@@ -66,3 +66,53 @@ Read the table + the "winners" block. Expected on the blocked network:
 
 Report the full table. The winning strategy + the per-host baseline verdicts
 define Phase 1 (the TCP plane + its auto-picker).
+
+## Spike 1 result (user's network, 2026-06-26) — WINNER = tlsrec_sni
+
+```
+host                 baseline   split_sni  split2     multisplit  tlsrec_sni
+gateway.discord.gg   timeout    timeout    timeout    timeout     OK 102ms
+discord.com          timeout    timeout    timeout    timeout     OK  91ms
+cdn.discordapp.com   timeout    timeout    timeout    timeout     OK  85ms
+www.youtube.com      timeout    timeout    timeout    timeout     OK  83ms
+```
+- baseline=timeout everywhere → DPI really blocks (control valid).
+- TCP-level splitting (split/split2/multisplit) = timeout → this TSPU reassembles
+  TCP segments, so TCP fragmentation does not help.
+- **`tlsrec_sni` (split ClientHello into two TLS records at the SNI) beats it on
+  ALL hosts incl YouTube, ~85–100ms.** Pure userspace, NO root. One strategy wins.
+- User wants the launch-time auto-sweep, not a fixed config (resilient, ISP-agnostic).
+  The sweep is extensible: if the userspace set ever fails, escalate to root
+  `fake`/low-TTL; if still nothing → honest "use a VPN".
+
+## Spike 2 — working tlsrec SOCKS5 proxy (`tlsproxy.py`) — VALIDATED LOCALLY
+
+The author's sandbox network independently SNI-blocks discord.com / gateway.discord.gg
+/ cdn.discordapp.com / www.youtube.com (probe baseline=timeout, tlsrec=ok) — i.e. it
+mirrors the user's TSPU. `tlsproxy.py` (rootless SOCKS5 + tlsrec) was validated against
+it end-to-end:
+```
+discord.com         HTTP 200   gateway.discord.gg  HTTP 404 (TLS through; WSS endpoint)
+cdn.discordapp.com  HTTP 403   www.youtube.com     HTTP 200   example.com  HTTP 200
+```
+**All previously-blocked hosts now connect through the proxy.** Two bug fixes mattered:
+1. SOCKS domain must `.decode("ascii")` (the `idna` codec rejects `errors="replace"`).
+2. **CRITICAL desync detail:** emit both TLS records in ONE `write()` == ONE TCP
+   segment. Sending them as two writes lets a TCP-reassembling DPI re-concatenate the
+   handshake across records and recover the SNI → re-blocks. One write succeeds.
+   (Also: force IPv4 upstream; IPv6 paths to CF-fronted hosts behave differently.)
+
+### How to actually use it (user, no root, no VPN)
+```bash
+cd slipstream/spike && source .venv/bin/activate
+python3 tlsproxy.py          # listens socks5://127.0.0.1:1080
+# fully QUIT Discord (Cmd+Q), then:
+open -a Discord --args --proxy-server=socks5://127.0.0.1:1080
+```
+Expected: Discord connects — servers, messages, gateway work, launcher updates.
+(Voice/UDP will NOT work via SOCKS yet — that is the separate voice plane, next.)
+Browser: set SOCKS5 127.0.0.1:1080 (Firefox: + "proxy DNS when using SOCKS5").
+
+Next: confirm Discord desktop loads through the proxy on the user's machine, then
+build Phase 1 proper (Rust `bypassd`: this tlsrec logic + the auto-sweep + a
+transparent pf-rdr or SOCKS front), then return to the voice plane.
