@@ -35,3 +35,34 @@ connect and actually emits voice datagrams to a public discord.media IP.
    - Flow appears → voice UDP forms; proceed to `live` priming test.
    - Nothing appears → gateway is blocked; Discord never reaches a voice server →
      build the TCP plane first, then revisit voice.
+
+## Confirmed 2026-06-26 — gateway/API is TCP-blocked (not just voice)
+
+User screenshot (VPN OFF): discord.com web loads the static shell but shows no
+servers/content (empty "Знаете ли вы?"), and the desktop launcher hangs on
+"checking for updates" forever. => `gateway.discord.gg` (WSS) + API + updater are
+DPI-blocked at the TCP/TLS layer. Voice cannot form until this is beaten. The TCP
+desync plane is the real foundation. User wants a launch-time AUTO-SWEEP (try
+strategies, pick the winner) rather than a fixed config — resilient, ISP-agnostic.
+
+## Spike 1 — TCP desync auto-sweep (`tcpsweep.py`) — RUN THIS NEXT (no root, no VPN)
+
+Engine validated locally against a non-blocked host (baseline + all 5 strategies
+complete TLS in ~80–140ms). On the blocked network it will show which strategy
+beats the DPI.
+
+```bash
+cd slipstream/spike && source .venv/bin/activate   # (no sudo)
+python3 tcpsweep.py
+```
+Read the table + the "winners" block. Expected on the blocked network:
+- `gateway.discord.gg` baseline=**fail** (proves the probe detects the block), and
+  ideally one of `split_sni / split2 / multisplit / tlsrec_sni` = **ok** (the
+  winning strategy for this ISP → goes straight into the engine).
+- If ALL strategies fail on gateway: the userspace-only set is insufficient here →
+  we add `fake`/low-TTL (needs root raw socket) to the sweep next.
+- `www.youtube.com` is throttled, not hard-blocked, so baseline may be `ok` there;
+  YouTube needs a bandwidth test, not a handshake test (separate probe later).
+
+Report the full table. The winning strategy + the per-host baseline verdicts
+define Phase 1 (the TCP plane + its auto-picker).
