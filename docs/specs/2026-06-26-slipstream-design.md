@@ -85,6 +85,29 @@ voice plane to **utun re-origination** (the SplitPath Plane B design): root utun
 (root-gated, entitlement-free), route only the voice UDP range in, desync, re-inject.
 This is the documented Plan B — validated by Spike 0 before any commitment.
 
+### Why this is original work (no reference implementation)
+
+No existing project ships **entitlement-free macOS Discord-voice desync**. Verified
+from source, not READMEs:
+- **SonicDPI** markets "returns voice channels" — but that claim is cross-platform
+  aggregate, true only on Windows (WinDivert) / Linux (NFQUEUE). Its **shipping
+  macOS backend** (`crates/sonicdpi-platform/src/macos.rs`, pf rdr-to transparent
+  proxy) is **TCP-only**; its docs call Discord voice on macOS "completely broken"
+  there. Its only macOS UDP path is a `NEFilterPacketProvider` System Extension that
+  **requires** a paid Apple Developer Program membership + the hand-reviewed
+  `com.apple.developer.networking.networkextension` entitlement + Developer ID +
+  notarization ("Without entitlement the System Extension simply will not load.
+  There is no workaround that ships to end users") — and is itself untested/aspirational
+  with a known burst-injection bug (sends only the first of 12 primes).
+- **zapret/tpws** on macOS is TCP-only (pf rdr + DIOCNATLOOK). **byedpi** README
+  states it cannot do Discord voice.
+
+So Slipstream's voice plane is **original R&D**, not a port. We reuse only the
+**desync logic** (voice-prime fake STUN/Discord burst, classifiers); the **transport**
+(entitlement-free UDP capture/inject via BPF + raw socket) is the gap we fill. Avoid
+SonicDPI's bug: inject the **entire** prime burst, not the first packet. This is the
+single reason Spike 0 leads the build order.
+
 ---
 
 ## 4. Components (clean isolation, independently testable)
