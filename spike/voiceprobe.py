@@ -22,6 +22,22 @@ REPEAT = 6                          # primes per (kind) per primed datagram
 CUTOFF = 4                          # only prime the first N datagrams of a flow
 
 
+def voice_filter(localip: str) -> str:
+    """Outbound UDP to a PUBLIC dst in the voice port range.
+
+    Excludes LAN / link-local / broadcast / multicast so we never prime
+    local noise (Spotify uses 57621→x.x.x.255; mDNS uses 224.0.0.251, etc.).
+    Discord voice servers are public IPs and survive these exclusions.
+    """
+    return (
+        f"udp and src host {localip} "
+        f"and dst portrange {VOICE_LO}-{VOICE_HI} "
+        f"and not dst net 192.168.0.0/16 and not dst net 10.0.0.0/8 "
+        f"and not dst net 172.16.0.0/12 and not dst net 169.254.0.0/16 "
+        f"and not dst net 224.0.0.0/4 and not dst host 255.255.255.255"
+    )
+
+
 def selftest(iface: str) -> int:
     dst = "1.1.1.1"            # unreachable at ttl=4; just needs to egress
     sport, dport = 54321, 3478
@@ -35,7 +51,7 @@ def selftest(iface: str) -> int:
     sniffer.start()
     time.sleep(0.3)
     pkt = IP(dst=dst, ttl=TTL_FAKE) / UDP(sport=sport, dport=dport) / Raw(payload)
-    send(pkt, iface=iface, verbose=0)
+    send(pkt, verbose=0)
     sniffer.join()
 
     got = sniffer.results
@@ -69,9 +85,7 @@ def capture(iface: str) -> int:
         if f["n"] <= 3:
             print(f"flow {key} pkt#{f['n']} len={len(payload)} class={kind}")
 
-    sniff(iface=iface,
-          filter=f"udp and src host {localip} and dst portrange {VOICE_LO}-{VOICE_HI}",
-          prn=on_pkt, store=0)
+    sniff(iface=iface, filter=voice_filter(localip), prn=on_pkt, store=0)
     return 0
 
 
@@ -82,7 +96,7 @@ def inject_primes(iface, src, sport, dst, dport):
         for payload in (build_fake_stun(), build_fake_discord_prime()):
             pkt = IP(src=src, dst=dst, ttl=TTL_FAKE) \
                 / UDP(sport=sport, dport=dport) / Raw(payload)
-            send(pkt, iface=iface, verbose=0)
+            send(pkt, verbose=0)
 
 
 def live(iface: str) -> int:
@@ -104,9 +118,7 @@ def live(iface: str) -> int:
             f["primed"] += 1
             print(f"primed flow {key} ({f['primed']}/{CUTOFF})")
 
-    sniff(iface=iface,
-          filter=f"udp and src host {localip} and dst portrange {VOICE_LO}-{VOICE_HI}",
-          prn=on_pkt, store=0)
+    sniff(iface=iface, filter=voice_filter(localip), prn=on_pkt, store=0)
     return 0
 
 
