@@ -29,18 +29,40 @@ DESYNC = True   # set False via --no-desync to A/B test passthrough vs tlsrec
 VERBOSE = False  # --verbose: log every connection (diagnostics)
 
 
+FIRST_REC_CAP = 64  # keep the FIRST TLS record tiny — see note below
+
+
 def tlsrec_split(record_head: bytes, body: bytes, host: str) -> list[bytes]:
-    """Split one ClientHello TLS record into two records, cut inside the SNI."""
+    """Re-frame one ClientHello record into 2-3 records.
+
+    Empirically (user's TSPU): the desync works only when the FIRST TLS record
+    is SMALL. Browsers send large ClientHellos (~1700-2300B) with the SNI at a
+    randomised offset; a single `find(SNI)+len/2` cut makes record1 large when
+    the SNI sits late -> DPI parses it -> re-blocks. So: always emit a tiny first
+    record (<= FIRST_REC_CAP), plus a cut inside the SNI hostname to break SNI
+    matching even on a reassembling parser. record1 stays tiny regardless of
+    where the SNI is.
+    """
     typ, ver = record_head[0:1], record_head[1:3]
+    n = len(body)
     i = body.find(host.encode())
-    pos = (i + max(1, len(host) // 2)) if i >= 0 else len(body) // 2
-    pos = max(1, min(len(body) - 1, pos))
-    a, b = body[:pos], body[pos:]
+    if i < 0:
+        i = max(1, n // 2)
+    c1 = min(FIRST_REC_CAP, max(1, i - 1))          # tiny first record
+    c2 = min(n - 1, i + max(1, len(host) // 2))     # cut inside the SNI hostname
+    cuts = sorted(c for c in {c1, c2} if 0 < c < n)
+
+    parts, prev = [], 0
+    for c in cuts:
+        if c > prev:
+            parts.append(body[prev:c])
+            prev = c
+    parts.append(body[prev:])
 
     def mk(payload: bytes) -> bytes:
         return typ + ver + struct.pack("!H", len(payload)) + payload
 
-    return [mk(a), mk(b)]
+    return [mk(p) for p in parts]
 
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
