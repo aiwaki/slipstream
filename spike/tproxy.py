@@ -204,9 +204,9 @@ def _doh_query(doh_ip, doh_sni, host, timeout=6):
         s.close()
         j = buf.find(b"{")
         doc = json.loads(buf[j:buf.rfind(b"}") + 1])
-        for ans in doc.get("Answer", []):
-            if ans.get("type") == 1:
-                return ans["data"]
+        ips = [a["data"] for a in doc.get("Answer", []) if a.get("type") == 1]
+        if ips:
+            return ips
     except Exception:
         try:
             s.close()
@@ -216,6 +216,8 @@ def _doh_query(doh_ip, doh_sni, host, timeout=6):
 
 
 def doh_resolve(host):
+    """Return a LIST of real A-record IPs (so we can try several — some specific
+    Cloudflare IPs are IP-blocked on the target network while others aren't)."""
     if host in _doh_cache:
         return _doh_cache[host]
     for ip, sni in DOH:
@@ -223,8 +225,8 @@ def doh_resolve(host):
         if r:
             _doh_cache[host] = r
             return r
-    _doh_cache[host] = None
-    return None
+    _doh_cache[host] = []
+    return []
 
 
 # ------------------------------------------------------------- relay
@@ -270,7 +272,7 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     Returns (up_r, up_w, server_first) or None if no response in time."""
     try:
         up_r, up_w = await asyncio.wait_for(
-            asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=8)
+            asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
     except Exception:
         return None
     try:
@@ -317,34 +319,37 @@ async def handle(reader, writer):
         writer.close()
         return
 
-    # de-poison: resolve the SNI over DoH, connect to the REAL ip (fallback dst_ip)
-    real_ip = dst_ip
+    # de-poison: resolve the SNI over DoH -> LIST of real IPs (fallback dst_ip)
+    real_ips = []
     if host:
-        r = await asyncio.to_thread(doh_resolve, host)
-        if r:
-            real_ip = r
+        real_ips = await asyncio.to_thread(doh_resolve, host)
+    if not real_ips:
+        real_ips = [dst_ip]
 
-    # retry with different split geometries — the DPI is probabilistic, so a fresh
-    # connection with a different split often succeeds where the first failed.
+    # Try several (ip, split-geometry) combos. Some specific Cloudflare IPs are
+    # IP-blocked on this network while others (same SNI) work, and the DPI is also
+    # probabilistic — so rotate IP first, then split geometry.
+    nvar = 3 if is_tls else 1
+    combos = [(ip, v) for v in range(nvar) for ip in real_ips[:3]][:5]
     result = None
-    attempts = 3 if is_tls else 1
-    for attempt in range(attempts):
-        blob = tlsrec_blob(head, body, host, variant=attempt) if is_tls else head + body
-        result = await dial_and_probe(real_ip, dst_port, blob)
+    chosen = real_ips[0]
+    for ip, v in combos:
+        blob = tlsrec_blob(head, body, host, variant=v) if is_tls else head + body
+        result = await dial_and_probe(ip, dst_port, blob)
         if result:
+            chosen = ip
             break
 
     if not result:
         if VERBOSE:
-            tag = f" (real {real_ip})" if host and real_ip != dst_ip else ""
-            print(f"  {host or dst_ip}{tag} NO RESPONSE after {attempts} tries",
-                  file=sys.stderr)
+            print(f"  {host or dst_ip} NO RESPONSE (tried {len(combos)} combos, "
+                  f"ips={real_ips[:3]})", file=sys.stderr)
         writer.close()
         return
 
     up_r, up_w, server_first = result
     if VERBOSE:
-        tag = f" (de-poisoned {dst_ip}->{real_ip})" if host and real_ip != dst_ip else ""
+        tag = f" via {chosen}" + (" de-poisoned" if host and chosen != dst_ip else "")
         print(f"OK {host or dst_ip}:{dst_port}{tag}", file=sys.stderr)
 
     try:
