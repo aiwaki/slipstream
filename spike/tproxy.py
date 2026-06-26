@@ -119,14 +119,18 @@ def parse_sni(body: bytes):
     return None
 
 
-def tlsrec_blob(head: bytes, body: bytes, host):
-    """Tiny first record (defeats this TSPU) + a cut inside the SNI if known."""
+def tlsrec_blob(head: bytes, body: bytes, host, variant: int = 0):
+    """Tiny first record (defeats this TSPU) + a cut inside the SNI if known.
+
+    `variant` changes the geometry so retries try a different split (the DPI is
+    probabilistic; a second geometry often succeeds where the first failed)."""
     typ, ver = head[0:1], head[1:3]
     n = len(body)
     i = body.find(host.encode()) if host else -1
     if i < 0:
         i = max(2, n // 3)
-    c1 = min(FIRST_REC_CAP, max(1, i - 1))
+    cap = (64, 16, 5)[variant % 3]              # progressively tinier first record
+    c1 = min(cap, max(1, i - 1))
     c2 = min(n - 1, i + (max(1, len(host) // 2) if host else 8))
     cuts = sorted(c for c in {c1, c2} if 0 < c < n)
     parts, prev = [], 0
@@ -261,6 +265,29 @@ async def pump(reader, up_w):
             pass
 
 
+async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
+    """Connect, send the (split) first flight, wait for the first server bytes.
+    Returns (up_r, up_w, server_first) or None if no response in time."""
+    try:
+        up_r, up_w = await asyncio.wait_for(
+            asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=8)
+    except Exception:
+        return None
+    try:
+        up_w.write(first_blob)
+        await up_w.drain()
+        data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
+        if data:
+            return up_r, up_w, data
+    except (asyncio.TimeoutError, OSError):
+        pass
+    try:
+        up_w.close()
+    except Exception:
+        pass
+    return None
+
+
 async def handle(reader, writer):
     sock = writer.get_extra_info("socket")
     try:
@@ -276,15 +303,16 @@ async def handle(reader, writer):
 
     # read the client's first flight to learn the SNI BEFORE dialing upstream
     host = None
-    first = b""
+    is_tls = False
+    head = body = b""
     try:
         head = await asyncio.wait_for(reader.readexactly(5), timeout=15)
         if head[0] == 0x16:
+            is_tls = True
             body = await reader.readexactly(struct.unpack("!H", head[3:5])[0])
             host = parse_sni(body)
-            first = tlsrec_blob(head, body, host)
         else:
-            first = head + await reader.read(65536)
+            body = await reader.read(65536)
     except (asyncio.IncompleteReadError, asyncio.TimeoutError, OSError):
         writer.close()
         return
@@ -296,33 +324,40 @@ async def handle(reader, writer):
         if r:
             real_ip = r
 
-    try:
-        up_r, up_w = await asyncio.wait_for(
-            asyncio.open_connection(real_ip, dst_port, family=socket.AF_INET),
-            timeout=10)
-    except Exception as e:
+    # retry with different split geometries — the DPI is probabilistic, so a fresh
+    # connection with a different split often succeeds where the first failed.
+    result = None
+    attempts = 3 if is_tls else 1
+    for attempt in range(attempts):
+        blob = tlsrec_blob(head, body, host, variant=attempt) if is_tls else head + body
+        result = await dial_and_probe(real_ip, dst_port, blob)
+        if result:
+            break
+
+    if not result:
         if VERBOSE:
-            print(f"  upstream {host or dst_ip} {real_ip}:{dst_port} failed: {e}",
+            tag = f" (real {real_ip})" if host and real_ip != dst_ip else ""
+            print(f"  {host or dst_ip}{tag} NO RESPONSE after {attempts} tries",
                   file=sys.stderr)
         writer.close()
         return
 
-    poisoned = host and real_ip != dst_ip
+    up_r, up_w, server_first = result
     if VERBOSE:
-        tag = f" (de-poisoned {dst_ip}->{real_ip})" if poisoned else ""
-        print(f"CONNECT {host or dst_ip}:{dst_port}{tag}", file=sys.stderr)
+        tag = f" (de-poisoned {dst_ip}->{real_ip})" if host and real_ip != dst_ip else ""
+        print(f"OK {host or dst_ip}:{dst_port}{tag}", file=sys.stderr)
 
-    up_w.write(first)
     try:
-        await up_w.drain()
+        writer.write(server_first)
+        await writer.drain()
     except OSError:
+        try:
+            up_w.close()
+        except Exception:
+            pass
         writer.close()
         return
-    res = await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
-    if VERBOSE:
-        srv = res[1] or 0
-        print(f"  {host or dst_ip} server_bytes={srv} "
-              f"{'OK' if srv > 0 else 'NO RESPONSE'}", file=sys.stderr)
+    await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
 
 
 async def amain(port):
