@@ -464,8 +464,9 @@ def main():
     VERBOSE = args.verbose
 
     atexit.register(pf_teardown)
-    for s in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(s, lambda *_: (pf_teardown(), sys.exit(0)))
+    # SIGHUP too: closing the terminal window must also restore pf/connectivity.
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, lambda *_: (pf_teardown(), os._exit(0)))
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
     pf_setup(args.port)
