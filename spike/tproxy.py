@@ -60,19 +60,33 @@ def _run(*args):
     return subprocess.run(list(args), capture_output=True, text=True)
 
 
-def pf_setup(port):
-    global _pf_applied
-    _run("pfctl", "-f", "/etc/pf.conf")
+def _pf_load(port):
     f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
     f.write(PF_RULES.format(port=port))
     f.close()
-    _run("pfctl", "-E")
     r = _run("pfctl", "-f", f.name)
+    try:
+        os.unlink(f.name)
+    except Exception:
+        pass
+    return r
+
+
+def pf_setup(port):
+    global _pf_applied
+    _run("pfctl", "-f", "/etc/pf.conf")
+    _run("pfctl", "-E")                 # enable pf (ref-counted) — once
+    r = _pf_load(port)
     if r.returncode != 0:
         print("pfctl load failed:\n" + r.stderr, file=sys.stderr)
         sys.exit(1)
     _pf_applied = True
     print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC (UDP/443) blocked")
+
+
+def pf_has_rules(port):
+    """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
+    return f"port {port}" in _run("pfctl", "-sn").stdout
 
 
 def pf_teardown():
@@ -277,28 +291,38 @@ def _fake_stun(txn=b"\x00" * 12):
     return struct.pack("!HHI", 0x0001, 0x0000, 0x2112A442) + txn   # STUN binding req
 
 
-def voice_plane(iface):
-    """Discord voice is UDP RTP to *.discord.media:50000-65535 — it bypasses the
-    TCP pf-rdr and the TSPU drops it. We can't sit inline on UDP without a NE, so
-    (Spike 0 model) passively sniff outbound voice via BPF and raw-inject low-TTL
-    decoy STUN datagrams on the same 5-tuple to poison the DPI's classification,
-    leaving the real flow untouched."""
-    try:
-        from scapy.all import sniff, send, IP, UDP, Raw, get_if_addr
-    except Exception as e:
-        print(f">> voice plane disabled (scapy: {e})", file=sys.stderr)
-        return
-    try:
-        localip = get_if_addr(iface)
-    except Exception:
-        print(">> voice plane disabled (no iface addr)", file=sys.stderr)
-        return
+def default_iface():
+    for line in _run("route", "get", "default").stdout.splitlines():
+        line = line.strip()
+        if line.startswith("interface:"):
+            return line.split()[1]
+    return None
+
+
+def _voice_bpf(localip):
+    return (f"udp and src host {localip} and dst portrange {VOICE_LO}-{VOICE_HI} "
+            "and not dst net 192.168.0.0/16 and not dst net 10.0.0.0/8 "
+            "and not dst net 172.16.0.0/12 and not dst net 169.254.0.0/16 "
+            "and not dst net 224.0.0.0/4 and not dst host 255.255.255.255")
+
+
+def network_monitor(port, voice=True):
+    """Long-running guard thread. (1) Keeps the voice sniffer bound to the CURRENT
+    default interface so voice survives Wi-Fi/Ethernet/sleep changes. (2) Re-applies
+    pf if it ever gets flushed (sleep/wake or another tool). Voice itself: Discord
+    RTP is UDP to *.discord.media:50000-65535, bypassing the TCP pf-rdr, so we
+    BPF-observe it and raw-inject low-TTL decoy STUN primes on the 5-tuple, leaving
+    the real flow untouched."""
+    AsyncSniffer = send = IP = UDP = Raw = get_if_addr = None
+    if voice:
+        try:
+            from scapy.all import AsyncSniffer, send, IP, UDP, Raw, get_if_addr
+        except Exception as e:
+            print(f">> voice disabled (scapy: {e})", file=sys.stderr)
     fake = _fake_stun()
     flows = {}
-    bpf = (f"udp and src host {localip} and dst portrange {VOICE_LO}-{VOICE_HI} "
-           "and not dst net 192.168.0.0/16 and not dst net 10.0.0.0/8 "
-           "and not dst net 172.16.0.0/12 and not dst net 169.254.0.0/16 "
-           "and not dst net 224.0.0.0/4 and not dst host 255.255.255.255")
+    sniffer = None
+    cur_iface = None
 
     def on_pkt(p):
         if not (p.haslayer(IP) and p.haslayer(UDP)):
@@ -318,8 +342,31 @@ def voice_plane(iface):
         if VERBOSE and n == 0:
             print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
 
-    print(f">> voice plane: priming UDP {VOICE_LO}-{VOICE_HI} on {iface}")
-    sniff(iface=iface, filter=bpf, prn=on_pkt, store=0)
+    while True:
+        if _pf_applied and not pf_has_rules(port):
+            print(">> pf rules vanished — re-applying", file=sys.stderr)
+            _pf_load(port)
+        if send is not None:                       # scapy available
+            iface = default_iface()
+            if iface and iface != cur_iface:
+                if sniffer is not None:
+                    try:
+                        sniffer.stop()
+                    except Exception:
+                        pass
+                    sniffer = None
+                try:
+                    localip = get_if_addr(iface)
+                    sniffer = AsyncSniffer(iface=iface, filter=_voice_bpf(localip),
+                                           prn=on_pkt, store=0)
+                    sniffer.start()
+                    cur_iface = iface
+                    print(f">> voice plane: priming UDP {VOICE_LO}-{VOICE_HI} "
+                          f"on {iface}")
+                except Exception as e:
+                    print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
+                    cur_iface = None
+        time.sleep(5)
 
 
 # ------------------------------------------------------------- DoH (blocking)
@@ -652,15 +699,9 @@ def main():
     cleanup_stale()        # kill leftover instances + reset pf before we start
     load_strat_cache()     # remember per-host winning strategies across restarts
 
-    if not args.no_voice:
-        dev = None
-        for line in _run("route", "get", "default").stdout.splitlines():
-            line = line.strip()
-            if line.startswith("interface:"):
-                dev = line.split()[1]
-                break
-        if dev:
-            threading.Thread(target=voice_plane, args=(dev,), daemon=True).start()
+    # guard thread: voice sniffer follows the default iface + pf self-heal
+    threading.Thread(target=network_monitor, args=(args.port,),
+                     kwargs={"voice": not args.no_voice}, daemon=True).start()
 
     atexit.register(pf_teardown)
     # Catch close-terminal (SIGHUP) and suspend (SIGTSTP, i.e. Ctrl+Z) too — a
