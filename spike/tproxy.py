@@ -143,6 +143,46 @@ def tlsrec_blob(head: bytes, body: bytes, host, variant: int = 0):
     return b"".join(mk(p) for p in parts)
 
 
+# --------------------------------------------------- fake ClientHello (decoy)
+FAKE_DECOY_SNI = "vk.com"   # RU whitelisted host the TSPU never blocks
+
+
+def build_fake_clienthello(sni: str) -> bytes:
+    """Minimal but parseable TLS1.2 ClientHello carrying a decoy SNI. Sent at a
+    low TTL so it dies before the server but the in-country DPI ingests it and
+    whitelists the flow, letting the real (hard-blocked-SNI) ClientHello pass."""
+    name = sni.encode()
+    server_name = b"\x00" + struct.pack("!H", len(name)) + name      # host_name entry
+    sni_list = struct.pack("!H", len(server_name)) + server_name
+    sni_ext = b"\x00\x00" + struct.pack("!H", len(sni_list)) + sni_list
+    ext_block = struct.pack("!H", len(sni_ext)) + sni_ext
+    ciphers = b"\x00\x2f"
+    cl_body = (b"\x03\x03" + os.urandom(32) + b"\x00"
+               + struct.pack("!H", len(ciphers)) + ciphers
+               + b"\x01\x00" + ext_block)
+    hs = b"\x01" + struct.pack("!I", len(cl_body))[1:] + cl_body      # 3-byte length
+    return b"\x16\x03\x01" + struct.pack("!H", len(hs)) + hs
+
+
+_FAKE_CH = build_fake_clienthello(FAKE_DECOY_SNI)
+
+
+def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
+    """Spray a few decoy-SNI ClientHello packets at low TTL on the real 4-tuple.
+    Needs scapy (run via the venv python). No-op with a warning if unavailable."""
+    try:
+        from scapy.all import IP, TCP, Raw, send
+    except Exception:
+        print("  fake-mode needs scapy: run with sudo .venv/bin/python tproxy.py",
+              file=sys.stderr)
+        return
+    pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
+           / TCP(sport=src_port, dport=dst_port, flags="PA", seq=1, ack=1)
+           / Raw(_FAKE_CH))
+    for _ in range(repeats):
+        send(pkt, verbose=0)
+
+
 # ------------------------------------------------------------- DoH (blocking)
 def _doh_query(doh_ip, doh_sni, host, timeout=6):
     ctx = ssl.create_default_context()
@@ -290,6 +330,32 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     return None
 
 
+async def dial_and_probe_fake(real_ip, port, first_blob, probe_timeout=3.0):
+    """Like dial_and_probe but injects a low-TTL decoy ClientHello on the real
+    4-tuple BEFORE the real flight (zapret 'fake' — for deep-reassembly SNIs)."""
+    try:
+        up_r, up_w = await asyncio.wait_for(
+            asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
+    except Exception:
+        return None
+    try:
+        s = up_w.get_extra_info("socket")
+        src_ip, src_port = s.getsockname()
+        await asyncio.to_thread(inject_fake, src_ip, src_port, real_ip, port)
+        up_w.write(first_blob)
+        await up_w.drain()
+        data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
+        if data:
+            return up_r, up_w, data
+    except (asyncio.TimeoutError, OSError):
+        pass
+    try:
+        up_w.close()
+    except Exception:
+        pass
+    return None
+
+
 async def handle(reader, writer):
     sock = writer.get_extra_info("socket")
     try:
@@ -340,9 +406,21 @@ async def handle(reader, writer):
             chosen = ip
             break
 
+    # last resort for deep-reassembly SNIs (updates.discord.com etc.): fake-mode
+    # — inject a decoy-SNI ClientHello at low TTL, then the real one.
+    if not result and is_tls:
+        for ip in real_ips[:2]:
+            result = await dial_and_probe_fake(
+                ip, dst_port, tlsrec_blob(head, body, host, 0))
+            if result:
+                chosen = ip
+                if VERBOSE:
+                    print(f"  {host} won via FAKE-MODE", file=sys.stderr)
+                break
+
     if not result:
         if VERBOSE:
-            print(f"  {host or dst_ip} NO RESPONSE (tried {len(combos)} combos, "
+            print(f"  {host or dst_ip} NO RESPONSE (tried {len(combos)} combos + fake, "
                   f"ips={real_ips[:3]})", file=sys.stderr)
         writer.close()
         return
