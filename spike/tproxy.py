@@ -30,6 +30,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 PROXY_PORT = 1080
@@ -202,6 +203,60 @@ def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
            / Raw(_FAKE_CH))
     for _ in range(repeats):
         send(pkt, verbose=0)
+
+
+# ------------------------------------------------------- UDP voice plane
+VOICE_LO, VOICE_HI = 50000, 65535   # Discord voice server UDP port range
+VOICE_TTL = 4
+VOICE_REPEAT = 6
+VOICE_CUTOFF = 5                    # prime the first N datagrams of each flow
+
+
+def _fake_stun(txn=b"\x00" * 12):
+    return struct.pack("!HHI", 0x0001, 0x0000, 0x2112A442) + txn   # STUN binding req
+
+
+def voice_plane(iface):
+    """Discord voice is UDP RTP to *.discord.media:50000-65535 — it bypasses the
+    TCP pf-rdr and the TSPU drops it. We can't sit inline on UDP without a NE, so
+    (Spike 0 model) passively sniff outbound voice via BPF and raw-inject low-TTL
+    decoy STUN datagrams on the same 5-tuple to poison the DPI's classification,
+    leaving the real flow untouched."""
+    try:
+        from scapy.all import sniff, send, IP, UDP, Raw, get_if_addr
+    except Exception as e:
+        print(f">> voice plane disabled (scapy: {e})", file=sys.stderr)
+        return
+    try:
+        localip = get_if_addr(iface)
+    except Exception:
+        print(">> voice plane disabled (no iface addr)", file=sys.stderr)
+        return
+    fake = _fake_stun()
+    flows = {}
+    bpf = (f"udp and src host {localip} and dst portrange {VOICE_LO}-{VOICE_HI} "
+           "and not dst net 192.168.0.0/16 and not dst net 10.0.0.0/8 "
+           "and not dst net 172.16.0.0/12 and not dst net 169.254.0.0/16 "
+           "and not dst net 224.0.0.0/4 and not dst host 255.255.255.255")
+
+    def on_pkt(p):
+        if not (p.haslayer(IP) and p.haslayer(UDP)):
+            return
+        ip, udp = p[IP], p[UDP]
+        key = (ip.src, udp.sport, ip.dst, udp.dport)
+        n = flows.get(key, 0)
+        if n >= VOICE_CUTOFF:
+            return
+        flows[key] = n + 1
+        pkt = (IP(src=ip.src, dst=ip.dst, ttl=VOICE_TTL)
+               / UDP(sport=udp.sport, dport=udp.dport) / Raw(fake))
+        for _ in range(VOICE_REPEAT):
+            send(pkt, verbose=0)
+        if VERBOSE and n == 0:
+            print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
+
+    print(f">> voice plane: priming UDP {VOICE_LO}-{VOICE_HI} on {iface}")
+    sniff(iface=iface, filter=bpf, prn=on_pkt, store=0)
 
 
 # ------------------------------------------------------------- DoH (blocking)
@@ -504,10 +559,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=PROXY_PORT)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--no-voice", action="store_true",
+                    help="disable the UDP voice plane")
     args = ap.parse_args()
     VERBOSE = args.verbose
 
     cleanup_stale()        # kill leftover instances + reset pf before we start
+
+    if not args.no_voice:
+        dev = None
+        for line in _run("route", "get", "default").stdout.splitlines():
+            line = line.strip()
+            if line.startswith("interface:"):
+                dev = line.split()[1]
+                break
+        if dev:
+            threading.Thread(target=voice_plane, args=(dev,), daemon=True).start()
 
     atexit.register(pf_teardown)
     # Catch close-terminal (SIGHUP) and suspend (SIGTSTP, i.e. Ctrl+Z) too — a
