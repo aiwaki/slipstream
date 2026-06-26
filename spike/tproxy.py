@@ -423,9 +423,15 @@ async def handle(reader, writer):
     combos = [(ip, v) for v in range(nvar) for ip in real_ips[:3]][:5]
     result = None
     chosen = real_ips[0]
-    for ip, v in combos:
+    # Discord flows are also SNI-classified by a *throttler* (deep reassembly that
+    # tlsrec doesn't hide from) — so always poison the first attempt with a decoy
+    # ClientHello, not just as a block fallback. Stops the download throttle that
+    # leaves history/profile/notifications "never loading".
+    is_discord = is_tls and bool(host) and "discord" in host
+    for idx, (ip, v) in enumerate(combos):
         blob = tlsrec_blob(head, body, host, variant=v) if is_tls else head + body
-        result = await dial_and_probe(ip, dst_port, blob)
+        dial = dial_and_probe_fake if (is_discord and idx == 0) else dial_and_probe
+        result = await dial(ip, dst_port, blob)
         if result:
             chosen = ip
             break
