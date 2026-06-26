@@ -26,6 +26,7 @@ import sys
 
 LISTEN_HOST, LISTEN_PORT = "127.0.0.1", 1080
 DESYNC = True   # set False via --no-desync to A/B test passthrough vs tlsrec
+VERBOSE = False  # --verbose: log every connection (diagnostics)
 
 
 def tlsrec_split(record_head: bytes, body: bytes, host: str) -> list[bytes]:
@@ -72,6 +73,9 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             writer.write(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
             await writer.drain(); writer.close(); return
 
+        if VERBOSE:
+            print(f"CONNECT {host}:{port}", file=sys.stderr)
+
         # --- connect upstream ---
         try:
             # Force IPv4: the DPI/desync path is validated on v4, and IPv6
@@ -89,10 +93,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         await writer.drain()
 
         # --- relay: tlsrec on the first client flight (443), then splice ---
-        await asyncio.gather(
+        results = await asyncio.gather(
             _client_to_upstream(reader, up_w, host, port),
             _splice(up_r, writer),
         )
+        if VERBOSE:
+            srv = results[1] or 0
+            print(f"  {host}:{port} server_bytes={srv} "
+                  f"{'OK' if srv > 0 else 'NO RESPONSE (blocked?)'}",
+                  file=sys.stderr)
     except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
         pass
     except Exception as e:
@@ -109,6 +118,9 @@ async def _client_to_upstream(reader, up_w, host, port):
                 rec_len = struct.unpack("!H", head[3:5])[0]
                 body = await reader.readexactly(rec_len)
                 frags = tlsrec_split(head, body, host)
+                if VERBOSE:
+                    print(f"  tlsrec {host}: CH={rec_len} -> recs="
+                          f"{[len(f) for f in frags]}", file=sys.stderr)
                 # CRITICAL: emit both records in ONE write == ONE TCP segment.
                 # Sending them as two writes (two segments) lets a TCP-reassembling
                 # DPI concatenate the handshake across records and recover the SNI,
@@ -135,11 +147,13 @@ async def _client_to_upstream(reader, up_w, host, port):
 
 
 async def _splice(src, dst):
+    total = 0
     try:
         while True:
             data = await src.read(65536)
             if not data:
                 break
+            total += len(data)
             dst.write(data)
             await dst.drain()
     except (ConnectionResetError, BrokenPipeError):
@@ -149,6 +163,7 @@ async def _splice(src, dst):
             dst.close()
         except Exception:
             pass
+    return total
 
 
 async def amain(host, port):
@@ -167,9 +182,12 @@ def main():
     ap.add_argument("--port", type=int, default=LISTEN_PORT)
     ap.add_argument("--no-desync", action="store_true",
                     help="passthrough (no tlsrec) — for A/B testing")
+    ap.add_argument("--verbose", action="store_true",
+                    help="log every connection (diagnostics)")
     args = ap.parse_args()
-    global DESYNC
+    global DESYNC, VERBOSE
     DESYNC = not args.no_desync
+    VERBOSE = args.verbose
     try:
         asyncio.run(amain(args.host, args.port))
     except KeyboardInterrupt:
