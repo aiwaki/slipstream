@@ -56,8 +56,17 @@ _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 
 
 # ---------------------------------------------------------------- pf plumbing
+# LaunchDaemons start with an empty PATH, so bare 'pfctl'/'route'/'pgrep' aren't
+# found and the daemon silently does nothing — force the system dirs onto PATH.
+_RUN_ENV = dict(os.environ)
+_RUN_ENV["PATH"] = "/sbin:/usr/sbin:/bin:/usr/bin:" + _RUN_ENV.get("PATH", "")
+
+
 def _run(*args):
-    return subprocess.run(list(args), capture_output=True, text=True)
+    try:
+        return subprocess.run(list(args), capture_output=True, text=True, env=_RUN_ENV)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args, 127, "", f"not found: {args[0]}")
 
 
 def _pf_load(port):
@@ -685,6 +694,8 @@ def do_install(port):
         f'<string>--port</string><string>{port}</string></array>\n'
         '  <key>RunAtLoad</key><true/>\n'
         '  <key>KeepAlive</key><true/>\n'
+        '  <key>EnvironmentVariables</key><dict><key>PATH</key>'
+        '<string>/sbin:/usr/sbin:/bin:/usr/bin</string></dict>\n'
         f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
         f'  <key>StandardOutPath</key><string>{LOG_PATH}</string>\n'
         f'  <key>StandardErrorPath</key><string>{LOG_PATH}</string>\n'
