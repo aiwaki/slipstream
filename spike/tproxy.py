@@ -665,6 +665,56 @@ async def handle(reader, writer):
               f"dur={time.monotonic() - t0:.1f}s", file=sys.stderr)
 
 
+LAUNCHD_LABEL = "dev.slipstream.tproxy"
+LAUNCHD_PLIST = f"/Library/LaunchDaemons/{LAUNCHD_LABEL}.plist"
+LOG_PATH = "/var/log/slipstream.log"
+
+
+def do_install(port):
+    py = sys.executable
+    script = os.path.abspath(__file__)
+    workdir = os.path.dirname(script)
+    plist = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>\n'
+        f'  <key>Label</key><string>{LAUNCHD_LABEL}</string>\n'
+        '  <key>ProgramArguments</key><array>'
+        f'<string>{py}</string><string>{script}</string>'
+        f'<string>--port</string><string>{port}</string></array>\n'
+        '  <key>RunAtLoad</key><true/>\n'
+        '  <key>KeepAlive</key><true/>\n'
+        f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
+        f'  <key>StandardOutPath</key><string>{LOG_PATH}</string>\n'
+        f'  <key>StandardErrorPath</key><string>{LOG_PATH}</string>\n'
+        '</dict></plist>\n'
+    )
+    with open(LAUNCHD_PLIST, "w") as f:
+        f.write(plist)
+    os.chmod(LAUNCHD_PLIST, 0o644)
+    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # if already loaded
+    r = _run("launchctl", "bootstrap", "system", LAUNCHD_PLIST)
+    if r.returncode != 0:
+        _run("launchctl", "load", "-w", LAUNCHD_PLIST)         # older macOS fallback
+    print(f"installed -> {LAUNCHD_PLIST}")
+    print(f"runs now + at every boot as root, auto-restarts on crash.")
+    print(f"logs:      tail -f {LOG_PATH}")
+    print(f"uninstall: sudo {py} {script} --uninstall")
+
+
+def do_uninstall():
+    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
+    _run("launchctl", "unload", "-w", LAUNCHD_PLIST)
+    try:
+        os.remove(LAUNCHD_PLIST)
+    except Exception:
+        pass
+    _run("pfctl", "-f", "/etc/pf.conf")
+    _run("pfctl", "-d")
+    print("uninstalled + pf restored")
+
+
 async def amain(port):
     try:
         server = await asyncio.start_server(
@@ -693,8 +743,19 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--no-voice", action="store_true",
                     help="disable the UDP voice plane")
+    ap.add_argument("--install", action="store_true",
+                    help="install as a LaunchDaemon (starts at boot, auto-restarts)")
+    ap.add_argument("--uninstall", action="store_true",
+                    help="remove the LaunchDaemon and restore pf")
     args = ap.parse_args()
     VERBOSE = args.verbose
+
+    if args.install:
+        do_install(args.port)
+        return
+    if args.uninstall:
+        do_uninstall()
+        return
 
     cleanup_stale()        # kill leftover instances + reset pf before we start
     load_strat_cache()     # remember per-host winning strategies across restarts
