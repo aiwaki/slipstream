@@ -141,17 +141,19 @@ def parse_sni(body: bytes):
     return None
 
 
-def tlsrec_blob(head: bytes, body: bytes, host, variant: int = 0):
-    """Tiny first record (defeats this TSPU) + a cut inside the SNI if known.
+def make_blob(head: bytes, body: bytes, host, cap):
+    """Build the first-flight bytes for one strategy.
 
-    `variant` changes the geometry so retries try a different split (the DPI is
-    probabilistic; a second geometry often succeeds where the first failed)."""
+    cap=None -> plain (no desync, for unblocked hosts). Otherwise split the
+    ClientHello into TLS records with a tiny first record (<=cap) plus a cut
+    inside the SNI hostname, which defeats this TSPU's first-record SNI check."""
+    if cap is None:
+        return head + body
     typ, ver = head[0:1], head[1:3]
     n = len(body)
     i = body.find(host.encode()) if host else -1
     if i < 0:
         i = max(2, n // 3)
-    cap = (64, 16, 5)[variant % 3]              # progressively tinier first record
     c1 = min(cap, max(1, i - 1))
     c2 = min(n - 1, i + (max(1, len(host) // 2) if host else 8))
     cuts = sorted(c for c in {c1, c2} if 0 < c < n)
@@ -163,6 +165,54 @@ def tlsrec_blob(head: bytes, body: bytes, host, variant: int = 0):
     parts.append(body[prev:])
     mk = lambda p: typ + ver + struct.pack("!H", len(p)) + p
     return b"".join(mk(p) for p in parts)
+
+
+# --------------------------------------------------- adaptive strategy ladder
+# Tried in order, cached winner first. The first that completes TLS is cached
+# per host; when the TSPU changes and the cached one stops working, connections
+# climb the ladder to the next working strategy and re-cache it. Self-tuning,
+# no manual re-tuning, survives strategy decay.
+STRATEGIES = [
+    {"name": "split64",      "cap": 64,   "fake": False},
+    {"name": "split64+fake", "cap": 64,   "fake": True},
+    {"name": "split16",      "cap": 16,   "fake": False},
+    {"name": "split16+fake", "cap": 16,   "fake": True},
+    {"name": "fake5",        "cap": 5,    "fake": True},
+    {"name": "plain",        "cap": None, "fake": False},
+]
+STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
+_STRAT_PATH = "/var/run/slipstream-strat.json"
+_strat_cache = {}
+
+
+def load_strat_cache():
+    global _strat_cache
+    try:
+        with open(_STRAT_PATH) as f:
+            _strat_cache = json.load(f)
+    except Exception:
+        _strat_cache = {}
+
+
+def save_strat_cache():
+    try:
+        with open(_STRAT_PATH, "w") as f:
+            json.dump(_strat_cache, f)
+    except Exception:
+        pass
+
+
+def strategy_order(host):
+    win = _strat_cache.get(host)
+    if win in STRAT_BY_NAME:
+        return [STRAT_BY_NAME[win]] + [s for s in STRATEGIES if s["name"] != win]
+    # Prior: Discord flows are throttled by SNI even when the block is beaten, and
+    # the probe (TLS handshake) can't see the throttle — so start Discord on a
+    # fake strategy (beats block AND throttle) instead of plain split.
+    if host and "discord" in host:
+        order = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
+        return [STRAT_BY_NAME[n] for n in order]
+    return STRATEGIES
 
 
 # --------------------------------------------------- fake ClientHello (decoy)
@@ -279,7 +329,7 @@ def _doh_query(doh_ip, doh_sni, host, timeout=6):
                 out = outbio.read()
                 if out:
                     if not sent[0]:
-                        s.sendall(tlsrec_blob(out[:5], out[5:], doh_sni)
+                        s.sendall(make_blob(out[:5], out[5:], doh_sni, FIRST_REC_CAP)
                                   if out[:1] == b"\x16" else out)
                         sent[0] = True
                     else:
@@ -435,6 +485,13 @@ async def dial_and_probe_fake(real_ip, port, first_blob, probe_timeout=3.0):
     return None
 
 
+async def dial_strategy(ip, port, head, body, host, strat):
+    blob = make_blob(head, body, host, strat["cap"])
+    if strat["fake"]:
+        return await dial_and_probe_fake(ip, port, blob)
+    return await dial_and_probe(ip, port, blob)
+
+
 async def handle(reader, writer):
     sock = writer.get_extra_info("socket")
     try:
@@ -471,49 +528,48 @@ async def handle(reader, writer):
     if not real_ips:
         real_ips = [dst_ip]
 
-    # Try several (ip, split-geometry) combos. Some specific Cloudflare IPs are
-    # IP-blocked on this network while others (same SNI) work, and the DPI is also
-    # probabilistic — so rotate IP first, then split geometry.
-    nvar = 3 if is_tls else 1
-    combos = [(ip, v) for v in range(nvar) for ip in real_ips[:3]][:5]
+    # Adaptive strategy ladder (auto-sweep / self-tuning). Try strategies in
+    # order — cached winner for this host first — across up to a couple of real
+    # IPs (some Cloudflare IPs are IP-blocked while others work). First success
+    # is cached per host so a decayed strategy auto-rolls to the next that works.
     result = None
     chosen = real_ips[0]
-    # Discord flows are also SNI-classified by a *throttler* (deep reassembly that
-    # tlsrec doesn't hide from) — so always poison the first attempt with a decoy
-    # ClientHello, not just as a block fallback. Stops the download throttle that
-    # leaves history/profile/notifications "never loading".
-    is_discord = is_tls and bool(host) and "discord" in host
-    for idx, (ip, v) in enumerate(combos):
-        blob = tlsrec_blob(head, body, host, variant=v) if is_tls else head + body
-        dial = dial_and_probe_fake if (is_discord and idx == 0) else dial_and_probe
-        result = await dial(ip, dst_port, blob)
-        if result:
-            chosen = ip
-            break
-
-    # last resort for deep-reassembly SNIs (updates.discord.com etc.): fake-mode
-    # — inject a decoy-SNI ClientHello at low TTL, then the real one.
-    if not result and is_tls:
+    chosen_name = None
+    if not is_tls:
         for ip in real_ips[:2]:
-            result = await dial_and_probe_fake(
-                ip, dst_port, tlsrec_blob(head, body, host, 0))
+            result = await dial_and_probe(ip, dst_port, head + body)
             if result:
                 chosen = ip
-                if VERBOSE:
-                    print(f"  {host} won via FAKE-MODE", file=sys.stderr)
                 break
+    else:
+        attempts = 0
+        for strat in strategy_order(host):
+            for ip in real_ips[:2]:
+                attempts += 1
+                result = await dial_strategy(ip, dst_port, head, body, host, strat)
+                if result:
+                    chosen, chosen_name = ip, strat["name"]
+                    break
+                if attempts >= 7:
+                    break
+            if result or attempts >= 7:
+                break
+        if result and host and _strat_cache.get(host) != chosen_name:
+            _strat_cache[host] = chosen_name
+            save_strat_cache()
 
     if not result:
         if VERBOSE:
-            print(f"  {host or dst_ip} NO RESPONSE (tried {len(combos)} combos + fake, "
-                  f"ips={real_ips[:3]})", file=sys.stderr)
+            print(f"  {host or dst_ip} NO RESPONSE ({len(real_ips)} ips)",
+                  file=sys.stderr)
         writer.close()
         return
 
     up_r, up_w, server_first = result
     if VERBOSE:
-        tag = f" via {chosen}" + (" de-poisoned" if host and chosen != dst_ip else "")
-        print(f"OK {host or dst_ip}:{dst_port}{tag}", file=sys.stderr)
+        tag = f" [{chosen_name}]" if chosen_name else ""
+        tag += " de-poisoned" if host and chosen != dst_ip else ""
+        print(f"OK {host or dst_ip}:{dst_port} via {chosen}{tag}", file=sys.stderr)
 
     try:
         writer.write(server_first)
@@ -565,6 +621,7 @@ def main():
     VERBOSE = args.verbose
 
     cleanup_stale()        # kill leftover instances + reset pf before we start
+    load_strat_cache()     # remember per-host winning strategies across restarts
 
     if not args.no_voice:
         dev = None
