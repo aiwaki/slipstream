@@ -30,6 +30,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 PROXY_PORT = 1080
 DIOCNATLOOK = 0xC0544417
@@ -311,11 +312,13 @@ async def splice(src, dst):
 
 
 async def pump(reader, up_w):
+    total = 0
     try:
         while True:
             data = await reader.read(65536)
             if not data:
                 break
+            total += len(data)
             up_w.write(data)
             await up_w.drain()
     except (ConnectionResetError, BrokenPipeError, OSError):
@@ -325,6 +328,7 @@ async def pump(reader, up_w):
             up_w.close()
         except Exception:
             pass
+    return total
 
 
 async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
@@ -460,7 +464,12 @@ async def handle(reader, writer):
             pass
         writer.close()
         return
-    await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
+    t0 = time.monotonic()
+    res = await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
+    if VERBOSE and host and "discord" in host:
+        up_b, down_b = res[0] or 0, len(server_first) + (res[1] or 0)
+        print(f"  closed {host}: up={up_b} down={down_b} "
+              f"dur={time.monotonic() - t0:.1f}s", file=sys.stderr)
 
 
 async def amain(port):
