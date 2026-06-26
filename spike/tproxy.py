@@ -82,6 +82,26 @@ def pf_teardown():
     print(">> pf restored")
 
 
+def cleanup_stale():
+    """Self-heal: kill any leftover tproxy instances (e.g. a Ctrl+Z-suspended
+    one still holding the port) and reset pf to the clean default, so a fresh
+    start always works without manual lsof/kill/escape."""
+    me, parent = os.getpid(), os.getppid()
+    res = _run("pgrep", "-f", "tproxy.py")
+    killed = 0
+    for line in res.stdout.split():
+        try:
+            pid = int(line)
+        except ValueError:
+            continue
+        if pid not in (me, parent):
+            _run("kill", "-9", str(pid))
+            killed += 1
+    _run("pfctl", "-f", "/etc/pf.conf")     # drop any stale rules from a crash
+    if killed:
+        print(f">> self-heal: killed {killed} stale tproxy instance(s), reset pf")
+
+
 def orig_dst(sock):
     peer = sock.getpeername()
     local = sock.getsockname()
@@ -472,9 +492,12 @@ def main():
     args = ap.parse_args()
     VERBOSE = args.verbose
 
+    cleanup_stale()        # kill leftover instances + reset pf before we start
+
     atexit.register(pf_teardown)
-    # SIGHUP too: closing the terminal window must also restore pf/connectivity.
-    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    # Catch close-terminal (SIGHUP) and suspend (SIGTSTP, i.e. Ctrl+Z) too — a
+    # network tool holding pf must never be left half-alive in the background.
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGTSTP):
         signal.signal(s, lambda *_: (pf_teardown(), os._exit(0)))
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
