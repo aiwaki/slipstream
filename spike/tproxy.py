@@ -444,10 +444,19 @@ async def handle(reader, writer):
 
 
 async def amain(port):
-    server = await asyncio.start_server(handle, "127.0.0.1", port)
+    try:
+        server = await asyncio.start_server(
+            handle, "127.0.0.1", port, reuse_address=True)
+    except OSError as e:
+        if e.errno == 48:
+            print(f"\nport {port} already in use — another tproxy is still running.\n"
+                  f"kill it and retry:\n  sudo lsof -ti tcp:{port} | xargs sudo kill\n",
+                  file=sys.stderr)
+        raise
+    pf_setup(port)                       # grab pf only AFTER we hold the port
     print(f">> transparent tlsrec+DoH proxy on 127.0.0.1:{port}  (root)")
     print(">> quit + reopen Discord normally; its updater is captured too")
-    print(">> Ctrl-C to stop and restore pf")
+    print(">> Ctrl-C (or close terminal) to stop and restore pf")
     async with server:
         await server.serve_forever()
 
@@ -469,7 +478,6 @@ def main():
         signal.signal(s, lambda *_: (pf_teardown(), os._exit(0)))
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
-    pf_setup(args.port)
     try:
         asyncio.run(amain(args.port))
     except KeyboardInterrupt:
