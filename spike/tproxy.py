@@ -22,6 +22,7 @@ import asyncio
 import atexit
 import fcntl
 import json
+from collections import OrderedDict
 import os
 import signal
 import socket
@@ -51,7 +52,7 @@ block drop quick inet proto udp from any to any port 443
 
 _pf_applied = False
 _pf_fd = None
-_doh_cache = {}
+_doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 
 
 # ---------------------------------------------------------------- pf plumbing
@@ -182,16 +183,25 @@ STRATEGIES = [
 ]
 STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"
-_strat_cache = {}
+STRAT_CACHE_MAX = 2048
+_strat_cache = OrderedDict()       # host -> winning strategy name
 
 
 def load_strat_cache():
     global _strat_cache
     try:
         with open(_STRAT_PATH) as f:
-            _strat_cache = json.load(f)
+            _strat_cache = OrderedDict(json.load(f))
     except Exception:
-        _strat_cache = {}
+        _strat_cache = OrderedDict()
+
+
+def remember_strategy(host, name):
+    _strat_cache[host] = name
+    _strat_cache.move_to_end(host)
+    while len(_strat_cache) > STRAT_CACHE_MAX:
+        _strat_cache.popitem(last=False)
+    save_strat_cache()
 
 
 def save_strat_cache():
@@ -260,6 +270,7 @@ VOICE_LO, VOICE_HI = 50000, 65535   # Discord voice server UDP port range
 VOICE_TTL = 4
 VOICE_REPEAT = 6
 VOICE_CUTOFF = 5                    # prime the first N datagrams of each flow
+VOICE_FLOWS_MAX = 8192             # bound the per-flow table (re-priming is harmless)
 
 
 def _fake_stun(txn=b"\x00" * 12):
@@ -297,6 +308,8 @@ def voice_plane(iface):
         n = flows.get(key, 0)
         if n >= VOICE_CUTOFF:
             return
+        if len(flows) > VOICE_FLOWS_MAX:
+            flows.clear()
         flows[key] = n + 1
         pkt = (IP(src=ip.src, dst=ip.dst, ttl=VOICE_TTL)
                / UDP(sport=udp.sport, dport=udp.dport) / Raw(fake))
@@ -381,18 +394,35 @@ def _doh_query(doh_ip, doh_sni, host, timeout=6):
     return None
 
 
+DOH_TTL = 300.0          # re-resolve every 5 min — Cloudflare rotates IPs, a
+                         # forever-cache silently breaks over hours (the sneaky one)
+DOH_TTL_NEG = 30.0       # short negative cache so failures don't hammer the resolver
+DOH_CACHE_MAX = 1024
+_doh_lock = threading.Lock()
+
+
 def doh_resolve(host):
-    """Return a LIST of real A-record IPs (so we can try several — some specific
-    Cloudflare IPs are IP-blocked on the target network while others aren't)."""
-    if host in _doh_cache:
-        return _doh_cache[host]
+    """Return a LIST of real A-record IPs (try several — some specific Cloudflare
+    IPs are IP-blocked while others aren't). TTL'd + bounded so stale rotated IPs
+    don't silently break it, and the cache can't grow without limit."""
+    now = time.monotonic()
+    with _doh_lock:
+        ent = _doh_cache.get(host)
+        if ent and ent[1] > now:
+            _doh_cache.move_to_end(host)
+            return ent[0]
+    ips = []
     for ip, sni in DOH:
         r = _doh_query(ip, sni, host)
         if r:
-            _doh_cache[host] = r
-            return r
-    _doh_cache[host] = []
-    return []
+            ips = r
+            break
+    with _doh_lock:
+        _doh_cache[host] = (ips, now + (DOH_TTL if ips else DOH_TTL_NEG))
+        _doh_cache.move_to_end(host)
+        while len(_doh_cache) > DOH_CACHE_MAX:
+            _doh_cache.popitem(last=False)
+    return ips
 
 
 # ------------------------------------------------------------- relay
@@ -555,8 +585,7 @@ async def handle(reader, writer):
             if result or attempts >= 7:
                 break
         if result and host and _strat_cache.get(host) != chosen_name:
-            _strat_cache[host] = chosen_name
-            save_strat_cache()
+            remember_strategy(host, chosen_name)
 
     if not result:
         if VERBOSE:
