@@ -1,0 +1,173 @@
+# Build the headless geph5-client and publish it as a vendored binary that the
+# Slipstream app bundles. This is how we "embed geph without installing it
+# separately": CI (which HAS Rust + network) compiles geph5-client from the
+# MPL-2.0 source, and the app-build workflow drops the result into
+# Slipstream.app/Contents/Resources. The scheduled run watches geph upstream for
+# new `geph5-client-v*` tags and rebuilds automatically -> users get geph
+# bugfixes through Slipstream's own auto-update, with nothing to install by hand.
+#
+# geph5-client is MPL-2.0 (file-level copyleft). Redistributing the unmodified
+# binary inside a larger MIT app is allowed; we ship geph's LICENSE alongside it
+# and link the source (compliance handled in the `license` step).
+name: build-geph
+
+on:
+  workflow_dispatch:            # manual trigger
+  schedule:
+    - cron: "17 6 * * *"        # daily: catch a new geph5-client release
+  push:
+    paths:
+      - ".github/workflows/build-geph.yml"
+
+permissions:
+  contents: write               # publish the vendored binary as a release asset
+
+env:
+  GEPH_REPO: geph-official/geph5
+
+jobs:
+  # 1) Find the latest upstream geph5-client tag; rebuild only when it differs
+  #    from what we've already vendored (vendor/geph/VERSION).
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.up.outputs.version }}
+      should_build: ${{ steps.cmp.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: up
+        name: Resolve latest geph5-client tag
+        run: |
+          tag=$(curl -fsSL \
+            "https://api.github.com/repos/${GEPH_REPO}/tags?per_page=100" \
+            | python3 -c 'import sys,json; \
+              ts=[t["name"] for t in json.load(sys.stdin) if t["name"].startswith("geph5-client-v")]; \
+              print(ts[0] if ts else "")')
+          echo "Latest upstream tag: ${tag:-<none>}"
+          [ -n "$tag" ] || { echo "no geph5-client tag found"; exit 1; }
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+      - id: cmp
+        name: Compare with vendored version
+        run: |
+          have=$(cat vendor/geph/VERSION 2>/dev/null || echo "")
+          want="${{ steps.up.outputs.version }}"
+          echo "vendored=$have wanted=$want"
+          if [ "$have" = "$want" ]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 2) Build geph5-client per platform. macOS = universal (arm64 + x86_64).
+  #    The matrix is the cross-platform seam: add linux/windows/android targets
+  #    here later (the user's portability requirement) without touching the rest.
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macos-universal
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # --- cross-platform (enable when we tackle each OS) ---
+          # - os: ubuntu-latest
+          #   name: linux-x86_64
+          #   rust_targets: x86_64-unknown-linux-gnu
+          # - os: windows-latest
+          #   name: windows-x86_64
+          #   rust_targets: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout geph5 @ ${{ needs.resolve.outputs.version }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GEPH_REPO }}
+          ref: ${{ needs.resolve.outputs.version }}
+          path: geph5
+
+      - name: Install Rust (stable) + targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            geph5/target
+          key: geph-${{ matrix.name }}-${{ needs.resolve.outputs.version }}
+
+      - name: Build deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf cmake pkg-config || true
+
+      - name: Build geph5-client (universal on macOS)
+        working-directory: geph5
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra TARGETS <<< "${{ matrix.rust_targets }}"
+          for t in "${TARGETS[@]}"; do
+            echo "::group::cargo build $t"
+            cargo build --release -p geph5-client --target "$t"
+            echo "::endgroup::"
+          done
+          mkdir -p out
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            lipo -create -output out/geph5-client \
+              target/aarch64-apple-darwin/release/geph5-client \
+              target/x86_64-apple-darwin/release/geph5-client
+            strip -x out/geph5-client
+            lipo -info out/geph5-client
+          else
+            bin=$(ls target/*/release/geph5-client* | head -1)
+            cp "$bin" "out/$(basename "$bin")"
+          fi
+
+      - name: Bundle MPL-2.0 license (compliance)
+        working-directory: geph5
+        run: |
+          cp LICENSE out/geph5-client.LICENSE 2>/dev/null || \
+            echo "geph5-client is MPL-2.0; source: https://github.com/${GEPH_REPO}" \
+              > out/geph5-client.LICENSE
+          echo "${{ needs.resolve.outputs.version }}" > out/geph5-client.VERSION
+          ( cd out && shasum -a 256 geph5-client* > SHA256SUMS )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: geph5-client-${{ matrix.name }}
+          path: geph5/out/*
+
+      - name: Publish vendored binary as a release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: geph-vendor-${{ needs.resolve.outputs.version }}
+          name: "geph5-client ${{ needs.resolve.outputs.version }} (vendored)"
+          body: |
+            Headless geph5-client built from ${{ env.GEPH_REPO }}@${{ needs.resolve.outputs.version }}
+            for embedding in Slipstream. MPL-2.0; source linked above.
+            Consumed by the app-build workflow -> Slipstream.app/Contents/Resources.
+          files: geph5/out/*
+
+  # 3) Record the version we vendored so the next scheduled run is a no-op until
+  #    geph ships something newer.
+  bump:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump vendor/geph/VERSION
+        run: |
+          echo "${{ needs.resolve.outputs.version }}" > vendor/geph/VERSION
+          git config user.name  "slipstream-ci"
+          git config user.email "ci@slipstream.local"
+          git add vendor/geph/VERSION
+          git commit -m "vendor: geph5-client ${{ needs.resolve.outputs.version }}" || echo "no change"
+          git push || echo "push skipped (no remote/perms)"
