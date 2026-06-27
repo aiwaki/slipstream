@@ -122,6 +122,11 @@ def cleanup_stale():
     one still holding the port) and reset pf to the clean default, so a fresh
     start always works without manual lsof/kill/escape."""
     me, parent = os.getpid(), os.getppid()
+    # A MANUAL run (from the repo, not the installed daemon) must stop the daemon
+    # first: launchd KeepAlive would instantly restart a kill-9'd daemon and
+    # re-grab :1080. The daemon itself runs from INSTALL_DIR -> never boots itself.
+    if os.path.abspath(__file__) != os.path.join(INSTALL_DIR, "tproxy.py"):
+        _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
     res = _run("pgrep", "-f", "tproxy.py")
     killed = 0
     for line in res.stdout.split():
