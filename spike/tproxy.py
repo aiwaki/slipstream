@@ -72,6 +72,59 @@ _dead = {}                     # host -> expiry_monotonic
 STATUS_PATH = "/var/run/slipstream.status"
 _conn_count = 0                # live proxied connections
 
+# --------------------------------------------------- Geph split-tunnel (hybrid)
+# The elegant hybrid (not a blunt VPN toggle): MOST traffic uses our local desync;
+# only the handful of services that hard-block Russian IPs server-side (OpenAI,
+# Anthropic, ...) are tunnelled through geph's local SOCKS5 — and ONLY when geph is
+# actually running. Russian services are split-tunnel-EXCLUDED: they must never
+# enter the tunnel (privacy + they'd break, geph exits abroad). geph absent ->
+# _geph_up stays False -> this whole path is inert and behaviour is unchanged.
+GEPH_ENABLED = os.environ.get("SLIP_GEPH", "1") != "0"
+GEPH_SOCKS_PORT = int(os.environ.get("SLIP_GEPH_PORT", "9909"))   # geph5 SOCKS default
+_geph_up = False               # set by network_monitor's periodic probe
+
+# Services that refuse Russian IPs at the application layer (desync can't help —
+# only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: it is
+# DPI-blocked, not geo-blocked, so local desync handles it (keep it off the tunnel).
+GEPH_HOSTS = (
+    "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
+    "anthropic.com", "claude.ai", "claudeusercontent.com",
+    "intercomcdn.com",            # OpenAI/Anthropic support widget assets
+)
+
+# Russian services — NEVER tunnelled (split-tunnel exclusion "for the VPN").
+# Primary rule is the national TLDs; the set covers big RU services on .com/.net.
+RU_TLDS = (".ru", ".su", ".xn--p1ai", ".moscow", ".tatar", ".xn--80adxhks")
+RU_HOSTS = (
+    "vk.com", "vk.cc", "vkvideo.ru", "userapi.com", "vk-cdn.net", "vkuser.net",
+    "yandex.com", "yandex.net", "yastatic.net", "yandexcloud.net", "ya.ru",
+    "mail.ru", "mycdn.me", "imgsmail.ru",
+    "sberbank.com", "sber.ru", "sberdevices.ru",
+    "ozon.com", "ozon.ru", "wildberries.ru", "wb.ru", "avito.ru",
+    "gosuslugi.ru", "nalog.ru", "gov.ru",
+    "tinkoff.ru", "tbank.ru", "gazprombank.ru", "vtb.ru", "alfabank.ru",
+    "rutube.ru", "ok.ru", "dzen.ru", "kinopoisk.ru", "2gis.com", "2gis.ru",
+    "kaspersky.com", "kaspersky.ru", "aliexpress.ru",
+)
+
+
+def is_russian(host):
+    """True for any Russian service — excluded from the geph tunnel."""
+    if not host:
+        return False
+    h = host.lower().rstrip(".")
+    if h.endswith(RU_TLDS):
+        return True
+    return any(h == d or h.endswith("." + d) for d in RU_HOSTS)
+
+
+def geph_route(host):
+    """Should this host go through geph's tunnel? Geo-blocked AND not Russian."""
+    if not host or is_russian(host):
+        return False
+    h = host.lower().rstrip(".")
+    return any(h == d or h.endswith("." + d) for d in GEPH_HOSTS)
+
 
 def write_status(state, iface, voice_iface):
     try:
@@ -84,6 +137,7 @@ def write_status(state, iface, voice_iface):
             "voice": voice_iface or "",
             "hosts_learned": len(_strat_cache),
             "dead": len(_dead),
+            "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
         }
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
@@ -401,7 +455,7 @@ def network_monitor(port, voice=True):
     RTP is UDP to *.discord.media:50000-65535, bypassing the TCP pf-rdr, so we
     BPF-observe it and raw-inject low-TTL decoy STUN primes on the 5-tuple, leaving
     the real flow untouched."""
-    global _pf_applied
+    global _pf_applied, _geph_up
     AsyncSniffer = send = IP = UDP = Raw = get_if_addr = None
     if voice:
         try:
@@ -433,6 +487,11 @@ def network_monitor(port, voice=True):
 
     while True:
         iface = default_iface()
+        was_geph, _geph_up = _geph_up, probe_geph()
+        if _geph_up != was_geph:
+            print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
+                  f"(:{GEPH_SOCKS_PORT}) — geo-blocked hosts "
+                  f"{'tunnelled' if _geph_up else 'on local desync'}", file=sys.stderr)
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
@@ -639,6 +698,62 @@ async def pump(reader, up_w):
     return total
 
 
+def probe_geph():
+    """Is geph's SOCKS5 listener accepting? (cheap TCP connect; called every 5s
+    by the monitor thread). A successful connect doesn't prove geph reached its
+    exit — dial_via_geph keeps tight timeouts and falls back if CONNECT fails."""
+    if not GEPH_ENABLED:
+        return False
+    try:
+        socket.create_connection(("127.0.0.1", GEPH_SOCKS_PORT), timeout=0.4).close()
+        return True
+    except Exception:
+        return False
+
+
+async def dial_via_geph(host, port, first_flight):
+    """Open a SOCKS5 CONNECT to host:port through geph's local listener and send
+    the buffered first flight PLAIN (the tunnel handles censorship — no desync).
+    CONNECT-by-domain lets geph resolve + exit abroad, sidestepping RU DNS poison
+    and the geo-block entirely. Returns (reader, writer) to geph or None on any
+    failure (caller then falls back to local desync)."""
+    try:
+        gr, gw = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", GEPH_SOCKS_PORT), timeout=3)
+    except Exception:
+        return None
+    try:
+        gw.write(b"\x05\x01\x00")                      # VER5, 1 method, no-auth
+        await gw.drain()
+        greet = await asyncio.wait_for(gr.readexactly(2), 3)
+        if greet[0] != 0x05 or greet[1] != 0x00:
+            raise IOError("socks5 no-auth refused")
+        hb = host.encode("ascii", "ignore")[:255]
+        gw.write(b"\x05\x01\x00\x03" + bytes([len(hb)]) + hb + struct.pack("!H", port))
+        await gw.drain()
+        rep = await asyncio.wait_for(gr.readexactly(4), 8)   # VER REP RSV ATYP
+        if rep[1] != 0x00:
+            raise IOError(f"socks5 connect rep={rep[1]}")
+        atyp = rep[3]
+        if atyp == 0x01:
+            await gr.readexactly(4)
+        elif atyp == 0x03:
+            ln = await gr.readexactly(1)
+            await gr.readexactly(ln[0])
+        elif atyp == 0x04:
+            await gr.readexactly(16)
+        await gr.readexactly(2)                        # bound port
+        gw.write(first_flight)                         # original ClientHello, plain
+        await gw.drain()
+        return gr, gw
+    except Exception:
+        try:
+            gw.close()
+        except Exception:
+            pass
+        return None
+
+
 async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     """Connect, send the (split) first flight, wait for the first server bytes.
     Returns (up_r, up_w, server_first) or None if no response in time."""
@@ -733,6 +848,21 @@ async def _handle_impl(reader, writer):
     except (asyncio.IncompleteReadError, asyncio.TimeoutError, OSError):
         writer.close()
         return
+
+    # Split-tunnel: a geo-blocked service (refuses RU IPs) goes through geph's
+    # SOCKS5 tunnel when geph is up; Russian services are excluded by geph_route;
+    # on any geph failure we fall through to local desync (no worse than today).
+    if is_tls and _geph_up and geph_route(host):
+        g = await dial_via_geph(host, dst_port, head + body)
+        if g:
+            gr, gw = g
+            if VERBOSE:
+                print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
+            await asyncio.gather(pump(reader, gw), splice(gr, writer))
+            return
+        if VERBOSE:
+            print(f"  geph CONNECT failed for {host} -> local desync",
+                  file=sys.stderr)
 
     # de-poison: resolve the SNI over DoH -> LIST of real IPs (fallback dst_ip)
     real_ips = []
