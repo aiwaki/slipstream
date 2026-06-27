@@ -216,6 +216,7 @@ STRATEGIES = [
 STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"
 STRAT_CACHE_MAX = 2048
+STRAT_CACHE_VERSION = 2             # bump on strategy-logic changes -> discard stale
 _strat_cache = OrderedDict()       # host -> winning strategy name
 
 
@@ -223,7 +224,11 @@ def load_strat_cache():
     global _strat_cache
     try:
         with open(_STRAT_PATH) as f:
-            _strat_cache = OrderedDict(json.load(f))
+            data = json.load(f)
+        if data.get("__v__") != STRAT_CACHE_VERSION:
+            data = {}                # logic changed -> old winners may be wrong
+        data.pop("__v__", None)
+        _strat_cache = OrderedDict(data)
     except Exception:
         _strat_cache = OrderedDict()
 
@@ -238,21 +243,26 @@ def remember_strategy(host, name):
 
 def save_strat_cache():
     try:
+        d = dict(_strat_cache)
+        d["__v__"] = STRAT_CACHE_VERSION
         with open(_STRAT_PATH, "w") as f:
-            json.dump(_strat_cache, f)
+            json.dump(d, f)
     except Exception:
         pass
 
 
 DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
+# Default order is FAKE-FIRST for every host: the TSPU throttles many services by
+# SNI (Discord, Anthropic, Shopify stores, ...) even when the block is beaten, and
+# the TLS probe can't see the throttle — so try fake first everywhere (the decoy
+# hides the SNI from the throttler). Non-fake variants remain as fallbacks for the
+# rare host the decoy upsets. Inject is cheap (not DoH); the pool absorbs it.
+GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
 
 
 def strategy_order(host):
-    # Discord is throttled by SNI even when the block is beaten, and the TLS probe
-    # can't see the throttle — so Discord must ONLY ever use a fake strategy (the
-    # decoy hides the SNI from the throttler). Never fall to a non-fake one, even
-    # if one got cached after the fakes transiently failed, or history/profiles
-    # silently stop loading. This also ignores a stale non-fake cache entry.
+    # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
+    # so it uses the fake-only set and ignores any stale non-fake cache entry.
     if host and "discord" in host:
         win = _strat_cache.get(host)
         names = ([win] + [n for n in DISCORD_STRATS if n != win]
@@ -261,7 +271,7 @@ def strategy_order(host):
     win = _strat_cache.get(host)
     if win in STRAT_BY_NAME:
         return [STRAT_BY_NAME[win]] + [s for s in STRATEGIES if s["name"] != win]
-    return STRATEGIES
+    return [STRAT_BY_NAME[n] for n in GENERAL_STRATS]
 
 
 # --------------------------------------------------- fake ClientHello (decoy)
