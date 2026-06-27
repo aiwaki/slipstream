@@ -68,6 +68,30 @@ _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH
 DEAD_TTL = 60.0
 _dead = {}                     # host -> expiry_monotonic
 
+# Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
+STATUS_PATH = "/var/run/slipstream.status"
+_conn_count = 0                # live proxied connections
+
+
+def write_status(state, iface, voice_iface):
+    try:
+        st = {
+            "state": state,            # "active" | "dormant"
+            "pid": os.getpid(),
+            "ts": time.time(),
+            "conns": _conn_count,
+            "iface": iface or "",
+            "voice": voice_iface or "",
+            "hosts_learned": len(_strat_cache),
+            "dead": len(_dead),
+        }
+        tmp = STATUS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(st, f)
+        os.replace(tmp, STATUS_PATH)
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------- pf plumbing
 # LaunchDaemons start with an empty PATH, so bare 'pfctl'/'route'/'pgrep' aren't
@@ -114,6 +138,10 @@ def pf_has_rules(port):
 
 def pf_teardown():
     global _pf_applied
+    try:
+        os.remove(STATUS_PATH)        # daemon is going away -> app shows "off"
+    except Exception:
+        pass
     if not _pf_applied:
         return
     _run("pfctl", "-f", "/etc/pf.conf")
@@ -442,6 +470,7 @@ def network_monitor(port, voice=True):
                 except Exception as e:
                     print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
+        write_status("dormant" if vpn else "active", iface, cur_iface)
         time.sleep(5)
 
 
@@ -668,6 +697,15 @@ async def dial_strategy(ip, port, head, body, host, strat):
 
 
 async def handle(reader, writer):
+    global _conn_count
+    _conn_count += 1
+    try:
+        await _handle_impl(reader, writer)
+    finally:
+        _conn_count -= 1
+
+
+async def _handle_impl(reader, writer):
     sock = writer.get_extra_info("socket")
     try:
         dst_ip, dst_port = orig_dst(sock)
@@ -874,9 +912,6 @@ async def amain(port):
 
 def main():
     global VERBOSE, _pf_fd
-    if os.geteuid() != 0:
-        print("must run as root:  sudo python3 tproxy.py", file=sys.stderr)
-        sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=PROXY_PORT)
     ap.add_argument("--verbose", action="store_true")
@@ -886,8 +921,27 @@ def main():
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
     ap.add_argument("--uninstall", action="store_true",
                     help="remove the LaunchDaemon and restore pf")
+    ap.add_argument("--status", action="store_true",
+                    help="print daemon status JSON and exit (no root needed)")
     args = ap.parse_args()
     VERBOSE = args.verbose
+
+    if args.status:
+        try:
+            with open(STATUS_PATH) as f:
+                line = f.read().strip()
+            # treat a stale file (>15s) as off — the daemon writes every 5s
+            st = json.loads(line)
+            if time.time() - st.get("ts", 0) > 15:
+                line = '{"state": "off"}'
+            print(line)
+        except Exception:
+            print('{"state": "off"}')
+        return
+
+    if os.geteuid() != 0:
+        print("must run as root:  sudo python3 tproxy.py", file=sys.stderr)
+        sys.exit(1)
 
     if args.install:
         do_install(args.port)
