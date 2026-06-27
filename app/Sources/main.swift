@@ -61,6 +61,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         lastState = state
         let conns = (st?["conns"] as? Int) ?? 0
         let learned = (st?["hosts_learned"] as? Int) ?? 0
+        let geph = (st?["geph"] as? String) ?? "off"
 
         let markName = (state == "off") ? "slip-menubar-mark-off" : "slip-menubar-mark"
         if let url = Bundle.main.url(forResource: markName, withExtension: "svg"),
@@ -72,7 +73,9 @@ final class Controller: NSObject, NSApplicationDelegate {
         switch state {
         case "active":
             stateItem.title = "Slipstream — Active"
-            detailItem.title = "\(conns) connections · \(learned) hosts learned"
+            var d = "\(conns) connections · \(learned) hosts learned"
+            if geph == "up" { d += " · Geph tunnel on" }   // geo-blocked hosts routed
+            detailItem.title = d
         case "dormant":
             stateItem.title = "Slipstream — Dormant"
             detailItem.title = "VPN is up; the VPN handles bypass"
