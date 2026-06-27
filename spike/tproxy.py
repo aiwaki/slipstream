@@ -24,6 +24,7 @@ import fcntl
 import json
 from collections import OrderedDict
 import os
+import resource
 import signal
 import socket
 import ssl
@@ -273,11 +274,26 @@ def build_fake_clienthello(sni: str) -> bytes:
 _FAKE_CH = build_fake_clienthello(FAKE_DECOY_SNI)
 
 
+# Reuse ONE scapy L3 socket per thread instead of send()-per-packet. scapy's
+# send() opens (and under load leaks) a socket each call, and the voice plane
+# primes 6x per packet -> FD exhaustion ("Too many open files"). A thread-local
+# socket is safe across the sniffer thread and the asyncio executor workers.
+_l3_tls = threading.local()
+
+
+def _l3send(pkt):
+    s = getattr(_l3_tls, "sock", None)
+    if s is None:
+        from scapy.all import conf
+        s = _l3_tls.sock = conf.L3socket()
+    s.send(pkt)
+
+
 def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
     """Spray a few decoy-SNI ClientHello packets at low TTL on the real 4-tuple.
     Needs scapy (run via the venv python). No-op with a warning if unavailable."""
     try:
-        from scapy.all import IP, TCP, Raw, send
+        from scapy.all import IP, TCP, Raw
     except Exception:
         print("  fake-mode needs scapy: run with sudo .venv/bin/python tproxy.py",
               file=sys.stderr)
@@ -286,7 +302,7 @@ def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
            / TCP(sport=src_port, dport=dst_port, flags="PA", seq=1, ack=1)
            / Raw(_FAKE_CH))
     for _ in range(repeats):
-        send(pkt, verbose=0)
+        _l3send(pkt)
 
 
 # ------------------------------------------------------- UDP voice plane
@@ -348,7 +364,7 @@ def network_monitor(port, voice=True):
         pkt = (IP(src=ip.src, dst=ip.dst, ttl=VOICE_TTL)
                / UDP(sport=udp.sport, dport=udp.dport) / Raw(fake))
         for _ in range(VOICE_REPEAT):
-            send(pkt, verbose=0)
+            _l3send(pkt)
         if VERBOSE and n == 0:
             print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
 
@@ -717,6 +733,10 @@ def do_install(port):
         '  <key>EnvironmentVariables</key><dict>'
         '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
         '<key>PYTHONUNBUFFERED</key><string>1</string></dict>\n'
+        '  <key>SoftResourceLimits</key><dict>'
+        '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
+        '  <key>HardResourceLimits</key><dict>'
+        '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
         f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
         f'  <key>StandardOutPath</key><string>{LOG_PATH}</string>\n'
         f'  <key>StandardErrorPath</key><string>{LOG_PATH}</string>\n'
@@ -789,6 +809,20 @@ def main():
     if args.uninstall:
         do_uninstall()
         return
+
+    # A transparent proxy carries ALL system TCP/443 — hundreds of concurrent FDs.
+    # The default 256-fd soft limit is far too low ("Too many open files"); raise it.
+    try:
+        _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        for target in (65536, 32768, 16384, 10240, 8192):
+            cap = target if hard == resource.RLIM_INFINITY else min(target, hard)
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (cap, hard))
+                break
+            except (ValueError, OSError):
+                continue
+    except Exception:
+        pass
 
     cleanup_stale()        # kill leftover instances + reset pf before we start
     load_strat_cache()     # remember per-host winning strategies across restarts
