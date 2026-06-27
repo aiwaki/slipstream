@@ -818,36 +818,46 @@ INSTALL_DIR = "/usr/local/slipstream"   # NOT under ~/Documents (TCC-protected)
 
 
 def do_install(port):
-    # A LaunchDaemon (root, via launchd) has NO TCC access to ~/Documents, so a
-    # venv there fails with "Operation not permitted". Install a self-contained
-    # copy + its own venv under /usr/local (outside TCC), and run from there.
-    os.makedirs(INSTALL_DIR, exist_ok=True)
-    script = os.path.join(INSTALL_DIR, "tproxy.py")
-    shutil.copy(os.path.abspath(__file__), script)
-    venv = os.path.join(INSTALL_DIR, "venv")
-    py = os.path.join(venv, "bin", "python3")
-    if not os.path.exists(py):
-        base = getattr(sys, "_base_executable", None) or sys.executable
-        print(">> building self-contained venv + scapy (needs network, ~20s)...")
-        if _run(base, "-m", "venv", venv).returncode != 0:
-            print("venv create failed", file=sys.stderr)
-            return
-        r = _run(py, "-m", "pip", "install", "--quiet",
-                 "--disable-pip-version-check", "scapy")
-        if r.returncode != 0:
-            print("scapy install failed (pypi reachable?):\n" + r.stderr[-400:],
-                  file=sys.stderr)
-            return
+    # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
+    # TCC access to ~/Documents). Two modes:
+    #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
+    #  - script (dev): copy tproxy.py + build a venv with scapy
+    if getattr(sys, "frozen", False):
+        src = os.path.dirname(os.path.abspath(sys.executable))
+        shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+        shutil.copytree(src, INSTALL_DIR)
+        binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
+        prog_args = [binary, "--port", str(port)]
+        uninstall_hint = f"sudo {binary} --uninstall"
+    else:
+        os.makedirs(INSTALL_DIR, exist_ok=True)
+        script = os.path.join(INSTALL_DIR, "tproxy.py")
+        shutil.copy(os.path.abspath(__file__), script)
+        venv = os.path.join(INSTALL_DIR, "venv")
+        py = os.path.join(venv, "bin", "python3")
+        if not os.path.exists(py):
+            base = getattr(sys, "_base_executable", None) or sys.executable
+            print(">> building self-contained venv + scapy (needs network, ~20s)...")
+            if _run(base, "-m", "venv", venv).returncode != 0:
+                print("venv create failed", file=sys.stderr)
+                return
+            r = _run(py, "-m", "pip", "install", "--quiet",
+                     "--disable-pip-version-check", "scapy")
+            if r.returncode != 0:
+                print("scapy install failed (pypi reachable?):\n" + r.stderr[-400:],
+                      file=sys.stderr)
+                return
+        prog_args = [py, script, "--port", str(port)]
+        uninstall_hint = f"sudo {py} {script} --uninstall"
     workdir = INSTALL_DIR
+    prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
     plist = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
         '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
         '<plist version="1.0"><dict>\n'
         f'  <key>Label</key><string>{LAUNCHD_LABEL}</string>\n'
-        '  <key>ProgramArguments</key><array>'
-        f'<string>{py}</string><string>{script}</string>'
-        f'<string>--port</string><string>{port}</string></array>\n'
+        f'  <key>ProgramArguments</key><array>{prog_xml}</array>\n'
         '  <key>RunAtLoad</key><true/>\n'
         '  <key>KeepAlive</key><true/>\n'
         '  <key>EnvironmentVariables</key><dict>'
@@ -872,7 +882,7 @@ def do_install(port):
     print(f"installed -> {LAUNCHD_PLIST}")
     print(f"runs now + at every boot as root, auto-restarts on crash.")
     print(f"logs:      tail -f {LOG_PATH}")
-    print(f"uninstall: sudo {py} {script} --uninstall")
+    print(f"uninstall: {uninstall_hint}")
 
 
 def do_uninstall():

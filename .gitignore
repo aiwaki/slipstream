@@ -4,3 +4,8 @@ __pycache__/
 spike/.venv/
 *.app/
 app/Slipstream.app/
+
+spike/.buildvenv/
+spike/build/
+spike/dist/
+spike/*.spec
