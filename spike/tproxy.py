@@ -373,6 +373,7 @@ def network_monitor(port, voice=True):
     RTP is UDP to *.discord.media:50000-65535, bypassing the TCP pf-rdr, so we
     BPF-observe it and raw-inject low-TTL decoy STUN primes on the 5-tuple, leaving
     the real flow untouched."""
+    global _pf_applied
     AsyncSniffer = send = IP = UDP = Raw = get_if_addr = None
     if voice:
         try:
@@ -403,11 +404,26 @@ def network_monitor(port, voice=True):
             print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
 
     while True:
-        if _pf_applied and not pf_has_rules(port):
-            print(">> pf rules vanished — re-applying", file=sys.stderr)
-            _pf_load(port)
+        iface = default_iface()
+        # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
+        # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
+        # conflict; re-arm automatically when the VPN drops.
+        vpn = bool(iface) and iface.startswith("utun")
+        if vpn:
+            if _pf_applied:
+                print(f">> VPN up (default via {iface}) -> Slipstream dormant",
+                      file=sys.stderr)
+                _run("pfctl", "-f", "/etc/pf.conf")
+                _pf_applied = False
+        else:
+            if not _pf_applied:
+                print(">> no VPN -> Slipstream active", file=sys.stderr)
+                _pf_load(port)
+                _pf_applied = True
+            elif not pf_has_rules(port):
+                print(">> pf rules vanished — re-applying", file=sys.stderr)
+                _pf_load(port)
         if send is not None:                       # scapy available
-            iface = default_iface()
             if iface and iface != cur_iface:
                 if sniffer is not None:
                     try:
