@@ -237,16 +237,23 @@ def save_strat_cache():
         pass
 
 
+DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
+
+
 def strategy_order(host):
+    # Discord is throttled by SNI even when the block is beaten, and the TLS probe
+    # can't see the throttle — so Discord must ONLY ever use a fake strategy (the
+    # decoy hides the SNI from the throttler). Never fall to a non-fake one, even
+    # if one got cached after the fakes transiently failed, or history/profiles
+    # silently stop loading. This also ignores a stale non-fake cache entry.
+    if host and "discord" in host:
+        win = _strat_cache.get(host)
+        names = ([win] + [n for n in DISCORD_STRATS if n != win]
+                 if win in DISCORD_STRATS else DISCORD_STRATS)
+        return [STRAT_BY_NAME[n] for n in names]
     win = _strat_cache.get(host)
     if win in STRAT_BY_NAME:
         return [STRAT_BY_NAME[win]] + [s for s in STRATEGIES if s["name"] != win]
-    # Prior: Discord flows are throttled by SNI even when the block is beaten, and
-    # the probe (TLS handshake) can't see the throttle — so start Discord on a
-    # fake strategy (beats block AND throttle) instead of plain split.
-    if host and "discord" in host:
-        order = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
-        return [STRAT_BY_NAME[n] for n in order]
     return STRATEGIES
 
 
@@ -765,6 +772,10 @@ def do_uninstall():
     _run("pfctl", "-f", "/etc/pf.conf")
     _run("pfctl", "-d")
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+    try:
+        os.remove(_STRAT_PATH)             # drop any stale strategy cache
+    except Exception:
+        pass
     print("uninstalled + pf restored")
 
 
