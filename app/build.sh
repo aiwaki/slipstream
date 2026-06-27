@@ -9,6 +9,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
 
+[ -f Resources/Slipstream.icns ] || ./make_icns.sh
+cp Resources/*.svg Resources/Slipstream.icns "$APP/Contents/Resources/"
+
 swiftc -O Sources/main.swift \
   -o "$APP/Contents/MacOS/Slipstream" \
   -framework AppKit -framework Foundation \

@@ -62,14 +62,12 @@ final class Controller: NSObject, NSApplicationDelegate {
         let conns = (st?["conns"] as? Int) ?? 0
         let learned = (st?["hosts_learned"] as? Int) ?? 0
 
-        let symbol: String
-        switch state {
-        case "active":  symbol = "bolt.fill"
-        case "dormant": symbol = "moon.zzz.fill"
-        default:        symbol = "bolt.slash"
-        }
-        if let btn = statusItem.button {
-            btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Slipstream")
+        let markName = (state == "off") ? "slip-menubar-mark-off" : "slip-menubar-mark"
+        if let url = Bundle.main.url(forResource: markName, withExtension: "svg"),
+           let img = NSImage(contentsOf: url) {
+            img.isTemplate = true                       // menu bar tints it (light/dark/active)
+            img.size = NSSize(width: 30, height: 17)    // 56x32 aspect
+            statusItem.button?.image = img
         }
         switch state {
         case "active":
