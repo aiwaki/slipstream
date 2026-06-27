@@ -23,6 +23,7 @@ import atexit
 import fcntl
 import json
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 import os
 import resource
 import signal
@@ -55,6 +56,12 @@ block return quick inet proto udp from any to any port 443
 _pf_applied = False
 _pf_fd = None
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
+# Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
+# The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
+# floods it with slow DoH queries and the whole proxy stalls. 64 workers + DoH
+# de-dup keeps the app responsive under a browser's connection burst.
+_POOL = ThreadPoolExecutor(max_workers=64, thread_name_prefix="slip")
+_doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH)
 
 
 # ---------------------------------------------------------------- pf plumbing
@@ -403,7 +410,7 @@ def network_monitor(port, voice=True):
 
 
 # ------------------------------------------------------------- DoH (blocking)
-def _doh_query(doh_ip, doh_sni, host, timeout=6):
+def _doh_query(doh_ip, doh_sni, host, timeout=3):
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -505,6 +512,27 @@ def doh_resolve(host):
     return ips
 
 
+async def doh_resolve_async(host):
+    """Resolve on the dedicated pool, collapsing concurrent first-time lookups
+    for the same host into a single query (no await between get+set -> race-free
+    on the single-threaded loop)."""
+    fut = _doh_inflight.get(host)
+    if fut is not None:
+        return await fut
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    _doh_inflight[host] = fut
+    try:
+        ips = await loop.run_in_executor(_POOL, doh_resolve, host)
+    except Exception:
+        ips = []
+    finally:
+        _doh_inflight.pop(host, None)
+        if not fut.done():
+            fut.set_result(ips)
+    return ips
+
+
 # ------------------------------------------------------------- relay
 async def splice(src, dst):
     total = 0
@@ -580,7 +608,8 @@ async def dial_and_probe_fake(real_ip, port, first_blob, probe_timeout=3.0):
     try:
         s = up_w.get_extra_info("socket")
         src_ip, src_port = s.getsockname()
-        await asyncio.to_thread(inject_fake, src_ip, src_port, real_ip, port)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(_POOL, inject_fake, src_ip, src_port, real_ip, port)
         up_w.write(first_blob)
         await up_w.drain()
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
@@ -634,7 +663,7 @@ async def handle(reader, writer):
     # de-poison: resolve the SNI over DoH -> LIST of real IPs (fallback dst_ip)
     real_ips = []
     if host:
-        real_ips = await asyncio.to_thread(doh_resolve, host)
+        real_ips = await doh_resolve_async(host)
     if not real_ips:
         real_ips = [dst_ip]
 
