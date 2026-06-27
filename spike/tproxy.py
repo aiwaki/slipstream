@@ -27,6 +27,7 @@ import os
 import signal
 import socket
 import ssl
+import shutil
 import struct
 import subprocess
 import sys
@@ -677,12 +678,31 @@ async def handle(reader, writer):
 LAUNCHD_LABEL = "dev.slipstream.tproxy"
 LAUNCHD_PLIST = f"/Library/LaunchDaemons/{LAUNCHD_LABEL}.plist"
 LOG_PATH = "/var/log/slipstream.log"
+INSTALL_DIR = "/usr/local/slipstream"   # NOT under ~/Documents (TCC-protected)
 
 
 def do_install(port):
-    py = sys.executable
-    script = os.path.abspath(__file__)
-    workdir = os.path.dirname(script)
+    # A LaunchDaemon (root, via launchd) has NO TCC access to ~/Documents, so a
+    # venv there fails with "Operation not permitted". Install a self-contained
+    # copy + its own venv under /usr/local (outside TCC), and run from there.
+    os.makedirs(INSTALL_DIR, exist_ok=True)
+    script = os.path.join(INSTALL_DIR, "tproxy.py")
+    shutil.copy(os.path.abspath(__file__), script)
+    venv = os.path.join(INSTALL_DIR, "venv")
+    py = os.path.join(venv, "bin", "python3")
+    if not os.path.exists(py):
+        base = getattr(sys, "_base_executable", None) or sys.executable
+        print(">> building self-contained venv + scapy (needs network, ~20s)...")
+        if _run(base, "-m", "venv", venv).returncode != 0:
+            print("venv create failed", file=sys.stderr)
+            return
+        r = _run(py, "-m", "pip", "install", "--quiet",
+                 "--disable-pip-version-check", "scapy")
+        if r.returncode != 0:
+            print("scapy install failed (pypi reachable?):\n" + r.stderr[-400:],
+                  file=sys.stderr)
+            return
+    workdir = INSTALL_DIR
     plist = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -723,6 +743,7 @@ def do_uninstall():
         pass
     _run("pfctl", "-f", "/etc/pf.conf")
     _run("pfctl", "-d")
+    shutil.rmtree(INSTALL_DIR, ignore_errors=True)
     print("uninstalled + pf restored")
 
 
