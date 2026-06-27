@@ -62,6 +62,11 @@ _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # de-dup keeps the app responsive under a browser's connection burst.
 _POOL = ThreadPoolExecutor(max_workers=64, thread_name_prefix="slip")
 _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH)
+# Negative cache: a host that failed the whole ladder is "dead" for a cooldown,
+# during which it gets ONE fast-fail attempt instead of 7 — stops retry-storms
+# from a persistently-blocked host (e.g. Telegram DC sockets hammering forever).
+DEAD_TTL = 60.0
+_dead = {}                     # host -> expiry_monotonic
 
 
 # ---------------------------------------------------------------- pf plumbing
@@ -696,6 +701,9 @@ async def handle(reader, writer):
                 chosen = ip
                 break
     else:
+        now = time.monotonic()
+        # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
+        max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
         attempts = 0
         for strat in strategy_order(host):
             for ip in real_ips[:2]:
@@ -704,12 +712,19 @@ async def handle(reader, writer):
                 if result:
                     chosen, chosen_name = ip, strat["name"]
                     break
-                if attempts >= 7:
+                if attempts >= max_attempts:
                     break
-            if result or attempts >= 7:
+            if result or attempts >= max_attempts:
                 break
-        if result and host and _strat_cache.get(host) != chosen_name:
-            remember_strategy(host, chosen_name)
+        if result:
+            if host:
+                _dead.pop(host, None)
+                if _strat_cache.get(host) != chosen_name:
+                    remember_strategy(host, chosen_name)
+        elif host:
+            _dead[host] = now + DEAD_TTL        # arm the negative cache
+            if len(_dead) > 4096:
+                _dead.clear()
 
     if not result:
         if VERBOSE:
