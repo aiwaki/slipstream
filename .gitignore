@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .venv/
 spike/.venv/
+*.app/
+app/Slipstream.app/
