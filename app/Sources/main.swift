@@ -5,9 +5,11 @@
 import AppKit
 import Foundation
 
-let PLIST = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist"
+let LAUNCHD_LABEL = "dev.slipstream.tproxy"
+let PLIST = "/Library/LaunchDaemons/\(LAUNCHD_LABEL).plist"
 let STATUS_PATH = "/var/run/slipstream.status"
 let LOG_PATH = "/var/log/slipstream.log"
+let APP_VERSION = "0.1"
 
 final class Controller: NSObject, NSApplicationDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -26,10 +28,16 @@ final class Controller: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         toggleItem.target = self
         menu.addItem(toggleItem)
+        let restart = NSMenuItem(title: "Restart Proxy", action: #selector(restartProxy), keyEquivalent: "")
+        restart.target = self
+        menu.addItem(restart)
         let log = NSMenuItem(title: "Open Log", action: #selector(openLog), keyEquivalent: "")
         log.target = self
         menu.addItem(log)
         menu.addItem(.separator())
+        let ver = NSMenuItem(title: "Version \(APP_VERSION)", action: nil, keyEquivalent: "")
+        ver.isEnabled = false
+        menu.addItem(ver)
         menu.addItem(NSMenuItem(title: "Quit Slipstream",
                                 action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
@@ -84,6 +92,11 @@ final class Controller: NSObject, NSApplicationDelegate {
             ? "launchctl bootout system \(PLIST)"
             : "launchctl bootstrap system \(PLIST)"
         runAdmin(cmd)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.refresh() }
+    }
+
+    @objc func restartProxy() {
+        runAdmin("launchctl kickstart -k system/\(LAUNCHD_LABEL)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.refresh() }
     }
 
