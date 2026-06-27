@@ -49,7 +49,7 @@ DOH = [("1.1.1.1", "cloudflare-dns.com"), ("8.8.8.8", "dns.google")]
 PF_RULES = """\
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
-block drop quick inet proto udp from any to any port 443
+block return quick inet proto udp from any to any port 443
 """
 
 _pf_applied = False
