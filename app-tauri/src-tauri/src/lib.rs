@@ -19,6 +19,7 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
 // Our bundled geph5-client runs an unprivileged SOCKS5 on this port; the root
@@ -88,13 +89,17 @@ fn run_admin(shell: &str) {
     let _ = Command::new("/usr/bin/osascript").arg("-e").arg(script).spawn();
 }
 
-/// Native secret-entry dialog (the same NSAlert look as TG WS Proxy). Returns the
-/// entered text, or None if cancelled.
-fn prompt_secret() -> Option<String> {
-    let script = "display dialog \"Geph account secret\" with title \"Slipstream\" \
-                  default answer \"\" with hidden answer \
-                  buttons {\"Cancel\", \"OK\"} default button \"OK\"";
-    let out = Command::new("/usr/bin/osascript").arg("-e").arg(script).output().ok()?;
+/// Native secret-entry dialog (the same NSAlert look as TG WS Proxy). Pre-fills
+/// the current secret and shows it (a 24-digit secret is unusable to type blind),
+/// like geph's own Account screen. Returns the entered text, or None if cancelled.
+fn prompt_secret(current: &str) -> Option<String> {
+    let cur = current.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        "display dialog \"Geph account secret\" with title \"Slipstream\" \
+         default answer \"{cur}\" \
+         buttons {{\"Cancel\", \"OK\"}} default button \"OK\""
+    );
+    let out = Command::new("/usr/bin/osascript").arg("-e").arg(&script).output().ok()?;
     if !out.status.success() {
         return None; // user cancelled
     }
@@ -268,6 +273,12 @@ async fn geph_supervisor(app: AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // single-instance MUST be the first plugin: a second launch just exits.
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -299,7 +310,7 @@ pub fn run() {
             exit_items.push(("auto".into(), auto.clone()));
 
             let mut gb = SubmenuBuilder::new(app, "Geph")
-                .item(&MenuItemBuilder::with_id(ID_ACCOUNT, "Account…").build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_ACCOUNT, "Account…").accelerator("CmdOrCtrl+,").build(app)?)
                 .separator()
                 .item(&auto)
                 .separator()
@@ -319,7 +330,10 @@ pub fn run() {
             }
             let geph_menu = gb.build()?;
 
-            let launch = CheckMenuItemBuilder::with_id(ID_LAUNCH, "Launch at Login").build(app)?;
+            let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
+            let launch = CheckMenuItemBuilder::with_id(ID_LAUNCH, "Launch at Login")
+                .checked(autostart_on)
+                .build(app)?;
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
@@ -358,16 +372,17 @@ pub fn run() {
                     }
                     match id {
                         ID_ACCOUNT => {
-                            if let Some(secret) = prompt_secret() {
+                            let cur = geph_secret(app).unwrap_or_default();
+                            if let Some(secret) = prompt_secret(&cur) {
                                 geph_config_set(app, "secret", &secret);
                                 geph_stop(app); // supervisor (re)starts geph with the new secret
                             }
                         }
                         ID_LAUNCH => {
-                            let on = launch_h.is_checked().unwrap_or(false);
-                            let _ = launch_h.set_checked(!on);
-                            geph_config_set(app, "launch_at_login", if !on { "1" } else { "0" });
-                            // TODO: wire actual autostart (tauri-plugin-autostart).
+                            let mgr = app.autolaunch();
+                            let enabled = mgr.is_enabled().unwrap_or(false);
+                            let _ = if enabled { mgr.disable() } else { mgr.enable() };
+                            let _ = launch_h.set_checked(!enabled); // reflect the real new state
                         }
                         ID_RESTART => run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}")),
                         ID_LOG => {
