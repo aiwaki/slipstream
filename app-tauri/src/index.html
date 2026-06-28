@@ -1,88 +1,9 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Slipstream Settings</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <main class="wrap">
-      <header class="appbar">
-        <img src="slip-appicon.svg" alt="" class="appicon" />
-        <div>
-          <div class="app-title">Slipstream</div>
-          <div class="app-sub">Local DPI-bypass · no VPN for most sites</div>
-        </div>
-      </header>
-
-      <h2 class="group">General</h2>
-      <div class="card">
-        <div class="row">
-          <span class="key">Launch at login</span>
-          <span class="switch"><input type="checkbox" id="launch" /><i></i></span>
-        </div>
-      </div>
-
-      <h2 class="group">Geph</h2>
-      <div class="card">
-        <div class="row">
-          <span class="key">Account secret</span>
-          <input type="password" id="geph-secret" autocomplete="off"
-                 placeholder="free tier (5 GB / mo)" />
-        </div>
-        <div class="row">
-          <span class="key">Exit server</span>
-          <select id="geph-exit">
-            <option value="auto">Automatic</option>
-            <optgroup label="Core">
-              <option value="ca-montreal">🇨🇦 CA / Montreal</option>
-              <option value="ca-toronto">🇨🇦 CA / Toronto (beta)</option>
-              <option value="ch-zurich">🇨🇭 CH / Zurich</option>
-              <option value="cz-prague">🇨🇿 CZ / Prague</option>
-              <option value="jp-osaka">🇯🇵 JP / Osaka (beta)</option>
-              <option value="jp-tokyo">🇯🇵 JP / Tokyo</option>
-              <option value="pl-warsaw">🇵🇱 PL / Warsaw</option>
-              <option value="se-stockholm">🇸🇪 SE / Stockholm (beta)</option>
-              <option value="sg-singapore">🇸🇬 SG / Singapore</option>
-              <option value="us-ashburn">🇺🇸 US / Ashburn</option>
-              <option value="us-dallas">🇺🇸 US / Dallas (beta)</option>
-              <option value="us-sanjose">🇺🇸 US / San Jose</option>
-              <option value="us-seattle">🇺🇸 US / Seattle (beta)</option>
-            </optgroup>
-            <optgroup label="Streaming">
-              <option value="hk-jordan">🇭🇰 HK / Jordan</option>
-              <option value="tw-taipei">🇹🇼 TW / Taipei</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="row">
-          <span class="key">Plan</span>
-          <span class="val" id="geph-plan">Free tier</span>
-        </div>
-        <div class="row">
-          <span class="key">&nbsp;</span>
-          <button id="geph-save" class="primary">Save</button>
-        </div>
-      </div>
-      <p class="caption">
-        Only for services that block Russian IPs (ChatGPT, Claude) — engages
-        automatically. Russian services always go direct, never through Geph.
-      </p>
-
-      <h2 class="group">About</h2>
-      <div class="card">
-        <div class="row">
-          <span class="key">Version</span>
-          <span class="val" id="version">0.1</span>
-        </div>
-        <div class="row">
-          <span class="key">Software update</span>
-          <button id="check-updates">Check Now…</button>
-        </div>
-      </div>
-      <p class="caption">Updates install automatically. Open-source · MIT.</p>
-    </main>
-    <script type="module" src="settings.js"></script>
-  </body>
-</html>
+<meta charset="utf-8" />
+<title>Slipstream</title>
+<!--
+  Slipstream's UI is 100% native: the menu-bar NSMenu + native osascript dialogs,
+  built in src-tauri/src/lib.rs. No window loads this page — it exists only to
+  satisfy Tauri's required frontendDist. (A styled WebView always reads as "web",
+  which is why we don't use one.)
+-->
