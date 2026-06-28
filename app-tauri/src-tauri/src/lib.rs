@@ -127,7 +127,10 @@ fn geph_config_set(app: &AppHandle, key: &str, val: &str) {
 }
 
 /// Refresh the two status info-items from the daemon status.
-fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>, app: &AppHandle) {
+/// Update the menu text from the daemon status; returns the state string so the
+/// caller can update the tray icon ONLY when it changes (re-setting the icon every
+/// poll made the menu-bar mark visibly blink).
+fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>) -> String {
     let st = read_status();
     let get_str = |k: &str, d: &'static str| -> String {
         st.as_ref().and_then(|v| v.get(k)).and_then(|x| x.as_str()).unwrap_or(d).to_string()
@@ -156,7 +159,11 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
     };
     let _ = state_item.set_text(&title);
     let _ = detail_item.set_text(if detail.is_empty() { " " } else { &detail });
+    state
+}
 
+/// Set the menu-bar mark for the given state (called only on a state change).
+fn set_tray_icon(app: &AppHandle, state: &str) {
     if let Some(tray) = app.tray_by_id("main") {
         let name = if state == "off" { "slip-menubar-mark-off.png" } else { "slip-menubar-mark.png" };
         if let Ok(dir) = app.path().resource_dir() {
@@ -267,16 +274,20 @@ fn exit_constraint(exit: &str) -> String {
 /// the public geph-network constants (from geph-official/geph5); only the account
 /// secret is user-specific. Exit stays Auto for now (any abroad exit unblocks the
 /// geo-locked services; mapping the picked country comes with the live exit list).
-fn geph_config_yaml(secret: &str, exit: &str) -> String {
+fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     let esc = secret.replace('\\', "\\\\").replace('"', "\\\"");
     let ec = exit_constraint(exit);
+    // allow_direct + a persistent cache match what the geph GUI runs and are the
+    // stability difference: direct exit connections (not bridges-only) survive a
+    // flaky mobile network, and the cache makes reconnects fast instead of cold.
     format!(
         "socks5_listen: 127.0.0.1:{GEPH_SOCKS_PORT}\n\
          http_proxy_listen: null\n\
          pac_listen: null\n\
          control_listen: null\n\
          exit_constraint: {ec}\n\
-         cache: null\n\
+         allow_direct: true\n\
+         cache: {cache_path}\n\
          broker:\n\
          \x20 race:\n\
          \x20   - fronted: {{front: https://www.cdn77.com/, host: 1826209743.rsc.cdn77.org, override_dns: null}}\n\
@@ -300,9 +311,36 @@ fn geph_stop(app: &AppHandle) {
     }
 }
 
+/// Is geph actually tunnelling? A SOCKS5 CONNECT through it to a reliable host.
+/// A geph process that is alive but STUCK (mobile network flapped, account
+/// contention) fails this — that's the "needed an app restart" case.
+async fn geph_health_ok() -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    let probe = async {
+        let mut s = TcpStream::connect(("127.0.0.1", GEPH_SOCKS_PORT)).await.ok()?;
+        s.write_all(&[5u8, 1, 0]).await.ok()?; // greeting, no-auth
+        let mut g = [0u8; 2];
+        s.read_exact(&mut g).await.ok()?;
+        if g != [5, 0] {
+            return None;
+        }
+        // CONNECT 1.1.1.1:443 — a host any working exit reaches
+        s.write_all(&[5, 1, 0, 1, 1, 1, 1, 1, 0x01, 0xbb]).await.ok()?;
+        let mut r = [0u8; 4];
+        s.read_exact(&mut r).await.ok()?; // VER REP RSV ATYP
+        (r[1] == 0).then_some(()) // REP==0 -> tunnel reached the exit
+    };
+    matches!(
+        tokio::time::timeout(Duration::from_secs(8), probe).await,
+        Ok(Some(()))
+    )
+}
+
 /// Supervisor: whenever a secret is configured, run the bundled geph5-client
-/// sidecar and keep it alive (respawn on exit). Killing the child (on a config
-/// change) makes this loop pick up the new config on the next iteration.
+/// sidecar and keep it alive — respawn on exit AND on a failed health-check (a
+/// stuck-but-alive geph). Killing the child (on a config change) also makes this
+/// loop pick up the new config on the next iteration.
 async fn geph_supervisor(app: AppHandle) {
     loop {
         // disabled (user prefers their own VPN) -> make sure ours is down
@@ -326,7 +364,12 @@ async fn geph_supervisor(app: AppHandle) {
                 continue;
             }
         };
-        let _ = fs::write(&cfg_path, geph_config_yaml(&secret, &exit));
+        let cache_path = app
+            .path()
+            .app_config_dir()
+            .map(|d| d.join("geph-cache.db").to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "/tmp/geph-cache.db".into());
+        let _ = fs::write(&cfg_path, geph_config_yaml(&secret, &exit, &cache_path));
 
         let sidecar = match app.shell().sidecar("geph5-client") {
             Ok(c) => c.args(["--config", &cfg_path.to_string_lossy()]),
@@ -345,10 +388,33 @@ async fn geph_supervisor(app: AppHandle) {
             }
         };
         *app.state::<GephState>().child.lock().unwrap() = Some(child);
-        // drain events until the process exits (crash or killed-for-restart)
-        while let Some(ev) = rx.recv().await {
-            if let CommandEvent::Terminated(_) = ev {
-                break;
+        // Drain events; meanwhile health-check every 30s. A geph that's alive but
+        // stuck fails the check -> kill it so this loop respawns a fresh one (no
+        // manual app restart). Give it 45s to connect before the first check.
+        let mut health = tokio::time::interval(Duration::from_secs(30));
+        health.tick().await; // immediate tick — skip
+        tokio::time::sleep(Duration::from_secs(15)).await; // grace before first real check
+        let mut sick = 0;
+        loop {
+            tokio::select! {
+                ev = rx.recv() => {
+                    match ev {
+                        Some(CommandEvent::Terminated(_)) | None => break,
+                        _ => {}
+                    }
+                }
+                _ = health.tick() => {
+                    if geph_health_ok().await {
+                        sick = 0;
+                    } else {
+                        sick += 1;
+                        if sick >= 2 {            // ~60s stuck -> respawn fresh
+                            eprintln!("geph health-check failed -> respawning");
+                            geph_stop(&app);
+                            break;
+                        }
+                    }
+                }
             }
         }
         app.state::<GephState>().child.lock().unwrap().take();
@@ -506,8 +572,13 @@ pub fn run() {
             let d = detail_item.clone();
             tauri::async_runtime::spawn(async move {
                 let mut last_geph: Option<bool> = None;
+                let mut last_state = String::new();
                 loop {
-                    refresh(&s, &d, &app_handle);
+                    let state = refresh(&s, &d);
+                    if state != last_state {
+                        set_tray_icon(&app_handle, &state); // only on change -> no blink
+                        last_state = state;
+                    }
                     // notify on Geph tunnel up/down transitions (not on first read)
                     if let Some(up) =
                         read_status().and_then(|v| v.get("geph").and_then(|x| x.as_str()).map(|g| g == "up"))
