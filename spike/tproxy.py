@@ -130,14 +130,24 @@ def is_russian(host):
 # We count low-content CLOSES, not raw connects, so a normal page's parallel burst
 # (which transfers real data) never trips it. Guard: if MANY distinct hosts fail
 # at once it's a network problem, not a per-host geo-block, so don't promote.
-AUTO_GEPH_WINDOW = 30.0       # seconds to accumulate a host's failures over
-AUTO_GEPH_STORM = 5           # low-content retries in the window = geo-blocked
+AUTO_GEPH_WINDOW = 60.0       # seconds to accumulate a host's failures over
+AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = STUCK
+AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
-_auto_fail = {}               # host -> list[monotonic] recent low-content closes
+_auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
+
+# geph's own broker-fronting domains — NEVER desync/auto-route these (our daemon
+# would otherwise mangle geph's broker access or route geph through itself).
+GEPH_INFRA = ("kubernetes.io", "cdn77.org", "cdn77.com", "netlify.app", "vuejs.org")
+
+
+def _is_geph_infra(host):
+    h = host.lower().rstrip(".")
+    return any(h == d or h.endswith("." + d) for d in GEPH_INFRA)
 
 
 def geph_route(host):
@@ -171,15 +181,20 @@ def save_auto_geph():
         pass
 
 
-def note_local_result(host, down_bytes):
-    """Called after a NON-geph local-desync close. If the reply had no real
-    content, count it; a storm of such closes for one host -> it's geo-blocked ->
-    learn it for the geph tunnel. Real content resets the host's failure noise."""
-    if not host or is_russian(host) or geph_route(host):
-        return                                  # RU, or already tunnelled
+def note_local_result(host, down_bytes, duration):
+    """Called after a NON-geph local-desync close. A "stuck" close — the
+    connection was held a long time but returned no real content (the
+    "reconnecting…" hang) — is the geo-block signal; a storm of them for one host
+    learns it for the geph tunnel. FAST low-content closes (redirects / 204 /
+    beacons, e.g. google) are normal and must NOT count, or they'd be falsely
+    tunnelled. Real content resets the host's failure noise."""
+    if not host or is_russian(host) or geph_route(host) or _is_geph_infra(host):
+        return                                  # RU, already tunnelled, or geph's own
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
         _auto_fail.pop(host, None)              # got real content -> not blocked
         return
+    if duration < AUTO_GEPH_HANG:
+        return                                  # fast + low content = normal, ignore
     now = time.monotonic()
     q = _auto_fail.setdefault(host, [])
     q.append(now)
@@ -1028,7 +1043,8 @@ async def _handle_impl(reader, writer):
     # adaptive: a host that keeps closing with no real content is geo-blocked ->
     # learn it for the geph tunnel (this connection went local; the next routes).
     if is_tls and host:
-        note_local_result(host, len(server_first) + (res[1] or 0))
+        note_local_result(host, len(server_first) + (res[1] or 0),
+                          time.monotonic() - t0)
     if VERBOSE and host and "discord" in host:
         up_b, down_b = res[0] or 0, len(server_first) + (res[1] or 0)
         print(f"  closed {host}: up={up_b} down={down_b} "
