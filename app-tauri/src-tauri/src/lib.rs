@@ -27,6 +27,8 @@ use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt}
 // daemon routes geo-blocked hosts to it. A dedicated port (not geph's default
 // 9909) so it never clashes with a separately-installed Geph.app.
 const GEPH_SOCKS_PORT: u16 = 9954;
+// geph's JSON-RPC control listener — we query it for the LIVE exit list.
+const GEPH_CONTROL_PORT: u16 = 9955;
 
 /// Holds the running geph5-client child so the menu can kill+respawn it on a
 /// config change (the supervisor loop then restarts it with the new config).
@@ -270,35 +272,24 @@ fn exit_constraint(exit: &str) -> String {
     }
 }
 
-/// Build a complete geph5-client YAML config. The broker fronts + Mizaru keys are
-/// the public geph-network constants (from geph-official/geph5); only the account
-/// secret is user-specific. Exit stays Auto for now (any abroad exit unblocks the
-/// geo-locked services; mapping the picked country comes with the live exit list).
+/// Build a MINIMAL geph5-client YAML config. We deliberately do NOT hardcode the
+/// broker fronts / Mizaru keys — geph5-client has them compiled in as defaults
+/// (verified: a config without a `broker` field parses and starts a session), so
+/// they auto-update when CI rebuilds the bundled binary instead of going stale.
+/// Only the account secret + the user's exit choice are ours; everything else is
+/// geph's own default. allow_direct + a persistent cache match the geph GUI (the
+/// stability difference: direct exit connections survive a flaky network and the
+/// cache makes reconnects warm). control_listen exposes geph's JSON-RPC so we can
+/// fetch the LIVE exit list instead of hardcoding it.
 fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     let esc = secret.replace('\\', "\\\\").replace('"', "\\\"");
     let ec = exit_constraint(exit);
-    // allow_direct + a persistent cache match what the geph GUI runs and are the
-    // stability difference: direct exit connections (not bridges-only) survive a
-    // flaky mobile network, and the cache makes reconnects fast instead of cold.
     format!(
         "socks5_listen: 127.0.0.1:{GEPH_SOCKS_PORT}\n\
-         http_proxy_listen: null\n\
-         pac_listen: null\n\
-         control_listen: null\n\
+         control_listen: 127.0.0.1:{GEPH_CONTROL_PORT}\n\
          exit_constraint: {ec}\n\
          allow_direct: true\n\
          cache: {cache_path}\n\
-         broker:\n\
-         \x20 race:\n\
-         \x20   - fronted: {{front: https://www.cdn77.com/, host: 1826209743.rsc.cdn77.org, override_dns: null}}\n\
-         \x20   - fronted: {{front: https://vuejs.org/, host: svitania-naidallszei-2.netlify.app, override_dns: null}}\n\
-         tunneled_broker: null\n\
-         broker_keys:\n\
-         \x20 master: 88c1d2d4197bed815b01a22cadfc6c35aa246dddb553682037a118aebfaa3954\n\
-         \x20 mizaru_free: 0558216cbab7a9c46f298f4c26e171add9af87d0694988b8a8fe52ee932aa754\n\
-         \x20 mizaru_plus: cf6f58868c6d9459b3a63bc2bd86165631b3e916bad7f62b578cd9614e0bcb3b\n\
-         \x20 mizaru_bw: \"\"\n\
-         task_limit: null\n\
          credentials:\n\
          \x20 secret: \"{esc}\"\n"
     )
