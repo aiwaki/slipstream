@@ -184,10 +184,55 @@ fn geph_field(app: &AppHandle, key: &str) -> Option<String> {
     v.get(key).and_then(|x| x.as_str()).map(|s| s.to_string())
 }
 
-/// Read the saved geph account secret (None → not signed in yet → don't start geph).
-fn geph_secret(app: &AppHandle) -> Option<String> {
-    let s = geph_field(app, "secret")?.trim().to_string();
+/// Remove a key from geph.json (used to scrub a migrated plaintext secret).
+fn geph_config_unset(app: &AppHandle, key: &str) {
+    let Ok(dir) = app.path().app_config_dir() else { return };
+    let path = dir.join("geph.json");
+    let Ok(text) = fs::read_to_string(&path) else { return };
+    let Ok(mut cfg) = serde_json::from_str::<serde_json::Map<String, Value>>(&text) else { return };
+    if cfg.remove(key).is_some() {
+        if let Ok(s) = serde_json::to_string_pretty(&Value::Object(cfg)) {
+            let _ = fs::write(&path, s);
+        }
+    }
+}
+
+// The account secret lives in the macOS Keychain, not the plaintext config.
+const KC_SERVICE: &str = "dev.slipstream.geph";
+const KC_ACCOUNT: &str = "account-secret";
+
+fn keychain_get() -> Option<String> {
+    let out = Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", KC_SERVICE, "-a", KC_ACCOUNT, "-w"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!s.is_empty()).then_some(s)
+}
+
+fn keychain_set(secret: &str) {
+    let _ = Command::new("/usr/bin/security")
+        .args(["add-generic-password", "-U", "-s", KC_SERVICE, "-a", KC_ACCOUNT, "-w", secret])
+        .status();
+}
+
+/// Read the geph account secret from the Keychain (None → not signed in → don't
+/// start geph). One-time migration: a legacy plaintext secret in geph.json is
+/// moved into the Keychain and scrubbed from the file.
+fn geph_secret(app: &AppHandle) -> Option<String> {
+    if let Some(s) = keychain_get() {
+        return Some(s);
+    }
+    let legacy = geph_field(app, "secret")?.trim().to_string();
+    if legacy.is_empty() {
+        return None;
+    }
+    keychain_set(&legacy);
+    geph_config_unset(app, "secret");
+    Some(legacy)
 }
 
 /// Whether OUR bundled geph should run. Default true; the user can turn it off
@@ -413,7 +458,7 @@ pub fn run() {
                         ID_ACCOUNT => {
                             let cur = geph_secret(app).unwrap_or_default();
                             if let Some(secret) = prompt_secret(&cur) {
-                                geph_config_set(app, "secret", &secret);
+                                keychain_set(&secret); // Keychain, not plaintext config
                                 geph_stop(app); // supervisor (re)starts geph with the new secret
                             }
                         }
