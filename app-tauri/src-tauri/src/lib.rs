@@ -126,6 +126,10 @@ fn open_settings(app: &AppHandle) {
     .resizable(false)
     .build()
     {
+        // Accessory apps don't auto-activate a freshly-built window -> show+focus
+        // explicitly so the FIRST click opens it (it used to need a second click).
+        let _ = window.show();
+        let _ = window.set_focus();
         let w = window.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

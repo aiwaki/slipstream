@@ -1,5 +1,8 @@
 // Settings window: native-style tab switching + wiring to the Rust commands.
-import { invoke } from "@tauri-apps/api/core";
+// Uses the global Tauri API (withGlobalTauri) so no bundler/import-map is needed
+// — a bare ES import of @tauri-apps/api would fail to resolve and kill the whole
+// script (which is why the tabs went dead).
+const invoke = window.__TAURI__?.core?.invoke;
 
 // ---- toolbar tabs ----
 const tabs = document.querySelectorAll(".tab");
@@ -14,6 +17,7 @@ tabs.forEach((tab) => {
 
 // ---- helpers ----
 async function tryInvoke(cmd, args) {
+  if (!invoke) return null;
   try {
     return await invoke(cmd, args);
   } catch (e) {
