@@ -123,12 +123,87 @@ def is_russian(host):
     return any(h == d or h.endswith("." + d) for d in RU_HOSTS)
 
 
+# Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
+# strategies. A host the app keeps reconnecting to that returns NO real content
+# over local desync (TLS ok, but a 403 / challenge / RST — the "reconnecting…"
+# symptom) is geo-blocked → promote it to the geph tunnel and remember it (TTL'd).
+# We count low-content CLOSES, not raw connects, so a normal page's parallel burst
+# (which transfers real data) never trips it. Guard: if MANY distinct hosts fail
+# at once it's a network problem, not a per-host geo-block, so don't promote.
+AUTO_GEPH_WINDOW = 30.0       # seconds to accumulate a host's failures over
+AUTO_GEPH_STORM = 5           # low-content retries in the window = geo-blocked
+AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
+AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
+AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
+_auto_fail = {}               # host -> list[monotonic] recent low-content closes
+_auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
+_AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
+
+
 def geph_route(host):
-    """Should this host go through geph's tunnel? Geo-blocked AND not Russian."""
+    """Should this host go through geph's tunnel? Geo-blocked (listed OR learned)
+    AND not Russian."""
     if not host or is_russian(host):
         return False
     h = host.lower().rstrip(".")
-    return any(h == d or h.endswith("." + d) for d in GEPH_HOSTS)
+    if any(h == d or h.endswith("." + d) for d in GEPH_HOSTS):
+        return True
+    return _auto_geph.get(h, 0) > time.time()
+
+
+def load_auto_geph():
+    global _auto_geph
+    try:
+        with open(_AUTO_GEPH_PATH) as f:
+            data = json.load(f)
+        now = time.time()
+        _auto_geph = {h: e for h, e in data.items()
+                      if isinstance(e, (int, float)) and e > now}
+    except Exception:
+        _auto_geph = {}
+
+
+def save_auto_geph():
+    try:
+        with open(_AUTO_GEPH_PATH, "w") as f:
+            json.dump(_auto_geph, f)
+    except Exception:
+        pass
+
+
+def note_local_result(host, down_bytes):
+    """Called after a NON-geph local-desync close. If the reply had no real
+    content, count it; a storm of such closes for one host -> it's geo-blocked ->
+    learn it for the geph tunnel. Real content resets the host's failure noise."""
+    if not host or is_russian(host) or geph_route(host):
+        return                                  # RU, or already tunnelled
+    if down_bytes >= AUTO_GEPH_FAIL_BYTES:
+        _auto_fail.pop(host, None)              # got real content -> not blocked
+        return
+    now = time.monotonic()
+    q = _auto_fail.setdefault(host, [])
+    q.append(now)
+    cutoff = now - AUTO_GEPH_WINDOW
+    while q and q[0] < cutoff:
+        q.pop(0)
+    if len(_auto_fail) > 4096:
+        for k in [k for k, v in list(_auto_fail.items()) if not v or v[-1] < cutoff]:
+            _auto_fail.pop(k, None)
+    if len(q) < AUTO_GEPH_STORM or not _geph_up:
+        return
+    # network-fine guard: if many DISTINCT hosts are failing at once it's the
+    # network, not a per-host geo-block — don't sweep everything into the tunnel.
+    # (Count hosts with >=2 recent low-content closes; this accumulates before any
+    # single host crosses the storm threshold, so a network-wide outage is caught.)
+    failing = sum(1 for v in _auto_fail.values()
+                  if sum(1 for t in v if t >= cutoff) >= 2)
+    if failing >= AUTO_GEPH_NET_BAD:
+        return
+    h = host.lower().rstrip(".")
+    _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+    save_auto_geph()
+    print(f">> auto-route: {host} keeps failing locally -> geph tunnel "
+          f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)", file=sys.stderr)
 
 
 def write_status(state, iface, voice_iface):
@@ -143,6 +218,7 @@ def write_status(state, iface, voice_iface):
             "hosts_learned": len(_strat_cache),
             "dead": len(_dead),
             "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
+            "geph_learned": len(_auto_geph),
         }
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
@@ -949,6 +1025,10 @@ async def _handle_impl(reader, writer):
         return
     t0 = time.monotonic()
     res = await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
+    # adaptive: a host that keeps closing with no real content is geo-blocked ->
+    # learn it for the geph tunnel (this connection went local; the next routes).
+    if is_tls and host:
+        note_local_result(host, len(server_first) + (res[1] or 0))
     if VERBOSE and host and "discord" in host:
         up_b, down_b = res[0] or 0, len(server_first) + (res[1] or 0)
         print(f"  closed {host}: up={up_b} down={down_b} "
@@ -1120,6 +1200,7 @@ def main():
 
     cleanup_stale()        # kill leftover instances + reset pf before we start
     load_strat_cache()     # remember per-host winning strategies across restarts
+    load_auto_geph()       # remember hosts learned to need the geph tunnel
 
     # guard thread: voice sniffer follows the default iface + pf self-heal
     threading.Thread(target=network_monitor, args=(args.port,),
