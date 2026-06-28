@@ -822,15 +822,32 @@ def probe_geph():
         _geph_port = None
         return False
     for p in GEPH_PORTS:
-        try:
-            # generous timeout: under load geph's accept() can lag, and a false
-            # "down" drops geo-blocked hosts to local desync (claude.ai "retrying").
-            socket.create_connection(("127.0.0.1", p), timeout=1.5).close()
+        if _geph_socks_works(p):
             _geph_port = p
             return True
-        except Exception:
-            continue
     return False    # transient miss -> keep last good _geph_port; hysteresis decides
+
+
+def _geph_socks_works(port, timeout=2.5):
+    """REAL health check, not just a port-open test: SOCKS5-CONNECT to 1.1.1.1:443
+    through this geph. A geph that accepts SOCKS but can't reach an exit (no
+    session — e.g. ours when the user's own Geph holds the account) fails here, so
+    a half-alive geph is skipped in favour of one that actually tunnels. This is
+    what stops the daemon picking a dead :9954 and leaking geo-blocked hosts
+    direct (RU IP -> Anthropic's 'redirected to www.anthropic.com')."""
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(b"\x05\x01\x00")
+        if s.recv(2)[:2] != b"\x05\x00":
+            s.close()
+            return False
+        s.sendall(b"\x05\x01\x00\x01\x01\x01\x01\x01\x01\xbb")   # CONNECT 1.1.1.1:443
+        rep = s.recv(4)
+        s.close()
+        return len(rep) >= 2 and rep[1] == 0                     # REP==0 == reached exit
+    except Exception:
+        return False
 
 
 async def dial_via_geph(host, port, first_flight):
