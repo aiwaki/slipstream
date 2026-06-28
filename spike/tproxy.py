@@ -181,6 +181,13 @@ def save_auto_geph():
         pass
 
 
+# Adaptive auto-routing is OFF by default: from OUTSIDE the TLS we can't tell a
+# 403 geo-block from a normal long-lived low-traffic connection (Apple push,
+# telemetry, websockets), so it over-promotes those into the tunnel. The static
+# GEPH_HOSTS list + the user adding hosts is reliable; opt in with SLIP_AUTOGEPH=1.
+AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "0") == "1"
+
+
 def note_local_result(host, down_bytes, duration):
     """Called after a NON-geph local-desync close. A "stuck" close — the
     connection was held a long time but returned no real content (the
@@ -188,6 +195,8 @@ def note_local_result(host, down_bytes, duration):
     learns it for the geph tunnel. FAST low-content closes (redirects / 204 /
     beacons, e.g. google) are normal and must NOT count, or they'd be falsely
     tunnelled. Real content resets the host's failure noise."""
+    if not AUTO_GEPH_ENABLED:
+        return                                  # opt-in only (see AUTO_GEPH_ENABLED)
     if not host or is_russian(host) or geph_route(host) or _is_geph_infra(host):
         return                                  # RU, already tunnelled, or geph's own
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
