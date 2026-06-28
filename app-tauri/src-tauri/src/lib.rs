@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -18,6 +19,19 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };
+use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
+
+// Our bundled geph5-client runs an unprivileged SOCKS5 on this port; the root
+// daemon routes geo-blocked hosts to it. A dedicated port (not geph's default
+// 9909) so it never clashes with a separately-installed Geph.app.
+const GEPH_SOCKS_PORT: u16 = 9954;
+
+/// Holds the running geph5-client child so the menu can kill+respawn it on a
+/// config change (the supervisor loop then restarts it with the new config).
+#[derive(Default)]
+struct GephState {
+    child: Mutex<Option<CommandChild>>,
+}
 
 const STATUS_PATH: &str = "/var/run/slipstream.status";
 const LOG_PATH: &str = "/var/log/slipstream.log";
@@ -157,6 +171,100 @@ async fn check_for_updates(app: AppHandle) {
     }
 }
 
+/// Read the saved geph account secret (None → not signed in yet → don't start geph).
+fn geph_secret(app: &AppHandle) -> Option<String> {
+    let path = app.path().app_config_dir().ok()?.join("geph.json");
+    let v: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    let s = v.get("secret").and_then(|x| x.as_str())?.trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// Build a complete geph5-client YAML config. The broker fronts + Mizaru keys are
+/// the public geph-network constants (from geph-official/geph5); only the account
+/// secret is user-specific. Exit stays Auto for now (any abroad exit unblocks the
+/// geo-locked services; mapping the picked country comes with the live exit list).
+fn geph_config_yaml(secret: &str) -> String {
+    let esc = secret.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "socks5_listen: 127.0.0.1:{GEPH_SOCKS_PORT}\n\
+         http_proxy_listen: null\n\
+         pac_listen: null\n\
+         control_listen: null\n\
+         exit_constraint: auto\n\
+         cache: null\n\
+         broker:\n\
+         \x20 race:\n\
+         \x20   - fronted: {{front: https://www.cdn77.com/, host: 1826209743.rsc.cdn77.org, override_dns: null}}\n\
+         \x20   - fronted: {{front: https://vuejs.org/, host: svitania-naidallszei-2.netlify.app, override_dns: null}}\n\
+         tunneled_broker: null\n\
+         broker_keys:\n\
+         \x20 master: 88c1d2d4197bed815b01a22cadfc6c35aa246dddb553682037a118aebfaa3954\n\
+         \x20 mizaru_free: 0558216cbab7a9c46f298f4c26e171add9af87d0694988b8a8fe52ee932aa754\n\
+         \x20 mizaru_plus: cf6f58868c6d9459b3a63bc2bd86165631b3e916bad7f62b578cd9614e0bcb3b\n\
+         \x20 mizaru_bw: \"\"\n\
+         task_limit: null\n\
+         credentials:\n\
+         \x20 secret: \"{esc}\"\n"
+    )
+}
+
+/// Stop a running geph5-client (e.g. before respawning with a new config).
+fn geph_stop(app: &AppHandle) {
+    if let Some(child) = app.state::<GephState>().child.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+}
+
+/// Supervisor: whenever a secret is configured, run the bundled geph5-client
+/// sidecar and keep it alive (respawn on exit). Killing the child (on a config
+/// change) makes this loop pick up the new config on the next iteration.
+async fn geph_supervisor(app: AppHandle) {
+    loop {
+        let Some(secret) = geph_secret(&app) else {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            continue;
+        };
+        // write the active config next to geph.json
+        let cfg_path = match app.path().app_config_dir() {
+            Ok(dir) => {
+                let _ = fs::create_dir_all(&dir);
+                dir.join("geph-active.yaml")
+            }
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+        let _ = fs::write(&cfg_path, geph_config_yaml(&secret));
+
+        let sidecar = match app.shell().sidecar("geph5-client") {
+            Ok(c) => c.args(["--config", &cfg_path.to_string_lossy()]),
+            Err(e) => {
+                eprintln!("geph sidecar missing: {e}");
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+        };
+        let (mut rx, child) = match sidecar.spawn() {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("geph spawn failed: {e}");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+        *app.state::<GephState>().child.lock().unwrap() = Some(child);
+        // drain events until the process exits (crash or killed-for-restart)
+        while let Some(ev) = rx.recv().await {
+            if let CommandEvent::Terminated(_) = ev {
+                break;
+            }
+        }
+        app.state::<GephState>().child.lock().unwrap().take();
+        tokio::time::sleep(Duration::from_secs(2)).await; // brief backoff, then respawn
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -245,12 +353,14 @@ pub fn run() {
                             let _ = item.set_checked(v == val);
                         }
                         geph_config_set(app, "exit", val);
+                        geph_stop(app); // supervisor respawns geph with the new exit
                         return;
                     }
                     match id {
                         ID_ACCOUNT => {
                             if let Some(secret) = prompt_secret() {
                                 geph_config_set(app, "secret", &secret);
+                                geph_stop(app); // supervisor (re)starts geph with the new secret
                             }
                         }
                         ID_LAUNCH => {
@@ -283,6 +393,10 @@ pub fn run() {
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             });
+
+            // geph supervisor: runs the bundled geph5-client whenever a secret is set
+            app.manage(GephState::default());
+            tauri::async_runtime::spawn(geph_supervisor(app.handle().clone()));
             Ok(())
         })
         .build(tauri::generate_context!())

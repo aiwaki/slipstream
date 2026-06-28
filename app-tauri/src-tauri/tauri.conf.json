@@ -18,6 +18,7 @@
     "targets": ["app", "dmg"],
     "icon": ["icons/icon.icns"],
     "resources": ["icons/*.png"],
+    "externalBin": ["binaries/geph5-client"],
     "macOS": {
       "minimumSystemVersion": "13.0"
     },

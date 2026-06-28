@@ -80,8 +80,13 @@ _conn_count = 0                # live proxied connections
 # enter the tunnel (privacy + they'd break, geph exits abroad). geph absent ->
 # _geph_up stays False -> this whole path is inert and behaviour is unchanged.
 GEPH_ENABLED = os.environ.get("SLIP_GEPH", "1") != "0"
-GEPH_SOCKS_PORT = int(os.environ.get("SLIP_GEPH_PORT", "9909"))   # geph5 SOCKS default
+# Prefer Slipstream's OWN bundled geph5-client (:9954, started by the menu-bar app
+# with the user's account secret); fall back to a separately-running Geph.app
+# (:9909). SLIP_GEPH_PORT overrides with a single explicit port.
+_env_geph_port = os.environ.get("SLIP_GEPH_PORT")
+GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [9954, 9909]
 _geph_up = False               # set by network_monitor's periodic probe
+_geph_port = None              # the live SOCKS port (set by probe_geph)
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: it is
@@ -490,7 +495,7 @@ def network_monitor(port, voice=True):
         was_geph, _geph_up = _geph_up, probe_geph()
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
-                  f"(:{GEPH_SOCKS_PORT}) — geo-blocked hosts "
+                  f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-blocked hosts "
                   f"{'tunnelled' if _geph_up else 'on local desync'}", file=sys.stderr)
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
@@ -702,13 +707,19 @@ def probe_geph():
     """Is geph's SOCKS5 listener accepting? (cheap TCP connect; called every 5s
     by the monitor thread). A successful connect doesn't prove geph reached its
     exit — dial_via_geph keeps tight timeouts and falls back if CONNECT fails."""
+    global _geph_port
     if not GEPH_ENABLED:
+        _geph_port = None
         return False
-    try:
-        socket.create_connection(("127.0.0.1", GEPH_SOCKS_PORT), timeout=0.4).close()
-        return True
-    except Exception:
-        return False
+    for p in GEPH_PORTS:
+        try:
+            socket.create_connection(("127.0.0.1", p), timeout=0.4).close()
+            _geph_port = p
+            return True
+        except Exception:
+            continue
+    _geph_port = None
+    return False
 
 
 async def dial_via_geph(host, port, first_flight):
@@ -717,9 +728,12 @@ async def dial_via_geph(host, port, first_flight):
     CONNECT-by-domain lets geph resolve + exit abroad, sidestepping RU DNS poison
     and the geo-block entirely. Returns (reader, writer) to geph or None on any
     failure (caller then falls back to local desync)."""
+    port_socks = _geph_port
+    if not port_socks:
+        return None
     try:
         gr, gw = await asyncio.wait_for(
-            asyncio.open_connection("127.0.0.1", GEPH_SOCKS_PORT), timeout=3)
+            asyncio.open_connection("127.0.0.1", port_socks), timeout=3)
     except Exception:
         return None
     try:
