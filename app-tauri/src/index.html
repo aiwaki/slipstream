@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Slipstream — Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Geph</h1>
+      <p class="sub">
+        Used only for services that block Russian IPs (ChatGPT, Claude). Engages
+        automatically — no toggle. Russian services never go through it.
+      </p>
+
+      <form id="geph-form">
+        <label>Account / secret
+          <input id="geph-secret" type="password" autocomplete="off"
+                 placeholder="geph login secret" />
+        </label>
+        <label>Exit
+          <select id="geph-exit">
+            <option value="auto">Auto (fastest)</option>
+            <option value="us">United States</option>
+            <option value="de">Germany</option>
+            <option value="nl">Netherlands</option>
+            <option value="fi">Finland</option>
+          </select>
+        </label>
+        <button type="submit">Save</button>
+        <span id="status" class="status"></span>
+      </form>
+    </main>
+    <script type="module" src="settings.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+[package]
+name = "slipstream"
+version = "0.1.0"
+description = "Slipstream — local DPI-bypass tray"
+authors = ["Slipstream"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "slipstream_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"        # sidecar: bundled geph5-client
+tauri-plugin-process = "2"      # restart after update
+tauri-plugin-updater = "2"      # built-in signed auto-update
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
