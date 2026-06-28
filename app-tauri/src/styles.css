@@ -4,10 +4,14 @@
   --sub: #9aa3b2;
   --accent: #2fd3c0;
   --field: #262a31;
+  --card: #21242b;
   --border: #353b45;
 }
 @media (prefers-color-scheme: light) {
-  :root { --bg: #f5f6f8; --fg: #1b1d22; --sub: #5b6472; --field: #fff; --border: #d8dce3; }
+  :root {
+    --bg: #f5f6f8; --fg: #1b1d22; --sub: #5b6472;
+    --field: #fff; --card: #fff; --border: #d8dce3;
+  }
 }
 * { box-sizing: border-box; }
 body {
@@ -16,11 +20,19 @@ body {
   background: var(--bg);
   color: var(--fg);
 }
-.wrap { padding: 18px 20px; }
-h1 { margin: 0 0 4px; font-size: 18px; }
-.sub { margin: 0 0 16px; color: var(--sub); }
+.wrap { padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+h1 { margin: 2px 0 0; font-size: 19px; }
+h2 { margin: 0 0 6px; font-size: 14px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.sub { margin: 0 0 12px; color: var(--sub); }
 form { display: flex; flex-direction: column; gap: 12px; }
 label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--sub); }
+label.row { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); }
 input, select {
   padding: 8px 10px;
   background: var(--field);
@@ -29,9 +41,11 @@ input, select {
   border-radius: 8px;
   font-size: 13px;
 }
+label.row input { width: auto; }
 button {
-  margin-top: 4px;
-  padding: 9px 12px;
+  margin-top: 2px;
+  align-self: flex-start;
+  padding: 8px 16px;
   background: var(--accent);
   color: #06231f;
   border: 0;

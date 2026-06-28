@@ -1,8 +1,7 @@
 // Slipstream — tray app (Tauri v2). Unprivileged menu-bar UI over the root
 // daemon (tproxy.py). Reads the daemon's status file; controls it via launchctl
 // with a one-time admin prompt. Built-in signed auto-updater + a bundled
-// geph5-client sidecar (unprivileged SOCKS, started here; the root daemon just
-// routes geo-blocked hosts to its local port).
+// geph5-client sidecar (the root daemon routes geo-blocked hosts to its port).
 //
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
@@ -14,7 +13,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tauri::{
     image::Image,
-    menu::{MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder},
+    menu::{MenuBuilder, MenuItem, MenuItemBuilder},
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };
@@ -24,9 +23,9 @@ const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 
 // Menu-item ids (matched in the event handler).
+const ID_SETTINGS: &str = "settings";
 const ID_RESTART: &str = "restart_proxy";
 const ID_LOG: &str = "open_log";
-const ID_GEPH: &str = "geph_settings";
 const ID_UPDATE: &str = "check_updates";
 const ID_QUIT: &str = "quit";
 
@@ -107,22 +106,34 @@ fn refresh(app: &AppHandle, state_item: &MenuItem<tauri::Wry>, detail_item: &Men
     }
 }
 
-/// Open (or focus) the small settings window (geph login + exit picker).
+/// Open (or focus) the Settings window. Closing it does NOT quit the app — the
+/// ExitRequested guard in run() keeps the tray alive (the bug the screenshot
+/// caught). Reopening rebuilds the window; on close it hides instead of being
+/// destroyed, preserving form state.
 fn open_settings(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.show();
         let _ = w.set_focus();
         return;
     }
-    let _ = tauri::WebviewWindowBuilder::new(
+    if let Ok(window) = tauri::WebviewWindowBuilder::new(
         app,
         "settings",
         tauri::WebviewUrl::App("index.html".into()),
     )
-    .title("Slipstream — Settings")
-    .inner_size(420.0, 360.0)
+    .title("Slipstream Settings")
+    .inner_size(460.0, 540.0)
     .resizable(false)
-    .build();
+    .build()
+    {
+        let w = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = w.hide();
+                api.prevent_close(); // hide, don't destroy -> keeps state + app alive
+            }
+        });
+    }
 }
 
 /// Built-in signed updater: check the appcast, download + install if newer.
@@ -140,7 +151,7 @@ async fn check_for_updates(app: AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -149,23 +160,28 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // --- menu ---------------------------------------------------------
+            // --- menu (top-level Settings… with the standard ⌘, accelerator) ---
             let state_item = MenuItemBuilder::with_id("state", "…").enabled(false).build(app)?;
             let detail_item = MenuItemBuilder::with_id("detail", " ").enabled(false).build(app)?;
-            let geph_submenu = SubmenuBuilder::new(app, "Geph")
-                .item(&MenuItemBuilder::with_id(ID_GEPH, "Settings & Login…").build(app)?)
-                .build()?;
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
                 .item(&detail_item)
                 .separator()
-                .item(&geph_submenu)
+                .item(
+                    &MenuItemBuilder::with_id(ID_SETTINGS, "Settings…")
+                        .accelerator("CmdOrCtrl+,")
+                        .build(app)?,
+                )
                 .item(&MenuItemBuilder::with_id(ID_RESTART, "Restart Proxy").build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_LOG, "Open Log").build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id(ID_UPDATE, "Check for Updates…").build(app)?)
                 .item(&MenuItemBuilder::with_id("version", "Version 0.1").enabled(false).build(app)?)
-                .item(&MenuItemBuilder::with_id(ID_QUIT, "Quit Slipstream").build(app)?)
+                .item(
+                    &MenuItemBuilder::with_id(ID_QUIT, "Quit Slipstream")
+                        .accelerator("CmdOrCtrl+Q")
+                        .build(app)?,
+                )
                 .build()?;
 
             // --- tray ---------------------------------------------------------
@@ -178,13 +194,13 @@ pub fn run() {
                 .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
+                    ID_SETTINGS => open_settings(app),
                     ID_RESTART => {
                         run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"));
                     }
                     ID_LOG => {
                         let _ = Command::new("/usr/bin/open").arg(LOG_PATH).spawn();
                     }
-                    ID_GEPH => open_settings(app),
                     ID_UPDATE => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -209,11 +225,22 @@ pub fn run() {
 
             // TODO(geph sidecar): once the CI-built geph5-client lands in
             // binaries/, start it here in SOCKS mode with a config generated from
-            // the user's saved login/exit (Keychain). Until then the daemon falls
-            // back to detecting an externally-running geph (current behaviour).
+            // the saved login/exit. The exit list + load % come from geph itself
+            // (a geph5-client query) — do NOT depend on a separately-installed
+            // Geph.app; that external-:9909 detection is only an interim bridge.
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Slipstream tray");
+        .build(tauri::generate_context!())
+        .expect("error while building Slipstream tray");
+
+    // Keep the app alive on the tray when windows close (implicit exit, code:None);
+    // an explicit Quit (app.exit(0)) carries a code and is allowed through.
+    app.run(|_app, event| {
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+            if code.is_none() {
+                api.prevent_exit();
+            }
+        }
+    });
 }

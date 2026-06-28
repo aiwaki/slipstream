@@ -3,34 +3,65 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Slipstream — Settings</title>
+    <title>Slipstream Settings</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="wrap">
-      <h1>Geph</h1>
-      <p class="sub">
-        Used only for services that block Russian IPs (ChatGPT, Claude). Engages
-        automatically — no toggle. Russian services never go through it.
-      </p>
+      <h1>Settings</h1>
 
-      <form id="geph-form">
-        <label>Account / secret
-          <input id="geph-secret" type="password" autocomplete="off"
-                 placeholder="geph login secret" />
+      <section class="card">
+        <h2>Geph</h2>
+        <p class="sub">
+          Used only for services that block Russian IPs (ChatGPT, Claude). Engages
+          automatically — no toggle. Russian services never go through it.
+          Slipstream runs its own bundled Geph; no separate install.
+        </p>
+        <form id="geph-form">
+          <label>Account / secret
+            <input id="geph-secret" type="password" autocomplete="off"
+                   placeholder="leave empty for the free tier" />
+          </label>
+          <label>Exit server
+            <select id="geph-exit">
+              <option value="auto">⚡ Automatic (fastest)</option>
+              <optgroup label="CORE — balanced security & speed">
+                <option value="ca-montreal">🇨🇦 CA / Montreal</option>
+                <option value="ca-toronto">🇨🇦 CA / Toronto (beta)</option>
+                <option value="ch-zurich">🇨🇭 CH / Zurich</option>
+                <option value="cz-prague">🇨🇿 CZ / Prague</option>
+                <option value="jp-osaka">🇯🇵 JP / Osaka (beta)</option>
+                <option value="jp-tokyo">🇯🇵 JP / Tokyo</option>
+                <option value="pl-warsaw">🇵🇱 PL / Warsaw</option>
+                <option value="se-stockholm">🇸🇪 SE / Stockholm (beta)</option>
+                <option value="sg-singapore">🇸🇬 SG / Singapore</option>
+                <option value="us-ashburn">🇺🇸 US / Ashburn</option>
+                <option value="us-dallas">🇺🇸 US / Dallas (beta)</option>
+                <option value="us-sanjose">🇺🇸 US / San Jose</option>
+                <option value="us-seattle">🇺🇸 US / Seattle (beta)</option>
+              </optgroup>
+              <optgroup label="STREAMING — region-locked media">
+                <option value="hk-jordan">🇭🇰 HK / Jordan</option>
+                <option value="tw-taipei">🇹🇼 TW / Taipei</option>
+              </optgroup>
+            </select>
+          </label>
+          <button type="submit">Save</button>
+          <span id="status" class="status"></span>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>General</h2>
+        <label class="row">
+          <input id="launch-at-login" type="checkbox" />
+          <span>Launch Slipstream at login</span>
         </label>
-        <label>Exit
-          <select id="geph-exit">
-            <option value="auto">Auto (fastest)</option>
-            <option value="us">United States</option>
-            <option value="de">Germany</option>
-            <option value="nl">Netherlands</option>
-            <option value="fi">Finland</option>
-          </select>
-        </label>
-        <button type="submit">Save</button>
-        <span id="status" class="status"></span>
-      </form>
+        <p class="sub">
+          The bypass engine runs as a background service (root) and starts at boot
+          on its own — this only controls the menu-bar app.
+        </p>
+      </section>
     </main>
     <script type="module" src="settings.js"></script>
   </body>
