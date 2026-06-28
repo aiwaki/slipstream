@@ -122,7 +122,7 @@ fn open_settings(app: &AppHandle) {
         tauri::WebviewUrl::App("index.html".into()),
     )
     .title("Slipstream Settings")
-    .inner_size(460.0, 540.0)
+    .inner_size(560.0, 430.0)
     .resizable(false)
     .build()
     {
@@ -149,12 +149,48 @@ async fn check_for_updates(app: AppHandle) {
     }
 }
 
+// ---- commands the settings window calls -----------------------------------
+/// Live daemon status JSON for the Network panel (None → app shows "Off").
+#[tauri::command]
+fn daemon_status() -> Option<Value> {
+    read_status()
+}
+
+/// Save geph login + exit. TODO: store the secret in the Keychain and (re)start
+/// the bundled geph5-client with a config for this exit. Stub until the CI binary
+/// lands; intentionally does NOT touch the separately-installed Geph.app.
+#[tauri::command]
+fn save_geph_config(secret: String, exit: String) -> Result<(), String> {
+    let _ = (secret, exit);
+    Ok(())
+}
+
+/// Toggle launch-at-login for the menu-bar app. TODO: wire to the autostart
+/// plugin (the root engine already starts at boot independently).
+#[tauri::command]
+fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    let _ = enabled;
+    Ok(())
+}
+
+/// Run the updater check from the About panel button.
+#[tauri::command]
+async fn trigger_update_check(app: AppHandle) {
+    check_for_updates(app).await;
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            daemon_status,
+            save_geph_config,
+            set_launch_at_login,
+            trigger_update_check
+        ])
         .setup(|app| {
             // Tray-only: no Dock icon (macOS).
             #[cfg(target_os = "macos")]

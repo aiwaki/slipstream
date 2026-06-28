@@ -1,57 +1,141 @@
+/* Native macOS "preferences" aesthetic — toolbar tabs + label:control rows. */
 :root {
-  --bg: #1b1d22;
-  --fg: #e8ebf0;
-  --sub: #9aa3b2;
-  --accent: #2fd3c0;
-  --field: #262a31;
-  --card: #21242b;
-  --border: #353b45;
+  --win: #ececec;
+  --toolbar: #e4e4e6;
+  --content: #f5f5f7;
+  --fg: #1d1d1f;
+  --muted: #86868b;
+  --field: #ffffff;
+  --border: #d2d2d7;
+  --hairline: #e3e3e6;
+  --accent: #0a84ff;        /* system blue for controls */
+  --brand: #2fd3c0;         /* slipstream teal */
+  --tab-active: rgba(0, 0, 0, 0.09);
+  --shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
 }
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #f5f6f8; --fg: #1b1d22; --sub: #5b6472;
-    --field: #fff; --card: #fff; --border: #d8dce3;
+    --win: #262629; --toolbar: #2c2c2e; --content: #1e1e20;
+    --fg: #f5f5f7; --muted: #8e8e93; --field: #333336; --border: #424246;
+    --hairline: #38383b; --accent: #0a84ff; --tab-active: rgba(255,255,255,0.13);
+    --shadow: 0 0 0 0.5px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.4);
   }
 }
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
   margin: 0;
-  font: 13px/1.45 -apple-system, system-ui, sans-serif;
-  background: var(--bg);
+  font: 13px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
   color: var(--fg);
+  background: var(--content);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
 }
-.wrap { padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 14px; }
-h1 { margin: 2px 0 0; font-size: 19px; }
-h2 { margin: 0 0 6px; font-size: 14px; }
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px;
+
+/* ---- toolbar ---- */
+.toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 9px;
+  background: var(--toolbar);
+  border-bottom: 0.5px solid var(--border);
+  -webkit-app-region: drag;            /* drag the window by the toolbar */
 }
-.sub { margin: 0 0 12px; color: var(--sub); }
-form { display: flex; flex-direction: column; gap: 12px; }
-label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--sub); }
-label.row { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); }
-input, select {
-  padding: 8px 10px;
+.tab {
+  -webkit-app-region: no-drag;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 62px; padding: 5px 9px 4px;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--fg); font-size: 11px; font-weight: 500; cursor: default;
+}
+.tab svg {
+  width: 19px; height: 19px; fill: none;
+  stroke: var(--fg); stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; opacity: 0.85;
+}
+.tab:hover { background: rgba(127,127,127,0.10); }
+.tab.is-active { background: var(--tab-active); }
+.tab.is-active svg { stroke: var(--accent); opacity: 1; }
+.tab.is-active span { color: var(--accent); }
+
+/* ---- panels ---- */
+.content { padding: 20px 26px 22px; }
+.panel { display: none; animation: fade 0.18s ease; }
+.panel.is-active { display: block; }
+@keyframes fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+.row {
+  display: grid;
+  grid-template-columns: 158px 1fr;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 30px;
+  margin-bottom: 8px;
+}
+.row > label { text-align: right; color: var(--fg); }
+.row.actions { margin-top: 4px; }
+
+/* ---- controls ---- */
+select, input[type="password"], input[type="text"] {
+  -webkit-app-region: no-drag;
+  width: 100%; max-width: 280px;
+  padding: 5px 8px;
+  font: inherit; color: var(--fg);
   background: var(--field);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px;
+  border: 0.5px solid var(--border); border-radius: 6px;
+  box-shadow: var(--shadow);
+  appearance: none;
 }
-label.row input { width: auto; }
+select {
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 51%, calc(100% - 9px) 51%;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  padding-right: 26px;
+}
+select:focus, input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 0; }
+
 button {
-  margin-top: 2px;
-  align-self: flex-start;
-  padding: 8px 16px;
-  background: var(--accent);
-  color: #06231f;
-  border: 0;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
+  -webkit-app-region: no-drag;
+  padding: 5px 14px; font: inherit; font-weight: 500;
+  color: var(--fg); background: var(--field);
+  border: 0.5px solid var(--border); border-radius: 6px;
+  box-shadow: var(--shadow); cursor: default;
 }
-button:hover { filter: brightness(1.05); }
-.status { font-size: 12px; color: var(--accent); min-height: 16px; }
+button:hover { background: color-mix(in srgb, var(--field) 92%, #000); }
+button.primary { color: #fff; background: var(--accent); border-color: transparent; }
+button.primary:hover { filter: brightness(1.06); }
+
+/* macOS-style switch */
+.switch { position: relative; display: inline-flex; width: 38px; height: 22px; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: default; }
+.switch i {
+  flex: 1; border-radius: 999px; background: #c6c6cb;
+  transition: background 0.16s ease; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.08);
+}
+.switch i::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  transition: transform 0.16s ease;
+}
+.switch input:checked + i { background: var(--brand); }
+.switch input:checked + i::after { transform: translateX(16px); }
+.switch.is-locked i { opacity: 0.85; }
+
+/* readouts + notes */
+.readout { color: var(--muted); }
+.sublabel { grid-column: 1 / -1; margin: -4px 0 10px; padding-left: 170px; color: var(--muted); font-size: 11px; }
+.note {
+  margin: 14px 0 0; padding-top: 12px;
+  border-top: 0.5px solid var(--hairline);
+  color: var(--muted); font-size: 11px; line-height: 1.5;
+}
+
+/* about */
+.about { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
+.appicon { width: 72px; height: 72px; }
+.about-text h2 { margin: 0; font-size: 17px; }
+.version { margin: 2px 0 4px; color: var(--muted); }
+.tagline { margin: 0; max-width: 280px; color: var(--fg); }

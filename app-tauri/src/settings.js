@@ -1,31 +1,59 @@
-// Settings window logic. Saves geph login/exit; the Rust side stores the secret
-// in the Keychain and (re)starts the bundled geph5-client with a fresh config.
-// invoke() targets are stubbed until the sidecar wiring lands.
+// Settings window: native-style tab switching + wiring to the Rust commands.
 import { invoke } from "@tauri-apps/api/core";
 
-const form = document.getElementById("geph-form");
-const statusEl = document.getElementById("status");
-const launch = document.getElementById("launch-at-login");
+// ---- toolbar tabs ----
+const tabs = document.querySelectorAll(".tab");
+const panels = document.querySelectorAll(".panel");
+tabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    tabs.forEach((t) => t.classList.toggle("is-active", t === tab));
+    const id = "panel-" + tab.dataset.panel;
+    panels.forEach((p) => p.classList.toggle("is-active", p.id === id));
+  });
+});
 
-form?.addEventListener("submit", async (e) => {
-  e.preventDefault();
+// ---- helpers ----
+async function tryInvoke(cmd, args) {
+  try {
+    return await invoke(cmd, args);
+  } catch (e) {
+    console.warn(cmd, e);
+    return null;
+  }
+}
+
+// ---- Geph save ----
+document.getElementById("geph-save")?.addEventListener("click", async () => {
   const secret = document.getElementById("geph-secret").value.trim();
   const exit = document.getElementById("geph-exit").value;
-  try {
-    await invoke("save_geph_config", { secret, exit });
-    statusEl.textContent = "Saved ✓";
-  } catch (err) {
-    // command not wired yet during scaffold — surface, don't crash
-    statusEl.textContent = "Saved locally (sidecar wiring pending)";
-    console.warn(err);
-  }
-  setTimeout(() => (statusEl.textContent = ""), 2500);
+  const plan = document.getElementById("geph-plan");
+  await tryInvoke("save_geph_config", { secret, exit });
+  plan.textContent = secret ? "Plus / paid (verifying…)" : "Free tier (5 GB / mo)";
 });
 
-launch?.addEventListener("change", async () => {
-  try {
-    await invoke("set_launch_at_login", { enabled: launch.checked });
-  } catch (err) {
-    console.warn(err);
-  }
+// ---- General: launch at login ----
+document.getElementById("launch")?.addEventListener("change", (e) => {
+  tryInvoke("set_launch_at_login", { enabled: e.target.checked });
 });
+
+// ---- About: check updates ----
+document.getElementById("check-updates")?.addEventListener("click", () => {
+  tryInvoke("trigger_update_check");
+});
+
+// ---- live engine status (Network panel) ----
+async function refreshStatus() {
+  const st = await tryInvoke("daemon_status");
+  const el = document.getElementById("net-status");
+  if (!el) return;
+  if (!st || !st.state || st.state === "off") {
+    el.textContent = "Off";
+  } else if (st.state === "dormant") {
+    el.textContent = "Dormant (VPN active)";
+  } else {
+    const g = st.geph === "up" ? " · Geph tunnel on" : "";
+    el.textContent = `Active — ${st.conns ?? 0} connections${g}`;
+  }
+}
+refreshStatus();
+setInterval(refreshStatus, 2000);
