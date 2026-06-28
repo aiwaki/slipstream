@@ -39,6 +39,7 @@ const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 
 const ID_ACCOUNT: &str = "geph_account";
+const ID_GEPH_ENABLE: &str = "geph_enable";
 const ID_LAUNCH: &str = "launch_at_login";
 const ID_RESTART: &str = "restart_proxy";
 const ID_LOG: &str = "open_log";
@@ -176,26 +177,52 @@ async fn check_for_updates(app: AppHandle) {
     }
 }
 
-/// Read the saved geph account secret (None → not signed in yet → don't start geph).
-fn geph_secret(app: &AppHandle) -> Option<String> {
+/// Read a string field from geph.json.
+fn geph_field(app: &AppHandle, key: &str) -> Option<String> {
     let path = app.path().app_config_dir().ok()?.join("geph.json");
     let v: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    let s = v.get("secret").and_then(|x| x.as_str())?.trim().to_string();
+    v.get(key).and_then(|x| x.as_str()).map(|s| s.to_string())
+}
+
+/// Read the saved geph account secret (None → not signed in yet → don't start geph).
+fn geph_secret(app: &AppHandle) -> Option<String> {
+    let s = geph_field(app, "secret")?.trim().to_string();
     (!s.is_empty()).then_some(s)
+}
+
+/// Whether OUR bundled geph should run. Default true; the user can turn it off
+/// (e.g. to use their own VPN — geph allows ONE session per account, so ours must
+/// stop or the user's own Geph can't connect).
+fn geph_enabled(app: &AppHandle) -> bool {
+    geph_field(app, "enabled").map(|s| s != "0").unwrap_or(true)
+}
+
+/// geph exit_constraint for a menu exit value ("us-sanjose" -> {country: us}).
+/// Country-level (ISO-3166 alpha-2, verified against the binary) is robust and
+/// lets the user dodge a blocked exit by region; "auto" lets geph choose.
+fn exit_constraint(exit: &str) -> String {
+    let e = exit.trim();
+    let cc = e.split('-').next().unwrap_or("");
+    if e == "auto" || cc.len() != 2 {
+        "auto".into()
+    } else {
+        format!("{{country: {}}}", cc.to_lowercase())
+    }
 }
 
 /// Build a complete geph5-client YAML config. The broker fronts + Mizaru keys are
 /// the public geph-network constants (from geph-official/geph5); only the account
 /// secret is user-specific. Exit stays Auto for now (any abroad exit unblocks the
 /// geo-locked services; mapping the picked country comes with the live exit list).
-fn geph_config_yaml(secret: &str) -> String {
+fn geph_config_yaml(secret: &str, exit: &str) -> String {
     let esc = secret.replace('\\', "\\\\").replace('"', "\\\"");
+    let ec = exit_constraint(exit);
     format!(
         "socks5_listen: 127.0.0.1:{GEPH_SOCKS_PORT}\n\
          http_proxy_listen: null\n\
          pac_listen: null\n\
          control_listen: null\n\
-         exit_constraint: auto\n\
+         exit_constraint: {ec}\n\
          cache: null\n\
          broker:\n\
          \x20 race:\n\
@@ -225,10 +252,16 @@ fn geph_stop(app: &AppHandle) {
 /// change) makes this loop pick up the new config on the next iteration.
 async fn geph_supervisor(app: AppHandle) {
     loop {
+        // disabled (user prefers their own VPN) -> make sure ours is down
+        if !geph_enabled(&app) {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            continue;
+        }
         let Some(secret) = geph_secret(&app) else {
             tokio::time::sleep(Duration::from_secs(3)).await;
             continue;
         };
+        let exit = geph_field(&app, "exit").unwrap_or_else(|| "auto".into());
         // write the active config next to geph.json
         let cfg_path = match app.path().app_config_dir() {
             Ok(dir) => {
@@ -240,7 +273,7 @@ async fn geph_supervisor(app: AppHandle) {
                 continue;
             }
         };
-        let _ = fs::write(&cfg_path, geph_config_yaml(&secret));
+        let _ = fs::write(&cfg_path, geph_config_yaml(&secret, &exit));
 
         let sidecar = match app.shell().sidecar("geph5-client") {
             Ok(c) => c.args(["--config", &cfg_path.to_string_lossy()]),
@@ -309,8 +342,13 @@ pub fn run() {
             let auto = mk(app, "auto", "Automatic")?;
             exit_items.push(("auto".into(), auto.clone()));
 
+            let geph_enable = CheckMenuItemBuilder::with_id(ID_GEPH_ENABLE, "Enable Geph")
+                .checked(geph_enabled(app.handle()))
+                .build(app)?;
+
             let mut gb = SubmenuBuilder::new(app, "Geph")
                 .item(&MenuItemBuilder::with_id(ID_ACCOUNT, "Account…").accelerator("CmdOrCtrl+,").build(app)?)
+                .item(&geph_enable)
                 .separator()
                 .item(&auto)
                 .separator()
@@ -356,6 +394,7 @@ pub fn run() {
             .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
 
             let launch_h = launch.clone();
+            let enable_h = geph_enable.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -377,6 +416,15 @@ pub fn run() {
                                 geph_config_set(app, "secret", &secret);
                                 geph_stop(app); // supervisor (re)starts geph with the new secret
                             }
+                        }
+                        ID_GEPH_ENABLE => {
+                            let new_on = !geph_enabled(app);
+                            geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
+                            let _ = enable_h.set_checked(new_on);
+                            if !new_on {
+                                geph_stop(app); // free the account so the user's own VPN/Geph can connect
+                            }
+                            // enabling -> the supervisor starts geph next loop (secret permitting)
                         }
                         ID_LAUNCH => {
                             let mgr = app.autolaunch();
@@ -409,6 +457,15 @@ pub fn run() {
                 }
             });
 
+            // Self-heal: kill any geph orphaned by a previous unclean exit
+            // (force-quit / crash / SIGTERM don't run the Exit handler), so a
+            // stale geph never keeps holding the account. The pattern matches only
+            // OUR bundled geph (path contains Slipstream.app), not the user's
+            // separately-installed gephgui.
+            let _ = Command::new("/usr/bin/pkill")
+                .args(["-f", "Slipstream.app/Contents/MacOS/geph5-client"])
+                .status();
+
             // geph supervisor: runs the bundled geph5-client whenever a secret is set
             app.manage(GephState::default());
             tauri::async_runtime::spawn(geph_supervisor(app.handle().clone()));
@@ -418,11 +475,15 @@ pub fn run() {
         .expect("error while building Slipstream tray");
 
     // No windows -> keep the app alive on the tray when an implicit exit fires.
-    app.run(|_app, event| {
-        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+    // On a real quit, kill the bundled geph so it never orphans (an orphaned geph
+    // holds the account session and blocks the user's own Geph from connecting).
+    app.run(|app, event| match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
             if code.is_none() {
                 api.prevent_exit();
             }
         }
+        tauri::RunEvent::Exit => geph_stop(app),
+        _ => {}
     });
 }
