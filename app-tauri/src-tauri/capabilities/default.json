@@ -9,14 +9,6 @@
     "core:menu:default",
     "process:default",
     "updater:default",
-    "shell:allow-open",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [{ "name": "binaries/geph5-client", "sidecar": true }]
-    },
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [{ "name": "binaries/geph5-client", "sidecar": true }]
-    }
+    "shell:allow-open"
   ]
 }
