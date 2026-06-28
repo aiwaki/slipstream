@@ -581,9 +581,19 @@ def network_monitor(port, voice=True):
         if VERBOSE and n == 0:
             print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
 
+    geph_strikes = 0
     while True:
         iface = default_iface()
-        was_geph, _geph_up = _geph_up, probe_geph()
+        # Hysteresis: a single failed probe (geph busy under load) must NOT flip us
+        # to "down" — that would drop geo-blocked hosts to local desync for 5s.
+        # Only declare down after 2 consecutive misses.
+        if probe_geph():
+            geph_strikes = 0
+            up = True
+        else:
+            geph_strikes += 1
+            up = geph_strikes < 2
+        was_geph, _geph_up = _geph_up, up
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
                   f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-blocked hosts "
@@ -804,13 +814,14 @@ def probe_geph():
         return False
     for p in GEPH_PORTS:
         try:
-            socket.create_connection(("127.0.0.1", p), timeout=0.4).close()
+            # generous timeout: under load geph's accept() can lag, and a false
+            # "down" drops geo-blocked hosts to local desync (claude.ai "retrying").
+            socket.create_connection(("127.0.0.1", p), timeout=1.5).close()
             _geph_port = p
             return True
         except Exception:
             continue
-    _geph_port = None
-    return False
+    return False    # transient miss -> keep last good _geph_port; hysteresis decides
 
 
 async def dial_via_geph(host, port, first_flight):
