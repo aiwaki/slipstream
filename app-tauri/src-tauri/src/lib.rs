@@ -122,7 +122,7 @@ fn open_settings(app: &AppHandle) {
         tauri::WebviewUrl::App("index.html".into()),
     )
     .title("Slipstream Settings")
-    .inner_size(560.0, 430.0)
+    .inner_size(440.0, 480.0)
     .resizable(false)
     .build()
     {

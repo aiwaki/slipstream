@@ -7,51 +7,35 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <!-- macOS-preferences-style toolbar -->
-    <nav class="toolbar" role="tablist">
-      <button class="tab is-active" data-panel="general" role="tab">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></svg>
-        <span>General</span>
-      </button>
-      <button class="tab" data-panel="geph" role="tab">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4M12 3.8c2.4 2.2 3.6 5.1 3.6 8.2s-1.2 6-3.6 8.2c-2.4-2.2-3.6-5.1-3.6-8.2s1.2-6 3.6-8.2z"/></svg>
-        <span>Geph</span>
-      </button>
-      <button class="tab" data-panel="network" role="tab">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3.5" width="6" height="5" rx="1.2"/><rect x="3.5" y="15.5" width="6" height="5" rx="1.2"/><rect x="14.5" y="15.5" width="6" height="5" rx="1.2"/><path d="M12 8.5v4M12 12.5H6.5V15.5M12 12.5h5.5V15.5"/></svg>
-        <span>Network</span>
-      </button>
-      <button class="tab" data-panel="about" role="tab">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 11v5.2M12 7.6v.2"/></svg>
-        <span>About</span>
-      </button>
-    </nav>
+    <main class="wrap">
+      <header class="appbar">
+        <img src="slip-appicon.svg" alt="" class="appicon" />
+        <div>
+          <div class="app-title">Slipstream</div>
+          <div class="app-sub">Local DPI-bypass · no VPN for most sites</div>
+        </div>
+      </header>
 
-    <main class="content">
-      <!-- GENERAL -->
-      <section class="panel is-active" id="panel-general">
+      <h2 class="group">General</h2>
+      <div class="card">
         <div class="row">
-          <label for="launch">Launch at login:</label>
+          <span class="key">Launch at login</span>
           <span class="switch"><input type="checkbox" id="launch" /><i></i></span>
         </div>
-        <p class="note">
-          The bypass engine runs as a background service and starts at boot on its
-          own — this only controls the menu-bar app.
-        </p>
-      </section>
+      </div>
 
-      <!-- GEPH -->
-      <section class="panel" id="panel-geph">
+      <h2 class="group">Geph</h2>
+      <div class="card">
         <div class="row">
-          <label for="geph-secret">Account secret:</label>
+          <span class="key">Account secret</span>
           <input type="password" id="geph-secret" autocomplete="off"
-                 placeholder="empty = free tier (5 GB / mo)" />
+                 placeholder="free tier (5 GB / mo)" />
         </div>
         <div class="row">
-          <label for="geph-exit">Exit server:</label>
+          <span class="key">Exit server</span>
           <select id="geph-exit">
-            <option value="auto">Automatic (fastest)</option>
-            <optgroup label="Core — balanced security & speed">
+            <option value="auto">Automatic</option>
+            <optgroup label="Core">
               <option value="ca-montreal">🇨🇦 CA / Montreal</option>
               <option value="ca-toronto">🇨🇦 CA / Toronto (beta)</option>
               <option value="ch-zurich">🇨🇭 CH / Zurich</option>
@@ -66,61 +50,38 @@
               <option value="us-sanjose">🇺🇸 US / San Jose</option>
               <option value="us-seattle">🇺🇸 US / Seattle (beta)</option>
             </optgroup>
-            <optgroup label="Streaming — region-locked media">
+            <optgroup label="Streaming">
               <option value="hk-jordan">🇭🇰 HK / Jordan</option>
               <option value="tw-taipei">🇹🇼 TW / Taipei</option>
             </optgroup>
           </select>
         </div>
         <div class="row">
-          <label>Plan:</label>
-          <span class="readout" id="geph-plan">— not signed in —</span>
+          <span class="key">Plan</span>
+          <span class="val" id="geph-plan">Free tier</span>
         </div>
-        <div class="row actions">
-          <span></span>
+        <div class="row">
+          <span class="key">&nbsp;</span>
           <button id="geph-save" class="primary">Save</button>
         </div>
-        <p class="note">
-          Used only for services that block Russian IPs (ChatGPT, Claude). Engages
-          automatically — no toggle. Slipstream runs its own bundled Geph; no
-          separate app to install.
-        </p>
-      </section>
+      </div>
+      <p class="caption">
+        Only for services that block Russian IPs (ChatGPT, Claude) — engages
+        automatically. Russian services always go direct, never through Geph.
+      </p>
 
-      <!-- NETWORK -->
-      <section class="panel" id="panel-network">
+      <h2 class="group">About</h2>
+      <div class="card">
         <div class="row">
-          <label>Engine status:</label>
-          <span class="readout" id="net-status">…</span>
+          <span class="key">Version</span>
+          <span class="val" id="version">0.1</span>
         </div>
         <div class="row">
-          <label>Exclude Russian services:</label>
-          <span class="switch is-locked"><input type="checkbox" checked disabled /><i></i></span>
+          <span class="key">Software update</span>
+          <button id="check-updates">Check Now…</button>
         </div>
-        <p class="sublabel">Russian services (.ru / .su / .рф, VK, Yandex, Sber…) always go direct — never through Geph.</p>
-        <div class="row">
-          <label>Block QUIC (UDP/443):</label>
-          <span class="switch is-locked"><input type="checkbox" checked disabled /><i></i></span>
-        </div>
-        <p class="sublabel">Forces browsers onto TCP so the desync engine can act. Required.</p>
-      </section>
-
-      <!-- ABOUT -->
-      <section class="panel" id="panel-about">
-        <div class="about">
-          <img src="slip-appicon.svg" alt="" class="appicon" />
-          <div class="about-text">
-            <h2>Slipstream</h2>
-            <p class="version" id="version">Version 0.1</p>
-            <p class="tagline">Local DPI-bypass for RU networks. No VPN required for most sites.</p>
-          </div>
-        </div>
-        <div class="row actions">
-          <span></span>
-          <button id="check-updates">Check for Updates…</button>
-        </div>
-        <p class="note">Updates install automatically in the background. Open-source · MIT.</p>
-      </section>
+      </div>
+      <p class="caption">Updates install automatically. Open-source · MIT.</p>
     </main>
     <script type="module" src="settings.js"></script>
   </body>
