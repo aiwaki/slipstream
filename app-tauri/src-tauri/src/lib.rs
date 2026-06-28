@@ -20,6 +20,7 @@ use tauri::{
     AppHandle, Manager,
 };
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
 // Our bundled geph5-client runs an unprivileged SOCKS5 on this port; the root
@@ -167,13 +168,20 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
     }
 }
 
+/// Show a native notification (geph up/down, updates).
+fn notify(app: &AppHandle, body: &str) {
+    let _ = app.notification().builder().title("Slipstream").body(body).show();
+}
+
 /// Built-in signed updater: check the appcast, download + install if newer.
 async fn check_for_updates(app: AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
     let Ok(updater) = app.updater() else { return };
     if let Ok(Some(update)) = updater.check().await {
-        let _ = update.download_and_install(|_, _| {}, || {}).await;
-        app.restart();
+        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+            notify(&app, "Update installed — restarting");
+            app.restart();
+        }
     }
 }
 
@@ -357,6 +365,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -496,8 +505,19 @@ pub fn run() {
             let s = state_item.clone();
             let d = detail_item.clone();
             tauri::async_runtime::spawn(async move {
+                let mut last_geph: Option<bool> = None;
                 loop {
                     refresh(&s, &d, &app_handle);
+                    // notify on Geph tunnel up/down transitions (not on first read)
+                    if let Some(up) =
+                        read_status().and_then(|v| v.get("geph").and_then(|x| x.as_str()).map(|g| g == "up"))
+                    {
+                        if last_geph == Some(!up) {
+                            notify(&app_handle,
+                                if up { "Geph tunnel connected" } else { "Geph tunnel disconnected" });
+                        }
+                        last_geph = Some(up);
+                    }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             });

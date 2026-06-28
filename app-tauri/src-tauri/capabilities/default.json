@@ -9,6 +9,7 @@
     "core:menu:default",
     "process:default",
     "updater:default",
+    "notification:default",
     "shell:allow-open",
     {
       "identifier": "shell:allow-execute",
