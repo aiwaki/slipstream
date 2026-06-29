@@ -272,15 +272,28 @@ fn exit_constraint(exit: &str) -> String {
     }
 }
 
-/// Build a MINIMAL geph5-client YAML config. We deliberately do NOT hardcode the
-/// broker fronts / Mizaru keys — geph5-client has them compiled in as defaults
-/// (verified: a config without a `broker` field parses and starts a session), so
-/// they auto-update when CI rebuilds the bundled binary instead of going stale.
-/// Only the account secret + the user's exit choice are ours; everything else is
-/// geph's own default. allow_direct + a persistent cache match the geph GUI (the
-/// stability difference: direct exit connections survive a flaky network and the
-/// cache makes reconnects warm). control_listen exposes geph's JSON-RPC so we can
-/// fetch the LIVE exit list instead of hardcoding it.
+// geph5-client's broker config — REQUIRED. Verified: WITHOUT a `broker` field,
+// every broker-dependent call ("broker information not provided") fails — no
+// connect token, no registration. geph5-client does NOT fall back to compiled
+// defaults at runtime (removing this was a regression). These values are geph5's
+// own source defaults (binaries/geph5-client/src/lib.rs): the cdn77 + netlify
+// domain-fronts and the Mizaru keys (mizaru_bw is empty in the source default;
+// the resulting bw-token warning is non-fatal — the official GUI runs the same).
+const GEPH_BROKER_YAML: &str = "\
+broker:\n\
+\x20 race:\n\
+\x20   - fronted: {front: https://www.cdn77.com/, host: 1826209743.rsc.cdn77.org, override_dns: null}\n\
+\x20   - fronted: {front: https://vuejs.org/, host: svitania-naidallszei-2.netlify.app, override_dns: null}\n\
+broker_keys:\n\
+\x20 master: 88c1d2d4197bed815b01a22cadfc6c35aa246dddb553682037a118aebfaa3954\n\
+\x20 mizaru_free: 0558216cbab7a9c46f298f4c26e171add9af87d0694988b8a8fe52ee932aa754\n\
+\x20 mizaru_plus: cf6f58868c6d9459b3a63bc2bd86165631b3e916bad7f62b578cd9614e0bcb3b\n\
+\x20 mizaru_bw: \"\"\n";
+
+/// Build the geph5-client YAML config. The broker block is required (see
+/// GEPH_BROKER_YAML); only the account secret + exit choice are ours. allow_direct
+/// + a persistent cache match the geph GUI (stability); control_listen exposes
+/// geph's JSON-RPC (for the live exit list + self-registration).
 fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     let esc = secret.replace('\\', "\\\\").replace('"', "\\\"");
     let ec = exit_constraint(exit);
@@ -290,6 +303,7 @@ fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
          exit_constraint: {ec}\n\
          allow_direct: true\n\
          cache: {cache_path}\n\
+         {GEPH_BROKER_YAML}\
          credentials:\n\
          \x20 secret: \"{esc}\"\n"
     )
@@ -302,36 +316,10 @@ fn geph_stop(app: &AppHandle) {
     }
 }
 
-/// Is geph actually tunnelling? A SOCKS5 CONNECT through it to a reliable host.
-/// A geph process that is alive but STUCK (mobile network flapped, account
-/// contention) fails this — that's the "needed an app restart" case.
-async fn geph_health_ok() -> bool {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
-    let probe = async {
-        let mut s = TcpStream::connect(("127.0.0.1", GEPH_SOCKS_PORT)).await.ok()?;
-        s.write_all(&[5u8, 1, 0]).await.ok()?; // greeting, no-auth
-        let mut g = [0u8; 2];
-        s.read_exact(&mut g).await.ok()?;
-        if g != [5, 0] {
-            return None;
-        }
-        // CONNECT 1.1.1.1:443 — a host any working exit reaches
-        s.write_all(&[5, 1, 0, 1, 1, 1, 1, 1, 0x01, 0xbb]).await.ok()?;
-        let mut r = [0u8; 4];
-        s.read_exact(&mut r).await.ok()?; // VER REP RSV ATYP
-        (r[1] == 0).then_some(()) // REP==0 -> tunnel reached the exit
-    };
-    matches!(
-        tokio::time::timeout(Duration::from_secs(8), probe).await,
-        Ok(Some(()))
-    )
-}
-
 /// Supervisor: whenever a secret is configured, run the bundled geph5-client
-/// sidecar and keep it alive — respawn on exit AND on a failed health-check (a
-/// stuck-but-alive geph). Killing the child (on a config change) also makes this
-/// loop pick up the new config on the next iteration.
+/// sidecar and keep it alive — respawn only if it actually exits. geph5-client
+/// handles its own retry/reconnect internally, so we must NOT kill it while it's
+/// recovering (that churns broker sessions -> ACCOUNT-STATUS-NOT-READY).
 async fn geph_supervisor(app: AppHandle) {
     loop {
         // disabled (user prefers their own VPN) -> make sure ours is down
@@ -379,37 +367,19 @@ async fn geph_supervisor(app: AppHandle) {
             }
         };
         *app.state::<GephState>().child.lock().unwrap() = Some(child);
-        // Drain events; meanwhile health-check every 30s. A geph that's alive but
-        // stuck fails the check -> kill it so this loop respawns a fresh one (no
-        // manual app restart). Give it 45s to connect before the first check.
-        let mut health = tokio::time::interval(Duration::from_secs(30));
-        health.tick().await; // immediate tick — skip
-        tokio::time::sleep(Duration::from_secs(15)).await; // grace before first real check
-        let mut sick = 0;
-        loop {
-            tokio::select! {
-                ev = rx.recv() => {
-                    match ev {
-                        Some(CommandEvent::Terminated(_)) | None => break,
-                        _ => {}
-                    }
-                }
-                _ = health.tick() => {
-                    if geph_health_ok().await {
-                        sick = 0;
-                    } else {
-                        sick += 1;
-                        if sick >= 2 {            // ~60s stuck -> respawn fresh
-                            eprintln!("geph health-check failed -> respawning");
-                            geph_stop(&app);
-                            break;
-                        }
-                    }
-                }
+        // Just keep it alive: geph5-client retries + reconnects INTERNALLY
+        // ("retrying now!") when the account/network is transiently not ready, so
+        // we only respawn if it actually EXITS. (An earlier health-check that
+        // killed a "stuck" geph was harmful — it interrupted geph's own recovery
+        // and each respawn was a new session attempt, keeping geph's broker in
+        // ACCOUNT-STATUS-NOT-READY. Don't churn sessions.)
+        while let Some(ev) = rx.recv().await {
+            if let CommandEvent::Terminated(_) = ev {
+                break;
             }
         }
         app.state::<GephState>().child.lock().unwrap().take();
-        tokio::time::sleep(Duration::from_secs(2)).await; // brief backoff, then respawn
+        tokio::time::sleep(Duration::from_secs(10)).await; // backoff before respawn — no churn
     }
 }
 
