@@ -36,16 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: up
-        name: Resolve latest geph5-client tag
+        name: Resolve latest geph5-client version (crates.io)
         run: |
-          tag=$(curl -fsSL \
-            "https://api.github.com/repos/${GEPH_REPO}/tags?per_page=100" \
-            | python3 -c 'import sys,json; \
-              ts=[t["name"] for t in json.load(sys.stdin) if t["name"].startswith("geph5-client-v")]; \
-              print(ts[0] if ts else "")')
-          echo "Latest upstream tag: ${tag:-<none>}"
-          [ -n "$tag" ] || { echo "no geph5-client tag found"; exit 1; }
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          # geph-official/geph5 does NOT publish geph5-client-v* git tags (it tags
+          # individual workspace crates like sillad-v*). crates.io is the source of
+          # truth and what `cargo install` builds, so resolve the version there.
+          ver=$(curl -fsSL "https://crates.io/api/v1/crates/geph5-client" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["crate"]["max_version"])')
+          echo "Latest crates.io version: ${ver:-<none>}"
+          [ -n "$ver" ] || { echo "no geph5-client version found on crates.io"; exit 1; }
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
       - id: cmp
         name: Compare with vendored version
         run: |
@@ -82,13 +82,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout geph5 @ ${{ needs.resolve.outputs.version }}
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.GEPH_REPO }}
-          ref: ${{ needs.resolve.outputs.version }}
-          path: geph5
-
       - name: Install Rust (stable) + targets
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -100,41 +93,46 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            geph5/target
           key: geph-${{ matrix.name }}-${{ needs.resolve.outputs.version }}
 
       - name: Build deps (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf cmake pkg-config || true
 
-      - name: Build geph5-client (universal on macOS)
-        working-directory: geph5
+      - name: Build geph5-client ${{ needs.resolve.outputs.version }} from crates.io
         run: |
           set -euo pipefail
+          VER="${{ needs.resolve.outputs.version }}"
           IFS=',' read -ra TARGETS <<< "${{ matrix.rust_targets }}"
+          mkdir -p out
+          bins=()
           for t in "${TARGETS[@]}"; do
-            echo "::group::cargo build $t"
-            cargo build --release -p geph5-client --target "$t"
+            echo "::group::cargo install geph5-client@$VER ($t)"
+            # crates.io is the only release channel (no git tags); cargo install
+            # downloads + builds the published crate. --no-track keeps it stateless;
+            # --force lets a re-run overwrite a cached install root.
+            cargo install geph5-client --version "$VER" --target "$t" \
+              --root "install-$t" --no-track --force
+            bins+=("install-$t/bin/geph5-client")
             echo "::endgroup::"
           done
-          mkdir -p out
           if [ "${{ runner.os }}" = "macOS" ]; then
-            lipo -create -output out/geph5-client \
-              target/aarch64-apple-darwin/release/geph5-client \
-              target/x86_64-apple-darwin/release/geph5-client
+            lipo -create -output out/geph5-client "${bins[@]}"
             strip -x out/geph5-client
             lipo -info out/geph5-client
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            cp "${bins[0]}.exe" out/geph5-client.exe
           else
-            bin=$(ls target/*/release/geph5-client* | head -1)
-            cp "$bin" "out/$(basename "$bin")"
+            cp "${bins[0]}" out/geph5-client
           fi
 
       - name: Bundle MPL-2.0 license (compliance)
-        working-directory: geph5
         run: |
-          cp LICENSE out/geph5-client.LICENSE 2>/dev/null || \
-            echo "geph5-client is MPL-2.0; source: https://github.com/${GEPH_REPO}" \
-              > out/geph5-client.LICENSE
+          # cargo install doesn't retain the source LICENSE, so ship the canonical
+          # MPL-2.0 text (binary is the unmodified upstream build).
+          curl -fsSL https://www.mozilla.org/media/MPL/2.0/index.txt \
+            -o out/geph5-client.LICENSE \
+            || echo "geph5-client is MPL-2.0 (https://www.mozilla.org/MPL/2.0/); source: https://github.com/${GEPH_REPO}, crate: https://crates.io/crates/geph5-client" > out/geph5-client.LICENSE
           echo "${{ needs.resolve.outputs.version }}" > out/geph5-client.VERSION
           ( cd out && shasum -a 256 geph5-client* > SHA256SUMS )
 
@@ -142,7 +140,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: geph5-client-${{ matrix.name }}
-          path: geph5/out/*
+          path: out/*
 
       - name: Publish vendored binary as a release asset
         uses: softprops/action-gh-release@v2
@@ -153,7 +151,7 @@ jobs:
             Headless geph5-client built from ${{ env.GEPH_REPO }}@${{ needs.resolve.outputs.version }}
             for embedding in Slipstream. MPL-2.0; source linked above.
             Consumed by the app-build workflow -> Slipstream.app/Contents/Resources.
-          files: geph5/out/*
+          files: out/*
 
   # 3) Record the version we vendored so the next scheduled run is a no-op until
   #    geph ships something newer.

@@ -89,13 +89,38 @@ _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
-# only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: it is
-# DPI-blocked, not geo-blocked, so local desync handles it (keep it off the tunnel).
+# only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
+# product decision it is NOT tunnelled through geph; its DPI block is handled by
+# the bundled tg-ws-proxy (local MTProto proxy), and its raw DC-IP sockets are
+# passed direct (see TELEGRAM_NETS) so our desync never mangles MTProto.
 GEPH_HOSTS = (
     "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
     "anthropic.com", "claude.ai", "claudeusercontent.com",
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
 )
+
+# Telegram's MTProto data-centre IP ranges (published, AS62041/AS44907). MTProto
+# has no SNI and looks nothing like TLS, so our desync corrupts its handshake and
+# breaks the desktop app. We pass these DIRECT (untouched); the real DPI-bypass
+# for Telegram is the bundled tg-ws-proxy the user points Telegram at.
+TELEGRAM_NETS = (
+    ("149.154.160.0", 20), ("91.108.4.0", 22), ("91.108.8.0", 22),
+    ("91.108.12.0", 22), ("91.108.16.0", 22), ("91.108.20.0", 22),
+    ("91.108.56.0", 22), ("95.161.64.0", 20), ("185.76.151.0", 24),
+)
+
+
+def _ip_in_nets(ip, nets):
+    """True if dotted-quad `ip` falls in any (network, prefixlen) in `nets`."""
+    try:
+        packed = struct.unpack("!I", socket.inet_aton(ip))[0]
+    except OSError:
+        return False
+    for net, bits in nets:
+        mask = (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF
+        if (packed & mask) == (struct.unpack("!I", socket.inet_aton(net))[0] & mask):
+            return True
+    return False
 
 # Russian services — NEVER tunnelled (split-tunnel exclusion "for the VPN").
 # Primary rule is the national TLDs; the set covers big RU services on .com/.net.
@@ -503,11 +528,25 @@ _l3_tls = threading.local()
 
 
 def _l3send(pkt):
+    from scapy.all import conf
     s = getattr(_l3_tls, "sock", None)
     if s is None:
-        from scapy.all import conf
         s = _l3_tls.sock = conf.L3socket()
-    s.send(pkt)
+    try:
+        s.send(pkt)
+    except OSError:
+        # The cached raw socket goes stale after sleep/wake or an interface change
+        # (each worker thread caches its own), so sends silently fail and desync
+        # stops working. Reopen once and retry — self-heals without a daemon restart.
+        try:
+            s.close()
+        except Exception:
+            pass
+        try:
+            s = _l3_tls.sock = conf.L3socket()
+            s.send(pkt)
+        except OSError:
+            _l3_tls.sock = None
 
 
 def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
@@ -591,17 +630,28 @@ def network_monitor(port, voice=True):
             print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
 
     geph_strikes = 0
+    last_tick = time.time()
     while True:
+        now = time.time()
+        if now - last_tick > 30:
+            # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
+            # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
+            # _l3send self-heals, and the pf/geph checks below re-arm the rest.
+            print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
+                  file=sys.stderr)
+            cur_iface = None
+        last_tick = now
         iface = default_iface()
-        # Hysteresis: a single failed probe (geph busy under load) must NOT flip us
-        # to "down" — that would drop geo-blocked hosts to local desync for 5s.
-        # Only declare down after 2 consecutive misses.
+        # Hysteresis: a few failed probes (geph busy under load, or briefly
+        # re-establishing its tunnel) must NOT flip us to "down" — that drops
+        # geo-blocked hosts to local desync (RU exit IP -> Anthropic/CF 403).
+        # Only declare down after 3 consecutive misses (~15s of real outage).
         if probe_geph():
             geph_strikes = 0
             up = True
         else:
             geph_strikes += 1
-            up = geph_strikes < 2
+            up = geph_strikes < 3
         was_geph, _geph_up = _geph_up, up
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
@@ -813,28 +863,68 @@ async def pump(reader, up_w):
     return total
 
 
+# Control-RPC port paired with each SOCKS port (ours :9955 / the GUI's :12222).
+GEPH_CONTROL = {9954: 9955, 9909: 12222}
+
+
 def probe_geph():
-    """Is geph's SOCKS5 listener accepting? (cheap TCP connect; called every 5s
-    by the monitor thread). A successful connect doesn't prove geph reached its
-    exit — dial_via_geph keeps tight timeouts and falls back if CONNECT fails."""
+    """Is a geph tunnel actually carrying sessions right now? (monitor, every 5s).
+    Liveness comes from the control RPC (conn_info reports ESTABLISHED sessions
+    without opening a new stream), NOT a fresh SOCKS5-CONNECT — that stream probe
+    intermittently failed under normal tunnel load, mis-reporting geph "down",
+    which fired fail-closed and dropped live app connections (the Claude/Codex
+    reconnects). geph's own process was stable throughout; only our probe flapped."""
     global _geph_port
     if not GEPH_ENABLED:
         _geph_port = None
         return False
-    for p in GEPH_PORTS:
-        if _geph_socks_works(p):
+    # Sticky: re-check the LAST-GOOD port first, only then the rest. Stops the
+    # daemon oscillating 9954<->9909 (ours vs the user's GUI) when both are up —
+    # port churn mid-session breaks live connections and spams up/down logs.
+    order = GEPH_PORTS
+    if _geph_port in GEPH_PORTS and _geph_port != GEPH_PORTS[0]:
+        order = [_geph_port] + [p for p in GEPH_PORTS if p != _geph_port]
+    for p in order:
+        if _geph_live(p):
             _geph_port = p
             return True
     return False    # transient miss -> keep last good _geph_port; hysteresis decides
 
 
+def _geph_conn_info_sessions(control_port, timeout=3):
+    """Active-session count from geph's control RPC conn_info, or None if the
+    control listener is unreachable."""
+    try:
+        s = socket.create_connection(("127.0.0.1", control_port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(b'{"jsonrpc":"2.0","id":1,"method":"conn_info","params":[]}\n')
+        buf = b""
+        while b"\n" not in buf:
+            d = s.recv(65536)
+            if not d:
+                break
+            buf += d
+        s.close()
+        return len(json.loads(buf.decode()).get("result", {}).get("sessions", []))
+    except Exception:
+        return None
+
+
+def _geph_live(socks_port, timeout=3):
+    """Liveness for a geph SOCKS port: prefer conn_info (no stream opened -> no
+    false-down under load); only if the control RPC is unreachable fall back to the
+    SOCKS-CONNECT test."""
+    ctl = GEPH_CONTROL.get(socks_port)
+    if ctl is not None:
+        n = _geph_conn_info_sessions(ctl, timeout)
+        if n is not None:
+            return n > 0
+    return _geph_socks_works(socks_port, timeout)
+
+
 def _geph_socks_works(port, timeout=2.5):
-    """REAL health check, not just a port-open test: SOCKS5-CONNECT to 1.1.1.1:443
-    through this geph. A geph that accepts SOCKS but can't reach an exit (no
-    session — e.g. ours when the user's own Geph holds the account) fails here, so
-    a half-alive geph is skipped in favour of one that actually tunnels. This is
-    what stops the daemon picking a dead :9954 and leaking geo-blocked hosts
-    direct (RU IP -> Anthropic's 'redirected to www.anthropic.com')."""
+    """Fallback liveness (used only when the control RPC is unreachable):
+    SOCKS5-CONNECT to 1.1.1.1:443 through this geph, proving it reaches an exit."""
     try:
         s = socket.create_connection(("127.0.0.1", port), timeout=timeout)
         s.settimeout(timeout)
@@ -893,6 +983,19 @@ async def dial_via_geph(host, port, first_flight):
             gw.close()
         except Exception:
             pass
+        return None
+
+
+async def dial_plain(ip, port, first_flight):
+    """Plain direct dial (no desync, no tunnel) for traffic we must not tamper
+    with — Telegram MTProto. Sends the buffered first flight verbatim; returns
+    (reader, writer) or None."""
+    try:
+        r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=6)
+        w.write(first_flight)
+        await w.drain()
+        return r, w
+    except Exception:
         return None
 
 
@@ -991,20 +1094,42 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
-    # Split-tunnel: a geo-blocked service (refuses RU IPs) goes through geph's
-    # SOCKS5 tunnel when geph is up; Russian services are excluded by geph_route;
-    # on any geph failure we fall through to local desync (no worse than today).
-    if is_tls and _geph_up and geph_route(host):
-        g = await dial_via_geph(host, dst_port, head + body)
-        if g:
-            gr, gw = g
-            if VERBOSE:
-                print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
-            await asyncio.gather(pump(reader, gw), splice(gr, writer))
+    # Telegram MTProto to its DC IPs: no SNI, nothing like TLS — our desync
+    # corrupts the handshake. Pass DIRECT (untouched) so we never make Telegram
+    # worse than baseline. The DPI-bypass for Telegram is the bundled tg-ws-proxy
+    # (local MTProto proxy on :1443); once Telegram points at it, these direct DC
+    # connections stop happening at all.
+    if _ip_in_nets(dst_ip, TELEGRAM_NETS):
+        up = await dial_plain(dst_ip, dst_port, head + body)
+        if up is None:
+            writer.close()
             return
+        ur, uw = up
+        await asyncio.gather(pump(reader, uw), splice(ur, writer))
+        return
+
+    # Split-tunnel: a geo-blocked service (refuses RU IPs) goes through geph's
+    # SOCKS5 tunnel. geph is the ONLY honest path for these hosts — local desync
+    # would exit on the Russian IP and earn a hard 403 ("Request not allowed")
+    # that makes apps like Claude DROP their session (forcing a manual re-login).
+    # So FAIL CLOSED on any geph trouble (down during a ~20-30s respawn, or the
+    # CONNECT failed): close the connection so the client retries until geph is
+    # back, instead of leaking the geo-host to an RU exit. (Russian services are
+    # excluded by geph_route and fall through to desync as normal.)
+    if is_tls and geph_route(host):
+        if _geph_up:
+            g = await dial_via_geph(host, dst_port, head + body)
+            if g:
+                gr, gw = g
+                if VERBOSE:
+                    print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
+                await asyncio.gather(pump(reader, gw), splice(gr, writer))
+                return
         if VERBOSE:
-            print(f"  geph CONNECT failed for {host} -> local desync",
-                  file=sys.stderr)
+            print(f"  geph unavailable for geo-host {host} -> fail closed "
+                  f"(no RU leak, client will retry)", file=sys.stderr)
+        writer.close()
+        return
 
     # de-poison: resolve the SNI over DoH -> LIST of real IPs (fallback dst_ip)
     real_ips = []
@@ -1197,6 +1322,106 @@ async def amain(port):
         await server.serve_forever()
 
 
+# ---- Telegram: bundled Flowseal/tg-ws-proxy (vendored proxy/ module) ----------
+TGWS_PORT = 1443
+TGWS_SECRET_PATH = "/usr/local/slipstream/tgws-secret"
+# World-readable so the (non-root) tray can read the tg://proxy link and offer a
+# one-click "Open in Telegram" — the secret file itself stays root-only 0600.
+TGWS_LINK_PATH = "/var/run/slipstream-tgws.link"
+
+
+def _tgws_secret():
+    """Stable 32-hex MTProto secret so the user's Telegram proxy entry keeps
+    working across restarts. Prefers the standalone TG WS Proxy app's secret (if
+    the user already runs it) so quitting that app and letting our embedded proxy
+    take over :1443 needs NO Telegram reconfigure; else our own persisted secret;
+    else a fresh one."""
+    import glob
+    for cfg in glob.glob("/Users/*/Library/Application Support/TgWsProxy/config.json"):
+        try:
+            s = json.load(open(cfg)).get("secret", "").strip().lower()
+            if len(s) == 32 and all(c in "0123456789abcdef" for c in s):
+                return s
+        except Exception:
+            pass
+    try:
+        s = open(TGWS_SECRET_PATH).read().strip()
+        if len(s) == 32 and all(c in "0123456789abcdef" for c in s):
+            return s
+    except Exception:
+        pass
+    s = os.urandom(16).hex()
+    try:
+        with open(TGWS_SECRET_PATH, "w") as f:
+            f.write(s)
+        os.chmod(TGWS_SECRET_PATH, 0o600)
+    except Exception:
+        pass
+    return s
+
+
+def start_tgws_proxy():
+    """Run the vendored tg-ws-proxy — a local MTProto proxy on 127.0.0.1:1443 — in
+    a daemon thread. Telegram Desktop points at it (tg://proxy?...) and its MTProto
+    rides WSS to Telegram's Cloudflare-fronted WS endpoints, bypassing the DC-IP
+    block. Its outbound runs as root, so our own pf rdr (user != root) leaves it
+    alone: it goes out direct, no desync, no loop back into us."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (here, os.path.join(here, "..", "vendor", "tg-ws-proxy")):
+        if os.path.isdir(os.path.join(cand, "proxy")):
+            p = os.path.abspath(cand)
+            if p not in sys.path:
+                sys.path.insert(0, p)
+            break
+    try:
+        from proxy.tg_ws_proxy import _run as _tgws_run
+        from proxy.config import proxy_config
+    except Exception as e:
+        print(f">> tg-ws-proxy unavailable ({e!r}); Telegram gets MTProto "
+              f"passthrough only", file=sys.stderr)
+        return
+    proxy_config.host = "127.0.0.1"
+    proxy_config.port = TGWS_PORT
+    proxy_config.secret = _tgws_secret()
+    link = f"tg://proxy?server=127.0.0.1&port={TGWS_PORT}&secret=dd{proxy_config.secret}"
+    # publish the link world-readable so the tray's "Open in Telegram" works
+    try:
+        with open(TGWS_LINK_PATH, "w") as f:
+            f.write(link)
+        os.chmod(TGWS_LINK_PATH, 0o644)
+    except Exception:
+        pass
+
+    def _loop():
+        warned_inuse = False
+        while True:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(_tgws_run())
+            except OSError as e:
+                if getattr(e, "errno", None) == 48:   # EADDRINUSE
+                    if not warned_inuse:
+                        print(">> tg-ws-proxy: :1443 held by the standalone TG WS "
+                              "Proxy app; the embedded proxy takes over when you "
+                              "quit it (same secret, no Telegram reconfigure)",
+                              file=sys.stderr)
+                        warned_inuse = True
+                    time.sleep(15)
+                    continue
+                print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
+                      file=sys.stderr)
+                time.sleep(5)
+            except Exception as e:
+                print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
+                      file=sys.stderr)
+                time.sleep(5)
+
+    threading.Thread(target=_loop, daemon=True, name="tg-ws-proxy").start()
+    print(f">> tg-ws-proxy ready on 127.0.0.1:{TGWS_PORT}; Telegram link: {link}",
+          file=sys.stderr)
+
+
 def main():
     global VERBOSE, _pf_fd
     ap = argparse.ArgumentParser()
@@ -1258,6 +1483,10 @@ def main():
     # guard thread: voice sniffer follows the default iface + pf self-heal
     threading.Thread(target=network_monitor, args=(args.port,),
                      kwargs={"voice": not args.no_voice}, daemon=True).start()
+
+    # bundled Telegram MTProto proxy (tg-ws-proxy) — local :1443, points Telegram
+    # past the DC-IP block via WSS. Best-effort; never blocks daemon startup.
+    start_tgws_proxy()
 
     atexit.register(pf_teardown)
     # Catch close-terminal (SIGHUP) and suspend (SIGTSTP, i.e. Ctrl+Z) too — a

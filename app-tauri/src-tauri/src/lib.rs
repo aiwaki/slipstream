@@ -8,8 +8,8 @@
 // later; main.rs is a thin desktop shim.
 
 use std::fs;
-use std::process::Command;
-use std::sync::Mutex;
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -21,7 +21,6 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
 // Our bundled geph5-client runs an unprivileged SOCKS5 on this port; the root
 // daemon routes geo-blocked hosts to it. A dedicated port (not geph's default
@@ -30,12 +29,9 @@ const GEPH_SOCKS_PORT: u16 = 9954;
 // geph's JSON-RPC control listener — we query it for the LIVE exit list.
 const GEPH_CONTROL_PORT: u16 = 9955;
 
-/// Holds the running geph5-client child so the menu can kill+respawn it on a
-/// config change (the supervisor loop then restarts it with the new config).
-#[derive(Default)]
-struct GephState {
-    child: Mutex<Option<CommandChild>>,
-}
+// geph5-client is spawned DETACHED (its own process group) so it survives a tray
+// restart/reinstall — see geph_supervisor. We track/kill it by process match, not
+// a held child handle, so no GephState is needed.
 
 const STATUS_PATH: &str = "/var/run/slipstream.status";
 const LOG_PATH: &str = "/var/log/slipstream.log";
@@ -48,28 +44,18 @@ const ID_RESTART: &str = "restart_proxy";
 const ID_LOG: &str = "open_log";
 const ID_UPDATE: &str = "check_updates";
 const ID_QUIT: &str = "quit";
+const ID_TGWS: &str = "tgws_open";
+// Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
+// tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
+// in one click (no manual host/port/secret entry).
+const TGWS_LINK_PATH: &str = "/var/run/slipstream-tgws.link";
 
-// geph exit catalog (value, menu label). Static for now; a geph5-client query
-// will replace this with the live list + load % once the bundled binary lands.
-const EXITS_CORE: &[(&str, &str)] = &[
-    ("ca-montreal", "🇨🇦 CA / Montreal"),
-    ("ca-toronto", "🇨🇦 CA / Toronto (beta)"),
-    ("ch-zurich", "🇨🇭 CH / Zurich"),
-    ("cz-prague", "🇨🇿 CZ / Prague"),
-    ("jp-osaka", "🇯🇵 JP / Osaka (beta)"),
-    ("jp-tokyo", "🇯🇵 JP / Tokyo"),
-    ("pl-warsaw", "🇵🇱 PL / Warsaw"),
-    ("se-stockholm", "🇸🇪 SE / Stockholm (beta)"),
-    ("sg-singapore", "🇸🇬 SG / Singapore"),
-    ("us-ashburn", "🇺🇸 US / Ashburn"),
-    ("us-dallas", "🇺🇸 US / Dallas (beta)"),
-    ("us-sanjose", "🇺🇸 US / San Jose"),
-    ("us-seattle", "🇺🇸 US / Seattle (beta)"),
-];
-const EXITS_STREAM: &[(&str, &str)] = &[
-    ("hk-jordan", "🇭🇰 HK / Jordan"),
-    ("tw-taipei", "🇹🇼 TW / Taipei"),
-];
+// Fallback exit list used ONLY on the first-ever launch, before geph's control
+// RPC (net_status) has answered once. After that the LIVE country list is cached
+// to geph-exits.json and used instead — no hardcoded catalog. Country-level to
+// match the {country: cc} exit_constraint we emit; flags are derived from the CC
+// at runtime (cc_flag), so there's no hardcoded flag/label table either.
+const EXITS_FALLBACK_CC: &[&str] = &["ca", "us", "ch", "de", "nl", "se", "jp", "sg"];
 
 /// Daemon status, or None if the file is missing/stale (>15s old → treat as off).
 fn read_status() -> Option<Value> {
@@ -259,41 +245,220 @@ fn geph_enabled(app: &AppHandle) -> bool {
     geph_field(app, "enabled").map(|s| s != "0").unwrap_or(true)
 }
 
-/// geph exit_constraint for a menu exit value ("us-sanjose" -> {country: us}).
-/// Country-level (ISO-3166 alpha-2, verified against the binary) is robust and
-/// lets the user dodge a blocked exit by region; "auto" lets geph choose.
+/// geph exit_constraint for a menu exit value. Three shapes:
+///   "auto"              -> auto                       (geph chooses)
+///   "ca|Toronto [BETA]" -> {country_city: [ca, "Toronto [BETA]"]}  (pin a city)
+///   "us" / "us-sanjose" -> {country: us}              (country-level / legacy)
+/// City pinning (verified against the binary: `{country_city: [cc, City]}`, City
+/// case-sensitive & exact from net_status) keeps the user on one exit region so a
+/// service that bans on location change never sees them move.
 fn exit_constraint(exit: &str) -> String {
     let e = exit.trim();
-    let cc = e.split('-').next().unwrap_or("");
-    if e == "auto" || cc.len() != 2 {
-        "auto".into()
-    } else {
-        format!("{{country: {}}}", cc.to_lowercase())
+    if e == "auto" || e.is_empty() {
+        return "auto".into();
     }
+    if let Some((cc, city)) = e.split_once('|') {
+        let cc = cc.trim().to_lowercase();
+        let city = city.replace('\\', "\\\\").replace('"', "\\\"");
+        if cc.len() == 2 {
+            return format!("{{country_city: [{cc}, \"{city}\"]}}");
+        }
+    }
+    let cc = e.split(['-', '|']).next().unwrap_or("");
+    if cc.len() == 2 {
+        format!("{{country: {}}}", cc.to_lowercase())
+    } else {
+        "auto".into()
+    }
+}
+
+/// Flag emoji from a 2-letter ISO country code via regional-indicator codepoints
+/// (no hardcoded table). "ca" -> 🇨🇦; "" for anything that isn't 2 ASCII letters.
+fn cc_flag(cc: &str) -> String {
+    let cc = cc.trim();
+    if cc.len() != 2 || !cc.chars().all(|c| c.is_ascii_alphabetic()) {
+        return String::new();
+    }
+    cc.to_ascii_uppercase()
+        .chars()
+        .filter_map(|c| char::from_u32(0x1F1E6 + (c as u32 - 'A' as u32)))
+        .collect()
+}
+
+/// Query geph's control RPC (newline-framed JSON-RPC on GEPH_CONTROL_PORT) for the
+/// LIVE exit list, one entry per (country, city). Pinning a CITY (not just a
+/// country) matters: a service that bans on a location change needs the user to
+/// stay on one exit region (the reason to "sit on Toronto"), so the menu offers
+/// each city and exit_constraint pins it as {country_city: [cc, "City"]}. Returns
+/// sorted (value="cc|City", label="🇨🇦 CA / Toronto") pairs, or None if the control
+/// port isn't answering yet.
+fn geph_net_status_catalog() -> Option<Vec<(String, String, String)>> {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", GEPH_CONTROL_PORT)).ok()?;
+    let to = Duration::from_secs(6);
+    let _ = s.set_read_timeout(Some(to));
+    let _ = s.set_write_timeout(Some(to));
+    s.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"net_status\",\"params\":[]}\n")
+        .ok()?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = s.read(&mut chunk).ok()?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.contains(&b'\n') || buf.len() > 4_000_000 {
+            break;
+        }
+    }
+    let v: Value = serde_json::from_slice(&buf).ok()?;
+    let exits = v.get("result")?.get("exits")?.as_object()?;
+    // (cc, city) -> category, deduped + sorted by country then city. category
+    // ("core"/"streaming", from exit[2]) drives the menu's section headers.
+    let mut map: std::collections::BTreeMap<(String, String), String> =
+        std::collections::BTreeMap::new();
+    for arr in exits.values() {
+        let meta = match arr.get(1) {
+            Some(m) => m,
+            None => continue,
+        };
+        let category = arr
+            .get(2)
+            .and_then(|c| c.get("category"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("core")
+            .to_string();
+        if let (Some(cc), Some(city)) = (
+            meta.get("country").and_then(|x| x.as_str()),
+            meta.get("city").and_then(|x| x.as_str()),
+        ) {
+            let cc = cc.trim().to_lowercase();
+            let city = city.trim().to_string();
+            if cc.len() == 2 && cc.chars().all(|c| c.is_ascii_alphabetic()) && !city.is_empty() {
+                map.entry((cc, city)).or_insert(category);
+            }
+        }
+    }
+    if map.is_empty() {
+        return None;
+    }
+    Some(
+        map.into_iter()
+            .map(|((cc, city), category)| {
+                // value carries the EXACT city (case-sensitive) for the constraint;
+                // label prettifies "Toronto [BETA]" -> "Toronto (beta)".
+                let value = format!("{cc}|{city}");
+                let pretty = city.replace(" [BETA]", " (beta)");
+                let label = format!("{} {} / {}", cc_flag(&cc), cc.to_uppercase(), pretty);
+                (value, label, category)
+            })
+            .collect(),
+    )
+}
+
+/// Exit catalog for the tray menu: the LIVE country list if geph's control RPC
+/// answers now (also cached to geph-exits.json), else the last cached list, else
+/// the static EXITS_FALLBACK_CC. Never hardcodes the live catalog.
+fn exit_catalog(cache_path: Option<std::path::PathBuf>) -> Vec<(String, String, String)> {
+    if let Some(live) = geph_net_status_catalog() {
+        if let Some(p) = &cache_path {
+            if let Ok(j) = serde_json::to_string(&live) {
+                let _ = fs::write(p, j);
+            }
+        }
+        return live;
+    }
+    if let Some(p) = &cache_path {
+        if let Ok(s) = fs::read_to_string(p) {
+            if let Ok(c) = serde_json::from_str::<Vec<(String, String, String)>>(&s) {
+                if !c.is_empty() {
+                    return c;
+                }
+            }
+        }
+    }
+    EXITS_FALLBACK_CC
+        .iter()
+        .map(|cc| {
+            (
+                cc.to_string(),
+                format!("{} {}", cc_flag(cc), cc.to_uppercase()),
+                "core".to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Background one-shot: once geph's control RPC comes up after launch, write the
+/// live country list to geph-exits.json so the NEXT tray build shows the real
+/// catalog (the menu is built once at startup, before geph has connected).
+fn refresh_exit_cache(cache_path: Option<std::path::PathBuf>) {
+    std::thread::spawn(move || {
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_secs(2));
+            if let Some(live) = geph_net_status_catalog() {
+                if let Some(p) = &cache_path {
+                    if let Ok(j) = serde_json::to_string(&live) {
+                        let _ = fs::write(p, j);
+                    }
+                }
+                return;
+            }
+        }
+    });
 }
 
 // geph5-client's broker config — REQUIRED. Verified: WITHOUT a `broker` field,
 // every broker-dependent call ("broker information not provided") fails — no
 // connect token, no registration. geph5-client does NOT fall back to compiled
-// defaults at runtime (removing this was a regression). These values are geph5's
-// own source defaults (binaries/geph5-client/src/lib.rs): the cdn77 + netlify
-// domain-fronts and the Mizaru keys (mizaru_bw is empty in the source default;
-// the resulting bw-token warning is non-fatal — the official GUI runs the same).
+// defaults at runtime.
+//
+// These values are extracted byte-for-byte from the official Geph.app's embedded
+// config (gephgui-wry 5.7.x). The earlier cdn77/vuejs `race:` list + empty
+// `mizaru_bw` was STALE and the root cause of "cannot get connect token" /
+// "mizaru_bw.inner: Encoding error": the fronts no longer serve get_connect_token
+// and the empty bw key can't decode. The current broker uses:
+//   - `priority_race` (a {priority: source} map, NOT a list), tried high-first;
+//   - an aws_lambda "bouncer" as the primary (1500) transport — the fast path;
+//   - kubernetes.io domain-fronting (host = netlify) as fallbacks (300/0);
+//   - tunneled_broker direct https://broker.geph.io;
+//   - the real RSA `mizaru_bw` key (DER hex) so bandwidth-token fetch succeeds.
+// The obfs_key below is public (shipped in every Geph.app binary).
 const GEPH_BROKER_YAML: &str = "\
 broker:\n\
-\x20 race:\n\
-\x20   - fronted: {front: https://www.cdn77.com/, host: 1826209743.rsc.cdn77.org, override_dns: null}\n\
-\x20   - fronted: {front: https://vuejs.org/, host: svitania-naidallszei-2.netlify.app, override_dns: null}\n\
+\x20 priority_race:\n\
+\x20   1500:\n\
+\x20     aws_lambda:\n\
+\x20       function_name: geph-lambda-bouncer\n\
+\x20       region: us-east-1\n\
+\x20       obfs_key: \"855MJGAMB58MCPJBB97NADJ36D64WM2T:C4TN2M1H68VNMRVCCH57GDV2C5VN6V3RB8QMWP235D0P4RT2ACV7GVTRCHX3EC37\"\n\
+\x20   300:\n\
+\x20     fronted:\n\
+\x20       front: https://kubernetes.io/\n\
+\x20       host: svitania-naidallszei-2.netlify.app\n\
+\x20       override_dns:\n\
+\x20         - 75.2.60.5:443\n\
+\x20   0:\n\
+\x20     fronted:\n\
+\x20       front: https://kubernetes.io/\n\
+\x20       host: svitania-naidallszei-2.netlify.app\n\
+tunneled_broker:\n\
+\x20 direct: https://broker.geph.io\n\
 broker_keys:\n\
 \x20 master: 88c1d2d4197bed815b01a22cadfc6c35aa246dddb553682037a118aebfaa3954\n\
 \x20 mizaru_free: 0558216cbab7a9c46f298f4c26e171add9af87d0694988b8a8fe52ee932aa754\n\
 \x20 mizaru_plus: cf6f58868c6d9459b3a63bc2bd86165631b3e916bad7f62b578cd9614e0bcb3b\n\
-\x20 mizaru_bw: \"\"\n";
+\x20 mizaru_bw: 3082010a0282010100d0ae53a794ea37bf2e100cb3a872177ec6c11e8375fdcbf92960ce0293465674eb1426a1841b7622a58979a5ff3f8aa2301a621545e9b90bb39d1a6bfda19d6ca1aae74a3192ddfd2b9558eb652c3c2c22f42bdde272852fb67d93cae5846213512c474bf799844aee019bf718f6fa64223be06364459fc8dec66796b141d450d730c4fffe1cac7df8f05591560afa44bcf274f6c0e2303b39c21ab09d19b459ee594512b8341f3d407c026e2509f42c6d89f82f6a3a36fd5c05ad423cd99ad39089403eb9122ea60ef6648afff65438e8e26ce41fa55b9b18741965c77a627bae947bd38fc345e9adab42d6c458f6e194e4232cfd3f04924d5a5e932fe769610203010001\n";
 
 /// Build the geph5-client YAML config. The broker block is required (see
-/// GEPH_BROKER_YAML); only the account secret + exit choice are ours. allow_direct
-/// + a persistent cache match the geph GUI (stability); control_listen exposes
-/// geph's JSON-RPC (for the live exit list + self-registration).
+/// GEPH_BROKER_YAML); only the account secret + exit choice are ours.
+/// `allow_direct: false` matches the official GUI's "My network blocks VPNs"
+/// mode (RU/CN/IR): geph hides traffic from the ISP via obfuscated bridges
+/// instead of connecting directly. Verified: standalone tunnels (no external
+/// VPN) ONLY with `false` on this network — `true` authenticates but the mux
+/// data path times out. A persistent cache matches the GUI (faster reconnect);
+/// control_listen exposes geph's JSON-RPC (live exit list).
 fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     let esc = secret.replace('\\', "\\\\").replace('"', "\\\"");
     let ec = exit_constraint(exit);
@@ -301,7 +466,7 @@ fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
         "socks5_listen: 127.0.0.1:{GEPH_SOCKS_PORT}\n\
          control_listen: 127.0.0.1:{GEPH_CONTROL_PORT}\n\
          exit_constraint: {ec}\n\
-         allow_direct: true\n\
+         allow_direct: false\n\
          cache: {cache_path}\n\
          {GEPH_BROKER_YAML}\
          credentials:\n\
@@ -309,21 +474,53 @@ fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     )
 }
 
-/// Stop a running geph5-client (e.g. before respawning with a new config).
-fn geph_stop(app: &AppHandle) {
-    if let Some(child) = app.state::<GephState>().child.lock().unwrap().take() {
-        let _ = child.kill();
-    }
+/// Absolute path to the bundled geph5-client, which sits next to our own
+/// executable (Slipstream.app/Contents/MacOS/geph5-client).
+fn geph_bin_path() -> Option<std::path::PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join("geph5-client"))
 }
 
-/// Supervisor: whenever a secret is configured, run the bundled geph5-client
-/// sidecar and keep it alive — respawn only if it actually exits. geph5-client
-/// handles its own retry/reconnect internally, so we must NOT kill it while it's
-/// recovering (that churns broker sessions -> ACCOUNT-STATUS-NOT-READY).
+/// Cheap liveness: is geph's SOCKS5 up on GEPH_SOCKS_PORT and speaking the no-auth
+/// handshake? Used to ADOPT an already-running geph rather than respawn it.
+fn geph_socks_alive() -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", GEPH_SOCKS_PORT)) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+    if s.write_all(&[0x05, 0x01, 0x00]).is_err() {
+        return false;
+    }
+    let mut r = [0u8; 2];
+    s.read_exact(&mut r).is_ok() && r[0] == 0x05
+}
+
+/// Kill the geph5-client WE launched (matched by our unique config path). Used
+/// before a deliberate reconfigure (exit change) or when Geph is disabled.
+fn geph_kill_running() {
+    let _ = Command::new("/usr/bin/pkill")
+        .args(["-f", "geph5-client.*geph-active.yaml"])
+        .status();
+}
+
+/// Stop a running geph5-client (e.g. before respawning with a new config).
+fn geph_stop(_app: &AppHandle) {
+    geph_kill_running();
+}
+
+/// Supervisor: keep the bundled geph5-client running whenever Geph is enabled and
+/// a secret is set. geph is spawned DETACHED (its own process group) so it SURVIVES
+/// a tray restart/reinstall — the tunnel the user's apps ride does NOT drop just
+/// because the menu-bar app was swapped. On each pass we ADOPT an already-running
+/// geph whose active config still matches, and only (re)spawn when geph is actually
+/// down or the config (exit/secret) changed. This ends the "reinstall -> restart
+/// your app" pain. geph5-client also retries/reconnects internally, so we never
+/// kill a live one mid-recovery (that churned broker sessions).
 async fn geph_supervisor(app: AppHandle) {
     loop {
-        // disabled (user prefers their own VPN) -> make sure ours is down
         if !geph_enabled(&app) {
+            geph_kill_running(); // user disabled Geph -> ensure ours is down
             tokio::time::sleep(Duration::from_secs(3)).await;
             continue;
         }
@@ -332,54 +529,47 @@ async fn geph_supervisor(app: AppHandle) {
             continue;
         };
         let exit = geph_field(&app, "exit").unwrap_or_else(|| "auto".into());
-        // write the active config next to geph.json
-        let cfg_path = match app.path().app_config_dir() {
-            Ok(dir) => {
-                let _ = fs::create_dir_all(&dir);
-                dir.join("geph-active.yaml")
-            }
-            Err(_) => {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
+        let Ok(dir) = app.path().app_config_dir() else {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
         };
-        let cache_path = app
-            .path()
-            .app_config_dir()
-            .map(|d| d.join("geph-cache.db").to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "/tmp/geph-cache.db".into());
-        let _ = fs::write(&cfg_path, geph_config_yaml(&secret, &exit, &cache_path));
+        let _ = fs::create_dir_all(&dir);
+        let cfg_path = dir.join("geph-active.yaml");
+        let cache_path = dir.join("geph-cache.db").to_string_lossy().into_owned();
+        let desired = geph_config_yaml(&secret, &exit, &cache_path);
 
-        let sidecar = match app.shell().sidecar("geph5-client") {
-            Ok(c) => c.args(["--config", &cfg_path.to_string_lossy()]),
-            Err(e) => {
-                eprintln!("geph sidecar missing: {e}");
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                continue;
-            }
-        };
-        let (mut rx, child) = match sidecar.spawn() {
-            Ok(pair) => pair,
-            Err(e) => {
-                eprintln!("geph spawn failed: {e}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
-        *app.state::<GephState>().child.lock().unwrap() = Some(child);
-        // Just keep it alive: geph5-client retries + reconnects INTERNALLY
-        // ("retrying now!") when the account/network is transiently not ready, so
-        // we only respawn if it actually EXITS. (An earlier health-check that
-        // killed a "stuck" geph was harmful — it interrupted geph's own recovery
-        // and each respawn was a new session attempt, keeping geph's broker in
-        // ACCOUNT-STATUS-NOT-READY. Don't churn sessions.)
-        while let Some(ev) = rx.recv().await {
-            if let CommandEvent::Terminated(_) = ev {
-                break;
-            }
+        // ADOPT: if a geph is already tunnelling on :9954 (e.g. it survived this
+        // tray's restart/reinstall), do NOT respawn it — respawning drops every
+        // connection riding the tunnel (the user's Claude app included). We only
+        // (re)spawn when :9954 is actually DOWN. A deliberate config change (exit
+        // or account) calls geph_stop(), which frees :9954, so the next pass here
+        // sees it down and respawns with the new config. (No config-equality check
+        // — it was too brittle and forced a churn on every launch.)
+        if geph_socks_alive() {
+            tokio::time::sleep(Duration::from_secs(6)).await;
+            continue;
         }
-        app.state::<GephState>().child.lock().unwrap().take();
-        tokio::time::sleep(Duration::from_secs(10)).await; // backoff before respawn — no churn
+
+        // geph is down -> spawn a fresh, DETACHED geph with the current config.
+        geph_kill_running();
+        let _ = fs::write(&cfg_path, &desired);
+        let Some(bin) = geph_bin_path() else {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            continue;
+        };
+        let spawned = Command::new(&bin)
+            .args(["--config", &cfg_path.to_string_lossy()])
+            .process_group(0) // detach: not in the tray's group -> survives tray exit
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Err(e) = spawned {
+            eprintln!("geph spawn failed: {e}");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        }
+        // Let it bind + start tunnelling before the next health check.
+        tokio::time::sleep(Duration::from_secs(8)).await;
     }
 }
 
@@ -414,10 +604,13 @@ pub fn run() {
                 .and_then(|v| v.get("exit").and_then(|x| x.as_str()).map(String::from))
                 .unwrap_or_else(|| "auto".into());
 
+            // Country chosen last time; old per-city values ("ca-toronto") collapse
+            // to their country for the checkmark.
+            let saved_cc = saved_exit.split('-').next().unwrap_or("auto").to_string();
             let mut exit_items: Vec<(String, CheckMenuItem<tauri::Wry>)> = Vec::new();
             let mk = |app: &tauri::App, val: &str, label: &str| {
                 CheckMenuItemBuilder::with_id(format!("exit:{val}"), label)
-                    .checked(val == saved_exit)
+                    .checked(val == saved_exit || val == saved_cc)
                     .build(app)
             };
             let auto = mk(app, "auto", "Automatic")?;
@@ -427,25 +620,55 @@ pub fn run() {
                 .checked(geph_enabled(app.handle()))
                 .build(app)?;
 
+            // LIVE country list from geph's control RPC (cached); no hardcoded catalog.
+            let exits_cache = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .map(|d| d.join("geph-exits.json"));
+            let catalog = exit_catalog(exits_cache);
+
             let mut gb = SubmenuBuilder::new(app, "Geph")
                 .item(&MenuItemBuilder::with_id(ID_ACCOUNT, "Account…").accelerator("CmdOrCtrl+,").build(app)?)
                 .item(&geph_enable)
                 .separator()
-                .item(&auto)
-                .separator()
-                .item(&MenuItemBuilder::with_id("lbl_core", "Core").enabled(false).build(app)?);
-            for (val, label) in EXITS_CORE {
-                let it = mk(app, val, label)?;
-                exit_items.push(((*val).into(), it.clone()));
-                gb = gb.item(&it);
-            }
-            gb = gb
-                .separator()
-                .item(&MenuItemBuilder::with_id("lbl_stream", "Streaming").enabled(false).build(app)?);
-            for (val, label) in EXITS_STREAM {
-                let it = mk(app, val, label)?;
-                exit_items.push(((*val).into(), it.clone()));
-                gb = gb.item(&it);
+                .item(&auto);
+            // Group cities by category under disabled section headers — Core first,
+            // then Streaming, then anything else — mirroring geph's own grouping.
+            // (Core = general exits; Streaming = Plus-only, tuned for Netflix-class
+            // services.) The category is live from net_status, never hardcoded.
+            let mut cats: Vec<String> = catalog.iter().map(|(_, _, c)| c.clone()).collect();
+            cats.sort();
+            cats.dedup();
+            cats.sort_by_key(|c| match c.as_str() {
+                "core" => (0u8, String::new()),
+                "streaming" => (1u8, String::new()),
+                other => (2u8, other.to_string()),
+            });
+            for cat in &cats {
+                let title = match cat.as_str() {
+                    "core" => "Core".to_string(),
+                    "streaming" => "Streaming".to_string(),
+                    other => {
+                        let mut ch = other.chars();
+                        match ch.next() {
+                            Some(f) => f.to_uppercase().collect::<String>() + ch.as_str(),
+                            None => other.to_string(),
+                        }
+                    }
+                };
+                gb = gb.separator().item(
+                    &MenuItemBuilder::with_id(format!("hdr_{cat}"), title)
+                        .enabled(false)
+                        .build(app)?,
+                );
+                for (val, label, c) in &catalog {
+                    if c == cat {
+                        let it = mk(app, val, label)?;
+                        exit_items.push((val.clone(), it.clone()));
+                        gb = gb.item(&it);
+                    }
+                }
             }
             let geph_menu = gb.build()?;
 
@@ -459,6 +682,7 @@ pub fn run() {
                 .item(&detail_item)
                 .separator()
                 .item(&geph_menu)
+                .item(&MenuItemBuilder::with_id(ID_TGWS, "Connect Telegram Proxy").build(app)?)
                 .item(&launch)
                 .item(&MenuItemBuilder::with_id(ID_RESTART, "Restart Proxy").build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_LOG, "Open Log").build(app)?)
@@ -521,6 +745,21 @@ pub fn run() {
                             let app = app.clone();
                             tauri::async_runtime::spawn(async move { check_for_updates(app).await });
                         }
+                        ID_TGWS => {
+                            // Open the tg://proxy link the daemon published -> Telegram
+                            // Desktop pops "Enable this proxy?" (one click, no manual entry).
+                            match std::fs::read_to_string(TGWS_LINK_PATH) {
+                                Ok(link) if link.trim().starts_with("tg://") => {
+                                    let _ = Command::new("/usr/bin/open").arg(link.trim()).spawn();
+                                }
+                                _ => {
+                                    let _ = Command::new("/usr/bin/osascript")
+                                        .arg("-e")
+                                        .arg("display dialog \"Telegram proxy is still starting — try again in a few seconds.\" with title \"Slipstream\" buttons {\"OK\"} default button \"OK\" with icon note")
+                                        .spawn();
+                                }
+                            }
+                        }
                         ID_QUIT => app.exit(0),
                         _ => {}
                     }
@@ -563,9 +802,17 @@ pub fn run() {
                 .args(["-f", "Slipstream.app/Contents/MacOS/geph5-client"])
                 .status();
 
-            // geph supervisor: runs the bundled geph5-client whenever a secret is set
-            app.manage(GephState::default());
+            // geph supervisor: runs the bundled geph5-client (detached) whenever a
+            // secret is set; survives tray restarts, adopts an already-running one.
             tauri::async_runtime::spawn(geph_supervisor(app.handle().clone()));
+            // Populate the live exit catalog cache once geph's control RPC is up,
+            // so the next tray build shows real countries instead of the fallback.
+            refresh_exit_cache(
+                app.path()
+                    .app_config_dir()
+                    .ok()
+                    .map(|d| d.join("geph-exits.json")),
+            );
             Ok(())
         })
         .build(tauri::generate_context!())
