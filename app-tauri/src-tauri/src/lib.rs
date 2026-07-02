@@ -75,6 +75,7 @@ fn tr(en: &str) -> String {
         "Core" => "Основные",
         "Streaming" => "Стриминг",
         "Connect Telegram Proxy" => "Подключить Telegram-прокси",
+        "System Proxy (all apps)" => "Системный прокси (все приложения)",
         "Launch at Login" => "Запускать при входе",
         "Restart Proxy" => "Перезапустить прокси",
         "Open Log" => "Открыть лог",
@@ -93,6 +94,7 @@ const ID_LOG: &str = "open_log";
 const ID_UPDATE: &str = "check_updates";
 const ID_QUIT: &str = "quit";
 const ID_TGWS: &str = "tgws_open";
+const ID_SYSPROXY: &str = "system_proxy";
 // Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
 // tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
 // in one click (no manual host/port/secret entry).
@@ -125,6 +127,30 @@ fn run_admin(shell: &str) {
     let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("do shell script \"{escaped}\" with administrator privileges");
     let _ = Command::new("/usr/bin/osascript").arg("-e").arg(script).spawn();
+}
+
+/// Point macOS's system-wide SOCKS proxy at Slipstream's local geph SOCKS
+/// (127.0.0.1:GEPH_SOCKS_PORT), or turn it off. Configure once here and every
+/// proxy-aware app (Chrome, Claude, VS Code, JetBrains via "use system proxy")
+/// follows — no per-app setup. Runs on all enabled network services. Changing
+/// network settings needs admin, so it triggers one password prompt.
+/// `grep -v '[*]'` drops disabled services (marked with `*`); `tail -n +2` drops
+/// the header line — no backslashes so run_admin's escaping stays simple.
+fn set_system_proxy(on: bool) {
+    let cmd = if on {
+        format!(
+            "networksetup -listallnetworkservices | tail -n +2 | grep -v '[*]' | \
+             while IFS= read -r s; do \
+             networksetup -setsocksfirewallproxy \"$s\" 127.0.0.1 {GEPH_SOCKS_PORT}; \
+             networksetup -setsocksfirewallproxystate \"$s\" on; done"
+        )
+    } else {
+        "networksetup -listallnetworkservices | tail -n +2 | grep -v '[*]' | \
+         while IFS= read -r s; do \
+         networksetup -setsocksfirewallproxystate \"$s\" off; done"
+            .to_string()
+    };
+    run_admin(&cmd);
 }
 
 /// First launch: if the root daemon isn't installed yet, install it from the
@@ -770,6 +796,12 @@ pub fn run() {
                 .checked(autostart_on)
                 .build(app)?;
             let version_label = if ui_ru() { "Версия 0.1" } else { "Version 0.1" };
+            let sysproxy_on = geph_field(app.handle(), "system_proxy")
+                .map(|s| s == "1")
+                .unwrap_or(false);
+            let sysproxy = CheckMenuItemBuilder::with_id(ID_SYSPROXY, tr("System Proxy (all apps)"))
+                .checked(sysproxy_on)
+                .build(app)?;
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
@@ -777,6 +809,7 @@ pub fn run() {
                 .separator()
                 .item(&geph_menu)
                 .item(&MenuItemBuilder::with_id(ID_TGWS, tr("Connect Telegram Proxy")).build(app)?)
+                .item(&sysproxy)
                 .item(&launch)
                 .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
@@ -794,6 +827,7 @@ pub fn run() {
 
             let launch_h = launch.clone();
             let enable_h = geph_enable.clone();
+            let sysproxy_h = sysproxy.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -824,6 +858,16 @@ pub fn run() {
                                 geph_stop(app); // free the account so the user's own VPN/Geph can connect
                             }
                             // enabling -> the supervisor starts geph next loop (secret permitting)
+                        }
+                        ID_SYSPROXY => {
+                            // Toggle the macOS system-wide SOCKS proxy to our geph
+                            // SOCKS so every app follows without per-app setup.
+                            let now = !geph_field(app, "system_proxy")
+                                .map(|s| s == "1")
+                                .unwrap_or(false);
+                            set_system_proxy(now);
+                            geph_config_set(app, "system_proxy", if now { "1" } else { "0" });
+                            let _ = sysproxy_h.set_checked(now);
                         }
                         ID_LAUNCH => {
                             let mgr = app.autolaunch();
