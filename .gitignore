@@ -9,6 +9,7 @@ spike/.buildvenv/
 spike/build/
 spike/dist/
 spike/*.spec
+!spike/slipstreamd.spec
 
 .DS_Store
 **/.DS_Store

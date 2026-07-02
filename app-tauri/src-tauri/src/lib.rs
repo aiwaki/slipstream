@@ -36,6 +36,7 @@ const GEPH_CONTROL_PORT: u16 = 9955;
 const STATUS_PATH: &str = "/var/run/slipstream.status";
 const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
+const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 
 const ID_ACCOUNT: &str = "geph_account";
 const ID_GEPH_ENABLE: &str = "geph_enable";
@@ -77,6 +78,26 @@ fn run_admin(shell: &str) {
     let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("do shell script \"{escaped}\" with administrator privileges");
     let _ = Command::new("/usr/bin/osascript").arg("-e").arg(script).spawn();
+}
+
+/// First launch: if the root daemon isn't installed yet, install it from the
+/// bundled self-contained `slipstreamd` (a PyInstaller onedir — scapy, crypto and
+/// the Telegram proxy all inside, no system Python needed) with a single admin
+/// prompt. That's the only thing the user is ever asked to allow by hand. No-op
+/// once the daemon is installed, or in dev builds that don't ship the frozen
+/// daemon (there you install it via `sudo python3 spike/tproxy.py --install`).
+fn ensure_daemon_installed(app: &AppHandle) {
+    if std::path::Path::new(LAUNCHD_PLIST).exists() {
+        return; // already installed
+    }
+    let Ok(res) = app.path().resource_dir() else {
+        return;
+    };
+    let bin = res.join("slipstreamd").join("slipstreamd");
+    if !bin.exists() {
+        return; // dev build without the bundled daemon
+    }
+    run_admin(&format!("'{}' --install", bin.to_string_lossy()));
 }
 
 /// Native secret-entry dialog (the same NSAlert look as TG WS Proxy). Pre-fills
@@ -589,6 +610,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // First launch: self-install the background service (one password
+            // prompt). Everything after this is automatic.
+            ensure_daemon_installed(app.handle());
 
             let state_item = MenuItemBuilder::with_id("state", "…").enabled(false).build(app)?;
             let detail_item = MenuItemBuilder::with_id("detail", " ").enabled(false).build(app)?;
