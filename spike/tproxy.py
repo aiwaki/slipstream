@@ -911,15 +911,23 @@ def _geph_conn_info_sessions(control_port, timeout=3):
 
 
 def _geph_live(socks_port, timeout=3):
-    """Liveness for a geph SOCKS port: prefer conn_info (no stream opened -> no
-    false-down under load); only if the control RPC is unreachable fall back to the
-    SOCKS-CONNECT test."""
+    """Liveness for a geph SOCKS port via conn_info — no stream opened, so no
+    false-down under load. If conn_info doesn't answer in time we do NOT fall back
+    to the SOCKS-CONNECT probe: that fresh-stream open false-fails under load and
+    was the whole reason for moving off it (it caused the residual flap). Instead,
+    if the control port still accepts a TCP connection geph is alive and merely
+    busy -> up; only a refused control port is a real "down"."""
     ctl = GEPH_CONTROL.get(socks_port)
-    if ctl is not None:
-        n = _geph_conn_info_sessions(ctl, timeout)
-        if n is not None:
-            return n > 0
-    return _geph_socks_works(socks_port, timeout)
+    if ctl is None:
+        return _geph_socks_works(socks_port, timeout)  # env port override, no control mapping
+    n = _geph_conn_info_sessions(ctl, timeout)
+    if n is not None:
+        return n > 0
+    try:
+        socket.create_connection(("127.0.0.1", ctl), timeout=1).close()
+        return True   # control bound + reachable, conn_info just slow -> alive
+    except OSError:
+        return False  # control refused -> geph really down
 
 
 def _geph_socks_works(port, timeout=2.5):
