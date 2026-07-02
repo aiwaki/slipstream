@@ -1243,6 +1243,13 @@ def do_install(port):
         os.makedirs(INSTALL_DIR, exist_ok=True)
         script = os.path.join(INSTALL_DIR, "tproxy.py")
         shutil.copy(os.path.abspath(__file__), script)
+        # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
+        # it (otherwise Telegram falls back to plain MTProto passthrough).
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
+        if os.path.isdir(_src_proxy):
+            shutil.rmtree(os.path.join(INSTALL_DIR, "proxy"), ignore_errors=True)
+            shutil.copytree(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
         venv = os.path.join(INSTALL_DIR, "venv")
         py = os.path.join(venv, "bin", "python3")
         if not os.path.exists(py):
@@ -1251,11 +1258,14 @@ def do_install(port):
             if _run(base, "-m", "venv", venv).returncode != 0:
                 print("venv create failed", file=sys.stderr)
                 return
+            # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
+            # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
+            # libcrypto in an unsafe way") -> the daemon crash-loops. Install both.
             r = _run(py, "-m", "pip", "install", "--quiet",
-                     "--disable-pip-version-check", "scapy")
+                     "--disable-pip-version-check", "scapy", "cryptography")
             if r.returncode != 0:
-                print("scapy install failed (pypi reachable?):\n" + r.stderr[-400:],
-                      file=sys.stderr)
+                print("scapy/cryptography install failed (pypi reachable?):\n"
+                      + r.stderr[-400:], file=sys.stderr)
                 return
         prog_args = [py, script, "--port", str(port)]
         uninstall_hint = f"sudo {py} {script} --uninstall"
