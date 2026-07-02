@@ -113,8 +113,12 @@ jobs:
             # crates.io is the only release channel (no git tags); cargo install
             # downloads + builds the published crate. --no-track keeps it stateless;
             # --force lets a re-run overwrite a cached install root.
+            # --features aws_lambda: the GUI's fast broker path (aws-sdk-lambda
+            # bouncer). Without it, heavy broker ops (register_user_secret, and
+            # slower connect-token) fall to the domain-fronted transport and can
+            # time out — it's what makes in-app account auto-registration work.
             cargo install geph5-client --version "$VER" --target "$t" \
-              --root "install-$t" --no-track --force
+              --root "install-$t" --no-track --force --features aws_lambda
             bins+=("install-$t/bin/geph5-client")
             echo "::endgroup::"
           done
