@@ -1,8 +1,9 @@
 <div align="center">
 
-# 🌊 Slipstream
-
-**Quietly puts the internet back the way it should be — on your Mac, with nothing to configure.**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/slipstream-banner-dark.png">
+  <img alt="Slipstream — quiet censorship bypass for macOS" src="docs/images/slipstream-banner-light.png" width="100%">
+</picture>
 
 [Русский](README.md) · **English**
 
