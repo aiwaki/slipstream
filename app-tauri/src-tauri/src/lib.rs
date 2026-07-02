@@ -38,6 +38,53 @@ const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 
+/// Is the system UI language Russian? Cached — the locale doesn't change while we
+/// run. Most users are in RU, so the tray speaks Russian when the Mac does.
+fn ui_ru() -> bool {
+    use std::sync::OnceLock;
+    static RU: OnceLock<bool> = OnceLock::new();
+    *RU.get_or_init(|| {
+        let read = |key: &str| -> String {
+            Command::new("defaults")
+                .args(["read", "-g", key])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default()
+        };
+        // AppleLanguages[0] is the preferred UI language — more accurate than the
+        // region locale. Its `defaults` form is a plist array: ("ru-RU", ...).
+        let langs = read("AppleLanguages");
+        if let Some(first) = langs.split('"').nth(1) {
+            return first.to_lowercase().starts_with("ru");
+        }
+        read("AppleLocale").trim().to_lowercase().starts_with("ru")
+    })
+}
+
+/// Localize a tray label. English is the source; Russian strings are returned
+/// when the system is Russian. Anything not listed falls back to English.
+fn tr(en: &str) -> String {
+    if !ui_ru() {
+        return en.to_string();
+    }
+    match en {
+        "Account…" => "Аккаунт…",
+        "Enable Geph" => "Включить Geph",
+        "Automatic" => "Автоматически",
+        "Core" => "Основные",
+        "Streaming" => "Стриминг",
+        "Connect Telegram Proxy" => "Подключить Telegram-прокси",
+        "Launch at Login" => "Запускать при входе",
+        "Restart Proxy" => "Перезапустить прокси",
+        "Open Log" => "Открыть лог",
+        "Check for Updates…" => "Проверить обновления…",
+        "Quit Slipstream" => "Выйти из Slipstream",
+        other => other,
+    }
+    .to_string()
+}
+
 const ID_ACCOUNT: &str = "geph_account";
 const ID_GEPH_ENABLE: &str = "geph_enable";
 const ID_LAUNCH: &str = "launch_at_login";
@@ -105,10 +152,15 @@ fn ensure_daemon_installed(app: &AppHandle) {
 /// like geph's own Account screen. Returns the entered text, or None if cancelled.
 fn prompt_secret(current: &str) -> Option<String> {
     let cur = current.replace('\\', "\\\\").replace('"', "\\\"");
+    let (msg, cancel) = if ui_ru() {
+        ("Ключ аккаунта Geph", "Отмена")
+    } else {
+        ("Geph account secret", "Cancel")
+    };
     let script = format!(
-        "display dialog \"Geph account secret\" with title \"Slipstream\" \
+        "display dialog \"{msg}\" with title \"Slipstream\" \
          default answer \"{cur}\" \
-         buttons {{\"Cancel\", \"OK\"}} default button \"OK\""
+         buttons {{\"{cancel}\", \"OK\"}} default button \"OK\" cancel button \"{cancel}\""
     );
     let out = Command::new("/usr/bin/osascript").arg("-e").arg(&script).output().ok()?;
     if !out.status.success() {
@@ -152,19 +204,35 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
     let learned = get_i64("hosts_learned");
     let geph = get_str("geph", "off");
 
+    let ru = ui_ru();
     let (title, detail) = match state.as_str() {
         "active" => {
-            let mut d = format!("{conns} connections · {learned} hosts learned");
+            let mut d = if ru {
+                format!("{conns} соединений · выучено хостов: {learned}")
+            } else {
+                format!("{conns} connections · {learned} hosts learned")
+            };
             if geph == "up" {
-                d.push_str(" · Geph tunnel on");
+                d.push_str(if ru { " · Geph-туннель включён" } else { " · Geph tunnel on" });
             }
-            ("Slipstream — Active".to_string(), d)
+            (
+                (if ru { "Slipstream — активен" } else { "Slipstream — Active" }).to_string(),
+                d,
+            )
         }
         "dormant" => (
-            "Slipstream — Dormant".to_string(),
-            "VPN is up; the VPN handles bypass".to_string(),
+            (if ru { "Slipstream — спит" } else { "Slipstream — Dormant" }).to_string(),
+            (if ru {
+                "VPN включён; обходом занимается он"
+            } else {
+                "VPN is up; the VPN handles bypass"
+            })
+            .to_string(),
         ),
-        _ => ("Slipstream — Off".to_string(), String::new()),
+        _ => (
+            (if ru { "Slipstream — выключен" } else { "Slipstream — Off" }).to_string(),
+            String::new(),
+        ),
     };
     let _ = state_item.set_text(&title);
     let _ = detail_item.set_text(if detail.is_empty() { " " } else { &detail });
@@ -638,10 +706,10 @@ pub fn run() {
                     .checked(val == saved_exit || val == saved_cc)
                     .build(app)
             };
-            let auto = mk(app, "auto", "Automatic")?;
+            let auto = mk(app, "auto", &tr("Automatic"))?;
             exit_items.push(("auto".into(), auto.clone()));
 
-            let geph_enable = CheckMenuItemBuilder::with_id(ID_GEPH_ENABLE, "Enable Geph")
+            let geph_enable = CheckMenuItemBuilder::with_id(ID_GEPH_ENABLE, tr("Enable Geph"))
                 .checked(geph_enabled(app.handle()))
                 .build(app)?;
 
@@ -654,7 +722,7 @@ pub fn run() {
             let catalog = exit_catalog(exits_cache);
 
             let mut gb = SubmenuBuilder::new(app, "Geph")
-                .item(&MenuItemBuilder::with_id(ID_ACCOUNT, "Account…").accelerator("CmdOrCtrl+,").build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_ACCOUNT, tr("Account…")).accelerator("CmdOrCtrl+,").build(app)?)
                 .item(&geph_enable)
                 .separator()
                 .item(&auto);
@@ -672,8 +740,8 @@ pub fn run() {
             });
             for cat in &cats {
                 let title = match cat.as_str() {
-                    "core" => "Core".to_string(),
-                    "streaming" => "Streaming".to_string(),
+                    "core" => tr("Core"),
+                    "streaming" => tr("Streaming"),
                     other => {
                         let mut ch = other.chars();
                         match ch.next() {
@@ -698,23 +766,24 @@ pub fn run() {
             let geph_menu = gb.build()?;
 
             let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
-            let launch = CheckMenuItemBuilder::with_id(ID_LAUNCH, "Launch at Login")
+            let launch = CheckMenuItemBuilder::with_id(ID_LAUNCH, tr("Launch at Login"))
                 .checked(autostart_on)
                 .build(app)?;
+            let version_label = if ui_ru() { "Версия 0.1" } else { "Version 0.1" };
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
                 .item(&detail_item)
                 .separator()
                 .item(&geph_menu)
-                .item(&MenuItemBuilder::with_id(ID_TGWS, "Connect Telegram Proxy").build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_TGWS, tr("Connect Telegram Proxy")).build(app)?)
                 .item(&launch)
-                .item(&MenuItemBuilder::with_id(ID_RESTART, "Restart Proxy").build(app)?)
-                .item(&MenuItemBuilder::with_id(ID_LOG, "Open Log").build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
                 .separator()
-                .item(&MenuItemBuilder::with_id(ID_UPDATE, "Check for Updates…").build(app)?)
-                .item(&MenuItemBuilder::with_id("version", "Version 0.1").enabled(false).build(app)?)
-                .item(&MenuItemBuilder::with_id(ID_QUIT, "Quit Slipstream").accelerator("CmdOrCtrl+Q").build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?)
+                .item(&MenuItemBuilder::with_id("version", version_label).enabled(false).build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream")).accelerator("CmdOrCtrl+Q").build(app)?)
                 .build()?;
 
             // ---- tray --------------------------------------------------------
@@ -778,9 +847,14 @@ pub fn run() {
                                     let _ = Command::new("/usr/bin/open").arg(link.trim()).spawn();
                                 }
                                 _ => {
+                                    let msg = if ui_ru() {
+                                        "Telegram-прокси ещё запускается — попробуй через пару секунд."
+                                    } else {
+                                        "Telegram proxy is still starting — try again in a few seconds."
+                                    };
                                     let _ = Command::new("/usr/bin/osascript")
                                         .arg("-e")
-                                        .arg("display dialog \"Telegram proxy is still starting — try again in a few seconds.\" with title \"Slipstream\" buttons {\"OK\"} default button \"OK\" with icon note")
+                                        .arg(format!("display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"OK\"}} default button \"OK\" with icon note"))
                                         .spawn();
                                 }
                             }
