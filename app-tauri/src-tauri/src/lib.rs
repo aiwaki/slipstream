@@ -595,20 +595,17 @@ fn geph_bin_path() -> Option<std::path::PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join("geph5-client"))
 }
 
-/// Cheap liveness: is geph's SOCKS5 up on GEPH_SOCKS_PORT and speaking the no-auth
-/// handshake? Used to ADOPT an already-running geph rather than respawn it.
+/// Cheap liveness: is geph's SOCKS5 listener up on GEPH_SOCKS_PORT? A plain TCP
+/// connect is enough to ADOPT an already-running geph (its active config already
+/// matched). A full SOCKS handshake here can transiently time out under load and
+/// cause a needless respawn — which defeats the whole survive-across-restart
+/// design — so we deliberately keep this to a connect check.
 fn geph_socks_alive() -> bool {
-    use std::io::{Read, Write};
-    let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", GEPH_SOCKS_PORT)) else {
-        return false;
-    };
-    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
-    let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
-    if s.write_all(&[0x05, 0x01, 0x00]).is_err() {
-        return false;
-    }
-    let mut r = [0u8; 2];
-    s.read_exact(&mut r).is_ok() && r[0] == 0x05
+    std::net::TcpStream::connect_timeout(
+        &(std::net::Ipv4Addr::LOCALHOST, GEPH_SOCKS_PORT).into(),
+        Duration::from_secs(1),
+    )
+    .is_ok()
 }
 
 /// Kill the geph5-client WE launched (matched by our unique config path). Used
