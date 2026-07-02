@@ -76,6 +76,7 @@ fn tr(en: &str) -> String {
         "Streaming" => "Стриминг",
         "Connect Telegram Proxy" => "Подключить Telegram-прокси",
         "System Proxy (all apps)" => "Системный прокси (все приложения)",
+        "Proxy for apps" => "Прокси для приложений",
         "Launch at Login" => "Запускать при входе",
         "Restart Proxy" => "Перезапустить прокси",
         "Open Log" => "Открыть лог",
@@ -136,7 +137,10 @@ fn run_admin(shell: &str) {
 /// network settings needs admin, so it triggers one password prompt.
 /// `grep -v '[*]'` drops disabled services (marked with `*`); `tail -n +2` drops
 /// the header line — no backslashes so run_admin's escaping stays simple.
-fn set_system_proxy(on: bool) {
+/// Returns true only if the admin command actually ran (osascript exits non-zero
+/// when the user cancels the password prompt) — so the caller can revert the menu
+/// checkmark instead of falsely showing "on".
+fn set_system_proxy(on: bool) -> bool {
     let cmd = if on {
         format!(
             "networksetup -listallnetworkservices | tail -n +2 | grep -v '[*]' | \
@@ -150,7 +154,16 @@ fn set_system_proxy(on: bool) {
          networksetup -setsocksfirewallproxystate \"$s\" off; done"
             .to_string()
     };
-    run_admin(&cmd);
+    // Block on the admin prompt (unlike run_admin's fire-and-forget) so we know the
+    // real outcome. osascript returns non-zero if the user cancels.
+    let escaped = cmd.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!("do shell script \"{escaped}\" with administrator privileges");
+    Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// First launch: if the root daemon isn't installed yet, install it from the
@@ -799,14 +812,19 @@ pub fn run() {
             let sysproxy = CheckMenuItemBuilder::with_id(ID_SYSPROXY, tr("System Proxy (all apps)"))
                 .checked(sysproxy_on)
                 .build(app)?;
+            // Group the app-proxy convenience actions into their own submenu (like
+            // Geph) so the top level stays clean.
+            let proxy_menu = SubmenuBuilder::new(app, tr("Proxy for apps"))
+                .item(&MenuItemBuilder::with_id(ID_TGWS, tr("Connect Telegram Proxy")).build(app)?)
+                .item(&sysproxy)
+                .build()?;
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
                 .item(&detail_item)
                 .separator()
                 .item(&geph_menu)
-                .item(&MenuItemBuilder::with_id(ID_TGWS, tr("Connect Telegram Proxy")).build(app)?)
-                .item(&sysproxy)
+                .item(&proxy_menu)
                 .item(&launch)
                 .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
@@ -858,13 +876,19 @@ pub fn run() {
                         }
                         ID_SYSPROXY => {
                             // Toggle the macOS system-wide SOCKS proxy to our geph
-                            // SOCKS so every app follows without per-app setup.
-                            let now = !geph_field(app, "system_proxy")
+                            // SOCKS so every app follows without per-app setup. The
+                            // CheckMenuItem already flipped its own checkmark on click;
+                            // only KEEP it if the admin command actually ran, else
+                            // revert (e.g. the user cancelled the password prompt).
+                            let want = !geph_field(app, "system_proxy")
                                 .map(|s| s == "1")
                                 .unwrap_or(false);
-                            set_system_proxy(now);
-                            geph_config_set(app, "system_proxy", if now { "1" } else { "0" });
-                            let _ = sysproxy_h.set_checked(now);
+                            if set_system_proxy(want) {
+                                geph_config_set(app, "system_proxy", if want { "1" } else { "0" });
+                                let _ = sysproxy_h.set_checked(want);
+                            } else {
+                                let _ = sysproxy_h.set_checked(!want); // revert
+                            }
                         }
                         ID_LAUNCH => {
                             let mgr = app.autolaunch();
@@ -953,6 +977,26 @@ pub fn run() {
                     .ok()
                     .map(|d| d.join("geph-exits.json")),
             );
+
+            // First run only: once the bundled tg-ws-proxy has published its
+            // tg://proxy link, auto-open it so Telegram Desktop prompts to enable
+            // the proxy (Telegram requires that confirmation — we can't set it
+            // silently). A marker makes this a one-time thing.
+            if geph_field(app.handle(), "tgws_prompted").as_deref() != Some("1") {
+                let app_h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    for _ in 0..40 {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        if let Ok(link) = fs::read_to_string(TGWS_LINK_PATH) {
+                            if link.trim().starts_with("tg://") {
+                                let _ = Command::new("/usr/bin/open").arg(link.trim()).spawn();
+                                geph_config_set(&app_h, "tgws_prompted", "1");
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
