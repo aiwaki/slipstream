@@ -17,7 +17,7 @@
     "active": true,
     "targets": ["app", "dmg"],
     "icon": ["icons/icon.icns"],
-    "resources": ["icons/*.png"],
+    "resources": ["icons/*.png", "slipstreamd/**/*"],
     "externalBin": ["binaries/geph5-client"],
     "macOS": {
       "minimumSystemVersion": "13.0"

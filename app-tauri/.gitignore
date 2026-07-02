@@ -4,3 +4,4 @@ src-tauri/gen/
 src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
 src-tauri/icons/Slipstream.iconset/
+src-tauri/slipstreamd/
