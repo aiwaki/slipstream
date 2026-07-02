@@ -41,7 +41,9 @@ jobs:
           # geph-official/geph5 does NOT publish geph5-client-v* git tags (it tags
           # individual workspace crates like sillad-v*). crates.io is the source of
           # truth and what `cargo install` builds, so resolve the version there.
-          ver=$(curl -fsSL "https://crates.io/api/v1/crates/geph5-client" \
+          # crates.io returns 403 without a descriptive User-Agent (their policy).
+          ver=$(curl -fsSL -A "slipstream-ci (+https://github.com/aiwaki/slipstream)" \
+            "https://crates.io/api/v1/crates/geph5-client" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["crate"]["max_version"])')
           echo "Latest crates.io version: ${ver:-<none>}"
           [ -n "$ver" ] || { echo "no geph5-client version found on crates.io"; exit 1; }
