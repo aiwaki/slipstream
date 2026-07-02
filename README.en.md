@@ -80,19 +80,15 @@ existing open network; the desync and Telegram proxy are entirely local.
 
 ## Install
 
-1. **Get the app** — grab `Slipstream.app` from
-   [Releases](https://github.com/aiwaki/slipstream/releases), or build it (below).
-2. **Install the background helper** (one time, needs your password — it sets up
-   the transparent intercept):
-   ```bash
-   sudo python3 spike/tproxy.py --install
-   ```
-3. **Open Slipstream** (it lives in the menu bar). Then:
+1. Download `Slipstream.app` from [Releases](https://github.com/aiwaki/slipstream/releases) and drag it to Applications.
+2. Launch it. On first run it **asks for your password once** — to install the
+   background service. After that it does everything itself.
+3. Open the menu-bar menu:
    - **Geph → Account…** — paste your Geph account secret (a free account works).
    - **Geph → pick an exit** — a city, or **Automatic**.
    - **Connect Telegram Proxy** — points Telegram Desktop at the bundled proxy.
 
-That's it. It stays out of your way from here.
+That's it. Nothing else to do by hand.
 
 ## Build from source
 
@@ -102,7 +98,8 @@ Requires Rust, Node, Python 3, and the Xcode command-line tools.
 # menu-bar app
 cd app-tauri && npm install && npm run tauri build
 
-# background helper (transparent desync + routing daemon)
+# background service (desync + routing) — the app installs it for you,
+# but during development you can install it manually:
 sudo python3 spike/tproxy.py --install
 ```
 
