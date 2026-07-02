@@ -2,9 +2,11 @@
 
 # 🌊 Slipstream
 
-**Quietly puts the internet back the way it should be — on your Mac, with nothing to configure.**
+**Тихо возвращает интернет таким, каким он должен быть — прямо на вашем Mac, без единой настройки.**
 
-[![platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-000000?logo=apple)](#install)
+**Русский** · [English](README.en.md)
+
+[![platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-000000?logo=apple)](#установка)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![build-geph](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml)
 
@@ -12,125 +14,118 @@
 
 ---
 
-Slipstream is a menu-bar app for macOS that transparently undoes the things a
-censoring ISP does to your connection — the throttling, the resets, the poisoned
-DNS, the geo-blocks — **without turning your whole machine into a VPN.** You
-install one app, sign into a Geph account, and forget it's there. No browser
-extensions, no per-app proxy fiddling, no manual on/off in normal use.
+Slipstream — приложение в строке меню macOS, которое **прозрачно чинит** то, что
+провайдер делает с вашим соединением: троттлинг, обрывы, подмену DNS,
+гео-блокировки. И при этом **не превращает весь компьютер в VPN.** Ставите одно
+приложение, входите в аккаунт Geph — и забываете о нём. Никаких расширений,
+ручных прокси в каждом приложении, никаких кнопок «вкл/выкл» в обычной жизни.
 
-It's built for the Russian TSPU environment specifically, but the ideas apply to
-any DPI-based censorship.
+Сделано под российский TSPU, но подход работает против любой DPI-цензуры.
 
-## What it fixes
+> [!NOTE]
+> **Статус:** ранняя версия. macOS на Apple Silicon, заточено под сети РФ.
 
-- **Discord** — chat, servers, CDN, and **voice** (the UDP part most tools drop).
-- **YouTube** — no more mid-video stalls from throttling.
-- **ChatGPT & Claude** — services that hard-refuse Russian IPs are routed out
-  through a real exit abroad, so they just work.
-- **Telegram** — Desktop rides a bundled local proxy past the data-center-IP
-  block; one click to enable.
-- **Most blocked / throttled / DNS-poisoned sites** — handled automatically.
+## Что чинит
 
-## Why it feels different
+- **Discord** — чат, серверы, CDN и **голос** (UDP-часть, которую большинство инструментов теряют).
+- **YouTube** — без подвисаний от троттлинга.
+- **ChatGPT и Claude** — сервисы, которые в лоб отказывают российским IP, идут через реальный выход за границей и просто работают.
+- **Telegram** — Desktop идёт через встроенный локальный прокси мимо блокировки по IP дата-центров; включается одной кнопкой.
+- **Большинство заблокированных / замедленных / отравленных по DNS сайтов** — автоматически.
 
-**It is not a full-tunnel VPN.** Slipstream is a *split-tunnel* by design:
+## Почему ощущается иначе
 
-- Your Russian traffic (banking, gov services, local sites) stays **direct and
-  fast** — it never leaves the country.
-- Sites the ISP merely *breaks* (DPI throttle / reset / DNS poison) are fixed
-  **locally**, in place — your IP stays Russian, the breakage just stops.
-- Only the handful of services that **geo-block Russian IPs outright** take the
-  encrypted detour abroad.
+**Это не full-tunnel VPN.** Slipstream — это *раздельный туннель* (split-tunnel) by design:
 
-So it's fast where it can be, private where it must be, and quiet the whole time.
+- Российский трафик (банки, госуслуги, локальные сайты) идёт **напрямую и быстро** — он вообще не покидает страну.
+- Сайты, которые провайдер просто *ломает* (DPI-троттлинг / reset / подмена DNS), чинятся **локально, на месте** — ваш IP остаётся российским, ломается только сама блокировка.
+- И только те немногие сервисы, что **гео-блокируют российские IP целиком**, идут в зашифрованный обход за границу.
 
-## How it works
+Быстро там, где можно; приватно там, где нужно; и тихо всё время.
 
-Three independent planes, kept strictly separate:
+## Как это работает
+
+Три независимых плоскости, строго раздельные:
 
 ```
-                 ┌─────────────────────────── your Mac ───────────────────────────┐
-   any app  ───► │  transparent :443 intercept (pf)                                │
-   (browser,     │        │                                                        │
-   Discord,      │        ├─ Russian host?      → straight out, untouched          │
-   Claude…)      │        ├─ DPI-blocked host?  → 1) DESYNC ENGINE (local)         │
-                 │        └─ geo-blocked host?  → 2) GEPH TUNNEL (exit abroad)      │
-                 │  Telegram Desktop ─────────► 3) TG-WS PROXY (local MTProto)      │
+                 ┌─────────────────────────── ваш Mac ────────────────────────────┐
+   любое         │  прозрачный перехват :443 (pf)                                  │
+   приложение ─► │        │                                                        │
+   (браузер,     │        ├─ российский хост? → напрямую, без изменений            │
+   Discord,      │        ├─ DPI-блок?        → 1) ДЕСИНК-ДВИЖОК (локально)         │
+   Claude…)      │        └─ гео-блок?        → 2) ТУННЕЛЬ GEPH (выход за границу)  │
+                 │  Telegram Desktop ───────► 3) TG-WS-ПРОКСИ (локальный MTProto)   │
                  └────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Desync engine** *(local, no server)* — beats the DPI box with TLS-record
-   fragmentation and low-TTL decoy packets (zapret / byedpi-style), plus DoH to
-   sidestep DNS poisoning and a dedicated UDP plane for Discord voice. Your IP
-   never changes.
-2. **Geph tunnel** — the open-source [Geph](https://geph.io) network
-   (`geph5-client`, bundled) carries only the geo-blocked services out through an
-   exit country you pick. Everything else stays off the tunnel.
-3. **Telegram proxy** — [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)
-   (bundled) runs a local MTProto proxy that tunnels Telegram over WebSocket,
-   getting past the block on Telegram's data-center IPs.
+1. **Десинк-движок** *(локально, без сервера)* — обходит DPI-коробку фрагментацией
+   TLS-записей и поддельными пакетами с низким TTL (в духе zapret / byedpi), плюс
+   DoH против подмены DNS и отдельная UDP-плоскость для голоса Discord. Ваш IP не меняется.
+2. **Туннель Geph** — открытая сеть [Geph](https://geph.io) (`geph5-client`,
+   встроен) выводит за границу **только** гео-заблокированные сервисы, через
+   выбранную вами страну. Всё остальное туннель не трогает.
+3. **Telegram-прокси** — [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)
+   (встроен) поднимает локальный MTProto-прокси, который гонит Telegram через
+   WebSocket мимо блокировки IP дата-центров.
 
-Nothing runs on our servers — there are none. Geph is your own account on an
-existing open network; the desync and Telegram proxy are entirely local.
+Ничего не работает на наших серверах — их нет. Geph — это ваш аккаунт в уже
+существующей открытой сети; десинк и Telegram-прокси целиком локальны.
 
-## Install
+## Установка
 
-> **Status:** early days. macOS on Apple Silicon, tuned for RU networks.
-
-1. **Get the app** — grab `Slipstream.app` from
-   [Releases](https://github.com/aiwaki/slipstream/releases), or build it (below).
-2. **Install the background helper** (one time, needs your password — it sets up
-   the transparent intercept):
+1. **Возьмите приложение** — `Slipstream.app` из
+   [Releases](https://github.com/aiwaki/slipstream/releases), либо соберите сами (ниже).
+2. **Поставьте фоновый помощник** (один раз, попросит пароль — он ставит
+   прозрачный перехват):
    ```bash
    sudo python3 spike/tproxy.py --install
    ```
-3. **Open Slipstream** (it lives in the menu bar). Then:
-   - **Geph → Account…** — paste your Geph account secret (a free account works).
-   - **Geph → pick an exit** — a city, or **Automatic**.
-   - **Connect Telegram Proxy** — points Telegram Desktop at the bundled proxy.
+3. **Откройте Slipstream** (живёт в строке меню). Затем:
+   - **Geph → Account…** — вставьте секрет аккаунта Geph (подойдёт бесплатный).
+   - **Geph → выберите выход** — город или **Automatic**.
+   - **Connect Telegram Proxy** — направляет Telegram Desktop на встроенный прокси.
 
-That's it. It stays out of your way from here.
+Готово. Дальше оно не отсвечивает.
 
-## Build from source
+## Сборка из исходников
 
-Requires Rust, Node, Python 3, and the Xcode command-line tools.
+Нужны Rust, Node, Python 3 и Xcode command-line tools.
 
 ```bash
-# menu-bar app
+# приложение в строке меню
 cd app-tauri && npm install && npm run tauri build
 
-# background helper (transparent desync + routing daemon)
+# фоновый помощник (прозрачный десинк + роутинг-демон)
 sudo python3 spike/tproxy.py --install
 ```
 
-The bundled `geph5-client` is compiled from source in CI
-([`build-geph.yml`](.github/workflows/build-geph.yml)) so it always tracks
-upstream — nothing is a stale binary blob.
+Встроенный `geph5-client` собирается из исходников в CI
+([`build-geph.yml`](.github/workflows/build-geph.yml)) — всегда свежий,
+никаких протухших бинарных блобов.
 
-## Repo layout
+## Структура репозитория
 
-| Path | What it is |
-|------|-----------|
-| `app-tauri/` | The menu-bar app — native macOS tray UI (Tauri + Rust). |
-| `spike/tproxy.py` | The transparent desync + split-tunnel routing daemon (Python, root). |
-| `vendor/tg-ws-proxy/` | Bundled Telegram MTProto-over-WebSocket proxy. |
-| `vendor/geph/` | How the bundled `geph5-client` is built + tracked. |
-| `docs/` | Design notes and threat model. |
+| Путь | Что это |
+|------|---------|
+| `app-tauri/` | Приложение в строке меню — нативный tray-UI macOS (Tauri + Rust). |
+| `spike/tproxy.py` | Демон прозрачного десинка + раздельного роутинга (Python, root). |
+| `vendor/tg-ws-proxy/` | Встроенный Telegram-прокси MTProto-over-WebSocket. |
+| `vendor/geph/` | Как собирается и отслеживается встроенный `geph5-client`. |
+| `docs/` | Проектные заметки и модель угроз. |
 
-## Privacy & trust
+## Приватность и доверие
 
-- Runs entirely on your machine; Slipstream has no backend.
-- Split-tunnel keeps Russian services **off** any tunnel — they go direct, so
-  your bank never sees a foreign IP.
-- Geph is your own account on the public Geph network; read their docs for its
-  threat model.
+- Работает целиком на вашей машине; у Slipstream нет бэкенда.
+- Раздельный туннель держит российские сервисы **вне** любого туннеля — они идут
+  напрямую, и ваш банк никогда не видит заграничный IP.
+- Geph — ваш собственный аккаунт в открытой сети Geph; их модель угроз — в их документации.
 
-## Credits & license
+## Благодарности и лицензия
 
 - **Slipstream** — [MIT](LICENSE).
-- **geph5-client** — MPL-2.0, © [Geph](https://geph.io). Bundled unmodified;
-  source tracked via CI.
+- **geph5-client** — MPL-2.0, © [Geph](https://geph.io). Встроен без изменений;
+  исходник отслеживается через CI.
 - **tg-ws-proxy** — MIT, © [Flowseal](https://github.com/Flowseal/tg-ws-proxy).
-  Vendored as a Python module.
+  Вендорен как Python-модуль.
 
-<div align="center"><sub>Made to be automatic and calm. If you notice it, something's wrong.</sub></div>
+<div align="center"><sub>Сделано, чтобы быть автоматическим и спокойным. Если вы его замечаете — что-то не так.</sub></div>
