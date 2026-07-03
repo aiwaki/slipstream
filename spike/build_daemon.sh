@@ -1,23 +1,20 @@
 #!/bin/bash
 # Freeze the daemon (tproxy.py) into a self-contained binary with PyInstaller, so
 # the shipped .app needs NO Python/venv on the end user's machine. Run on a Mac
-# with network (pulls pyinstaller + scapy from PyPI). Output: dist/slipstreamd/.
+# with network (pulls pyinstaller + runtime deps from PyPI). Output: dist/slipstreamd/.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PY="${PYTHON:-python3}"
-echo ">> build venv + pyinstaller + scapy ..."
+echo ">> build venv + pyinstaller + runtime deps ..."
 rm -rf .buildvenv
 "$PY" -m venv .buildvenv
 .buildvenv/bin/python -m pip install --quiet --upgrade pip
-.buildvenv/bin/python -m pip install --quiet pyinstaller scapy
+.buildvenv/bin/python -m pip install --quiet pyinstaller scapy cryptography
 
-echo ">> freezing tproxy.py (scapy collected whole — it imports submodules at runtime) ..."
-rm -rf build dist slipstreamd.spec
-.buildvenv/bin/pyinstaller --noconfirm --clean \
-  --onedir --name slipstreamd \
-  --collect-all scapy \
-  tproxy.py
+echo ">> freezing tproxy.py via slipstreamd.spec ..."
+rm -rf build dist
+.buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec
 
 echo
 echo "built dist/slipstreamd/  (self-contained, no Python needed)"

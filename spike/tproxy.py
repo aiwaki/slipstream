@@ -36,6 +36,7 @@ import sys
 import tempfile
 import threading
 import time
+from urllib.parse import urlencode
 
 PROXY_PORT = 1080
 DIOCNATLOOK = 0xC0544417
@@ -699,10 +700,19 @@ def network_monitor(port, voice=True):
 
 
 # ------------------------------------------------------------- DoH (blocking)
+def _doh_ssl_context():
+    return ssl.create_default_context()
+
+
+def _doh_request(host, doh_sni):
+    query = urlencode({"name": host, "type": "A"})
+    return (f"GET /dns-query?{query} HTTP/1.1\r\n"
+            f"Host: {doh_sni}\r\naccept: application/dns-json\r\n"
+            f"connection: close\r\n\r\n").encode("ascii")
+
+
 def _doh_query(doh_ip, doh_sni, host, timeout=3):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = _doh_ssl_context()
     inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
     obj = ctx.wrap_bio(inbio, outbio, server_hostname=doh_sni)
     s = socket.create_connection((doh_ip, 443), timeout=timeout)
@@ -727,9 +737,7 @@ def _doh_query(doh_ip, doh_sni, host, timeout=3):
                 if not data:
                     raise IOError("eof in handshake")
                 inbio.write(data)
-        req = (f"GET /dns-query?name={host}&type=A HTTP/1.1\r\n"
-               f"Host: {doh_sni}\r\naccept: application/dns-json\r\n"
-               f"connection: close\r\n\r\n").encode()
+        req = _doh_request(host, doh_sni)
         obj.write(req)
         while True:
             out = outbio.read()
