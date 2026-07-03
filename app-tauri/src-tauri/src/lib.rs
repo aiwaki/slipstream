@@ -967,14 +967,11 @@ pub fn run() {
                 }
             });
 
-            // Self-heal: kill any geph orphaned by a previous unclean exit
-            // (force-quit / crash / SIGTERM don't run the Exit handler), so a
-            // stale geph never keeps holding the account. The pattern matches only
-            // OUR bundled geph (path contains Slipstream.app), not the user's
-            // separately-installed gephgui.
-            let _ = Command::new("/usr/bin/pkill")
-                .args(["-f", "Slipstream.app/Contents/MacOS/geph5-client"])
-                .status();
+            // NB: we deliberately do NOT kill a leftover geph at startup — a geph
+            // that SURVIVED this tray's restart/reinstall (spawned detached) is what
+            // lets the supervisor ADOPT it, keeping the tunnel (and the user's apps)
+            // up across a reinstall. The account has no device limit, so a lingering
+            // geph never blocks the user's own Geph.
 
             // geph supervisor: runs the bundled geph5-client (detached) whenever a
             // secret is set; survives tray restarts, adopts an already-running one.
@@ -1012,18 +1009,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Slipstream tray");
 
-    // No windows -> keep the app alive on the tray when an implicit exit fires.
-    // On a real quit, stop the bundled geph so it doesn't linger tunnelling on the
-    // account after the app is gone. (Seamless "geph survives a reinstall" isn't
-    // worth it: a normal reinstall is a graceful quit anyway, so geph respawns
-    // regardless; the ~15s reconnect is covered when the user keeps another Geph up.)
-    app.run(|app, event| match event {
-        tauri::RunEvent::ExitRequested { code, api, .. } => {
+    // No windows -> keep the app alive on the tray. We do NOT stop geph on exit:
+    // it's spawned detached so it SURVIVES the tray quitting/restarting/reinstalling,
+    // and the next tray ADOPTS the survivor — that's what keeps the user's apps
+    // connected across a reinstall (no "restart your app" dance). The routing daemon
+    // is a separate LaunchDaemon that already outlives the tray, so a running tunnel
+    // after quit is consistent. To actually stop geph, disable Geph in the menu.
+    app.run(|_app, event| {
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             if code.is_none() {
                 api.prevent_exit();
             }
         }
-        tauri::RunEvent::Exit => geph_stop(app),
-        _ => {}
     });
 }
