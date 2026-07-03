@@ -130,6 +130,10 @@ fn run_admin(shell: &str) {
     let _ = Command::new("/usr/bin/osascript").arg("-e").arg(script).spawn();
 }
 
+fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
+}
+
 /// Point macOS's system-wide SOCKS proxy at Slipstream's local geph SOCKS
 /// (127.0.0.1:GEPH_SOCKS_PORT), or turn it off. Configure once here and every
 /// proxy-aware app (Chrome, Claude, VS Code, JetBrains via "use system proxy")
@@ -183,7 +187,8 @@ fn ensure_daemon_installed(app: &AppHandle) {
     if !bin.exists() {
         return; // dev build without the bundled daemon
     }
-    run_admin(&format!("'{}' --install", bin.to_string_lossy()));
+    let bin = bin.to_string_lossy();
+    run_admin(&format!("{} --install", shell_quote(bin.as_ref())));
 }
 
 /// Native secret-entry dialog (the same NSAlert look as TG WS Proxy). Pre-fills
@@ -1022,4 +1027,25 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_quote;
+
+    #[test]
+    fn shell_quote_wraps_plain_argument() {
+        assert_eq!(
+            shell_quote("/Applications/Slipstream.app/slipstreamd"),
+            "'/Applications/Slipstream.app/slipstreamd'"
+        );
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(
+            shell_quote("/tmp/Bob's Apps/slipstreamd"),
+            "'/tmp/Bob'\\''s Apps/slipstreamd'"
+        );
+    }
 }

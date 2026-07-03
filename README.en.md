@@ -10,6 +10,7 @@
 [![platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-000000?logo=apple)](#install)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![build-geph](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml)
+[![build-app](https://github.com/aiwaki/slipstream/actions/workflows/build-app.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-app.yml)
 
 </div>
 
@@ -27,26 +28,45 @@ what. No extensions, no per-app proxies, no extra buttons.
 > [!NOTE]
 > Early version. macOS on Apple Silicon only for now, tuned for RU networks.
 
+## Interface
+
+<p align="center">
+  <img src="docs/images/slipstream-menu-composite.png" alt="Slipstream menu: Geph exit selection, app proxy actions, launch at login, logs, and updates">
+</p>
+
 ## What it fixes
 
-- **Discord** — chat, servers, and **voice** (the UDP part others drop).
-- **YouTube** — no endless buffering.
-- **ChatGPT and Claude** — which flat-out refuse Russian IPs. We send them through an exit abroad, and they just work.
-- **Telegram** — Desktop goes through a bundled proxy, past the data-center-IP block. One button.
-- **Almost everything else that's blocked or throttled** — automatically.
+| Service | How it goes |
+|---|---|
+| Discord | chat, servers, and voice through local desync |
+| YouTube | locally, without endless buffering |
+| ChatGPT and Claude | only these go through a foreign Geph exit |
+| Telegram Desktop | through the bundled MTProto-over-WebSocket proxy |
+| Everything else blocked or throttled | automatically routed through local bypass or the tunnel |
 
 ## How it's different from a VPN
 
 A regular VPN routes literally everything through a server — slow and pointless.
 Slipstream splits the traffic:
 
-- **Russian stuff** (banks, gov services, local sites) — direct, it shouldn't leave the country anyway;
-- **things the DPI just breaks** — fixed in place, your IP stays Russian;
-- **things that refuse Russian IPs** — only that takes the detour abroad.
+| Traffic | Route | Why |
+|---|---|---|
+| Russian services | direct | banks, gov services, and local sites never see a foreign IP |
+| Things the DPI breaks | local desync | your IP stays Russian and latency stays low |
+| Things that refuse Russian IPs | Geph | a foreign exit is used only where there is no local fix |
 
 Fast where it can be. A detour only where there's no other way.
 
 ## How it works
+
+| Layer | Where it runs | What it does |
+|---|---|---|
+| Desync | on your Mac | splits TLS handshakes, sends short-lived decoys, and uses DoH |
+| Geph | local client + Geph network | tunnels only geo-blocked services |
+| Telegram proxy | on your Mac | gives Telegram Desktop a local MTProto-over-WebSocket entry |
+
+<details>
+<summary>Routing diagram</summary>
 
 ```
                  ┌─────────────────────────── your Mac ───────────────────────────┐
@@ -58,6 +78,8 @@ Fast where it can be. A detour only where there's no other way.
                  │  Telegram Desktop ─────────► 3) TG-WS PROXY (local MTProto)      │
                  └────────────────────────────────────────────────────────────────┘
 ```
+
+</details>
 
 Three things, each doing its own job:
 
@@ -84,22 +106,38 @@ network — you just need an account in it.
 
 Done — it takes it from here.
 
+> [!TIP]
+> First-download builds are not Apple-notarized yet. If macOS blocks the app,
+> open it with right-click → **Open**.
+
 ## Build it yourself
 
 Needs Rust, Node, Python 3, and the Xcode command-line tools.
 
 ```bash
+# the background service bundled into the .app
+cd spike
+./build_daemon.sh
+cd ..
+rm -rf app-tauri/src-tauri/slipstreamd
+cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
+
 # the menu-bar app
-cd app-tauri && npm install && npm run tauri build
+cd app-tauri
+npm ci
+# a clean local release build needs the geph sidecar at:
+# app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+npm run tauri build
 
 # the background service (desync + routing) — the app installs it for you,
-# but during development you can do it manually:
+# but during development you can do it manually from the repo root:
+cd ..
 sudo python3 spike/tproxy.py --install
 ```
 
 The bundled `geph5-client` is built from source right in CI
 ([`build-geph.yml`](.github/workflows/build-geph.yml)) — always fresh, no stale
-binaries.
+binaries. CI drops it into `app-tauri/src-tauri/binaries/` automatically.
 
 ## What's where
 
