@@ -1003,8 +1003,10 @@ pub fn run() {
         .expect("error while building Slipstream tray");
 
     // No windows -> keep the app alive on the tray when an implicit exit fires.
-    // On a real quit, kill the bundled geph so it never orphans (an orphaned geph
-    // holds the account session and blocks the user's own Geph from connecting).
+    // On a real quit, stop the bundled geph so it doesn't linger tunnelling on the
+    // account after the app is gone. (Seamless "geph survives a reinstall" isn't
+    // worth it: a normal reinstall is a graceful quit anyway, so geph respawns
+    // regardless; the ~15s reconnect is covered when the user keeps another Geph up.)
     app.run(|app, event| match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
             if code.is_none() {
