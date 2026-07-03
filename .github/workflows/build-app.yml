@@ -70,9 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=$(gh release list --repo "${{ github.repository }}" --limit 50 \
-            | awk '/geph-vendor-/{print $1; exit}')
+          # pick the newest geph-vendor-* release TAG (release list's first column is
+          # the title, not the tag, so query tag_name directly).
+          tag=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq '[.[].tag_name | select(startswith("geph-vendor-"))] | first // empty')
           [ -n "$tag" ] || { echo "no geph-vendor release yet — run build-geph first"; exit 1; }
+          echo "using geph vendor tag: $tag"
           mkdir -p app-tauri/src-tauri/binaries /tmp/geph
           gh release download "$tag" --repo "${{ github.repository }}" \
             --pattern 'geph5-client' --dir /tmp/geph
