@@ -1,34 +1,38 @@
-<div align="center">
+# Slipstream
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/slipstream-banner-dark.png">
-  <img alt="Slipstream — quiet censorship bypass for macOS" src="docs/images/slipstream-banner-light.png" width="100%">
-</picture>
+<div align="center">
 
 [Русский](README.md) · **English**
 
-[![platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-000000?logo=apple)](#install)
+[![preview](https://img.shields.io/badge/preview-macOS%20(Apple%20Silicon)-000000?logo=apple)](#install)
+[![roadmap](https://img.shields.io/badge/roadmap-cross--platform-2f80ed)](#platforms)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![build-geph](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml)
 [![build-app](https://github.com/aiwaki/slipstream/actions/workflows/build-app.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-app.yml)
 
 </div>
 
----
+Slipstream is a cross-platform smart-routing client for blocked and throttled
+services. It keeps the internet usable without turning the whole connection into
+a remote VPN: direct where possible, local DPI bypass where needed, and a chosen
+Geph exit only for services that need a foreign IP.
 
-Russian ISPs break half the internet: they throttle YouTube, tear Discord apart,
-hand you a fake DNS, and ChatGPT and Claude won't even open. Slipstream fixes all
-of it — quietly, in the background, right on your Mac. And it doesn't push every
-byte through some faraway server like a regular VPN — only what won't open any
-other way goes abroad.
+Routes are selected automatically:
 
-Install it, drop in your Geph key once — and it figures out on its own what needs
-what. No extensions, no per-app proxies, no extra buttons.
+- local services stay direct;
+- DPI-broken traffic uses a local bypass;
+- services that need a foreign IP use Geph;
+- individual apps, such as Telegram Desktop, can use the bundled proxy.
+
+No browser extensions. No per-app proxy setup. No unnecessary remote tunnel for
+everything.
 
 > [!NOTE]
-> Early version. macOS on Apple Silicon only for now, tuned for RU networks.
+> The current early build is a macOS Apple Silicon preview tuned for RU networks.
+> Windows, Linux, iOS, and Android are on the roadmap; bypass capabilities will
+> depend on what each platform allows.
 
-## Interface
+## macOS Preview Interface
 
 <p align="center">
   <img src="docs/images/slipstream-menu-composite.png" alt="Slipstream menu: Geph exit selection, app proxy actions, launch at login, logs, and updates">
@@ -44,10 +48,10 @@ what. No extensions, no per-app proxies, no extra buttons.
 | Telegram Desktop | through the bundled MTProto-over-WebSocket proxy |
 | Everything else blocked or throttled | automatically routed through local bypass or the tunnel |
 
-## How it's different from a VPN
+## How it's different from a regular VPN
 
-A regular VPN routes literally everything through a server — slow and pointless.
-Slipstream splits the traffic:
+Slipstream does not try to replace the whole internet with one remote VPN server.
+It splits traffic and chooses the lightest working route:
 
 | Traffic | Route | Why |
 |---|---|---|
@@ -57,16 +61,20 @@ Slipstream splits the traffic:
 
 Fast where it can be. A detour only where there's no other way.
 
+On iOS and Android this may be exposed through a system VPN profile, but the goal
+is still split routing, not a permanent remote tunnel for the whole device.
+
 ## How it works
 
-| Layer | Where it runs | What it does |
+| Layer | Role | Platform model |
 |---|---|---|
-| Desync | on your Mac | splits TLS handshakes, sends short-lived decoys, and uses DoH |
-| Geph | local client + Geph network | tunnels only geo-blocked services |
-| Telegram proxy | on your Mac | gives Telegram Desktop a local MTProto-over-WebSocket entry |
+| Route engine | decides where a domain or connection should go | shared logic |
+| Local bypass | bypasses DPI locally where the OS allows it | platform adapter |
+| Geph tunnel | provides a foreign exit for geo-blocked services | shared network layer |
+| App adapters | connect menus, system routing, and app-specific proxies | OS-specific |
 
 <details>
-<summary>Routing diagram</summary>
+<summary>Current macOS routing diagram</summary>
 
 ```
                  ┌─────────────────────────── your Mac ───────────────────────────┐
@@ -81,7 +89,7 @@ Fast where it can be. A detour only where there's no other way.
 
 </details>
 
-Three things, each doing its own job:
+The current macOS preview is built from three parts:
 
 1. **Desync** — fools the DPI box locally: splits the TLS handshake and fires
    low-TTL decoy packets (the zapret / byedpi idea), plus DoH against DNS
@@ -94,6 +102,16 @@ Three things, each doing its own job:
 
 Desync and the Telegram proxy run entirely on your machine. Geph is a ready-made
 network — you just need an account in it.
+
+## Platforms
+
+| Platform | Status |
+|---|---|
+| macOS Apple Silicon | early preview build |
+| Windows | planned |
+| Linux | planned |
+| iOS | planned, within Network Extension limits |
+| Android | planned, through the platform VPN/split-routing layer |
 
 ## Install
 
@@ -143,15 +161,15 @@ binaries. CI drops it into `app-tauri/src-tauri/binaries/` automatically.
 
 | Path | What it is |
 |------|-----------|
-| `app-tauri/` | The menu-bar app — native macOS UI (Tauri + Rust). |
-| `spike/tproxy.py` | The desync + split-routing service (Python, root). |
+| `app-tauri/` | The current macOS preview: menu-bar app (Tauri + Rust). |
+| `spike/tproxy.py` | The desync + split-routing service for the macOS preview (Python, root). |
 | `vendor/tg-ws-proxy/` | The bundled Telegram MTProto-over-WebSocket proxy. |
 | `vendor/geph/` | How the bundled `geph5-client` is built and updated. |
 | `docs/` | Design and security notes. |
 
 ## Privacy
 
-- Slipstream is a local tool: everything runs on your machine.
+- Slipstream's client-side routing logic runs locally on your device.
 - Russian services stay **off** the tunnel — they go direct, so e.g. your bank never sees a foreign IP.
 - Geph is your own account on the open Geph network; its security is on them, details in their docs.
 
@@ -160,5 +178,3 @@ binaries. CI drops it into `app-tauri/src-tauri/binaries/` automatically.
 - **Slipstream** — [MIT](LICENSE).
 - **geph5-client** — MPL-2.0, © [Geph](https://geph.io). Bundled as-is, built in CI.
 - **tg-ws-proxy** — MIT, © [Flowseal](https://github.com/Flowseal/tg-ws-proxy). Bundled as a module.
-
-<div align="center"><sub>Made to just work — on its own, and like a human would!</sub></div>
