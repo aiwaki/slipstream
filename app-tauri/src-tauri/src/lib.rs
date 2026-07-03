@@ -733,13 +733,10 @@ pub fn run() {
                 .and_then(|v| v.get("exit").and_then(|x| x.as_str()).map(String::from))
                 .unwrap_or_else(|| "auto".into());
 
-            // Country chosen last time; old per-city values ("ca-toronto") collapse
-            // to their country for the checkmark.
-            let saved_cc = saved_exit.split('-').next().unwrap_or("auto").to_string();
             let mut exit_items: Vec<(String, CheckMenuItem<tauri::Wry>)> = Vec::new();
             let mk = |app: &tauri::App, val: &str, label: &str| {
                 CheckMenuItemBuilder::with_id(format!("exit:{val}"), label)
-                    .checked(val == saved_exit || val == saved_cc)
+                    .checked(val == saved_exit)
                     .build(app)
             };
             let auto = mk(app, "auto", &tr("Automatic"))?;
@@ -935,23 +932,36 @@ pub fn run() {
             let s = state_item.clone();
             let d = detail_item.clone();
             tauri::async_runtime::spawn(async move {
-                let mut last_geph: Option<bool> = None;
                 let mut last_state = String::new();
+                // Debounced Geph up/down notification: geph flaps with the network,
+                // and notifying on every transition spammed the user. Only fire when
+                // a state has HELD for ~3 polls (6s) and differs from what we last
+                // notified — a flap that reverts within 6s never surfaces.
+                let mut notified_geph: Option<bool> = None;
+                let mut pending: Option<bool> = None;
+                let mut stable: u8 = 0;
                 loop {
                     let state = refresh(&s, &d);
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
                     }
-                    // notify on Geph tunnel up/down transitions (not on first read)
                     if let Some(up) =
                         read_status().and_then(|v| v.get("geph").and_then(|x| x.as_str()).map(|g| g == "up"))
                     {
-                        if last_geph == Some(!up) {
-                            notify(&app_handle,
-                                if up { "Geph tunnel connected" } else { "Geph tunnel disconnected" });
+                        if pending == Some(up) {
+                            stable = stable.saturating_add(1);
+                        } else {
+                            pending = Some(up);
+                            stable = 1;
                         }
-                        last_geph = Some(up);
+                        if stable >= 3 && notified_geph != Some(up) {
+                            if notified_geph.is_some() {
+                                notify(&app_handle,
+                                    if up { "Geph tunnel connected" } else { "Geph tunnel disconnected" });
+                            }
+                            notified_geph = Some(up); // record even the first stable read silently
+                        }
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
