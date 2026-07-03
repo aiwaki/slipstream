@@ -1,0 +1,143 @@
+# Build, sign, and publish Slipstream.app + the auto-update appcast.
+#
+# Produces a complete self-installing bundle: the tray app + the vendored
+# geph5-client (from build-geph.yml's `geph-vendor-*` release) + the frozen
+# `slipstreamd` daemon (built here with PyInstaller). The bundle is signed with the
+# updater key (TAURI_SIGNING_PRIVATE_KEY secret; its public half is in
+# tauri.conf.json) and published as a GitHub Release, along with a `latest.json`
+# appcast at the URL the app's updater polls
+# (releases/latest/download/latest.json). Existing installs then auto-update.
+#
+# NOTE: the .app is NOT Apple-notarized (no Developer ID), so a FIRST download
+# still hits Gatekeeper (right-click > Open). The updater signature is minisign,
+# separate from Apple codesigning — it only guarantees update integrity.
+name: build-app
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.1.1 (no leading v)"
+        required: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version + tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF_NAME#v}"; tag="${GITHUB_REF_NAME}"
+          else
+            v="${{ github.event.inputs.version }}"; tag="v${v}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $v ($tag)"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: System build deps
+        run: brew install protobuf cmake pkg-config || true
+
+      - name: Build the self-contained daemon (slipstreamd, PyInstaller)
+        run: |
+          set -euo pipefail
+          python3 -m venv spike/.buildvenv
+          spike/.buildvenv/bin/pip install --quiet --disable-pip-version-check \
+            scapy cryptography pyinstaller
+          ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
+          rm -rf app-tauri/src-tauri/slipstreamd
+          cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
+          test -x app-tauri/src-tauri/slipstreamd/slipstreamd
+
+      - name: Fetch vendored geph5-client (from build-geph.yml)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release list --repo "${{ github.repository }}" --limit 50 \
+            | awk '/geph-vendor-/{print $1; exit}')
+          [ -n "$tag" ] || { echo "no geph-vendor release yet — run build-geph first"; exit 1; }
+          mkdir -p app-tauri/src-tauri/binaries /tmp/geph
+          gh release download "$tag" --repo "${{ github.repository }}" \
+            --pattern 'geph5-client' --dir /tmp/geph
+          cp /tmp/geph/geph5-client \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+
+      - name: Sync tauri.conf version
+        run: |
+          python3 - <<PY
+          import json
+          p = "app-tauri/src-tauri/tauri.conf.json"
+          d = json.load(open(p)); d["version"] = "${{ steps.ver.outputs.version }}"
+          json.dump(d, open(p, "w"), indent=2)
+          PY
+
+      - name: Build + sign the app
+        working-directory: app-tauri
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm install
+          npm run tauri build
+
+      - name: Package + build the update appcast (latest.json)
+        id: pkg
+        run: |
+          set -euo pipefail
+          B=app-tauri/src-tauri/target/release/bundle
+          OUT=dist-release; mkdir -p "$OUT"
+          # a plain zip of the .app for first-time downloads (no DMG friction)
+          ditto -c -k --keepParent "$B/macos/Slipstream.app" "$OUT/Slipstream-macos-arm64.zip"
+          cp "$B/dmg/"*.dmg "$OUT/" 2>/dev/null || true
+          # updater artifacts (tauri produced these because a signing key was set)
+          cp "$B/macos/Slipstream.app.tar.gz" "$OUT/"
+          cp "$B/macos/Slipstream.app.tar.gz.sig" "$OUT/"
+          sig=$(cat "$B/macos/Slipstream.app.tar.gz.sig")
+          url="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/Slipstream.app.tar.gz"
+          # ISO date without relying on GNU date extensions
+          pub=$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')
+          python3 - "$sig" "$url" "$pub" > "$OUT/latest.json" <<'PY'
+          import json, sys
+          sig, url, pub = sys.argv[1], sys.argv[2], sys.argv[3]
+          print(json.dumps({
+              "version": "${{ steps.ver.outputs.version }}",
+              "notes": "See the release notes.",
+              "pub_date": pub,
+              "platforms": {"darwin-aarch64": {"signature": sig, "url": url}},
+          }, indent=2))
+          PY
+          echo "made appcast:"; cat "$OUT/latest.json"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Slipstream ${{ steps.ver.outputs.version }}"
+          body: |
+            Slipstream ${{ steps.ver.outputs.version }} (macOS, Apple Silicon).
+            Unsigned by Apple — on first download, right-click the app > Open.
+            Existing installs auto-update via the built-in updater.
+          files: |
+            dist-release/Slipstream-macos-arm64.zip
+            dist-release/Slipstream.app.tar.gz
+            dist-release/Slipstream.app.tar.gz.sig
+            dist-release/latest.json
+            dist-release/*.dmg

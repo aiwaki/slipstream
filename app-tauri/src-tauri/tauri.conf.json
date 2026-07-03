@@ -29,7 +29,7 @@
       "endpoints": [
         "https://github.com/aiwaki/slipstream/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2OTk4QUM0RTUwRDQyRDAKUldUUVFnM2x4SXFaUmhlRFFhUit0UEpZelV0UkV6cTV0dkhhUFc0V1pqN2JHUkxnTHFkMkVCSU8K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdGQzQ3RUM3MEIyNjcyNkUKUldSdWNpWUx4MzdFZjNXZHFhUjFWSG05OTUrU2ltbWFmQ2VXdUkyeW0zTHp5M2NnMUl5NTdQNzgK",
       "windows": { "installMode": "passive" }
     }
   }
