@@ -131,6 +131,13 @@ jobs:
           else
             cp "${bins[0]}" out/geph5-client
           fi
+          # sanity: --features aws_lambda must actually be compiled in (the fast
+          # broker/bouncer path + what account auto-registration needs).
+          if grep -aq aws_smithy out/geph5-client*; then
+            echo "aws_lambda feature present ✓"
+          else
+            echo "::error::aws_lambda feature NOT in the built binary"; exit 1
+          fi
 
       - name: Bundle MPL-2.0 license (compliance)
         run: |
