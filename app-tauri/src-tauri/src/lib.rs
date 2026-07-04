@@ -818,7 +818,11 @@ pub fn run() {
             let launch = CheckMenuItemBuilder::with_id(ID_LAUNCH, tr("Launch at Login"))
                 .checked(autostart_on)
                 .build(app)?;
-            let version_label = if ui_ru() { "Версия 0.1" } else { "Version 0.1" };
+            let version_label = format!(
+                "{} {}",
+                if ui_ru() { "Версия" } else { "Version" },
+                app.package_info().version
+            );
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
