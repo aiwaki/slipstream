@@ -20,7 +20,8 @@
     "resources": ["icons/*.png", "slipstreamd/**/*"],
     "externalBin": ["binaries/geph5-client"],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-"
     },
     "createUpdaterArtifacts": true
   },
