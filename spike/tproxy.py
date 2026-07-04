@@ -22,7 +22,7 @@ import asyncio
 import atexit
 import fcntl
 import json
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
 import resource
@@ -109,6 +109,11 @@ TELEGRAM_NETS = (
     ("91.108.12.0", 22), ("91.108.16.0", 22), ("91.108.20.0", 22),
     ("91.108.56.0", 22), ("95.161.64.0", 20), ("185.76.151.0", 24),
 )
+TG_DIRECT_FAIL_WINDOW = 120.0
+TG_DIRECT_FAIL_THRESHOLD = 3
+TG_PROXY_SUGGEST_TTL = 30 * 60.0
+_tg_direct_failures = deque()
+_tg_proxy_suggest_until = 0.0
 
 
 def _ip_in_nets(ip, nets):
@@ -122,6 +127,29 @@ def _ip_in_nets(ip, nets):
         if (packed & mask) == (struct.unpack("!I", socket.inet_aton(net))[0] & mask):
             return True
     return False
+
+
+def note_telegram_direct_failure(reason):
+    """After repeated raw Telegram DC failures, ask the tray to offer tg-ws-proxy."""
+    global _tg_proxy_suggest_until
+    now = time.time()
+    _tg_direct_failures.append(now)
+    prune_telegram_direct_failures(now)
+    if len(_tg_direct_failures) >= TG_DIRECT_FAIL_THRESHOLD:
+        _tg_proxy_suggest_until = max(_tg_proxy_suggest_until, now + TG_PROXY_SUGGEST_TTL)
+        if VERBOSE:
+            print(f">> Telegram direct looks blocked ({reason}); offering tg-ws-proxy",
+                  file=sys.stderr)
+
+
+def note_telegram_direct_success():
+    _tg_direct_failures.clear()
+
+
+def prune_telegram_direct_failures(now=None):
+    now = time.time() if now is None else now
+    while _tg_direct_failures and now - _tg_direct_failures[0] > TG_DIRECT_FAIL_WINDOW:
+        _tg_direct_failures.popleft()
 
 # Russian services — NEVER tunnelled (split-tunnel exclusion "for the VPN").
 # Primary rule is the national TLDs; the set covers big RU services on .com/.net.
@@ -258,10 +286,12 @@ def note_local_result(host, down_bytes, duration):
 
 def write_status(state, iface, voice_iface):
     try:
+        now = time.time()
+        prune_telegram_direct_failures(now)
         st = {
             "state": state,            # "active" | "dormant"
             "pid": os.getpid(),
-            "ts": time.time(),
+            "ts": now,
             "conns": _conn_count,
             "iface": iface or "",
             "voice": voice_iface or "",
@@ -269,6 +299,8 @@ def write_status(state, iface, voice_iface):
             "dead": len(_dead),
             "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
             "geph_learned": len(_auto_geph),
+            "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
+            "telegram_direct_failures": len(_tg_direct_failures),
         }
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
@@ -1118,10 +1150,18 @@ async def _handle_impl(reader, writer):
     if _ip_in_nets(dst_ip, TELEGRAM_NETS):
         up = await dial_plain(dst_ip, dst_port, head + body)
         if up is None:
+            note_telegram_direct_failure("connect failed")
             writer.close()
             return
         ur, uw = up
-        await asyncio.gather(pump(reader, uw), splice(ur, writer))
+        t0 = time.monotonic()
+        res = await asyncio.gather(pump(reader, uw), splice(ur, writer))
+        down_b = res[1] or 0
+        dur = time.monotonic() - t0
+        if down_b > 0:
+            note_telegram_direct_success()
+        elif dur < 20:
+            note_telegram_direct_failure("empty direct response")
         return
 
     # Split-tunnel: a geo-blocked service (refuses RU IPs) goes through geph's

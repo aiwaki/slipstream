@@ -10,7 +10,7 @@
 use std::fs;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tauri::{
@@ -74,9 +74,6 @@ fn tr(en: &str) -> String {
         "Automatic" => "Автоматически",
         "Core" => "Основные",
         "Streaming" => "Стриминг",
-        "Connect Telegram Proxy" => "Подключить Telegram-прокси",
-        "System Proxy (all apps)" => "Системный прокси (все приложения)",
-        "Proxy for apps" => "Прокси для приложений",
         "Launch at Login" => "Запускать при входе",
         "Restart Proxy" => "Перезапустить прокси",
         "Open Log" => "Открыть лог",
@@ -94,8 +91,6 @@ const ID_RESTART: &str = "restart_proxy";
 const ID_LOG: &str = "open_log";
 const ID_UPDATE: &str = "check_updates";
 const ID_QUIT: &str = "quit";
-const ID_TGWS: &str = "tgws_open";
-const ID_SYSPROXY: &str = "system_proxy";
 // Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
 // tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
 // in one click (no manual host/port/secret entry).
@@ -132,42 +127,6 @@ fn run_admin(shell: &str) {
 
 fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
-}
-
-/// Point macOS's system-wide SOCKS proxy at Slipstream's local geph SOCKS
-/// (127.0.0.1:GEPH_SOCKS_PORT), or turn it off. Configure once here and every
-/// proxy-aware app (Chrome, Claude, VS Code, JetBrains via "use system proxy")
-/// follows — no per-app setup. Runs on all enabled network services. Changing
-/// network settings needs admin, so it triggers one password prompt.
-/// `grep -v '[*]'` drops disabled services (marked with `*`); `tail -n +2` drops
-/// the header line — no backslashes so run_admin's escaping stays simple.
-/// Returns true only if the admin command actually ran (osascript exits non-zero
-/// when the user cancels the password prompt) — so the caller can revert the menu
-/// checkmark instead of falsely showing "on".
-fn set_system_proxy(on: bool) -> bool {
-    let cmd = if on {
-        format!(
-            "networksetup -listallnetworkservices | tail -n +2 | grep -v '[*]' | \
-             while IFS= read -r s; do \
-             networksetup -setsocksfirewallproxy \"$s\" 127.0.0.1 {GEPH_SOCKS_PORT}; \
-             networksetup -setsocksfirewallproxystate \"$s\" on; done"
-        )
-    } else {
-        "networksetup -listallnetworkservices | tail -n +2 | grep -v '[*]' | \
-         while IFS= read -r s; do \
-         networksetup -setsocksfirewallproxystate \"$s\" off; done"
-            .to_string()
-    };
-    // Block on the admin prompt (unlike run_admin's fire-and-forget) so we know the
-    // real outcome. osascript returns non-zero if the user cancels.
-    let escaped = cmd.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("do shell script \"{escaped}\" with administrator privileges");
-    Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 /// First launch: if the root daemon isn't installed yet, install it from the
@@ -299,6 +258,58 @@ fn set_tray_icon(app: &AppHandle, state: &str) {
 /// Show a native notification (geph up/down, updates).
 fn notify(app: &AppHandle, body: &str) {
     let _ = app.notification().builder().title("Slipstream").body(body).show();
+}
+
+fn open_telegram_proxy_link() -> bool {
+    match fs::read_to_string(TGWS_LINK_PATH) {
+        Ok(link) if link.trim().starts_with("tg://") => Command::new("/usr/bin/open")
+            .arg(link.trim())
+            .spawn()
+            .is_ok(),
+        _ => false,
+    }
+}
+
+fn tell_telegram_proxy_starting() {
+    let msg = if ui_ru() {
+        "Telegram-прокси ещё запускается — попробуй через пару секунд."
+    } else {
+        "Telegram proxy is still starting — try again in a few seconds."
+    };
+    let _ = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(format!(
+            "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"OK\"}} \
+             default button \"OK\" with icon note"
+        ))
+        .spawn();
+}
+
+fn prompt_telegram_proxy_offer() -> bool {
+    let (msg, connect, later) = if ui_ru() {
+        (
+            "Похоже, Telegram не подключается напрямую. Подключить встроенный прокси Slipstream?",
+            "Подключить",
+            "Не сейчас",
+        )
+    } else {
+        (
+            "Telegram direct connection looks blocked. Connect the built-in Slipstream proxy?",
+            "Connect",
+            "Not Now",
+        )
+    };
+    let script = format!(
+        "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"{later}\", \"{connect}\"}} \
+         default button \"{connect}\" with icon note"
+    );
+    let Ok(out) = Command::new("/usr/bin/osascript").arg("-e").arg(script).output() else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&out.stdout).contains(&format!("button returned:{connect}"))
 }
 
 /// Built-in signed updater: check the appcast, download + install if newer.
@@ -808,25 +819,12 @@ pub fn run() {
                 .checked(autostart_on)
                 .build(app)?;
             let version_label = if ui_ru() { "Версия 0.1" } else { "Version 0.1" };
-            let sysproxy_on = geph_field(app.handle(), "system_proxy")
-                .map(|s| s == "1")
-                .unwrap_or(false);
-            let sysproxy = CheckMenuItemBuilder::with_id(ID_SYSPROXY, tr("System Proxy (all apps)"))
-                .checked(sysproxy_on)
-                .build(app)?;
-            // Group the app-proxy convenience actions into their own submenu (like
-            // Geph) so the top level stays clean.
-            let proxy_menu = SubmenuBuilder::new(app, tr("Proxy for apps"))
-                .item(&MenuItemBuilder::with_id(ID_TGWS, tr("Connect Telegram Proxy")).build(app)?)
-                .item(&sysproxy)
-                .build()?;
 
             let menu = MenuBuilder::new(app)
                 .item(&state_item)
                 .item(&detail_item)
                 .separator()
                 .item(&geph_menu)
-                .item(&proxy_menu)
                 .item(&launch)
                 .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
@@ -844,7 +842,6 @@ pub fn run() {
 
             let launch_h = launch.clone();
             let enable_h = geph_enable.clone();
-            let sysproxy_h = sysproxy.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -876,22 +873,6 @@ pub fn run() {
                             }
                             // enabling -> the supervisor starts geph next loop (secret permitting)
                         }
-                        ID_SYSPROXY => {
-                            // Toggle the macOS system-wide SOCKS proxy to our geph
-                            // SOCKS so every app follows without per-app setup. The
-                            // CheckMenuItem already flipped its own checkmark on click;
-                            // only KEEP it if the admin command actually ran, else
-                            // revert (e.g. the user cancelled the password prompt).
-                            let want = !geph_field(app, "system_proxy")
-                                .map(|s| s == "1")
-                                .unwrap_or(false);
-                            if set_system_proxy(want) {
-                                geph_config_set(app, "system_proxy", if want { "1" } else { "0" });
-                                let _ = sysproxy_h.set_checked(want);
-                            } else {
-                                let _ = sysproxy_h.set_checked(!want); // revert
-                            }
-                        }
                         ID_LAUNCH => {
                             let mgr = app.autolaunch();
                             let enabled = mgr.is_enabled().unwrap_or(false);
@@ -905,26 +886,6 @@ pub fn run() {
                         ID_UPDATE => {
                             let app = app.clone();
                             tauri::async_runtime::spawn(async move { check_for_updates(app).await });
-                        }
-                        ID_TGWS => {
-                            // Open the tg://proxy link the daemon published -> Telegram
-                            // Desktop pops "Enable this proxy?" (one click, no manual entry).
-                            match std::fs::read_to_string(TGWS_LINK_PATH) {
-                                Ok(link) if link.trim().starts_with("tg://") => {
-                                    let _ = Command::new("/usr/bin/open").arg(link.trim()).spawn();
-                                }
-                                _ => {
-                                    let msg = if ui_ru() {
-                                        "Telegram-прокси ещё запускается — попробуй через пару секунд."
-                                    } else {
-                                        "Telegram proxy is still starting — try again in a few seconds."
-                                    };
-                                    let _ = Command::new("/usr/bin/osascript")
-                                        .arg("-e")
-                                        .arg(format!("display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"OK\"}} default button \"OK\" with icon note"))
-                                        .spawn();
-                                }
-                            }
                         }
                         ID_QUIT => app.exit(0),
                         _ => {}
@@ -945,14 +906,19 @@ pub fn run() {
                 let mut notified_geph: Option<bool> = None;
                 let mut pending: Option<bool> = None;
                 let mut stable: u8 = 0;
+                let mut next_tg_offer = Instant::now();
                 loop {
                     let state = refresh(&s, &d);
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
                     }
-                    if let Some(up) =
-                        read_status().and_then(|v| v.get("geph").and_then(|x| x.as_str()).map(|g| g == "up"))
+                    let status = read_status();
+                    if let Some(up) = status
+                        .as_ref()
+                        .and_then(|v| v.get("geph"))
+                        .and_then(|x| x.as_str())
+                        .map(|g| g == "up")
                     {
                         if pending == Some(up) {
                             stable = stable.saturating_add(1);
@@ -966,6 +932,26 @@ pub fn run() {
                                     if up { "Geph tunnel connected" } else { "Geph tunnel disconnected" });
                             }
                             notified_geph = Some(up); // record even the first stable read silently
+                        }
+                    }
+                    let should_offer_tg = status
+                        .as_ref()
+                        .and_then(|v| v.get("telegram_proxy_suggest"))
+                        .and_then(|x| x.as_bool())
+                        .unwrap_or(false);
+                    let already_accepted =
+                        geph_field(&app_handle, "tgws_offer_accepted").as_deref() == Some("1");
+                    if should_offer_tg && !already_accepted && Instant::now() >= next_tg_offer {
+                        // Telegram requires user confirmation for tg://proxy. We only
+                        // ask after the daemon has seen repeated direct DC failures.
+                        next_tg_offer = Instant::now() + Duration::from_secs(30 * 60);
+                        if prompt_telegram_proxy_offer() {
+                            if open_telegram_proxy_link() {
+                                geph_config_set(&app_handle, "tgws_offer_accepted", "1");
+                            } else {
+                                tell_telegram_proxy_starting();
+                                next_tg_offer = Instant::now() + Duration::from_secs(30);
+                            }
                         }
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -990,25 +976,6 @@ pub fn run() {
                     .map(|d| d.join("geph-exits.json")),
             );
 
-            // First run only: once the bundled tg-ws-proxy has published its
-            // tg://proxy link, auto-open it so Telegram Desktop prompts to enable
-            // the proxy (Telegram requires that confirmation — we can't set it
-            // silently). A marker makes this a one-time thing.
-            if geph_field(app.handle(), "tgws_prompted").as_deref() != Some("1") {
-                let app_h = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    for _ in 0..40 {
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                        if let Ok(link) = fs::read_to_string(TGWS_LINK_PATH) {
-                            if link.trim().starts_with("tg://") {
-                                let _ = Command::new("/usr/bin/open").arg(link.trim()).spawn();
-                                geph_config_set(&app_h, "tgws_prompted", "1");
-                                break;
-                            }
-                        }
-                    }
-                });
-            }
             Ok(())
         })
         .build(tauri::generate_context!())
