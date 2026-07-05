@@ -1,5 +1,6 @@
 import ssl
 import logging
+from collections import OrderedDict
 
 import tproxy
 from tproxy import _doh_request, _doh_ssl_context
@@ -127,6 +128,45 @@ def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
 
     assert not filt.filter(noisy)
     assert filt.filter(useful)
+
+
+def test_voice_flow_observe_caps_count_and_keeps_recent_flow():
+    flows = OrderedDict()
+    key = ("10.0.0.2", 50000, "203.0.113.10", 50001)
+
+    for index in range(tproxy.VOICE_CUTOFF):
+        should_prime, count = tproxy.observe_voice_flow(flows, key, now=float(index))
+        assert should_prime
+        assert count == index
+
+    should_prime, count = tproxy.observe_voice_flow(flows, key, now=99.0)
+
+    assert not should_prime
+    assert count == tproxy.VOICE_CUTOFF
+    assert flows[key] == (tproxy.VOICE_CUTOFF, 99.0)
+
+
+def test_voice_flow_prune_expires_idle_entries():
+    flows = OrderedDict([
+        ("old", (1, 0.0)),
+        ("fresh", (1, 200.0)),
+    ])
+
+    tproxy.prune_voice_flows(flows, now=400.0, idle_ttl=250.0)
+
+    assert list(flows) == ["fresh"]
+
+
+def test_voice_flow_prune_evicts_lru_overflow_without_full_clear():
+    flows = OrderedDict([
+        ("oldest", (1, 100.0)),
+        ("middle", (1, 101.0)),
+        ("newest", (1, 102.0)),
+    ])
+
+    tproxy.prune_voice_flows(flows, now=110.0, max_flows=2, idle_ttl=999.0)
+
+    assert list(flows) == ["middle", "newest"]
 
 
 def test_rotating_log_writer_keeps_bounded_archives(tmp_path):

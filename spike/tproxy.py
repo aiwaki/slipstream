@@ -679,10 +679,32 @@ VOICE_TTL = 4
 VOICE_REPEAT = 6
 VOICE_CUTOFF = 5                    # prime the first N datagrams of each flow
 VOICE_FLOWS_MAX = 8192             # bound the per-flow table (re-priming is harmless)
+VOICE_FLOW_IDLE_TTL = 5 * 60.0
 
 
 def _fake_stun(txn=b"\x00" * 12):
     return struct.pack("!HHI", 0x0001, 0x0000, 0x2112A442) + txn   # STUN binding req
+
+
+def prune_voice_flows(flows, now, max_flows=VOICE_FLOWS_MAX, idle_ttl=VOICE_FLOW_IDLE_TTL):
+    """Drop idle voice flows first, then only the oldest overflow entries."""
+    cutoff = now - idle_ttl
+    for key, (_, last_seen) in list(flows.items()):
+        if last_seen >= cutoff:
+            break
+        del flows[key]
+    while len(flows) > max_flows:
+        flows.popitem(last=False)
+
+
+def observe_voice_flow(flows, key, now=None):
+    now = time.time() if now is None else now
+    prune_voice_flows(flows, now)
+    count, _ = flows.get(key, (0, 0.0))
+    should_prime = count < VOICE_CUTOFF
+    flows[key] = (min(count + 1, VOICE_CUTOFF), now)
+    flows.move_to_end(key)
+    return should_prime, count
 
 
 def default_iface():
@@ -716,7 +738,7 @@ def network_monitor(port, voice=True):
         except Exception as e:
             print(f">> voice disabled (scapy: {e})", file=sys.stderr)
     fake = _fake_stun()
-    flows = {}
+    flows = OrderedDict()
     sniffer = None
     cur_iface = None
 
@@ -725,12 +747,9 @@ def network_monitor(port, voice=True):
             return
         ip, udp = p[IP], p[UDP]
         key = (ip.src, udp.sport, ip.dst, udp.dport)
-        n = flows.get(key, 0)
-        if n >= VOICE_CUTOFF:
+        should_prime, n = observe_voice_flow(flows, key)
+        if not should_prime:
             return
-        if len(flows) > VOICE_FLOWS_MAX:
-            flows.clear()
-        flows[key] = n + 1
         pkt = (IP(src=ip.src, dst=ip.dst, ttl=VOICE_TTL)
                / UDP(sport=udp.sport, dport=udp.dport) / Raw(fake))
         for _ in range(VOICE_REPEAT):
