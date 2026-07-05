@@ -83,7 +83,7 @@ _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH
 DEAD_TTL = 60.0
 _dead = {}                     # host -> expiry_monotonic
 
-CANARY_HOST = os.environ.get("SLIP_CANARY_HOST", "gateway.discord.gg")
+CANARY_HOST = os.environ.get("SLIP_CANARY_HOST", "www.google.com")
 try:
     CANARY_TIMEOUT = float(os.environ.get("SLIP_CANARY_TIMEOUT", "3.0"))
 except ValueError:
@@ -585,9 +585,18 @@ def _set_network_canary(state, reason="", route="", error="", ok=False, now=None
         _canary_error = (error or "")[:200]
 
 
+def _canary_ssl_context():
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _wrap_canary_tls(sock, host, timeout):
     sock.settimeout(timeout)
-    ctx = ssl.create_default_context()
+    ctx = _canary_ssl_context()
     return ctx.wrap_socket(sock, server_hostname=host)
 
 
