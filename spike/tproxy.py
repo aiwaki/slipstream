@@ -83,6 +83,21 @@ _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH
 DEAD_TTL = 60.0
 _dead = {}                     # host -> expiry_monotonic
 
+CANARY_HOST = os.environ.get("SLIP_CANARY_HOST", "gateway.discord.gg")
+try:
+    CANARY_TIMEOUT = float(os.environ.get("SLIP_CANARY_TIMEOUT", "3.0"))
+except ValueError:
+    CANARY_TIMEOUT = 3.0
+CANARY_IP_LIMIT = 3
+_canary_lock = threading.Lock()
+_canary_state = "idle"
+_canary_reason = ""
+_canary_route = ""
+_canary_last_run = 0.0
+_canary_last_ok = 0.0
+_canary_error = ""
+_canary_thread = None
+
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
 _conn_count = 0                # live proxied connections
@@ -346,6 +361,19 @@ def note_local_result(host, down_bytes, duration):
           f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)", file=sys.stderr)
 
 
+def network_canary_status(now=None):
+    with _canary_lock:
+        return {
+            "canary": _canary_state,
+            "canary_host": CANARY_HOST,
+            "canary_reason": _canary_reason,
+            "canary_route": _canary_route,
+            "canary_last_run": _canary_last_run,
+            "canary_last_ok": _canary_last_ok,
+            "canary_error": _canary_error,
+        }
+
+
 def write_status(state, iface, voice_iface):
     try:
         now = time.time()
@@ -365,6 +393,7 @@ def write_status(state, iface, voice_iface):
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
         }
+        st.update(network_canary_status(now))
         st.update(tgws_status(now))
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
@@ -460,6 +489,98 @@ def pf_setup(port):
 def pf_has_rules(port):
     """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
     return f"port {port}" in _run("pfctl", "-sn").stdout
+
+
+def reset_network_runtime_state(reason, sync_quic=None):
+    """Drop route-sensitive transient state after wake or route/VPN changes."""
+    global _tg_proxy_suggest_until
+    _dead.clear()
+    _tg_direct_failures.clear()
+    _tg_proxy_suggest_until = 0.0
+    with _doh_lock:
+        _doh_cache.clear()
+    _quic_block_ips.clear()
+    if sync_quic is None:
+        sync_quic = _pf_applied
+    if sync_quic:
+        sync_quic_block_table()
+    print(f">> network recheck ({reason}) -> transient routing state reset",
+          file=sys.stderr)
+
+
+def _set_network_canary(state, reason="", route="", error="", ok=False, now=None):
+    global _canary_state, _canary_reason, _canary_route
+    global _canary_last_run, _canary_last_ok, _canary_error
+    if now is None:
+        now = time.time()
+    with _canary_lock:
+        _canary_state = state
+        _canary_reason = reason
+        _canary_route = route
+        _canary_last_run = now
+        if ok:
+            _canary_last_ok = now
+        _canary_error = (error or "")[:200]
+
+
+def run_network_canary(host=CANARY_HOST, timeout=CANARY_TIMEOUT,
+                       resolver=None, connector=None):
+    """Resolve through Slipstream's DoH path, then check a few TCP/443 routes."""
+    resolver = resolver or doh_resolve
+    connector = connector or socket.create_connection
+    try:
+        ips = resolver(host) or []
+    except Exception as e:
+        return False, f"resolve error: {e}"
+    if not ips:
+        return False, "resolve returned no A records"
+    last_error = ""
+    for ip in ips[:CANARY_IP_LIMIT]:
+        try:
+            sock = connector((ip, 443), timeout=timeout)
+            try:
+                sock.close()
+            except Exception:
+                pass
+            return True, ip
+        except OSError as e:
+            last_error = f"{ip}: {e}"
+    return False, last_error or "connect failed"
+
+
+def _network_canary_worker(reason, route):
+    ok, detail = run_network_canary()
+    if ok:
+        _set_network_canary("ok", reason, route, ok=True)
+        print(f">> network canary ok ({reason}) via {detail}", file=sys.stderr)
+    else:
+        _set_network_canary("failed", reason, route, error=detail)
+        print(f">> network canary failed ({reason}): {detail}", file=sys.stderr)
+
+
+def schedule_network_canary(reason, route, vpn=False):
+    global _canary_thread, _canary_state, _canary_reason, _canary_route
+    global _canary_last_run, _canary_error
+    if vpn:
+        _set_network_canary("skipped", reason, route, error="vpn default route")
+        return False
+    with _canary_lock:
+        if _canary_thread is not None and _canary_thread.is_alive():
+            return False
+        now = time.time()
+        _canary_state = "checking"
+        _canary_reason = reason
+        _canary_route = route
+        _canary_last_run = now
+        _canary_error = ""
+        _canary_thread = threading.Thread(
+            target=_network_canary_worker,
+            args=(reason, route),
+            name="slipstream-canary",
+            daemon=True,
+        )
+        _canary_thread.start()
+        return True
 
 
 def pf_teardown():
@@ -757,12 +878,29 @@ def observe_voice_flow(flows, key, now=None):
     return should_prime, count
 
 
-def default_iface():
+def default_route_info():
+    iface = gateway = ""
     for line in _run("route", "get", "default").stdout.splitlines():
         line = line.strip()
-        if line.startswith("interface:"):
-            return line.split()[1]
-    return None
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        value = value.strip()
+        value = value.split()[0] if value else ""
+        if key == "interface":
+            iface = value
+        elif key == "gateway":
+            gateway = value
+    return iface or None, gateway
+
+
+def route_signature(route_info):
+    iface, gateway = route_info
+    return f"{iface or ''}|{gateway or ''}"
+
+
+def default_iface():
+    return default_route_info()[0]
 
 
 def _voice_bpf(localip):
@@ -791,6 +929,8 @@ def network_monitor(port, voice=True):
     flows = OrderedDict()
     sniffer = None
     cur_iface = None
+    cur_route = None
+    last_vpn = None
 
     def on_pkt(p):
         if not (p.haslayer(IP) and p.haslayer(UDP)):
@@ -811,6 +951,7 @@ def network_monitor(port, voice=True):
     last_tick = time.time()
     while True:
         now = time.time()
+        recheck_reasons = []
         if now - last_tick > 30:
             # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
             # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
@@ -818,8 +959,32 @@ def network_monitor(port, voice=True):
             print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
+            recheck_reasons.append("wake")
         last_tick = now
-        iface = default_iface()
+        route_info = default_route_info()
+        iface = route_info[0]
+        route = route_signature(route_info)
+        vpn = bool(iface) and iface.startswith("utun")
+        if cur_route is None:
+            recheck_reasons.append("startup")
+        elif route != cur_route:
+            print(f">> default route changed ({cur_route or '-'} -> {route or '-'})",
+                  file=sys.stderr)
+            recheck_reasons.append("route change")
+        if last_vpn is not None and vpn != last_vpn:
+            recheck_reasons.append("vpn on" if vpn else "vpn off")
+        cur_route = route
+        last_vpn = vpn
+        if recheck_reasons:
+            seen = []
+            for reason in recheck_reasons:
+                if reason not in seen:
+                    seen.append(reason)
+            recheck_reason = ", ".join(seen)
+            reset_network_runtime_state(recheck_reason)
+            flows.clear()
+        else:
+            recheck_reason = None
         # Hysteresis: a few failed probes (geph busy under load, or briefly
         # re-establishing its tunnel) must NOT flip us to "down" — that drops
         # geo-blocked hosts to local desync (RU exit IP -> Anthropic/CF 403).
@@ -838,7 +1003,6 @@ def network_monitor(port, voice=True):
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
-        vpn = bool(iface) and iface.startswith("utun")
         if vpn:
             if _pf_applied:
                 print(f">> VPN up (default via {iface}) -> Slipstream dormant",
@@ -853,6 +1017,8 @@ def network_monitor(port, voice=True):
             elif not pf_has_rules(port):
                 print(">> pf rules vanished — re-applying", file=sys.stderr)
                 _pf_load(port)
+        if recheck_reason:
+            schedule_network_canary(recheck_reason, route, vpn=vpn)
         if send is not None:                       # scapy available
             if iface and iface != cur_iface:
                 if sniffer is not None:
