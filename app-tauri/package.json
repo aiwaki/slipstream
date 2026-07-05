@@ -4,9 +4,10 @@
   "private": true,
   "description": "Slipstream menu-bar tray (Tauri v2)",
   "scripts": {
+    "sync-version": "python3 ../scripts/sync_version.py",
     "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "dev": "npm run sync-version && tauri dev",
+    "build": "npm run sync-version && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

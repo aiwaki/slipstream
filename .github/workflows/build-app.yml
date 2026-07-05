@@ -17,8 +17,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 0.1.1 (no leading v)"
-        required: true
+        description: "Optional version override; must match VERSION, e.g. 0.1.3"
+        required: false
   push:
     tags: ["v*"]
 
@@ -34,10 +34,17 @@ jobs:
       - name: Resolve version + tag
         id: ver
         run: |
+          repo_v="$(tr -d '[:space:]' < VERSION)"
           if [ "${{ github.event_name }}" = "push" ]; then
             v="${GITHUB_REF_NAME#v}"; tag="${GITHUB_REF_NAME}"
+            [ "$v" = "$repo_v" ] || { echo "tag $tag does not match VERSION ($repo_v)"; exit 1; }
           else
-            v="${{ github.event.inputs.version }}"; tag="v${v}"
+            input_v="${{ github.event.inputs.version }}"
+            if [ -n "$input_v" ] && [ "$input_v" != "$repo_v" ]; then
+              echo "workflow version $input_v does not match VERSION ($repo_v)"
+              exit 1
+            fi
+            v="$repo_v"; tag="v${v}"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -83,14 +90,8 @@ jobs:
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
 
-      - name: Sync tauri.conf version
-        run: |
-          python3 - <<PY
-          import json
-          p = "app-tauri/src-tauri/tauri.conf.json"
-          d = json.load(open(p)); d["version"] = "${{ steps.ver.outputs.version }}"
-          json.dump(d, open(p, "w"), indent=2)
-          PY
+      - name: Check version metadata
+        run: python3 scripts/sync_version.py --check
 
       - name: Build + sign the app
         working-directory: app-tauri
@@ -99,7 +100,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           npm ci
-          npm run tauri build
+          npm run build
 
       - name: Package + build the update appcast (latest.json)
         id: pkg

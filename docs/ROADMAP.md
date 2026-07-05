@@ -13,6 +13,7 @@ not a release promise.
 | Local DPI bypass | implemented for current macOS daemon |
 | Geph sidecar | implemented for macOS build |
 | Telegram Desktop proxy offer | implemented |
+| Single version source | implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -32,7 +33,6 @@ Goal: make the current macOS build safer to install, run, diagnose, and update.
 - Scoped QUIC handling so UDP/443 blocking is limited to destinations that need
   it.
 - Rotating logs for support and post-mortem debugging.
-- Single version source for local and release builds.
 
 ## P1 — Routing Quality
 
