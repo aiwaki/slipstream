@@ -19,6 +19,7 @@ not a release promise.
 | Scoped QUIC handling | implemented |
 | Wake/network recheck canary | implemented |
 | Daemon watchdog / stale `pf` recovery | implemented |
+| Periodic route canaries | implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -36,7 +37,6 @@ No active P0 items.
 
 Goal: detect degradation before the user has to diagnose it manually.
 
-- Periodic canary checks for key routes.
 - Throughput canary for throttling, not only handshake failure.
 - Automatic re-sweep when a known strategy stops working.
 - More detailed status: current route, strategy, Geph state, canary result.

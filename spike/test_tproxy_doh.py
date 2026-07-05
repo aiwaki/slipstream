@@ -211,6 +211,36 @@ def test_run_network_canary_reports_resolve_failure():
     assert detail == "resolve returned no A records"
 
 
+def test_periodic_canary_runs_only_when_due_and_active():
+    assert tproxy.should_run_periodic_canary(
+        now=400.0,
+        last_run=100.0,
+        interval=300.0,
+    )
+    assert not tproxy.should_run_periodic_canary(
+        now=399.0,
+        last_run=100.0,
+        interval=300.0,
+    )
+    assert not tproxy.should_run_periodic_canary(
+        now=400.0,
+        last_run=100.0,
+        interval=300.0,
+        vpn=True,
+    )
+    assert not tproxy.should_run_periodic_canary(
+        now=400.0,
+        last_run=100.0,
+        interval=300.0,
+        recheck_reason="route change",
+    )
+    assert not tproxy.should_run_periodic_canary(
+        now=400.0,
+        last_run=0.0,
+        interval=0.0,
+    )
+
+
 def test_pf_rules_scope_quic_block_to_table():
     assert f"table <{tproxy.QUIC_BLOCK_TABLE}> persist" in tproxy.PF_RULES
     assert f"to <{tproxy.QUIC_BLOCK_TABLE}> port 443" in tproxy.PF_RULES
