@@ -21,6 +21,7 @@ not a release promise.
 | Daemon watchdog / stale `pf` recovery | implemented |
 | Periodic route canaries | implemented |
 | Detailed route diagnostics | implemented |
+| Throughput canary | implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -38,7 +39,6 @@ No active P0 items.
 
 Goal: detect degradation before the user has to diagnose it manually.
 
-- Throughput canary for throttling, not only handshake failure.
 - Automatic re-sweep when a known strategy stops working.
 - Signed strategy-list updates without rebuilding the app.
 
