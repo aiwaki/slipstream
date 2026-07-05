@@ -18,6 +18,7 @@ not a release promise.
 | Voice-flow TTL/LRU cleanup | implemented |
 | Scoped QUIC handling | implemented |
 | Wake/network recheck canary | implemented |
+| Daemon watchdog / stale `pf` recovery | implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -29,8 +30,7 @@ not a release promise.
 
 Goal: make the current macOS build safer to install, run, diagnose, and update.
 
-- Watchdog or recovery path for stale `pf` state if the daemon is killed and does
-  not restart.
+No active P0 items.
 
 ## P1 — Routing Quality
 

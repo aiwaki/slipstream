@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,8 @@ const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
+const DAEMON_WATCHDOG_MISSES: u8 = 3;
+const DAEMON_WATCHDOG_COOLDOWN_SECS: u64 = 5 * 60;
 
 /// Is the system UI language Russian? Cached — the locale doesn't change while we
 /// run. Most users are in RU, so the tray speaks Russian when the Mac does.
@@ -158,6 +160,45 @@ fn daemon_needs_install(bundled: &Path) -> bool {
     !same_file_bytes(bundled, Path::new(INSTALLED_DAEMON))
 }
 
+fn bundled_daemon_path(app: &AppHandle) -> Option<PathBuf> {
+    Some(
+        app.path()
+            .resource_dir()
+            .ok()?
+            .join("slipstreamd")
+            .join("slipstreamd"),
+    )
+}
+
+fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
+    let Some(bin) = bundled_daemon_path(app) else {
+        return false;
+    };
+    bin.exists() && !daemon_needs_install(&bin)
+}
+
+fn should_recover_daemon(missing_status_polls: u8, cooldown_ready: bool, installed: bool) -> bool {
+    installed && cooldown_ready && missing_status_polls >= DAEMON_WATCHDOG_MISSES
+}
+
+fn daemon_recovery_shell() -> String {
+    let label = shell_quote(&format!("system/{LAUNCHD_LABEL}"));
+    let plist = shell_quote(LAUNCHD_PLIST);
+    let daemon = shell_quote(INSTALLED_DAEMON);
+    format!(
+        "/bin/launchctl kickstart -k {label} >/dev/null 2>&1 \
+         || /bin/launchctl bootstrap system {plist} >/dev/null 2>&1 \
+         || true; \
+         /bin/sleep 3; \
+         status=$({daemon} --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
+         if printf '%s\\n' \"$status\" \
+            | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
+         then exit 0; fi; \
+         /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; \
+         /sbin/pfctl -d >/dev/null 2>&1 || true"
+    )
+}
+
 /// First launch: if the root daemon isn't installed yet, install it from the
 /// bundled self-contained `slipstreamd` (a PyInstaller onedir — scapy, crypto and
 /// the Telegram proxy all inside, no system Python needed) with a single admin
@@ -165,10 +206,9 @@ fn daemon_needs_install(bundled: &Path) -> bool {
 /// No-op in dev builds that don't ship the frozen daemon (there you install it via
 /// `sudo python3 spike/tproxy.py --install`).
 fn ensure_daemon_installed(app: &AppHandle) {
-    let Ok(res) = app.path().resource_dir() else {
+    let Some(bin) = bundled_daemon_path(app) else {
         return;
     };
-    let bin = res.join("slipstreamd").join("slipstreamd");
     if !bin.exists() {
         return; // dev build without the bundled daemon
     }
@@ -1086,6 +1126,8 @@ pub fn run() {
                 let mut pending: Option<bool> = None;
                 let mut stable: u8 = 0;
                 let mut next_tg_offer = Instant::now();
+                let mut missing_status_polls: u8 = 0;
+                let mut next_daemon_recovery = Instant::now();
                 loop {
                     let state = refresh(&s, &d);
                     if state != last_state {
@@ -1093,6 +1135,21 @@ pub fn run() {
                         last_state = state;
                     }
                     let status = read_status();
+                    let now = Instant::now();
+                    if status.is_some() {
+                        missing_status_polls = 0;
+                    } else {
+                        missing_status_polls = missing_status_polls.saturating_add(1);
+                    }
+                    if should_recover_daemon(
+                        missing_status_polls,
+                        now >= next_daemon_recovery,
+                        daemon_installed_for_watchdog(&app_handle),
+                    ) {
+                        next_daemon_recovery =
+                            now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
+                        run_admin(&daemon_recovery_shell());
+                    }
                     if let Some(up) = status
                         .as_ref()
                         .and_then(|v| v.get("geph"))
@@ -1181,7 +1238,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{launchd_plist_uses_bundled_daemon, shell_quote, telegram_proxy_detail};
+    use super::{
+        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, shell_quote,
+        should_recover_daemon, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+    };
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -1209,6 +1269,28 @@ mod tests {
     fn launchd_plist_rejects_legacy_script_daemon() {
         let plist = "<array><string>/usr/local/slipstream/venv/bin/python3</string><string>/usr/local/slipstream/tproxy.py</string></array>";
         assert!(!launchd_plist_uses_bundled_daemon(plist));
+    }
+
+    #[test]
+    fn watchdog_waits_for_threshold_cooldown_and_installed_daemon() {
+        assert!(!should_recover_daemon(
+            DAEMON_WATCHDOG_MISSES - 1,
+            true,
+            true
+        ));
+        assert!(!should_recover_daemon(DAEMON_WATCHDOG_MISSES, false, true));
+        assert!(!should_recover_daemon(DAEMON_WATCHDOG_MISSES, true, false));
+        assert!(should_recover_daemon(DAEMON_WATCHDOG_MISSES, true, true));
+    }
+
+    #[test]
+    fn daemon_recovery_shell_kickstarts_before_pf_cleanup() {
+        let shell = daemon_recovery_shell();
+
+        assert!(shell.contains("/bin/launchctl kickstart -k 'system/dev.slipstream.tproxy'"));
+        assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
+        assert!(shell.contains("/sbin/pfctl -f /etc/pf.conf"));
+        assert!(shell.find("kickstart").unwrap() < shell.find("pfctl").unwrap());
     }
 
     #[test]
