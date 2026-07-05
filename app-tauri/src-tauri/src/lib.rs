@@ -365,6 +365,50 @@ fn telegram_proxy_detail(proxy: &str, suggested: bool, ru: bool) -> Option<&'sta
     }
 }
 
+fn status_str<'a>(st: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    st.and_then(|v| v.get(key)).and_then(|x| x.as_str())
+}
+
+fn push_detail_part(detail: &mut String, part: &str) {
+    if !part.is_empty() {
+        detail.push_str(" · ");
+        detail.push_str(part);
+    }
+}
+
+fn canary_detail(st: Option<&Value>, ru: bool) -> Option<&'static str> {
+    match status_str(st, "canary")? {
+        "ok" => Some(if ru { "сеть OK" } else { "network OK" }),
+        "checking" => Some(if ru {
+            "проверка сети"
+        } else {
+            "network check"
+        }),
+        "failed" => Some(if ru {
+            "сбой сети"
+        } else {
+            "network issue"
+        }),
+        "skipped" => Some(if ru {
+            "сеть через VPN"
+        } else {
+            "network via VPN"
+        }),
+        _ => None,
+    }
+}
+
+fn local_strategy_detail(st: Option<&Value>) -> Option<String> {
+    if status_str(st, "route_mode_last") != Some("local") {
+        return None;
+    }
+    let strategy = status_str(st, "strategy_last").unwrap_or("");
+    if strategy.is_empty() {
+        return None;
+    }
+    Some(format!("DPI: {strategy}"))
+}
+
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
@@ -398,18 +442,11 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
     let ru = ui_ru();
     let (title, mut detail) = match state.as_str() {
         "active" => {
-            let mut d = if ru {
-                format!("{conns} соединений · выучено хостов: {learned}")
+            let d = if ru {
+                format!("{conns} соединений · хостов: {learned}")
             } else {
                 format!("{conns} connections · {learned} hosts learned")
             };
-            if geph == "up" {
-                d.push_str(if ru {
-                    " · Geph-туннель включён"
-                } else {
-                    " · Geph tunnel on"
-                });
-            }
             (
                 (if ru {
                     "Slipstream — активен"
@@ -450,9 +487,24 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         ),
     };
     if matches!(state.as_str(), "active" | "dormant") {
+        if let Some(canary) = canary_detail(st.as_ref(), ru) {
+            push_detail_part(&mut detail, canary);
+        }
+        if let Some(strategy) = local_strategy_detail(st.as_ref()) {
+            push_detail_part(&mut detail, &strategy);
+        }
+        if geph == "up" {
+            push_detail_part(
+                &mut detail,
+                if ru {
+                    "Geph-туннель включён"
+                } else {
+                    "Geph tunnel on"
+                },
+            );
+        }
         if let Some(tg) = telegram_proxy_detail(&telegram_proxy, telegram_proxy_suggested, ru) {
-            detail.push_str(" · ");
-            detail.push_str(tg);
+            push_detail_part(&mut detail, tg);
         }
     }
     let _ = state_item.set_text(&title);
@@ -1311,9 +1363,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, shell_quote, should_recover_daemon, telegram_proxy_detail,
-        DAEMON_WATCHDOG_MISSES,
+        canary_detail, daemon_recovery_shell, launchd_plist_uses_bundled_daemon,
+        local_strategy_detail, log_snapshot_shell, osascript_dialog_args, shell_quote,
+        should_recover_daemon, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
     };
 
     #[test]
@@ -1417,5 +1469,35 @@ mod tests {
             Some("Telegram-прокси недоступен")
         );
         assert_eq!(telegram_proxy_detail("unknown", false, false), None);
+    }
+
+    #[test]
+    fn canary_detail_reports_compact_health() {
+        let status = serde_json::json!({ "canary": "ok" });
+        assert_eq!(canary_detail(Some(&status), true), Some("сеть OK"));
+
+        let status = serde_json::json!({ "canary": "checking" });
+        assert_eq!(canary_detail(Some(&status), false), Some("network check"));
+
+        let status = serde_json::json!({ "canary": "failed" });
+        assert_eq!(canary_detail(Some(&status), true), Some("сбой сети"));
+    }
+
+    #[test]
+    fn local_strategy_detail_reports_only_local_dpi_strategy() {
+        let local = serde_json::json!({
+            "route_mode_last": "local",
+            "strategy_last": "split64+fake"
+        });
+        assert_eq!(
+            local_strategy_detail(Some(&local)),
+            Some("DPI: split64+fake".to_string())
+        );
+
+        let geph = serde_json::json!({
+            "route_mode_last": "geph",
+            "strategy_last": "socks5"
+        });
+        assert_eq!(local_strategy_detail(Some(&geph)), None);
     }
 }
