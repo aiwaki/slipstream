@@ -130,6 +130,48 @@ def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     assert filt.filter(useful)
 
 
+def test_pf_rules_scope_quic_block_to_table():
+    assert f"table <{tproxy.QUIC_BLOCK_TABLE}> persist" in tproxy.PF_RULES
+    assert f"to <{tproxy.QUIC_BLOCK_TABLE}> port 443" in tproxy.PF_RULES
+    assert "proto udp from any to any port 443" not in tproxy.PF_RULES
+
+
+def test_note_quic_block_ips_filters_and_evicts_lru(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
+    tproxy._quic_block_ips.clear()
+
+    tproxy.note_quic_block_ips([
+        "93.184.216.34",
+        "10.0.0.1",
+        "149.154.160.1",
+        "1.1.1.1",
+        "8.8.8.8",
+    ], max_ips=2)
+
+    assert list(tproxy._quic_block_ips) == ["1.1.1.1", "8.8.8.8"]
+    assert calls == [
+        ("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "replace",
+         "1.1.1.1", "8.8.8.8")
+    ]
+
+
+def test_sync_quic_block_table_replaces_loaded_table(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
+    tproxy._quic_block_ips.clear()
+    tproxy._quic_block_ips["93.184.216.34"] = 1.0
+    tproxy._quic_block_ips["1.1.1.1"] = 2.0
+
+    tproxy.sync_quic_block_table()
+
+    assert calls == [
+        ("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "replace",
+         "93.184.216.34", "1.1.1.1")
+    ]
+
+
 def test_voice_flow_observe_caps_count_and_keeps_recent_flow():
     flows = OrderedDict()
     key = ("10.0.0.2", 50000, "203.0.113.10", 50001)

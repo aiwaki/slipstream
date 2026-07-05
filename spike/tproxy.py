@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import atexit
 import fcntl
+import ipaddress
 import json
 import logging
 from collections import OrderedDict, deque
@@ -58,13 +59,17 @@ VERBOSE = False
 DOH = [("1.1.1.1", "cloudflare-dns.com"), ("8.8.8.8", "dns.google")]
 
 PF_RULES = """\
+table <slipstream_quic_block> persist
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
-block return quick inet proto udp from any to any port 443
+block return quick inet proto udp from any to <slipstream_quic_block> port 443
 """
 
 _pf_applied = False
 _pf_fd = None
+QUIC_BLOCK_TABLE = "slipstream_quic_block"
+QUIC_BLOCK_MAX = 4096
+_quic_block_ips = OrderedDict()
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
@@ -383,11 +388,56 @@ def _run(*args):
         return subprocess.CompletedProcess(args, 127, "", f"not found: {args[0]}")
 
 
+def _quic_blockable_ip(ip):
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return (
+        addr.version == 4
+        and not addr.is_loopback
+        and not addr.is_link_local
+        and not addr.is_multicast
+        and not addr.is_private
+        and not _ip_in_nets(ip, TELEGRAM_NETS)
+    )
+
+
+def sync_quic_block_table():
+    ips = list(_quic_block_ips)
+    if ips:
+        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "replace", *ips)
+    else:
+        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "flush")
+
+
+def note_quic_block_ips(ips, max_ips=QUIC_BLOCK_MAX):
+    new_ips = []
+    for ip in ips:
+        if not _quic_blockable_ip(ip):
+            continue
+        exists = ip in _quic_block_ips
+        _quic_block_ips[ip] = time.monotonic()
+        _quic_block_ips.move_to_end(ip)
+        if not exists:
+            new_ips.append(ip)
+    evicted = False
+    while len(_quic_block_ips) > max_ips:
+        _quic_block_ips.popitem(last=False)
+        evicted = True
+    if _pf_applied and evicted:
+        sync_quic_block_table()
+    elif _pf_applied and new_ips:
+        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "add", *new_ips)
+
+
 def _pf_load(port):
     f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
     f.write(PF_RULES.format(port=port))
     f.close()
     r = _run("pfctl", "-f", f.name)
+    if r.returncode == 0:
+        sync_quic_block_table()
     try:
         os.unlink(f.name)
     except Exception:
@@ -404,7 +454,7 @@ def pf_setup(port):
         print("pfctl load failed:\n" + r.stderr, file=sys.stderr)
         sys.exit(1)
     _pf_applied = True
-    print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC (UDP/443) blocked")
+    print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC scoped by table")
 
 
 def pf_has_rules(port):
@@ -1268,6 +1318,7 @@ async def _handle_impl(reader, writer):
     # back, instead of leaking the geo-host to an RU exit. (Russian services are
     # excluded by geph_route and fall through to desync as normal.)
     if is_tls and geph_route(host):
+        note_quic_block_ips([dst_ip])
         if _geph_up:
             g = await dial_via_geph(host, dst_port, head + body)
             if g:
@@ -1323,6 +1374,8 @@ async def _handle_impl(reader, writer):
                 _dead.pop(host, None)
                 if _strat_cache.get(host) != chosen_name:
                     remember_strategy(host, chosen_name)
+                if chosen_name != "plain":
+                    note_quic_block_ips([dst_ip, chosen, *real_ips[:2]])
         elif host:
             _dead[host] = now + DEAD_TTL        # arm the negative cache
             if len(_dead) > 4096:
