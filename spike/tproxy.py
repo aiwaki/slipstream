@@ -88,6 +88,10 @@ try:
     CANARY_TIMEOUT = float(os.environ.get("SLIP_CANARY_TIMEOUT", "3.0"))
 except ValueError:
     CANARY_TIMEOUT = 3.0
+try:
+    CANARY_INTERVAL = float(os.environ.get("SLIP_CANARY_INTERVAL", "300.0"))
+except ValueError:
+    CANARY_INTERVAL = 300.0
 CANARY_IP_LIMIT = 3
 _canary_lock = threading.Lock()
 _canary_state = "idle"
@@ -370,6 +374,7 @@ def network_canary_status(now=None):
             "canary_route": _canary_route,
             "canary_last_run": _canary_last_run,
             "canary_last_ok": _canary_last_ok,
+            "canary_interval": CANARY_INTERVAL,
             "canary_error": _canary_error,
         }
 
@@ -556,6 +561,16 @@ def _network_canary_worker(reason, route):
     else:
         _set_network_canary("failed", reason, route, error=detail)
         print(f">> network canary failed ({reason}): {detail}", file=sys.stderr)
+
+
+def should_run_periodic_canary(now, last_run, interval=CANARY_INTERVAL,
+                               vpn=False, recheck_reason=None):
+    return (
+        interval > 0
+        and not vpn
+        and not recheck_reason
+        and now - last_run >= interval
+    )
 
 
 def schedule_network_canary(reason, route, vpn=False):
@@ -931,6 +946,7 @@ def network_monitor(port, voice=True):
     cur_iface = None
     cur_route = None
     last_vpn = None
+    last_periodic_canary = 0.0
 
     def on_pkt(p):
         if not (p.haslayer(IP) and p.haslayer(UDP)):
@@ -1018,7 +1034,11 @@ def network_monitor(port, voice=True):
                 print(">> pf rules vanished — re-applying", file=sys.stderr)
                 _pf_load(port)
         if recheck_reason:
-            schedule_network_canary(recheck_reason, route, vpn=vpn)
+            if schedule_network_canary(recheck_reason, route, vpn=vpn):
+                last_periodic_canary = now
+        elif should_run_periodic_canary(now, last_periodic_canary, vpn=vpn):
+            if schedule_network_canary("periodic", route, vpn=vpn):
+                last_periodic_canary = now
         if send is not None:                       # scapy available
             if iface and iface != cur_iface:
                 if sniffer is not None:
