@@ -22,6 +22,7 @@ import asyncio
 import atexit
 import fcntl
 import json
+import logging
 from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -37,6 +38,14 @@ import tempfile
 import threading
 import time
 from urllib.parse import urlencode
+
+
+class _ScapyMacNoiseFilter(logging.Filter):
+    def filter(self, record):
+        return "MAC address to reach destination not found" not in record.getMessage()
+
+
+logging.getLogger("scapy.runtime").addFilter(_ScapyMacNoiseFilter())
 
 PROXY_PORT = 1080
 DIOCNATLOOK = 0xC0544417
@@ -112,8 +121,36 @@ TELEGRAM_NETS = (
 TG_DIRECT_FAIL_WINDOW = 120.0
 TG_DIRECT_FAIL_THRESHOLD = 3
 TG_PROXY_SUGGEST_TTL = 30 * 60.0
+TGWS_ACCEPTED_PATH = "/var/tmp/dev.slipstream.tgws.accepted"
 _tg_direct_failures = deque()
 _tg_proxy_suggest_until = 0.0
+_tg_proxy_ack_seen = 0.0
+_tgws_state = "starting"
+_tgws_last_error = ""
+_tgws_ready_since = 0.0
+
+
+def set_tgws_state(state, error=""):
+    global _tgws_state, _tgws_last_error, _tgws_ready_since
+    _tgws_state = state
+    _tgws_last_error = error[:200]
+    if state == "ready" and not _tgws_ready_since:
+        _tgws_ready_since = time.time()
+    elif state != "ready":
+        _tgws_ready_since = 0.0
+
+
+def tgws_status(now=None):
+    now = time.time() if now is None else now
+    return {
+        "telegram_proxy": _tgws_state,
+        "telegram_proxy_port": TGWS_PORT,
+        "telegram_proxy_error": _tgws_last_error,
+        "telegram_proxy_ready_for": (
+            int(max(0, now - _tgws_ready_since))
+            if _tgws_state == "ready" and _tgws_ready_since else 0
+        ),
+    }
 
 
 def _ip_in_nets(ip, nets):
@@ -144,6 +181,26 @@ def note_telegram_direct_failure(reason):
 
 def note_telegram_direct_success():
     _tg_direct_failures.clear()
+
+
+def consume_telegram_proxy_acceptance():
+    """Clear the current offer after the user opens tg://proxy.
+
+    The ack file lives in /var/tmp so the non-root tray can update it and the root
+    daemon can consume it. Only the mtime matters; once consumed, future direct
+    Telegram failures can raise a fresh suggestion again.
+    """
+    global _tg_proxy_suggest_until, _tg_proxy_ack_seen
+    try:
+        mtime = os.path.getmtime(TGWS_ACCEPTED_PATH)
+    except OSError:
+        return False
+    if mtime <= _tg_proxy_ack_seen:
+        return False
+    _tg_proxy_ack_seen = mtime
+    _tg_direct_failures.clear()
+    _tg_proxy_suggest_until = 0.0
+    return True
 
 
 def prune_telegram_direct_failures(now=None):
@@ -288,6 +345,7 @@ def write_status(state, iface, voice_iface):
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
+        consume_telegram_proxy_acceptance()
         st = {
             "state": state,            # "active" | "dormant"
             "pid": os.getpid(),
@@ -302,6 +360,7 @@ def write_status(state, iface, voice_iface):
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
         }
+        st.update(tgws_status(now))
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
             json.dump(st, f)
@@ -367,6 +426,19 @@ def pf_teardown():
     print(">> pf restored")
 
 
+def running_from_install_dir(file_path=None, executable=None, frozen=None):
+    if frozen is None:
+        frozen = getattr(sys, "frozen", False)
+    if executable is None:
+        executable = sys.executable
+    if file_path is None:
+        file_path = __file__
+
+    if frozen:
+        return os.path.dirname(os.path.abspath(executable)) == INSTALL_DIR
+    return os.path.abspath(file_path) == os.path.join(INSTALL_DIR, "tproxy.py")
+
+
 def cleanup_stale():
     """Self-heal: kill any leftover tproxy instances (e.g. a Ctrl+Z-suspended
     one still holding the port) and reset pf to the clean default, so a fresh
@@ -374,19 +446,21 @@ def cleanup_stale():
     me, parent = os.getpid(), os.getppid()
     # A MANUAL run (from the repo, not the installed daemon) must stop the daemon
     # first: launchd KeepAlive would instantly restart a kill-9'd daemon and
-    # re-grab :1080. The daemon itself runs from INSTALL_DIR -> never boots itself.
-    if os.path.abspath(__file__) != os.path.join(INSTALL_DIR, "tproxy.py"):
+    # re-grab :1080. PyInstaller sets __file__ under _internal, so frozen daemons
+    # must be identified by sys.executable instead.
+    if not running_from_install_dir():
         _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
-    res = _run("pgrep", "-f", "tproxy.py")
     killed = 0
-    for line in res.stdout.split():
-        try:
-            pid = int(line)
-        except ValueError:
-            continue
-        if pid not in (me, parent):
-            _run("kill", "-9", str(pid))
-            killed += 1
+    for pattern in ("tproxy.py", "slipstreamd"):
+        res = _run("pgrep", "-f", pattern)
+        for line in res.stdout.split():
+            try:
+                pid = int(line)
+            except ValueError:
+                continue
+            if pid not in (me, parent):
+                _run("kill", "-9", str(pid))
+                killed += 1
     _run("pfctl", "-f", "/etc/pf.conf")     # drop any stale rules from a crash
     if killed:
         print(f">> self-heal: killed {killed} stale tproxy instance(s), reset pf")
@@ -562,6 +636,7 @@ _l3_tls = threading.local()
 
 def _l3send(pkt):
     from scapy.all import conf
+    conf.verb = 0
     s = getattr(_l3_tls, "sock", None)
     if s is None:
         s = _l3_tls.sock = conf.L3socket()
@@ -636,7 +711,8 @@ def network_monitor(port, voice=True):
     AsyncSniffer = send = IP = UDP = Raw = get_if_addr = None
     if voice:
         try:
-            from scapy.all import AsyncSniffer, send, IP, UDP, Raw, get_if_addr
+            from scapy.all import AsyncSniffer, send, IP, UDP, Raw, get_if_addr, conf
+            conf.verb = 0
         except Exception as e:
             print(f">> voice disabled (scapy: {e})", file=sys.stderr)
     fake = _fake_stun()
@@ -1280,6 +1356,12 @@ def do_install(port):
     # TCC access to ~/Documents). Two modes:
     #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
     #  - script (dev): copy tproxy.py + build a venv with scapy
+    secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
+    try:
+        tgws_secret_backup = open(secret_path).read()
+    except Exception:
+        tgws_secret_backup = None
+    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # stop old daemon before replacing files
     if getattr(sys, "frozen", False):
         src = os.path.dirname(os.path.abspath(sys.executable))
         shutil.rmtree(INSTALL_DIR, ignore_errors=True)
@@ -1308,15 +1390,23 @@ def do_install(port):
                 return
             # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
             # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
-            # libcrypto in an unsafe way") -> the daemon crash-loops. Install both.
+            # libcrypto in an unsafe way") -> the daemon crash-loops. certifi gives
+            # the GitHub CF-domain refresh a CA bundle in frozen/script installs.
             r = _run(py, "-m", "pip", "install", "--quiet",
-                     "--disable-pip-version-check", "scapy", "cryptography")
+                     "--disable-pip-version-check", "scapy", "cryptography", "certifi")
             if r.returncode != 0:
-                print("scapy/cryptography install failed (pypi reachable?):\n"
+                print("scapy/cryptography/certifi install failed (pypi reachable?):\n"
                       + r.stderr[-400:], file=sys.stderr)
                 return
         prog_args = [py, script, "--port", str(port)]
         uninstall_hint = f"sudo {py} {script} --uninstall"
+    if tgws_secret_backup:
+        try:
+            with open(secret_path, "w") as f:
+                f.write(tgws_secret_backup.strip())
+            os.chmod(secret_path, 0o600)
+        except Exception:
+            pass
     workdir = INSTALL_DIR
     prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
     plist = (
@@ -1432,6 +1522,7 @@ def start_tgws_proxy():
     rides WSS to Telegram's Cloudflare-fronted WS endpoints, bypassing the DC-IP
     block. Its outbound runs as root, so our own pf rdr (user != root) leaves it
     alone: it goes out direct, no desync, no loop back into us."""
+    set_tgws_state("starting")
     here = os.path.dirname(os.path.abspath(__file__))
     for cand in (here, os.path.join(here, "..", "vendor", "tg-ws-proxy")):
         if os.path.isdir(os.path.join(cand, "proxy")):
@@ -1443,6 +1534,7 @@ def start_tgws_proxy():
         from proxy.tg_ws_proxy import _run as _tgws_run
         from proxy.config import proxy_config
     except Exception as e:
+        set_tgws_state("unavailable", repr(e))
         print(f">> tg-ws-proxy unavailable ({e!r}); Telegram gets MTProto "
               f"passthrough only", file=sys.stderr)
         return
@@ -1464,9 +1556,11 @@ def start_tgws_proxy():
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+                set_tgws_state("ready")
                 loop.run_until_complete(_tgws_run())
             except OSError as e:
                 if getattr(e, "errno", None) == 48:   # EADDRINUSE
+                    set_tgws_state("in_use", "127.0.0.1:1443 is already in use")
                     if not warned_inuse:
                         print(">> tg-ws-proxy: :1443 held by the standalone TG WS "
                               "Proxy app; the embedded proxy takes over when you "
@@ -1475,10 +1569,12 @@ def start_tgws_proxy():
                         warned_inuse = True
                     time.sleep(15)
                     continue
+                set_tgws_state("error", repr(e))
                 print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
                       file=sys.stderr)
                 time.sleep(5)
             except Exception as e:
+                set_tgws_state("error", repr(e))
                 print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
                       file=sys.stderr)
                 time.sleep(5)

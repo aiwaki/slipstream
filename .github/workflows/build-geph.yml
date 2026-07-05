@@ -2,9 +2,8 @@
 # Slipstream app bundles. This is how we "embed geph without installing it
 # separately": CI (which HAS Rust + network) compiles geph5-client from the
 # MPL-2.0 source, and the app-build workflow drops the result into
-# Slipstream.app/Contents/Resources. The scheduled run watches geph upstream for
-# new `geph5-client-v*` tags and rebuilds automatically -> users get geph
-# bugfixes through Slipstream's own auto-update, with nothing to install by hand.
+# Slipstream.app/Contents/Resources. The scheduled run watches crates.io for new
+# geph5-client versions and publishes a matching vendored binary.
 #
 # geph5-client is MPL-2.0 (file-level copyleft). Redistributing the unmodified
 # binary inside a larger MIT app is allowed; we ship geph's LICENSE alongside it
@@ -26,7 +25,7 @@ env:
   GEPH_REPO: geph-official/geph5
 
 jobs:
-  # 1) Find the latest upstream geph5-client tag; rebuild only when it differs
+  # 1) Find the latest geph5-client crate; rebuild only when it differs
   #    from what we've already vendored (vendor/geph/VERSION).
   resolve:
     runs-on: ubuntu-latest

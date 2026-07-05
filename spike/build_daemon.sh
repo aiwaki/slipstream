@@ -10,7 +10,7 @@ echo ">> build venv + pyinstaller + runtime deps ..."
 rm -rf .buildvenv
 "$PY" -m venv .buildvenv
 .buildvenv/bin/python -m pip install --quiet --upgrade pip
-.buildvenv/bin/python -m pip install --quiet pyinstaller scapy cryptography
+.buildvenv/bin/python -m pip install --quiet pyinstaller scapy cryptography certifi
 
 echo ">> freezing tproxy.py via slipstreamd.spec ..."
 rm -rf build dist

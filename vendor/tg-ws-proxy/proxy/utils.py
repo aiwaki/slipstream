@@ -1,8 +1,10 @@
 import socket as _socket
+import ssl
+import time
 import urllib.request
 import http.client
 
-from typing import Optional, Dict, List
+from typing import Callable, Hashable, Optional, Dict, List
 from urllib.request import Request
 
 
@@ -33,6 +35,42 @@ _GITHUB_IPS: Dict[str, str] = {
     "release-assets.githubusercontent.com": "185.199.109.133",
     "raw.githubusercontent.com": "185.199.109.133",
 }
+_LIMITED_LOG_EVENTS: Dict[Hashable, tuple[float, int]] = {}
+
+
+def log_limited(
+    log_method: Callable[..., None],
+    key: Hashable,
+    message: str,
+    *args,
+    interval: float = 30.0,
+) -> None:
+    now = time.monotonic()
+    last_event = _LIMITED_LOG_EVENTS.get(key)
+    if last_event is None:
+        _LIMITED_LOG_EVENTS[key] = (now, 0)
+        log_method(message, *args)
+        return
+
+    last, suppressed = last_event
+    if now - last < interval:
+        _LIMITED_LOG_EVENTS[key] = (last, suppressed + 1)
+        return
+
+    if suppressed:
+        message = f"{message} (suppressed %d similar messages)"
+        args = (*args, suppressed)
+    _LIMITED_LOG_EVENTS[key] = (now, 0)
+    log_method(message, *args)
+
+
+def _github_ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 DC_DEFAULT_IPS: Dict[int, str] = {
     1: '149.154.175.50',
@@ -74,6 +112,9 @@ def get_link_host(host: str) -> Optional[str]:
 
 
 class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self):
+        super().__init__(context=_github_ssl_context())
+
     def https_open(self, req: Request):
         host = req.host.split(":")[0]
         ip = _GITHUB_IPS.get(host)

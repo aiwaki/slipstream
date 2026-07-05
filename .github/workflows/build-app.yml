@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
           python3 -m venv spike/.buildvenv
           spike/.buildvenv/bin/pip install --quiet --disable-pip-version-check \
-            scapy cryptography pyinstaller
+            scapy cryptography certifi pyinstaller
           ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
           rm -rf app-tauri/src-tauri/slipstreamd
           cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd

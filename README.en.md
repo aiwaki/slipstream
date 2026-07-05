@@ -43,6 +43,8 @@ Desync and the Telegram proxy run on the device. Geph requires a Geph account.
 | iOS | not implemented |
 | Android | not implemented |
 
+Implementation order: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## Install
 
 1. Download `Slipstream.app` from [releases](https://github.com/aiwaki/slipstream/releases) and move it to Applications.

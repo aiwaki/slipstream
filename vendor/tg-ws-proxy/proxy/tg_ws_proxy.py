@@ -352,8 +352,13 @@ async def _handle_client(reader, writer, secret: bytes):
                                                 sni="sprinthost.ru")
             except Exception as exc:
                 stats.ws_errors += 1
-                log.warning("[%s] DC%d%s fronting failed: %s",
-                            label, dc, media_tag, repr(exc))
+                log_limited(
+                    log.warning,
+                    ("fronting_failed", dc, is_media, type(exc).__name__,
+                     repr(exc)[:120]),
+                    "[%s] DC%d%s fronting failed: %s",
+                    label, dc, media_tag, repr(exc),
+                )
             if ws:
                 stats.connections_fronting += 1
                 fronting_until = now + FRONTING_COOLDOWN
@@ -375,26 +380,45 @@ async def _handle_client(reader, writer, secret: bytes):
                     stats.ws_errors += 1
                     if exc.is_redirect:
                         ws_failed_redirect = True
-                        log.warning("[%s] DC%d%s got %d from %s -> %s",
-                                    label, dc, media_tag,
-                                    exc.status_code, domain,
-                                    exc.location or '?')
+                        log_limited(
+                            log.warning,
+                            ("ws_redirect", dc, is_media, domain,
+                             exc.status_code, exc.location or '?'),
+                            "[%s] DC%d%s got %d from %s -> %s",
+                            label, dc, media_tag,
+                            exc.status_code, domain,
+                            exc.location or '?',
+                        )
                         continue
                     else:
                         all_redirects = False
-                        log.warning("[%s] DC%d%s WS handshake: %s",
-                                    label, dc, media_tag, exc.status_line)
+                        log_limited(
+                            log.warning,
+                            ("ws_handshake", dc, is_media, domain,
+                             exc.status_line),
+                            "[%s] DC%d%s WS handshake: %s",
+                            label, dc, media_tag, exc.status_line,
+                        )
                 except asyncio.TimeoutError:
                     stats.ws_errors += 1
                     ws_timed_out = True
-                    log.warning("[%s] DC%d%s WS connect timed out via %s",
-                                label, dc, media_tag, domain)
+                    log_limited(
+                        log.warning,
+                        ("ws_timeout", dc, is_media, domain),
+                        "[%s] DC%d%s WS connect timed out via %s",
+                        label, dc, media_tag, domain,
+                    )
                     break
                 except Exception as exc:
                     stats.ws_errors += 1
                     all_redirects = False
-                    log.warning("[%s] DC%d%s WS connect failed: %s",
-                                label, dc, media_tag, repr(exc))
+                    log_limited(
+                        log.warning,
+                        ("ws_connect_failed", dc, is_media, domain,
+                         type(exc).__name__, repr(exc)[:120]),
+                        "[%s] DC%d%s WS connect failed: %s",
+                        label, dc, media_tag, repr(exc),
+                    )
 
         # Fronting fallback if WS timed out
         # TODO: Move fronting logic into bridge.py where other fallbacks are handled
@@ -408,8 +432,13 @@ async def _handle_client(reader, writer, secret: bytes):
                                                 sni="sprinthost.ru")
             except Exception as exc:
                 stats.ws_errors += 1
-                log.warning("[%s] DC%d%s fronting failed: %s",
-                            label, dc, media_tag, repr(exc))
+                log_limited(
+                    log.warning,
+                    ("fronting_failed", dc, is_media, type(exc).__name__,
+                     repr(exc)[:120]),
+                    "[%s] DC%d%s fronting failed: %s",
+                    label, dc, media_tag, repr(exc),
+                )
             if ws:
                 fronting_until = now + FRONTING_COOLDOWN
                 ws_pool.fronting_until = now + FRONTING_COOLDOWN

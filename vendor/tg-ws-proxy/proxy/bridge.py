@@ -202,8 +202,13 @@ async def _cfproxy_worker_fallback(reader, writer, relay_init, label,
                 ws = await RawWebSocket.connect(worker_domain, worker_domain,
                                                 timeout=10.0, path=path)
             except Exception as exc:
-                log.warning("[%s] DC%d%s CF worker %s failed: %s",
-                            label, dc, media_tag, worker_domain, repr(exc))
+                log_limited(
+                    log.warning,
+                    ("cf_worker_failed", dc, is_media, worker_domain,
+                     type(exc).__name__, repr(exc)[:120]),
+                    "[%s] DC%d%s CF worker %s failed: %s",
+                    label, dc, media_tag, worker_domain, repr(exc),
+                )
                 continue
 
         stats.connections_cfproxy += 1
@@ -233,8 +238,13 @@ async def _cfproxy_fallback(reader, writer, relay_init, label,
             chosen_domain = base_domain
             break
         except Exception as exc:
-            log.warning("[%s] DC%d%s CF proxy failed: %s",
-                        label, dc, media_tag, repr(exc))
+            log_limited(
+                log.warning,
+                ("cf_proxy_failed", dc, is_media, type(exc).__name__,
+                 repr(exc)[:120]),
+                "[%s] DC%d%s CF proxy failed: %s",
+                label, dc, media_tag, repr(exc),
+            )
 
     if ws is None:
         return False
@@ -255,8 +265,13 @@ async def _tcp_fallback(reader, writer, dst, port, relay_init, label, ctx: Crypt
         rr, rw = await asyncio.wait_for(
             asyncio.open_connection(dst, port), timeout=10)
     except Exception as exc:
-        log.warning("[%s] TCP fallback to %s:%d failed: %s",
-                    label, dst, port, repr(exc))
+        log_limited(
+            log.warning,
+            ("tcp_fallback_failed", dst, port, type(exc).__name__,
+             repr(exc)[:120]),
+            "[%s] TCP fallback to %s:%d failed: %s",
+            label, dst, port, repr(exc),
+        )
         return False
 
     stats.connections_tcp_fallback += 1

@@ -9,13 +9,16 @@
 
 use std::fs;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tauri::{
     image::Image,
-    menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder},
+    menu::{
+        CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder,
+    },
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };
@@ -37,6 +40,8 @@ const STATUS_PATH: &str = "/var/run/slipstream.status";
 const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
+const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
+const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 
 /// Is the system UI language Russian? Cached — the locale doesn't change while we
 /// run. Most users are in RU, so the tray speaks Russian when the Mac does.
@@ -122,23 +127,44 @@ fn read_status() -> Option<Value> {
 fn run_admin(shell: &str) {
     let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("do shell script \"{escaped}\" with administrator privileges");
-    let _ = Command::new("/usr/bin/osascript").arg("-e").arg(script).spawn();
+    let _ = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .spawn();
 }
 
 fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
+fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
+    raw.contains(&format!("<string>{INSTALLED_DAEMON}</string>"))
+}
+
+fn same_file_bytes(left: &Path, right: &Path) -> bool {
+    match (fs::read(left), fs::read(right)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn daemon_needs_install(bundled: &Path) -> bool {
+    let Ok(raw_plist) = fs::read_to_string(LAUNCHD_PLIST) else {
+        return true;
+    };
+    if !launchd_plist_uses_bundled_daemon(&raw_plist) {
+        return true;
+    }
+    !same_file_bytes(bundled, Path::new(INSTALLED_DAEMON))
+}
+
 /// First launch: if the root daemon isn't installed yet, install it from the
 /// bundled self-contained `slipstreamd` (a PyInstaller onedir — scapy, crypto and
 /// the Telegram proxy all inside, no system Python needed) with a single admin
-/// prompt. That's the only thing the user is ever asked to allow by hand. No-op
-/// once the daemon is installed, or in dev builds that don't ship the frozen
-/// daemon (there you install it via `sudo python3 spike/tproxy.py --install`).
+/// prompt. Also upgrades older script/venv installs and stale bundled daemons.
+/// No-op in dev builds that don't ship the frozen daemon (there you install it via
+/// `sudo python3 spike/tproxy.py --install`).
 fn ensure_daemon_installed(app: &AppHandle) {
-    if std::path::Path::new(LAUNCHD_PLIST).exists() {
-        return; // already installed
-    }
     let Ok(res) = app.path().resource_dir() else {
         return;
     };
@@ -146,8 +172,10 @@ fn ensure_daemon_installed(app: &AppHandle) {
     if !bin.exists() {
         return; // dev build without the bundled daemon
     }
-    let bin = bin.to_string_lossy();
-    run_admin(&format!("{} --install", shell_quote(bin.as_ref())));
+    if daemon_needs_install(&bin) {
+        let bin = bin.to_string_lossy();
+        run_admin(&format!("{} --install", shell_quote(bin.as_ref())));
+    }
 }
 
 /// Native secret-entry dialog (the same NSAlert look as TG WS Proxy). Pre-fills
@@ -165,19 +193,27 @@ fn prompt_secret(current: &str) -> Option<String> {
          default answer \"{cur}\" \
          buttons {{\"{cancel}\", \"OK\"}} default button \"OK\" cancel button \"{cancel}\""
     );
-    let out = Command::new("/usr/bin/osascript").arg("-e").arg(&script).output().ok()?;
+    let out = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None; // user cancelled
     }
     let s = String::from_utf8_lossy(&out.stdout);
-    s.split("text returned:").nth(1).map(|t| t.trim().to_string())
+    s.split("text returned:")
+        .nth(1)
+        .map(|t| t.trim().to_string())
 }
 
 /// Persist a geph setting (secret / exit / launch) into the per-user config the
 /// bundled geph5-client supervisor will read. Does NOT touch a separately
 /// installed Geph.app.
 fn geph_config_set(app: &AppHandle, key: &str, val: &str) {
-    let Ok(dir) = app.path().app_config_dir() else { return };
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
+    };
     let _ = fs::create_dir_all(&dir);
     let path = dir.join("geph.json");
     let mut cfg: serde_json::Map<String, Value> = fs::read_to_string(&path)
@@ -190,6 +226,40 @@ fn geph_config_set(app: &AppHandle, key: &str, val: &str) {
     }
 }
 
+fn telegram_proxy_detail(proxy: &str, suggested: bool, ru: bool) -> Option<&'static str> {
+    if suggested {
+        return Some(if ru {
+            "Telegram-прокси рекомендуется"
+        } else {
+            "Telegram proxy suggested"
+        });
+    }
+
+    match proxy {
+        "ready" => Some(if ru {
+            "Telegram-прокси готов"
+        } else {
+            "Telegram proxy ready"
+        }),
+        "starting" => Some(if ru {
+            "Telegram-прокси запускается"
+        } else {
+            "Telegram proxy starting"
+        }),
+        "in_use" => Some(if ru {
+            "Telegram-прокси занят"
+        } else {
+            "Telegram proxy in use"
+        }),
+        "unavailable" | "error" => Some(if ru {
+            "Telegram-прокси недоступен"
+        } else {
+            "Telegram proxy unavailable"
+        }),
+        _ => None,
+    }
+}
+
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
@@ -197,18 +267,31 @@ fn geph_config_set(app: &AppHandle, key: &str, val: &str) {
 fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>) -> String {
     let st = read_status();
     let get_str = |k: &str, d: &'static str| -> String {
-        st.as_ref().and_then(|v| v.get(k)).and_then(|x| x.as_str()).unwrap_or(d).to_string()
+        st.as_ref()
+            .and_then(|v| v.get(k))
+            .and_then(|x| x.as_str())
+            .unwrap_or(d)
+            .to_string()
     };
     let get_i64 = |k: &str| -> i64 {
-        st.as_ref().and_then(|v| v.get(k)).and_then(|x| x.as_i64()).unwrap_or(0)
+        st.as_ref()
+            .and_then(|v| v.get(k))
+            .and_then(|x| x.as_i64())
+            .unwrap_or(0)
     };
     let state = get_str("state", "off");
     let conns = get_i64("conns");
     let learned = get_i64("hosts_learned");
     let geph = get_str("geph", "off");
+    let telegram_proxy = get_str("telegram_proxy", "unknown");
+    let telegram_proxy_suggested = st
+        .as_ref()
+        .and_then(|v| v.get("telegram_proxy_suggest"))
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false);
 
     let ru = ui_ru();
-    let (title, detail) = match state.as_str() {
+    let (title, mut detail) = match state.as_str() {
         "active" => {
             let mut d = if ru {
                 format!("{conns} соединений · выучено хостов: {learned}")
@@ -216,15 +299,29 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
                 format!("{conns} connections · {learned} hosts learned")
             };
             if geph == "up" {
-                d.push_str(if ru { " · Geph-туннель включён" } else { " · Geph tunnel on" });
+                d.push_str(if ru {
+                    " · Geph-туннель включён"
+                } else {
+                    " · Geph tunnel on"
+                });
             }
             (
-                (if ru { "Slipstream — активен" } else { "Slipstream — Active" }).to_string(),
+                (if ru {
+                    "Slipstream — активен"
+                } else {
+                    "Slipstream — Active"
+                })
+                .to_string(),
                 d,
             )
         }
         "dormant" => (
-            (if ru { "Slipstream — спит" } else { "Slipstream — Dormant" }).to_string(),
+            (if ru {
+                "Slipstream — спит"
+            } else {
+                "Slipstream — Dormant"
+            })
+            .to_string(),
             (if ru {
                 "VPN включён; обходом занимается он"
             } else {
@@ -233,19 +330,39 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
             .to_string(),
         ),
         _ => (
-            (if ru { "Slipstream — выключен" } else { "Slipstream — Off" }).to_string(),
-            String::new(),
+            (if ru {
+                "Slipstream — выключен"
+            } else {
+                "Slipstream — Off"
+            })
+            .to_string(),
+            (if ru {
+                "Фоновый прокси не запущен"
+            } else {
+                "Background proxy is not running"
+            })
+            .to_string(),
         ),
     };
+    if matches!(state.as_str(), "active" | "dormant") {
+        if let Some(tg) = telegram_proxy_detail(&telegram_proxy, telegram_proxy_suggested, ru) {
+            detail.push_str(" · ");
+            detail.push_str(tg);
+        }
+    }
     let _ = state_item.set_text(&title);
-    let _ = detail_item.set_text(if detail.is_empty() { " " } else { &detail });
+    let _ = detail_item.set_text(&detail);
     state
 }
 
 /// Set the menu-bar mark for the given state (called only on a state change).
 fn set_tray_icon(app: &AppHandle, state: &str) {
     if let Some(tray) = app.tray_by_id("main") {
-        let name = if state == "off" { "slip-menubar-mark-off.png" } else { "slip-menubar-mark.png" };
+        let name = if state == "off" {
+            "slip-menubar-mark-off.png"
+        } else {
+            "slip-menubar-mark.png"
+        };
         if let Ok(dir) = app.path().resource_dir() {
             if let Ok(img) = Image::from_path(dir.join("icons").join(name)) {
                 let _ = tray.set_icon(Some(img));
@@ -257,7 +374,12 @@ fn set_tray_icon(app: &AppHandle, state: &str) {
 
 /// Show a native notification (geph up/down, updates).
 fn notify(app: &AppHandle, body: &str) {
-    let _ = app.notification().builder().title("Slipstream").body(body).show();
+    let _ = app
+        .notification()
+        .builder()
+        .title("Slipstream")
+        .body(body)
+        .show();
 }
 
 fn open_telegram_proxy_link() -> bool {
@@ -268,6 +390,10 @@ fn open_telegram_proxy_link() -> bool {
             .is_ok(),
         _ => false,
     }
+}
+
+fn mark_telegram_proxy_accepted() {
+    let _ = fs::write(TGWS_ACCEPTED_PATH, b"1\n");
 }
 
 fn tell_telegram_proxy_starting() {
@@ -303,7 +429,11 @@ fn prompt_telegram_proxy_offer() -> bool {
         "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"{later}\", \"{connect}\"}} \
          default button \"{connect}\" with icon note"
     );
-    let Ok(out) = Command::new("/usr/bin/osascript").arg("-e").arg(script).output() else {
+    let Ok(out) = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+    else {
         return false;
     };
     if !out.status.success() {
@@ -333,10 +463,16 @@ fn geph_field(app: &AppHandle, key: &str) -> Option<String> {
 
 /// Remove a key from geph.json (used to scrub a migrated plaintext secret).
 fn geph_config_unset(app: &AppHandle, key: &str) {
-    let Ok(dir) = app.path().app_config_dir() else { return };
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
+    };
     let path = dir.join("geph.json");
-    let Ok(text) = fs::read_to_string(&path) else { return };
-    let Ok(mut cfg) = serde_json::from_str::<serde_json::Map<String, Value>>(&text) else { return };
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut cfg) = serde_json::from_str::<serde_json::Map<String, Value>>(&text) else {
+        return;
+    };
     if cfg.remove(key).is_some() {
         if let Ok(s) = serde_json::to_string_pretty(&Value::Object(cfg)) {
             let _ = fs::write(&path, s);
@@ -350,7 +486,14 @@ const KC_ACCOUNT: &str = "account-secret";
 
 fn keychain_get() -> Option<String> {
     let out = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", KC_SERVICE, "-a", KC_ACCOUNT, "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            KC_SERVICE,
+            "-a",
+            KC_ACCOUNT,
+            "-w",
+        ])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -362,7 +505,16 @@ fn keychain_get() -> Option<String> {
 
 fn keychain_set(secret: &str) {
     let _ = Command::new("/usr/bin/security")
-        .args(["add-generic-password", "-U", "-s", KC_SERVICE, "-a", KC_ACCOUNT, "-w", secret])
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            KC_SERVICE,
+            "-a",
+            KC_ACCOUNT,
+            "-w",
+            secret,
+        ])
         .status();
 }
 
@@ -735,8 +887,12 @@ pub fn run() {
             // prompt). Everything after this is automatic.
             ensure_daemon_installed(app.handle());
 
-            let state_item = MenuItemBuilder::with_id("state", "…").enabled(false).build(app)?;
-            let detail_item = MenuItemBuilder::with_id("detail", " ").enabled(false).build(app)?;
+            let state_item = MenuItemBuilder::with_id("state", "…")
+                .enabled(false)
+                .build(app)?;
+            let detail_item = MenuItemBuilder::with_id("detail", " ")
+                .enabled(false)
+                .build(app)?;
 
             // ---- Geph submenu: Account… + checkable exit list (grouped) ------
             let saved_exit = app
@@ -771,7 +927,11 @@ pub fn run() {
             let catalog = exit_catalog(exits_cache);
 
             let mut gb = SubmenuBuilder::new(app, "Geph")
-                .item(&MenuItemBuilder::with_id(ID_ACCOUNT, tr("Account…")).accelerator("CmdOrCtrl+,").build(app)?)
+                .item(
+                    &MenuItemBuilder::with_id(ID_ACCOUNT, tr("Account…"))
+                        .accelerator("CmdOrCtrl+,")
+                        .build(app)?,
+                )
                 .item(&geph_enable)
                 .separator()
                 .item(&auto);
@@ -834,13 +994,24 @@ pub fn run() {
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?)
-                .item(&MenuItemBuilder::with_id("version", version_label).enabled(false).build(app)?)
-                .item(&MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream")).accelerator("CmdOrCtrl+Q").build(app)?)
+                .item(
+                    &MenuItemBuilder::with_id("version", version_label)
+                        .enabled(false)
+                        .build(app)?,
+                )
+                .item(
+                    &MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream"))
+                        .accelerator("CmdOrCtrl+Q")
+                        .build(app)?,
+                )
                 .build()?;
 
             // ---- tray --------------------------------------------------------
             let icon = Image::from_path(
-                app.path().resource_dir()?.join("icons").join("slip-menubar-mark.png"),
+                app.path()
+                    .resource_dir()?
+                    .join("icons")
+                    .join("slip-menubar-mark.png"),
             )
             .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
 
@@ -883,13 +1054,17 @@ pub fn run() {
                             let _ = if enabled { mgr.disable() } else { mgr.enable() };
                             let _ = launch_h.set_checked(!enabled); // reflect the real new state
                         }
-                        ID_RESTART => run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}")),
+                        ID_RESTART => {
+                            run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"))
+                        }
                         ID_LOG => {
                             let _ = Command::new("/usr/bin/open").arg(LOG_PATH).spawn();
                         }
                         ID_UPDATE => {
                             let app = app.clone();
-                            tauri::async_runtime::spawn(async move { check_for_updates(app).await });
+                            tauri::async_runtime::spawn(
+                                async move { check_for_updates(app).await },
+                            );
                         }
                         ID_QUIT => app.exit(0),
                         _ => {}
@@ -932,8 +1107,14 @@ pub fn run() {
                         }
                         if stable >= 3 && notified_geph != Some(up) {
                             if notified_geph.is_some() {
-                                notify(&app_handle,
-                                    if up { "Geph tunnel connected" } else { "Geph tunnel disconnected" });
+                                notify(
+                                    &app_handle,
+                                    if up {
+                                        "Geph tunnel connected"
+                                    } else {
+                                        "Geph tunnel disconnected"
+                                    },
+                                );
                             }
                             notified_geph = Some(up); // record even the first stable read silently
                         }
@@ -943,15 +1124,13 @@ pub fn run() {
                         .and_then(|v| v.get("telegram_proxy_suggest"))
                         .and_then(|x| x.as_bool())
                         .unwrap_or(false);
-                    let already_accepted =
-                        geph_field(&app_handle, "tgws_offer_accepted").as_deref() == Some("1");
-                    if should_offer_tg && !already_accepted && Instant::now() >= next_tg_offer {
+                    if should_offer_tg && Instant::now() >= next_tg_offer {
                         // Telegram requires user confirmation for tg://proxy. We only
                         // ask after the daemon has seen repeated direct DC failures.
                         next_tg_offer = Instant::now() + Duration::from_secs(30 * 60);
                         if prompt_telegram_proxy_offer() {
                             if open_telegram_proxy_link() {
-                                geph_config_set(&app_handle, "tgws_offer_accepted", "1");
+                                mark_telegram_proxy_accepted();
                             } else {
                                 tell_telegram_proxy_starting();
                                 next_tg_offer = Instant::now() + Duration::from_secs(30);
@@ -1002,7 +1181,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_quote;
+    use super::{launchd_plist_uses_bundled_daemon, shell_quote, telegram_proxy_detail};
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -1018,5 +1197,38 @@ mod tests {
             shell_quote("/tmp/Bob's Apps/slipstreamd"),
             "'/tmp/Bob'\\''s Apps/slipstreamd'"
         );
+    }
+
+    #[test]
+    fn launchd_plist_detects_bundled_daemon() {
+        let plist = "<array><string>/usr/local/slipstream/slipstreamd</string><string>--port</string></array>";
+        assert!(launchd_plist_uses_bundled_daemon(plist));
+    }
+
+    #[test]
+    fn launchd_plist_rejects_legacy_script_daemon() {
+        let plist = "<array><string>/usr/local/slipstream/venv/bin/python3</string><string>/usr/local/slipstream/tproxy.py</string></array>";
+        assert!(!launchd_plist_uses_bundled_daemon(plist));
+    }
+
+    #[test]
+    fn telegram_proxy_detail_prefers_suggested_state() {
+        assert_eq!(
+            telegram_proxy_detail("ready", true, true),
+            Some("Telegram-прокси рекомендуется")
+        );
+    }
+
+    #[test]
+    fn telegram_proxy_detail_reports_ready_and_errors() {
+        assert_eq!(
+            telegram_proxy_detail("ready", false, false),
+            Some("Telegram proxy ready")
+        );
+        assert_eq!(
+            telegram_proxy_detail("error", false, true),
+            Some("Telegram-прокси недоступен")
+        );
+        assert_eq!(telegram_proxy_detail("unknown", false, false), None);
     }
 }
