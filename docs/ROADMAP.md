@@ -17,6 +17,7 @@ not a release promise.
 | Rotating support logs | implemented |
 | Voice-flow TTL/LRU cleanup | implemented |
 | Scoped QUIC handling | implemented |
+| Wake/network recheck canary | implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -30,8 +31,6 @@ Goal: make the current macOS build safer to install, run, diagnose, and update.
 
 - Watchdog or recovery path for stale `pf` state if the daemon is killed and does
   not restart.
-- Wake and network-change canary: re-check routing after sleep, Wi-Fi changes,
-  route changes, and VPN toggles.
 
 ## P1 — Routing Quality
 

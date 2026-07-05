@@ -130,6 +130,87 @@ def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     assert filt.filter(useful)
 
 
+def test_default_route_info_tracks_interface_and_gateway(monkeypatch):
+    class Result:
+        stdout = """
+           route to: default
+        destination: default
+            gateway: 192.168.1.1
+          interface: en0
+        """
+
+    monkeypatch.setattr(tproxy, "_run", lambda *args: Result())
+
+    assert tproxy.default_route_info() == ("en0", "192.168.1.1")
+    assert tproxy.default_iface() == "en0"
+    assert tproxy.route_signature(("en0", "192.168.1.1")) == "en0|192.168.1.1"
+
+
+def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
+    tproxy._dead["blocked.example"] = 999.0
+    tproxy._tg_direct_failures.clear()
+    tproxy._tg_direct_failures.append(10.0)
+    tproxy._tg_proxy_suggest_until = 999.0
+    tproxy._quic_block_ips.clear()
+    tproxy._quic_block_ips["203.0.113.10"] = 1.0
+    with tproxy._doh_lock:
+        tproxy._doh_cache["blocked.example"] = (["203.0.113.10"], 999.0)
+
+    tproxy.reset_network_runtime_state("test")
+
+    assert tproxy._dead == {}
+    assert list(tproxy._tg_direct_failures) == []
+    assert tproxy._tg_proxy_suggest_until == 0.0
+    assert tproxy._quic_block_ips == {}
+    with tproxy._doh_lock:
+        assert tproxy._doh_cache == {}
+    assert calls == [
+        ("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "flush")
+    ]
+
+
+def test_run_network_canary_resolves_via_doh_then_checks_tcp():
+    class Sock:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    sockets = []
+
+    def connector(addr, timeout):
+        sock = Sock()
+        sockets.append((addr, timeout, sock))
+        return sock
+
+    ok, detail = tproxy.run_network_canary(
+        host="gateway.discord.gg",
+        timeout=1.25,
+        resolver=lambda host: ["203.0.113.10"],
+        connector=connector,
+    )
+
+    assert ok
+    assert detail == "203.0.113.10"
+    assert sockets[0][0] == ("203.0.113.10", 443)
+    assert sockets[0][1] == 1.25
+    assert sockets[0][2].closed
+
+
+def test_run_network_canary_reports_resolve_failure():
+    ok, detail = tproxy.run_network_canary(
+        resolver=lambda host: [],
+        connector=lambda addr, timeout: None,
+    )
+
+    assert not ok
+    assert detail == "resolve returned no A records"
+
+
 def test_pf_rules_scope_quic_block_to_table():
     assert f"table <{tproxy.QUIC_BLOCK_TABLE}> persist" in tproxy.PF_RULES
     assert f"to <{tproxy.QUIC_BLOCK_TABLE}> port 443" in tproxy.PF_RULES
