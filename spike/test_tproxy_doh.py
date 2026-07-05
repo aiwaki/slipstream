@@ -127,3 +127,42 @@ def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
 
     assert not filt.filter(noisy)
     assert filt.filter(useful)
+
+
+def test_rotating_log_writer_keeps_bounded_archives(tmp_path):
+    log = tmp_path / "slipstream.log"
+    writer = tproxy.RotatingLogWriter(str(log), max_bytes=10, backups=2)
+
+    writer.write("123456789\n")
+    writer.write("abcdefghi\n")
+    writer.write("XYZ\n")
+    writer.flush()
+
+    assert log.read_text() == "XYZ\n"
+    assert (tmp_path / "slipstream.log.1").read_text() == "abcdefghi\n"
+    assert (tmp_path / "slipstream.log.2").read_text() == "123456789\n"
+    assert not (tmp_path / "slipstream.log.3").exists()
+    assert log.stat().st_mode & 0o777 == 0o640
+
+
+def test_rotating_log_writer_rotates_oversized_existing_log(tmp_path):
+    log = tmp_path / "slipstream.log"
+    log.write_text("already too large\n")
+
+    writer = tproxy.RotatingLogWriter(str(log), max_bytes=10, backups=2)
+    writer.write("fresh\n")
+    writer.flush()
+
+    assert log.read_text() == "fresh\n"
+    assert (tmp_path / "slipstream.log.1").read_text() == "already too large\n"
+
+
+def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
+    conf = tmp_path / "dev.slipstream.tproxy.conf"
+    conf.write_text("obsolete\n")
+    monkeypatch.setattr(tproxy, "OBSOLETE_NEWSYSLOG_CONFIG_PATH", str(conf))
+
+    tproxy.remove_obsolete_newsyslog_config()
+    tproxy.remove_obsolete_newsyslog_config()
+
+    assert not conf.exists()

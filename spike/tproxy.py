@@ -1348,7 +1348,89 @@ async def _handle_impl(reader, writer):
 LAUNCHD_LABEL = "dev.slipstream.tproxy"
 LAUNCHD_PLIST = f"/Library/LaunchDaemons/{LAUNCHD_LABEL}.plist"
 LOG_PATH = "/var/log/slipstream.log"
+OBSOLETE_NEWSYSLOG_CONFIG_PATH = f"/etc/newsyslog.d/{LAUNCHD_LABEL}.conf"
 INSTALL_DIR = "/usr/local/slipstream"   # NOT under ~/Documents (TCC-protected)
+LOG_MAX_BYTES = 1024 * 1024
+LOG_BACKUPS = 5
+
+
+class RotatingLogWriter:
+    def __init__(self, path, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUPS, redirect_fds=False):
+        self.path = path
+        self.max_bytes = max_bytes
+        self.backups = backups
+        self.redirect_fds = redirect_fds
+        self._lock = threading.RLock()
+        self._file = None
+        if os.path.exists(self.path) and os.path.getsize(self.path) >= self.max_bytes:
+            self._rotate()
+        else:
+            self._open()
+
+    def _open(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self._file = open(self.path, "a", buffering=1)
+        try:
+            os.chown(self.path, 0, 0)
+        except (AttributeError, PermissionError, OSError):
+            pass
+        os.chmod(self.path, 0o640)
+        if self.redirect_fds:
+            os.dup2(self._file.fileno(), 1)
+            os.dup2(self._file.fileno(), 2)
+
+    def _archive_path(self, index):
+        return f"{self.path}.{index}"
+
+    def _rotate(self):
+        if self._file:
+            self._file.flush()
+            self._file.close()
+        oldest = self._archive_path(self.backups)
+        if os.path.exists(oldest):
+            os.remove(oldest)
+        for index in range(self.backups - 1, 0, -1):
+            src = self._archive_path(index)
+            if os.path.exists(src):
+                os.replace(src, self._archive_path(index + 1))
+        if os.path.exists(self.path):
+            os.replace(self.path, self._archive_path(1))
+        self._open()
+
+    def write(self, data):
+        if not data:
+            return 0
+        with self._lock:
+            size = os.path.getsize(self.path) if os.path.exists(self.path) else 0
+            incoming = len(data.encode("utf-8", errors="replace"))
+            if size and size + incoming > self.max_bytes:
+                self._rotate()
+            written = self._file.write(data)
+            self._file.flush()
+            return written
+
+    def flush(self):
+        with self._lock:
+            self._file.flush()
+
+    def isatty(self):
+        return False
+
+
+def setup_rotating_logs():
+    writer = RotatingLogWriter(LOG_PATH, redirect_fds=True)
+    sys.stdout = writer
+    sys.stderr = writer
+    return writer
+
+
+def remove_obsolete_newsyslog_config():
+    try:
+        os.remove(OBSOLETE_NEWSYSLOG_CONFIG_PATH)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
 
 
 def do_install(port):
@@ -1433,6 +1515,7 @@ def do_install(port):
     with open(LAUNCHD_PLIST, "w") as f:
         f.write(plist)
     os.chmod(LAUNCHD_PLIST, 0o644)
+    remove_obsolete_newsyslog_config()
     _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # if already loaded
     r = _run("launchctl", "bootstrap", "system", LAUNCHD_PLIST)
     if r.returncode != 0:
@@ -1450,6 +1533,7 @@ def do_uninstall():
         os.remove(LAUNCHD_PLIST)
     except Exception:
         pass
+    remove_obsolete_newsyslog_config()
     _run("pfctl", "-f", "/etc/pf.conf")
     _run("pfctl", "-d")
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
@@ -1639,6 +1723,7 @@ def main():
         pass
 
     cleanup_stale()        # kill leftover instances + reset pf before we start
+    setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel
 
