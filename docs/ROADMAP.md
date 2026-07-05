@@ -20,6 +20,7 @@ not a release promise.
 | Wake/network recheck canary | implemented |
 | Daemon watchdog / stale `pf` recovery | implemented |
 | Periodic route canaries | implemented |
+| Detailed route diagnostics | implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -39,7 +40,6 @@ Goal: detect degradation before the user has to diagnose it manually.
 
 - Throughput canary for throttling, not only handshake failure.
 - Automatic re-sweep when a known strategy stops working.
-- More detailed status: current route, strategy, Geph state, canary result.
 - Signed strategy-list updates without rebuilding the app.
 
 ## P2 — Desktop Portability

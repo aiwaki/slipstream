@@ -101,6 +101,10 @@ _canary_last_run = 0.0
 _canary_last_ok = 0.0
 _canary_error = ""
 _canary_thread = None
+_diag_lock = threading.Lock()
+_last_route_mode = ""
+_last_strategy = ""
+_last_route_decision_ts = 0.0
 
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
@@ -379,7 +383,38 @@ def network_canary_status(now=None):
         }
 
 
-def write_status(state, iface, voice_iface):
+def note_routing_decision(mode, strategy="", now=None):
+    global _last_route_mode, _last_strategy, _last_route_decision_ts
+    if now is None:
+        now = time.time()
+    with _diag_lock:
+        _last_route_mode = mode or ""
+        _last_strategy = strategy or ""
+        _last_route_decision_ts = now
+
+
+def routing_diagnostics_status(route_info=None, pf_state=None):
+    iface, gateway = route_info or ("", "")
+    route_info = (iface or "", gateway or "")
+    if pf_state is None:
+        pf_state = "active" if _pf_applied else "off"
+    with _diag_lock:
+        route_mode = _last_route_mode
+        strategy = _last_strategy
+        decision_ts = _last_route_decision_ts
+    return {
+        "route": route_signature(route_info) if any(route_info) else "",
+        "route_iface": route_info[0],
+        "route_gateway": route_info[1],
+        "pf": pf_state,
+        "route_mode_last": route_mode,
+        "strategy_last": strategy,
+        "strategy_last_at": decision_ts,
+        "strategy_known_hosts": len(_strat_cache),
+    }
+
+
+def write_status(state, iface, voice_iface, route_info=None, pf_state=None):
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
@@ -398,6 +433,7 @@ def write_status(state, iface, voice_iface):
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
         }
+        st.update(routing_diagnostics_status(route_info or (iface, ""), pf_state))
         st.update(network_canary_status(now))
         st.update(tgws_status(now))
         tmp = STATUS_PATH + ".tmp"
@@ -498,10 +534,15 @@ def pf_has_rules(port):
 
 def reset_network_runtime_state(reason, sync_quic=None):
     """Drop route-sensitive transient state after wake or route/VPN changes."""
-    global _tg_proxy_suggest_until
+    global _tg_proxy_suggest_until, _last_route_mode, _last_strategy
+    global _last_route_decision_ts
     _dead.clear()
     _tg_direct_failures.clear()
     _tg_proxy_suggest_until = 0.0
+    with _diag_lock:
+        _last_route_mode = ""
+        _last_strategy = ""
+        _last_route_decision_ts = 0.0
     with _doh_lock:
         _doh_cache.clear()
     _quic_block_ips.clear()
@@ -1025,6 +1066,7 @@ def network_monitor(port, voice=True):
                       file=sys.stderr)
                 _run("pfctl", "-f", "/etc/pf.conf")
                 _pf_applied = False
+            pf_state = "dormant"
         else:
             if not _pf_applied:
                 print(">> no VPN -> Slipstream active", file=sys.stderr)
@@ -1033,6 +1075,7 @@ def network_monitor(port, voice=True):
             elif not pf_has_rules(port):
                 print(">> pf rules vanished — re-applying", file=sys.stderr)
                 _pf_load(port)
+            pf_state = "active" if _pf_applied else "off"
         if recheck_reason:
             if schedule_network_canary(recheck_reason, route, vpn=vpn):
                 last_periodic_canary = now
@@ -1058,7 +1101,8 @@ def network_monitor(port, voice=True):
                 except Exception as e:
                     print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
-        write_status("dormant" if vpn else "active", iface, cur_iface)
+        write_status("dormant" if vpn else "active", iface, cur_iface,
+                     route_info=route_info, pf_state=pf_state)
         time.sleep(5)
 
 
@@ -1490,6 +1534,7 @@ async def _handle_impl(reader, writer):
         down_b = res[1] or 0
         dur = time.monotonic() - t0
         if down_b > 0:
+            note_routing_decision("telegram_direct", "plain")
             note_telegram_direct_success()
         elif dur < 20:
             note_telegram_direct_failure("empty direct response")
@@ -1509,6 +1554,7 @@ async def _handle_impl(reader, writer):
             g = await dial_via_geph(host, dst_port, head + body)
             if g:
                 gr, gw = g
+                note_routing_decision("geph", "socks5")
                 if VERBOSE:
                     print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                 await asyncio.gather(pump(reader, gw), splice(gr, writer))
@@ -1575,6 +1621,7 @@ async def _handle_impl(reader, writer):
         return
 
     up_r, up_w, server_first = result
+    note_routing_decision("local" if is_tls else "direct", chosen_name or "plain")
     if VERBOSE:
         tag = f" [{chosen_name}]" if chosen_name else ""
         tag += " de-poisoned" if host and chosen != dst_ip else ""
