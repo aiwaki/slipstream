@@ -218,6 +218,23 @@ fn ensure_daemon_installed(app: &AppHandle) {
     }
 }
 
+fn osascript_dialog_args(script: &str) -> Vec<String> {
+    vec![
+        "-e".into(),
+        "activate".into(),
+        "-e".into(),
+        "delay 0.05".into(),
+        "-e".into(),
+        script.into(),
+    ]
+}
+
+fn osascript_dialog(script: &str) -> Command {
+    let mut cmd = Command::new("/usr/bin/osascript");
+    cmd.args(osascript_dialog_args(script));
+    cmd
+}
+
 /// Native secret-entry dialog (the same NSAlert look as TG WS Proxy). Pre-fills
 /// the current secret and shows it (a 24-digit secret is unusable to type blind),
 /// like geph's own Account screen. Returns the entered text, or None if cancelled.
@@ -233,11 +250,7 @@ fn prompt_secret(current: &str) -> Option<String> {
          default answer \"{cur}\" \
          buttons {{\"{cancel}\", \"OK\"}} default button \"OK\" cancel button \"{cancel}\""
     );
-    let out = Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .ok()?;
+    let out = osascript_dialog(&script).output().ok()?;
     if !out.status.success() {
         return None; // user cancelled
     }
@@ -442,13 +455,11 @@ fn tell_telegram_proxy_starting() {
     } else {
         "Telegram proxy is still starting — try again in a few seconds."
     };
-    let _ = Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(format!(
-            "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"OK\"}} \
-             default button \"OK\" with icon note"
-        ))
-        .spawn();
+    let script = format!(
+        "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"OK\"}} \
+         default button \"OK\" with icon note"
+    );
+    let _ = osascript_dialog(&script).spawn();
 }
 
 fn prompt_telegram_proxy_offer() -> bool {
@@ -469,11 +480,7 @@ fn prompt_telegram_proxy_offer() -> bool {
         "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"{later}\", \"{connect}\"}} \
          default button \"{connect}\" with icon note"
     );
-    let Ok(out) = Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-    else {
+    let Ok(out) = osascript_dialog(&script).output() else {
         return false;
     };
     if !out.status.success() {
@@ -1239,8 +1246,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, shell_quote,
-        should_recover_daemon, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, osascript_dialog_args,
+        shell_quote, should_recover_daemon, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
     };
 
     #[test]
@@ -1256,6 +1263,21 @@ mod tests {
         assert_eq!(
             shell_quote("/tmp/Bob's Apps/slipstreamd"),
             "'/tmp/Bob'\\''s Apps/slipstreamd'"
+        );
+    }
+
+    #[test]
+    fn osascript_dialog_args_activate_before_displaying_dialog() {
+        assert_eq!(
+            osascript_dialog_args("display dialog \"hello\""),
+            vec![
+                "-e",
+                "activate",
+                "-e",
+                "delay 0.05",
+                "-e",
+                "display dialog \"hello\"",
+            ]
         );
     }
 
