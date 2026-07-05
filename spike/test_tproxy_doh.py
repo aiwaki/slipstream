@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import ssl
@@ -198,6 +199,7 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
     tproxy._dead["blocked.example"] = 999.0
+    tproxy._quic_block_ips["8.8.8.8"] = 999.0
     tproxy._tg_direct_failures.clear()
     tproxy._tg_direct_failures.append(10.0)
     tproxy._tg_proxy_suggest_until = 999.0
@@ -205,9 +207,10 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     with tproxy._doh_lock:
         tproxy._doh_cache["blocked.example"] = (["203.0.113.10"], 999.0)
 
-    tproxy.reset_network_runtime_state("test")
+    tproxy.reset_network_runtime_state("test", seed_quic=False)
 
     assert tproxy._dead == {}
+    assert tproxy._quic_block_ips == {}
     assert list(tproxy._tg_direct_failures) == []
     assert tproxy._tg_proxy_suggest_until == 0.0
     status = tproxy.routing_diagnostics_status()
@@ -216,7 +219,7 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     assert status["strategy_last_at"] == 0.0
     with tproxy._doh_lock:
         assert tproxy._doh_cache == {}
-    assert calls == []
+    assert calls == [("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "flush")]
 
 
 def test_run_network_canary_resolves_via_doh_then_checks_tcp():
@@ -401,9 +404,85 @@ def test_periodic_canary_runs_only_when_due_and_active():
     )
 
 
-def test_pf_rules_force_quic_to_tcp_fallback():
-    assert "block return quick inet proto udp from any to any port 443" in tproxy.PF_RULES
-    assert "slipstream_quic_block" not in tproxy.PF_RULES
+def test_pf_rules_scope_quic_fallback_to_table():
+    assert "table <slipstream_quic_block> persist" in tproxy.PF_RULES
+    assert (
+        "block return quick inet proto udp from any "
+        "to <slipstream_quic_block> port 443"
+    ) in tproxy.PF_RULES
+    assert "block return quick inet proto udp from any to any port 443" not in tproxy.PF_RULES
+
+
+def test_quic_block_host_excludes_youtube_video_cdn():
+    assert tproxy.quic_block_host("discord.com")
+    assert not tproxy.quic_block_host("www.youtube.com")
+    assert not tproxy.quic_block_host("rr2---sn-ntq7yner.googlevideo.com")
+    assert not tproxy.quic_block_host("rr1---sn-ixh7rn76.c.youtube.com")
+
+
+def test_seed_quic_block_table_filters_and_adds_public_ips(monkeypatch):
+    calls = []
+    tproxy._quic_block_ips.clear()
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
+
+    try:
+        tproxy.seed_quic_block_table(
+            hosts=["discord.example"],
+            resolver=lambda host: ["8.8.8.8", "10.0.0.1", "149.154.167.91"],
+        )
+
+        assert list(tproxy._quic_block_ips) == ["8.8.8.8"]
+        assert calls == [("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "add", "8.8.8.8")]
+    finally:
+        tproxy._quic_block_ips.clear()
+
+
+def test_youtube_video_hosts_ignore_stale_non_fake_strategy_cache():
+    host = "rr2---sn-ntq7yner.googlevideo.com"
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache[host] = "split64"
+
+    try:
+        names = [s["name"] for s in tproxy.strategy_order(host)]
+
+        assert names[:3] == ["split64+fake", "split16+fake", "fake5"]
+        assert names.index("split64") > names.index("fake5")
+    finally:
+        tproxy._strat_cache.clear()
+
+
+def test_youtube_video_hosts_keep_full_attempts_when_marked_dead():
+    host = "rr1---sn-ixh7rn76.c.youtube.com"
+    tproxy._dead.clear()
+    tproxy._dead[host] = 200.0
+    tproxy._dead["blocked.example"] = 200.0
+
+    try:
+        assert tproxy.max_tls_attempts(host, now=100.0) == 7
+        assert tproxy.max_tls_attempts("blocked.example", now=100.0) == 1
+    finally:
+        tproxy._dead.clear()
+
+
+def test_resolve_connection_ips_falls_back_to_system_dns_after_empty_doh(monkeypatch):
+    async def empty_doh(host):
+        return []
+
+    async def system(host):
+        return ["203.0.113.10", "203.0.113.10"]
+
+    monkeypatch.setattr(tproxy, "doh_resolve_async", empty_doh)
+    monkeypatch.setattr(tproxy, "system_resolve_async", system)
+
+    ips = asyncio.run(
+        tproxy.resolve_connection_ips(
+            "rr2---sn-ntq7yner.googlevideo.com",
+            "198.51.100.20",
+        )
+    )
+
+    assert ips == ["203.0.113.10", "198.51.100.20"]
 
 
 def test_voice_flow_observe_caps_count_and_keeps_recent_flow():

@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import atexit
 import fcntl
+import ipaddress
 import json
 import logging
 from collections import OrderedDict, deque
@@ -58,13 +59,27 @@ VERBOSE = False
 DOH = [("1.1.1.1", "cloudflare-dns.com"), ("8.8.8.8", "dns.google")]
 
 PF_RULES = """\
+table <slipstream_quic_block> persist
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
-block return quick inet proto udp from any to any port 443
+block return quick inet proto udp from any to <slipstream_quic_block> port 443
 """
 
 _pf_applied = False
 _pf_fd = None
+QUIC_BLOCK_TABLE = "slipstream_quic_block"
+QUIC_BLOCK_MAX = 4096
+QUIC_BLOCK_SEED_HOSTS = [
+    "discord.com",
+    "discord.gg",
+    "discordapp.com",
+    "gateway.discord.gg",
+    "updates.discord.com",
+    "stable.dl2.discordapp.net",
+    "cdn.discordapp.com",
+    "media.discordapp.net",
+]
+_quic_block_ips = OrderedDict()
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
@@ -469,11 +484,75 @@ def _run(*args):
         return subprocess.CompletedProcess(args, 127, "", f"not found: {args[0]}")
 
 
+def _quic_blockable_ip(ip):
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return (
+        addr.version == 4
+        and not addr.is_loopback
+        and not addr.is_link_local
+        and not addr.is_multicast
+        and not addr.is_private
+        and not _ip_in_nets(ip, TELEGRAM_NETS)
+    )
+
+
+def sync_quic_block_table():
+    ips = list(_quic_block_ips)
+    if ips:
+        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "replace", *ips)
+    else:
+        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "flush")
+
+
+def note_quic_block_ips(ips, max_ips=QUIC_BLOCK_MAX):
+    new_ips = []
+    for ip in ips:
+        if not _quic_blockable_ip(ip):
+            continue
+        exists = ip in _quic_block_ips
+        _quic_block_ips[ip] = time.monotonic()
+        _quic_block_ips.move_to_end(ip)
+        if not exists:
+            new_ips.append(ip)
+    evicted = False
+    while len(_quic_block_ips) > max_ips:
+        _quic_block_ips.popitem(last=False)
+        evicted = True
+    if _pf_applied and evicted:
+        sync_quic_block_table()
+    elif _pf_applied and new_ips:
+        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "add", *new_ips)
+
+
+def seed_quic_block_table(hosts=QUIC_BLOCK_SEED_HOSTS, resolver=None):
+    if resolver is None:
+        resolver = system_resolve
+    ips = []
+    for host in hosts:
+        try:
+            ips.extend(resolver(host))
+        except Exception:
+            pass
+    note_quic_block_ips(ips)
+
+
+def schedule_quic_block_seed():
+    try:
+        _POOL.submit(seed_quic_block_table)
+    except Exception:
+        pass
+
+
 def _pf_load(port):
     f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
     f.write(PF_RULES.format(port=port))
     f.close()
     r = _run("pfctl", "-f", f.name)
+    if r.returncode == 0:
+        sync_quic_block_table()
     try:
         os.unlink(f.name)
     except Exception:
@@ -490,7 +569,8 @@ def pf_setup(port):
         print("pfctl load failed:\n" + r.stderr, file=sys.stderr)
         sys.exit(1)
     _pf_applied = True
-    print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC (UDP/443) blocked")
+    schedule_quic_block_seed()
+    print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC scoped by table")
 
 
 def pf_has_rules(port):
@@ -498,7 +578,7 @@ def pf_has_rules(port):
     return f"port {port}" in _run("pfctl", "-sn").stdout
 
 
-def reset_network_runtime_state(reason):
+def reset_network_runtime_state(reason, sync_quic=None, seed_quic=True):
     """Drop route-sensitive transient state after wake or route/VPN changes."""
     global _tg_proxy_suggest_until, _last_route_mode, _last_strategy
     global _last_route_decision_ts
@@ -511,6 +591,13 @@ def reset_network_runtime_state(reason):
         _last_route_decision_ts = 0.0
     with _doh_lock:
         _doh_cache.clear()
+    _quic_block_ips.clear()
+    if sync_quic is None:
+        sync_quic = _pf_applied
+    if sync_quic:
+        sync_quic_block_table()
+        if seed_quic:
+            schedule_quic_block_seed()
     print(f">> network recheck ({reason}) -> transient routing state reset",
           file=sys.stderr)
 
@@ -831,7 +918,7 @@ STRATEGIES = [
 STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"
 STRAT_CACHE_MAX = 2048
-STRAT_CACHE_VERSION = 2             # bump on strategy-logic changes -> discard stale
+STRAT_CACHE_VERSION = 3             # bump on strategy-logic changes -> discard stale
 _strat_cache = OrderedDict()       # host -> winning strategy name
 
 
@@ -873,6 +960,33 @@ DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # hides the SNI from the throttler). Non-fake variants remain as fallbacks for the
 # rare host the decoy upsets. Inject is cheap (not DoH); the pool absorbs it.
 GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
+YOUTUBE_VIDEO_STRATS = GENERAL_STRATS
+DEFAULT_IP_ATTEMPT_LIMIT = 2
+VIDEO_CDN_IP_ATTEMPT_LIMIT = 4
+
+
+def is_youtube_video_host(host):
+    h = (host or "").rstrip(".").lower()
+    return (
+        h == "googlevideo.com"
+        or h.endswith(".googlevideo.com")
+        or h.endswith(".c.youtube.com")
+    )
+
+
+def quic_block_host(host):
+    h = (host or "").rstrip(".").lower()
+    return "discord" in h or geph_route(host)
+
+
+def ip_attempt_limit(host):
+    return VIDEO_CDN_IP_ATTEMPT_LIMIT if is_youtube_video_host(host) else DEFAULT_IP_ATTEMPT_LIMIT
+
+
+def max_tls_attempts(host, now):
+    if is_youtube_video_host(host):
+        return 7
+    return 1 if (host and _dead.get(host, 0) > now) else 7
 
 
 def strategy_order(host):
@@ -882,6 +996,12 @@ def strategy_order(host):
         win = _strat_cache.get(host)
         names = ([win] + [n for n in DISCORD_STRATS if n != win]
                  if win in DISCORD_STRATS else DISCORD_STRATS)
+        return [STRAT_BY_NAME[n] for n in names]
+    if is_youtube_video_host(host):
+        win = _strat_cache.get(host)
+        names = list(YOUTUBE_VIDEO_STRATS)
+        if win in ("split64+fake", "split16+fake", "fake5"):
+            names = [win] + [n for n in names if n != win]
         return [STRAT_BY_NAME[n] for n in names]
     win = _strat_cache.get(host)
     if win in STRAT_BY_NAME:
@@ -1296,6 +1416,35 @@ async def doh_resolve_async(host):
     return ips
 
 
+async def system_resolve_async(host):
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(_POOL, system_resolve, host)
+    except Exception:
+        return []
+
+
+def merge_ip_candidates(*groups):
+    ips = []
+    seen = set()
+    for group in groups:
+        for ip in group or []:
+            if not ip or ":" in ip or ip in seen:
+                continue
+            seen.add(ip)
+            ips.append(ip)
+    return ips
+
+
+async def resolve_connection_ips(host, fallback_ip):
+    resolved = []
+    if host:
+        resolved = await doh_resolve_async(host)
+        if not resolved:
+            resolved = await system_resolve_async(host)
+    return merge_ip_candidates(resolved, [fallback_ip])
+
+
 # ------------------------------------------------------------- relay
 async def splice(src, dst):
     total = 0
@@ -1608,6 +1757,7 @@ async def _handle_impl(reader, writer):
     # back, instead of leaking the geo-host to an RU exit. (Russian services are
     # excluded by geph_route and fall through to desync as normal.)
     if is_tls and geph_route(host):
+        note_quic_block_ips([dst_ip])
         if _geph_up:
             g = await dial_via_geph(host, dst_port, head + body)
             if g:
@@ -1623,12 +1773,9 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
-    # de-poison: resolve the SNI over DoH -> LIST of real IPs (fallback dst_ip)
-    real_ips = []
-    if host:
-        real_ips = await doh_resolve_async(host)
-    if not real_ips:
-        real_ips = [dst_ip]
+    # de-poison: resolve the SNI over DoH -> LIST of real IPs; if the DoH path
+    # is temporarily blocked, fall back to system DNS before the original dst_ip.
+    real_ips = await resolve_connection_ips(host, dst_ip)
 
     # Adaptive strategy ladder (auto-sweep / self-tuning). Try strategies in
     # order — cached winner for this host first — across up to a couple of real
@@ -1637,19 +1784,21 @@ async def _handle_impl(reader, writer):
     result = None
     chosen = real_ips[0]
     chosen_name = None
+    ip_limit = ip_attempt_limit(host)
     if not is_tls:
-        for ip in real_ips[:2]:
+        for ip in real_ips[:ip_limit]:
             result = await dial_and_probe(ip, dst_port, head + body)
             if result:
                 chosen = ip
                 break
     else:
         now = time.monotonic()
-        # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
-        max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
+        # known-dead hosts usually fast-fail; video CDN hosts keep the ladder
+        # because one bad probe should not stall the browser's next segment.
+        max_attempts = max_tls_attempts(host, now)
         attempts = 0
         for strat in strategy_order(host):
-            for ip in real_ips[:2]:
+            for ip in real_ips[:ip_limit]:
                 attempts += 1
                 result = await dial_strategy(ip, dst_port, head, body, host, strat)
                 if result:
@@ -1664,6 +1813,8 @@ async def _handle_impl(reader, writer):
                 _dead.pop(host, None)
                 if _strat_cache.get(host) != chosen_name:
                     remember_strategy(host, chosen_name)
+                if chosen_name != "plain" and quic_block_host(host):
+                    note_quic_block_ips([dst_ip, chosen, *real_ips[:ip_limit]])
         elif host:
             _dead[host] = now + DEAD_TTL        # arm the negative cache
             if len(_dead) > 4096:
