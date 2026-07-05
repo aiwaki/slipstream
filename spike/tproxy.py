@@ -92,6 +92,19 @@ try:
     CANARY_INTERVAL = float(os.environ.get("SLIP_CANARY_INTERVAL", "300.0"))
 except ValueError:
     CANARY_INTERVAL = 300.0
+try:
+    CANARY_READ_BYTES = max(0, int(os.environ.get("SLIP_CANARY_READ_BYTES", "512")))
+except ValueError:
+    CANARY_READ_BYTES = 512
+try:
+    CANARY_MIN_BPS = max(0.0, float(os.environ.get("SLIP_CANARY_MIN_BPS", "128.0")))
+except ValueError:
+    CANARY_MIN_BPS = 128.0
+CANARY_PATH = (os.environ.get("SLIP_CANARY_PATH", "/") or "/").splitlines()[0].strip()
+if not CANARY_PATH:
+    CANARY_PATH = "/"
+if not CANARY_PATH.startswith("/"):
+    CANARY_PATH = "/" + CANARY_PATH
 CANARY_IP_LIMIT = 3
 _canary_lock = threading.Lock()
 _canary_state = "idle"
@@ -379,6 +392,9 @@ def network_canary_status(now=None):
             "canary_last_run": _canary_last_run,
             "canary_last_ok": _canary_last_ok,
             "canary_interval": CANARY_INTERVAL,
+            "canary_read_bytes": CANARY_READ_BYTES,
+            "canary_min_bps": CANARY_MIN_BPS,
+            "canary_path": CANARY_PATH,
             "canary_error": _canary_error,
         }
 
@@ -569,11 +585,63 @@ def _set_network_canary(state, reason="", route="", error="", ok=False, now=None
         _canary_error = (error or "")[:200]
 
 
+def _wrap_canary_tls(sock, host, timeout):
+    sock.settimeout(timeout)
+    ctx = ssl.create_default_context()
+    return ctx.wrap_socket(sock, server_hostname=host)
+
+
+def check_canary_throughput(sock, host, timeout, read_bytes=CANARY_READ_BYTES,
+                            min_bps=CANARY_MIN_BPS, path=CANARY_PATH,
+                            tls_wrapper=None, clock=None):
+    """Fetch a tiny HTTPS response so canaries catch stalls, not only connects."""
+    if read_bytes <= 0:
+        return True, "tcp connect"
+    tls_wrapper = tls_wrapper or _wrap_canary_tls
+    clock = clock or time.monotonic
+    path = (path or "/").splitlines()[0].strip() or "/"
+    if not path.startswith("/"):
+        path = "/" + path
+    started = clock()
+    tls = tls_wrapper(sock, host, timeout)
+    try:
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            "User-Agent: SlipstreamCanary/1\r\n"
+            "Accept: */*\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii", "ignore")
+        tls.sendall(request)
+        received = 0
+        while received < read_bytes:
+            chunk = tls.recv(min(4096, read_bytes - received))
+            if not chunk:
+                break
+            received += len(chunk)
+        elapsed = max(clock() - started, 0.001)
+        bps = received / elapsed
+        detail = f"{received} bytes in {elapsed:.2f}s ({bps:.0f} B/s)"
+        if received <= 0:
+            return False, "no response bytes"
+        if min_bps > 0 and bps < min_bps:
+            return False, (
+                f"throughput {bps:.0f} B/s below {min_bps:.0f} B/s ({detail})"
+            )
+        return True, detail
+    finally:
+        try:
+            tls.close()
+        except Exception:
+            pass
+
+
 def run_network_canary(host=CANARY_HOST, timeout=CANARY_TIMEOUT,
-                       resolver=None, connector=None):
-    """Resolve through Slipstream's DoH path, then check a few TCP/443 routes."""
+                       resolver=None, connector=None, throughput_checker=None):
+    """Resolve through DoH, connect to TCP/443, then verify response throughput."""
     resolver = resolver or doh_resolve
     connector = connector or socket.create_connection
+    throughput_checker = throughput_checker or check_canary_throughput
     try:
         ips = resolver(host) or []
     except Exception as e:
@@ -582,15 +650,21 @@ def run_network_canary(host=CANARY_HOST, timeout=CANARY_TIMEOUT,
         return False, "resolve returned no A records"
     last_error = ""
     for ip in ips[:CANARY_IP_LIMIT]:
+        sock = None
         try:
             sock = connector((ip, 443), timeout=timeout)
-            try:
-                sock.close()
-            except Exception:
-                pass
-            return True, ip
+            ok, detail = throughput_checker(sock, host, timeout)
+            if ok:
+                return True, f"{ip}: {detail}"
+            last_error = f"{ip}: {detail}"
         except OSError as e:
             last_error = f"{ip}: {e}"
+        finally:
+            try:
+                if sock is not None:
+                    sock.close()
+            except Exception:
+                pass
     return False, last_error or "connect failed"
 
 

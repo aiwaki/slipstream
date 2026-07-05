@@ -239,18 +239,92 @@ def test_run_network_canary_resolves_via_doh_then_checks_tcp():
         sockets.append((addr, timeout, sock))
         return sock
 
+    checks = []
+
+    def throughput_checker(sock, host, timeout):
+        checks.append((sock, host, timeout))
+        return True, "512 bytes in 0.25s (2048 B/s)"
+
     ok, detail = tproxy.run_network_canary(
         host="gateway.discord.gg",
         timeout=1.25,
         resolver=lambda host: ["203.0.113.10"],
         connector=connector,
+        throughput_checker=throughput_checker,
     )
 
     assert ok
-    assert detail == "203.0.113.10"
+    assert detail == "203.0.113.10: 512 bytes in 0.25s (2048 B/s)"
     assert sockets[0][0] == ("203.0.113.10", 443)
     assert sockets[0][1] == 1.25
     assert sockets[0][2].closed
+    assert checks == [(sockets[0][2], "gateway.discord.gg", 1.25)]
+
+
+def test_check_canary_throughput_reads_https_response():
+    class TLS:
+        def __init__(self):
+            self.sent = b""
+            self.closed = False
+            self.chunks = [b"x" * 128]
+
+        def sendall(self, data):
+            self.sent += data
+
+        def recv(self, count):
+            if self.chunks:
+                return self.chunks.pop(0)[:count]
+            return b""
+
+        def close(self):
+            self.closed = True
+
+    tls = TLS()
+    calls = []
+    ticks = iter([10.0, 10.25])
+
+    def tls_wrapper(sock, host, timeout):
+        calls.append((sock, host, timeout))
+        return tls
+
+    probe = object()
+    ok, detail = tproxy.check_canary_throughput(
+        probe,
+        "gateway.discord.gg",
+        1.25,
+        read_bytes=128,
+        min_bps=128.0,
+        path="/health",
+        tls_wrapper=tls_wrapper,
+        clock=lambda: next(ticks),
+    )
+
+    assert ok
+    assert detail == "128 bytes in 0.25s (512 B/s)"
+    assert b"GET /health HTTP/1.1" in tls.sent
+    assert b"Host: gateway.discord.gg" in tls.sent
+    assert calls == [(probe, "gateway.discord.gg", 1.25)]
+    assert tls.closed
+
+
+def test_run_network_canary_reports_throughput_failure():
+    class Sock:
+        def close(self):
+            pass
+
+    ok, detail = tproxy.run_network_canary(
+        host="gateway.discord.gg",
+        timeout=1.25,
+        resolver=lambda host: ["203.0.113.10"],
+        connector=lambda addr, timeout: Sock(),
+        throughput_checker=lambda sock, host, timeout: (
+            False,
+            "throughput 5 B/s below 128 B/s",
+        ),
+    )
+
+    assert not ok
+    assert detail == "203.0.113.10: throughput 5 B/s below 128 B/s"
 
 
 def test_run_network_canary_reports_resolve_failure():
