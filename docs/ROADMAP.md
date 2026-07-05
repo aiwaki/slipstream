@@ -16,7 +16,7 @@ not a release promise.
 | Single version source | implemented |
 | Rotating support logs | implemented |
 | Voice-flow TTL/LRU cleanup | implemented |
-| Scoped QUIC handling | implemented |
+| QUIC-to-TCP fallback | implemented |
 | Wake/network recheck canary | implemented |
 | Daemon watchdog / stale `pf` recovery | implemented |
 | Periodic route canaries | implemented |
@@ -41,6 +41,7 @@ Goal: detect degradation before the user has to diagnose it manually.
 
 - Automatic re-sweep when a known strategy stops working.
 - Signed strategy-list updates without rebuilding the app.
+- Smarter QUIC scoping that preserves video/updater reliability.
 
 ## P2 — Desktop Portability
 

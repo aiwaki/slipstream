@@ -202,8 +202,6 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     tproxy._tg_direct_failures.append(10.0)
     tproxy._tg_proxy_suggest_until = 999.0
     tproxy.note_routing_decision("local", "split64+fake", now=1234.0)
-    tproxy._quic_block_ips.clear()
-    tproxy._quic_block_ips["203.0.113.10"] = 1.0
     with tproxy._doh_lock:
         tproxy._doh_cache["blocked.example"] = (["203.0.113.10"], 999.0)
 
@@ -216,12 +214,9 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     assert status["route_mode_last"] == ""
     assert status["strategy_last"] == ""
     assert status["strategy_last_at"] == 0.0
-    assert tproxy._quic_block_ips == {}
     with tproxy._doh_lock:
         assert tproxy._doh_cache == {}
-    assert calls == [
-        ("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "flush")
-    ]
+    assert calls == []
 
 
 def test_run_network_canary_resolves_via_doh_then_checks_tcp():
@@ -406,46 +401,9 @@ def test_periodic_canary_runs_only_when_due_and_active():
     )
 
 
-def test_pf_rules_scope_quic_block_to_table():
-    assert f"table <{tproxy.QUIC_BLOCK_TABLE}> persist" in tproxy.PF_RULES
-    assert f"to <{tproxy.QUIC_BLOCK_TABLE}> port 443" in tproxy.PF_RULES
-    assert "proto udp from any to any port 443" not in tproxy.PF_RULES
-
-
-def test_note_quic_block_ips_filters_and_evicts_lru(monkeypatch):
-    calls = []
-    monkeypatch.setattr(tproxy, "_pf_applied", True)
-    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
-    tproxy._quic_block_ips.clear()
-
-    tproxy.note_quic_block_ips([
-        "93.184.216.34",
-        "10.0.0.1",
-        "149.154.160.1",
-        "1.1.1.1",
-        "8.8.8.8",
-    ], max_ips=2)
-
-    assert list(tproxy._quic_block_ips) == ["1.1.1.1", "8.8.8.8"]
-    assert calls == [
-        ("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "replace",
-         "1.1.1.1", "8.8.8.8")
-    ]
-
-
-def test_sync_quic_block_table_replaces_loaded_table(monkeypatch):
-    calls = []
-    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
-    tproxy._quic_block_ips.clear()
-    tproxy._quic_block_ips["93.184.216.34"] = 1.0
-    tproxy._quic_block_ips["1.1.1.1"] = 2.0
-
-    tproxy.sync_quic_block_table()
-
-    assert calls == [
-        ("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "replace",
-         "93.184.216.34", "1.1.1.1")
-    ]
+def test_pf_rules_force_quic_to_tcp_fallback():
+    assert "block return quick inet proto udp from any to any port 443" in tproxy.PF_RULES
+    assert "slipstream_quic_block" not in tproxy.PF_RULES
 
 
 def test_voice_flow_observe_caps_count_and_keeps_recent_flow():
