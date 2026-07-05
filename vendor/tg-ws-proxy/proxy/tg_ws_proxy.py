@@ -325,8 +325,13 @@ async def _handle_client(reader, writer, secret: bytes):
                 dc, is_media, media_tag,
                 ctx, splitter=splitter)
             if not ok:
-                log.warning("[%s] DC%d%s no fallback available",
-                            label, dc, media_tag)
+                log_limited(
+                    log.warning,
+                    ("no_fallback_available", dc, bool(is_media)),
+                    "[%s] DC%d%s no fallback available",
+                    label, dc, media_tag,
+                    interval=30.0,
+                )
             return
 
         ws_timeout = WS_FAIL_TIMEOUT if now < dc_fail_until.get(dc_key, 0) else 5.0

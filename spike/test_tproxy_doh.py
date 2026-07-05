@@ -261,6 +261,45 @@ def test_run_network_canary_resolves_via_doh_then_checks_tcp():
     assert checks == [(sockets[0][2], "gateway.discord.gg", 1.25)]
 
 
+def test_run_network_canary_falls_back_to_system_dns_after_doh_timeout():
+    class Sock:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    sockets = []
+
+    def resolver(host):
+        raise TimeoutError("timed out")
+
+    def connector(addr, timeout):
+        sock = Sock()
+        sockets.append((addr, timeout, sock))
+        return sock
+
+    ok, detail = tproxy.run_network_canary(
+        host="gateway.discord.gg",
+        timeout=1.25,
+        resolver=resolver,
+        fallback_resolver=lambda host: ["203.0.113.10"],
+        connector=connector,
+        throughput_checker=lambda sock, host, timeout: (
+            True,
+            "512 bytes in 0.25s (2048 B/s)",
+        ),
+    )
+
+    assert ok
+    assert detail == (
+        "203.0.113.10: 512 bytes in 0.25s (2048 B/s) "
+        "(system DNS fallback after resolve error: timed out)"
+    )
+    assert sockets[0][0] == ("203.0.113.10", 443)
+    assert sockets[0][2].closed
+
+
 def test_check_canary_throughput_reads_https_response():
     class TLS:
         def __init__(self):
