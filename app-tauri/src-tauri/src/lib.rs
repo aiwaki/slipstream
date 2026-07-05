@@ -11,6 +11,10 @@ use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -135,8 +139,56 @@ fn run_admin(shell: &str) {
         .spawn();
 }
 
+fn run_admin_status(shell: &str) -> bool {
+    let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!("do shell script \"{escaped}\" with administrator privileges");
+    Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
+}
+
+fn current_numeric_id(flag: &str) -> Option<String> {
+    let out = Command::new("/usr/bin/id").arg(flag).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let id = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    if id.chars().all(|c| c.is_ascii_digit()) {
+        Some(id)
+    } else {
+        None
+    }
+}
+
+fn log_snapshot_shell(log_path: &str, snapshot_path: &Path, uid: &str, gid: &str) -> String {
+    let dst = snapshot_path.to_string_lossy();
+    format!(
+        "/bin/cp {src} {dst} && /usr/sbin/chown {uid}:{gid} {dst} && /bin/chmod 600 {dst}",
+        src = shell_quote(log_path),
+        dst = shell_quote(dst.as_ref()),
+    )
+}
+
+fn open_log_snapshot() -> bool {
+    let Some(uid) = current_numeric_id("-u") else {
+        return false;
+    };
+    let Some(gid) = current_numeric_id("-g") else {
+        return false;
+    };
+    let snapshot = std::env::temp_dir().join("slipstream.log");
+    let shell = log_snapshot_shell(LOG_PATH, &snapshot, &uid, &gid);
+    if !run_admin_status(&shell) {
+        return false;
+    }
+    Command::new("/usr/bin/open").arg(snapshot).spawn().is_ok()
 }
 
 fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
@@ -1053,6 +1105,8 @@ pub fn run() {
                 )
                 .build()?;
 
+            let tg_offer_reset = Arc::new(AtomicU64::new(0));
+
             // ---- tray --------------------------------------------------------
             let icon = Image::from_path(
                 app.path()
@@ -1064,6 +1118,7 @@ pub fn run() {
 
             let launch_h = launch.clone();
             let enable_h = geph_enable.clone();
+            let tg_offer_reset_menu = tg_offer_reset.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -1102,10 +1157,13 @@ pub fn run() {
                             let _ = launch_h.set_checked(!enabled); // reflect the real new state
                         }
                         ID_RESTART => {
-                            run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"))
+                            tg_offer_reset_menu.fetch_add(1, Ordering::Relaxed);
+                            run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"));
                         }
                         ID_LOG => {
-                            let _ = Command::new("/usr/bin/open").arg(LOG_PATH).spawn();
+                            if !open_log_snapshot() {
+                                notify(app, "Unable to open Slipstream log");
+                            }
                         }
                         ID_UPDATE => {
                             let app = app.clone();
@@ -1123,6 +1181,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let s = state_item.clone();
             let d = detail_item.clone();
+            let tg_offer_reset_watch = tg_offer_reset.clone();
             tauri::async_runtime::spawn(async move {
                 let mut last_state = String::new();
                 // Debounced Geph up/down notification: geph flaps with the network,
@@ -1133,6 +1192,7 @@ pub fn run() {
                 let mut pending: Option<bool> = None;
                 let mut stable: u8 = 0;
                 let mut next_tg_offer = Instant::now();
+                let mut seen_tg_offer_reset = tg_offer_reset_watch.load(Ordering::Relaxed);
                 let mut missing_status_polls: u8 = 0;
                 let mut next_daemon_recovery = Instant::now();
                 loop {
@@ -1147,6 +1207,11 @@ pub fn run() {
                         missing_status_polls = 0;
                     } else {
                         missing_status_polls = missing_status_polls.saturating_add(1);
+                    }
+                    let tg_offer_reset_seen_now = tg_offer_reset_watch.load(Ordering::Relaxed);
+                    if tg_offer_reset_seen_now != seen_tg_offer_reset {
+                        seen_tg_offer_reset = tg_offer_reset_seen_now;
+                        next_tg_offer = now;
                     }
                     if should_recover_daemon(
                         missing_status_polls,
@@ -1246,8 +1311,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, osascript_dialog_args,
-        shell_quote, should_recover_daemon, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, shell_quote, should_recover_daemon, telegram_proxy_detail,
+        DAEMON_WATCHDOG_MISSES,
     };
 
     #[test]
@@ -1263,6 +1329,23 @@ mod tests {
         assert_eq!(
             shell_quote("/tmp/Bob's Apps/slipstreamd"),
             "'/tmp/Bob'\\''s Apps/slipstreamd'"
+        );
+    }
+
+    #[test]
+    fn log_snapshot_shell_quotes_paths_and_uses_user_owner() {
+        let shell = log_snapshot_shell(
+            "/var/log/slipstream.log",
+            std::path::Path::new("/tmp/Bob's Logs/slipstream.log"),
+            "501",
+            "20",
+        );
+
+        assert_eq!(
+            shell,
+            "/bin/cp '/var/log/slipstream.log' '/tmp/Bob'\\''s Logs/slipstream.log' && \
+             /usr/sbin/chown 501:20 '/tmp/Bob'\\''s Logs/slipstream.log' && \
+             /bin/chmod 600 '/tmp/Bob'\\''s Logs/slipstream.log'"
         );
     }
 
