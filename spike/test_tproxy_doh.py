@@ -1,5 +1,6 @@
-import ssl
+import json
 import logging
+import ssl
 from collections import OrderedDict
 
 import tproxy
@@ -146,6 +147,52 @@ def test_default_route_info_tracks_interface_and_gateway(monkeypatch):
     assert tproxy.route_signature(("en0", "192.168.1.1")) == "en0|192.168.1.1"
 
 
+def test_routing_diagnostics_status_reports_route_pf_and_strategy():
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache["example.com"] = "split64+fake"
+    tproxy.note_routing_decision("local", "split64+fake", now=1234.0)
+
+    status = tproxy.routing_diagnostics_status(
+        route_info=("en0", "192.168.1.1"),
+        pf_state="active",
+    )
+
+    assert status["route"] == "en0|192.168.1.1"
+    assert status["route_iface"] == "en0"
+    assert status["route_gateway"] == "192.168.1.1"
+    assert status["pf"] == "active"
+    assert status["route_mode_last"] == "local"
+    assert status["strategy_last"] == "split64+fake"
+    assert status["strategy_last_at"] == 1234.0
+    assert status["strategy_known_hosts"] == 1
+    assert "example.com" not in status.values()
+
+
+def test_write_status_includes_route_diagnostics(monkeypatch, tmp_path):
+    status_path = tmp_path / "slipstream.status"
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache["example.com"] = "split64+fake"
+    tproxy.note_routing_decision("geph", "socks5", now=1234.0)
+
+    tproxy.write_status(
+        "active",
+        "en0",
+        "en0",
+        route_info=("en0", "192.168.1.1"),
+        pf_state="active",
+    )
+
+    status = json.loads(status_path.read_text())
+    assert status["route"] == "en0|192.168.1.1"
+    assert status["route_iface"] == "en0"
+    assert status["route_gateway"] == "192.168.1.1"
+    assert status["pf"] == "active"
+    assert status["route_mode_last"] == "geph"
+    assert status["strategy_last"] == "socks5"
+    assert status["strategy_last_at"] == 1234.0
+
+
 def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     calls = []
     monkeypatch.setattr(tproxy, "_pf_applied", True)
@@ -154,6 +201,7 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     tproxy._tg_direct_failures.clear()
     tproxy._tg_direct_failures.append(10.0)
     tproxy._tg_proxy_suggest_until = 999.0
+    tproxy.note_routing_decision("local", "split64+fake", now=1234.0)
     tproxy._quic_block_ips.clear()
     tproxy._quic_block_ips["203.0.113.10"] = 1.0
     with tproxy._doh_lock:
@@ -164,6 +212,10 @@ def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
     assert tproxy._dead == {}
     assert list(tproxy._tg_direct_failures) == []
     assert tproxy._tg_proxy_suggest_until == 0.0
+    status = tproxy.routing_diagnostics_status()
+    assert status["route_mode_last"] == ""
+    assert status["strategy_last"] == ""
+    assert status["strategy_last_at"] == 0.0
     assert tproxy._quic_block_ips == {}
     with tproxy._doh_lock:
         assert tproxy._doh_cache == {}
