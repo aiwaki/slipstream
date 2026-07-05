@@ -636,18 +636,48 @@ def check_canary_throughput(sock, host, timeout, read_bytes=CANARY_READ_BYTES,
             pass
 
 
+def system_resolve(host):
+    ips = []
+    seen = set()
+    for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
+        ip = info[4][0]
+        if ip not in seen:
+            seen.add(ip)
+            ips.append(ip)
+    return ips
+
+
 def run_network_canary(host=CANARY_HOST, timeout=CANARY_TIMEOUT,
-                       resolver=None, connector=None, throughput_checker=None):
+                       resolver=None, connector=None, throughput_checker=None,
+                       fallback_resolver=None):
     """Resolve through DoH, connect to TCP/443, then verify response throughput."""
+    use_default_resolver = resolver is None
     resolver = resolver or doh_resolve
+    if fallback_resolver is None and use_default_resolver:
+        fallback_resolver = system_resolve
     connector = connector or socket.create_connection
     throughput_checker = throughput_checker or check_canary_throughput
+    resolve_error = ""
+    resolve_note = ""
     try:
         ips = resolver(host) or []
     except Exception as e:
-        return False, f"resolve error: {e}"
+        ips = []
+        resolve_error = f"resolve error: {e}"
+    if not ips and fallback_resolver is not None:
+        try:
+            ips = fallback_resolver(host) or []
+            if ips:
+                resolve_note = (
+                    f"system DNS fallback after {resolve_error or 'DoH returned no A records'}"
+                )
+        except Exception as e:
+            if resolve_error:
+                resolve_error = f"{resolve_error}; system DNS error: {e}"
+            else:
+                resolve_error = f"system DNS error: {e}"
     if not ips:
-        return False, "resolve returned no A records"
+        return False, resolve_error or "resolve returned no A records"
     last_error = ""
     for ip in ips[:CANARY_IP_LIMIT]:
         sock = None
@@ -655,7 +685,8 @@ def run_network_canary(host=CANARY_HOST, timeout=CANARY_TIMEOUT,
             sock = connector((ip, 443), timeout=timeout)
             ok, detail = throughput_checker(sock, host, timeout)
             if ok:
-                return True, f"{ip}: {detail}"
+                suffix = f" ({resolve_note})" if resolve_note else ""
+                return True, f"{ip}: {detail}{suffix}"
             last_error = f"{ip}: {detail}"
         except OSError as e:
             last_error = f"{ip}: {e}"
