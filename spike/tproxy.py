@@ -62,23 +62,18 @@ PF_RULES = """\
 table <slipstream_quic_block> persist
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
-block return quick inet proto udp from any to <slipstream_quic_block> port 443
 """
+# NOTE: QUIC (UDP/443) is intentionally NOT blocked. YouTube/googlevideo video runs
+# over QUIC/HTTP3, and QUIC to those hosts WORKS on this TSPU (verified 2026-07-07:
+# Version-Negotiation replies in ~0.04s). The old QUIC block (Codex #11-#15) forced
+# the browser onto TCP, which IS DPI-dropped for googlevideo -> video died. Leaving
+# QUIC alone restores native HTTP3 playback. The <slipstream_quic_block> table is
+# kept (empty, unreferenced) so the legacy note_quic_block_ips() calls don't error.
 
 _pf_applied = False
 _pf_fd = None
 QUIC_BLOCK_TABLE = "slipstream_quic_block"
 QUIC_BLOCK_MAX = 4096
-QUIC_BLOCK_SEED_HOSTS = [
-    "discord.com",
-    "discord.gg",
-    "discordapp.com",
-    "gateway.discord.gg",
-    "updates.discord.com",
-    "stable.dl2.discordapp.net",
-    "cdn.discordapp.com",
-    "media.discordapp.net",
-]
 _quic_block_ips = OrderedDict()
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
@@ -92,42 +87,6 @@ _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH
 # from a persistently-blocked host (e.g. Telegram DC sockets hammering forever).
 DEAD_TTL = 60.0
 _dead = {}                     # host -> expiry_monotonic
-
-CANARY_HOST = os.environ.get("SLIP_CANARY_HOST", "www.google.com")
-try:
-    CANARY_TIMEOUT = float(os.environ.get("SLIP_CANARY_TIMEOUT", "3.0"))
-except ValueError:
-    CANARY_TIMEOUT = 3.0
-try:
-    CANARY_INTERVAL = float(os.environ.get("SLIP_CANARY_INTERVAL", "300.0"))
-except ValueError:
-    CANARY_INTERVAL = 300.0
-try:
-    CANARY_READ_BYTES = max(0, int(os.environ.get("SLIP_CANARY_READ_BYTES", "512")))
-except ValueError:
-    CANARY_READ_BYTES = 512
-try:
-    CANARY_MIN_BPS = max(0.0, float(os.environ.get("SLIP_CANARY_MIN_BPS", "128.0")))
-except ValueError:
-    CANARY_MIN_BPS = 128.0
-CANARY_PATH = (os.environ.get("SLIP_CANARY_PATH", "/") or "/").splitlines()[0].strip()
-if not CANARY_PATH:
-    CANARY_PATH = "/"
-if not CANARY_PATH.startswith("/"):
-    CANARY_PATH = "/" + CANARY_PATH
-CANARY_IP_LIMIT = 3
-_canary_lock = threading.Lock()
-_canary_state = "idle"
-_canary_reason = ""
-_canary_route = ""
-_canary_last_run = 0.0
-_canary_last_ok = 0.0
-_canary_error = ""
-_canary_thread = None
-_diag_lock = threading.Lock()
-_last_route_mode = ""
-_last_strategy = ""
-_last_route_decision_ts = 0.0
 
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
@@ -159,6 +118,35 @@ GEPH_HOSTS = (
     "anthropic.com", "claude.ai", "claudeusercontent.com",
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
 )
+
+# Flowseal/zapret-style hostlists mark services for LOCAL DPI bypass, not for a
+# foreign VPN exit. These hosts should stay on the user's normal route and use
+# desync/fake strategies; Geph is reserved for application-layer geo-blocks.
+DISCORD_HOSTS = (
+    "discord.com", "discord.gg", "discord.media",
+    "discordapp.com", "discordapp.net", "discordcdn.com",
+)
+GOOGLE_VIDEO = ("googlevideo.com", "youtube.com", "ytimg.com", "gvt1.com", "gvt2.com")
+LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
+
+
+def _host_matches(host, domains):
+    if not host:
+        return False
+    h = host.lower().rstrip(".")
+    return any(h == d or h.endswith("." + d) for d in domains)
+
+
+def is_discord_host(host):
+    return _host_matches(host, DISCORD_HOSTS)
+
+
+def is_google_video_host(host):
+    return _host_matches(host, GOOGLE_VIDEO)
+
+
+def is_local_bypass_host(host):
+    return _host_matches(host, LOCAL_BYPASS_HOSTS)
 
 # Telegram's MTProto data-centre IP ranges (published, AS62041/AS44907). MTProto
 # has no SNI and looks nothing like TLS, so our desync corrupts its handshake and
@@ -282,7 +270,7 @@ def is_russian(host):
     h = host.lower().rstrip(".")
     if h.endswith(RU_TLDS):
         return True
-    return any(h == d or h.endswith("." + d) for d in RU_HOSTS)
+    return _host_matches(h, RU_HOSTS)
 
 
 # Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
@@ -308,17 +296,16 @@ GEPH_INFRA = ("kubernetes.io", "cdn77.org", "cdn77.com", "netlify.app", "vuejs.o
 
 
 def _is_geph_infra(host):
-    h = host.lower().rstrip(".")
-    return any(h == d or h.endswith("." + d) for d in GEPH_INFRA)
+    return _host_matches(host, GEPH_INFRA)
 
 
 def geph_route(host):
     """Should this host go through geph's tunnel? Geo-blocked (listed OR learned)
     AND not Russian."""
-    if not host or is_russian(host):
+    if not host or is_russian(host) or is_local_bypass_host(host):
         return False
     h = host.lower().rstrip(".")
-    if any(h == d or h.endswith("." + d) for d in GEPH_HOSTS):
+    if _host_matches(h, GEPH_HOSTS):
         return True
     return _auto_geph.get(h, 0) > time.time()
 
@@ -359,7 +346,13 @@ def note_local_result(host, down_bytes, duration):
     tunnelled. Real content resets the host's failure noise."""
     if not AUTO_GEPH_ENABLED:
         return                                  # opt-in only (see AUTO_GEPH_ENABLED)
-    if not host or is_russian(host) or geph_route(host) or _is_geph_infra(host):
+    if (
+        not host
+        or is_russian(host)
+        or is_local_bypass_host(host)
+        or geph_route(host)
+        or _is_geph_infra(host)
+    ):
         return                                  # RU, already tunnelled, or geph's own
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
         _auto_fail.pop(host, None)              # got real content -> not blocked
@@ -392,55 +385,7 @@ def note_local_result(host, down_bytes, duration):
           f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)", file=sys.stderr)
 
 
-def network_canary_status(now=None):
-    with _canary_lock:
-        return {
-            "canary": _canary_state,
-            "canary_host": CANARY_HOST,
-            "canary_reason": _canary_reason,
-            "canary_route": _canary_route,
-            "canary_last_run": _canary_last_run,
-            "canary_last_ok": _canary_last_ok,
-            "canary_interval": CANARY_INTERVAL,
-            "canary_read_bytes": CANARY_READ_BYTES,
-            "canary_min_bps": CANARY_MIN_BPS,
-            "canary_path": CANARY_PATH,
-            "canary_error": _canary_error,
-        }
-
-
-def note_routing_decision(mode, strategy="", now=None):
-    global _last_route_mode, _last_strategy, _last_route_decision_ts
-    if now is None:
-        now = time.time()
-    with _diag_lock:
-        _last_route_mode = mode or ""
-        _last_strategy = strategy or ""
-        _last_route_decision_ts = now
-
-
-def routing_diagnostics_status(route_info=None, pf_state=None):
-    iface, gateway = route_info or ("", "")
-    route_info = (iface or "", gateway or "")
-    if pf_state is None:
-        pf_state = "active" if _pf_applied else "off"
-    with _diag_lock:
-        route_mode = _last_route_mode
-        strategy = _last_strategy
-        decision_ts = _last_route_decision_ts
-    return {
-        "route": route_signature(route_info) if any(route_info) else "",
-        "route_iface": route_info[0],
-        "route_gateway": route_info[1],
-        "pf": pf_state,
-        "route_mode_last": route_mode,
-        "strategy_last": strategy,
-        "strategy_last_at": decision_ts,
-        "strategy_known_hosts": len(_strat_cache),
-    }
-
-
-def write_status(state, iface, voice_iface, route_info=None, pf_state=None):
+def write_status(state, iface, voice_iface):
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
@@ -459,8 +404,6 @@ def write_status(state, iface, voice_iface, route_info=None, pf_state=None):
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
         }
-        st.update(routing_diagnostics_status(route_info or (iface, ""), pf_state))
-        st.update(network_canary_status(now))
         st.update(tgws_status(now))
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
@@ -527,25 +470,6 @@ def note_quic_block_ips(ips, max_ips=QUIC_BLOCK_MAX):
         _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "add", *new_ips)
 
 
-def seed_quic_block_table(hosts=QUIC_BLOCK_SEED_HOSTS, resolver=None):
-    if resolver is None:
-        resolver = system_resolve
-    ips = []
-    for host in hosts:
-        try:
-            ips.extend(resolver(host))
-        except Exception:
-            pass
-    note_quic_block_ips(ips)
-
-
-def schedule_quic_block_seed():
-    try:
-        _POOL.submit(seed_quic_block_table)
-    except Exception:
-        pass
-
-
 def _pf_load(port):
     f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
     f.write(PF_RULES.format(port=port))
@@ -569,220 +493,12 @@ def pf_setup(port):
         print("pfctl load failed:\n" + r.stderr, file=sys.stderr)
         sys.exit(1)
     _pf_applied = True
-    schedule_quic_block_seed()
     print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC scoped by table")
 
 
 def pf_has_rules(port):
     """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
     return f"port {port}" in _run("pfctl", "-sn").stdout
-
-
-def reset_network_runtime_state(reason, sync_quic=None, seed_quic=True):
-    """Drop route-sensitive transient state after wake or route/VPN changes."""
-    global _tg_proxy_suggest_until, _last_route_mode, _last_strategy
-    global _last_route_decision_ts
-    _dead.clear()
-    _tg_direct_failures.clear()
-    _tg_proxy_suggest_until = 0.0
-    with _diag_lock:
-        _last_route_mode = ""
-        _last_strategy = ""
-        _last_route_decision_ts = 0.0
-    with _doh_lock:
-        _doh_cache.clear()
-    _quic_block_ips.clear()
-    if sync_quic is None:
-        sync_quic = _pf_applied
-    if sync_quic:
-        sync_quic_block_table()
-        if seed_quic:
-            schedule_quic_block_seed()
-    print(f">> network recheck ({reason}) -> transient routing state reset",
-          file=sys.stderr)
-
-
-def _set_network_canary(state, reason="", route="", error="", ok=False, now=None):
-    global _canary_state, _canary_reason, _canary_route
-    global _canary_last_run, _canary_last_ok, _canary_error
-    if now is None:
-        now = time.time()
-    with _canary_lock:
-        _canary_state = state
-        _canary_reason = reason
-        _canary_route = route
-        _canary_last_run = now
-        if ok:
-            _canary_last_ok = now
-        _canary_error = (error or "")[:200]
-
-
-def _canary_ssl_context():
-    try:
-        import certifi
-
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        return ssl.create_default_context()
-
-
-def _wrap_canary_tls(sock, host, timeout):
-    sock.settimeout(timeout)
-    ctx = _canary_ssl_context()
-    return ctx.wrap_socket(sock, server_hostname=host)
-
-
-def check_canary_throughput(sock, host, timeout, read_bytes=CANARY_READ_BYTES,
-                            min_bps=CANARY_MIN_BPS, path=CANARY_PATH,
-                            tls_wrapper=None, clock=None):
-    """Fetch a tiny HTTPS response so canaries catch stalls, not only connects."""
-    if read_bytes <= 0:
-        return True, "tcp connect"
-    tls_wrapper = tls_wrapper or _wrap_canary_tls
-    clock = clock or time.monotonic
-    path = (path or "/").splitlines()[0].strip() or "/"
-    if not path.startswith("/"):
-        path = "/" + path
-    started = clock()
-    tls = tls_wrapper(sock, host, timeout)
-    try:
-        request = (
-            f"GET {path} HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            "User-Agent: SlipstreamCanary/1\r\n"
-            "Accept: */*\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("ascii", "ignore")
-        tls.sendall(request)
-        received = 0
-        while received < read_bytes:
-            chunk = tls.recv(min(4096, read_bytes - received))
-            if not chunk:
-                break
-            received += len(chunk)
-        elapsed = max(clock() - started, 0.001)
-        bps = received / elapsed
-        detail = f"{received} bytes in {elapsed:.2f}s ({bps:.0f} B/s)"
-        if received <= 0:
-            return False, "no response bytes"
-        if min_bps > 0 and bps < min_bps:
-            return False, (
-                f"throughput {bps:.0f} B/s below {min_bps:.0f} B/s ({detail})"
-            )
-        return True, detail
-    finally:
-        try:
-            tls.close()
-        except Exception:
-            pass
-
-
-def system_resolve(host):
-    ips = []
-    seen = set()
-    for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
-        ip = info[4][0]
-        if ip not in seen:
-            seen.add(ip)
-            ips.append(ip)
-    return ips
-
-
-def run_network_canary(host=CANARY_HOST, timeout=CANARY_TIMEOUT,
-                       resolver=None, connector=None, throughput_checker=None,
-                       fallback_resolver=None):
-    """Resolve through DoH, connect to TCP/443, then verify response throughput."""
-    use_default_resolver = resolver is None
-    resolver = resolver or doh_resolve
-    if fallback_resolver is None and use_default_resolver:
-        fallback_resolver = system_resolve
-    connector = connector or socket.create_connection
-    throughput_checker = throughput_checker or check_canary_throughput
-    resolve_error = ""
-    resolve_note = ""
-    try:
-        ips = resolver(host) or []
-    except Exception as e:
-        ips = []
-        resolve_error = f"resolve error: {e}"
-    if not ips and fallback_resolver is not None:
-        try:
-            ips = fallback_resolver(host) or []
-            if ips:
-                resolve_note = (
-                    f"system DNS fallback after {resolve_error or 'DoH returned no A records'}"
-                )
-        except Exception as e:
-            if resolve_error:
-                resolve_error = f"{resolve_error}; system DNS error: {e}"
-            else:
-                resolve_error = f"system DNS error: {e}"
-    if not ips:
-        return False, resolve_error or "resolve returned no A records"
-    last_error = ""
-    for ip in ips[:CANARY_IP_LIMIT]:
-        sock = None
-        try:
-            sock = connector((ip, 443), timeout=timeout)
-            ok, detail = throughput_checker(sock, host, timeout)
-            if ok:
-                suffix = f" ({resolve_note})" if resolve_note else ""
-                return True, f"{ip}: {detail}{suffix}"
-            last_error = f"{ip}: {detail}"
-        except OSError as e:
-            last_error = f"{ip}: {e}"
-        finally:
-            try:
-                if sock is not None:
-                    sock.close()
-            except Exception:
-                pass
-    return False, last_error or "connect failed"
-
-
-def _network_canary_worker(reason, route):
-    ok, detail = run_network_canary()
-    if ok:
-        _set_network_canary("ok", reason, route, ok=True)
-        print(f">> network canary ok ({reason}) via {detail}", file=sys.stderr)
-    else:
-        _set_network_canary("failed", reason, route, error=detail)
-        print(f">> network canary failed ({reason}): {detail}", file=sys.stderr)
-
-
-def should_run_periodic_canary(now, last_run, interval=CANARY_INTERVAL,
-                               vpn=False, recheck_reason=None):
-    return (
-        interval > 0
-        and not vpn
-        and not recheck_reason
-        and now - last_run >= interval
-    )
-
-
-def schedule_network_canary(reason, route, vpn=False):
-    global _canary_thread, _canary_state, _canary_reason, _canary_route
-    global _canary_last_run, _canary_error
-    if vpn:
-        _set_network_canary("skipped", reason, route, error="vpn default route")
-        return False
-    with _canary_lock:
-        if _canary_thread is not None and _canary_thread.is_alive():
-            return False
-        now = time.time()
-        _canary_state = "checking"
-        _canary_reason = reason
-        _canary_route = route
-        _canary_last_run = now
-        _canary_error = ""
-        _canary_thread = threading.Thread(
-            target=_network_canary_worker,
-            args=(reason, route),
-            name="slipstream-canary",
-            daemon=True,
-        )
-        _canary_thread.start()
-        return True
 
 
 def pf_teardown():
@@ -918,7 +634,8 @@ STRATEGIES = [
 STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"
 STRAT_CACHE_MAX = 2048
-STRAT_CACHE_VERSION = 3             # bump on strategy-logic changes -> discard stale
+STRAT_CACHE_VERSION = 4             # bump on strategy-logic changes -> discard stale
+                                    # v4: Discord uses decoy fake; video uses poison fake
 _strat_cache = OrderedDict()       # host -> winning strategy name
 
 
@@ -954,54 +671,35 @@ def save_strat_cache():
 
 
 DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
+# YouTube/googlevideo video edges are hard-blocked by SNI like Discord. The TLS probe
+# can PASS on a non-fake split (record-splitting alone completes the handshake to the
+# CDN), so the adaptive cache happily pins these hosts to "split64" — yet real video
+# traffic still stalls (infinite load) because only the fake decoy hides the SNI from
+# the TSPU. So force fake-ONLY here and ignore any stale non-fake cache winner. Matches
+# Windows zapret "general (ALT)", which always fakes google/youtube instead of probing.
+# Session edges rotate (rrN---sn-XXXX.googlevideo.com, *.c.youtube.com) so match by suffix.
+GOOGLE_VIDEO_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # Default order is FAKE-FIRST for every host: the TSPU throttles many services by
 # SNI (Discord, Anthropic, Shopify stores, ...) even when the block is beaten, and
 # the TLS probe can't see the throttle — so try fake first everywhere (the decoy
 # hides the SNI from the throttler). Non-fake variants remain as fallbacks for the
 # rare host the decoy upsets. Inject is cheap (not DoH); the pool absorbs it.
 GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
-YOUTUBE_VIDEO_STRATS = GENERAL_STRATS
-DEFAULT_IP_ATTEMPT_LIMIT = 2
-VIDEO_CDN_IP_ATTEMPT_LIMIT = 4
-
-
-def is_youtube_video_host(host):
-    h = (host or "").rstrip(".").lower()
-    return (
-        h == "googlevideo.com"
-        or h.endswith(".googlevideo.com")
-        or h.endswith(".c.youtube.com")
-    )
-
-
-def quic_block_host(host):
-    h = (host or "").rstrip(".").lower()
-    return "discord" in h or geph_route(host)
-
-
-def ip_attempt_limit(host):
-    return VIDEO_CDN_IP_ATTEMPT_LIMIT if is_youtube_video_host(host) else DEFAULT_IP_ATTEMPT_LIMIT
-
-
-def max_tls_attempts(host, now):
-    if is_youtube_video_host(host):
-        return 7
-    return 1 if (host and _dead.get(host, 0) > now) else 7
 
 
 def strategy_order(host):
     # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
     # so it uses the fake-only set and ignores any stale non-fake cache entry.
-    if host and "discord" in host:
+    if is_discord_host(host):
         win = _strat_cache.get(host)
         names = ([win] + [n for n in DISCORD_STRATS if n != win]
                  if win in DISCORD_STRATS else DISCORD_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
-    if is_youtube_video_host(host):
+    # YouTube/googlevideo: same fake-only discipline (see GOOGLE_VIDEO note above).
+    if is_google_video_host(host):
         win = _strat_cache.get(host)
-        names = list(YOUTUBE_VIDEO_STRATS)
-        if win in ("split64+fake", "split16+fake", "fake5"):
-            names = [win] + [n for n in names if n != win]
+        names = ([win] + [n for n in GOOGLE_VIDEO_STRATS if n != win]
+                 if win in GOOGLE_VIDEO_STRATS else GOOGLE_VIDEO_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
     win = _strat_cache.get(host)
     if win in STRAT_BY_NAME:
@@ -1031,6 +729,53 @@ def build_fake_clienthello(sni: str) -> bytes:
 
 
 _FAKE_CH = build_fake_clienthello(FAKE_DECOY_SNI)
+
+# zapret-style "fake"/disorder POISON. Proven on this TSPU (2026-07-07): a fake
+# TLS-record-shaped GARBAGE segment injected at the connection's REAL next-seq
+# (isn+1) with a fooling that makes the SERVER drop it (ttl=4 dies in transit)
+# poisons the DPI's TCP reassembly so it never reads the (hard-blocked)
+# googlevideo SNI -> the real ClientHello passes and the handshake completes.
+# Whitelist-by-decoy-SNI (real google/vk ClientHello) did NOT work here; only the
+# GARBAGE poison at the CORRECT seq did (100% on manifest/rr/youtube/redirector;
+# seq=1 or any wrong offset -> ignored by the DPI). This is why the old ttl/ts
+# decoy with seq=1 never beat googlevideo.
+_FAKE_POISON = b"\x16\x03\x01\x02\x00" + b"\x00" * 512
+FAKE_TTL = 4
+
+# (local_sport, remote_ip) -> {"isn":.., "sisn":..} filled by the network_monitor
+# sniffer (outbound SYN + inbound SYN-ACK). inject_fake needs the real ISN to place
+# the poison at isn+1 exactly — macOS has no getsockopt for a socket's TCP seq.
+_syn_map = OrderedDict()
+_syn_lock = threading.Lock()
+SYN_MAP_MAX = 4096
+
+
+def syn_record(sport, remote_ip, isn=None, sisn=None):
+    with _syn_lock:
+        k = (sport, remote_ip)
+        ent = _syn_map.get(k) or {"isn": None, "sisn": None}
+        if isn is not None:
+            ent["isn"] = isn
+        if sisn is not None:
+            ent["sisn"] = sisn
+        _syn_map[k] = ent
+        _syn_map.move_to_end(k)
+        while len(_syn_map) > SYN_MAP_MAX:
+            _syn_map.popitem(last=False)
+
+
+def syn_lookup(sport, remote_ip, wait=0.03):
+    # SYN is on the wire before we inject (connection already opened), so this is
+    # almost always a hit; the short retry only covers the sniffer-thread race.
+    deadline = time.monotonic() + wait
+    while True:
+        with _syn_lock:
+            ent = _syn_map.get((sport, remote_ip))
+        if ent and ent.get("isn") is not None:
+            return ent
+        if time.monotonic() >= deadline:
+            return ent
+        time.sleep(0.005)
 
 
 # Reuse ONE scapy L3 socket per thread instead of send()-per-packet. scapy's
@@ -1063,9 +808,39 @@ def _l3send(pkt):
             _l3_tls.sock = None
 
 
-def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
-    """Spray a few decoy-SNI ClientHello packets at low TTL on the real 4-tuple.
-    Needs scapy (run via the venv python). No-op with a warning if unavailable."""
+def inject_fake_poison(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6):
+    """Inject a fake GARBAGE TLS-record segment at the connection's REAL next-seq
+    (isn+1, from the SYN-sniffed syn_map) with a low TTL so the SERVER drops it in
+    transit but the in-country DPI ingests it and poisons its reassembly — the real
+    (hard-blocked-SNI) ClientHello that follows then passes. Verified vs googlevideo
+    on this TSPU. No-ops if the ISN isn't known yet (real CH still sent unpoisoned;
+    better a miss than the old seq=1 dud). Needs scapy (bundled in the frozen)."""
+    try:
+        from scapy.all import IP, TCP, Raw
+    except Exception:
+        print("  fake-mode needs scapy: run with sudo .venv/bin/python tproxy.py",
+              file=sys.stderr)
+        return
+    ent = syn_lookup(src_port, dst_ip)
+    if not ent or ent.get("isn") is None:
+        return                       # unknown seq -> skip (seq=1 is ignored by DPI)
+    seq = (ent["isn"] + 1) & 0xffffffff
+    ack = ((ent.get("sisn") or 0) + 1) & 0xffffffff
+    pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
+           / TCP(sport=src_port, dport=dst_port, flags="PA",
+                 seq=seq, ack=ack, window=64240)
+           / Raw(_FAKE_POISON))
+    for _ in range(repeats):
+        _l3send(pkt)
+
+
+def inject_fake_decoy(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6):
+    """Inject a low-TTL decoy ClientHello on the same tuple.
+
+    This mirrors the zapret/Flowseal fake mode for Discord-family traffic: the DPI
+    sees a harmless SNI first, while the server never receives the decoy because
+    the TTL expires in transit.
+    """
     try:
         from scapy.all import IP, TCP, Raw
     except Exception:
@@ -1073,10 +848,22 @@ def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=4, repeats=3):
               file=sys.stderr)
         return
     pkt = (IP(src=src_ip, dst=dst_ip, ttl=ttl)
-           / TCP(sport=src_port, dport=dst_port, flags="PA", seq=1, ack=1)
+           / TCP(sport=src_port, dport=dst_port, flags="PA",
+                 seq=1, ack=1, window=64240)
            / Raw(_FAKE_CH))
     for _ in range(repeats):
         _l3send(pkt)
+
+
+def inject_fake_for_host(host, src_ip, src_port, dst_ip, dst_port):
+    if is_discord_host(host):
+        inject_fake_decoy(src_ip, src_port, dst_ip, dst_port)
+        return
+    inject_fake_poison(src_ip, src_port, dst_ip, dst_port)
+
+
+def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6):
+    inject_fake_poison(src_ip, src_port, dst_ip, dst_port, ttl=ttl, repeats=repeats)
 
 
 # ------------------------------------------------------- UDP voice plane
@@ -1113,29 +900,12 @@ def observe_voice_flow(flows, key, now=None):
     return should_prime, count
 
 
-def default_route_info():
-    iface = gateway = ""
+def default_iface():
     for line in _run("route", "get", "default").stdout.splitlines():
         line = line.strip()
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        value = value.strip()
-        value = value.split()[0] if value else ""
-        if key == "interface":
-            iface = value
-        elif key == "gateway":
-            gateway = value
-    return iface or None, gateway
-
-
-def route_signature(route_info):
-    iface, gateway = route_info
-    return f"{iface or ''}|{gateway or ''}"
-
-
-def default_iface():
-    return default_route_info()[0]
+        if line.startswith("interface:"):
+            return line.split()[1]
+    return None
 
 
 def _voice_bpf(localip):
@@ -1143,6 +913,13 @@ def _voice_bpf(localip):
             "and not dst net 192.168.0.0/16 and not dst net 10.0.0.0/8 "
             "and not dst net 172.16.0.0/12 and not dst net 169.254.0.0/16 "
             "and not dst net 224.0.0.0/4 and not dst host 255.255.255.255")
+
+
+def _syn_bpf(localip):
+    # Capture outbound SYN (our ISN) + inbound SYN-ACK (server ISN) on :443 so
+    # inject_fake can place the poison at the connection's real seq. SYN-flagged
+    # only -> volume is bounded to handshakes, not every data packet.
+    return f"tcp and host {localip} and port 443 and (tcp[13] & 2 != 0)"
 
 
 def network_monitor(port, voice=True):
@@ -1153,10 +930,11 @@ def network_monitor(port, voice=True):
     BPF-observe it and raw-inject low-TTL decoy STUN primes on the 5-tuple, leaving
     the real flow untouched."""
     global _pf_applied, _geph_up
-    AsyncSniffer = send = IP = UDP = Raw = get_if_addr = None
+    AsyncSniffer = send = IP = UDP = TCP = Raw = get_if_addr = None
     if voice:
         try:
-            from scapy.all import AsyncSniffer, send, IP, UDP, Raw, get_if_addr, conf
+            from scapy.all import (AsyncSniffer, send, IP, UDP, TCP, Raw,
+                                   get_if_addr, conf)
             conf.verb = 0
         except Exception as e:
             print(f">> voice disabled (scapy: {e})", file=sys.stderr)
@@ -1164,11 +942,17 @@ def network_monitor(port, voice=True):
     flows = OrderedDict()
     sniffer = None
     cur_iface = None
-    cur_route = None
-    last_vpn = None
-    last_periodic_canary = 0.0
 
     def on_pkt(p):
+        # TCP SYN / SYN-ACK on :443 -> record the connection's ISNs for inject_fake.
+        if TCP is not None and p.haslayer(TCP) and p.haslayer(IP):
+            t = p[TCP]
+            f = int(t.flags)
+            if t.dport == 443 and (f & 0x02) and not (f & 0x10):
+                syn_record(t.sport, p[IP].dst, isn=t.seq)          # outbound SYN
+            elif t.sport == 443 and (f & 0x02) and (f & 0x10):
+                syn_record(t.dport, p[IP].src, sisn=t.seq)         # inbound SYN-ACK
+            return
         if not (p.haslayer(IP) and p.haslayer(UDP)):
             return
         ip, udp = p[IP], p[UDP]
@@ -1187,7 +971,6 @@ def network_monitor(port, voice=True):
     last_tick = time.time()
     while True:
         now = time.time()
-        recheck_reasons = []
         if now - last_tick > 30:
             # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
             # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
@@ -1195,32 +978,8 @@ def network_monitor(port, voice=True):
             print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
-            recheck_reasons.append("wake")
         last_tick = now
-        route_info = default_route_info()
-        iface = route_info[0]
-        route = route_signature(route_info)
-        vpn = bool(iface) and iface.startswith("utun")
-        if cur_route is None:
-            recheck_reasons.append("startup")
-        elif route != cur_route:
-            print(f">> default route changed ({cur_route or '-'} -> {route or '-'})",
-                  file=sys.stderr)
-            recheck_reasons.append("route change")
-        if last_vpn is not None and vpn != last_vpn:
-            recheck_reasons.append("vpn on" if vpn else "vpn off")
-        cur_route = route
-        last_vpn = vpn
-        if recheck_reasons:
-            seen = []
-            for reason in recheck_reasons:
-                if reason not in seen:
-                    seen.append(reason)
-            recheck_reason = ", ".join(seen)
-            reset_network_runtime_state(recheck_reason)
-            flows.clear()
-        else:
-            recheck_reason = None
+        iface = default_iface()
         # Hysteresis: a few failed probes (geph busy under load, or briefly
         # re-establishing its tunnel) must NOT flip us to "down" — that drops
         # geo-blocked hosts to local desync (RU exit IP -> Anthropic/CF 403).
@@ -1239,13 +998,13 @@ def network_monitor(port, voice=True):
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
+        vpn = bool(iface) and iface.startswith("utun")
         if vpn:
             if _pf_applied:
                 print(f">> VPN up (default via {iface}) -> Slipstream dormant",
                       file=sys.stderr)
                 _run("pfctl", "-f", "/etc/pf.conf")
                 _pf_applied = False
-            pf_state = "dormant"
         else:
             if not _pf_applied:
                 print(">> no VPN -> Slipstream active", file=sys.stderr)
@@ -1254,13 +1013,6 @@ def network_monitor(port, voice=True):
             elif not pf_has_rules(port):
                 print(">> pf rules vanished — re-applying", file=sys.stderr)
                 _pf_load(port)
-            pf_state = "active" if _pf_applied else "off"
-        if recheck_reason:
-            if schedule_network_canary(recheck_reason, route, vpn=vpn):
-                last_periodic_canary = now
-        elif should_run_periodic_canary(now, last_periodic_canary, vpn=vpn):
-            if schedule_network_canary("periodic", route, vpn=vpn):
-                last_periodic_canary = now
         if send is not None:                       # scapy available
             if iface and iface != cur_iface:
                 if sniffer is not None:
@@ -1271,17 +1023,17 @@ def network_monitor(port, voice=True):
                     sniffer = None
                 try:
                     localip = get_if_addr(iface)
-                    sniffer = AsyncSniffer(iface=iface, filter=_voice_bpf(localip),
+                    bpf = f"({_voice_bpf(localip)}) or ({_syn_bpf(localip)})"
+                    sniffer = AsyncSniffer(iface=iface, filter=bpf,
                                            prn=on_pkt, store=0)
                     sniffer.start()
                     cur_iface = iface
                     print(f">> voice plane: priming UDP {VOICE_LO}-{VOICE_HI} "
-                          f"on {iface}")
+                          f"+ SYN-seq capture on {iface}")
                 except Exception as e:
                     print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
-        write_status("dormant" if vpn else "active", iface, cur_iface,
-                     route_info=route_info, pf_state=pf_state)
+        write_status("dormant" if vpn else "active", iface, cur_iface)
         time.sleep(5)
 
 
@@ -1416,33 +1168,53 @@ async def doh_resolve_async(host):
     return ips
 
 
-async def system_resolve_async(host):
-    loop = asyncio.get_running_loop()
+def system_resolve(host, port=443):
     try:
-        return await loop.run_in_executor(_POOL, system_resolve, host)
-    except Exception:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
         return []
-
-
-def merge_ip_candidates(*groups):
     ips = []
-    seen = set()
-    for group in groups:
-        for ip in group or []:
-            if not ip or ":" in ip or ip in seen:
-                continue
-            seen.add(ip)
+    for info in infos:
+        ip = info[4][0]
+        if ip not in ips:
             ips.append(ip)
     return ips
 
 
+async def system_resolve_async(host):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_POOL, system_resolve, host)
+
+
+def _dedupe_ips(ips):
+    out = []
+    for ip in ips:
+        if ip and ip not in out:
+            out.append(ip)
+    return out
+
+
 async def resolve_connection_ips(host, fallback_ip):
-    resolved = []
-    if host:
-        resolved = await doh_resolve_async(host)
-        if not resolved:
-            resolved = await system_resolve_async(host)
-    return merge_ip_candidates(resolved, [fallback_ip])
+    if not host:
+        return [fallback_ip] if fallback_ip else []
+    ips = []
+    doh_ips = await doh_resolve_async(host)
+    ips.extend(doh_ips)
+    # Local-bypass/CDN domains often have one dead edge and several working ones.
+    # When DoH is empty or this is a zapret-scoped host, include system DNS too
+    # so the strategy ladder can roll to a different edge without using Geph.
+    if not doh_ips or is_local_bypass_host(host):
+        ips.extend(await system_resolve_async(host))
+    ips.append(fallback_ip)
+    return _dedupe_ips(ips)
+
+
+DEFAULT_IP_ATTEMPT_LIMIT = 2
+LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
+
+
+def ip_attempt_limit(host):
+    return LOCAL_BYPASS_IP_ATTEMPT_LIMIT if is_local_bypass_host(host) else DEFAULT_IP_ATTEMPT_LIMIT
 
 
 # ------------------------------------------------------------- relay
@@ -1653,7 +1425,7 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     return None
 
 
-async def dial_and_probe_fake(real_ip, port, first_blob, probe_timeout=3.0):
+async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0):
     """Like dial_and_probe but injects a low-TTL decoy ClientHello on the real
     4-tuple BEFORE the real flight (zapret 'fake' — for deep-reassembly SNIs)."""
     try:
@@ -1665,7 +1437,9 @@ async def dial_and_probe_fake(real_ip, port, first_blob, probe_timeout=3.0):
         s = up_w.get_extra_info("socket")
         src_ip, src_port = s.getsockname()
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(_POOL, inject_fake, src_ip, src_port, real_ip, port)
+        await loop.run_in_executor(
+            _POOL, inject_fake_for_host, host, src_ip, src_port, real_ip, port
+        )
         up_w.write(first_blob)
         await up_w.drain()
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
@@ -1683,7 +1457,7 @@ async def dial_and_probe_fake(real_ip, port, first_blob, probe_timeout=3.0):
 async def dial_strategy(ip, port, head, body, host, strat):
     blob = make_blob(head, body, host, strat["cap"])
     if strat["fake"]:
-        return await dial_and_probe_fake(ip, port, blob)
+        return await dial_and_probe_fake(ip, port, blob, host=host)
     return await dial_and_probe(ip, port, blob)
 
 
@@ -1742,7 +1516,6 @@ async def _handle_impl(reader, writer):
         down_b = res[1] or 0
         dur = time.monotonic() - t0
         if down_b > 0:
-            note_routing_decision("telegram_direct", "plain")
             note_telegram_direct_success()
         elif dur < 20:
             note_telegram_direct_failure("empty direct response")
@@ -1762,7 +1535,6 @@ async def _handle_impl(reader, writer):
             g = await dial_via_geph(host, dst_port, head + body)
             if g:
                 gr, gw = g
-                note_routing_decision("geph", "socks5")
                 if VERBOSE:
                     print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                 await asyncio.gather(pump(reader, gw), splice(gr, writer))
@@ -1773,9 +1545,10 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
-    # de-poison: resolve the SNI over DoH -> LIST of real IPs; if the DoH path
-    # is temporarily blocked, fall back to system DNS before the original dst_ip.
+    # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
+    # (fallback dst_ip). Some CDN edges are bad while neighbors work.
     real_ips = await resolve_connection_ips(host, dst_ip)
+    ip_limit = ip_attempt_limit(host)
 
     # Adaptive strategy ladder (auto-sweep / self-tuning). Try strategies in
     # order — cached winner for this host first — across up to a couple of real
@@ -1784,7 +1557,6 @@ async def _handle_impl(reader, writer):
     result = None
     chosen = real_ips[0]
     chosen_name = None
-    ip_limit = ip_attempt_limit(host)
     if not is_tls:
         for ip in real_ips[:ip_limit]:
             result = await dial_and_probe(ip, dst_port, head + body)
@@ -1793,9 +1565,8 @@ async def _handle_impl(reader, writer):
                 break
     else:
         now = time.monotonic()
-        # known-dead hosts usually fast-fail; video CDN hosts keep the ladder
-        # because one bad probe should not stall the browser's next segment.
-        max_attempts = max_tls_attempts(host, now)
+        # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
+        max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
         attempts = 0
         for strat in strategy_order(host):
             for ip in real_ips[:ip_limit]:
@@ -1813,7 +1584,7 @@ async def _handle_impl(reader, writer):
                 _dead.pop(host, None)
                 if _strat_cache.get(host) != chosen_name:
                     remember_strategy(host, chosen_name)
-                if chosen_name != "plain" and quic_block_host(host):
+                if chosen_name != "plain":
                     note_quic_block_ips([dst_ip, chosen, *real_ips[:ip_limit]])
         elif host:
             _dead[host] = now + DEAD_TTL        # arm the negative cache
@@ -1828,7 +1599,6 @@ async def _handle_impl(reader, writer):
         return
 
     up_r, up_w, server_first = result
-    note_routing_decision("local" if is_tls else "direct", chosen_name or "plain")
     if VERBOSE:
         tag = f" [{chosen_name}]" if chosen_name else ""
         tag += " de-poisoned" if host and chosen != dst_ip else ""
@@ -1851,7 +1621,7 @@ async def _handle_impl(reader, writer):
     if is_tls and host:
         note_local_result(host, len(server_first) + (res[1] or 0),
                           time.monotonic() - t0)
-    if VERBOSE and host and "discord" in host:
+    if VERBOSE and is_discord_host(host):
         up_b, down_b = res[0] or 0, len(server_first) + (res[1] or 0)
         print(f"  closed {host}: up={up_b} down={down_b} "
               f"dur={time.monotonic() - t0:.1f}s", file=sys.stderr)
