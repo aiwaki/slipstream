@@ -11,17 +11,17 @@ not a release promise.
 | Tauri tray UI | implemented |
 | Root routing daemon | implemented for macOS |
 | Local DPI bypass | implemented for current macOS daemon |
-| Geph sidecar | implemented for macOS build |
+| Geph sidecar | implemented for selected geo-blocked hosts |
 | Telegram Desktop proxy offer | implemented |
 | Single version source | implemented |
 | Rotating support logs | implemented |
 | Voice-flow TTL/LRU cleanup | implemented |
-| QUIC-to-TCP fallback | implemented |
-| Wake/network recheck canary | implemented |
-| Daemon watchdog / stale `pf` recovery | implemented |
-| Periodic route canaries | implemented |
-| Detailed route diagnostics | implemented |
-| Throughput canary | implemented |
+| QUIC handling | preserved by default; no global UDP/443 block |
+| Wake/network re-arm | partial: pf and voice capture are re-armed |
+| Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
+| Periodic route canaries | not implemented |
+| Detailed route diagnostics | not implemented |
+| Throughput canary | not implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -29,25 +29,42 @@ not a release promise.
 | iOS | not implemented |
 | Android | not implemented |
 
-## P0 — macOS Release Hardening
+## Routing Model
 
-Goal: make the current macOS build safer to install, run, diagnose, and update.
+Slipstream has two separate routing tools.
 
-No active P0 items.
+Local bypass is used for DPI/SNI interference. Discord and YouTube/googlevideo
+stay on the normal network route and use local desync/fake strategies.
 
-## P1 — Routing Quality
+Geph is used only for hosts that require a foreign exit because the service
+itself rejects Russian IP addresses. It is not the default answer for Discord,
+YouTube, or other local-bypass hosts.
+
+## P0 - macOS Release Hardening
+
+Goal: keep the current macOS build safe to install, run, diagnose, and update.
+
+- Keep install/reinstall idempotent across app relaunches.
+- Keep bundled daemon resources and installed daemon in sync.
+- Make log access reliable from the tray.
+- Keep release versioning and appcast metadata consistent.
+
+## P1 - Routing Quality
 
 Goal: detect degradation before the user has to diagnose it manually.
 
 - Automatic re-sweep when a known strategy stops working.
+- Throughput canary for local-bypass hosts, not just TLS handshake success.
+- Periodic canary after wake/network change.
 - Signed strategy-list updates without rebuilding the app.
-- Smarter QUIC scoping that preserves video/updater reliability.
+- More explicit policy tables for Geph hosts, local-bypass hosts, and attempt
+  limits.
 
-## P2 — Desktop Portability
+## P2 - Desktop Portability
 
 Goal: prepare Windows and Linux without changing the product model.
 
-- Split the daemon into shared routing logic and OS-specific adapters.
+- Split the daemon into shared routing policy and OS-specific adapters.
 - Build and publish `geph5-client` artifacts for Windows and Linux.
 - Windows adapter: service install, route/filter layer, local DPI bypass backend,
   tray integration.
@@ -56,14 +73,15 @@ Goal: prepare Windows and Linux without changing the product model.
 - Keep Geph, Telegram proxy, route policy, and UI concepts consistent across
   desktop platforms.
 
-## P3 — Mobile
+## P3 - Mobile
 
 Goal: define mobile as a separate platform track, not a direct port of the macOS
 daemon.
 
 - iOS: Network Extension-based design, entitlement and signing requirements,
   split-routing constraints.
-- Android: `VpnService`-based design, split-routing policy, background lifecycle.
+- Android: `VpnService`-based design, split-routing policy, background
+  lifecycle.
 - Decide which features are feasible on mobile: Geph routing, Telegram proxy,
   local DPI bypass, diagnostics.
 - Build mobile-specific UX around system VPN/profile constraints.
