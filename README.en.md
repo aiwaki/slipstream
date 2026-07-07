@@ -44,6 +44,7 @@ Desync and the Telegram proxy run on the device. Geph requires a Geph account.
 | Android | not implemented |
 
 Implementation order: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Troubleshooting: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ## Install
 
