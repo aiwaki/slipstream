@@ -398,17 +398,6 @@ fn canary_detail(st: Option<&Value>, ru: bool) -> Option<&'static str> {
     }
 }
 
-fn local_strategy_detail(st: Option<&Value>) -> Option<String> {
-    if status_str(st, "route_mode_last") != Some("local") {
-        return None;
-    }
-    let strategy = status_str(st, "strategy_last").unwrap_or("");
-    if strategy.is_empty() {
-        return None;
-    }
-    Some(format!("DPI: {strategy}"))
-}
-
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
@@ -489,9 +478,6 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
     if matches!(state.as_str(), "active" | "dormant") {
         if let Some(canary) = canary_detail(st.as_ref(), ru) {
             push_detail_part(&mut detail, canary);
-        }
-        if let Some(strategy) = local_strategy_detail(st.as_ref()) {
-            push_detail_part(&mut detail, &strategy);
         }
         if geph == "up" {
             push_detail_part(
@@ -1364,8 +1350,8 @@ pub fn run() {
 mod tests {
     use super::{
         canary_detail, daemon_recovery_shell, launchd_plist_uses_bundled_daemon,
-        local_strategy_detail, log_snapshot_shell, osascript_dialog_args, shell_quote,
-        should_recover_daemon, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        log_snapshot_shell, osascript_dialog_args, shell_quote, should_recover_daemon,
+        telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
     };
 
     #[test]
@@ -1483,21 +1469,4 @@ mod tests {
         assert_eq!(canary_detail(Some(&status), true), Some("сбой сети"));
     }
 
-    #[test]
-    fn local_strategy_detail_reports_only_local_dpi_strategy() {
-        let local = serde_json::json!({
-            "route_mode_last": "local",
-            "strategy_last": "split64+fake"
-        });
-        assert_eq!(
-            local_strategy_detail(Some(&local)),
-            Some("DPI: split64+fake".to_string())
-        );
-
-        let geph = serde_json::json!({
-            "route_mode_last": "geph",
-            "strategy_last": "socks5"
-        });
-        assert_eq!(local_strategy_detail(Some(&geph)), None);
-    }
 }
