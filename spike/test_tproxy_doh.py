@@ -132,7 +132,7 @@ def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     assert filt.filter(useful)
 
 
-def test_default_route_info_tracks_interface_and_gateway(monkeypatch):
+def test_default_iface_tracks_interface(monkeypatch):
     class Result:
         stdout = """
            route to: default
@@ -143,299 +143,36 @@ def test_default_route_info_tracks_interface_and_gateway(monkeypatch):
 
     monkeypatch.setattr(tproxy, "_run", lambda *args: Result())
 
-    assert tproxy.default_route_info() == ("en0", "192.168.1.1")
     assert tproxy.default_iface() == "en0"
-    assert tproxy.route_signature(("en0", "192.168.1.1")) == "en0|192.168.1.1"
 
 
-def test_routing_diagnostics_status_reports_route_pf_and_strategy():
-    tproxy._strat_cache.clear()
-    tproxy._strat_cache["example.com"] = "split64+fake"
-    tproxy.note_routing_decision("local", "split64+fake", now=1234.0)
-
-    status = tproxy.routing_diagnostics_status(
-        route_info=("en0", "192.168.1.1"),
-        pf_state="active",
-    )
-
-    assert status["route"] == "en0|192.168.1.1"
-    assert status["route_iface"] == "en0"
-    assert status["route_gateway"] == "192.168.1.1"
-    assert status["pf"] == "active"
-    assert status["route_mode_last"] == "local"
-    assert status["strategy_last"] == "split64+fake"
-    assert status["strategy_last_at"] == 1234.0
-    assert status["strategy_known_hosts"] == 1
-    assert "example.com" not in status.values()
-
-
-def test_write_status_includes_route_diagnostics(monkeypatch, tmp_path):
+def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     status_path = tmp_path / "slipstream.status"
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
-    tproxy.note_routing_decision("geph", "socks5", now=1234.0)
+    tproxy._dead.clear()
+    tproxy._dead["blocked.example"] = 999.0
+    monkeypatch.setattr(tproxy, "_geph_up", True)
 
-    tproxy.write_status(
-        "active",
-        "en0",
-        "en0",
-        route_info=("en0", "192.168.1.1"),
-        pf_state="active",
-    )
+    tproxy.write_status("active", "en0", "en0")
 
     status = json.loads(status_path.read_text())
-    assert status["route"] == "en0|192.168.1.1"
-    assert status["route_iface"] == "en0"
-    assert status["route_gateway"] == "192.168.1.1"
-    assert status["pf"] == "active"
-    assert status["route_mode_last"] == "geph"
-    assert status["strategy_last"] == "socks5"
-    assert status["strategy_last_at"] == 1234.0
+    assert status["state"] == "active"
+    assert status["iface"] == "en0"
+    assert status["voice"] == "en0"
+    assert status["hosts_learned"] == 1
+    assert status["dead"] == 1
+    assert status["geph"] == "up"
+    assert status["telegram_proxy"] in {"ready", "starting", "error"}
+    assert "route" not in status
+    assert "canary" not in status
 
 
-def test_reset_network_runtime_state_clears_transient_route_state(monkeypatch):
-    calls = []
-    monkeypatch.setattr(tproxy, "_pf_applied", True)
-    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
-    tproxy._dead["blocked.example"] = 999.0
-    tproxy._quic_block_ips["8.8.8.8"] = 999.0
-    tproxy._tg_direct_failures.clear()
-    tproxy._tg_direct_failures.append(10.0)
-    tproxy._tg_proxy_suggest_until = 999.0
-    tproxy.note_routing_decision("local", "split64+fake", now=1234.0)
-    with tproxy._doh_lock:
-        tproxy._doh_cache["blocked.example"] = (["203.0.113.10"], 999.0)
-
-    tproxy.reset_network_runtime_state("test", seed_quic=False)
-
-    assert tproxy._dead == {}
-    assert tproxy._quic_block_ips == {}
-    assert list(tproxy._tg_direct_failures) == []
-    assert tproxy._tg_proxy_suggest_until == 0.0
-    status = tproxy.routing_diagnostics_status()
-    assert status["route_mode_last"] == ""
-    assert status["strategy_last"] == ""
-    assert status["strategy_last_at"] == 0.0
-    with tproxy._doh_lock:
-        assert tproxy._doh_cache == {}
-    assert calls == [("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "flush")]
-
-
-def test_run_network_canary_resolves_via_doh_then_checks_tcp():
-    class Sock:
-        def __init__(self):
-            self.closed = False
-
-        def close(self):
-            self.closed = True
-
-    sockets = []
-
-    def connector(addr, timeout):
-        sock = Sock()
-        sockets.append((addr, timeout, sock))
-        return sock
-
-    checks = []
-
-    def throughput_checker(sock, host, timeout):
-        checks.append((sock, host, timeout))
-        return True, "512 bytes in 0.25s (2048 B/s)"
-
-    ok, detail = tproxy.run_network_canary(
-        host="gateway.discord.gg",
-        timeout=1.25,
-        resolver=lambda host: ["203.0.113.10"],
-        connector=connector,
-        throughput_checker=throughput_checker,
-    )
-
-    assert ok
-    assert detail == "203.0.113.10: 512 bytes in 0.25s (2048 B/s)"
-    assert sockets[0][0] == ("203.0.113.10", 443)
-    assert sockets[0][1] == 1.25
-    assert sockets[0][2].closed
-    assert checks == [(sockets[0][2], "gateway.discord.gg", 1.25)]
-
-
-def test_run_network_canary_falls_back_to_system_dns_after_doh_timeout():
-    class Sock:
-        def __init__(self):
-            self.closed = False
-
-        def close(self):
-            self.closed = True
-
-    sockets = []
-
-    def resolver(host):
-        raise TimeoutError("timed out")
-
-    def connector(addr, timeout):
-        sock = Sock()
-        sockets.append((addr, timeout, sock))
-        return sock
-
-    ok, detail = tproxy.run_network_canary(
-        host="gateway.discord.gg",
-        timeout=1.25,
-        resolver=resolver,
-        fallback_resolver=lambda host: ["203.0.113.10"],
-        connector=connector,
-        throughput_checker=lambda sock, host, timeout: (
-            True,
-            "512 bytes in 0.25s (2048 B/s)",
-        ),
-    )
-
-    assert ok
-    assert detail == (
-        "203.0.113.10: 512 bytes in 0.25s (2048 B/s) "
-        "(system DNS fallback after resolve error: timed out)"
-    )
-    assert sockets[0][0] == ("203.0.113.10", 443)
-    assert sockets[0][2].closed
-
-
-def test_check_canary_throughput_reads_https_response():
-    class TLS:
-        def __init__(self):
-            self.sent = b""
-            self.closed = False
-            self.chunks = [b"x" * 128]
-
-        def sendall(self, data):
-            self.sent += data
-
-        def recv(self, count):
-            if self.chunks:
-                return self.chunks.pop(0)[:count]
-            return b""
-
-        def close(self):
-            self.closed = True
-
-    tls = TLS()
-    calls = []
-    ticks = iter([10.0, 10.25])
-
-    def tls_wrapper(sock, host, timeout):
-        calls.append((sock, host, timeout))
-        return tls
-
-    probe = object()
-    ok, detail = tproxy.check_canary_throughput(
-        probe,
-        "gateway.discord.gg",
-        1.25,
-        read_bytes=128,
-        min_bps=128.0,
-        path="/health",
-        tls_wrapper=tls_wrapper,
-        clock=lambda: next(ticks),
-    )
-
-    assert ok
-    assert detail == "128 bytes in 0.25s (512 B/s)"
-    assert b"GET /health HTTP/1.1" in tls.sent
-    assert b"Host: gateway.discord.gg" in tls.sent
-    assert calls == [(probe, "gateway.discord.gg", 1.25)]
-    assert tls.closed
-
-
-def test_run_network_canary_reports_throughput_failure():
-    class Sock:
-        def close(self):
-            pass
-
-    ok, detail = tproxy.run_network_canary(
-        host="gateway.discord.gg",
-        timeout=1.25,
-        resolver=lambda host: ["203.0.113.10"],
-        connector=lambda addr, timeout: Sock(),
-        throughput_checker=lambda sock, host, timeout: (
-            False,
-            "throughput 5 B/s below 128 B/s",
-        ),
-    )
-
-    assert not ok
-    assert detail == "203.0.113.10: throughput 5 B/s below 128 B/s"
-
-
-def test_run_network_canary_reports_resolve_failure():
-    ok, detail = tproxy.run_network_canary(
-        resolver=lambda host: [],
-        connector=lambda addr, timeout: None,
-    )
-
-    assert not ok
-    assert detail == "resolve returned no A records"
-
-
-def test_periodic_canary_runs_only_when_due_and_active():
-    assert tproxy.should_run_periodic_canary(
-        now=400.0,
-        last_run=100.0,
-        interval=300.0,
-    )
-    assert not tproxy.should_run_periodic_canary(
-        now=399.0,
-        last_run=100.0,
-        interval=300.0,
-    )
-    assert not tproxy.should_run_periodic_canary(
-        now=400.0,
-        last_run=100.0,
-        interval=300.0,
-        vpn=True,
-    )
-    assert not tproxy.should_run_periodic_canary(
-        now=400.0,
-        last_run=100.0,
-        interval=300.0,
-        recheck_reason="route change",
-    )
-    assert not tproxy.should_run_periodic_canary(
-        now=400.0,
-        last_run=0.0,
-        interval=0.0,
-    )
-
-
-def test_pf_rules_scope_quic_fallback_to_table():
+def test_pf_rules_leave_quic_unblocked():
     assert "table <slipstream_quic_block> persist" in tproxy.PF_RULES
-    assert (
-        "block return quick inet proto udp from any "
-        "to <slipstream_quic_block> port 443"
-    ) in tproxy.PF_RULES
+    assert "proto udp" not in tproxy.PF_RULES
     assert "block return quick inet proto udp from any to any port 443" not in tproxy.PF_RULES
-
-
-def test_quic_block_host_excludes_youtube_video_cdn():
-    assert tproxy.quic_block_host("discord.com")
-    assert not tproxy.quic_block_host("www.youtube.com")
-    assert not tproxy.quic_block_host("rr2---sn-ntq7yner.googlevideo.com")
-    assert not tproxy.quic_block_host("rr1---sn-ixh7rn76.c.youtube.com")
-
-
-def test_seed_quic_block_table_filters_and_adds_public_ips(monkeypatch):
-    calls = []
-    tproxy._quic_block_ips.clear()
-    monkeypatch.setattr(tproxy, "_pf_applied", True)
-    monkeypatch.setattr(tproxy, "_run", lambda *args: calls.append(args))
-
-    try:
-        tproxy.seed_quic_block_table(
-            hosts=["discord.example"],
-            resolver=lambda host: ["8.8.8.8", "10.0.0.1", "149.154.167.91"],
-        )
-
-        assert list(tproxy._quic_block_ips) == ["8.8.8.8"]
-        assert calls == [("pfctl", "-t", tproxy.QUIC_BLOCK_TABLE, "-T", "add", "8.8.8.8")]
-    finally:
-        tproxy._quic_block_ips.clear()
 
 
 def test_youtube_video_hosts_ignore_stale_non_fake_strategy_cache():
@@ -446,43 +183,82 @@ def test_youtube_video_hosts_ignore_stale_non_fake_strategy_cache():
     try:
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names[:3] == ["split64+fake", "split16+fake", "fake5"]
-        assert names.index("split64") > names.index("fake5")
+        assert names == ["split64+fake", "split16+fake", "fake5"]
     finally:
         tproxy._strat_cache.clear()
 
 
-def test_youtube_video_hosts_keep_full_attempts_when_marked_dead():
-    host = "rr1---sn-ixh7rn76.c.youtube.com"
-    tproxy._dead.clear()
-    tproxy._dead[host] = 200.0
-    tproxy._dead["blocked.example"] = 200.0
+def test_discord_hosts_use_fake_only_local_bypass_strategy():
+    host = "gateway.discord.gg"
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache[host] = "split64"
 
     try:
-        assert tproxy.max_tls_attempts(host, now=100.0) == 7
-        assert tproxy.max_tls_attempts("blocked.example", now=100.0) == 1
+        names = [s["name"] for s in tproxy.strategy_order(host)]
+
+        assert names == ["split64+fake", "split16+fake", "fake5"]
     finally:
-        tproxy._dead.clear()
+        tproxy._strat_cache.clear()
 
 
-def test_resolve_connection_ips_falls_back_to_system_dns_after_empty_doh(monkeypatch):
+def test_discord_hosts_do_not_route_via_geph():
+    assert not tproxy.geph_route("updates.discord.com")
+    assert not tproxy.geph_route("gateway.discord.gg")
+    assert not tproxy.geph_route("discord.com")
+
+
+def test_local_bypass_hosts_ignore_stale_auto_geph_cache():
+    tproxy._auto_geph.clear()
+    tproxy._auto_geph["updates.discord.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["rr2---sn-ntq7yner.googlevideo.com"] = tproxy.time.time() + 3600
+
+    try:
+        assert not tproxy.geph_route("updates.discord.com")
+        assert not tproxy.geph_route("rr2---sn-ntq7yner.googlevideo.com")
+    finally:
+        tproxy._auto_geph.clear()
+
+
+def test_local_bypass_resolution_uses_system_dns_when_doh_is_empty(monkeypatch):
     async def empty_doh(host):
         return []
 
     async def system(host):
-        return ["203.0.113.10", "203.0.113.10"]
+        return ["162.159.136.232", "162.159.138.232"]
 
     monkeypatch.setattr(tproxy, "doh_resolve_async", empty_doh)
     monkeypatch.setattr(tproxy, "system_resolve_async", system)
 
-    ips = asyncio.run(
-        tproxy.resolve_connection_ips(
-            "rr2---sn-ntq7yner.googlevideo.com",
-            "198.51.100.20",
-        )
-    )
+    ips = asyncio.run(tproxy.resolve_connection_ips("updates.discord.com", "162.159.136.232"))
 
-    assert ips == ["203.0.113.10", "198.51.100.20"]
+    assert ips == ["162.159.136.232", "162.159.138.232"]
+    assert tproxy.ip_attempt_limit("updates.discord.com") == 4
+
+
+def test_local_bypass_resolution_keeps_system_dns_even_when_doh_has_results(monkeypatch):
+    async def doh(host):
+        return ["162.159.128.233"]
+
+    async def system(host):
+        return ["162.159.136.232", "162.159.138.232"]
+
+    monkeypatch.setattr(tproxy, "doh_resolve_async", doh)
+    monkeypatch.setattr(tproxy, "system_resolve_async", system)
+
+    ips = asyncio.run(tproxy.resolve_connection_ips("gateway.discord.gg", "162.159.136.232"))
+
+    assert ips == ["162.159.128.233", "162.159.136.232", "162.159.138.232"]
+
+
+def test_fake_injector_uses_discord_decoy_without_changing_video_poison(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "inject_fake_decoy", lambda *args: calls.append("decoy"))
+    monkeypatch.setattr(tproxy, "inject_fake_poison", lambda *args: calls.append("poison"))
+
+    tproxy.inject_fake_for_host("gateway.discord.gg", "127.0.0.1", 50000, "203.0.113.10", 443)
+    tproxy.inject_fake_for_host("rr2---sn-ntq7yner.googlevideo.com", "127.0.0.1", 50001, "203.0.113.11", 443)
+
+    assert calls == ["decoy", "poison"]
 
 
 def test_voice_flow_observe_caps_count_and_keeps_recent_flow():
