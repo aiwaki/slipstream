@@ -376,28 +376,6 @@ fn push_detail_part(detail: &mut String, part: &str) {
     }
 }
 
-fn canary_detail(st: Option<&Value>, ru: bool) -> Option<&'static str> {
-    match status_str(st, "canary")? {
-        "ok" => Some(if ru { "сеть OK" } else { "network OK" }),
-        "checking" => Some(if ru {
-            "проверка сети"
-        } else {
-            "network check"
-        }),
-        "failed" => Some(if ru {
-            "сбой сети"
-        } else {
-            "network issue"
-        }),
-        "skipped" => Some(if ru {
-            "сеть через VPN"
-        } else {
-            "network via VPN"
-        }),
-        _ => None,
-    }
-}
-
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
@@ -476,9 +454,6 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         ),
     };
     if matches!(state.as_str(), "active" | "dormant") {
-        if let Some(canary) = canary_detail(st.as_ref(), ru) {
-            push_detail_part(&mut detail, canary);
-        }
         if geph == "up" {
             push_detail_part(
                 &mut detail,
@@ -1349,9 +1324,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        canary_detail, daemon_recovery_shell, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, shell_quote, should_recover_daemon,
-        telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, shell_quote, should_recover_daemon, telegram_proxy_detail,
+        DAEMON_WATCHDOG_MISSES,
     };
 
     #[test]
@@ -1455,18 +1430,6 @@ mod tests {
             Some("Telegram-прокси недоступен")
         );
         assert_eq!(telegram_proxy_detail("unknown", false, false), None);
-    }
-
-    #[test]
-    fn canary_detail_reports_compact_health() {
-        let status = serde_json::json!({ "canary": "ok" });
-        assert_eq!(canary_detail(Some(&status), true), Some("сеть OK"));
-
-        let status = serde_json::json!({ "canary": "checking" });
-        assert_eq!(canary_detail(Some(&status), false), Some("network check"));
-
-        let status = serde_json::json!({ "canary": "failed" });
-        assert_eq!(canary_detail(Some(&status), true), Some("сбой сети"));
     }
 
 }
