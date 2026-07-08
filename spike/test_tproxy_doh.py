@@ -288,6 +288,72 @@ def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):
     assert health["last_route_class"] == tproxy.ROUTE_GEO_EXIT
 
 
+def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
+        tproxy.route_health_event(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+            "chatgpt.com",
+            ok=True,
+            now=100.0,
+        )
+        tproxy.route_health_event(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+            "billing.openai.com",
+            ok=False,
+            reason="SOCKS connect failed",
+            soft=True,
+            now=110.0,
+        )
+
+        health = tproxy.route_health_snapshot(now=110.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_failure"] == ""
+        assert health["last_warning"] == "SOCKS connect failed"
+        assert health["last_warning_host"] == "billing.openai.com"
+        assert health["failures_5m"] == 1
+
+        tproxy.route_health_event(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+            "chatgpt.com",
+            ok=False,
+            reason="SOCKS connect failed",
+            now=115.0,
+        )
+        health = tproxy.route_health_snapshot(now=115.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_failure"] == "SOCKS connect failed"
+
+        health = tproxy.route_health_snapshot(now=500.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_UNKNOWN
+        assert health["last_failure"] == ""
+        assert health["failures_5m"] == 0
+
+        tproxy.route_health_event(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+            "chatgpt.com",
+            ok=False,
+            reason="tunnel down",
+            state=tproxy.HEALTH_BLOCKED,
+            now=120.0,
+        )
+        health = tproxy.route_health_snapshot(now=120.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_BLOCKED
+        assert health["last_failure"] == "tunnel down"
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_pf_rules_leave_quic_unblocked():
     assert "table <slipstream_quic_block> persist" in tproxy.PF_RULES
     assert "proto udp" not in tproxy.PF_RULES
