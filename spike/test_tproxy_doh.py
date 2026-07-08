@@ -386,6 +386,15 @@ def test_discord_api_canary_uses_gateway_api_path():
     assert b"Host: discord.com\r\n" in req
 
 
+def test_youtube_web_canary_uses_generate_204_path():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_web")
+    req = tproxy._local_payload_canary_request(spec["host"], spec)
+
+    assert spec["payload_path"] == "/generate_204"
+    assert req.startswith(b"HEAD /generate_204 HTTP/1.1\r\n")
+    assert b"Host: www.youtube.com\r\n" in req
+
+
 def test_quic_version_negotiation_probe_packet_is_padded_initial():
     pkt = tproxy._quic_version_negotiation_probe_packet(
         dcid=b"12345678",
@@ -453,6 +462,23 @@ def test_youtube_redirector_canary_stays_local_bypass_and_fake_only():
     }
     assert not tproxy.geph_route(host)
     assert [s["name"] for s in tproxy.strategy_order(host)] == [
+        "split64+fake",
+        "split16+fake",
+        "fake5",
+    ]
+
+
+def test_youtube_web_canary_stays_local_bypass_and_fake_only():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_web")
+
+    assert tproxy.route_policy(spec["host"]) == {
+        "host": "www.youtube.com",
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "service_group": tproxy.SERVICE_YOUTUBE,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+    }
+    assert not tproxy.geph_route(spec["host"])
+    assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
         "split64+fake",
         "split16+fake",
         "fake5",

@@ -1030,6 +1030,12 @@ CANARY_SPECS = (
         "payload_path": "/embed/avatars/0.png",
     },
     {
+        "name": "youtube_web",
+        "group": SERVICE_YOUTUBE,
+        "host": "www.youtube.com",
+        "payload_path": "/generate_204",
+    },
+    {
         "name": "youtube_video",
         "group": SERVICE_YOUTUBE,
         "host": "",

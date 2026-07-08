@@ -15,10 +15,14 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | Discord voice UDP | Future platform work | Full UDP handling needs packet-level filtering, not broad pf redirects. | Revisit under Network Extension or platform adapter work. |
 | 2026-07-08 | SonicDPI adaptive probing | Backlog | Strategy health should be scored from real endpoint outcomes, not exposed as a manual picker. | Design per-policy-group scoring for canary results. |
 | 2026-07-08 | SonicDPI forged RST detection | Future platform work | TTL-baseline RST filtering is useful only with inbound packet visibility. | Revisit with Network Extension, WinDivert, or another packet adapter. |
+| 2026-07-08 | SonicDPI passive DNS cache | Future platform work | DNS-observed IP binding is the right way to classify hidden-SNI/QUIC targets without global guesses. | Use for future packet adapters; add read-only DNS diagnostics first. |
+| 2026-07-08 | SonicDPI MSS clamp | Future platform work | MSS clamp can help Cloudflare-fronted Discord mid-stream resets, but only with SYN visibility and tight target gating. | Revisit under packet adapters; never clamp broadly. |
 | 2026-07-08 | SonicDPI macOS Network Extension | Future platform work | Full UDP/voice handling on macOS belongs in a System Extension path, not the current pf/TCP layer. | Keep routing core adapter-independent. |
 | 2026-07-08 | Unblock-Pro connectivity probes | Adopted where safe | Use real Gateway WebSocket-style probing for Discord readiness. | Keep canaries autonomous and non-mutating. |
 | 2026-07-08 | Unblock-Pro endpoint gates | Partially adopted | A route is healthy only when both UI shell and delivery endpoints work. | Keep expanding canary coverage by evidence-backed service class. |
 | 2026-07-08 | Slipstream canary check details | Implemented | Group health must not let a passing sibling endpoint hide a failing gateway/CDN/video check. | Use `canaries.checks` in diagnostics; keep tray summary compact. |
+| 2026-07-08 | Unblock-Pro Flowseal bundle policy | Backlog | Pinned upstream strategy bundles are useful only with checksums/signatures and regression fixtures. | Consider signed remote policy updates, not raw script sync. |
+| 2026-07-08 | Unblock-Pro exclusion lists | Reference only | Broad bypass tools need negative lists to avoid breaking banks, games, and local services. | Use as a reminder for direct-passthrough tests; do not copy wholesale. |
 | 2026-07-08 | Unblock-Pro GitHub mirrors | Backlog | App-owned downloads may try mirror URLs only with integrity validation. | Consider for updater/binary fetch reliability. |
 | 2026-07-08 | Unblock-Pro DNS/hosts/proxy mutations | Rejected | Do not mutate `/etc/hosts`, system DNS, system proxy, PAC, or external VPN configuration. | Detect and warn only. |
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
@@ -49,6 +53,11 @@ Indexed routing projects:
 - `tmp-slipstream-research-sonic-20260708-sonicdpi`
 - `tmp-slipstream-research-unblock-20260708-unblock-pro`
 
+Fresh external snapshots checked on 2026-07-08:
+
+- `by-sonic/sonicdpi` at `ebd08f71d33ce8cbeb671742b06054471adbdfd5`
+- `by-sonic/unblock-pro` at `a075902efca70392cf7e07f97c85a8b280cb571c`
+
 ## SonicDPI Findings
 
 - The most useful idea is cautious target identity, not a direct strategy copy.
@@ -63,6 +72,10 @@ Indexed routing projects:
   classify later packets whose SNI is no longer visible. This is a useful model
   for local-bypass health: do not guess UDP/QUIC identity globally, correlate
   it with recent DNS or other host/IP evidence.
+- The DNS cache is bounded and time-limited. The useful transferable idea is
+  not "own DNS", but "remember verified host-to-IP evidence briefly." The
+  current macOS pf/TCP daemon cannot passively observe UDP/53, so this belongs
+  either in read-only diagnostics now or in a future packet adapter.
 - SonicDPI has a lightweight probing model that records wins/losses, ranks
   profiles by a Wilson lower-bound, and gives old entries a small age bonus so
   alternatives get re-tested. Slipstream can borrow this shape for autonomous
@@ -71,6 +84,11 @@ Indexed routing projects:
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied
   into the current macOS pf/TCP transparent-proxy layer.
+- SonicDPI has a TCP MSS clamp strategy for Cloudflare-fronted Discord where
+  mid-stream classifiers reset update/download flows after the initial TLS
+  handshake. It rewrites outbound SYN MSS and carries a throughput cost, so it
+  is future packet-adapter research only and must be gated to verified target
+  IPs if adopted.
 - SonicDPI covers Discord voice UDP ranges `19294-19344` and `50000-50100`.
   That depends on packet-level filtering. It should not be copied into
   Slipstream as a broad pf redirect.
@@ -99,6 +117,8 @@ Indexed routing projects:
 - Discord local-bypass health now has separate API, Gateway WebSocket, CDN, and
   updater canaries, matching the endpoint split that Unblock-Pro used to avoid
   false positives.
+- YouTube local-bypass health now splits the web shell canary from the
+  `googlevideo`/redirector QUIC video-delivery canary.
 - Flowseal-style rules include Discord voice UDP ranges and `discord.media`
   alternate TCP ports `2053,2083,2087,2096,8443`. These are useful references,
   but should only be used with host/IP evidence. No global alternate-port
@@ -107,6 +127,14 @@ Indexed routing projects:
   Flowseal priority order. Slipstream can use a private route-health cache for
   ordering autonomous checks, but should not expose or require a manual strategy
   picker.
+- Unblock-Pro pins a Flowseal release, records a bundle checksum, and tests the
+  generated strategy snapshot. That is the right shape for any future
+  remote-policy import: signed or checksummed data plus fixtures, not live
+  execution of unreviewed scripts.
+- Unblock-Pro also ships broad exclusion lists for banks, government sites,
+  games, stores, and local/private networks. Treat this as a warning that
+  bypass rules need direct-passthrough regression tests; the exact lists should
+  not be copied without evidence.
 - `safe-copy` and binary-format checks are useful for release/install hygiene:
   retry locked files, skip identical files, and validate Mach-O headers before
   installing local binaries.
@@ -125,6 +153,9 @@ Indexed routing projects:
   evidence-backed host/IP rule exists.
 - Do not copy Unblock-Pro's `/etc/hosts`, system DNS, or system proxy mutation
   behavior into Slipstream.
+- Do not copy its static `/etc/hosts` fallback for Discord voice or Telegram:
+  stale IPs can create worse failures than the original DPI block, and this
+  violates Slipstream's rule that external DNS/hosts state is read-only.
 - Neither SonicDPI nor Unblock-Pro uses `xbox-dns.ru` directly in the inspected
   code. If users configure it at the OS/router level, Slipstream should treat it
   like other external DNS state: report it in diagnostics if relevant, but never
@@ -140,11 +171,15 @@ Safe candidates:
   Broader Google domains such as `googleapis.com` and `googleusercontent.com`
   need observed evidence before they join local bypass.
 - Use a fresh WebSocket nonce in the Discord Gateway canary.
-- Continue splitting route-health canaries into service classes so "page loads"
-  is not mistaken for "video/app transport works": YouTube web, YouTube video
-  delivery, and Telegram local proxy.
+- Continue adding service-class canaries only when there is evidence that a
+  separate endpoint class can fail independently.
+- Add read-only DNS diagnostics: active resolver list, obvious poisoned/null
+  answers for known local-bypass hosts, and whether user-managed DNS such as
+  `xbox-dns.ru` appears active. Do not rewrite resolver settings.
 - Add autonomous route-health scoring based on wins/losses with exploration
   over time, similar to SonicDPI's Wilson-rank plus age-bonus model.
+- For future packet adapters, evaluate MSS clamp only for verified
+  Cloudflare-fronted Discord update/download flows.
 - Watch reinstall logs for any remaining locked-file or permission edge cases.
 - Add app-owned GitHub download mirror fallback only behind checksum/signature
   validation.
@@ -162,3 +197,6 @@ Unsafe candidates:
 - Mutating `/etc/hosts`.
 - Rewriting system DNS, system proxy, PAC, or external VPN configuration.
 - Auto-configuring third-party DNS such as `xbox-dns.ru`.
+- Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
+- Importing upstream strategy scripts without a pinned, verified, and reviewed
+  policy bundle.
