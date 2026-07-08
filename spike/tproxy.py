@@ -164,6 +164,9 @@ STRATEGY_GEPH = "geph"
 STRATEGY_DIRECT = "direct"
 STRATEGY_GENERAL = "general"
 
+GEO_BACKEND_GEPH = "geph"
+GEO_BACKEND_SMART_DNS = "smart_dns"
+
 HEALTH_OK = "ok"
 HEALTH_DEGRADED = "degraded"
 HEALTH_BLOCKED = "blocked"
@@ -177,6 +180,9 @@ LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
+SMART_DNS_OK_TTL = 10 * 60.0
+_smart_dns_ok_until = {}
+_smart_dns_last_failure = {"host": "", "reason": "", "ts": 0.0}
 
 
 def _host_matches(host, domains):
@@ -271,6 +277,7 @@ def _route_health_default(group, route_class=ROUTE_UNKNOWN):
         "failures_5m": 0,
         "last_host": "",
         "last_route_class": route_class,
+        "last_backend": "",
     }
 
 
@@ -465,6 +472,7 @@ def route_health_event(
     now=None,
     soft=False,
     degrade_after=1,
+    backend="",
 ):
     now = time.time() if now is None else now
     if group not in _route_health:
@@ -482,6 +490,7 @@ def route_health_event(
         last_warning_host = ""
         last_host = normalize_host(host)
         last_route_class = route_class
+        last_backend = backend
     else:
         health_state = state or HEALTH_DEGRADED
         last_failure = reason[:200]
@@ -492,6 +501,7 @@ def route_health_event(
             last_failure = previous.get("last_failure", "")
             last_host = previous.get("last_host", "")
             last_route_class = previous.get("last_route_class", route_class)
+            last_backend = previous.get("last_backend", "")
         else:
             q.append(now)
             if health_state == HEALTH_DEGRADED and len(q) < degrade_after:
@@ -501,11 +511,13 @@ def route_health_event(
                 last_failure = previous.get("last_failure", "")
                 last_host = previous.get("last_host", "")
                 last_route_class = previous.get("last_route_class", route_class)
+                last_backend = previous.get("last_backend", "")
             else:
                 last_warning = ""
                 last_warning_host = ""
                 last_host = normalize_host(host)
                 last_route_class = route_class
+                last_backend = backend or previous.get("last_backend", "")
     _route_health[group] = {
         "state": health_state,
         "last_failure": last_failure,
@@ -515,6 +527,7 @@ def route_health_event(
         "failures_5m": len(q),
         "last_host": last_host,
         "last_route_class": last_route_class,
+        "last_backend": last_backend,
     }
 
 
@@ -569,6 +582,7 @@ def route_health_unknown(group, route_class, host="", now=None):
         "failures_5m": len(q),
         "last_host": normalize_host(host),
         "last_route_class": route_class,
+        "last_backend": "",
     }
 
 
@@ -641,6 +655,53 @@ def current_system_dns_status(now=None):
         status = system_dns_status_from_scutil(res.stdout)
     _system_dns_cache.update({"ts": now, "status": dict(status)})
     return status
+
+
+def smart_dns_available():
+    return current_system_dns_status().get("state") == "xbox_dns"
+
+
+def _smart_dns_mark_ok(group, now=None):
+    now = time.time() if now is None else now
+    _smart_dns_ok_until[group] = now + SMART_DNS_OK_TTL
+
+
+def _smart_dns_mark_failure(host, reason, group=None):
+    _smart_dns_last_failure.update({
+        "host": normalize_host(host),
+        "reason": reason[:200],
+        "ts": time.time(),
+    })
+    if group:
+        _smart_dns_ok_until.pop(group, None)
+
+
+def smart_dns_route_enabled(host, now=None):
+    policy = route_policy(host)
+    if policy["route_class"] != ROUTE_GEO_EXIT:
+        return False
+    if not smart_dns_available():
+        return False
+    now = time.time() if now is None else now
+    return _smart_dns_ok_until.get(policy["service_group"], 0.0) > now
+
+
+def smart_dns_status_snapshot(now=None):
+    now = time.time() if now is None else now
+    dns = current_system_dns_status()
+    groups = sorted(
+        group for group, until in _smart_dns_ok_until.items()
+        if until > now
+    )
+    return {
+        "state": "ready" if groups else ("available" if dns.get("state") == "xbox_dns" else "off"),
+        "providers": dns.get("providers", ""),
+        "enabled_groups": groups,
+        "last_failure_host": _smart_dns_last_failure["host"],
+        "last_failure_reason": _smart_dns_last_failure["reason"],
+        "last_failure_at": _smart_dns_last_failure["ts"],
+        "managed_by_slipstream": False,
+    }
 
 
 def log_geph_route_failure(host, reason, now=None):
@@ -928,6 +989,44 @@ def _close_probe_result(result):
         pass
 
 
+async def _try_smart_dns_geo_connect(host, port, first_flight, probe_timeout=3.0):
+    if not host or not smart_dns_available():
+        return None
+    ips = _dedupe_ips(await system_resolve_async(host))
+    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
+        result = await dial_and_probe(ip, port, first_flight, probe_timeout=probe_timeout)
+        if result:
+            return ip, result
+    return None
+
+
+async def _run_smart_dns_geo_canary(spec):
+    host = spec["host"]
+    policy = route_policy(host)
+    if policy["route_class"] != ROUTE_GEO_EXIT:
+        return None
+    result = await _try_smart_dns_geo_connect(host, 443, build_fake_clienthello(host))
+    if result:
+        _ip, probe = result
+        _close_probe_result(probe)
+        _smart_dns_mark_ok(spec["group"])
+        clear_geph_route_failure()
+        route_health_event(
+            spec["group"],
+            ROUTE_GEO_EXIT,
+            host,
+            True,
+            backend=GEO_BACKEND_SMART_DNS,
+        )
+        return True
+    _smart_dns_mark_failure(
+        host,
+        "smart dns probe failed",
+        None if spec.get("soft") else spec["group"],
+    )
+    return False
+
+
 def _observed_canary_host(group):
     for host in reversed(_strat_cache):
         if route_policy(host)["service_group"] == group:
@@ -994,6 +1093,10 @@ async def _run_geo_exit_canary(spec):
     if policy["route_class"] != ROUTE_GEO_EXIT:
         route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
         return False
+    if smart_dns_available():
+        smart_dns_ok = await _run_smart_dns_geo_canary(spec)
+        if smart_dns_ok:
+            return True
     if not _geph_up:
         route_health_event(spec["group"], ROUTE_GEO_EXIT, host, False, "tunnel down", HEALTH_BLOCKED)
         return False
@@ -1001,7 +1104,7 @@ async def _run_geo_exit_canary(spec):
     if result:
         _close_probe_result(result)
         clear_geph_route_failure()
-        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True)
+        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
         return True
     route_health_event(
         spec["group"],
@@ -1145,6 +1248,7 @@ def write_status(state, iface, voice_iface):
             "route_health": route_health_snapshot(now),
             "system_proxy": current_system_proxy_status(),
             "system_dns": current_system_dns_status(),
+            "smart_dns": smart_dns_status_snapshot(now),
             "pf_state": pf_state_snapshot(PROXY_PORT),
             "geph_detail": {
                 "port": _geph_port or 0,
@@ -2305,9 +2409,43 @@ async def _handle_impl(reader, writer):
     # So FAIL CLOSED on any geph trouble (down during a ~20-30s respawn, or the
     # CONNECT failed): close the connection so the client retries until geph is
     # back, instead of leaking the geo-host to an RU exit. (Russian services are
-    # excluded by geph_route and fall through to desync as normal.)
+    # excluded by geph_route and fall through to desync as normal.) A user-owned
+    # Smart DNS can take this branch first, but only after canaries have proven
+    # that the DNS-provided path is live; any runtime miss falls back to Geph.
     if is_tls and geph_route(host):
+        policy = route_policy(host)
         note_quic_block_ips([dst_ip])
+        if smart_dns_route_enabled(host):
+            smart = await _try_smart_dns_geo_connect(host, dst_port, head + body)
+            if smart:
+                smart_ip, smart_result = smart
+                up_r, up_w, server_first = smart_result
+                route_health_event(
+                    policy["service_group"],
+                    ROUTE_GEO_EXIT,
+                    host,
+                    True,
+                    backend=GEO_BACKEND_SMART_DNS,
+                )
+                if VERBOSE:
+                    print(f"OK {host}:{dst_port} via smart DNS {smart_ip}", file=sys.stderr)
+                try:
+                    writer.write(server_first)
+                    await writer.drain()
+                except OSError:
+                    try:
+                        up_w.close()
+                    except Exception:
+                        pass
+                    writer.close()
+                    return
+                await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
+                return
+            _smart_dns_mark_failure(
+                host,
+                "smart dns runtime probe failed",
+                policy["service_group"],
+            )
         if _geph_up:
             g = await dial_via_geph(host, dst_port, head + body)
             if g:
