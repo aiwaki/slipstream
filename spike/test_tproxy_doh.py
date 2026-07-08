@@ -302,6 +302,33 @@ def test_local_payload_canary_request_supports_discord_gateway_websocket():
     assert len(base64.b64decode(key)) == 16
 
 
+def test_local_payload_canary_request_supports_specific_http_path():
+    req = tproxy._local_payload_canary_request(
+        "cdn.discordapp.com",
+        {"payload_path": "/embed/avatars/0.png"},
+    )
+
+    assert req.startswith(b"HEAD /embed/avatars/0.png HTTP/1.1\r\n")
+    assert b"Host: cdn.discordapp.com\r\n" in req
+
+
+def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_cdn")
+
+    assert tproxy.route_policy(spec["host"]) == {
+        "host": "cdn.discordapp.com",
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "service_group": tproxy.SERVICE_DISCORD,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+    }
+    assert not tproxy.geph_route(spec["host"])
+    assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
+        "split64+fake",
+        "split16+fake",
+        "fake5",
+    ]
+
+
 def test_system_proxy_status_from_scutil_reports_kind_without_mutating():
     raw = """
 HTTPEnable : 1

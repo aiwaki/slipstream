@@ -821,6 +821,12 @@ CANARY_SPECS = (
         "host": "gateway.discord.gg",
         "payload_probe": "websocket_upgrade",
     },
+    {
+        "name": "discord_cdn",
+        "group": SERVICE_DISCORD,
+        "host": "cdn.discordapp.com",
+        "payload_path": "/embed/avatars/0.png",
+    },
     {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": ""},
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
     {
@@ -856,8 +862,11 @@ def _local_payload_canary_request(host, spec=None):
             "User-Agent: SlipstreamRouteCanary/1\r\n"
             "\r\n"
         ).encode("ascii", "ignore")
+    path = (spec or {}).get("payload_path", "/")
+    if not isinstance(path, str) or not path.startswith("/"):
+        path = "/"
     return (
-        f"HEAD / HTTP/1.1\r\n"
+        f"HEAD {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         f"User-Agent: SlipstreamRouteCanary/1\r\n"
         f"Accept: */*\r\n"
