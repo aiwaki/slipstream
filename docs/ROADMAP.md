@@ -21,7 +21,7 @@ not a release promise.
 | Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
 | Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
-| Detailed route diagnostics | implemented in daemon status and tray summary; per-canary check details are in daemon status |
+| Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |

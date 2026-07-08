@@ -417,6 +417,153 @@ fn install_diagnostic_value(
     })
 }
 
+fn value_string(value: Option<&Value>, key: &str, default: &str) -> String {
+    value
+        .and_then(|item| item.get(key))
+        .and_then(|item| item.as_str())
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn diagnostic_problem_row(source: &str, name: &str, item: &Value) -> Option<Value> {
+    let failure = item
+        .get("last_failure")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let warning = item
+        .get("last_warning")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if failure.is_empty() && warning.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "source": source,
+        "name": name,
+        "state": value_string(Some(item), "state", "unknown"),
+        "route_class": value_string(Some(item), "last_route_class", ""),
+        "host": value_string(Some(item), "last_host", ""),
+        "backend": value_string(Some(item), "last_backend", ""),
+        "failure": failure,
+        "warning": warning,
+        "warning_host": value_string(Some(item), "last_warning_host", ""),
+        "failures_5m": item.get("failures_5m").and_then(|value| value.as_i64()).unwrap_or(0),
+    }))
+}
+
+fn diagnostic_problem_rows(status: Option<&Value>) -> Value {
+    let mut rows = Vec::new();
+    if let Some(routes) = status
+        .and_then(|status| status.get("route_health"))
+        .and_then(|value| value.as_object())
+    {
+        for (name, item) in routes {
+            if let Some(row) = diagnostic_problem_row("route_health", name, item) {
+                rows.push(row);
+            }
+        }
+    }
+    if let Some(checks) = status
+        .and_then(|status| status.get("canaries"))
+        .and_then(|value| value.get("checks"))
+        .and_then(|value| value.as_object())
+    {
+        for (name, item) in checks {
+            if let Some(row) = diagnostic_problem_row("canary", name, item) {
+                rows.push(row);
+            }
+        }
+    }
+    Value::Array(rows)
+}
+
+fn diagnostic_summary_value(status: Option<&Value>) -> Value {
+    let daemon_state = value_string(status, "state", "off");
+    let geph = value_string(status, "geph", "unknown");
+    let telegram_proxy = value_string(status, "telegram_proxy", "unknown");
+    let local_bypass = route_class_health(status, "local_bypass").unwrap_or("unknown".to_string());
+    let geo_exit = if geph == "off" {
+        "off".to_string()
+    } else {
+        route_class_health(status, "geo_exit").unwrap_or("unknown".to_string())
+    };
+    let system_proxy = status
+        .and_then(|status| status.get("system_proxy"))
+        .cloned()
+        .unwrap_or_else(|| json!({"state": "unknown", "kind": ""}));
+    let system_dns = status
+        .and_then(|status| status.get("system_dns"))
+        .map(|dns| {
+            json!({
+                "state": value_string(Some(dns), "state", "unknown"),
+                "providers": value_string(Some(dns), "providers", ""),
+                "managed_by_slipstream": dns
+                    .get("managed_by_slipstream")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+                "resolution_state": dns
+                    .get("resolution_checks")
+                    .and_then(|value| value.get("state"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown"),
+            })
+        })
+        .unwrap_or_else(|| json!({"state": "unknown"}));
+    let pf_state = status
+        .and_then(|status| status.get("pf_state"))
+        .cloned()
+        .unwrap_or_else(|| json!({"applied": false, "enabled": false, "rules_loaded": false}));
+    let canaries = status
+        .and_then(|status| status.get("canaries"))
+        .map(|canaries| {
+            json!({
+                "running": canaries.get("running").and_then(|value| value.as_bool()).unwrap_or(false),
+                "last_reason": value_string(Some(canaries), "last_reason", ""),
+                "total": canaries.get("total").and_then(|value| value.as_i64()).unwrap_or(0),
+                "ok": canaries.get("ok").and_then(|value| value.as_i64()).unwrap_or(0),
+                "warnings": canaries.get("warnings").and_then(|value| value.as_i64()).unwrap_or(0),
+                "degraded": canaries.get("degraded").and_then(|value| value.as_i64()).unwrap_or(0),
+                "unknown": canaries.get("unknown").and_then(|value| value.as_i64()).unwrap_or(0),
+            })
+        })
+        .unwrap_or_else(|| json!({"total": 0, "ok": 0, "warnings": 0, "degraded": 0}));
+    let auto_geo_exit = status
+        .and_then(|status| status.get("auto_geo_exit"))
+        .cloned()
+        .unwrap_or_else(|| json!({"enabled": false, "learned": 0, "pending": 0}));
+    let geph_detail = status
+        .and_then(|status| status.get("geph_detail"))
+        .map(|detail| {
+            json!({
+                "port": detail.get("port").and_then(|value| value.as_i64()).unwrap_or(0),
+                "failure_reason": value_string(Some(detail), "failure_reason", ""),
+                "last_failure_host": value_string(Some(detail), "last_failure_host", ""),
+                "last_failure_at": detail
+                    .get("last_failure_at")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0),
+            })
+        })
+        .unwrap_or_else(|| json!({"port": 0}));
+
+    json!({
+        "daemon_state": daemon_state,
+        "geph": geph,
+        "telegram_proxy": telegram_proxy,
+        "routes": {
+            "local_bypass": local_bypass,
+            "geo_exit": geo_exit,
+        },
+        "system_proxy": system_proxy,
+        "system_dns": system_dns,
+        "pf_state": pf_state,
+        "canaries": canaries,
+        "auto_geo_exit": auto_geo_exit,
+        "geph_detail": geph_detail,
+        "problems": diagnostic_problem_rows(status),
+    })
+}
+
 fn diagnostic_snapshot_value(
     app_version: &str,
     status: Option<Value>,
@@ -424,12 +571,14 @@ fn diagnostic_snapshot_value(
     log_tail: Option<Value>,
     bundled_daemon: Option<&Path>,
 ) -> Value {
+    let summary = diagnostic_summary_value(status.as_ref());
     let mut snapshot = json!({
         "app": {
             "name": "Slipstream",
             "version": app_version,
         },
         "generated_at_unix": generated_at,
+        "summary": summary,
         "daemon": status.unwrap_or_else(|| json!({"state": "off"})),
         "install": install_diagnostic_value(
             bundled_daemon,
@@ -1732,11 +1881,11 @@ pub fn run() {
 mod tests {
     use super::{
         copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell, diagnostic_log_tail,
-        diagnostic_snapshot_value, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon,
-        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        valid_bundled_daemon, DAEMON_WATCHDOG_MISSES,
+        diagnostic_snapshot_value, diagnostic_summary_value, install_diagnostic_value,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
+        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
+        telegram_proxy_detail, valid_bundled_daemon, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -1816,13 +1965,51 @@ mod tests {
             "0.1.5",
             Some(json!({
                 "state": "active",
+                "geph": "up",
+                "telegram_proxy": "ready",
                 "route_health": {
                     "openai": {
                         "state": "ok",
-                        "last_host": "chatgpt.com"
+                        "last_host": "chatgpt.com",
+                        "last_route_class": "geo_exit"
+                    },
+                    "youtube_video": {
+                        "state": "ok",
+                        "last_host": "redirector.googlevideo.com",
+                        "last_route_class": "local_bypass",
+                        "last_warning": "strategy probe failed",
+                        "last_warning_host": "www.youtube.com"
                     }
                 },
-                "geph": {
+                "canaries": {
+                    "total": 2,
+                    "ok": 1,
+                    "warnings": 1,
+                    "degraded": 0,
+                    "checks": {
+                        "youtube_web": {
+                            "state": "unknown",
+                            "last_route_class": "local_bypass",
+                            "last_warning": "strategy probe failed",
+                            "last_warning_host": "www.youtube.com"
+                        }
+                    }
+                },
+                "system_proxy": {"state": "off", "kind": ""},
+                "system_dns": {
+                    "state": "xbox_dns",
+                    "providers": "xbox_dns",
+                    "managed_by_slipstream": false,
+                    "resolution_checks": {"state": "ok"}
+                },
+                "pf_state": {"applied": true, "enabled": true, "rules_loaded": true},
+                "auto_geo_exit": {
+                    "enabled": true,
+                    "learned": 1,
+                    "pending": 0,
+                    "last_host": "payments.example.com"
+                },
+                "secrets": {
                     "account_secret": "very-secret",
                     "nested": {
                         "api_token": "token-value",
@@ -1840,6 +2027,12 @@ mod tests {
         let text = serde_json::to_string(&snapshot).unwrap();
 
         assert_eq!(snapshot["app"]["version"], "0.1.5");
+        assert_eq!(snapshot["summary"]["daemon_state"], "active");
+        assert_eq!(snapshot["summary"]["routes"]["local_bypass"], "ok");
+        assert_eq!(snapshot["summary"]["routes"]["geo_exit"], "ok");
+        assert_eq!(snapshot["summary"]["system_dns"]["resolution_state"], "ok");
+        assert_eq!(snapshot["summary"]["auto_geo_exit"]["learned"], 1);
+        assert_eq!(snapshot["summary"]["problems"].as_array().unwrap().len(), 2);
         assert_eq!(
             snapshot["daemon"]["route_health"]["openai"]["last_host"],
             "chatgpt.com"
@@ -1849,6 +2042,17 @@ mod tests {
         assert!(!text.contains("pass-value"));
         assert!(!text.contains("old-secret"));
         assert!(text.contains("<redacted>"));
+    }
+
+    #[test]
+    fn diagnostic_summary_reports_off_state_without_daemon_status() {
+        let summary = diagnostic_summary_value(None);
+
+        assert_eq!(summary["daemon_state"], "off");
+        assert_eq!(summary["routes"]["local_bypass"], "unknown");
+        assert_eq!(summary["routes"]["geo_exit"], "unknown");
+        assert_eq!(summary["auto_geo_exit"]["enabled"], false);
+        assert_eq!(summary["problems"].as_array().unwrap().len(), 0);
     }
 
     #[test]

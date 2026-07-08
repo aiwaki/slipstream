@@ -21,6 +21,12 @@ Daemon status:
 /usr/local/slipstream/slipstreamd --status
 ```
 
+Tray diagnostics:
+
+- `Copy Diagnostics` copies a redacted JSON snapshot with a short `summary`
+  section first, followed by raw daemon status, install checks, and recent log
+  lines.
+
 Daemon log:
 
 ```bash
