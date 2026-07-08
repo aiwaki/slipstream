@@ -456,6 +456,59 @@ def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
         q.extend(original_window)
 
 
+def test_runtime_geo_exit_failures_require_repeated_signal():
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
+        tproxy.route_health_event(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+            "chatgpt.com",
+            ok=True,
+            now=100.0,
+        )
+
+        for i, now in enumerate((110.0, 120.0), start=1):
+            tproxy.route_health_event(
+                tproxy.SERVICE_OPENAI,
+                tproxy.ROUTE_GEO_EXIT,
+                "persistent.oaistatic.com",
+                ok=False,
+                reason="remote closed without response",
+                degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
+                now=now,
+            )
+            health = tproxy.route_health_snapshot(now=now)[tproxy.SERVICE_OPENAI]
+            assert health["state"] == tproxy.HEALTH_OK
+            assert health["last_failure"] == ""
+            assert health["last_warning"] == "remote closed without response"
+            assert health["last_warning_host"] == "persistent.oaistatic.com"
+            assert health["failures_5m"] == i
+            assert health["last_host"] == "chatgpt.com"
+
+        tproxy.route_health_event(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+            "persistent.oaistatic.com",
+            ok=False,
+            reason="remote closed without response",
+            degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
+            now=130.0,
+        )
+        health = tproxy.route_health_snapshot(now=130.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_failure"] == "remote closed without response"
+        assert health["failures_5m"] == tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER
+        assert health["last_host"] == "persistent.oaistatic.com"
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_pf_rules_leave_quic_unblocked():
     assert "table <slipstream_quic_block> persist" in tproxy.PF_RULES
     assert "proto udp" not in tproxy.PF_RULES
