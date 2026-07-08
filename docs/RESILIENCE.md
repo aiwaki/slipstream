@@ -37,6 +37,7 @@ YouTube/googlevideo.
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe throughput checks |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
+| Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
 | Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle validator, local persist, rollback, and explicit opt-in remote fetch scheduler with health gates | production key distribution and release-channel policy hosting |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
 | Logs | rotating daemon log, tray snapshot, route-health failure summaries, and copied diagnostic summary | attachable diagnostic file/export UX |

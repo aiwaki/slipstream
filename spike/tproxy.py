@@ -2193,7 +2193,7 @@ CANARY_SPECS = (
         "name": "openai_billing",
         "group": SERVICE_OPENAI,
         "host": "billing.openai.com",
-        "soft": True,
+        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
     {
@@ -2623,8 +2623,12 @@ async def _run_geo_exit_canary(spec):
         False,
         "SOCKS connect failed",
         soft=bool(spec.get("soft")),
+        degrade_after=int(spec.get("degrade_after", 1) or 1),
     )
     if spec.get("soft"):
+        return "warning"
+    health = canary_health_snapshot().get(_canary_key(spec), {})
+    if health.get("state") != HEALTH_DEGRADED:
         return "warning"
     return False
 

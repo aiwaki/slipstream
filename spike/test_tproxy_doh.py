@@ -1916,7 +1916,7 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         q.extend(original_window)
 
 
-def test_canary_health_secondary_geo_warning_does_not_override_core_ok():
+def test_canary_health_secondary_geo_warning_grace_before_degraded():
     original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
     core = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_core")
@@ -1939,7 +1939,7 @@ def test_canary_health_secondary_geo_warning_does_not_override_core_ok():
             "billing.openai.com",
             ok=False,
             reason="SOCKS connect failed",
-            soft=True,
+            degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
             now=now + 10.0,
         )
 
@@ -1954,6 +1954,26 @@ def test_canary_health_secondary_geo_warning_does_not_override_core_ok():
         assert health["last_failure"] == ""
         assert health["last_warning"] == "SOCKS connect failed"
         assert health["last_warning_host"] == "billing.openai.com"
+
+        for idx in range(1, tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER):
+            tproxy.canary_health_event(
+                billing,
+                tproxy.ROUTE_GEO_EXIT,
+                "billing.openai.com",
+                ok=False,
+                reason="SOCKS connect failed",
+                degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
+                now=now + 10.0 + idx,
+            )
+
+        checks = tproxy.canary_health_snapshot(now=now + 20.0)
+        assert checks["openai_billing"]["state"] == tproxy.HEALTH_DEGRADED
+        assert checks["openai_billing"]["last_failure"] == "SOCKS connect failed"
+
+        health = tproxy.route_health_snapshot(now=now + 20.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_host"] == "billing.openai.com"
+        assert health["last_failure"] == "SOCKS connect failed"
     finally:
         tproxy._route_health[tproxy.SERVICE_OPENAI] = original
         q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
@@ -1961,7 +1981,7 @@ def test_canary_health_secondary_geo_warning_does_not_override_core_ok():
         q.extend(original_window)
 
 
-def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
+def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
     original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
     original_state = dict(tproxy._canary_state)
@@ -1983,7 +2003,7 @@ def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
                 "name": "openai_billing",
                 "group": tproxy.SERVICE_OPENAI,
                 "host": "billing.openai.com",
-                "soft": True,
+                "degrade_after": tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
             },
         ))
 
@@ -1996,7 +2016,17 @@ def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
         assert health["state"] == tproxy.HEALTH_UNKNOWN
         assert health["last_warning"] == "SOCKS connect failed"
-        assert health["failures_5m"] == 0
+        assert health["failures_5m"] == 1
+
+        for _ in range(1, tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER):
+            ok, degraded = asyncio.run(tproxy.run_route_canaries("test"))
+
+        assert (ok, degraded) == (0, 1)
+        assert tproxy._canary_state["degraded"] == 1
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_failure"] == "SOCKS connect failed"
+        assert health["last_host"] == "billing.openai.com"
     finally:
         tproxy._canary_state.clear()
         tproxy._canary_state.update(original_state)

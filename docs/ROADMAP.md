@@ -20,7 +20,7 @@ not a release promise.
 | Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
 | Daemon watchdog / stale `pf` recovery | implemented in tray: kickstart daemon first, reset `pf` only if recovery fails |
 | Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
-| Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
+| Periodic route canaries | implemented for local-bypass, Geph, Telegram proxy readiness, and repeated secondary endpoint failures |
 | Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
 | Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
@@ -59,6 +59,8 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 Goal: detect degradation before the user has to diagnose it manually.
 
 - Continue tuning automatic re-sweep when a known strategy stops working.
+- Keep important secondary endpoints from being hidden by passing core endpoints,
+  while preserving grace thresholds for transient failures.
 - Broaden local-bypass throughput thresholds only for endpoints where response
   size and semantics are safe to probe.
 - Signed strategy-list/policy updates without rebuilding the app; the local
