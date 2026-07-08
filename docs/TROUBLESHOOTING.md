@@ -26,6 +26,8 @@ Tray diagnostics:
 - `Copy Diagnostics` copies a redacted JSON snapshot with a short `summary`
   section first, followed by raw daemon status, install checks, and recent log
   lines.
+- The summary includes both app version and daemon version so install drift is
+  visible in bug reports.
 - The snapshot includes `daemon_recovery` when the tray watchdog recently tried
   to recover the root daemon or reset stale `pf` rules.
 

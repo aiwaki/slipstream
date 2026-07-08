@@ -503,6 +503,7 @@ fn diagnostic_problem_rows(status: Option<&Value>) -> Value {
 
 fn diagnostic_summary_value(status: Option<&Value>) -> Value {
     let daemon_state = value_string(status, "state", "off");
+    let daemon_version = value_string(status, "version", "unknown");
     let geph = value_string(status, "geph", "unknown");
     let telegram_proxy = value_string(status, "telegram_proxy", "unknown");
     let local_bypass = route_class_health(status, "local_bypass").unwrap_or("unknown".to_string());
@@ -590,6 +591,7 @@ fn diagnostic_summary_value(status: Option<&Value>) -> Value {
 
     json!({
         "daemon_state": daemon_state,
+        "daemon_version": daemon_version,
         "geph": geph,
         "telegram_proxy": telegram_proxy,
         "routes": {
@@ -2022,6 +2024,7 @@ mod tests {
             "0.1.5",
             Some(json!({
                 "state": "active",
+                "version": "0.1.5",
                 "geph": "up",
                 "telegram_proxy": "ready",
                 "route_health": {
@@ -2113,6 +2116,7 @@ mod tests {
 
         assert_eq!(snapshot["app"]["version"], "0.1.5");
         assert_eq!(snapshot["summary"]["daemon_state"], "active");
+        assert_eq!(snapshot["summary"]["daemon_version"], "0.1.5");
         assert_eq!(snapshot["summary"]["routes"]["local_bypass"], "ok");
         assert_eq!(snapshot["summary"]["routes"]["geo_exit"], "ok");
         assert_eq!(snapshot["summary"]["system_dns"]["resolution_state"], "ok");
@@ -2152,6 +2156,7 @@ mod tests {
         let summary = diagnostic_summary_value(None);
 
         assert_eq!(summary["daemon_state"], "off");
+        assert_eq!(summary["daemon_version"], "unknown");
         assert_eq!(summary["routes"]["local_bypass"], "unknown");
         assert_eq!(summary["routes"]["geo_exit"], "unknown");
         assert_eq!(summary["auto_geo_exit"]["enabled"], false);

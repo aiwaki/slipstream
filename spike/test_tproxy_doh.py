@@ -323,6 +323,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
 
     status = json.loads(status_path.read_text())
     assert status["state"] == "active"
+    assert status["version"] == tproxy.DAEMON_VERSION
     assert status["iface"] == "en0"
     assert status["voice"] == "en0"
     assert status["hosts_learned"] == 1

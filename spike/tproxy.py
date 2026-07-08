@@ -98,6 +98,7 @@ _dead = {}                     # host -> expiry_monotonic
 
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
+DAEMON_VERSION = "0.1.5"
 _conn_count = 0                # live proxied connections
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
@@ -2750,6 +2751,7 @@ def write_status(state, iface, voice_iface):
         consume_telegram_proxy_acceptance()
         st = {
             "state": state,            # "active" | "dormant"
+            "version": DAEMON_VERSION,
             "pid": os.getpid(),
             "ts": now,
             "conns": _conn_count,

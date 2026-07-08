@@ -84,6 +84,19 @@ def sync_cargo_lock(path: Path, version: str, check: bool, changed: list[Path]) 
     write_if_changed(path, "".join(output), check, changed)
 
 
+def sync_python_constant(path: Path, name: str, version: str, check: bool, changed: list[Path]) -> None:
+    text = path.read_text(encoding="utf-8")
+    new_text, count = re.subn(
+        rf'(?m)^{re.escape(name)} = "[^"]+"$',
+        f'{name} = "{version}"',
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"could not find {name} in {path}")
+    write_if_changed(path, new_text, check, changed)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", help="Version to sync instead of reading VERSION")
@@ -119,6 +132,7 @@ def main() -> int:
     )
     sync_cargo_toml(ROOT / "app-tauri/src-tauri/Cargo.toml", version, args.check, changed)
     sync_cargo_lock(ROOT / "app-tauri/src-tauri/Cargo.lock", version, args.check, changed)
+    sync_python_constant(ROOT / "spike/tproxy.py", "DAEMON_VERSION", version, args.check, changed)
 
     if args.check and changed:
         for path in changed:

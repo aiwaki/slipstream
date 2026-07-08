@@ -27,6 +27,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("tauri build", scripts["build:release"])
         self.assertEqual(scripts["build"], "npm run build:release")
 
+    def test_daemon_version_tracks_root_version(self) -> None:
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        daemon = (ROOT / "spike/tproxy.py").read_text(encoding="utf-8")
+
+        self.assertIn(f'DAEMON_VERSION = "{version}"', daemon)
+
 
 if __name__ == "__main__":
     unittest.main()
