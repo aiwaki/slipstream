@@ -80,8 +80,10 @@ If playback fails:
 
 ## Steam
 
-Steam is not currently a Slipstream routing target. Treat slow store pages,
-update checks, or CM reconnect loops as direct-path diagnostics first.
+Steam Store web hosts use `geo_exit` because the direct path can return a tiny
+partial page and then stall. This is intentionally narrower than "all Steam":
+Steam CM, game traffic, and download paths are not routed through Geph by
+default.
 
 Useful checks:
 
@@ -93,9 +95,9 @@ tail -n 120 "$HOME/Library/Application Support/Steam/logs/connection_log.txt"
 tail -n 120 "$HOME/Library/Application Support/Steam/logs/bootstrap_log.txt"
 ```
 
-Do not add Steam to Geph or local bypass without endpoint-level evidence. Steam
-can use store/CDN/update hosts plus CM WebSocket and UDP paths, so one working
-endpoint does not prove the whole app is healthy.
+Do not widen Steam routing without endpoint-level evidence. Steam can use
+store/CDN/update hosts plus CM WebSocket and UDP paths, so one working endpoint
+does not prove the whole app is healthy.
 
 ## Installed Daemon
 

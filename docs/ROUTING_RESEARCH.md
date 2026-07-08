@@ -36,7 +36,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Superpowers | Agent tooling | Installed as a general Codex workflow aid; not a Slipstream runtime dependency. | Use opportunistically after session reload exposes its skills. |
 | 2026-07-09 | ECC | Not installed | Current Codex plugin path is broad and upstream-doc-fragile for this repo. | Revisit only for a focused workflow need. |
 | 2026-07-09 | Ruflo | Not installed | Too much global agent harness behavior for current Slipstream work. | Mine health-check and ADR ideas only. |
-| 2026-07-09 | Steam slowdown | Needs evidence | Steam is not currently classified by policy; observed CDN/update endpoints are mostly fast while store body/CM WebSocket paths can stall. | Add diagnostics before any routing change. |
+| 2026-07-09 | Steam Store web | Adopted narrowly | Route Steam Store web hosts through geo-exit; keep Steam CM/game/download paths out until separately proven. | Watch real Steam logs before widening host coverage. |
 
 ## Codebase Graph
 
@@ -225,20 +225,26 @@ Fresh external snapshots checked on 2026-07-09:
   health checks, witness manifests, and tool-description audits; the harness is
   too much global behavior for Slipstream right now.
 
-## Steam Observation
+## Steam Store Findings
 
-- Current Slipstream policy has no Steam-specific routing class or canary.
-  Treat Steam as `unknown`/direct evidence until a concrete failure mode is
-  observed.
 - Runtime status on 2026-07-09 showed Slipstream active, pf applied, system proxy
   off, `xbox_dns` detected as external DNS, and existing route-health groups OK.
-- Direct endpoint probes showed Steam CDN/update hosts responding quickly, while
-  `store.steampowered.com` returned HTTP 200 but stalled while transferring the
-  body. Steam's own logs showed WebSocket CM attempts timing out before a later
-  successful UDP connection.
-- Do not route Steam through Geph or local bypass by default. First useful step is
-  a diagnostic snapshot for Steam: store shell, update host, CM WebSocket/UDP,
-  and CDN timing, with no system proxy/DNS mutation.
+- Direct endpoint probes showed `store.steampowered.com` returning HTTP 200 but
+  stalling while transferring the page body: about 13 KB in 25 seconds. The same
+  URL through Slipstream's bundled Geph SOCKS on `127.0.0.1:9954` transferred
+  about 1.37 MB in about 2 seconds.
+- Steam's own logs showed WebSocket CM attempts timing out before a later
+  successful UDP connection. Keep CM/gaming/download paths separate from the
+  Store web fix.
+- Slipstream now treats the Steam Store web family as `steam_store`/`geo_exit`:
+  `steampowered.com`, `steamcommunity.com`, `steamstatic.com`,
+  `steamusercontent.com`, and the narrow Steam-owned Akamai hostnames
+  `steamcdn-a.akamaihd.net` and `steamcommunity-a.akamaihd.net`.
+- Steam Store skips Smart DNS even when `xbox-dns.ru` is active because the
+  observed failure was an application-data stall on the direct path, not just
+  DNS poisoning. Runtime uses the bundled Geph tunnel for this group.
+- Do not route `steamserver.net`, Steam CM, game traffic, or broad Akamai/Fastly
+  hostnames through Geph without endpoint-level evidence.
 
 ## Transfer Backlog
 
@@ -259,8 +265,8 @@ Safe candidates:
   keep Slipstream's native-menu simplicity and autonomous routing model.
 - Consider a headless local-bypass re-sweep that uses temporary proxy probes and
   endpoint outcomes, without exposing a manual strategy picker.
-- Add direct-passthrough diagnostics for Steam-like apps before deciding whether
-  any routing policy is needed.
+- Keep Steam Store geo-exit narrow; add direct-passthrough diagnostics before
+  widening Steam CM, game, or download routing.
 - For future packet adapters, evaluate MSS clamp only for verified
   Cloudflare-fronted Discord update/download flows.
 - Watch reinstall logs for any remaining locked-file or permission edge cases.
@@ -282,7 +288,8 @@ Unsafe candidates:
 - Auto-configuring third-party DNS such as `xbox-dns.ru`.
 - Auto-configuring system SOCKS proxy to support an engine.
 - Granting broad `NOPASSWD` sudoers entries for service control.
-- Adding Steam to Geph or local bypass without endpoint-level evidence.
+- Adding Steam CM/game/download traffic to Geph or local bypass without
+  endpoint-level evidence.
 - Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
 - Importing upstream strategy scripts without a pinned, verified, and reviewed
   policy bundle.

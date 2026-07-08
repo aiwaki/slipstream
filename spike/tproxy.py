@@ -131,9 +131,17 @@ GEPH_HOSTS = (
     "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
     "anthropic.com", "claude.ai", "claudeusercontent.com",
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
+    "steampowered.com", "steamcommunity.com", "steamstatic.com",
+    "steamusercontent.com",
+    "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
 )
 OPENAI_HOSTS = ("openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com")
 ANTHROPIC_HOSTS = ("anthropic.com", "claude.ai", "claudeusercontent.com")
+STEAM_STORE_HOSTS = (
+    "steampowered.com", "steamcommunity.com", "steamstatic.com",
+    "steamusercontent.com",
+    "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
+)
 
 # Flowseal/zapret-style hostlists mark services for LOCAL DPI bypass, not for a
 # foreign VPN exit. These hosts should stay on the user's normal route and use
@@ -171,6 +179,7 @@ SERVICE_YOUTUBE = "youtube_video"
 SERVICE_OPENAI = "openai"
 SERVICE_ANTHROPIC = "anthropic"
 SERVICE_TELEGRAM = "telegram"
+SERVICE_STEAM_STORE = "steam_store"
 SERVICE_GENERIC = "generic"
 
 DNS_DIAGNOSTIC_HOSTS = (
@@ -211,6 +220,7 @@ QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
 SMART_DNS_OK_TTL = 10 * 60.0
+SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
 _smart_dns_ok_until = {}
 _smart_dns_last_failure = {"host": "", "reason": "", "ts": 0.0}
 
@@ -281,6 +291,8 @@ def route_policy(host, now=None):
             group = SERVICE_OPENAI
         elif _host_matches(h, ANTHROPIC_HOSTS):
             group = SERVICE_ANTHROPIC
+        elif _host_matches(h, STEAM_STORE_HOSTS):
+            group = SERVICE_STEAM_STORE
         else:
             group = SERVICE_GENERIC
         return {
@@ -317,6 +329,7 @@ _route_health = {
     SERVICE_OPENAI: _route_health_default(SERVICE_OPENAI, ROUTE_GEO_EXIT),
     SERVICE_ANTHROPIC: _route_health_default(SERVICE_ANTHROPIC, ROUTE_GEO_EXIT),
     SERVICE_TELEGRAM: _route_health_default(SERVICE_TELEGRAM, ROUTE_DIRECT),
+    SERVICE_STEAM_STORE: _route_health_default(SERVICE_STEAM_STORE, ROUTE_GEO_EXIT),
 }
 _route_failure_windows = {group: deque() for group in _route_health}
 _canary_health = {}
@@ -971,6 +984,8 @@ def smart_dns_route_enabled(host, now=None):
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_GEO_EXIT:
         return False
+    if policy["service_group"] not in SMART_DNS_GROUPS:
+        return False
     if not smart_dns_available():
         return False
     now = time.time() if now is None else now
@@ -1146,6 +1161,12 @@ CANARY_SPECS = (
         "soft": True,
     },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
+    {
+        "name": "steam_store",
+        "group": SERVICE_STEAM_STORE,
+        "host": "store.steampowered.com",
+        "smart_dns": False,
+    },
     {"name": "telegram_proxy", "group": SERVICE_TELEGRAM, "host": ""},
 )
 
@@ -1487,7 +1508,7 @@ async def _run_geo_exit_canary(spec):
     if policy["route_class"] != ROUTE_GEO_EXIT:
         canary_health_event(spec, policy["route_class"], host, False, "policy mismatch")
         return False
-    if smart_dns_available():
+    if spec.get("smart_dns", True) and smart_dns_available():
         smart_dns_ok = await _run_smart_dns_geo_canary(spec)
         if smart_dns_ok:
             canary_health_event(

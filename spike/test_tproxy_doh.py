@@ -366,6 +366,21 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("billing.openai.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
     assert tproxy.route_policy("claude.ai")["service_group"] == tproxy.SERVICE_ANTHROPIC
     assert tproxy.route_policy("t.me")["service_group"] == tproxy.SERVICE_TELEGRAM
+    assert tproxy.route_policy("store.steampowered.com") == {
+        "host": "store.steampowered.com",
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "service_group": tproxy.SERVICE_STEAM_STORE,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    }
+    assert tproxy.route_policy("cdn.fastly.steamstatic.com")["service_group"] == (
+        tproxy.SERVICE_STEAM_STORE
+    )
+    assert tproxy.route_policy("steamcdn-a.akamaihd.net")["service_group"] == (
+        tproxy.SERVICE_STEAM_STORE
+    )
+    assert tproxy.route_policy("cmp1-fra1.steamserver.net")["route_class"] == (
+        tproxy.ROUTE_UNKNOWN
+    )
 
 
 def test_local_payload_canary_request_supports_discord_gateway_websocket():
@@ -635,6 +650,8 @@ def test_smart_dns_route_gate_requires_geo_exit_and_fresh_canary(monkeypatch):
     assert not tproxy.smart_dns_route_enabled("chatgpt.com", now=201.0)
     assert not tproxy.smart_dns_route_enabled("gateway.discord.gg", now=100.0)
     assert not tproxy.smart_dns_route_enabled("rr2---sn-ntq7yner.googlevideo.com", now=100.0)
+    tproxy._smart_dns_ok_until[tproxy.SERVICE_STEAM_STORE] = 200.0
+    assert not tproxy.smart_dns_route_enabled("store.steampowered.com", now=100.0)
 
 
 def test_canary_scheduler_runs_on_forced_and_periodic_triggers(monkeypatch):
@@ -1052,6 +1069,37 @@ def test_geo_exit_canary_falls_back_to_geph_when_smart_dns_fails(monkeypatch):
         assert health["last_backend"] == tproxy.GEO_BACKEND_GEPH
     finally:
         tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+
+
+def test_steam_store_canary_skips_smart_dns_and_uses_geph(monkeypatch):
+    original = dict(tproxy._route_health[tproxy.SERVICE_STEAM_STORE])
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def smart_should_not_run(spec):
+        raise AssertionError("Steam Store should not use Smart DNS")
+
+    async def geph_connect(host, port, first_flight):
+        assert host == "store.steampowered.com"
+        assert port == 443
+        return object(), DummyWriter()
+
+    try:
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
+        monkeypatch.setattr(tproxy, "_run_smart_dns_geo_canary", smart_should_not_run)
+        monkeypatch.setattr(tproxy, "dial_via_geph", geph_connect)
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+
+        spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "steam_store")
+        assert asyncio.run(tproxy._run_geo_exit_canary(spec))
+
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_STEAM_STORE]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_backend"] == tproxy.GEO_BACKEND_GEPH
+    finally:
+        tproxy._route_health[tproxy.SERVICE_STEAM_STORE] = original
 
 
 def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
