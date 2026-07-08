@@ -8,6 +8,7 @@
 // later; main.rs is a thin desktop shim.
 
 use std::fs;
+use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,7 +18,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{
     image::Image,
     menu::{
@@ -88,6 +89,7 @@ fn tr(en: &str) -> String {
         "Launch at Login" => "Запускать при входе",
         "Restart Proxy" => "Перезапустить прокси",
         "Open Log" => "Открыть лог",
+        "Copy Diagnostics" => "Скопировать диагностику",
         "Check for Updates…" => "Проверить обновления…",
         "Quit Slipstream" => "Выйти из Slipstream",
         other => other,
@@ -100,6 +102,7 @@ const ID_GEPH_ENABLE: &str = "geph_enable";
 const ID_LAUNCH: &str = "launch_at_login";
 const ID_RESTART: &str = "restart_proxy";
 const ID_LOG: &str = "open_log";
+const ID_DIAGNOSTICS: &str = "copy_diagnostics";
 const ID_UPDATE: &str = "check_updates";
 const ID_QUIT: &str = "quit";
 // Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
@@ -189,6 +192,94 @@ fn open_log_snapshot() -> bool {
         return false;
     }
     Command::new("/usr/bin/open").arg(snapshot).spawn().is_ok()
+}
+
+fn sensitive_json_key(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    k.contains("secret")
+        || k.contains("password")
+        || k.contains("token")
+        || k.contains("private_key")
+}
+
+fn sanitize_json(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            let sensitive: Vec<String> = map
+                .keys()
+                .filter(|key| sensitive_json_key(key))
+                .cloned()
+                .collect();
+            for key in sensitive {
+                map.insert(key, Value::String("<redacted>".to_string()));
+            }
+            for child in map.values_mut() {
+                sanitize_json(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                sanitize_json(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn diagnostic_snapshot_value(app_version: &str, status: Option<Value>, generated_at: f64) -> Value {
+    let mut snapshot = json!({
+        "app": {
+            "name": "Slipstream",
+            "version": app_version,
+        },
+        "generated_at_unix": generated_at,
+        "daemon": status.unwrap_or_else(|| json!({"state": "off"})),
+        "install": {
+            "daemon_path": INSTALLED_DAEMON,
+            "launchd_label": LAUNCHD_LABEL,
+            "launchd_plist": LAUNCHD_PLIST,
+            "status_path": STATUS_PATH,
+            "log_path": LOG_PATH,
+        },
+    });
+    sanitize_json(&mut snapshot);
+    snapshot
+}
+
+fn unix_now_secs() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+fn copy_text_to_clipboard(text: &str) -> bool {
+    let Ok(mut child) = Command::new("/usr/bin/pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+    else {
+        return false;
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        return false;
+    };
+    if stdin.write_all(text.as_bytes()).is_err() {
+        return false;
+    }
+    drop(stdin);
+    child.wait().map(|status| status.success()).unwrap_or(false)
+}
+
+fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
+    let snapshot = diagnostic_snapshot_value(
+        &app.package_info().version.to_string(),
+        read_status(),
+        unix_now_secs(),
+    );
+    let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
+        return false;
+    };
+    copy_text_to_clipboard(&text)
 }
 
 fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
@@ -1204,6 +1295,7 @@ pub fn run() {
                 .item(&launch)
                 .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_DIAGNOSTICS, tr("Copy Diagnostics")).build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?)
                 .item(
@@ -1276,6 +1368,13 @@ pub fn run() {
                         ID_LOG => {
                             if !open_log_snapshot() {
                                 notify(app, "Unable to open Slipstream log");
+                            }
+                        }
+                        ID_DIAGNOSTICS => {
+                            if copy_diagnostic_snapshot(app) {
+                                notify(app, "Slipstream diagnostics copied");
+                            } else {
+                                notify(app, "Unable to copy Slipstream diagnostics");
                             }
                         }
                         ID_UPDATE => {
@@ -1424,10 +1523,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
-        telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        daemon_recovery_shell, diagnostic_snapshot_value, launchd_plist_uses_bundled_daemon,
+        log_snapshot_shell, osascript_dialog_args, route_class_health, routing_health_summary,
+        shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
+        system_proxy_from_status, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
 
@@ -1462,6 +1561,41 @@ mod tests {
              /usr/sbin/chown 501:20 '/tmp/Bob'\\''s Logs/slipstream.log' && \
              /bin/chmod 600 '/tmp/Bob'\\''s Logs/slipstream.log'"
         );
+    }
+
+    #[test]
+    fn diagnostic_snapshot_redacts_sensitive_status_fields() {
+        let snapshot = diagnostic_snapshot_value(
+            "0.1.5",
+            Some(json!({
+                "state": "active",
+                "route_health": {
+                    "openai": {
+                        "state": "ok",
+                        "last_host": "chatgpt.com"
+                    }
+                },
+                "geph": {
+                    "account_secret": "very-secret",
+                    "nested": {
+                        "api_token": "token-value",
+                        "password": "pass-value"
+                    }
+                }
+            })),
+            123.0,
+        );
+        let text = serde_json::to_string(&snapshot).unwrap();
+
+        assert_eq!(snapshot["app"]["version"], "0.1.5");
+        assert_eq!(
+            snapshot["daemon"]["route_health"]["openai"]["last_host"],
+            "chatgpt.com"
+        );
+        assert!(!text.contains("very-secret"));
+        assert!(!text.contains("token-value"));
+        assert!(!text.contains("pass-value"));
+        assert!(text.contains("<redacted>"));
     }
 
     #[test]

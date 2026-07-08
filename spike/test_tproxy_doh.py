@@ -172,8 +172,35 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
+    assert status["pf_state"] == {"applied": False, "enabled": False, "rules_loaded": False}
     assert status["geph_detail"]["port"] == 0
     assert "canaries" in status
+
+
+def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):
+    def fake_run(*args):
+        if args == ("pfctl", "-s", "info"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "Status: Enabled\n",
+                "stderr": "",
+            })()
+        if args == ("pfctl", "-sn"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "rdr pass on en0 inet proto tcp to any port 443 -> 127.0.0.1 port 1080\n",
+                "stderr": "",
+            })()
+        raise AssertionError(args)
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+
+    assert tproxy.pf_state_snapshot(1080) == {
+        "applied": True,
+        "enabled": True,
+        "rules_loaded": True,
+    }
 
 
 def test_route_policy_classifies_service_groups():
