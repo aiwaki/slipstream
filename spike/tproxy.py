@@ -289,6 +289,8 @@ AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
 _auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
+GEPH_FAIL_LOG_TTL = 60.0
+_geph_fail_log = {}           # (host, reason) -> last log monotonic
 
 # geph's own broker-fronting domains — NEVER desync/auto-route these (our daemon
 # would otherwise mangle geph's broker access or route geph through itself).
@@ -308,6 +310,23 @@ def geph_route(host):
     if _host_matches(h, GEPH_HOSTS):
         return True
     return _auto_geph.get(h, 0) > time.time()
+
+
+def log_geph_route_failure(host, reason, now=None):
+    if not host:
+        return
+    now = time.monotonic() if now is None else now
+    key = (host.lower().rstrip("."), reason)
+    last = _geph_fail_log.get(key)
+    if last is not None and now - last < GEPH_FAIL_LOG_TTL:
+        return
+    _geph_fail_log[key] = now
+    if len(_geph_fail_log) > 1024:
+        cutoff = now - GEPH_FAIL_LOG_TTL
+        for old_key, old_time in list(_geph_fail_log.items()):
+            if old_time < cutoff:
+                _geph_fail_log.pop(old_key, None)
+    print(f">> geph route failed for {host}: {reason}", file=sys.stderr)
 
 
 def load_auto_geph():
@@ -1539,6 +1558,9 @@ async def _handle_impl(reader, writer):
                     print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                 await asyncio.gather(pump(reader, gw), splice(gr, writer))
                 return
+            log_geph_route_failure(host, "SOCKS connect failed")
+        else:
+            log_geph_route_failure(host, "tunnel down")
         if VERBOSE:
             print(f"  geph unavailable for geo-host {host} -> fail closed "
                   f"(no RU leak, client will retry)", file=sys.stderr)
