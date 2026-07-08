@@ -27,6 +27,7 @@ import logging
 from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
+import pwd
 import resource
 import signal
 import socket
@@ -2183,6 +2184,16 @@ LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 5
 
 
+def active_console_gid(console_path="/dev/console"):
+    try:
+        uid = os.stat(console_path).st_uid
+        if uid:
+            return pwd.getpwuid(uid).pw_gid
+    except (AttributeError, KeyError, OSError):
+        pass
+    return 0
+
+
 class RotatingLogWriter:
     def __init__(
         self,
@@ -2211,7 +2222,7 @@ class RotatingLogWriter:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self._file = open(self.path, "a", buffering=1)
         try:
-            os.chown(self.path, 0, 0)
+            os.chown(self.path, 0, active_console_gid())
         except (AttributeError, PermissionError, OSError):
             pass
         os.chmod(self.path, 0o640)

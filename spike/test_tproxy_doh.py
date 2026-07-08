@@ -659,6 +659,28 @@ def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
     )
 
 
+def test_active_console_gid_uses_console_user_group(monkeypatch):
+    class Stat:
+        st_uid = 501
+
+    class User:
+        pw_gid = 20
+
+    monkeypatch.setattr(tproxy.os, "stat", lambda path: Stat())
+    monkeypatch.setattr(tproxy.pwd, "getpwuid", lambda uid: User())
+
+    assert tproxy.active_console_gid() == 20
+
+
+def test_active_console_gid_falls_back_to_root_group(monkeypatch):
+    class Stat:
+        st_uid = 0
+
+    monkeypatch.setattr(tproxy.os, "stat", lambda path: Stat())
+
+    assert tproxy.active_console_gid() == 0
+
+
 def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
     conf = tmp_path / "dev.slipstream.tproxy.conf"
     conf.write_text("obsolete\n")
