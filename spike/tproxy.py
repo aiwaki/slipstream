@@ -26,6 +26,7 @@ import fcntl
 import ipaddress
 import json
 import logging
+import math
 from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -603,7 +604,9 @@ def route_health_event(
 def clear_route_strategy_cache(group=None, host=None):
     removed = 0
     if host:
-        removed = 1 if _strat_cache.pop(normalize_host(host), None) else 0
+        h = normalize_host(host)
+        removed = 1 if _strat_cache.pop(h, None) else 0
+        _strat_scores.pop(h, None)
         if removed:
             save_strat_cache()
         return removed
@@ -611,6 +614,9 @@ def clear_route_strategy_cache(group=None, host=None):
         if group is None or route_policy(cached_host)["service_group"] == group:
             _strat_cache.pop(cached_host, None)
             removed += 1
+    for scored_host in list(_strat_scores):
+        if group is None or route_policy(scored_host)["service_group"] == group:
+            _strat_scores.pop(scored_host, None)
     if removed:
         save_strat_cache()
     return removed
@@ -1438,6 +1444,7 @@ async def _run_local_bypass_canary(spec):
     head, body = _canary_client_hello(host)
     payload_failed = False
     for strat in strategy_order(host):
+        strat_ok = False
         if not strat.get("fake"):
             continue
         for ip in ips[:ip_attempt_limit(host)]:
@@ -1448,10 +1455,14 @@ async def _run_local_bypass_canary(spec):
                 if payload_bytes < LOCAL_PAYLOAD_CANARY_MIN_BYTES:
                     payload_failed = True
                     continue
+                strat_ok = True
+                _record_strategy_result(host, strat["name"], True)
                 if _strat_cache.get(host) != strat["name"]:
                     remember_strategy(host, strat["name"])
                 canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
                 return True
+        if not strat_ok:
+            _record_strategy_result(host, strat["name"], False)
     clear_route_strategy_cache(group=spec["group"])
     if payload_failed:
         canary_health_event(
@@ -1968,6 +1979,12 @@ STRAT_CACHE_MAX = 2048
 STRAT_CACHE_VERSION = 4             # bump on strategy-logic changes -> discard stale
                                     # v4: Discord uses decoy fake; video uses poison fake
 _strat_cache = OrderedDict()       # host -> winning strategy name
+STRAT_SCORE_MAX_HOSTS = 2048
+STRAT_SCORE_Z = 1.0                # light Wilson lower bound; avoids overreacting
+STRAT_SCORE_CACHED_BONUS = 0.12
+STRAT_SCORE_AGE_BONUS_MAX = 0.05
+STRAT_SCORE_AGE_BONUS_AFTER = 3600.0
+_strat_scores = OrderedDict()      # host -> strategy -> {ok, fail, last}
 
 
 def load_strat_cache():
@@ -2001,6 +2018,57 @@ def save_strat_cache():
         pass
 
 
+def _strategy_wilson_score(ok, total):
+    if total <= 0:
+        return 0.5
+    z = STRAT_SCORE_Z
+    p = ok / total
+    denom = 1.0 + (z * z / total)
+    center = p + (z * z / (2.0 * total))
+    margin = z * math.sqrt((p * (1.0 - p) + z * z / (4.0 * total)) / total)
+    return max(0.0, min(1.0, (center - margin) / denom))
+
+
+def _record_strategy_result(host, name, ok, now=None):
+    host = normalize_host(host)
+    if not host or name not in STRAT_BY_NAME:
+        return
+    now = time.time() if now is None else now
+    per_host = _strat_scores.setdefault(host, {})
+    item = per_host.setdefault(name, {"ok": 0, "fail": 0, "last": 0.0})
+    item["ok" if ok else "fail"] += 1
+    item["last"] = now
+    _strat_scores.move_to_end(host)
+    while len(_strat_scores) > STRAT_SCORE_MAX_HOSTS:
+        _strat_scores.popitem(last=False)
+
+
+def _strategy_rank(host, name, base_index, cached, now):
+    item = _strat_scores.get(host, {}).get(name)
+    if item:
+        total = item.get("ok", 0) + item.get("fail", 0)
+        score = _strategy_wilson_score(item.get("ok", 0), total)
+        age = max(0.0, now - item.get("last", now))
+        age_ratio = age / STRAT_SCORE_AGE_BONUS_AFTER
+        score += min(STRAT_SCORE_AGE_BONUS_MAX, age_ratio * STRAT_SCORE_AGE_BONUS_MAX)
+    else:
+        score = 0.5
+    if name == cached:
+        score += STRAT_SCORE_CACHED_BONUS
+    return (-score, base_index)
+
+
+def _rank_strategy_names(host, names, now=None):
+    host = normalize_host(host)
+    cached = _strat_cache.get(host)
+    now = time.time() if now is None else now
+    base_indexes = {name: index for index, name in enumerate(names)}
+    return sorted(
+        names,
+        key=lambda name: _strategy_rank(host, name, base_indexes[name], cached, now),
+    )
+
+
 DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # YouTube/googlevideo video edges are hard-blocked by SNI like Discord. The TLS probe
 # can PASS on a non-fake split (record-splitting alone completes the handshake to the
@@ -2023,20 +2091,19 @@ def strategy_order(host):
     # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
     # so it uses the fake-only set and ignores any stale non-fake cache entry.
     if policy["service_group"] == SERVICE_DISCORD:
-        win = _strat_cache.get(host)
-        names = ([win] + [n for n in DISCORD_STRATS if n != win]
-                 if win in DISCORD_STRATS else DISCORD_STRATS)
+        names = _rank_strategy_names(host, DISCORD_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
     # YouTube/googlevideo: same fake-only discipline (see GOOGLE_VIDEO note above).
     if policy["service_group"] == SERVICE_YOUTUBE:
-        win = _strat_cache.get(host)
-        names = ([win] + [n for n in GOOGLE_VIDEO_STRATS if n != win]
-                 if win in GOOGLE_VIDEO_STRATS else GOOGLE_VIDEO_STRATS)
+        names = _rank_strategy_names(host, GOOGLE_VIDEO_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
+    host = normalize_host(host)
     win = _strat_cache.get(host)
     if win in STRAT_BY_NAME:
-        return [STRAT_BY_NAME[win]] + [s for s in STRATEGIES if s["name"] != win]
-    return [STRAT_BY_NAME[n] for n in GENERAL_STRATS]
+        names = [win] + [n for n in GENERAL_STRATS if n != win]
+    else:
+        names = GENERAL_STRATS
+    return [STRAT_BY_NAME[n] for n in _rank_strategy_names(host, names)]
 
 
 # --------------------------------------------------- fake ClientHello (decoy)
@@ -2982,14 +3049,19 @@ async def _handle_impl(reader, writer):
         max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
         attempts = 0
         for strat in strategy_order(host):
+            strat_ok = False
             for ip in real_ips[:ip_limit]:
                 attempts += 1
                 result = await dial_strategy(ip, dst_port, head, body, host, strat)
                 if result:
                     chosen, chosen_name = ip, strat["name"]
+                    strat_ok = True
+                    _record_strategy_result(host, strat["name"], True)
                     break
                 if attempts >= max_attempts:
                     break
+            if not strat_ok:
+                _record_strategy_result(host, strat["name"], False)
             if result or attempts >= max_attempts:
                 break
         if result:

@@ -13,7 +13,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | SonicDPI target identity | Reference only | Copy the principle of verified host/IP identity, not raw packet interception. | Use this when designing any future UDP/QUIC handling. |
 | 2026-07-08 | Discord domain family | Partially adopted | Keep Discord on local bypass and cover the broad brand family. | Add only evidence-backed host expansions. |
 | 2026-07-08 | Discord voice UDP | Future platform work | Full UDP handling needs packet-level filtering, not broad pf redirects. | Revisit under Network Extension or platform adapter work. |
-| 2026-07-08 | SonicDPI adaptive probing | Backlog | Strategy health should be scored from real endpoint outcomes, not exposed as a manual picker. | Design per-policy-group scoring for canary results. |
+| 2026-07-08 | SonicDPI adaptive probing | Partially adopted | Strategy health is scored from real endpoint outcomes, not exposed as a manual picker. | Observe real logs and tune score weights only from evidence. |
 | 2026-07-08 | SonicDPI forged RST detection | Future platform work | TTL-baseline RST filtering is useful only with inbound packet visibility. | Revisit with Network Extension, WinDivert, or another packet adapter. |
 | 2026-07-08 | SonicDPI passive DNS cache | Future platform work | DNS-observed IP binding is the right way to classify hidden-SNI/QUIC targets without global guesses. | Use for future packet adapters; add read-only DNS diagnostics first. |
 | 2026-07-08 | SonicDPI MSS clamp | Future platform work | MSS clamp can help Cloudflare-fronted Discord mid-stream resets, but only with SYN visibility and tight target gating. | Revisit under packet adapters; never clamp broadly. |
@@ -85,6 +85,10 @@ Fresh external snapshots checked on 2026-07-08:
   profiles by a Wilson lower-bound, and gives old entries a small age bonus so
   alternatives get re-tested. Slipstream can borrow this shape for autonomous
   route-health scoring without adding a manual strategy picker to the UI.
+- Slipstream now keeps an in-memory local-bypass strategy score per host and
+  strategy. Runtime and canary outcomes record wins/losses, cached winners get a
+  small bias, stale entries get a small age bonus, and fake-only policies remain
+  fake-only.
 - SonicDPI detects likely forged inbound TCP RST packets by learning a target
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied
@@ -182,8 +186,8 @@ Safe candidates:
   separate endpoint class can fail independently.
 - Continue refining read-only DNS diagnostics only from evidence; keep resolver
   settings immutable.
-- Add autonomous route-health scoring based on wins/losses with exploration
-  over time, similar to SonicDPI's Wilson-rank plus age-bonus model.
+- Keep tuning autonomous strategy scoring from real logs; do not expose a manual
+  strategy picker in the tray.
 - For future packet adapters, evaluate MSS clamp only for verified
   Cloudflare-fronted Discord update/download flows.
 - Watch reinstall logs for any remaining locked-file or permission edge cases.

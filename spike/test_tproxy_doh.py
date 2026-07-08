@@ -18,6 +18,10 @@ def reset_smart_dns_state():
     dns_cache = dict(tproxy._system_dns_cache)
     smart_ok = dict(tproxy._smart_dns_ok_until)
     smart_failure = dict(tproxy._smart_dns_last_failure)
+    strat_scores = OrderedDict(
+        (host, {name: dict(value) for name, value in per_host.items()})
+        for host, per_host in tproxy._strat_scores.items()
+    )
     canary_health = {key: dict(value) for key, value in tproxy._canary_health.items()}
     canary_windows = {
         key: deque(value) for key, value in tproxy._canary_failure_windows.items()
@@ -31,6 +35,7 @@ def reset_smart_dns_state():
         })
         tproxy._smart_dns_ok_until.clear()
         tproxy._smart_dns_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+        tproxy._strat_scores.clear()
         tproxy._canary_health.clear()
         tproxy._canary_failure_windows.clear()
         yield
@@ -41,6 +46,8 @@ def reset_smart_dns_state():
         tproxy._smart_dns_ok_until.update(smart_ok)
         tproxy._smart_dns_last_failure.clear()
         tproxy._smart_dns_last_failure.update(smart_failure)
+        tproxy._strat_scores.clear()
+        tproxy._strat_scores.update(strat_scores)
         tproxy._canary_health.clear()
         tproxy._canary_health.update(canary_health)
         tproxy._canary_failure_windows.clear()
@@ -1274,6 +1281,52 @@ def test_youtube_video_hosts_ignore_stale_non_fake_strategy_cache():
         assert names == ["split64+fake", "split16+fake", "fake5"]
     finally:
         tproxy._strat_cache.clear()
+
+
+def test_local_strategy_score_demotes_failed_cached_fake_strategy():
+    host = "gateway.discord.gg"
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache[host] = "split64+fake"
+
+    try:
+        tproxy._record_strategy_result(host, "split64+fake", False, now=100.0)
+        names = [s["name"] for s in tproxy.strategy_order(host)]
+
+        assert names == ["split16+fake", "fake5", "split64+fake"]
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+
+
+def test_local_strategy_score_keeps_successful_cached_fake_strategy_first():
+    host = "gateway.discord.gg"
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache[host] = "split64+fake"
+
+    try:
+        tproxy._record_strategy_result(host, "split64+fake", True, now=100.0)
+        names = [s["name"] for s in tproxy.strategy_order(host)]
+
+        assert names == ["split64+fake", "split16+fake", "fake5"]
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+
+
+def test_clear_route_strategy_cache_removes_strategy_scores():
+    host = "gateway.discord.gg"
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache[host] = "split64+fake"
+    tproxy._record_strategy_result(host, "split64+fake", False, now=100.0)
+
+    try:
+        assert tproxy.clear_route_strategy_cache(host=host) == 1
+
+        assert host not in tproxy._strat_cache
+        assert host not in tproxy._strat_scores
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
 
 
 def test_discord_hosts_use_fake_only_local_bypass_strategy():
