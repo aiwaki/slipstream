@@ -377,6 +377,15 @@ def test_local_payload_canary_request_supports_specific_http_path():
     assert b"Host: cdn.discordapp.com\r\n" in req
 
 
+def test_discord_api_canary_uses_gateway_api_path():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_api")
+    req = tproxy._local_payload_canary_request(spec["host"], spec)
+
+    assert spec["payload_path"] == "/api/v10/gateway"
+    assert req.startswith(b"HEAD /api/v10/gateway HTTP/1.1\r\n")
+    assert b"Host: discord.com\r\n" in req
+
+
 def test_quic_version_negotiation_probe_packet_is_padded_initial():
     pkt = tproxy._quic_version_negotiation_probe_packet(
         dcid=b"12345678",
@@ -403,6 +412,23 @@ def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
 
     assert tproxy.route_policy(spec["host"]) == {
         "host": "cdn.discordapp.com",
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "service_group": tproxy.SERVICE_DISCORD,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+    }
+    assert not tproxy.geph_route(spec["host"])
+    assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
+        "split64+fake",
+        "split16+fake",
+        "fake5",
+    ]
+
+
+def test_discord_api_canary_stays_local_bypass_and_fake_only():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_api")
+
+    assert tproxy.route_policy(spec["host"]) == {
+        "host": "discord.com",
         "route_class": tproxy.ROUTE_LOCAL_BYPASS,
         "service_group": tproxy.SERVICE_DISCORD,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,

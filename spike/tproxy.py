@@ -1012,6 +1012,12 @@ def note_local_result(host, down_bytes, duration):
 CANARY_SPECS = (
     {"name": "discord_update", "group": SERVICE_DISCORD, "host": "updates.discord.com"},
     {
+        "name": "discord_api",
+        "group": SERVICE_DISCORD,
+        "host": "discord.com",
+        "payload_path": "/api/v10/gateway",
+    },
+    {
         "name": "discord_gateway",
         "group": SERVICE_DISCORD,
         "host": "gateway.discord.gg",

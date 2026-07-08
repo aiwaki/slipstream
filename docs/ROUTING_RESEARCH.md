@@ -96,6 +96,9 @@ Indexed routing projects:
 - Slipstream now keeps per-check canary health in `canaries.checks` and reduces
   it into the backward-compatible group-level `route_health`. A passing
   `discord_cdn` canary no longer hides a failing `discord_gateway` canary.
+- Discord local-bypass health now has separate API, Gateway WebSocket, CDN, and
+  updater canaries, matching the endpoint split that Unblock-Pro used to avoid
+  false positives.
 - Flowseal-style rules include Discord voice UDP ranges and `discord.media`
   alternate TCP ports `2053,2083,2087,2096,8443`. These are useful references,
   but should only be used with host/IP evidence. No global alternate-port
@@ -139,7 +142,7 @@ Safe candidates:
 - Use a fresh WebSocket nonce in the Discord Gateway canary.
 - Continue splitting route-health canaries into service classes so "page loads"
   is not mistaken for "video/app transport works": YouTube web, YouTube video
-  delivery, Discord API/CDN, Discord Gateway WebSocket, and Telegram local proxy.
+  delivery, and Telegram local proxy.
 - Add autonomous route-health scoring based on wins/losses with exploration
   over time, similar to SonicDPI's Wilson-rank plus age-bonus model.
 - Watch reinstall logs for any remaining locked-file or permission edge cases.
