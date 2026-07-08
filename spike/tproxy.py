@@ -833,6 +833,7 @@ CANARY_SPECS = (
         "name": "youtube_video",
         "group": SERVICE_YOUTUBE,
         "host": "",
+        "observed_domains": ("googlevideo.com",),
         "fallback_host": "redirector.googlevideo.com",
     },
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
@@ -1043,9 +1044,11 @@ async def _run_smart_dns_geo_canary(spec):
     return False
 
 
-def _observed_canary_host(group):
+def _observed_canary_host(group, domains=None):
     for host in reversed(_strat_cache):
         if route_policy(host)["service_group"] == group:
+            if domains and not _host_matches(host, domains):
+                continue
             return host
     return ""
 
@@ -1053,7 +1056,7 @@ def _observed_canary_host(group):
 def _canary_host(spec):
     return (
         spec.get("host")
-        or _observed_canary_host(spec["group"])
+        or _observed_canary_host(spec["group"], spec.get("observed_domains"))
         or spec.get("fallback_host", "")
     )
 

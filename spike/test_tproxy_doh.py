@@ -601,6 +601,9 @@ def test_youtube_canary_prefers_observed_video_host_then_redirector_fallback():
     try:
         assert tproxy._canary_host(spec) == "redirector.googlevideo.com"
 
+        tproxy._strat_cache["www.youtube.com"] = "fake5"
+        assert tproxy._canary_host(spec) == "redirector.googlevideo.com"
+
         tproxy._strat_cache["rr2---sn-ntq7yner.googlevideo.com"] = "fake5"
 
         assert tproxy._canary_host(spec) == "rr2---sn-ntq7yner.googlevideo.com"
