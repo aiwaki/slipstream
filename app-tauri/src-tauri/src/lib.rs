@@ -410,10 +410,6 @@ fn system_proxy_from_status(st: Option<&Value>) -> Option<(bool, String)> {
     }
 }
 
-fn status_str<'a>(st: Option<&'a Value>, key: &str) -> Option<&'a str> {
-    st.and_then(|v| v.get(key)).and_then(|x| x.as_str())
-}
-
 fn push_detail_part(detail: &mut String, part: &str) {
     if !part.is_empty() {
         detail.push_str(" · ");
