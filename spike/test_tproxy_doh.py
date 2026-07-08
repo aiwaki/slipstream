@@ -333,7 +333,7 @@ def test_local_bypass_canary_requires_payload_success(monkeypatch):
         q.extend(original_window)
 
 
-def test_local_bypass_canary_payload_failure_decays_strategy_cache(monkeypatch):
+def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
     host = "updates.discord.com"
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
@@ -353,6 +353,13 @@ def test_local_bypass_canary_payload_failure_decays_strategy_cache(monkeypatch):
 
     try:
         tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+        tproxy.route_health_event(
+            tproxy.SERVICE_DISCORD,
+            tproxy.ROUTE_LOCAL_BYPASS,
+            host,
+            ok=True,
+            now=100.0,
+        )
         tproxy._strat_cache.clear()
         tproxy._strat_cache[host] = "split64+fake"
         tproxy._strat_cache["billing.openai.com"] = "split64+fake"
@@ -366,10 +373,18 @@ def test_local_bypass_canary_payload_failure_decays_strategy_cache(monkeypatch):
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
 
         spec = {"group": tproxy.SERVICE_DISCORD, "host": host}
-        assert not asyncio.run(tproxy._run_local_bypass_canary(spec))
+        assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
 
         assert host not in tproxy._strat_cache
         assert tproxy._strat_cache["billing.openai.com"] == "split64+fake"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_DISCORD]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_failure"] == ""
+        assert health["last_warning"] == "payload probe failed"
+
+        for _ in range(max(0, tproxy.LOCAL_PAYLOAD_DEGRADE_AFTER - 2)):
+            assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
+        assert not asyncio.run(tproxy._run_local_bypass_canary(spec))
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_DISCORD]
         assert health["state"] == tproxy.HEALTH_DEGRADED
         assert health["last_failure"] == "payload probe failed"
