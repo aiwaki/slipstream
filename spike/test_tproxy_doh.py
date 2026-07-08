@@ -372,7 +372,8 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         assert health["last_failure"] == ""
         assert health["last_warning"] == "SOCKS connect failed"
         assert health["last_warning_host"] == "billing.openai.com"
-        assert health["failures_5m"] == 1
+        assert health["failures_5m"] == 0
+        assert health["last_host"] == "chatgpt.com"
 
         tproxy.route_health_event(
             tproxy.SERVICE_OPENAI,
@@ -444,6 +445,7 @@ def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
         assert health["state"] == tproxy.HEALTH_UNKNOWN
         assert health["last_warning"] == "SOCKS connect failed"
+        assert health["failures_5m"] == 0
     finally:
         tproxy._canary_state.clear()
         tproxy._canary_state.update(original_state)

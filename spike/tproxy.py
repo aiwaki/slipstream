@@ -453,8 +453,9 @@ def route_health_event(
         last_failure = ""
         last_warning = ""
         last_warning_host = ""
+        last_host = normalize_host(host)
+        last_route_class = route_class
     else:
-        q.append(now)
         health_state = state or HEALTH_DEGRADED
         last_failure = reason[:200]
         if soft and health_state == HEALTH_DEGRADED:
@@ -462,9 +463,14 @@ def route_health_event(
             last_warning = reason[:200]
             last_warning_host = normalize_host(host)
             last_failure = previous.get("last_failure", "")
+            last_host = previous.get("last_host", "")
+            last_route_class = previous.get("last_route_class", route_class)
         else:
+            q.append(now)
             last_warning = ""
             last_warning_host = ""
+            last_host = normalize_host(host)
+            last_route_class = route_class
     _route_health[group] = {
         "state": health_state,
         "last_failure": last_failure,
@@ -472,8 +478,8 @@ def route_health_event(
         "last_warning_host": last_warning_host,
         "last_checked": now,
         "failures_5m": len(q),
-        "last_host": normalize_host(host),
-        "last_route_class": route_class,
+        "last_host": last_host,
+        "last_route_class": last_route_class,
     }
 
 
