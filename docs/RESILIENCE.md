@@ -30,8 +30,8 @@ YouTube/googlevideo.
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
 | Crash restart | launchd `KeepAlive` | none |
-| Clean exit | restores `pf` on normal termination | watchdog for hard-kill cases |
-| Stale `pf` recovery | daemon re-applies rules while active | second watchdog if daemon stays dead |
+| Clean exit | restores `pf` on normal termination | non-tray watchdog for app-not-running cases |
+| Stale `pf` recovery | daemon re-applies rules while active; tray watchdog kickstarts daemon and resets `pf` if recovery fails | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader throughput canary |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, and route-health HTTPS payload canaries | signed strategy updates, broader throughput checks |
@@ -49,7 +49,7 @@ YouTube/googlevideo.
 - Keep the installed daemon and app-bundled daemon identical after releases.
 - Keep log snapshot/open-log behavior reliable.
 - Keep version, appcast, and release artifacts consistent.
-- Add a watchdog for hard-kill/stale-`pf` cleanup.
+- Keep hard-kill/stale-`pf` cleanup visible in diagnostics.
 
 ### P1 - Routing Quality
 

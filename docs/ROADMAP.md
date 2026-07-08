@@ -18,7 +18,7 @@ not a release promise.
 | Voice-flow TTL/LRU cleanup | implemented |
 | QUIC handling | preserved by default; no global UDP/443 block |
 | Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
-| Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
+| Daemon watchdog / stale `pf` recovery | implemented in tray: kickstart daemon first, reset `pf` only if recovery fails |
 | Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |

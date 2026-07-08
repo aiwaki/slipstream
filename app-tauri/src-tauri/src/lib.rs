@@ -48,6 +48,7 @@ const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
+const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
 const DAEMON_WATCHDOG_COOLDOWN_SECS: u64 = 5 * 60;
 const DIAGNOSTIC_LOG_TAIL_LINES: usize = 80;
@@ -344,6 +345,29 @@ fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
     }
 }
 
+fn daemon_recovery_status_value(path: &str) -> Value {
+    match fs::read_to_string(path) {
+        Ok(raw) => {
+            let parsed = serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| {
+                json!({
+                    "parse_error": true,
+                    "raw": raw,
+                })
+            });
+            json!({
+                "path": path,
+                "available": true,
+                "last": parsed,
+            })
+        }
+        Err(err) => json!({
+            "path": path,
+            "available": false,
+            "error": format!("{:?}", err.kind()),
+        }),
+    }
+}
+
 fn launchd_plist_uses_daemon(raw: &str, daemon: &Path) -> bool {
     raw.contains(&format!("<string>{}</string>", daemon.display()))
 }
@@ -569,6 +593,7 @@ fn diagnostic_snapshot_value(
     status: Option<Value>,
     generated_at: f64,
     log_tail: Option<Value>,
+    daemon_recovery: Option<Value>,
     bundled_daemon: Option<&Path>,
 ) -> Value {
     let summary = diagnostic_summary_value(status.as_ref());
@@ -588,6 +613,9 @@ fn diagnostic_snapshot_value(
     });
     if let Some(log_tail) = log_tail {
         snapshot["log_tail"] = log_tail;
+    }
+    if let Some(daemon_recovery) = daemon_recovery {
+        snapshot["daemon_recovery"] = daemon_recovery;
     }
     sanitize_json(&mut snapshot);
     snapshot
@@ -624,6 +652,7 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
         read_status(),
         unix_now_secs(),
         Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
+        Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
         bundled_daemon.as_deref(),
     );
     let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
@@ -678,17 +707,25 @@ fn daemon_recovery_shell() -> String {
     let label = shell_quote(&format!("system/{LAUNCHD_LABEL}"));
     let plist = shell_quote(LAUNCHD_PLIST);
     let daemon = shell_quote(INSTALLED_DAEMON);
+    let recovery = shell_quote(DAEMON_RECOVERY_STATUS_PATH);
     format!(
-        "/bin/launchctl kickstart -k {label} >/dev/null 2>&1 \
+        "recovery_status={recovery}; \
+         write_recovery() {{ \
+           /bin/printf '{{\"result\":\"%s\",\"ts\":%s}}\\n' \"$1\" \"$(/bin/date +%s)\" \
+             > \"$recovery_status\"; \
+           /bin/chmod 644 \"$recovery_status\"; \
+         }}; \
+         /bin/launchctl kickstart -k {label} >/dev/null 2>&1 \
          || /bin/launchctl bootstrap system {plist} >/dev/null 2>&1 \
          || true; \
          /bin/sleep 3; \
          status=$({daemon} --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
          if printf '%s\\n' \"$status\" \
             | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
-         then exit 0; fi; \
+         then write_recovery daemon_recovered; exit 0; fi; \
          /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; \
-         /sbin/pfctl -d >/dev/null 2>&1 || true"
+         /sbin/pfctl -d >/dev/null 2>&1 || true; \
+         write_recovery pf_reset"
     )
 }
 
@@ -1880,12 +1917,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell, diagnostic_log_tail,
-        diagnostic_snapshot_value, diagnostic_summary_value, install_diagnostic_value,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
-        telegram_proxy_detail, valid_bundled_daemon, DAEMON_WATCHDOG_MISSES,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
+        daemon_recovery_status_value, diagnostic_log_tail, diagnostic_snapshot_value,
+        diagnostic_summary_value, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
+        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
+        routing_health_summary, shell_quote, should_recover_daemon,
+        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
+        valid_bundled_daemon, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2022,6 +2060,13 @@ mod tests {
                 "available": true,
                 "lines": ["tg://proxy?server=127.0.0.1&secret=old-secret"]
             })),
+            Some(json!({
+                "available": true,
+                "last": {
+                    "result": "daemon_recovered",
+                    "ts": 12345
+                }
+            })),
             None,
         );
         let text = serde_json::to_string(&snapshot).unwrap();
@@ -2033,6 +2078,10 @@ mod tests {
         assert_eq!(snapshot["summary"]["system_dns"]["resolution_state"], "ok");
         assert_eq!(snapshot["summary"]["auto_geo_exit"]["learned"], 1);
         assert_eq!(snapshot["summary"]["problems"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            snapshot["daemon_recovery"]["last"]["result"],
+            "daemon_recovered"
+        );
         assert_eq!(
             snapshot["daemon"]["route_health"]["openai"]["last_host"],
             "chatgpt.com"
@@ -2053,6 +2102,34 @@ mod tests {
         assert_eq!(summary["routes"]["geo_exit"], "unknown");
         assert_eq!(summary["auto_geo_exit"]["enabled"], false);
         assert_eq!(summary["problems"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn daemon_recovery_status_reports_last_watchdog_result() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-daemon-recovery-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon-recovery.json");
+        std::fs::write(&path, r#"{"result":"pf_reset","ts":12345}"#).unwrap();
+
+        let status = daemon_recovery_status_value(path.to_str().unwrap());
+
+        assert_eq!(status["available"], true);
+        assert_eq!(status["last"]["result"], "pf_reset");
+        assert_eq!(status["last"]["ts"], 12345);
+
+        std::fs::write(&path, "not json secret=hidden").unwrap();
+        let broken = daemon_recovery_status_value(path.to_str().unwrap());
+        assert_eq!(broken["available"], true);
+        assert_eq!(broken["last"]["parse_error"], true);
+
+        let missing = daemon_recovery_status_value("/definitely/missing/recovery.json");
+        assert_eq!(missing["available"], false);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2233,8 +2310,12 @@ mod tests {
 
         assert!(shell.contains("/bin/launchctl kickstart -k 'system/dev.slipstream.tproxy'"));
         assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
+        assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
+        assert!(shell.contains("daemon_recovered"));
+        assert!(shell.contains("pf_reset"));
         assert!(shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(shell.find("kickstart").unwrap() < shell.find("pfctl").unwrap());
+        assert!(shell.find("--status").unwrap() < shell.find("pfctl").unwrap());
     }
 
     #[test]
