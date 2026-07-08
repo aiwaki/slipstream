@@ -78,7 +78,7 @@ cd app-tauri
 npm ci
 # a clean local release build needs the geph sidecar at:
 # app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-npm run tauri build
+npm run build:local
 
 # the background service (desync + routing) — the app installs it for you,
 # but during development you can do it manually from the repo root:
@@ -89,6 +89,8 @@ sudo python3 spike/tproxy.py --install
 The bundled `geph5-client` is built from source in CI
 ([`build-geph.yml`](.github/workflows/build-geph.yml)) and placed in
 `app-tauri/src-tauri/binaries/`.
+The release app build (`npm run build`) also signs the updater artifact and
+requires `TAURI_SIGNING_PRIVATE_KEY`.
 
 ## What's where
 
