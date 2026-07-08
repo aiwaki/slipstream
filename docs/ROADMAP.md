@@ -24,7 +24,7 @@ not a release promise.
 | Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
 | Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
-| Signed policy bundle validation | implemented as validator/verifier plus local persist/rollback; remote fetch not enabled |
+| Signed policy bundle validation | implemented as validator/verifier, local persist/rollback, and disabled remote fetch health-gate plumbing; scheduled fetch not enabled |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
@@ -61,7 +61,8 @@ Goal: detect degradation before the user has to diagnose it manually.
 - Continue tuning automatic re-sweep when a known strategy stops working.
 - Broaden local-bypass canaries from small HTTPS payload checks to throughput
   thresholds where that is safe.
-- Signed strategy-list/policy updates without rebuilding the app.
+- Signed strategy-list/policy updates without rebuilding the app; the local
+  verifier, rollback path, and health-gated remote apply helper are in place.
 - Move the bundled policy metadata/hash into signed policy updates and
   OS-specific adapters.
 

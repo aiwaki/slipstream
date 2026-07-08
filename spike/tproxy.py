@@ -43,7 +43,8 @@ import sys
 import tempfile
 import threading
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
+import urllib.request
 
 from primes import build_fake_stun, classify as classify_voice_payload
 
@@ -240,6 +241,11 @@ POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
 POLICY_STATE_DIR = "/var/db/slipstream"
 ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
 ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
+ROUTE_POLICY_KEYS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy-keys.json")
+ROUTE_POLICY_REMOTE_URL_ENV = "SLIP_ROUTE_POLICY_URL"
+ROUTE_POLICY_KEYS_PATH_ENV = "SLIP_ROUTE_POLICY_KEYS_PATH"
+ROUTE_POLICY_FETCH_TIMEOUT = 5.0
+ROUTE_POLICY_MAX_BYTES = 256 * 1024
 TRUSTED_ROUTE_POLICY_KEYS = {}
 _active_route_policy_manifest = None
 _route_policy_storage = {
@@ -249,6 +255,14 @@ _route_policy_storage = {
     "sha256": "",
     "last_error": "",
     "updated_at": 0.0,
+}
+_route_policy_remote = {
+    "state": "disabled",
+    "url": "",
+    "last_error": "",
+    "last_checked": 0.0,
+    "last_source": "",
+    "last_sha256": "",
 }
 
 DNS_DIAGNOSTIC_HOSTS = (
@@ -610,6 +624,218 @@ def _set_route_policy_storage(state, *, source=None, sha256="", error="", path=N
 
 def route_policy_storage_snapshot():
     return dict(_route_policy_storage)
+
+
+def _set_route_policy_remote(
+    state,
+    *,
+    url="",
+    error="",
+    source="",
+    sha256="",
+    now=None,
+):
+    _route_policy_remote.update({
+        "state": state,
+        "url": url,
+        "last_error": error,
+        "last_checked": time.time() if now is None else now,
+        "last_source": source,
+        "last_sha256": sha256,
+    })
+    return route_policy_remote_snapshot()
+
+
+def route_policy_remote_snapshot():
+    return dict(_route_policy_remote)
+
+
+def _validate_route_policy_key_map(keys):
+    if not isinstance(keys, dict):
+        raise ValueError("trusted policy keys must be an object")
+    normalized = {}
+    for key_id, value in keys.items():
+        if not isinstance(key_id, str) or not key_id.strip():
+            raise ValueError("trusted policy key id must be a non-empty string")
+        if not isinstance(value, str):
+            raise ValueError(f"trusted policy key {key_id!r} must be base64")
+        try:
+            raw = base64.b64decode(value, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"trusted policy key {key_id!r} is not valid base64") from exc
+        if len(raw) != 32:
+            raise ValueError(f"trusted policy key {key_id!r} is not an Ed25519 key")
+        normalized[key_id] = value
+    return normalized
+
+
+def load_trusted_route_policy_keys(
+    *,
+    path=None,
+    embedded_keys=None,
+):
+    keys = dict(TRUSTED_ROUTE_POLICY_KEYS if embedded_keys is None else embedded_keys)
+    if path is None:
+        path = os.environ.get(ROUTE_POLICY_KEYS_PATH_ENV, ROUTE_POLICY_KEYS_PATH)
+    if path and os.path.exists(path):
+        with open(path) as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "keys" in data:
+            data = data["keys"]
+        keys.update(_validate_route_policy_key_map(data))
+    return _validate_route_policy_key_map(keys)
+
+
+def validate_route_policy_remote_url(url):
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("remote policy url is empty")
+    parsed = urlparse(url.strip())
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("remote policy url must use https")
+    return url.strip()
+
+
+def fetch_signed_route_policy_bundle(
+    url,
+    *,
+    fetcher=None,
+    timeout=ROUTE_POLICY_FETCH_TIMEOUT,
+    max_bytes=ROUTE_POLICY_MAX_BYTES,
+):
+    url = validate_route_policy_remote_url(url)
+    if fetcher is not None:
+        data = fetcher(url)
+    else:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "SlipstreamPolicyUpdater/1",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = response.read(max_bytes + 1)
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("remote policy response must be JSON")
+    if len(data) > max_bytes:
+        raise ValueError("remote policy response is too large")
+    return json.loads(bytes(data).decode("utf-8"))
+
+
+def _route_policy_health_gate_passed(result):
+    if result is True:
+        return True, ""
+    if result is False:
+        return False, "health gate failed"
+    if isinstance(result, (list, tuple)) and len(result) >= 2:
+        ok, degraded = result[0], result[1]
+        try:
+            ok_count = int(ok)
+            degraded_count = int(degraded)
+        except (TypeError, ValueError):
+            return False, "health gate returned invalid counters"
+        if degraded_count == 0 and ok_count > 0:
+            return True, ""
+        return False, f"health gate degraded={degraded_count} ok={ok_count}"
+    if isinstance(result, dict):
+        degraded = int(result.get("degraded") or 0)
+        blocked = int(result.get("blocked") or 0)
+        ok = int(result.get("ok") or 0)
+        if degraded == 0 and blocked == 0 and ok > 0:
+            return True, ""
+        return False, f"health gate degraded={degraded} blocked={blocked} ok={ok}"
+    return False, "health gate did not run"
+
+
+def apply_signed_route_policy_bundle_with_health_gate(
+    bundle,
+    public_keys,
+    health_runner,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    now=None,
+):
+    previous_manifest = route_policy_manifest()
+    previous_storage = route_policy_storage_snapshot()
+    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    apply_route_policy_manifest(manifest)
+    try:
+        gate_ok, gate_error = _route_policy_health_gate_passed(health_runner())
+    except Exception as exc:
+        gate_ok, gate_error = False, f"health gate error: {exc}"
+    if not gate_ok:
+        if previous_manifest.get("source") == ROUTE_POLICY_SOURCE:
+            reset_route_policy_manifest()
+        else:
+            apply_route_policy_manifest(previous_manifest)
+        _set_route_policy_storage(
+            "rejected",
+            source=previous_storage.get("source") or previous_manifest.get("source"),
+            sha256=previous_storage.get("sha256") or route_policy_hash(previous_manifest),
+            error=gate_error,
+            path=policy_path,
+        )
+        return None
+    return save_signed_route_policy_bundle(
+        bundle,
+        public_keys,
+        policy_path=policy_path,
+        previous_path=previous_path,
+        now=now,
+    )
+
+
+def update_route_policy_from_remote(
+    *,
+    url=None,
+    public_keys=None,
+    fetcher=None,
+    health_runner=None,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    now=None,
+):
+    url = url if url is not None else os.environ.get(ROUTE_POLICY_REMOTE_URL_ENV, "")
+    now = time.time() if now is None else now
+    if not url:
+        _set_route_policy_remote("disabled", now=now)
+        return False
+    try:
+        url = validate_route_policy_remote_url(url)
+        keys = load_trusted_route_policy_keys() if public_keys is None else public_keys
+        if not keys:
+            raise ValueError("trusted policy keys are required")
+        if health_runner is None:
+            raise ValueError("remote policy health gate is required")
+        bundle = fetch_signed_route_policy_bundle(url, fetcher=fetcher)
+        status = apply_signed_route_policy_bundle_with_health_gate(
+            bundle,
+            keys,
+            health_runner,
+            policy_path=policy_path,
+            previous_path=previous_path,
+            now=now,
+        )
+        if not status:
+            error = route_policy_storage_snapshot().get("last_error", "health gate failed")
+            _set_route_policy_remote("rejected", url=url, error=error, now=now)
+            return False
+        _set_route_policy_remote(
+            "applied",
+            url=url,
+            source=status["source"],
+            sha256=status["sha256"],
+            now=now,
+        )
+        return True
+    except Exception as exc:
+        _set_route_policy_remote("error", url=url, error=str(exc), now=now)
+        return False
 
 
 def _atomic_write_json(path, data, *, mode=0o600):
@@ -2417,6 +2643,7 @@ def write_status(state, iface, voice_iface):
             "auto_geo_exit": auto_geo_exit_status_snapshot(now),
             "routing_policy": route_policy_status_snapshot(),
             "routing_policy_storage": route_policy_storage_snapshot(),
+            "routing_policy_remote": route_policy_remote_snapshot(),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),
@@ -4303,7 +4530,13 @@ def main():
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel
-    load_persisted_route_policy(TRUSTED_ROUTE_POLICY_KEYS)
+    try:
+        trusted_policy_keys = load_trusted_route_policy_keys()
+    except Exception as exc:
+        trusted_policy_keys = dict(TRUSTED_ROUTE_POLICY_KEYS)
+        _set_route_policy_remote("key_error", error=str(exc))
+        print(f">> route policy keys unavailable: {exc}", file=sys.stderr)
+    load_persisted_route_policy(trusted_policy_keys)
 
     # guard thread: voice sniffer follows the default iface + pf self-heal
     threading.Thread(target=network_monitor, args=(args.port,),

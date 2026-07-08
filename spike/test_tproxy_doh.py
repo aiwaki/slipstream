@@ -23,6 +23,7 @@ def reset_smart_dns_state():
     auto_confirming = dict(tproxy._auto_geph_confirming)
     auto_last_probe = dict(tproxy._auto_geph_last_probe)
     auto_last_status = dict(tproxy._auto_geph_last_status)
+    policy_remote = dict(tproxy._route_policy_remote)
     strat_scores = OrderedDict(
         (host, {name: dict(value) for name, value in per_host.items()})
         for host, per_host in tproxy._strat_scores.items()
@@ -74,6 +75,8 @@ def reset_smart_dns_state():
         tproxy._auto_geph_last_probe.update(auto_last_probe)
         tproxy._auto_geph_last_status.clear()
         tproxy._auto_geph_last_status.update(auto_last_status)
+        tproxy._route_policy_remote.clear()
+        tproxy._route_policy_remote.update(policy_remote)
         tproxy._strat_scores.clear()
         tproxy._strat_scores.update(strat_scores)
         tproxy._canary_health.clear()
@@ -336,6 +339,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     )
     assert status["routing_policy_storage"]["state"] == "bundled"
     assert status["routing_policy_storage"]["source"] == tproxy.ROUTE_POLICY_SOURCE
+    assert status["routing_policy_remote"]["state"] == "disabled"
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
@@ -712,6 +716,120 @@ def test_atomic_write_json_accepts_bare_filename(tmp_path, monkeypatch):
     tproxy._atomic_write_json("route-policy.json", {"ok": True})
 
     assert json.loads((tmp_path / "route-policy.json").read_text()) == {"ok": True}
+
+
+def test_trusted_route_policy_keys_load_from_file_and_validate(tmp_path):
+    key = base64.b64encode(b"\x01" * 32).decode("ascii")
+    path = tmp_path / "keys.json"
+    path.write_text(json.dumps({"keys": {"test": key}}))
+
+    assert tproxy.load_trusted_route_policy_keys(path=str(path)) == {"test": key}
+
+    path.write_text(json.dumps({"keys": {"bad": base64.b64encode(b"short").decode("ascii")}}))
+    with pytest.raises(ValueError, match="Ed25519"):
+        tproxy.load_trusted_route_policy_keys(path=str(path))
+
+
+def test_remote_route_policy_url_must_be_https():
+    with pytest.raises(ValueError, match="https"):
+        tproxy.validate_route_policy_remote_url("http://example.org/policy.json")
+
+    assert tproxy.validate_route_policy_remote_url(
+        "https://example.org/policy.json"
+    ) == "https://example.org/policy.json"
+
+
+def test_remote_route_policy_update_disabled_without_url(monkeypatch):
+    monkeypatch.delenv(tproxy.ROUTE_POLICY_REMOTE_URL_ENV, raising=False)
+
+    assert not tproxy.update_route_policy_from_remote(now=100.0)
+    remote = tproxy.route_policy_remote_snapshot()
+    assert remote["state"] == "disabled"
+    assert remote["last_checked"] == 100.0
+
+
+def test_remote_route_policy_rejects_without_health_gate(tmp_path):
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:remote"
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+
+    assert not tproxy.update_route_policy_from_remote(
+        url="https://policy.example.org/route-policy.json",
+        public_keys=public_keys,
+        fetcher=lambda _url: bundle,
+        policy_path=str(tmp_path / "route-policy.json"),
+        now=100.0,
+    )
+    remote = tproxy.route_policy_remote_snapshot()
+    assert remote["state"] == "error"
+    assert "health gate" in remote["last_error"]
+
+
+def test_signed_route_policy_health_gate_rolls_back_failed_candidate(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:remote"
+    manifest["geo_exit_routes"].append({
+        "domains": ["reject.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+
+    status = tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: (0, 1),
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+
+    assert status is None
+    assert not policy_path.exists()
+    assert tproxy.route_policy("reject.example.org")["route_class"] == (
+        tproxy.ROUTE_UNKNOWN
+    )
+    storage = tproxy.route_policy_storage_snapshot()
+    assert storage["state"] == "rejected"
+    assert "health gate degraded=1" in storage["last_error"]
+
+
+def test_remote_route_policy_fetch_applies_after_health_gate(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:remote"
+    manifest["geo_exit_routes"].append({
+        "domains": ["remote.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+
+    assert tproxy.update_route_policy_from_remote(
+        url="https://policy.example.org/route-policy.json",
+        public_keys=public_keys,
+        fetcher=lambda _url: bundle,
+        health_runner=lambda: (5, 0),
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+
+    assert policy_path.exists()
+    assert tproxy.route_policy("remote.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
+    storage = tproxy.route_policy_storage_snapshot()
+    assert storage["state"] == "saved"
+    remote = tproxy.route_policy_remote_snapshot()
+    assert remote["state"] == "applied"
+    assert remote["last_source"] == "signed:remote"
+    assert len(remote["last_sha256"]) == 64
 
 
 def test_ip_attempt_limits_follow_route_policy():
