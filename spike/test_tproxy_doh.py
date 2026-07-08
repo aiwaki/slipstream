@@ -731,6 +731,102 @@ def test_local_bypass_canary_failure_decays_only_local_strategy_cache(monkeypatc
         tproxy._strat_cache.clear()
 
 
+def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch):
+    host = "updates.discord.com"
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+    original_canary_state = dict(tproxy._canary_state)
+    calls = []
+
+    try:
+        monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
+        tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+        tproxy._canary_state.update({
+            "running": False,
+            "last_run": 0.0,
+            "last_started": 0.0,
+            "next_due": 0.0,
+            "last_reason": "",
+            "total": 0,
+            "ok": 0,
+            "degraded": 0,
+            "warnings": 0,
+            "unknown": 0,
+        })
+        tproxy.route_health_event(
+            tproxy.SERVICE_DISCORD,
+            tproxy.ROUTE_LOCAL_BYPASS,
+            host,
+            ok=True,
+            now=90.0,
+        )
+        tproxy._strat_cache.clear()
+        tproxy._strat_cache[host] = "split64+fake"
+        tproxy._strat_cache["gateway.discord.gg"] = "split16+fake"
+        tproxy._strat_cache["billing.openai.com"] = "split64+fake"
+
+        first = tproxy.note_local_bypass_runtime_result(
+            host,
+            False,
+            "runtime strategy probe failed",
+            now=100.0,
+            canary_now=200.0,
+            canary_runner=calls.append,
+        )
+
+        assert first["state"] == tproxy.HEALTH_OK
+        assert first["last_warning"] == "runtime strategy probe failed"
+        assert host not in tproxy._strat_cache
+        assert "gateway.discord.gg" not in tproxy._strat_cache
+        assert tproxy._strat_cache["billing.openai.com"] == "split64+fake"
+        assert calls == [f"runtime:{tproxy.SERVICE_DISCORD}"]
+
+        for offset in range(1, tproxy.LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER):
+            tproxy.note_local_bypass_runtime_result(
+                host,
+                False,
+                "runtime strategy probe failed",
+                now=100.0 + offset,
+                canary_now=200.0 + offset,
+                canary_runner=calls.append,
+            )
+
+        health = tproxy.route_health_snapshot(now=110.0)[tproxy.SERVICE_DISCORD]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_failure"] == "runtime strategy probe failed"
+        assert calls == [f"runtime:{tproxy.SERVICE_DISCORD}"]
+        assert not tproxy.geph_route(host)
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._canary_state.clear()
+        tproxy._canary_state.update(original_canary_state)
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
+def test_local_bypass_runtime_success_marks_route_ok():
+    host = "gateway.discord.gg"
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+
+        item = tproxy.note_local_bypass_runtime_result(host, True, now=100.0)
+
+        assert item["state"] == tproxy.HEALTH_OK
+        assert item["last_failure"] == ""
+        assert item["last_host"] == host
+        assert item["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
+    finally:
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_local_bypass_canary_requires_payload_success(monkeypatch):
     host = "updates.discord.com"
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])

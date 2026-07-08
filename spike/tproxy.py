@@ -215,6 +215,7 @@ CANARY_FAILURE_WINDOW = 5 * 60.0
 LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
+LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
@@ -646,6 +647,46 @@ def clear_route_strategy_cache(group=None, host=None):
     if removed:
         save_strat_cache()
     return removed
+
+
+def note_local_bypass_runtime_result(
+    host,
+    ok,
+    reason="",
+    now=None,
+    canary_now=None,
+    canary_runner=None,
+):
+    policy = route_policy(host, now=now)
+    if policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        return None
+    group = policy["service_group"]
+    if ok:
+        return route_health_event(
+            group,
+            ROUTE_LOCAL_BYPASS,
+            host,
+            True,
+            now=now,
+        )
+
+    clear_route_strategy_cache(group=group)
+    item = route_health_event(
+        group,
+        ROUTE_LOCAL_BYPASS,
+        host,
+        False,
+        reason or "runtime local bypass failed",
+        now=now,
+        degrade_after=LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER,
+    )
+    start_canaries_if_due(
+        f"runtime:{group}",
+        force=True,
+        now=canary_now,
+        runner=canary_runner,
+    )
+    return item
 
 
 def _health_snapshot_from(store, windows, now=None, include_identity=False):
@@ -3259,6 +3300,7 @@ async def _handle_impl(reader, writer):
 
     # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
     # (fallback dst_ip). Some CDN edges are bad while neighbors work.
+    policy = route_policy(host)
     real_ips = await resolve_connection_ips(host, dst_ip)
     ip_limit = ip_attempt_limit(host)
 
@@ -3309,11 +3351,20 @@ async def _handle_impl(reader, writer):
                 _dead.clear()
 
     if not result:
+        if policy["route_class"] == ROUTE_LOCAL_BYPASS:
+            note_local_bypass_runtime_result(
+                host,
+                False,
+                "runtime strategy probe failed",
+            )
         if VERBOSE:
             print(f"  {host or dst_ip} NO RESPONSE ({len(real_ips)} ips)",
                   file=sys.stderr)
         writer.close()
         return
+
+    if policy["route_class"] == ROUTE_LOCAL_BYPASS:
+        note_local_bypass_runtime_result(host, True)
 
     up_r, up_w, server_first = result
     if VERBOSE:

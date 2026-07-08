@@ -34,7 +34,7 @@ YouTube/googlevideo.
 | Stale `pf` recovery | daemon re-applies rules while active; tray watchdog kickstarts daemon and resets `pf` if recovery fails | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader throughput canary |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
-| Local bypass strategy decay | strategy ladder, per-host cache, and route-health HTTPS payload canaries | signed strategy updates, broader throughput checks |
+| Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, and route-health HTTPS payload canaries | signed strategy updates, broader throughput checks |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Strategy cache | bounded and versioned | signed remote strategy list |
@@ -54,7 +54,7 @@ YouTube/googlevideo.
 ### P1 - Routing Quality
 
 - Extend local-bypass payload canaries into broader throughput checks.
-- Extend canary failures into broader re-sweep and signed strategy update flows.
+- Extend runtime/canary failures into signed strategy update flows.
 - Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
 - Move host policy and attempt limits into a signed policy update format.
 

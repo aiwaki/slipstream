@@ -37,6 +37,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | ECC | Not installed | Current Codex plugin path is broad and upstream-doc-fragile for this repo. | Revisit only for a focused workflow need. |
 | 2026-07-09 | Ruflo | Not installed | Too much global agent harness behavior for current Slipstream work. | Mine health-check and ADR ideas only. |
 | 2026-07-09 | Steam Store web | Adopted narrowly | Route Steam Store web hosts through geo-exit; keep Steam CM/game/download paths out until separately proven. | Watch real Steam logs before widening host coverage. |
+| 2026-07-09 | Runtime local-bypass recheck | Implemented | Full local-bypass runtime strategy failure clears only that route group's strategy cache and force-schedules canary recheck. | Keep observing real failures before changing thresholds. |
 
 ## Codebase Graph
 
@@ -263,6 +264,18 @@ Fresh external snapshots checked on 2026-07-09:
 - This is intended to cover Steam-like future cases without adding a manual
   service rule first. Static policy is still preferred when a service class is
   well understood and has multiple endpoint families.
+
+## Runtime Local-Bypass Recheck
+
+- Periodic canaries were already able to clear stale local-bypass strategy
+  cache and re-sweep candidates, but runtime connection failures could stay
+  invisible until the next scheduled canary.
+- Slipstream now reports full runtime local-bypass strategy failures into route
+  health, clears only the affected local-bypass route group's strategy cache,
+  and force-schedules route canaries with the existing cooldown.
+- Runtime success marks the affected local-bypass group healthy. Discord and
+  YouTube/googlevideo remain local-bypass only; this path never promotes them
+  to Geph.
 
 ## Transfer Backlog
 

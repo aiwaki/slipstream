@@ -21,6 +21,7 @@ not a release promise.
 | Daemon watchdog / stale `pf` recovery | implemented in tray: kickstart daemon first, reset `pf` only if recovery fails |
 | Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
+| Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
@@ -54,7 +55,7 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 
 Goal: detect degradation before the user has to diagnose it manually.
 
-- Automatic re-sweep when a known strategy stops working.
+- Continue tuning automatic re-sweep when a known strategy stops working.
 - Broaden local-bypass canaries from small HTTPS payload checks to throughput
   thresholds where that is safe.
 - Signed strategy-list updates without rebuilding the app.
