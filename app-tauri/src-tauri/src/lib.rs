@@ -344,11 +344,49 @@ fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
     }
 }
 
+fn launchd_plist_uses_daemon(raw: &str, daemon: &Path) -> bool {
+    raw.contains(&format!("<string>{}</string>", daemon.display()))
+}
+
+fn install_diagnostic_value(
+    bundled_daemon: Option<&Path>,
+    installed_daemon: &Path,
+    launchd_plist: &Path,
+) -> Value {
+    let bundled_daemon_path = bundled_daemon.map(|path| path.to_string_lossy().into_owned());
+    let bundled_daemon_exists = bundled_daemon.map(|path| path.exists()).unwrap_or(false);
+    let installed_daemon_exists = installed_daemon.exists();
+    let installed_daemon_matches_bundle = bundled_daemon.and_then(|path| {
+        if path.exists() && installed_daemon_exists {
+            Some(same_file_bytes(path, installed_daemon))
+        } else {
+            None
+        }
+    });
+    let launchd_plist_uses_installed_daemon = fs::read_to_string(launchd_plist)
+        .ok()
+        .map(|raw| launchd_plist_uses_daemon(&raw, installed_daemon));
+
+    json!({
+        "daemon_path": installed_daemon.to_string_lossy(),
+        "bundled_daemon_path": bundled_daemon_path,
+        "installed_daemon_exists": installed_daemon_exists,
+        "bundled_daemon_exists": bundled_daemon_exists,
+        "installed_daemon_matches_bundle": installed_daemon_matches_bundle,
+        "launchd_label": LAUNCHD_LABEL,
+        "launchd_plist": launchd_plist.to_string_lossy(),
+        "launchd_plist_uses_installed_daemon": launchd_plist_uses_installed_daemon,
+        "status_path": STATUS_PATH,
+        "log_path": LOG_PATH,
+    })
+}
+
 fn diagnostic_snapshot_value(
     app_version: &str,
     status: Option<Value>,
     generated_at: f64,
     log_tail: Option<Value>,
+    bundled_daemon: Option<&Path>,
 ) -> Value {
     let mut snapshot = json!({
         "app": {
@@ -357,13 +395,11 @@ fn diagnostic_snapshot_value(
         },
         "generated_at_unix": generated_at,
         "daemon": status.unwrap_or_else(|| json!({"state": "off"})),
-        "install": {
-            "daemon_path": INSTALLED_DAEMON,
-            "launchd_label": LAUNCHD_LABEL,
-            "launchd_plist": LAUNCHD_PLIST,
-            "status_path": STATUS_PATH,
-            "log_path": LOG_PATH,
-        },
+        "install": install_diagnostic_value(
+            bundled_daemon,
+            Path::new(INSTALLED_DAEMON),
+            Path::new(LAUNCHD_PLIST),
+        ),
     });
     if let Some(log_tail) = log_tail {
         snapshot["log_tail"] = log_tail;
@@ -397,11 +433,13 @@ fn copy_text_to_clipboard(text: &str) -> bool {
 }
 
 fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
+    let bundled_daemon = bundled_daemon_path(app);
     let snapshot = diagnostic_snapshot_value(
         &app.package_info().version.to_string(),
         read_status(),
         unix_now_secs(),
         Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
+        bundled_daemon.as_deref(),
     );
     let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
         return false;
@@ -410,7 +448,7 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
 }
 
 fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
-    raw.contains(&format!("<string>{INSTALLED_DAEMON}</string>"))
+    launchd_plist_uses_daemon(raw, Path::new(INSTALLED_DAEMON))
 }
 
 fn same_file_bytes(left: &Path, right: &Path) -> bool {
@@ -1651,11 +1689,10 @@ pub fn run() {
 mod tests {
     use super::{
         copy_log_snapshot_direct, daemon_recovery_shell, diagnostic_snapshot_value,
-        diagnostic_log_tail, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon,
-        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        DAEMON_WATCHDOG_MISSES,
+        diagnostic_log_tail, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
+        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
+        routing_health_summary, shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
+        system_proxy_from_status, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -1749,6 +1786,7 @@ mod tests {
                 "available": true,
                 "lines": ["tg://proxy?server=127.0.0.1&secret=old-secret"]
             })),
+            None,
         );
         let text = serde_json::to_string(&snapshot).unwrap();
 
@@ -1762,6 +1800,49 @@ mod tests {
         assert!(!text.contains("pass-value"));
         assert!(!text.contains("old-secret"));
         assert!(text.contains("<redacted>"));
+    }
+
+    #[test]
+    fn install_diagnostics_report_bundled_daemon_sync() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-install-diagnostic-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bundled = dir.join("bundled-slipstreamd");
+        let installed = dir.join("installed-slipstreamd");
+        let plist = dir.join("dev.slipstream.tproxy.plist");
+        std::fs::write(&bundled, "daemon-v1").unwrap();
+        std::fs::write(&installed, "daemon-v1").unwrap();
+        std::fs::write(
+            &plist,
+            format!(
+                "<array><string>{}</string><string>--status</string></array>",
+                installed.display()
+            ),
+        )
+        .unwrap();
+
+        let synced = install_diagnostic_value(Some(&bundled), &installed, &plist);
+        assert_eq!(synced["bundled_daemon_exists"], true);
+        assert_eq!(synced["installed_daemon_exists"], true);
+        assert_eq!(synced["installed_daemon_matches_bundle"], true);
+        assert_eq!(synced["launchd_plist_uses_installed_daemon"], true);
+        assert_eq!(
+            synced["bundled_daemon_path"],
+            bundled.to_string_lossy().as_ref()
+        );
+
+        std::fs::write(&installed, "daemon-v2").unwrap();
+        let stale = install_diagnostic_value(Some(&bundled), &installed, &plist);
+        assert_eq!(stale["installed_daemon_matches_bundle"], false);
+
+        let missing_bundle = install_diagnostic_value(None, &installed, &plist);
+        assert_eq!(missing_bundle["bundled_daemon_exists"], false);
+        assert!(missing_bundle["installed_daemon_matches_bundle"].is_null());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
