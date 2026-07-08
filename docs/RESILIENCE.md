@@ -32,14 +32,14 @@ YouTube/googlevideo.
 | Crash restart | launchd `KeepAlive` | none |
 | Clean exit | restores `pf` on normal termination | watchdog for hard-kill cases |
 | Stale `pf` recovery | daemon re-applies rules while active | second watchdog if daemon stays dead |
-| Network transitions | detects default interface and re-arms pf/voice capture | canary after wake/network change |
+| Network transitions | detects default interface and re-arms pf/voice capture/canaries | throughput canary |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
-| Local bypass strategy decay | strategy ladder and per-host cache | throughput canary, signed strategy updates |
+| Local bypass strategy decay | strategy ladder, per-host cache, and route-health canaries | throughput canary, signed strategy updates |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Strategy cache | bounded and versioned | signed remote strategy list |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
-| Logs | rotating daemon log and tray snapshot | clearer user-facing failure summaries |
+| Logs | rotating daemon log, tray snapshot, and route-health failure summaries | richer diagnostic export |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
 
 ## Priority Order
@@ -54,9 +54,9 @@ YouTube/googlevideo.
 ### P1 - Routing Quality
 
 - Add throughput canary for Discord/YouTube-style local-bypass hosts.
-- Re-sweep after wake or network changes when a canary fails.
-- Surface local-bypass, Geph, Telegram proxy, and last-failure state in the tray.
-- Move host policy and attempt limits into an explicit policy table.
+- Extend canary failures into broader re-sweep and signed strategy update flows.
+- Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
+- Move host policy and attempt limits into a signed policy update format.
 
 ### P2 - Maintenance Horizon
 

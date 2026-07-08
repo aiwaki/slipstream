@@ -118,6 +118,8 @@ GEPH_HOSTS = (
     "anthropic.com", "claude.ai", "claudeusercontent.com",
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
 )
+OPENAI_HOSTS = ("openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com")
+ANTHROPIC_HOSTS = ("anthropic.com", "claude.ai", "claudeusercontent.com")
 
 # Flowseal/zapret-style hostlists mark services for LOCAL DPI bypass, not for a
 # foreign VPN exit. These hosts should stay on the user's normal route and use
@@ -128,6 +130,34 @@ DISCORD_HOSTS = (
 )
 GOOGLE_VIDEO = ("googlevideo.com", "youtube.com", "ytimg.com", "gvt1.com", "gvt2.com")
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
+TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
+
+ROUTE_LOCAL_BYPASS = "local_bypass"
+ROUTE_GEO_EXIT = "geo_exit"
+ROUTE_DIRECT = "direct_passthrough"
+ROUTE_UNKNOWN = "unknown"
+
+SERVICE_DISCORD = "discord"
+SERVICE_YOUTUBE = "youtube_video"
+SERVICE_OPENAI = "openai"
+SERVICE_ANTHROPIC = "anthropic"
+SERVICE_TELEGRAM = "telegram"
+SERVICE_GENERIC = "generic"
+
+STRATEGY_FAKE_ONLY = "fake_only"
+STRATEGY_GEPH = "geph"
+STRATEGY_DIRECT = "direct"
+STRATEGY_GENERAL = "general"
+
+HEALTH_OK = "ok"
+HEALTH_DEGRADED = "degraded"
+HEALTH_BLOCKED = "blocked"
+HEALTH_UNKNOWN = "unknown"
+
+CANARY_INTERVAL = 10 * 60.0
+CANARY_JITTER = 90.0
+CANARY_FORCE_MIN_GAP = 60.0
+CANARY_FAILURE_WINDOW = 5 * 60.0
 
 
 def _host_matches(host, domains):
@@ -147,6 +177,101 @@ def is_google_video_host(host):
 
 def is_local_bypass_host(host):
     return _host_matches(host, LOCAL_BYPASS_HOSTS)
+
+
+def normalize_host(host):
+    return host.lower().rstrip(".") if host else ""
+
+
+def route_policy(host, now=None):
+    h = normalize_host(host)
+    if not h:
+        return {
+            "host": "",
+            "route_class": ROUTE_UNKNOWN,
+            "service_group": SERVICE_GENERIC,
+            "strategy_set": STRATEGY_GENERAL,
+        }
+    if _host_matches(h, TELEGRAM_HOSTS):
+        return {
+            "host": h,
+            "route_class": ROUTE_DIRECT,
+            "service_group": SERVICE_TELEGRAM,
+            "strategy_set": STRATEGY_DIRECT,
+        }
+    if is_discord_host(h):
+        return {
+            "host": h,
+            "route_class": ROUTE_LOCAL_BYPASS,
+            "service_group": SERVICE_DISCORD,
+            "strategy_set": STRATEGY_FAKE_ONLY,
+        }
+    if is_google_video_host(h):
+        return {
+            "host": h,
+            "route_class": ROUTE_LOCAL_BYPASS,
+            "service_group": SERVICE_YOUTUBE,
+            "strategy_set": STRATEGY_FAKE_ONLY,
+        }
+    if is_russian(h):
+        return {
+            "host": h,
+            "route_class": ROUTE_DIRECT,
+            "service_group": SERVICE_GENERIC,
+            "strategy_set": STRATEGY_DIRECT,
+        }
+    wall_now = time.time() if now is None else now
+    if _host_matches(h, GEPH_HOSTS) or _auto_geph.get(h, 0) > wall_now:
+        if _host_matches(h, OPENAI_HOSTS) or h == "billing.openai.com":
+            group = SERVICE_OPENAI
+        elif _host_matches(h, ANTHROPIC_HOSTS):
+            group = SERVICE_ANTHROPIC
+        else:
+            group = SERVICE_GENERIC
+        return {
+            "host": h,
+            "route_class": ROUTE_GEO_EXIT,
+            "service_group": group,
+            "strategy_set": STRATEGY_GEPH,
+        }
+    return {
+        "host": h,
+        "route_class": ROUTE_UNKNOWN,
+        "service_group": SERVICE_GENERIC,
+        "strategy_set": STRATEGY_GENERAL,
+    }
+
+
+def _route_health_default(group, route_class=ROUTE_UNKNOWN):
+    return {
+        "state": HEALTH_UNKNOWN,
+        "last_failure": "",
+        "last_checked": 0.0,
+        "failures_5m": 0,
+        "last_host": "",
+        "last_route_class": route_class,
+    }
+
+
+_route_health = {
+    SERVICE_DISCORD: _route_health_default(SERVICE_DISCORD, ROUTE_LOCAL_BYPASS),
+    SERVICE_YOUTUBE: _route_health_default(SERVICE_YOUTUBE, ROUTE_LOCAL_BYPASS),
+    SERVICE_OPENAI: _route_health_default(SERVICE_OPENAI, ROUTE_GEO_EXIT),
+    SERVICE_ANTHROPIC: _route_health_default(SERVICE_ANTHROPIC, ROUTE_GEO_EXIT),
+    SERVICE_TELEGRAM: _route_health_default(SERVICE_TELEGRAM, ROUTE_DIRECT),
+}
+_route_failure_windows = {group: deque() for group in _route_health}
+_canary_state = {
+    "running": False,
+    "last_run": 0.0,
+    "last_started": 0.0,
+    "next_due": 0.0,
+    "last_reason": "",
+    "total": 0,
+    "ok": 0,
+    "degraded": 0,
+}
+_geph_last_failure = {"host": "", "reason": "", "ts": 0.0}
 
 # Telegram's MTProto data-centre IP ranges (published, AS62041/AS44907). MTProto
 # has no SNI and looks nothing like TLS, so our desync corrupts its handshake and
@@ -304,15 +429,107 @@ def _is_geph_infra(host):
 def geph_route(host):
     """Should this host go through geph's tunnel? Geo-blocked (listed OR learned)
     AND not Russian."""
-    if not host or is_russian(host) or is_local_bypass_host(host):
-        return False
-    h = host.lower().rstrip(".")
-    if _host_matches(h, GEPH_HOSTS):
-        return True
-    return _auto_geph.get(h, 0) > time.time()
+    return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+
+
+def route_health_event(group, route_class, host="", ok=True, reason="", state=None, now=None):
+    now = time.time() if now is None else now
+    if group not in _route_health:
+        _route_health[group] = _route_health_default(group, route_class)
+        _route_failure_windows[group] = deque()
+    q = _route_failure_windows.setdefault(group, deque())
+    cutoff = now - CANARY_FAILURE_WINDOW
+    while q and q[0] < cutoff:
+        q.popleft()
+    if ok:
+        health_state = HEALTH_OK
+        last_failure = ""
+    else:
+        q.append(now)
+        health_state = state or HEALTH_DEGRADED
+        last_failure = reason[:200]
+    _route_health[group] = {
+        "state": health_state,
+        "last_failure": last_failure,
+        "last_checked": now,
+        "failures_5m": len(q),
+        "last_host": normalize_host(host),
+        "last_route_class": route_class,
+    }
+
+
+def clear_route_strategy_cache(group=None, host=None):
+    removed = 0
+    if host:
+        removed = 1 if _strat_cache.pop(normalize_host(host), None) else 0
+        if removed:
+            save_strat_cache()
+        return removed
+    for cached_host in list(_strat_cache):
+        if group is None or route_policy(cached_host)["service_group"] == group:
+            _strat_cache.pop(cached_host, None)
+            removed += 1
+    if removed:
+        save_strat_cache()
+    return removed
+
+
+def route_health_snapshot(now=None):
+    now = time.time() if now is None else now
+    snap = {}
+    for group, item in _route_health.items():
+        q = _route_failure_windows.setdefault(group, deque())
+        cutoff = now - CANARY_FAILURE_WINDOW
+        while q and q[0] < cutoff:
+            q.popleft()
+        clone = dict(item)
+        clone["failures_5m"] = len(q)
+        snap[group] = clone
+    return snap
+
+
+def system_proxy_status_from_scutil(raw):
+    kind_by_key = {
+        "HTTPEnable": "http",
+        "HTTPSEnable": "https",
+        "SOCKSEnable": "socks",
+        "ProxyAutoConfigEnable": "pac",
+        "ProxyAutoDiscoveryEnable": "wpad",
+    }
+    kinds = []
+    for line in raw.splitlines():
+        key, sep, value = line.partition(":")
+        if not sep or value.strip() != "1":
+            continue
+        kind = kind_by_key.get(key.strip())
+        if kind and kind not in kinds:
+            kinds.append(kind)
+    return {
+        "state": "active" if kinds else "off",
+        "kind": ",".join(kinds),
+    }
+
+
+def current_system_proxy_status():
+    res = _run("scutil", "--proxy")
+    if res.returncode != 0:
+        return {"state": "unknown", "kind": "", "error": res.stderr[:200]}
+    return system_proxy_status_from_scutil(res.stdout)
 
 
 def log_geph_route_failure(host, reason, now=None):
+    _geph_last_failure.update({
+        "host": normalize_host(host),
+        "reason": reason[:200],
+        "ts": time.time(),
+    })
+    policy = route_policy(host)
+    route_health_event(
+        policy["service_group"], ROUTE_GEO_EXIT, host,
+        ok=False,
+        reason=reason,
+        state=HEALTH_BLOCKED if reason == "tunnel down" else HEALTH_DEGRADED,
+    )
     if not host:
         return
     now = time.monotonic() if now is None else now
@@ -404,6 +621,181 @@ def note_local_result(host, down_bytes, duration):
           f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)", file=sys.stderr)
 
 
+CANARY_SPECS = (
+    {"name": "discord_update", "group": SERVICE_DISCORD, "host": "updates.discord.com"},
+    {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": "www.youtube.com"},
+    {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
+    {"name": "openai_billing", "group": SERVICE_OPENAI, "host": "billing.openai.com"},
+    {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
+    {"name": "telegram_proxy", "group": SERVICE_TELEGRAM, "host": ""},
+)
+
+
+def _canary_delay(now=None):
+    now = time.monotonic() if now is None else now
+    return CANARY_INTERVAL + (int(now) % int(CANARY_JITTER or 1))
+
+
+def _canary_client_hello(host):
+    rec = build_fake_clienthello(host)
+    return rec[:5], rec[5:]
+
+
+def _close_probe_result(result):
+    if not result:
+        return
+    try:
+        result[1].close()
+    except Exception:
+        pass
+
+
+async def _run_local_bypass_canary(spec):
+    host = spec["host"]
+    policy = route_policy(host)
+    if policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
+        return False
+    ips = await resolve_connection_ips(host, None)
+    if not ips:
+        route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "dns failed")
+        clear_route_strategy_cache(group=spec["group"])
+        return False
+    head, body = _canary_client_hello(host)
+    for strat in strategy_order(host):
+        if not strat.get("fake"):
+            continue
+        for ip in ips[:ip_attempt_limit(host)]:
+            result = await dial_strategy(ip, 443, head, body, host, strat)
+            if result:
+                _close_probe_result(result)
+                if _strat_cache.get(host) != strat["name"]:
+                    remember_strategy(host, strat["name"])
+                route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
+                return True
+    clear_route_strategy_cache(group=spec["group"])
+    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
+    return False
+
+
+async def _run_geo_exit_canary(spec):
+    host = spec["host"]
+    policy = route_policy(host)
+    if policy["route_class"] != ROUTE_GEO_EXIT:
+        route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
+        return False
+    if not _geph_up:
+        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, False, "tunnel down", HEALTH_BLOCKED)
+        return False
+    result = await dial_via_geph(host, 443, build_fake_clienthello(host))
+    if result:
+        _close_probe_result(result)
+        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True)
+        return True
+    route_health_event(spec["group"], ROUTE_GEO_EXIT, host, False, "SOCKS connect failed")
+    return False
+
+
+async def _run_telegram_proxy_canary(spec):
+    ok = _tgws_state == "ready"
+    route_health_event(
+        spec["group"], ROUTE_DIRECT, "127.0.0.1",
+        ok=ok,
+        reason="" if ok else f"telegram proxy {_tgws_state}",
+        state=HEALTH_DEGRADED,
+    )
+    return ok
+
+
+async def run_route_canaries(reason="periodic"):
+    ok = degraded = total = 0
+    for spec in CANARY_SPECS:
+        total += 1
+        try:
+            policy = route_policy(spec.get("host"))
+            if spec["group"] == SERVICE_TELEGRAM:
+                passed = await _run_telegram_proxy_canary(spec)
+            elif policy["route_class"] == ROUTE_LOCAL_BYPASS:
+                passed = await _run_local_bypass_canary(spec)
+            elif policy["route_class"] == ROUTE_GEO_EXIT:
+                passed = await _run_geo_exit_canary(spec)
+            else:
+                route_health_event(
+                    spec["group"], policy["route_class"], spec.get("host", ""),
+                    ok=False,
+                    reason="unknown route policy",
+                )
+                passed = False
+            if passed:
+                ok += 1
+            else:
+                degraded += 1
+        except Exception as e:
+            degraded += 1
+            route_health_event(
+                spec["group"], ROUTE_UNKNOWN, spec.get("host", ""),
+                ok=False,
+                reason=f"canary error: {e}",
+            )
+    _canary_state.update({
+        "last_run": time.time(),
+        "last_reason": reason,
+        "total": total,
+        "ok": ok,
+        "degraded": degraded,
+    })
+    return ok, degraded
+
+
+def finish_canaries(now=None):
+    now = time.monotonic() if now is None else now
+    _canary_state["running"] = False
+    _canary_state["next_due"] = now + _canary_delay(now)
+
+
+def _canary_thread_main(reason):
+    try:
+        asyncio.run(run_route_canaries(reason))
+    except Exception as e:
+        print(f">> route canaries failed: {e}", file=sys.stderr)
+    finally:
+        finish_canaries()
+
+
+def start_canaries_if_due(reason="periodic", force=False, now=None, runner=None):
+    now = time.monotonic() if now is None else now
+    if _canary_state["running"]:
+        return False
+    if force and _canary_state["last_started"] and now - _canary_state["last_started"] < CANARY_FORCE_MIN_GAP:
+        return False
+    if not force and _canary_state["next_due"] and now < _canary_state["next_due"]:
+        return False
+    _canary_state["running"] = True
+    _canary_state["last_started"] = now
+    if runner is not None:
+        try:
+            runner(reason)
+        finally:
+            finish_canaries(now)
+        return True
+    threading.Thread(target=_canary_thread_main, args=(reason,), daemon=True).start()
+    return True
+
+
+def canary_status_snapshot(now=None):
+    now = time.monotonic() if now is None else now
+    next_due = _canary_state.get("next_due", 0.0)
+    return {
+        "running": bool(_canary_state.get("running")),
+        "last_run": _canary_state.get("last_run", 0.0),
+        "last_reason": _canary_state.get("last_reason", ""),
+        "next_due_in": int(max(0, next_due - now)) if next_due else 0,
+        "total": _canary_state.get("total", 0),
+        "ok": _canary_state.get("ok", 0),
+        "degraded": _canary_state.get("degraded", 0),
+    }
+
+
 def write_status(state, iface, voice_iface):
     try:
         now = time.time()
@@ -422,6 +814,15 @@ def write_status(state, iface, voice_iface):
             "geph_learned": len(_auto_geph),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
+            "route_health": route_health_snapshot(now),
+            "system_proxy": current_system_proxy_status(),
+            "geph_detail": {
+                "port": _geph_port or 0,
+                "failure_reason": _geph_last_failure["reason"],
+                "last_failure_host": _geph_last_failure["host"],
+                "last_failure_at": _geph_last_failure["ts"],
+            },
+            "canaries": canary_status_snapshot(),
         }
         st.update(tgws_status(now))
         tmp = STATUS_PATH + ".tmp"
@@ -707,15 +1108,16 @@ GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16",
 
 
 def strategy_order(host):
+    policy = route_policy(host)
     # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
     # so it uses the fake-only set and ignores any stale non-fake cache entry.
-    if is_discord_host(host):
+    if policy["service_group"] == SERVICE_DISCORD:
         win = _strat_cache.get(host)
         names = ([win] + [n for n in DISCORD_STRATS if n != win]
                  if win in DISCORD_STRATS else DISCORD_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
     # YouTube/googlevideo: same fake-only discipline (see GOOGLE_VIDEO note above).
-    if is_google_video_host(host):
+    if policy["service_group"] == SERVICE_YOUTUBE:
         win = _strat_cache.get(host)
         names = ([win] + [n for n in GOOGLE_VIDEO_STRATS if n != win]
                  if win in GOOGLE_VIDEO_STRATS else GOOGLE_VIDEO_STRATS)
@@ -988,6 +1390,8 @@ def network_monitor(port, voice=True):
 
     geph_strikes = 0
     last_tick = time.time()
+    last_iface = None
+    first_tick = True
     while True:
         now = time.time()
         if now - last_tick > 30:
@@ -997,8 +1401,13 @@ def network_monitor(port, voice=True):
             print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
+            start_canaries_if_due("wake", force=True)
         last_tick = now
         iface = default_iface()
+        if iface != last_iface:
+            if last_iface is not None:
+                start_canaries_if_due("network_change", force=True)
+            last_iface = iface
         # Hysteresis: a few failed probes (geph busy under load, or briefly
         # re-establishing its tunnel) must NOT flip us to "down" — that drops
         # geo-blocked hosts to local desync (RU exit IP -> Anthropic/CF 403).
@@ -1014,6 +1423,8 @@ def network_monitor(port, voice=True):
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
                   f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-blocked hosts "
                   f"{'tunnelled' if _geph_up else 'on local desync'}", file=sys.stderr)
+            if not first_tick:
+                start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
@@ -1029,9 +1440,11 @@ def network_monitor(port, voice=True):
                 print(">> no VPN -> Slipstream active", file=sys.stderr)
                 _pf_load(port)
                 _pf_applied = True
+                start_canaries_if_due("pf_reapply", force=True)
             elif not pf_has_rules(port):
                 print(">> pf rules vanished — re-applying", file=sys.stderr)
                 _pf_load(port)
+                start_canaries_if_due("pf_reapply", force=True)
         if send is not None:                       # scapy available
             if iface and iface != cur_iface:
                 if sniffer is not None:
@@ -1053,6 +1466,11 @@ def network_monitor(port, voice=True):
                     print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
         write_status("dormant" if vpn else "active", iface, cur_iface)
+        if first_tick:
+            start_canaries_if_due("startup", force=True)
+            first_tick = False
+        else:
+            start_canaries_if_due("periodic")
         time.sleep(5)
 
 
