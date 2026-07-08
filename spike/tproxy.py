@@ -159,6 +159,8 @@ CANARY_INTERVAL = 10 * 60.0
 CANARY_JITTER = 90.0
 CANARY_FORCE_MIN_GAP = 60.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
+LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
+LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
 
 
@@ -718,6 +720,108 @@ def _canary_client_hello(host):
     return rec[:5], rec[5:]
 
 
+def _local_payload_canary_request(host):
+    return (
+        f"HEAD / HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        f"User-Agent: SlipstreamRouteCanary/1\r\n"
+        f"Accept: */*\r\n"
+        f"Cache-Control: no-cache\r\n"
+        f"Connection: close\r\n\r\n"
+    ).encode("ascii", "ignore")
+
+
+def _local_payload_probe(ip, host, strat, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
+    """Complete a real TLS request over the candidate local-bypass strategy.
+
+    The raw strategy probe only proves that first server TLS bytes came back.
+    This probe drives the TLS state machine far enough to write a tiny HTTPS
+    HEAD request and read decrypted response bytes, catching stalled paths where
+    the handshake succeeds but application data does not move.
+    """
+    ctx = ssl.create_default_context()
+    inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
+    obj = ctx.wrap_bio(inbio, outbio, server_hostname=host)
+    sock = None
+    deadline = time.monotonic() + timeout
+    first_flight_sent = False
+    total = 0
+    try:
+        sock = socket.create_connection((ip, 443), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        while True:
+            try:
+                obj.do_handshake()
+                break
+            except ssl.SSLWantReadError:
+                out = outbio.read()
+                if out:
+                    if not first_flight_sent:
+                        first_flight_sent = True
+                        if strat.get("fake") and out[:1] == b"\x16":
+                            try:
+                                src_ip, src_port = sock.getsockname()
+                                inject_fake_for_host(host, src_ip, src_port, ip, 443)
+                            except Exception:
+                                pass
+                        if out[:1] == b"\x16":
+                            out = make_blob(out[:5], out[5:], host, strat.get("cap"))
+                    sock.sendall(out)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("payload canary handshake timeout")
+                sock.settimeout(max(0.1, remaining))
+                data = sock.recv(65536)
+                if not data:
+                    raise IOError("eof in handshake")
+                inbio.write(data)
+
+        obj.write(_local_payload_canary_request(host))
+        while True:
+            out = outbio.read()
+            if not out:
+                break
+            sock.sendall(out)
+
+        while time.monotonic() < deadline:
+            sock.settimeout(max(0.1, deadline - time.monotonic()))
+            try:
+                data = sock.recv(65536)
+            except socket.timeout:
+                break
+            if not data:
+                break
+            inbio.write(data)
+            while True:
+                try:
+                    dec = obj.read(65536)
+                except ssl.SSLWantReadError:
+                    break
+                except ssl.SSLError:
+                    return total
+                if not dec:
+                    break
+                total += len(dec)
+                if total >= LOCAL_PAYLOAD_CANARY_MIN_BYTES:
+                    return total
+    except Exception:
+        return 0
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    return total
+
+
+async def _run_local_payload_probe(ip, host, strat):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_POOL, _local_payload_probe, ip, host, strat)
+
+
 def _close_probe_result(result):
     if not result:
         return
@@ -753,6 +857,7 @@ async def _run_local_bypass_canary(spec):
         clear_route_strategy_cache(group=spec["group"])
         return False
     head, body = _canary_client_hello(host)
+    payload_failed = False
     for strat in strategy_order(host):
         if not strat.get("fake"):
             continue
@@ -760,12 +865,17 @@ async def _run_local_bypass_canary(spec):
             result = await dial_strategy(ip, 443, head, body, host, strat)
             if result:
                 _close_probe_result(result)
+                payload_bytes = await _run_local_payload_probe(ip, host, strat)
+                if payload_bytes < LOCAL_PAYLOAD_CANARY_MIN_BYTES:
+                    payload_failed = True
+                    continue
                 if _strat_cache.get(host) != strat["name"]:
                     remember_strategy(host, strat["name"])
                 route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
                 return True
     clear_route_strategy_cache(group=spec["group"])
-    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
+    reason = "payload probe failed" if payload_failed else "strategy probe failed"
+    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, reason)
     return False
 
 

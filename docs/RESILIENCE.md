@@ -32,9 +32,9 @@ YouTube/googlevideo.
 | Crash restart | launchd `KeepAlive` | none |
 | Clean exit | restores `pf` on normal termination | watchdog for hard-kill cases |
 | Stale `pf` recovery | daemon re-applies rules while active | second watchdog if daemon stays dead |
-| Network transitions | detects default interface and re-arms pf/voice capture/canaries | throughput canary |
+| Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader throughput canary |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
-| Local bypass strategy decay | strategy ladder, per-host cache, and route-health canaries | throughput canary, signed strategy updates |
+| Local bypass strategy decay | strategy ladder, per-host cache, and route-health HTTPS payload canaries | signed strategy updates, broader throughput checks |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Strategy cache | bounded and versioned | signed remote strategy list |
@@ -53,7 +53,7 @@ YouTube/googlevideo.
 
 ### P1 - Routing Quality
 
-- Add throughput canary for Discord/YouTube-style local-bypass hosts.
+- Extend local-bypass payload canaries into broader throughput checks.
 - Extend canary failures into broader re-sweep and signed strategy update flows.
 - Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
 - Move host policy and attempt limits into a signed policy update format.
