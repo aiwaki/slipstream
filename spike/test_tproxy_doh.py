@@ -494,6 +494,59 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
     }
 
 
+def test_route_policy_manifest_validator_preserves_bundled_manifest():
+    manifest = tproxy.route_policy_manifest()
+    normalized = tproxy.validate_route_policy_manifest(manifest)
+
+    assert normalized == manifest
+    assert tproxy.route_policy_canonical_bytes(manifest) == json.dumps(
+        manifest,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def test_route_policy_manifest_rejects_protected_group_geph_route():
+    manifest = tproxy.route_policy_manifest()
+    manifest["geo_exit_routes"].append({
+        "domains": ["discord.com"],
+        "service_group": tproxy.SERVICE_DISCORD,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+
+    with pytest.raises(ValueError, match="discord.*local_bypass"):
+        tproxy.validate_route_policy_manifest(manifest)
+
+
+def test_signed_route_policy_bundle_verifies_and_rejects_tampering():
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    manifest = tproxy.route_policy_manifest()
+    signature = private_key.sign(tproxy.route_policy_canonical_bytes(manifest))
+    bundle = {
+        "schema": tproxy.ROUTE_POLICY_SCHEMA_VERSION,
+        "key_id": "test",
+        "manifest": manifest,
+        "signature": base64.b64encode(signature).decode("ascii"),
+    }
+    public_keys = {"test": base64.b64encode(public_key).decode("ascii")}
+
+    assert tproxy.verify_signed_route_policy_bundle(bundle, public_keys) == manifest
+
+    tampered = json.loads(json.dumps(bundle))
+    tampered["manifest"]["geo_exit_routes"][0]["domains"].append("example.org")
+    with pytest.raises(ValueError, match="signature verification failed"):
+        tproxy.verify_signed_route_policy_bundle(tampered, public_keys)
+
+
 def test_ip_attempt_limits_follow_route_policy():
     assert tproxy.IP_ATTEMPT_LIMIT_BY_ROUTE == {
         tproxy.ROUTE_LOCAL_BYPASS: tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
