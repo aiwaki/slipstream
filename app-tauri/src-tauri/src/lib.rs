@@ -365,6 +365,33 @@ fn telegram_proxy_detail(proxy: &str, suggested: bool, ru: bool) -> Option<&'sta
     }
 }
 
+fn system_proxy_active_from_scutil(raw: &str) -> bool {
+    const ENABLE_KEYS: [&str; 5] = [
+        "HTTPEnable",
+        "HTTPSEnable",
+        "SOCKSEnable",
+        "ProxyAutoConfigEnable",
+        "ProxyAutoDiscoveryEnable",
+    ];
+
+    raw.lines().any(|line| {
+        let mut parts = line.splitn(2, ':');
+        let key = parts.next().map(str::trim);
+        let value = parts.next().map(str::trim);
+        matches!((key, value), (Some(k), Some("1")) if ENABLE_KEYS.contains(&k))
+    })
+}
+
+fn system_proxy_active() -> bool {
+    Command::new("/usr/sbin/scutil")
+        .arg("--proxy")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .is_some_and(|raw| system_proxy_active_from_scutil(&raw))
+}
+
 fn status_str<'a>(st: Option<&'a Value>, key: &str) -> Option<&'a str> {
     st.and_then(|v| v.get(key)).and_then(|x| x.as_str())
 }
@@ -466,6 +493,16 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         }
         if let Some(tg) = telegram_proxy_detail(&telegram_proxy, telegram_proxy_suggested, ru) {
             push_detail_part(&mut detail, tg);
+        }
+        if system_proxy_active() {
+            push_detail_part(
+                &mut detail,
+                if ru {
+                    "Системный прокси включён"
+                } else {
+                    "System proxy active"
+                },
+            );
         }
     }
     let _ = state_item.set_text(&title);
@@ -1326,7 +1363,7 @@ mod tests {
     use super::{
         daemon_recovery_shell, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
         osascript_dialog_args, shell_quote, should_recover_daemon, telegram_proxy_detail,
-        DAEMON_WATCHDOG_MISSES,
+        system_proxy_active_from_scutil, DAEMON_WATCHDOG_MISSES,
     };
 
     #[test]
@@ -1430,6 +1467,28 @@ mod tests {
             Some("Telegram-прокси недоступен")
         );
         assert_eq!(telegram_proxy_detail("unknown", false, false), None);
+    }
+
+    #[test]
+    fn inactive_system_proxy_ignores_stale_servers() {
+        let raw = r#"<dictionary> {
+  HTTPEnable : 0
+  HTTPProxy : 127.0.0.1
+  HTTPPort : 9910
+  HTTPSEnable : 0
+  SOCKSEnable : 0
+  ProxyAutoConfigEnable : 0
+}"#;
+
+        assert!(!system_proxy_active_from_scutil(raw));
+    }
+
+    #[test]
+    fn active_system_proxy_detects_manual_and_pac_modes() {
+        assert!(system_proxy_active_from_scutil("HTTPSEnable : 1\n"));
+        assert!(system_proxy_active_from_scutil("SOCKSEnable : 1\n"));
+        assert!(system_proxy_active_from_scutil("ProxyAutoConfigEnable : 1\n"));
+        assert!(system_proxy_active_from_scutil("ProxyAutoDiscoveryEnable : 1\n"));
     }
 
 }
