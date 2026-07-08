@@ -99,7 +99,7 @@ sudo python3 spike/tproxy.py --install
 | `spike/tproxy.py` | Служба десинка и раздельного роутинга для macOS (Python, root). |
 | `vendor/tg-ws-proxy/` | Встроенный Telegram-прокси MTProto-over-WebSocket. |
 | `vendor/geph/` | Сборка встроенного `geph5-client`. |
-| `docs/` | Заметки по устройству и безопасности. |
+| [`docs/`](docs/README.md) | Карта документации, решений и инженерных заметок. |
 
 ## Приватность
 

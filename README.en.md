@@ -98,7 +98,7 @@ The bundled `geph5-client` is built from source in CI
 | `spike/tproxy.py` | Desync and split-routing service for macOS (Python, root). |
 | `vendor/tg-ws-proxy/` | The bundled Telegram MTProto-over-WebSocket proxy. |
 | `vendor/geph/` | Build setup for the bundled `geph5-client`. |
-| `docs/` | Design and security notes. |
+| [`docs/`](docs/README.md) | Documentation map, decisions, and engineering notes. |
 
 ## Privacy
 
