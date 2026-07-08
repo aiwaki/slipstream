@@ -237,7 +237,19 @@ POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
     ROUTE_LOCAL_BYPASS: frozenset((STRATEGY_FAKE_ONLY,)),
     ROUTE_GEO_EXIT: frozenset((STRATEGY_GEPH,)),
 }
+POLICY_STATE_DIR = "/var/db/slipstream"
+ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
+ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
+TRUSTED_ROUTE_POLICY_KEYS = {}
 _active_route_policy_manifest = None
+_route_policy_storage = {
+    "state": "bundled",
+    "path": ROUTE_POLICY_STATE_PATH,
+    "source": ROUTE_POLICY_SOURCE,
+    "sha256": "",
+    "last_error": "",
+    "updated_at": 0.0,
+}
 
 DNS_DIAGNOSTIC_HOSTS = (
     ("updates.discord.com", SERVICE_DISCORD),
@@ -584,9 +596,154 @@ def apply_signed_route_policy_bundle(bundle, public_keys):
     return apply_route_policy_manifest(manifest)
 
 
+def _set_route_policy_storage(state, *, source=None, sha256="", error="", path=None):
+    _route_policy_storage.update({
+        "state": state,
+        "path": path or ROUTE_POLICY_STATE_PATH,
+        "source": source or "",
+        "sha256": sha256,
+        "last_error": error,
+        "updated_at": time.time(),
+    })
+    return route_policy_storage_snapshot()
+
+
+def route_policy_storage_snapshot():
+    return dict(_route_policy_storage)
+
+
+def _atomic_write_json(path, data, *, mode=0o600):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f, sort_keys=True, separators=(",", ":"))
+            f.write("\n")
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+
+def signed_route_policy_state(bundle, public_keys, now=None):
+    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    return {
+        "schema": ROUTE_POLICY_SCHEMA_VERSION,
+        "saved_at": time.time() if now is None else now,
+        "sha256": route_policy_hash(manifest),
+        "source": manifest["source"],
+        "bundle": bundle,
+    }
+
+
+def save_signed_route_policy_bundle(
+    bundle,
+    public_keys,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    now=None,
+):
+    state = signed_route_policy_state(bundle, public_keys, now=now)
+    if os.path.exists(policy_path):
+        os.makedirs(os.path.dirname(previous_path), exist_ok=True)
+        shutil.copy2(policy_path, previous_path)
+    _atomic_write_json(policy_path, state)
+    apply_signed_route_policy_bundle(bundle, public_keys)
+    _set_route_policy_storage(
+        "saved",
+        source=state["source"],
+        sha256=state["sha256"],
+        path=policy_path,
+    )
+    return route_policy_status_snapshot()
+
+
+def load_persisted_route_policy(
+    public_keys,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+):
+    if not os.path.exists(policy_path):
+        reset_route_policy_manifest()
+        _set_route_policy_storage(
+            "bundled",
+            source=ROUTE_POLICY_SOURCE,
+            sha256=route_policy_hash(),
+            path=policy_path,
+        )
+        return False
+    try:
+        with open(policy_path) as f:
+            state = json.load(f)
+        if state.get("schema") != ROUTE_POLICY_SCHEMA_VERSION:
+            raise ValueError("unsupported persisted policy schema")
+        manifest = verify_signed_route_policy_bundle(state.get("bundle"), public_keys)
+        expected_hash = state.get("sha256")
+        actual_hash = route_policy_hash(manifest)
+        if expected_hash != actual_hash:
+            raise ValueError("persisted policy hash mismatch")
+        apply_route_policy_manifest(manifest)
+        _set_route_policy_storage(
+            "loaded",
+            source=manifest["source"],
+            sha256=actual_hash,
+            path=policy_path,
+        )
+        return True
+    except Exception as exc:
+        reset_route_policy_manifest()
+        _set_route_policy_storage(
+            "invalid",
+            source=ROUTE_POLICY_SOURCE,
+            sha256=route_policy_hash(),
+            error=str(exc),
+            path=policy_path,
+        )
+        return False
+
+
+def rollback_route_policy(
+    public_keys,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+):
+    if os.path.exists(previous_path):
+        os.replace(previous_path, policy_path)
+        loaded = load_persisted_route_policy(public_keys, policy_path=policy_path)
+        if loaded:
+            _route_policy_storage["state"] = "rolled_back"
+        return loaded
+    try:
+        os.remove(policy_path)
+    except FileNotFoundError:
+        pass
+    reset_route_policy_manifest()
+    _set_route_policy_storage(
+        "rolled_back_bundled",
+        source=ROUTE_POLICY_SOURCE,
+        sha256=route_policy_hash(),
+        path=policy_path,
+    )
+    return True
+
+
 def reset_route_policy_manifest():
     global _active_route_policy_manifest
     _active_route_policy_manifest = None
+    _set_route_policy_storage(
+        "bundled",
+        source=ROUTE_POLICY_SOURCE,
+        sha256=route_policy_hash(),
+    )
     return route_policy_status_snapshot()
 
 
@@ -2259,6 +2416,7 @@ def write_status(state, iface, voice_iface):
             "geph_learned": len(_auto_geph),
             "auto_geo_exit": auto_geo_exit_status_snapshot(now),
             "routing_policy": route_policy_status_snapshot(),
+            "routing_policy_storage": route_policy_storage_snapshot(),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),
@@ -4145,6 +4303,7 @@ def main():
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel
+    load_persisted_route_policy(TRUSTED_ROUTE_POLICY_KEYS)
 
     # guard thread: voice sniffer follows the default iface + pf self-heal
     threading.Thread(target=network_monitor, args=(args.port,),

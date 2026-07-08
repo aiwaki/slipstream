@@ -334,6 +334,8 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["routing_policy"]["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
         len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
     )
+    assert status["routing_policy_storage"]["state"] == "bundled"
+    assert status["routing_policy_storage"]["source"] == tproxy.ROUTE_POLICY_SOURCE
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
@@ -521,7 +523,7 @@ def test_route_policy_manifest_rejects_protected_group_geph_route():
         tproxy.validate_route_policy_manifest(manifest)
 
 
-def test_signed_route_policy_bundle_verifies_and_rejects_tampering():
+def signed_test_policy_bundle(manifest, key_id="test"):
     pytest.importorskip("cryptography")
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -531,15 +533,21 @@ def test_signed_route_policy_bundle_verifies_and_rejects_tampering():
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
     )
-    manifest = tproxy.route_policy_manifest()
     signature = private_key.sign(tproxy.route_policy_canonical_bytes(manifest))
-    bundle = {
-        "schema": tproxy.ROUTE_POLICY_SCHEMA_VERSION,
-        "key_id": "test",
-        "manifest": manifest,
-        "signature": base64.b64encode(signature).decode("ascii"),
-    }
-    public_keys = {"test": base64.b64encode(public_key).decode("ascii")}
+    return (
+        {
+            "schema": tproxy.ROUTE_POLICY_SCHEMA_VERSION,
+            "key_id": key_id,
+            "manifest": manifest,
+            "signature": base64.b64encode(signature).decode("ascii"),
+        },
+        {key_id: base64.b64encode(public_key).decode("ascii")},
+    )
+
+
+def test_signed_route_policy_bundle_verifies_and_rejects_tampering():
+    manifest = tproxy.route_policy_manifest()
+    bundle, public_keys = signed_test_policy_bundle(manifest)
 
     assert tproxy.verify_signed_route_policy_bundle(bundle, public_keys) == manifest
 
@@ -587,15 +595,6 @@ def test_apply_route_policy_manifest_updates_lookup_status_and_reset():
 
 
 def test_apply_signed_route_policy_bundle_activates_manifest():
-    pytest.importorskip("cryptography")
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-    private_key = Ed25519PrivateKey.generate()
-    public_key = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
-    )
     manifest = tproxy.route_policy_manifest()
     manifest["source"] = "signed:test"
     manifest["geo_exit_routes"].append({
@@ -604,14 +603,7 @@ def test_apply_signed_route_policy_bundle_activates_manifest():
         "route_class": tproxy.ROUTE_GEO_EXIT,
         "strategy_set": tproxy.STRATEGY_GEPH,
     })
-    signature = private_key.sign(tproxy.route_policy_canonical_bytes(manifest))
-    bundle = {
-        "schema": tproxy.ROUTE_POLICY_SCHEMA_VERSION,
-        "key_id": "test",
-        "manifest": manifest,
-        "signature": base64.b64encode(signature).decode("ascii"),
-    }
-    public_keys = {"test": base64.b64encode(public_key).decode("ascii")}
+    bundle, public_keys = signed_test_policy_bundle(manifest)
 
     status = tproxy.apply_signed_route_policy_bundle(bundle, public_keys)
 
@@ -619,6 +611,107 @@ def test_apply_signed_route_policy_bundle_activates_manifest():
     assert tproxy.route_policy("payments.example.org")["route_class"] == (
         tproxy.ROUTE_GEO_EXIT
     )
+
+
+def test_persisted_route_policy_loads_and_rolls_back(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+
+    first = tproxy.route_policy_manifest()
+    first["source"] = "signed:first"
+    first["geo_exit_routes"].append({
+        "domains": ["alpha.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    first_bundle, public_keys = signed_test_policy_bundle(first)
+
+    tproxy.save_signed_route_policy_bundle(
+        first_bundle,
+        public_keys,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+    assert policy_path.exists()
+    assert not previous_path.exists()
+    assert tproxy.route_policy("alpha.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
+
+    tproxy.reset_route_policy_manifest()
+    assert tproxy.route_policy("alpha.example.org")["route_class"] == (
+        tproxy.ROUTE_UNKNOWN
+    )
+    assert tproxy.load_persisted_route_policy(public_keys, policy_path=str(policy_path))
+    assert tproxy.route_policy("alpha.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
+    assert tproxy.route_policy_storage_snapshot()["state"] == "loaded"
+
+    second = tproxy.route_policy_manifest()
+    second["source"] = "signed:second"
+    second["geo_exit_routes"].append({
+        "domains": ["beta.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    second_bundle, second_public_keys = signed_test_policy_bundle(second, key_id="test2")
+    public_keys.update(second_public_keys)
+    tproxy.save_signed_route_policy_bundle(
+        second_bundle,
+        public_keys,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=200.0,
+    )
+
+    assert previous_path.exists()
+    assert tproxy.route_policy("beta.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
+    assert tproxy.rollback_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+    )
+    assert tproxy.route_policy("alpha.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
+    assert tproxy.route_policy("beta.example.org")["route_class"] == tproxy.ROUTE_UNKNOWN
+    assert tproxy.route_policy_storage_snapshot()["state"] == "rolled_back"
+
+
+def test_persisted_route_policy_hash_mismatch_falls_back_to_bundled(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:test"
+    manifest["geo_exit_routes"].append({
+        "domains": ["gamma.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+    state = tproxy.signed_route_policy_state(bundle, public_keys, now=100.0)
+    state["sha256"] = "0" * 64
+    policy_path.write_text(json.dumps(state))
+
+    assert not tproxy.load_persisted_route_policy(public_keys, policy_path=str(policy_path))
+    assert tproxy.route_policy("gamma.example.org")["route_class"] == tproxy.ROUTE_UNKNOWN
+    storage = tproxy.route_policy_storage_snapshot()
+    assert storage["state"] == "invalid"
+    assert "hash mismatch" in storage["last_error"]
+
+
+def test_atomic_write_json_accepts_bare_filename(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    tproxy._atomic_write_json("route-policy.json", {"ok": True})
+
+    assert json.loads((tmp_path / "route-policy.json").read_text()) == {"ok": True}
 
 
 def test_ip_attempt_limits_follow_route_policy():

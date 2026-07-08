@@ -42,6 +42,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Policy metadata in diagnostics | Implemented | Daemon status and copied diagnostics expose bundled policy version, source, hash, domain counts, and attempt limits. | Use this as the base for signed remote policy verification. |
 | 2026-07-09 | Signed policy bundle validator | Implemented | Future policy bundles must pass manifest validation and Ed25519 signature verification; Discord/YouTube are protected from geo-exit policy. | Add remote fetch/apply only after key management and rollback rules are explicit. |
 | 2026-07-09 | Policy apply path | Implemented | A verified manifest can be activated in memory and reflected in route lookup/status; default runtime remains bundled until explicit apply. | Add persistence/rollback before any remote fetch is enabled. |
+| 2026-07-09 | Policy persistence and rollback | Implemented | Verified policy bundles can be saved under Slipstream-owned state, loaded on daemon start, and rolled back to the previous bundle or bundled policy. | Add remote fetch only after signing keys and post-apply health gates are explicit. |
 
 ## Codebase Graph
 
