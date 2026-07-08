@@ -93,6 +93,9 @@ jobs:
       - name: Check version metadata
         run: python3 scripts/sync_version.py --check
 
+      - name: Test release metadata scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
       - name: Build + sign the app
         working-directory: app-tauri
         env:
@@ -114,20 +117,12 @@ jobs:
           # updater artifacts (tauri produced these because a signing key was set)
           cp "$B/macos/Slipstream.app.tar.gz" "$OUT/"
           cp "$B/macos/Slipstream.app.tar.gz.sig" "$OUT/"
-          sig=$(cat "$B/macos/Slipstream.app.tar.gz.sig")
-          url="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/Slipstream.app.tar.gz"
-          # ISO date without relying on GNU date extensions
-          pub=$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')
-          python3 - "$sig" "$url" "$pub" > "$OUT/latest.json" <<'PY'
-          import json, sys
-          sig, url, pub = sys.argv[1], sys.argv[2], sys.argv[3]
-          print(json.dumps({
-              "version": "${{ steps.ver.outputs.version }}",
-              "notes": "See the release notes.",
-              "pub_date": pub,
-              "platforms": {"darwin-aarch64": {"signature": sig, "url": url}},
-          }, indent=2))
-          PY
+          python3 scripts/make_appcast.py \
+            --version "${{ steps.ver.outputs.version }}" \
+            --tag "${{ steps.ver.outputs.tag }}" \
+            --repository "${{ github.repository }}" \
+            --signature-file "$B/macos/Slipstream.app.tar.gz.sig" \
+            --output "$OUT/latest.json"
           echo "made appcast:"; cat "$OUT/latest.json"
 
       - name: Publish release
