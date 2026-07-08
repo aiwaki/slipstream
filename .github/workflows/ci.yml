@@ -19,11 +19,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "spike/requirements.txt"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app-tauri/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('app-tauri/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
 
       - name: Install Python test deps
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install pytest scapy cryptography certifi
+          python3 -m pip install -r spike/requirements.txt
 
       - name: Check version metadata
         run: python3 scripts/sync_version.py --check
