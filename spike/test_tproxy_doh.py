@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 import re
@@ -229,6 +230,8 @@ def test_local_payload_canary_request_supports_discord_gateway_websocket():
     assert b"Host: gateway.discord.gg\r\n" in req
     assert b"Upgrade: websocket\r\n" in req
     assert b"Sec-WebSocket-Version: 13\r\n" in req
+    key = re.search(rb"Sec-WebSocket-Key: ([^\r]+)", req).group(1)
+    assert len(base64.b64decode(key)) == 16
 
 
 def test_system_proxy_status_from_scutil_reports_kind_without_mutating():
