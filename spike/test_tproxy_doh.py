@@ -219,6 +219,18 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("t.me")["service_group"] == tproxy.SERVICE_TELEGRAM
 
 
+def test_local_payload_canary_request_supports_discord_gateway_websocket():
+    req = tproxy._local_payload_canary_request(
+        "gateway.discord.gg",
+        {"payload_probe": "websocket_upgrade"},
+    )
+
+    assert req.startswith(b"GET /?v=10&encoding=json HTTP/1.1\r\n")
+    assert b"Host: gateway.discord.gg\r\n" in req
+    assert b"Upgrade: websocket\r\n" in req
+    assert b"Sec-WebSocket-Version: 13\r\n" in req
+
+
 def test_system_proxy_status_from_scutil_reports_kind_without_mutating():
     raw = """
 HTTPEnable : 1
@@ -300,8 +312,8 @@ def test_local_bypass_canary_requires_payload_success(monkeypatch):
     async def connected(ip, port, head, body, sni, strat):
         return object(), DummyWriter(), b"\x16\x03\x03"
 
-    async def payload(ip, sni, strat):
-        payload_calls.append((ip, sni, strat["name"]))
+    async def payload(ip, sni, strat, spec):
+        payload_calls.append((ip, sni, strat["name"], spec["name"]))
         return tproxy.LOCAL_PAYLOAD_CANARY_MIN_BYTES
 
     try:
@@ -316,10 +328,10 @@ def test_local_bypass_canary_requires_payload_success(monkeypatch):
         monkeypatch.setattr(tproxy, "dial_strategy", connected)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", payload)
 
-        spec = {"group": tproxy.SERVICE_DISCORD, "host": host}
+        spec = {"name": "discord_update", "group": tproxy.SERVICE_DISCORD, "host": host}
         assert asyncio.run(tproxy._run_local_bypass_canary(spec))
 
-        assert payload_calls == [("203.0.113.10", host, "split64+fake")]
+        assert payload_calls == [("203.0.113.10", host, "split64+fake", "discord_update")]
         assert tproxy._strat_cache[host] == "split64+fake"
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_DISCORD]
         assert health["state"] == tproxy.HEALTH_OK
@@ -348,7 +360,7 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
     async def connected(ip, port, head, body, sni, strat):
         return object(), DummyWriter(), b"\x16\x03\x03"
 
-    async def no_payload(ip, sni, strat):
+    async def no_payload(ip, sni, strat, spec):
         return 0
 
     try:
@@ -372,7 +384,7 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
         monkeypatch.setattr(tproxy, "dial_strategy", connected)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
 
-        spec = {"group": tproxy.SERVICE_DISCORD, "host": host}
+        spec = {"name": "discord_update", "group": tproxy.SERVICE_DISCORD, "host": host}
         assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
 
         assert host not in tproxy._strat_cache
