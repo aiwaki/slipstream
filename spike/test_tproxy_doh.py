@@ -748,6 +748,102 @@ def test_remote_route_policy_update_disabled_without_url(monkeypatch):
     assert remote["last_checked"] == 100.0
 
 
+def test_remote_route_policy_scheduler_disabled_without_url(monkeypatch):
+    monkeypatch.delenv(tproxy.ROUTE_POLICY_REMOTE_URL_ENV, raising=False)
+
+    assert not tproxy.start_route_policy_remote_update_if_due("periodic", now=100.0)
+    remote = tproxy.route_policy_remote_snapshot()
+    assert remote["state"] == "disabled"
+    assert remote["next_due"] == 0.0
+    assert remote["failures"] == 0
+    assert remote["running"] is False
+
+
+def test_remote_route_policy_scheduler_success_sets_next_due(monkeypatch):
+    monkeypatch.setenv(
+        tproxy.ROUTE_POLICY_REMOTE_URL_ENV,
+        "https://policy.example.org/route-policy.json",
+    )
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_INTERVAL", 60.0)
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_JITTER", 1.0)
+    calls = []
+
+    assert tproxy.start_route_policy_remote_update_if_due(
+        "periodic",
+        now=100.0,
+        runner=lambda reason, url: calls.append((reason, url)) or True,
+    )
+
+    remote = tproxy.route_policy_remote_snapshot()
+    assert calls == [("periodic", "https://policy.example.org/route-policy.json")]
+    assert remote["running"] is False
+    assert remote["failures"] == 0
+    assert remote["next_due"] == 160.0
+    assert not tproxy.start_route_policy_remote_update_if_due(
+        "periodic",
+        now=159.0,
+        runner=lambda _reason, _url: True,
+    )
+
+
+def test_remote_route_policy_scheduler_failure_backs_off(monkeypatch):
+    monkeypatch.setenv(
+        tproxy.ROUTE_POLICY_REMOTE_URL_ENV,
+        "https://policy.example.org/route-policy.json",
+    )
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_RETRY_BASE", 10.0)
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_RETRY_MAX", 60.0)
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_JITTER", 1.0)
+    calls = []
+
+    assert not tproxy.start_route_policy_remote_update_if_due(
+        "periodic",
+        now=100.0,
+        runner=lambda reason, url: calls.append((reason, url)) or False,
+    )
+    remote = tproxy.route_policy_remote_snapshot()
+    assert remote["failures"] == 1
+    assert remote["next_due"] == 110.0
+    assert calls == [("periodic", "https://policy.example.org/route-policy.json")]
+
+    assert not tproxy.start_route_policy_remote_update_if_due(
+        "periodic",
+        now=109.0,
+        runner=lambda reason, url: calls.append((reason, url)) or True,
+    )
+    assert calls == [("periodic", "https://policy.example.org/route-policy.json")]
+
+
+def test_remote_route_policy_scheduler_waits_for_running_canaries(monkeypatch):
+    monkeypatch.setenv(
+        tproxy.ROUTE_POLICY_REMOTE_URL_ENV,
+        "https://policy.example.org/route-policy.json",
+    )
+    tproxy._canary_state["running"] = True
+    try:
+        assert not tproxy.start_route_policy_remote_update_if_due(
+            "periodic",
+            now=100.0,
+            runner=lambda _reason, _url: True,
+        )
+        assert tproxy.route_policy_remote_snapshot()["running"] is False
+    finally:
+        tproxy._canary_state["running"] = False
+
+
+def test_remote_route_policy_scheduler_rejects_non_https_url(monkeypatch):
+    monkeypatch.setenv(tproxy.ROUTE_POLICY_REMOTE_URL_ENV, "http://example.org/policy")
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_RETRY_BASE", 10.0)
+    monkeypatch.setattr(tproxy, "ROUTE_POLICY_REMOTE_JITTER", 1.0)
+
+    assert not tproxy.start_route_policy_remote_update_if_due("periodic", now=100.0)
+    remote = tproxy.route_policy_remote_snapshot()
+    assert remote["state"] == "error"
+    assert "https" in remote["last_error"]
+    assert remote["failures"] == 1
+    assert remote["next_due"] == 110.0
+
+
 def test_remote_route_policy_rejects_without_health_gate(tmp_path):
     manifest = tproxy.route_policy_manifest()
     manifest["source"] = "signed:remote"

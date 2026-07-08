@@ -246,6 +246,10 @@ ROUTE_POLICY_REMOTE_URL_ENV = "SLIP_ROUTE_POLICY_URL"
 ROUTE_POLICY_KEYS_PATH_ENV = "SLIP_ROUTE_POLICY_KEYS_PATH"
 ROUTE_POLICY_FETCH_TIMEOUT = 5.0
 ROUTE_POLICY_MAX_BYTES = 256 * 1024
+ROUTE_POLICY_REMOTE_INTERVAL = 6 * 60 * 60.0
+ROUTE_POLICY_REMOTE_JITTER = 5 * 60.0
+ROUTE_POLICY_REMOTE_RETRY_BASE = 15 * 60.0
+ROUTE_POLICY_REMOTE_RETRY_MAX = 6 * 60 * 60.0
 TRUSTED_ROUTE_POLICY_KEYS = {}
 _active_route_policy_manifest = None
 _route_policy_storage = {
@@ -263,6 +267,10 @@ _route_policy_remote = {
     "last_checked": 0.0,
     "last_source": "",
     "last_sha256": "",
+    "next_due": 0.0,
+    "running": False,
+    "failures": 0,
+    "last_reason": "",
 }
 
 DNS_DIAGNOSTIC_HOSTS = (
@@ -648,6 +656,95 @@ def _set_route_policy_remote(
 
 def route_policy_remote_snapshot():
     return dict(_route_policy_remote)
+
+
+def route_policy_remote_url():
+    return os.environ.get(ROUTE_POLICY_REMOTE_URL_ENV, "").strip()
+
+
+def _route_policy_remote_delay(success, failures, now=None):
+    now = time.monotonic() if now is None else now
+    jitter = int(now) % int(ROUTE_POLICY_REMOTE_JITTER or 1)
+    if success:
+        return ROUTE_POLICY_REMOTE_INTERVAL + jitter
+    failures = max(1, int(failures or 1))
+    delay = ROUTE_POLICY_REMOTE_RETRY_BASE * (2 ** (failures - 1))
+    return min(ROUTE_POLICY_REMOTE_RETRY_MAX, delay) + jitter
+
+
+def _finish_route_policy_remote_update(success, now=None):
+    now = time.monotonic() if now is None else now
+    failures = 0 if success else int(_route_policy_remote.get("failures") or 0) + 1
+    _route_policy_remote["running"] = False
+    _route_policy_remote["failures"] = failures
+    _route_policy_remote["next_due"] = now + _route_policy_remote_delay(success, failures, now)
+
+
+def _route_policy_remote_health_runner(reason):
+    return asyncio.run(run_route_canaries(f"policy_update:{reason}"))
+
+
+def _route_policy_remote_thread_main(reason, url):
+    success = False
+    try:
+        success = update_route_policy_from_remote(
+            url=url,
+            health_runner=lambda: _route_policy_remote_health_runner(reason),
+        )
+    except Exception as exc:
+        _set_route_policy_remote("error", url=url, error=str(exc))
+    finally:
+        _finish_route_policy_remote_update(success)
+
+
+def start_route_policy_remote_update_if_due(
+    reason="periodic",
+    *,
+    force=False,
+    now=None,
+    runner=None,
+):
+    now = time.monotonic() if now is None else now
+    url = route_policy_remote_url()
+    if not url:
+        _set_route_policy_remote("disabled", now=time.time())
+        _route_policy_remote["running"] = False
+        _route_policy_remote["next_due"] = 0.0
+        _route_policy_remote["failures"] = 0
+        _route_policy_remote["last_reason"] = reason
+        return False
+    if _route_policy_remote.get("running"):
+        return False
+    if _canary_state.get("running"):
+        return False
+    next_due = float(_route_policy_remote.get("next_due") or 0.0)
+    if not force and next_due and now < next_due:
+        return False
+    try:
+        url = validate_route_policy_remote_url(url)
+    except Exception as exc:
+        _set_route_policy_remote("error", url=url, error=str(exc))
+        _finish_route_policy_remote_update(False, now)
+        return False
+    _route_policy_remote["running"] = True
+    _route_policy_remote["last_reason"] = reason
+    if runner is not None:
+        success = False
+        try:
+            success = bool(runner(reason, url))
+            return success
+        except Exception as exc:
+            _set_route_policy_remote("error", url=url, error=str(exc))
+            return False
+        finally:
+            _finish_route_policy_remote_update(success, now)
+    threading.Thread(
+        target=_route_policy_remote_thread_main,
+        args=(reason, url),
+        daemon=True,
+        name="route-policy-update",
+    ).start()
+    return True
 
 
 def _validate_route_policy_key_map(keys):
@@ -3460,9 +3557,11 @@ def network_monitor(port, voice=True):
         write_status("dormant" if vpn else "active", iface, cur_iface)
         if first_tick:
             start_canaries_if_due("startup", force=True)
+            start_route_policy_remote_update_if_due("startup")
             first_tick = False
         else:
             start_canaries_if_due("periodic")
+            start_route_policy_remote_update_if_due("periodic")
         time.sleep(5)
 
 
