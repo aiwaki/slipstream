@@ -1556,7 +1556,11 @@ async def _handle_impl(reader, writer):
                 gr, gw = g
                 if VERBOSE:
                     print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
-                await asyncio.gather(pump(reader, gw), splice(gr, writer))
+                t0 = time.monotonic()
+                res = await asyncio.gather(pump(reader, gw), splice(gr, writer))
+                down_b = res[1] or 0
+                if down_b == 0 and time.monotonic() - t0 < 10:
+                    log_geph_route_failure(host, "remote closed without response")
                 return
             log_geph_route_failure(host, "SOCKS connect failed")
         else:

@@ -213,11 +213,15 @@ def test_geph_route_failure_log_is_rate_limited(capsys):
     try:
         tproxy.log_geph_route_failure("billing.openai.com", "SOCKS connect failed", now=10.0)
         tproxy.log_geph_route_failure("billing.openai.com", "SOCKS connect failed", now=20.0)
+        tproxy.log_geph_route_failure(
+            "billing.openai.com", "remote closed without response", now=30.0
+        )
         tproxy.log_geph_route_failure("billing.openai.com", "SOCKS connect failed", now=71.0)
 
         err = capsys.readouterr().err
-        assert err.count("billing.openai.com") == 2
+        assert err.count("billing.openai.com") == 3
         assert "SOCKS connect failed" in err
+        assert "remote closed without response" in err
     finally:
         tproxy._geph_fail_log.clear()
 
