@@ -8,8 +8,28 @@ import sys
 from types import SimpleNamespace
 from collections import OrderedDict
 
+import pytest
 import tproxy
 from tproxy import _doh_request, _doh_ssl_context
+
+
+@pytest.fixture(autouse=True)
+def reset_smart_dns_state():
+    dns_cache = dict(tproxy._system_dns_cache)
+    smart_ok = dict(tproxy._smart_dns_ok_until)
+    smart_failure = dict(tproxy._smart_dns_last_failure)
+    try:
+        tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
+        tproxy._smart_dns_ok_until.clear()
+        tproxy._smart_dns_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+        yield
+    finally:
+        tproxy._system_dns_cache.clear()
+        tproxy._system_dns_cache.update(dns_cache)
+        tproxy._smart_dns_ok_until.clear()
+        tproxy._smart_dns_ok_until.update(smart_ok)
+        tproxy._smart_dns_last_failure.clear()
+        tproxy._smart_dns_last_failure.update(smart_failure)
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -207,6 +227,15 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "servers": ["111.88.96.50", "111.88.96.51"],
         "managed_by_slipstream": False,
     }
+    assert status["smart_dns"] == {
+        "state": "available",
+        "providers": "xbox_dns",
+        "enabled_groups": [],
+        "last_failure_host": "",
+        "last_failure_reason": "",
+        "last_failure_at": 0.0,
+        "managed_by_slipstream": False,
+    }
     assert status["pf_state"] == {"applied": False, "enabled": False, "rules_loaded": False}
     assert status["geph_detail"]["port"] == 0
     assert "canaries" in status
@@ -340,6 +369,25 @@ def test_current_system_dns_status_is_cached(monkeypatch):
     finally:
         tproxy._system_dns_cache.clear()
         tproxy._system_dns_cache.update(original)
+
+
+def test_smart_dns_route_gate_requires_geo_exit_and_fresh_canary(monkeypatch):
+    monkeypatch.setattr(
+        tproxy,
+        "current_system_dns_status",
+        lambda now=None: {
+            "state": "xbox_dns",
+            "providers": "xbox_dns",
+            "servers": ["111.88.96.50"],
+            "managed_by_slipstream": False,
+        },
+    )
+    tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] = 200.0
+
+    assert tproxy.smart_dns_route_enabled("chatgpt.com", now=100.0)
+    assert not tproxy.smart_dns_route_enabled("chatgpt.com", now=201.0)
+    assert not tproxy.smart_dns_route_enabled("gateway.discord.gg", now=100.0)
+    assert not tproxy.smart_dns_route_enabled("rr2---sn-ntq7yner.googlevideo.com", now=100.0)
 
 
 def test_canary_scheduler_runs_on_forced_and_periodic_triggers(monkeypatch):
@@ -522,6 +570,7 @@ def test_youtube_canary_waits_for_observed_video_host(monkeypatch):
 
 
 def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):
+    monkeypatch.setattr(tproxy, "smart_dns_available", lambda: False)
     monkeypatch.setattr(tproxy, "_geph_up", False)
 
     spec = {"group": tproxy.SERVICE_OPENAI, "host": "billing.openai.com"}
@@ -545,6 +594,7 @@ def test_geo_exit_canary_success_clears_stale_geph_failure(monkeypatch):
         return object(), DummyWriter()
 
     try:
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: False)
         monkeypatch.setattr(tproxy, "_geph_up", True)
         monkeypatch.setattr(tproxy, "dial_via_geph", connected)
         tproxy._geph_last_failure.update({
@@ -560,6 +610,95 @@ def test_geo_exit_canary_success_clears_stale_geph_failure(monkeypatch):
     finally:
         tproxy._route_health[tproxy.SERVICE_OPENAI] = original
         tproxy._geph_last_failure.update(original_failure)
+
+
+def test_geo_exit_canary_uses_smart_dns_before_geph(monkeypatch):
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def system_ips(host):
+        assert host == "chatgpt.com"
+        return ["203.0.113.10"]
+
+    async def smart_probe(ip, port, first_flight, probe_timeout=3.0):
+        assert (ip, port) == ("203.0.113.10", 443)
+        return object(), DummyWriter(), b"\x16\x03\x03"
+
+    async def geph_should_not_run(host, port, first_flight):
+        raise AssertionError("Geph should not run after Smart DNS succeeds")
+
+    try:
+        monkeypatch.setattr(
+            tproxy,
+            "current_system_dns_status",
+            lambda now=None: {
+                "state": "xbox_dns",
+                "providers": "xbox_dns",
+                "servers": ["111.88.96.50"],
+                "managed_by_slipstream": False,
+            },
+        )
+        monkeypatch.setattr(tproxy, "system_resolve_async", system_ips)
+        monkeypatch.setattr(tproxy, "dial_and_probe", smart_probe)
+        monkeypatch.setattr(tproxy, "dial_via_geph", geph_should_not_run)
+        monkeypatch.setattr(tproxy, "_geph_up", False)
+
+        spec = {"group": tproxy.SERVICE_OPENAI, "host": "chatgpt.com"}
+        assert asyncio.run(tproxy._run_geo_exit_canary(spec))
+
+        assert tproxy._smart_dns_ok_until[tproxy.SERVICE_OPENAI] > 0
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_backend"] == tproxy.GEO_BACKEND_SMART_DNS
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+
+
+def test_geo_exit_canary_falls_back_to_geph_when_smart_dns_fails(monkeypatch):
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def system_ips(host):
+        return ["203.0.113.10"]
+
+    async def smart_probe(ip, port, first_flight, probe_timeout=3.0):
+        return None
+
+    async def geph_connect(host, port, first_flight):
+        return object(), DummyWriter()
+
+    try:
+        monkeypatch.setattr(
+            tproxy,
+            "current_system_dns_status",
+            lambda now=None: {
+                "state": "xbox_dns",
+                "providers": "xbox_dns",
+                "servers": ["111.88.96.50"],
+                "managed_by_slipstream": False,
+            },
+        )
+        monkeypatch.setattr(tproxy, "system_resolve_async", system_ips)
+        monkeypatch.setattr(tproxy, "dial_and_probe", smart_probe)
+        monkeypatch.setattr(tproxy, "dial_via_geph", geph_connect)
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+
+        spec = {"group": tproxy.SERVICE_OPENAI, "host": "chatgpt.com"}
+        assert asyncio.run(tproxy._run_geo_exit_canary(spec))
+
+        assert tproxy.SERVICE_OPENAI not in tproxy._smart_dns_ok_until
+        assert tproxy._smart_dns_last_failure["host"] == "chatgpt.com"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_backend"] == tproxy.GEO_BACKEND_GEPH
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
 
 
 def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
@@ -638,6 +777,7 @@ def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
         return None
 
     try:
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: False)
         tproxy._route_health[tproxy.SERVICE_OPENAI] = tproxy._route_health_default(
             tproxy.SERVICE_OPENAI,
             tproxy.ROUTE_GEO_EXIT,
