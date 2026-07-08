@@ -38,6 +38,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Ruflo | Not installed | Too much global agent harness behavior for current Slipstream work. | Mine health-check and ADR ideas only. |
 | 2026-07-09 | Steam Store web | Adopted narrowly | Route Steam Store web hosts through geo-exit; keep Steam CM/game/download paths out until separately proven. | Watch real Steam logs before widening host coverage. |
 | 2026-07-09 | Runtime local-bypass recheck | Implemented | Full local-bypass runtime strategy failure clears only that route group's strategy cache and force-schedules canary recheck. | Keep observing real failures before changing thresholds. |
+| 2026-07-09 | Explicit route policy tables | Implemented | Static direct, local-bypass, geo-exit, and attempt-limit policy now lives in inspectable tables instead of a hand-written route-policy branch chain. | Use this shape for signed policy updates and OS adapters. |
 
 ## Codebase Graph
 
@@ -276,6 +277,17 @@ Fresh external snapshots checked on 2026-07-09:
 - Runtime success marks the affected local-bypass group healthy. Discord and
   YouTube/googlevideo remain local-bypass only; this path never promotes them
   to Geph.
+
+## Explicit Route Policy Tables
+
+- Static direct/local-bypass/geo-exit routing now uses `ROUTE_POLICY_TABLE`,
+  `GEO_EXIT_POLICY_TABLE`, and `IP_ATTEMPT_LIMIT_BY_ROUTE` instead of embedding
+  every group decision directly in `route_policy`.
+- This does not change runtime behavior. Discord and YouTube/googlevideo remain
+  fake-only local-bypass groups; Telegram stays direct; OpenAI/Anthropic/Steam
+  Store stay geo-exit where listed.
+- The shape is intentionally close to a future signed policy payload while
+  keeping the current source-controlled policy as the only active authority.
 
 ## Transfer Backlog
 

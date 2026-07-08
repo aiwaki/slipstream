@@ -22,6 +22,7 @@ not a release promise.
 | Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
 | Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
+| Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
@@ -59,8 +60,7 @@ Goal: detect degradation before the user has to diagnose it manually.
 - Broaden local-bypass canaries from small HTTPS payload checks to throughput
   thresholds where that is safe.
 - Signed strategy-list updates without rebuilding the app.
-- More explicit policy tables for Geph hosts, local-bypass hosts, and attempt
-  limits.
+- Prepare explicit policy tables for signed updates and OS-specific adapters.
 
 ## P2 - Desktop Portability
 

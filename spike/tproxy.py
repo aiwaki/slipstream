@@ -122,25 +122,44 @@ _system_dns_cache = {
 SYSTEM_DNS_STATUS_TTL = 30.0
 SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
 
+ROUTE_LOCAL_BYPASS = "local_bypass"
+ROUTE_GEO_EXIT = "geo_exit"
+ROUTE_DIRECT = "direct_passthrough"
+ROUTE_UNKNOWN = "unknown"
+
+SERVICE_DISCORD = "discord"
+SERVICE_YOUTUBE = "youtube_video"
+SERVICE_OPENAI = "openai"
+SERVICE_ANTHROPIC = "anthropic"
+SERVICE_TELEGRAM = "telegram"
+SERVICE_STEAM_STORE = "steam_store"
+SERVICE_GENERIC = "generic"
+
+STRATEGY_FAKE_ONLY = "fake_only"
+STRATEGY_GEPH = "geph"
+STRATEGY_DIRECT = "direct"
+STRATEGY_GENERAL = "general"
+
+DEFAULT_IP_ATTEMPT_LIMIT = 2
+LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
+IP_ATTEMPT_LIMIT_BY_ROUTE = {
+    ROUTE_LOCAL_BYPASS: LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
+}
+
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
 # product decision it is NOT tunnelled through geph; its DPI block is handled by
 # the bundled tg-ws-proxy (local MTProto proxy), and its raw DC-IP sockets are
 # passed direct (see TELEGRAM_NETS) so our desync never mangles MTProto.
-GEPH_HOSTS = (
-    "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
-    "anthropic.com", "claude.ai", "claudeusercontent.com",
-    "intercomcdn.com",            # OpenAI/Anthropic support widget assets
-    "steampowered.com", "steamcommunity.com", "steamstatic.com",
-    "steamusercontent.com",
-    "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
-)
 OPENAI_HOSTS = ("openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com")
 ANTHROPIC_HOSTS = ("anthropic.com", "claude.ai", "claudeusercontent.com")
 STEAM_STORE_HOSTS = (
     "steampowered.com", "steamcommunity.com", "steamstatic.com",
     "steamusercontent.com",
     "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
+)
+GEPH_MISC_HOSTS = (
+    "intercomcdn.com",            # OpenAI/Anthropic support widget assets
 )
 
 # Flowseal/zapret-style hostlists mark services for LOCAL DPI bypass, not for a
@@ -169,18 +188,36 @@ XBOX_DNS_SERVERS = (
     "2a00:ab00:1233:26::51",
 )
 
-ROUTE_LOCAL_BYPASS = "local_bypass"
-ROUTE_GEO_EXIT = "geo_exit"
-ROUTE_DIRECT = "direct_passthrough"
-ROUTE_UNKNOWN = "unknown"
+ROUTE_POLICY_TABLE = (
+    {
+        "domains": TELEGRAM_HOSTS,
+        "route_class": ROUTE_DIRECT,
+        "service_group": SERVICE_TELEGRAM,
+        "strategy_set": STRATEGY_DIRECT,
+    },
+    {
+        "domains": DISCORD_HOSTS,
+        "route_class": ROUTE_LOCAL_BYPASS,
+        "service_group": SERVICE_DISCORD,
+        "strategy_set": STRATEGY_FAKE_ONLY,
+    },
+    {
+        "domains": GOOGLE_VIDEO,
+        "route_class": ROUTE_LOCAL_BYPASS,
+        "service_group": SERVICE_YOUTUBE,
+        "strategy_set": STRATEGY_FAKE_ONLY,
+    },
+)
 
-SERVICE_DISCORD = "discord"
-SERVICE_YOUTUBE = "youtube_video"
-SERVICE_OPENAI = "openai"
-SERVICE_ANTHROPIC = "anthropic"
-SERVICE_TELEGRAM = "telegram"
-SERVICE_STEAM_STORE = "steam_store"
-SERVICE_GENERIC = "generic"
+GEO_EXIT_POLICY_TABLE = (
+    {"domains": OPENAI_HOSTS + ("billing.openai.com",), "service_group": SERVICE_OPENAI},
+    {"domains": ANTHROPIC_HOSTS, "service_group": SERVICE_ANTHROPIC},
+    {"domains": STEAM_STORE_HOSTS, "service_group": SERVICE_STEAM_STORE},
+    {"domains": GEPH_MISC_HOSTS, "service_group": SERVICE_GENERIC},
+)
+GEPH_HOSTS = tuple(
+    domain for policy in GEO_EXIT_POLICY_TABLE for domain in policy["domains"]
+)
 
 DNS_DIAGNOSTIC_HOSTS = (
     ("updates.discord.com", SERVICE_DISCORD),
@@ -194,11 +231,6 @@ DNS_POISON_STUB_NETS = tuple(
         "87.228.47.0/24",  # observed ISP poison stub range
     )
 )
-
-STRATEGY_FAKE_ONLY = "fake_only"
-STRATEGY_GEPH = "geph"
-STRATEGY_DIRECT = "direct"
-STRATEGY_GENERAL = "general"
 
 GEO_BACKEND_GEPH = "geph"
 GEO_BACKEND_SMART_DNS = "smart_dns"
@@ -242,72 +274,53 @@ def is_google_video_host(host):
 
 
 def is_local_bypass_host(host):
-    return _host_matches(host, LOCAL_BYPASS_HOSTS)
+    return any(
+        policy["route_class"] == ROUTE_LOCAL_BYPASS
+        and _host_matches(host, policy["domains"])
+        for policy in ROUTE_POLICY_TABLE
+    )
 
 
 def normalize_host(host):
     return host.lower().rstrip(".") if host else ""
 
 
+def _policy_result(host, route_class, service_group, strategy_set):
+    return {
+        "host": host,
+        "route_class": route_class,
+        "service_group": service_group,
+        "strategy_set": strategy_set,
+    }
+
+
+def _match_policy(host, policies):
+    for policy in policies:
+        if _host_matches(host, policy["domains"]):
+            return policy
+    return None
+
+
 def route_policy(host, now=None):
     h = normalize_host(host)
     if not h:
-        return {
-            "host": "",
-            "route_class": ROUTE_UNKNOWN,
-            "service_group": SERVICE_GENERIC,
-            "strategy_set": STRATEGY_GENERAL,
-        }
-    if _host_matches(h, TELEGRAM_HOSTS):
-        return {
-            "host": h,
-            "route_class": ROUTE_DIRECT,
-            "service_group": SERVICE_TELEGRAM,
-            "strategy_set": STRATEGY_DIRECT,
-        }
-    if is_discord_host(h):
-        return {
-            "host": h,
-            "route_class": ROUTE_LOCAL_BYPASS,
-            "service_group": SERVICE_DISCORD,
-            "strategy_set": STRATEGY_FAKE_ONLY,
-        }
-    if is_google_video_host(h):
-        return {
-            "host": h,
-            "route_class": ROUTE_LOCAL_BYPASS,
-            "service_group": SERVICE_YOUTUBE,
-            "strategy_set": STRATEGY_FAKE_ONLY,
-        }
+        return _policy_result("", ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
+    policy = _match_policy(h, ROUTE_POLICY_TABLE)
+    if policy:
+        return _policy_result(
+            h,
+            policy["route_class"],
+            policy["service_group"],
+            policy["strategy_set"],
+        )
     if is_russian(h):
-        return {
-            "host": h,
-            "route_class": ROUTE_DIRECT,
-            "service_group": SERVICE_GENERIC,
-            "strategy_set": STRATEGY_DIRECT,
-        }
+        return _policy_result(h, ROUTE_DIRECT, SERVICE_GENERIC, STRATEGY_DIRECT)
     wall_now = time.time() if now is None else now
-    if _host_matches(h, GEPH_HOSTS) or _auto_geph.get(h, 0) > wall_now:
-        if _host_matches(h, OPENAI_HOSTS) or h == "billing.openai.com":
-            group = SERVICE_OPENAI
-        elif _host_matches(h, ANTHROPIC_HOSTS):
-            group = SERVICE_ANTHROPIC
-        elif _host_matches(h, STEAM_STORE_HOSTS):
-            group = SERVICE_STEAM_STORE
-        else:
-            group = SERVICE_GENERIC
-        return {
-            "host": h,
-            "route_class": ROUTE_GEO_EXIT,
-            "service_group": group,
-            "strategy_set": STRATEGY_GEPH,
-        }
-    return {
-        "host": h,
-        "route_class": ROUTE_UNKNOWN,
-        "service_group": SERVICE_GENERIC,
-        "strategy_set": STRATEGY_GENERAL,
-    }
+    geo_policy = _match_policy(h, GEO_EXIT_POLICY_TABLE)
+    if geo_policy or _auto_geph.get(h, 0) > wall_now:
+        group = (geo_policy or {}).get("service_group", SERVICE_GENERIC)
+        return _policy_result(h, ROUTE_GEO_EXIT, group, STRATEGY_GEPH)
+    return _policy_result(h, ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
 
 
 def _route_health_default(group, route_class=ROUTE_UNKNOWN):
@@ -2919,12 +2932,12 @@ async def resolve_connection_ips(host, fallback_ip):
     return _dedupe_ips(ips)
 
 
-DEFAULT_IP_ATTEMPT_LIMIT = 2
-LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
-
-
 def ip_attempt_limit(host):
-    return LOCAL_BYPASS_IP_ATTEMPT_LIMIT if is_local_bypass_host(host) else DEFAULT_IP_ATTEMPT_LIMIT
+    policy = route_policy(host)
+    return IP_ATTEMPT_LIMIT_BY_ROUTE.get(
+        policy["route_class"],
+        DEFAULT_IP_ATTEMPT_LIMIT,
+    )
 
 
 # ------------------------------------------------------------- relay

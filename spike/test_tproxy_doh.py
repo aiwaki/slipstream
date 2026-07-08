@@ -412,6 +412,53 @@ def test_route_policy_classifies_service_groups():
     )
 
 
+def test_route_policy_tables_are_explicit_and_keep_boundaries():
+    static = {
+        (policy["service_group"], policy["route_class"], policy["strategy_set"])
+        for policy in tproxy.ROUTE_POLICY_TABLE
+    }
+    geo = {
+        policy["service_group"]
+        for policy in tproxy.GEO_EXIT_POLICY_TABLE
+    }
+
+    assert (
+        tproxy.SERVICE_DISCORD,
+        tproxy.ROUTE_LOCAL_BYPASS,
+        tproxy.STRATEGY_FAKE_ONLY,
+    ) in static
+    assert (
+        tproxy.SERVICE_YOUTUBE,
+        tproxy.ROUTE_LOCAL_BYPASS,
+        tproxy.STRATEGY_FAKE_ONLY,
+    ) in static
+    assert (
+        tproxy.SERVICE_TELEGRAM,
+        tproxy.ROUTE_DIRECT,
+        tproxy.STRATEGY_DIRECT,
+    ) in static
+    assert tproxy.SERVICE_DISCORD not in geo
+    assert tproxy.SERVICE_YOUTUBE not in geo
+    assert tproxy.SERVICE_OPENAI in geo
+    assert tproxy.SERVICE_STEAM_STORE in geo
+    assert "discord.com" not in tproxy.GEPH_HOSTS
+    assert "youtube.com" not in tproxy.GEPH_HOSTS
+
+
+def test_ip_attempt_limits_follow_route_policy():
+    assert tproxy.IP_ATTEMPT_LIMIT_BY_ROUTE == {
+        tproxy.ROUTE_LOCAL_BYPASS: tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
+    }
+    assert tproxy.ip_attempt_limit("updates.discord.com") == (
+        tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT
+    )
+    assert tproxy.ip_attempt_limit("rr2---sn-ntq7yner.googlevideo.com") == (
+        tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT
+    )
+    assert tproxy.ip_attempt_limit("chatgpt.com") == tproxy.DEFAULT_IP_ATTEMPT_LIMIT
+    assert tproxy.ip_attempt_limit("example.net") == tproxy.DEFAULT_IP_ATTEMPT_LIMIT
+
+
 def test_local_payload_canary_request_supports_discord_gateway_websocket():
     spec = {"payload_probe": "websocket_upgrade"}
     req = tproxy._local_payload_canary_request(
