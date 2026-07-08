@@ -108,6 +108,8 @@ _env_geph_port = os.environ.get("SLIP_GEPH_PORT")
 GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [9954, 9909]
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
+_system_dns_cache = {"ts": 0.0, "status": None}
+SYSTEM_DNS_STATUS_TTL = 30.0
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
@@ -128,10 +130,22 @@ ANTHROPIC_HOSTS = ("anthropic.com", "claude.ai", "claudeusercontent.com")
 DISCORD_HOSTS = (
     "discord.com", "discord.gg", "discord.media",
     "discordapp.com", "discordapp.net", "discordcdn.com",
+    "discord.app", "discord.co", "discord.dev", "discord.design",
+    "discord.gift", "discord.gifts", "discord.new", "discord.store",
+    "discord.status", "discord-activities.com", "discordactivities.com",
+    "discordmerch.com", "discordpartygames.com", "discordsays.com",
+    "discordsez.com", "discordstatus.com", "dis.gd",
 )
 GOOGLE_VIDEO = ("googlevideo.com", "youtube.com", "ytimg.com", "gvt1.com", "gvt2.com")
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
+
+XBOX_DNS_SERVERS = (
+    "111.88.96.50",
+    "111.88.96.51",
+    "2a00:ab00:1233:26::50",
+    "2a00:ab00:1233:26::51",
+)
 
 ROUTE_LOCAL_BYPASS = "local_bypass"
 ROUTE_GEO_EXIT = "geo_exit"
@@ -585,6 +599,48 @@ def current_system_proxy_status():
     if res.returncode != 0:
         return {"state": "unknown", "kind": "", "error": res.stderr[:200]}
     return system_proxy_status_from_scutil(res.stdout)
+
+
+def system_dns_status_from_scutil(raw):
+    servers = []
+    for line in raw.splitlines():
+        key, sep, value = line.partition(":")
+        if not sep or not key.strip().startswith("nameserver["):
+            continue
+        server = value.strip().lower()
+        if server and server not in servers:
+            servers.append(server)
+
+    providers = []
+    if any(server in XBOX_DNS_SERVERS for server in servers):
+        providers.append("xbox_dns")
+
+    return {
+        "state": "xbox_dns" if providers else ("configured" if servers else "unknown"),
+        "providers": ",".join(providers),
+        "servers": servers[:8],
+        "managed_by_slipstream": False,
+    }
+
+
+def current_system_dns_status(now=None):
+    now = time.monotonic() if now is None else now
+    cached = _system_dns_cache.get("status")
+    if cached is not None and now - _system_dns_cache.get("ts", 0.0) < SYSTEM_DNS_STATUS_TTL:
+        return dict(cached)
+    res = _run("scutil", "--dns")
+    if res.returncode != 0:
+        status = {
+            "state": "unknown",
+            "providers": "",
+            "servers": [],
+            "managed_by_slipstream": False,
+            "error": res.stderr[:200],
+        }
+    else:
+        status = system_dns_status_from_scutil(res.stdout)
+    _system_dns_cache.update({"ts": now, "status": dict(status)})
+    return status
 
 
 def log_geph_route_failure(host, reason, now=None):
@@ -1088,6 +1144,7 @@ def write_status(state, iface, voice_iface):
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),
             "system_proxy": current_system_proxy_status(),
+            "system_dns": current_system_dns_status(),
             "pf_state": pf_state_snapshot(PROXY_PORT),
             "geph_detail": {
                 "port": _geph_port or 0,
