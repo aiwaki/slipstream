@@ -900,6 +900,7 @@ def write_status(state, iface, voice_iface):
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),
             "system_proxy": current_system_proxy_status(),
+            "pf_state": pf_state_snapshot(PROXY_PORT),
             "geph_detail": {
                 "port": _geph_port or 0,
                 "failure_reason": _geph_last_failure["reason"],
@@ -1003,6 +1004,16 @@ def pf_setup(port):
 def pf_has_rules(port):
     """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
     return f"port {port}" in _run("pfctl", "-sn").stdout
+
+
+def pf_state_snapshot(port=PROXY_PORT):
+    info = _run("pfctl", "-s", "info")
+    rules = _run("pfctl", "-sn")
+    return {
+        "applied": bool(_pf_applied),
+        "enabled": info.returncode == 0 and "Status: Enabled" in info.stdout,
+        "rules_loaded": rules.returncode == 0 and f"port {port}" in rules.stdout,
+    }
 
 
 def pf_teardown():
