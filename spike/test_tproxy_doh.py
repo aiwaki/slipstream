@@ -207,6 +207,21 @@ def test_discord_hosts_do_not_route_via_geph():
     assert not tproxy.geph_route("discord.com")
 
 
+def test_geph_route_failure_log_is_rate_limited(capsys):
+    tproxy._geph_fail_log.clear()
+
+    try:
+        tproxy.log_geph_route_failure("billing.openai.com", "SOCKS connect failed", now=10.0)
+        tproxy.log_geph_route_failure("billing.openai.com", "SOCKS connect failed", now=20.0)
+        tproxy.log_geph_route_failure("billing.openai.com", "SOCKS connect failed", now=71.0)
+
+        err = capsys.readouterr().err
+        assert err.count("billing.openai.com") == 2
+        assert "SOCKS connect failed" in err
+    finally:
+        tproxy._geph_fail_log.clear()
+
+
 def test_local_bypass_hosts_ignore_stale_auto_geph_cache():
     tproxy._auto_geph.clear()
     tproxy._auto_geph["updates.discord.com"] = tproxy.time.time() + 3600
