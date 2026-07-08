@@ -165,6 +165,57 @@ def test_repo_script_is_not_running_from_install_dir():
     )
 
 
+def test_copy_file_resilient_skips_identical_and_replaces_changed_file(tmp_path):
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.write_text("one")
+    dst.write_text("one")
+    dst.chmod(0o600)
+
+    assert tproxy._copy_file_resilient(str(src), str(dst), mode=0o644) == "unchanged"
+    assert dst.read_text() == "one"
+    assert dst.stat().st_mode & 0o777 == 0o644
+
+    src.write_text("two")
+
+    assert tproxy._copy_file_resilient(str(src), str(dst), mode=0o600) == "copied"
+    assert dst.read_text() == "two"
+    assert dst.stat().st_mode & 0o777 == 0o600
+
+
+def test_replace_tree_resilient_replaces_tree_without_stale_files(tmp_path):
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    (src / "fresh.txt").write_text("fresh")
+    (dst / "stale.txt").write_text("stale")
+
+    assert tproxy._replace_tree_resilient(str(src), str(dst)) == "replaced"
+    assert (dst / "fresh.txt").read_text() == "fresh"
+    assert not (dst / "stale.txt").exists()
+
+
+def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    (src / "fresh.txt").write_text("fresh")
+    (dst / "current.txt").write_text("current")
+
+    def fail_copytree(_src, _dst):
+        raise OSError("copy failed")
+
+    monkeypatch.setattr(tproxy.shutil, "copytree", fail_copytree)
+
+    with pytest.raises(OSError):
+        tproxy._replace_tree_resilient(str(src), str(dst), attempts=1)
+
+    assert (dst / "current.txt").read_text() == "current"
+    assert not (dst / "fresh.txt").exists()
+
+
 def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     filt = tproxy._ScapyMacNoiseFilter()
     noisy = logging.LogRecord(

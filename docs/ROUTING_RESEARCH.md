@@ -22,7 +22,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | Unblock-Pro GitHub mirrors | Backlog | App-owned downloads may try mirror URLs only with integrity validation. | Consider for updater/binary fetch reliability. |
 | 2026-07-08 | Unblock-Pro DNS/hosts/proxy mutations | Rejected | Do not mutate `/etc/hosts`, system DNS, system proxy, PAC, or external VPN configuration. | Detect and warn only. |
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
-| 2026-07-08 | Install hygiene ideas | Partially adopted | Safe-copy and binary-format validation are useful for daemon install reliability. | Keep retry/locked-file safe-copy as a separate release-hardening item. |
+| 2026-07-08 | Install hygiene ideas | Adopted where safe | Safe-copy and binary-format validation are useful for daemon install reliability. | Keep monitoring real reinstall logs for locked-file edge cases. |
 | 2026-07-08 | `xbox-dns.ru` external DNS | Reference only | Treat user-managed DNS as external state, not something Slipstream enables or rewrites. | Detect in diagnostics if useful; never auto-configure it. |
 
 ## Codebase Graph
@@ -110,6 +110,9 @@ Indexed routing projects:
 - Slipstream now validates that the bundled daemon is an executable Mach-O before
   asking launchd to install it, and reports the validation result in diagnostic
   snapshots.
+- Frozen daemon and vendored proxy installs now copy into a temporary path before
+  swapping into `/usr/local/slipstream`, and script installs skip identical files
+  while replacing changed files atomically.
 - GitHub mirror URL fallback could help updater reliability, but only as an
   app-owned download fallback. It must not mutate global proxy, DNS, or VPN
   settings.
@@ -139,7 +142,7 @@ Safe candidates:
   delivery, Discord API/CDN, Discord Gateway WebSocket, and Telegram local proxy.
 - Add autonomous route-health scoring based on wins/losses with exploration
   over time, similar to SonicDPI's Wilson-rank plus age-bonus model.
-- Add retry/locked-file safe-copy behavior around app-owned binary replacement.
+- Watch reinstall logs for any remaining locked-file or permission edge cases.
 - Add app-owned GitHub download mirror fallback only behind checksum/signature
   validation.
 - Consider a signed remote policy/strategy update format.

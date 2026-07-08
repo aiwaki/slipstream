@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import atexit
 import base64
+import filecmp
 import fcntl
 import ipaddress
 import json
@@ -1688,6 +1689,75 @@ def running_from_install_dir(file_path=None, executable=None, frozen=None):
     return os.path.abspath(file_path) == os.path.join(INSTALL_DIR, "tproxy.py")
 
 
+def _same_file_bytes(src, dst):
+    try:
+        return os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)
+    except Exception:
+        return False
+
+
+def _copy_file_resilient(src, dst, mode=None, attempts=3, delay=0.15):
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if _same_file_bytes(src, dst):
+        if mode is not None:
+            os.chmod(dst, mode)
+        return "unchanged"
+    last = None
+    for attempt in range(max(1, attempts)):
+        tmp = f"{dst}.tmp.{os.getpid()}.{attempt}"
+        try:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            shutil.copy2(src, tmp)
+            if mode is not None:
+                os.chmod(tmp, mode)
+            os.replace(tmp, dst)
+            return "copied"
+        except Exception as e:
+            last = e
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    raise last
+
+
+def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
+    parent = os.path.dirname(dst)
+    os.makedirs(parent, exist_ok=True)
+    last = None
+    for attempt in range(max(1, attempts)):
+        tmp = f"{dst}.tmp.{os.getpid()}.{attempt}"
+        backup = f"{dst}.bak.{os.getpid()}.{attempt}"
+        try:
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(backup, ignore_errors=True)
+            shutil.copytree(src, tmp)
+            if os.path.exists(dst):
+                os.replace(dst, backup)
+            os.replace(tmp, dst)
+            shutil.rmtree(backup, ignore_errors=True)
+            return "replaced"
+        except Exception as e:
+            last = e
+            if not os.path.exists(dst) and os.path.exists(backup):
+                try:
+                    os.replace(backup, dst)
+                except Exception:
+                    pass
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(backup, ignore_errors=True)
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    raise last
+
+
 def cleanup_stale():
     """Self-heal: kill any leftover tproxy instances (e.g. a Ctrl+Z-suspended
     one still holding the port) and reset pf to the clean default, so a fresh
@@ -3007,22 +3077,20 @@ def do_install(port):
     _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # stop old daemon before replacing files
     if getattr(sys, "frozen", False):
         src = os.path.dirname(os.path.abspath(sys.executable))
-        shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-        shutil.copytree(src, INSTALL_DIR)
+        _replace_tree_resilient(src, INSTALL_DIR)
         binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
         prog_args = [binary, "--port", str(port)]
         uninstall_hint = f"sudo {binary} --uninstall"
     else:
         os.makedirs(INSTALL_DIR, exist_ok=True)
         script = os.path.join(INSTALL_DIR, "tproxy.py")
-        shutil.copy(os.path.abspath(__file__), script)
+        _copy_file_resilient(os.path.abspath(__file__), script, mode=0o644)
         # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
         # it (otherwise Telegram falls back to plain MTProto passthrough).
         _here = os.path.dirname(os.path.abspath(__file__))
         _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
         if os.path.isdir(_src_proxy):
-            shutil.rmtree(os.path.join(INSTALL_DIR, "proxy"), ignore_errors=True)
-            shutil.copytree(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
+            _replace_tree_resilient(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
         venv = os.path.join(INSTALL_DIR, "venv")
         py = os.path.join(venv, "bin", "python3")
         if not os.path.exists(py):
