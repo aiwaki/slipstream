@@ -169,15 +169,24 @@ def test_default_iface_tracks_interface(monkeypatch):
 def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     status_path = tmp_path / "slipstream.status"
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
-    monkeypatch.setattr(
-        tproxy,
-        "_run",
-        lambda *args: type("Result", (), {"returncode": 0, "stdout": "HTTPEnable : 0\n", "stderr": ""})(),
-    )
+
+    def fake_run(*args):
+        if args == ("scutil", "--proxy"):
+            return type("Result", (), {"returncode": 0, "stdout": "HTTPEnable : 0\n", "stderr": ""})()
+        if args == ("scutil", "--dns"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "nameserver[0] : 111.88.96.50\nnameserver[1] : 111.88.96.51\n",
+                "stderr": "",
+            })()
+        return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
     tproxy._dead.clear()
     tproxy._dead["blocked.example"] = 999.0
+    tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
     monkeypatch.setattr(tproxy, "_geph_up", True)
 
     tproxy.write_status("active", "en0", "en0")
@@ -192,6 +201,12 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
+    assert status["system_dns"] == {
+        "state": "xbox_dns",
+        "providers": "xbox_dns",
+        "servers": ["111.88.96.50", "111.88.96.51"],
+        "managed_by_slipstream": False,
+    }
     assert status["pf_state"] == {"applied": False, "enabled": False, "rules_loaded": False}
     assert status["geph_detail"]["port"] == 0
     assert "canaries" in status
@@ -226,6 +241,12 @@ def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):
 def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("updates.discord.com") == {
         "host": "updates.discord.com",
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "service_group": tproxy.SERVICE_DISCORD,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+    }
+    assert tproxy.route_policy("status.discordstatus.com") == {
+        "host": "status.discordstatus.com",
         "route_class": tproxy.ROUTE_LOCAL_BYPASS,
         "service_group": tproxy.SERVICE_DISCORD,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
@@ -268,6 +289,57 @@ ProxyAutoConfigEnable : 1
         "state": "off",
         "kind": "",
     }
+
+
+def test_system_dns_status_detects_xbox_dns_without_mutating():
+    raw = """
+DNS configuration
+
+resolver #1
+  nameserver[0] : 111.88.96.50
+  nameserver[1] : 111.88.96.51
+
+DNS configuration (for scoped queries)
+resolver #1
+  nameserver[0] : 111.88.96.50
+"""
+
+    assert tproxy.system_dns_status_from_scutil(raw) == {
+        "state": "xbox_dns",
+        "providers": "xbox_dns",
+        "servers": ["111.88.96.50", "111.88.96.51"],
+        "managed_by_slipstream": False,
+    }
+    assert tproxy.system_dns_status_from_scutil("nameserver[0] : 1.1.1.1\n") == {
+        "state": "configured",
+        "providers": "",
+        "servers": ["1.1.1.1"],
+        "managed_by_slipstream": False,
+    }
+
+
+def test_current_system_dns_status_is_cached(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        return type("Result", (), {
+            "returncode": 0,
+            "stdout": "nameserver[0] : 111.88.96.50\n",
+            "stderr": "",
+        })()
+
+    original = dict(tproxy._system_dns_cache)
+    try:
+        tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
+        monkeypatch.setattr(tproxy, "_run", fake_run)
+
+        assert tproxy.current_system_dns_status(now=100.0)["state"] == "xbox_dns"
+        assert tproxy.current_system_dns_status(now=110.0)["state"] == "xbox_dns"
+        assert calls == [("scutil", "--dns")]
+    finally:
+        tproxy._system_dns_cache.clear()
+        tproxy._system_dns_cache.update(original)
 
 
 def test_canary_scheduler_runs_on_forced_and_periodic_triggers(monkeypatch):
@@ -690,6 +762,9 @@ def test_discord_hosts_do_not_route_via_geph():
     assert not tproxy.geph_route("updates.discord.com")
     assert not tproxy.geph_route("gateway.discord.gg")
     assert not tproxy.geph_route("discord.com")
+    assert not tproxy.geph_route("status.discordstatus.com")
+    assert not tproxy.geph_route("cdn.discordapp.com")
+    assert not tproxy.geph_route("discord-activities.com")
 
 
 def test_geph_route_failure_log_is_rate_limited(capsys):
