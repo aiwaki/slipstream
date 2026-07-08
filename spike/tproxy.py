@@ -161,6 +161,7 @@ CANARY_FORCE_MIN_GAP = 60.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
 LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
+LOCAL_PAYLOAD_DEGRADE_AFTER = 3
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
 
 
@@ -874,8 +875,20 @@ async def _run_local_bypass_canary(spec):
                 route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
                 return True
     clear_route_strategy_cache(group=spec["group"])
-    reason = "payload probe failed" if payload_failed else "strategy probe failed"
-    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, reason)
+    if payload_failed:
+        route_health_event(
+            spec["group"],
+            ROUTE_LOCAL_BYPASS,
+            host,
+            False,
+            "payload probe failed",
+            degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
+        )
+        health = route_health_snapshot().get(spec["group"], {})
+        if health.get("state") != HEALTH_DEGRADED:
+            return "warning"
+        return False
+    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
     return False
 
 
