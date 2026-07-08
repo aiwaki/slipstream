@@ -983,6 +983,17 @@ def test_discord_api_canary_uses_gateway_api_path():
     assert b"Host: discord.com\r\n" in req
 
 
+def test_discord_cdn_canary_uses_get_and_throughput_threshold():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_cdn")
+    req = tproxy._local_payload_canary_request(spec["host"], spec)
+
+    assert spec["payload_path"] == "/embed/avatars/0.png"
+    assert spec["payload_method"] == "GET"
+    assert tproxy._local_payload_min_bytes(spec) == 512
+    assert req.startswith(b"GET /embed/avatars/0.png HTTP/1.1\r\n")
+    assert b"Host: cdn.discordapp.com\r\n" in req
+
+
 def test_youtube_web_canary_uses_generate_204_path():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_web")
     req = tproxy._local_payload_canary_request(spec["host"], spec)
@@ -1463,6 +1474,56 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
         assert health["last_failure"] == "payload probe failed"
     finally:
         tproxy._strat_cache.clear()
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
+def test_local_bypass_canary_short_cdn_payload_warns_before_degraded(monkeypatch):
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_cdn")
+    host = spec["host"]
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def ips(_host, _fallback_ip):
+        return ["203.0.113.10"]
+
+    async def connected(ip, port, head, body, sni, strat):
+        return object(), DummyWriter(), b"\x16\x03\x03"
+
+    async def short_payload(ip, sni, strat, probe_spec):
+        assert probe_spec["payload_min_bytes"] == 512
+        return 128
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", ips)
+        monkeypatch.setattr(
+            tproxy,
+            "strategy_order",
+            lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
+        )
+        monkeypatch.setattr(tproxy, "dial_strategy", connected)
+        monkeypatch.setattr(tproxy, "_run_local_payload_probe", short_payload)
+
+        assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
+
+        check = tproxy.canary_health_snapshot()["discord_cdn"]
+        assert check["last_warning"] == "payload throughput below threshold"
+        assert check["last_warning_host"] == host
+        assert check["state"] != tproxy.HEALTH_DEGRADED
+
+        for _ in range(1, tproxy.LOCAL_PAYLOAD_DEGRADE_AFTER):
+            asyncio.run(tproxy._run_local_bypass_canary(spec))
+        check = tproxy.canary_health_snapshot()["discord_cdn"]
+        assert check["state"] == tproxy.HEALTH_DEGRADED
+        assert check["last_failure"] == "payload throughput below threshold"
+    finally:
         tproxy._route_health[tproxy.SERVICE_DISCORD] = original
         q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
         q.clear()

@@ -26,7 +26,7 @@ not a release promise.
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
 | Signed policy bundle validation | implemented as validator/verifier, local persist/rollback, and explicit opt-in remote fetch scheduler with health gates |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
-| Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
+| Throughput canary | partial: Discord CDN local-bypass canary verifies a small GET payload threshold |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -59,8 +59,8 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 Goal: detect degradation before the user has to diagnose it manually.
 
 - Continue tuning automatic re-sweep when a known strategy stops working.
-- Broaden local-bypass canaries from small HTTPS payload checks to throughput
-  thresholds where that is safe.
+- Broaden local-bypass throughput thresholds only for endpoints where response
+  size and semantics are safe to probe.
 - Signed strategy-list/policy updates without rebuilding the app; the local
   verifier, rollback path, and opt-in health-gated remote fetch scheduler are
   in place.

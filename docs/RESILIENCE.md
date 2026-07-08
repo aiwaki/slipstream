@@ -32,9 +32,9 @@ YouTube/googlevideo.
 | Crash restart | launchd `KeepAlive` | none |
 | Clean exit | restores `pf` on normal termination | non-tray watchdog for app-not-running cases |
 | Stale `pf` recovery | daemon re-applies rules while active; tray watchdog kickstarts daemon and resets `pf` if recovery fails | non-tray watchdog if both app and daemon are gone |
-| Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader throughput canary |
+| Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader endpoint-safe throughput canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
-| Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, and route-health HTTPS payload canaries | signed strategy updates, broader throughput checks |
+| Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe throughput checks |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle validator, local persist, rollback, and explicit opt-in remote fetch scheduler with health gates | production key distribution and release-channel policy hosting |
@@ -53,7 +53,7 @@ YouTube/googlevideo.
 
 ### P1 - Routing Quality
 
-- Extend local-bypass payload canaries into broader throughput checks.
+- Extend local-bypass payload canaries into endpoint-safe throughput checks where response size and method are predictable.
 - Extend runtime/canary failures into signed strategy update flows.
 - Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
 - Move explicit host policy, attempt limits, and policy hash into production

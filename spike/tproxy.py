@@ -2169,7 +2169,9 @@ CANARY_SPECS = (
         "name": "discord_cdn",
         "group": SERVICE_DISCORD,
         "host": "cdn.discordapp.com",
+        "payload_method": "GET",
         "payload_path": "/embed/avatars/0.png",
+        "payload_min_bytes": 512,
     },
     {
         "name": "youtube_web",
@@ -2227,17 +2229,27 @@ def _local_payload_canary_request(host, spec=None):
             "User-Agent: SlipstreamRouteCanary/1\r\n"
             "\r\n"
         ).encode("ascii", "ignore")
+    method = (spec or {}).get("payload_method", "HEAD")
+    if method not in {"HEAD", "GET"}:
+        method = "HEAD"
     path = (spec or {}).get("payload_path", "/")
     if not isinstance(path, str) or not path.startswith("/"):
         path = "/"
     return (
-        f"HEAD {path} HTTP/1.1\r\n"
+        f"{method} {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         f"User-Agent: SlipstreamRouteCanary/1\r\n"
         f"Accept: */*\r\n"
         f"Cache-Control: no-cache\r\n"
         f"Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
+
+
+def _local_payload_min_bytes(spec=None):
+    value = (spec or {}).get("payload_min_bytes", LOCAL_PAYLOAD_CANARY_MIN_BYTES)
+    if not isinstance(value, int) or isinstance(value, bool):
+        return LOCAL_PAYLOAD_CANARY_MIN_BYTES
+    return max(1, min(value, 64 * 1024))
 
 
 def _quic_version_negotiation_probe_packet(dcid=None, scid=None):
@@ -2314,6 +2326,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
     expect_websocket_upgrade = bool(
         spec and spec.get("payload_probe") == "websocket_upgrade"
     )
+    min_bytes = _local_payload_min_bytes(spec)
     observed = bytearray()
     try:
         sock = socket.create_connection((ip, 443), timeout=timeout)
@@ -2381,7 +2394,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                     if first_line.startswith(b"HTTP/1.1 101 "):
                         return max(total, LOCAL_PAYLOAD_CANARY_MIN_BYTES)
                     continue
-                if total >= LOCAL_PAYLOAD_CANARY_MIN_BYTES:
+                if total >= min_bytes:
                     return total
     except Exception:
         return 0
@@ -2515,6 +2528,8 @@ async def _run_local_bypass_canary(spec):
         return False
     head, body = _canary_client_hello(host)
     payload_failed = False
+    payload_short = False
+    min_payload_bytes = _local_payload_min_bytes(spec)
     for strat in strategy_order(host):
         strat_ok = False
         if not strat.get("fake"):
@@ -2524,8 +2539,10 @@ async def _run_local_bypass_canary(spec):
             if result:
                 _close_probe_result(result)
                 payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
-                if payload_bytes < LOCAL_PAYLOAD_CANARY_MIN_BYTES:
+                if payload_bytes < min_payload_bytes:
                     payload_failed = True
+                    if payload_bytes > 0:
+                        payload_short = True
                     continue
                 strat_ok = True
                 _record_strategy_result(host, strat["name"], True)
@@ -2537,12 +2554,13 @@ async def _run_local_bypass_canary(spec):
             _record_strategy_result(host, strat["name"], False)
     clear_route_strategy_cache(group=spec["group"])
     if payload_failed:
+        reason = "payload throughput below threshold" if payload_short else "payload probe failed"
         canary_health_event(
             spec,
             ROUTE_LOCAL_BYPASS,
             host,
             False,
-            "payload probe failed",
+            reason,
             degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
             soft=bool(spec.get("soft")),
         )
