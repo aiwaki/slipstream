@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -179,17 +180,26 @@ fn log_snapshot_shell(log_path: &str, snapshot_path: &Path, uid: &str, gid: &str
     )
 }
 
+fn copy_log_snapshot_direct(log_path: &str, snapshot_path: &Path) -> bool {
+    if fs::copy(log_path, snapshot_path).is_err() {
+        return false;
+    }
+    fs::set_permissions(snapshot_path, fs::Permissions::from_mode(0o600)).is_ok()
+}
+
 fn open_log_snapshot() -> bool {
-    let Some(uid) = current_numeric_id("-u") else {
-        return false;
-    };
-    let Some(gid) = current_numeric_id("-g") else {
-        return false;
-    };
     let snapshot = std::env::temp_dir().join("slipstream.log");
-    let shell = log_snapshot_shell(LOG_PATH, &snapshot, &uid, &gid);
-    if !run_admin_status(&shell) {
-        return false;
+    if !copy_log_snapshot_direct(LOG_PATH, &snapshot) {
+        let Some(uid) = current_numeric_id("-u") else {
+            return false;
+        };
+        let Some(gid) = current_numeric_id("-g") else {
+            return false;
+        };
+        let shell = log_snapshot_shell(LOG_PATH, &snapshot, &uid, &gid);
+        if !run_admin_status(&shell) {
+            return false;
+        }
     }
     Command::new("/usr/bin/open").arg(snapshot).spawn().is_ok()
 }
@@ -1523,12 +1533,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_recovery_shell, diagnostic_snapshot_value, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, route_class_health, routing_health_summary,
-        shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
-        system_proxy_from_status, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        copy_log_snapshot_direct, daemon_recovery_shell, diagnostic_snapshot_value,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
+        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
+        DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -1561,6 +1573,37 @@ mod tests {
              /usr/sbin/chown 501:20 '/tmp/Bob'\\''s Logs/slipstream.log' && \
              /bin/chmod 600 '/tmp/Bob'\\''s Logs/slipstream.log'"
         );
+    }
+
+    #[test]
+    fn copy_log_snapshot_direct_copies_and_clamps_permissions() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-log-copy-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("source.log");
+        let dst = dir.join("snapshot.log");
+        std::fs::write(&src, "line one\nline two\n").unwrap();
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        assert!(copy_log_snapshot_direct(src.to_str().unwrap(), &dst));
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "line one\nline two\n");
+        assert_eq!(std::fs::metadata(&dst).unwrap().permissions().mode() & 0o777, 0o600);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_log_snapshot_direct_returns_false_when_unreadable() {
+        let dst = std::env::temp_dir().join(format!(
+            "slipstream-missing-log-{}.log",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&dst);
+
+        assert!(!copy_log_snapshot_direct("/definitely/missing/slipstream.log", &dst));
     }
 
     #[test]

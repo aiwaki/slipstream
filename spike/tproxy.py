@@ -159,6 +159,7 @@ CANARY_INTERVAL = 10 * 60.0
 CANARY_JITTER = 90.0
 CANARY_FORCE_MIN_GAP = 60.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
+GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
 
 
 def _host_matches(host, domains):
@@ -438,7 +439,15 @@ def geph_route(host):
 
 
 def route_health_event(
-    group, route_class, host="", ok=True, reason="", state=None, now=None, soft=False
+    group,
+    route_class,
+    host="",
+    ok=True,
+    reason="",
+    state=None,
+    now=None,
+    soft=False,
+    degrade_after=1,
 ):
     now = time.time() if now is None else now
     if group not in _route_health:
@@ -468,10 +477,18 @@ def route_health_event(
             last_route_class = previous.get("last_route_class", route_class)
         else:
             q.append(now)
-            last_warning = ""
-            last_warning_host = ""
-            last_host = normalize_host(host)
-            last_route_class = route_class
+            if health_state == HEALTH_DEGRADED and len(q) < degrade_after:
+                health_state = previous.get("state", HEALTH_UNKNOWN)
+                last_warning = reason[:200]
+                last_warning_host = normalize_host(host)
+                last_failure = previous.get("last_failure", "")
+                last_host = previous.get("last_host", "")
+                last_route_class = previous.get("last_route_class", route_class)
+            else:
+                last_warning = ""
+                last_warning_host = ""
+                last_host = normalize_host(host)
+                last_route_class = route_class
     _route_health[group] = {
         "state": health_state,
         "last_failure": last_failure,
@@ -579,6 +596,7 @@ def log_geph_route_failure(host, reason, now=None):
         ok=False,
         reason=reason,
         state=HEALTH_BLOCKED if reason == "tunnel down" else HEALTH_DEGRADED,
+        degrade_after=1 if reason == "tunnel down" else GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     )
     if not host:
         return
