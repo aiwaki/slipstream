@@ -32,6 +32,7 @@ def reset_smart_dns_state():
         key: deque(value) for key, value in tproxy._canary_failure_windows.items()
     }
     try:
+        tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
             "ts": 0.0,
             "status": None,
@@ -56,6 +57,7 @@ def reset_smart_dns_state():
         tproxy._canary_failure_windows.clear()
         yield
     finally:
+        tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.clear()
         tproxy._system_dns_cache.update(dns_cache)
         tproxy._smart_dns_ok_until.clear()
@@ -545,6 +547,78 @@ def test_signed_route_policy_bundle_verifies_and_rejects_tampering():
     tampered["manifest"]["geo_exit_routes"][0]["domains"].append("example.org")
     with pytest.raises(ValueError, match="signature verification failed"):
         tproxy.verify_signed_route_policy_bundle(tampered, public_keys)
+
+
+def test_apply_route_policy_manifest_updates_lookup_status_and_reset():
+    manifest = tproxy.route_policy_manifest()
+    manifest["version"] += 1
+    manifest["source"] = "signed:test"
+    manifest["geo_exit_routes"].append({
+        "domains": ["example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    manifest["attempt_limits"][tproxy.ROUTE_GEO_EXIT] = 3
+
+    before = tproxy.route_policy("api.example.org")
+    assert before["route_class"] == tproxy.ROUTE_UNKNOWN
+
+    status = tproxy.apply_route_policy_manifest(manifest)
+
+    policy = tproxy.route_policy("api.example.org")
+    assert policy == {
+        "host": "api.example.org",
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "service_group": tproxy.SERVICE_GENERIC,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    }
+    assert tproxy.active_geph_hosts()[-1] == "example.org"
+    assert tproxy.ip_attempt_limit("api.example.org") == 3
+    assert status["source"] == "signed:test"
+    assert status["version"] == tproxy.ROUTE_POLICY_VERSION + 1
+    assert status["domains"][tproxy.ROUTE_GEO_EXIT] == len(tproxy.GEPH_HOSTS) + 1
+    assert status["sha256"] == tproxy.route_policy_hash(manifest)
+
+    reset_status = tproxy.reset_route_policy_manifest()
+    assert tproxy.route_policy("api.example.org")["route_class"] == tproxy.ROUTE_UNKNOWN
+    assert reset_status["source"] == tproxy.ROUTE_POLICY_SOURCE
+    assert reset_status["domains"][tproxy.ROUTE_GEO_EXIT] == len(tproxy.GEPH_HOSTS)
+
+
+def test_apply_signed_route_policy_bundle_activates_manifest():
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:test"
+    manifest["geo_exit_routes"].append({
+        "domains": ["payments.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    signature = private_key.sign(tproxy.route_policy_canonical_bytes(manifest))
+    bundle = {
+        "schema": tproxy.ROUTE_POLICY_SCHEMA_VERSION,
+        "key_id": "test",
+        "manifest": manifest,
+        "signature": base64.b64encode(signature).decode("ascii"),
+    }
+    public_keys = {"test": base64.b64encode(public_key).decode("ascii")}
+
+    status = tproxy.apply_signed_route_policy_bundle(bundle, public_keys)
+
+    assert status["source"] == "signed:test"
+    assert tproxy.route_policy("payments.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
 
 
 def test_ip_attempt_limits_follow_route_policy():

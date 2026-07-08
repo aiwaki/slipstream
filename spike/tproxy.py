@@ -237,6 +237,7 @@ POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
     ROUTE_LOCAL_BYPASS: frozenset((STRATEGY_FAKE_ONLY,)),
     ROUTE_GEO_EXIT: frozenset((STRATEGY_GEPH,)),
 }
+_active_route_policy_manifest = None
 
 DNS_DIAGNOSTIC_HOSTS = (
     ("updates.discord.com", SERVICE_DISCORD),
@@ -292,14 +293,6 @@ def is_google_video_host(host):
     return _host_matches(host, GOOGLE_VIDEO)
 
 
-def is_local_bypass_host(host):
-    return any(
-        policy["route_class"] == ROUTE_LOCAL_BYPASS
-        and _host_matches(host, policy["domains"])
-        for policy in ROUTE_POLICY_TABLE
-    )
-
-
 def normalize_host(host):
     return host.lower().rstrip(".") if host else ""
 
@@ -320,7 +313,7 @@ def _match_policy(host, policies):
     return None
 
 
-def route_policy_manifest():
+def bundled_route_policy_manifest():
     return {
         "version": ROUTE_POLICY_VERSION,
         "source": ROUTE_POLICY_SOURCE,
@@ -347,6 +340,59 @@ def route_policy_manifest():
             **IP_ATTEMPT_LIMIT_BY_ROUTE,
         },
     }
+
+
+def _copy_route_policy_manifest(manifest):
+    return {
+        "version": manifest["version"],
+        "source": manifest["source"],
+        "static_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "route_class": policy["route_class"],
+                "service_group": policy["service_group"],
+                "strategy_set": policy["strategy_set"],
+            }
+            for policy in manifest["static_routes"]
+        ],
+        "geo_exit_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "route_class": policy["route_class"],
+                "service_group": policy["service_group"],
+                "strategy_set": policy["strategy_set"],
+            }
+            for policy in manifest["geo_exit_routes"]
+        ],
+        "attempt_limits": dict(manifest["attempt_limits"]),
+    }
+
+
+def route_policy_manifest():
+    manifest = _active_route_policy_manifest
+    if manifest is None:
+        manifest = bundled_route_policy_manifest()
+    return _copy_route_policy_manifest(manifest)
+
+
+def route_policy_tables(manifest=None):
+    manifest = route_policy_manifest() if manifest is None else manifest
+    normalized = validate_route_policy_manifest(manifest)
+    return normalized["static_routes"], normalized["geo_exit_routes"]
+
+
+def active_geph_hosts(manifest=None):
+    _static_routes, geo_exit_routes = route_policy_tables(manifest)
+    return tuple(domain for policy in geo_exit_routes for domain in policy["domains"])
+
+
+def is_local_bypass_host(host):
+    static_routes, _geo_exit_routes = route_policy_tables()
+    return any(
+        policy["route_class"] == ROUTE_LOCAL_BYPASS
+        and _host_matches(host, policy["domains"])
+        for policy in static_routes
+    )
 
 
 def _require_policy_int(value, name, *, min_value=0, max_value=100):
@@ -520,6 +566,30 @@ def verify_signed_route_policy_bundle(bundle, public_keys):
     return manifest
 
 
+def apply_route_policy_manifest(manifest):
+    """Activate a validated route policy manifest in memory.
+
+    Remote fetch/persistence is deliberately outside this function. This keeps
+    policy updates staged: verify first, activate atomically, then expose the
+    active hash in status for diagnostics/rollback decisions.
+    """
+    global _active_route_policy_manifest
+    normalized = validate_route_policy_manifest(manifest)
+    _active_route_policy_manifest = _copy_route_policy_manifest(normalized)
+    return route_policy_status_snapshot()
+
+
+def apply_signed_route_policy_bundle(bundle, public_keys):
+    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    return apply_route_policy_manifest(manifest)
+
+
+def reset_route_policy_manifest():
+    global _active_route_policy_manifest
+    _active_route_policy_manifest = None
+    return route_policy_status_snapshot()
+
+
 def route_policy_status_snapshot():
     manifest = route_policy_manifest()
     domains = {ROUTE_DIRECT: 0, ROUTE_LOCAL_BYPASS: 0, ROUTE_GEO_EXIT: 0}
@@ -554,7 +624,8 @@ def route_policy(host, now=None):
     h = normalize_host(host)
     if not h:
         return _policy_result("", ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
-    policy = _match_policy(h, ROUTE_POLICY_TABLE)
+    static_routes, geo_exit_routes = route_policy_tables()
+    policy = _match_policy(h, static_routes)
     if policy:
         return _policy_result(
             h,
@@ -565,7 +636,7 @@ def route_policy(host, now=None):
     if is_russian(h):
         return _policy_result(h, ROUTE_DIRECT, SERVICE_GENERIC, STRATEGY_DIRECT)
     wall_now = time.time() if now is None else now
-    geo_policy = _match_policy(h, GEO_EXIT_POLICY_TABLE)
+    geo_policy = _match_policy(h, geo_exit_routes)
     if geo_policy or _auto_geph.get(h, 0) > wall_now:
         group = (geo_policy or {}).get("service_group", SERVICE_GENERIC)
         return _policy_result(h, ROUTE_GEO_EXIT, group, STRATEGY_GEPH)
@@ -3184,9 +3255,10 @@ async def resolve_connection_ips(host, fallback_ip):
 
 def ip_attempt_limit(host):
     policy = route_policy(host)
-    return IP_ATTEMPT_LIMIT_BY_ROUTE.get(
+    limits = route_policy_manifest().get("attempt_limits", {})
+    return limits.get(
         policy["route_class"],
-        DEFAULT_IP_ATTEMPT_LIMIT,
+        limits.get("default", DEFAULT_IP_ATTEMPT_LIMIT),
     )
 
 

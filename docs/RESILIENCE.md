@@ -37,7 +37,7 @@ YouTube/googlevideo.
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, and route-health HTTPS payload canaries | signed strategy updates, broader throughput checks |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
-| Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, and signed-bundle validator | signed remote fetch/apply |
+| Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle validator, and in-memory apply path | signed remote fetch/persist/apply |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
 | Logs | rotating daemon log, tray snapshot, route-health failure summaries, and copied diagnostic summary | attachable diagnostic file/export UX |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
@@ -57,7 +57,7 @@ YouTube/googlevideo.
 - Extend runtime/canary failures into signed strategy update flows.
 - Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
 - Move explicit host policy, attempt limits, and policy hash into a signed remote
-  fetch/apply flow.
+  fetch/persist/apply flow with rollback.
 
 ### P2 - Maintenance Horizon
 
