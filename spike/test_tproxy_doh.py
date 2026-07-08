@@ -6,7 +6,7 @@ import re
 import ssl
 import sys
 from types import SimpleNamespace
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 import pytest
 import tproxy
@@ -312,6 +312,27 @@ def test_local_payload_canary_request_supports_specific_http_path():
     assert b"Host: cdn.discordapp.com\r\n" in req
 
 
+def test_quic_version_negotiation_probe_packet_is_padded_initial():
+    pkt = tproxy._quic_version_negotiation_probe_packet(
+        dcid=b"12345678",
+        scid=b"abcdefgh",
+    )
+
+    assert len(pkt) == tproxy.QUIC_MIN_INITIAL_SIZE
+    assert pkt[:5] == b"\xc0" + tproxy.QUIC_UNSUPPORTED_VERSION
+    assert pkt[5] == 8
+    assert pkt[6:14] == b"12345678"
+    assert pkt[14] == 8
+    assert pkt[15:23] == b"abcdefgh"
+
+
+def test_quic_version_negotiation_response_detection():
+    assert tproxy._is_quic_version_negotiation_response(b"\xc0\x00\x00\x00\x00rest")
+
+    assert not tproxy._is_quic_version_negotiation_response(b"\xc0\x00\x00\x00\x01rest")
+    assert not tproxy._is_quic_version_negotiation_response(b"\x40\x00\x00\x00\x00rest")
+
+
 def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_cdn")
 
@@ -609,6 +630,46 @@ def test_youtube_canary_prefers_observed_video_host_then_redirector_fallback():
         assert tproxy._canary_host(spec) == "rr2---sn-ntq7yner.googlevideo.com"
     finally:
         tproxy._strat_cache.clear()
+
+
+def test_youtube_canary_uses_quic_transport_probe(monkeypatch):
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
+    original = dict(tproxy._route_health[tproxy.SERVICE_YOUTUBE])
+    original_window = deque(tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE])
+    tproxy._strat_cache.clear()
+    calls = []
+
+    async def fake_resolve(host, fallback_ip):
+        calls.append(("resolve", host, fallback_ip))
+        return ["203.0.113.10"]
+
+    async def fake_quic(ips):
+        calls.append(("quic", tuple(ips)))
+        return True
+
+    async def unexpected_dial_strategy(*args, **kwargs):
+        raise AssertionError("YouTube canary should not use the TCP strategy probe")
+
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_resolve)
+    monkeypatch.setattr(tproxy, "_run_quic_version_negotiation_probe", fake_quic)
+    monkeypatch.setattr(tproxy, "dial_strategy", unexpected_dial_strategy)
+
+    try:
+        assert asyncio.run(tproxy._run_local_bypass_canary(spec)) is True
+
+        assert calls == [
+            ("resolve", "redirector.googlevideo.com", None),
+            ("quic", ("203.0.113.10",)),
+        ]
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_host"] == "redirector.googlevideo.com"
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._route_health[tproxy.SERVICE_YOUTUBE] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE]
+        q.clear()
+        q.extend(original_window)
 
 
 def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):

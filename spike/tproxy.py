@@ -181,6 +181,9 @@ CANARY_FAILURE_WINDOW = 5 * 60.0
 LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
+QUIC_CANARY_TIMEOUT = 1.5
+QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
+QUIC_MIN_INITIAL_SIZE = 1200
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
 SMART_DNS_OK_TTL = 10 * 60.0
 _smart_dns_ok_until = {}
@@ -835,6 +838,7 @@ CANARY_SPECS = (
         "host": "",
         "observed_domains": ("googlevideo.com",),
         "fallback_host": "redirector.googlevideo.com",
+        "transport_probe": "quic_version_negotiation",
     },
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
     {
@@ -881,6 +885,53 @@ def _local_payload_canary_request(host, spec=None):
         f"Cache-Control: no-cache\r\n"
         f"Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
+
+
+def _quic_version_negotiation_probe_packet(dcid=None, scid=None):
+    dcid = os.urandom(8) if dcid is None else dcid
+    scid = os.urandom(8) if scid is None else scid
+    header = (
+        b"\xc0"
+        + QUIC_UNSUPPORTED_VERSION
+        + bytes([len(dcid)])
+        + dcid
+        + bytes([len(scid)])
+        + scid
+    )
+    if len(header) >= QUIC_MIN_INITIAL_SIZE:
+        return header
+    return header + (b"\x00" * (QUIC_MIN_INITIAL_SIZE - len(header)))
+
+
+def _is_quic_version_negotiation_response(data):
+    return len(data) >= 5 and bool(data[0] & 0x80) and data[1:5] == b"\x00\x00\x00\x00"
+
+
+def _quic_version_negotiation_probe(ip, timeout=QUIC_CANARY_TIMEOUT):
+    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    addr = (ip, 443, 0, 0) if family == socket.AF_INET6 else (ip, 443)
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    try:
+        sock.settimeout(timeout)
+        sock.sendto(_quic_version_negotiation_probe_packet(), addr)
+        data, _peer = sock.recvfrom(2048)
+        return _is_quic_version_negotiation_response(data)
+    except Exception:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+async def _run_quic_version_negotiation_probe(ips):
+    loop = asyncio.get_running_loop()
+    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
+        ok = await loop.run_in_executor(_POOL, _quic_version_negotiation_probe, ip)
+        if ok:
+            return True
+    return False
 
 
 def _local_payload_ssl_context():
@@ -1074,6 +1125,22 @@ async def _run_local_bypass_canary(spec):
     if not ips:
         route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "dns failed")
         clear_route_strategy_cache(group=spec["group"])
+        return False
+    if spec.get("transport_probe") == "quic_version_negotiation":
+        if await _run_quic_version_negotiation_probe(ips):
+            route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
+            return True
+        route_health_event(
+            spec["group"],
+            ROUTE_LOCAL_BYPASS,
+            host,
+            False,
+            "quic probe failed",
+            degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
+        )
+        health = route_health_snapshot().get(spec["group"], {})
+        if health.get("state") != HEALTH_DEGRADED:
+            return "warning"
         return False
     head, body = _canary_client_hello(host)
     payload_failed = False
