@@ -698,6 +698,12 @@ def note_local_result(host, down_bytes, duration):
 
 CANARY_SPECS = (
     {"name": "discord_update", "group": SERVICE_DISCORD, "host": "updates.discord.com"},
+    {
+        "name": "discord_gateway",
+        "group": SERVICE_DISCORD,
+        "host": "gateway.discord.gg",
+        "payload_probe": "websocket_upgrade",
+    },
     {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": ""},
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
     {
@@ -721,7 +727,18 @@ def _canary_client_hello(host):
     return rec[:5], rec[5:]
 
 
-def _local_payload_canary_request(host):
+def _local_payload_canary_request(host, spec=None):
+    if spec and spec.get("payload_probe") == "websocket_upgrade":
+        return (
+            "GET /?v=10&encoding=json HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: c2xpcHN0cmVhbS1jYW5hcnk=\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "User-Agent: SlipstreamRouteCanary/1\r\n"
+            "\r\n"
+        ).encode("ascii", "ignore")
     return (
         f"HEAD / HTTP/1.1\r\n"
         f"Host: {host}\r\n"
@@ -732,7 +749,7 @@ def _local_payload_canary_request(host):
     ).encode("ascii", "ignore")
 
 
-def _local_payload_probe(ip, host, strat, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
+def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
     """Complete a real TLS request over the candidate local-bypass strategy.
 
     The raw strategy probe only proves that first server TLS bytes came back.
@@ -747,6 +764,10 @@ def _local_payload_probe(ip, host, strat, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
     deadline = time.monotonic() + timeout
     first_flight_sent = False
     total = 0
+    expect_websocket_upgrade = bool(
+        spec and spec.get("payload_probe") == "websocket_upgrade"
+    )
+    observed = bytearray()
     try:
         sock = socket.create_connection((ip, 443), timeout=timeout)
         sock.settimeout(timeout)
@@ -779,7 +800,7 @@ def _local_payload_probe(ip, host, strat, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
                     raise IOError("eof in handshake")
                 inbio.write(data)
 
-        obj.write(_local_payload_canary_request(host))
+        obj.write(_local_payload_canary_request(host, spec))
         while True:
             out = outbio.read()
             if not out:
@@ -805,6 +826,14 @@ def _local_payload_probe(ip, host, strat, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
                 if not dec:
                     break
                 total += len(dec)
+                if expect_websocket_upgrade:
+                    observed.extend(dec)
+                    if len(observed) > 4096:
+                        del observed[:-4096]
+                    first_line = bytes(observed).split(b"\r\n", 1)[0]
+                    if first_line.startswith(b"HTTP/1.1 101 "):
+                        return max(total, LOCAL_PAYLOAD_CANARY_MIN_BYTES)
+                    continue
                 if total >= LOCAL_PAYLOAD_CANARY_MIN_BYTES:
                     return total
     except Exception:
@@ -815,12 +844,14 @@ def _local_payload_probe(ip, host, strat, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
                 sock.close()
             except Exception:
                 pass
+    if expect_websocket_upgrade:
+        return 0
     return total
 
 
-async def _run_local_payload_probe(ip, host, strat):
+async def _run_local_payload_probe(ip, host, strat, spec=None):
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_POOL, _local_payload_probe, ip, host, strat)
+    return await loop.run_in_executor(_POOL, _local_payload_probe, ip, host, strat, spec)
 
 
 def _close_probe_result(result):
@@ -866,7 +897,7 @@ async def _run_local_bypass_canary(spec):
             result = await dial_strategy(ip, 443, head, body, host, strat)
             if result:
                 _close_probe_result(result)
-                payload_bytes = await _run_local_payload_probe(ip, host, strat)
+                payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
                 if payload_bytes < LOCAL_PAYLOAD_CANARY_MIN_BYTES:
                     payload_failed = True
                     continue
