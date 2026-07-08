@@ -734,7 +734,7 @@ def _local_payload_canary_request(host, spec=None):
             f"Host: {host}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Key: c2xpcHN0cmVhbS1jYW5hcnk=\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
             "Sec-WebSocket-Version: 13\r\n"
             "User-Agent: SlipstreamRouteCanary/1\r\n"
             "\r\n"
