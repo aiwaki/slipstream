@@ -354,6 +354,49 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         q.extend(original_window)
 
 
+def test_soft_geo_exit_canary_counts_warning_not_degraded(monkeypatch):
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
+    original_state = dict(tproxy._canary_state)
+
+    async def no_connect(host, port, first_flight):
+        return None
+
+    try:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = tproxy._route_health_default(
+            tproxy.SERVICE_OPENAI,
+            tproxy.ROUTE_GEO_EXIT,
+        )
+        tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+        monkeypatch.setattr(tproxy, "dial_via_geph", no_connect)
+        monkeypatch.setattr(tproxy, "CANARY_SPECS", (
+            {
+                "name": "openai_billing",
+                "group": tproxy.SERVICE_OPENAI,
+                "host": "billing.openai.com",
+                "soft": True,
+            },
+        ))
+
+        ok, degraded = asyncio.run(tproxy.run_route_canaries("test"))
+
+        assert (ok, degraded) == (0, 0)
+        assert tproxy._canary_state["degraded"] == 0
+        assert tproxy._canary_state["warnings"] == 1
+        assert tproxy.canary_status_snapshot()["warnings"] == 1
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_UNKNOWN
+        assert health["last_warning"] == "SOCKS connect failed"
+    finally:
+        tproxy._canary_state.clear()
+        tproxy._canary_state.update(original_state)
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_pf_rules_leave_quic_unblocked():
     assert "table <slipstream_quic_block> persist" in tproxy.PF_RULES
     assert "proto udp" not in tproxy.PF_RULES

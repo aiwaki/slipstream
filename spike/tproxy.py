@@ -272,6 +272,7 @@ _canary_state = {
     "total": 0,
     "ok": 0,
     "degraded": 0,
+    "warnings": 0,
     "unknown": 0,
 }
 _geph_last_failure = {"host": "", "reason": "", "ts": 0.0}
@@ -761,6 +762,8 @@ async def _run_geo_exit_canary(spec):
         "SOCKS connect failed",
         soft=bool(spec.get("soft")),
     )
+    if spec.get("soft"):
+        return "warning"
     return False
 
 
@@ -776,7 +779,7 @@ async def _run_telegram_proxy_canary(spec):
 
 
 async def run_route_canaries(reason="periodic"):
-    ok = degraded = unknown = total = 0
+    ok = degraded = unknown = warnings = total = 0
     for spec in CANARY_SPECS:
         total += 1
         try:
@@ -794,7 +797,9 @@ async def run_route_canaries(reason="periodic"):
                     reason="unknown route policy",
                 )
                 passed = False
-            if passed is None:
+            if passed == "warning":
+                warnings += 1
+            elif passed is None:
                 unknown += 1
             elif passed:
                 ok += 1
@@ -813,6 +818,7 @@ async def run_route_canaries(reason="periodic"):
         "total": total,
         "ok": ok,
         "degraded": degraded,
+        "warnings": warnings,
         "unknown": unknown,
     })
     return ok, degraded
@@ -864,6 +870,7 @@ def canary_status_snapshot(now=None):
         "total": _canary_state.get("total", 0),
         "ok": _canary_state.get("ok", 0),
         "degraded": _canary_state.get("degraded", 0),
+        "warnings": _canary_state.get("warnings", 0),
         "unknown": _canary_state.get("unknown", 0),
     }
 
