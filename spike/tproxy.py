@@ -298,6 +298,8 @@ _route_health = {
     SERVICE_TELEGRAM: _route_health_default(SERVICE_TELEGRAM, ROUTE_DIRECT),
 }
 _route_failure_windows = {group: deque() for group in _route_health}
+_canary_health = {}
+_canary_failure_windows = {}
 _canary_state = {
     "running": False,
     "last_run": 0.0,
@@ -471,7 +473,10 @@ def geph_route(host):
     return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
-def route_health_event(
+def _record_health_event(
+    store,
+    windows,
+    key,
     group,
     route_class,
     host="",
@@ -482,13 +487,14 @@ def route_health_event(
     soft=False,
     degrade_after=1,
     backend="",
+    include_identity=False,
 ):
     now = time.time() if now is None else now
-    if group not in _route_health:
-        _route_health[group] = _route_health_default(group, route_class)
-        _route_failure_windows[group] = deque()
-    previous = _route_health.get(group, _route_health_default(group, route_class))
-    q = _route_failure_windows.setdefault(group, deque())
+    if key not in store:
+        store[key] = _route_health_default(group, route_class)
+        windows[key] = deque()
+    previous = store.get(key, _route_health_default(group, route_class))
+    q = windows.setdefault(key, deque())
     cutoff = now - CANARY_FAILURE_WINDOW
     while q and q[0] < cutoff:
         q.popleft()
@@ -527,7 +533,7 @@ def route_health_event(
                 last_host = normalize_host(host)
                 last_route_class = route_class
                 last_backend = backend or previous.get("last_backend", "")
-    _route_health[group] = {
+    item = {
         "state": health_state,
         "last_failure": last_failure,
         "last_warning": last_warning,
@@ -538,6 +544,40 @@ def route_health_event(
         "last_route_class": last_route_class,
         "last_backend": last_backend,
     }
+    if include_identity:
+        item["name"] = key
+        item["group"] = group
+    store[key] = item
+    return item
+
+
+def route_health_event(
+    group,
+    route_class,
+    host="",
+    ok=True,
+    reason="",
+    state=None,
+    now=None,
+    soft=False,
+    degrade_after=1,
+    backend="",
+):
+    return _record_health_event(
+        _route_health,
+        _route_failure_windows,
+        group,
+        group,
+        route_class,
+        host,
+        ok,
+        reason,
+        state,
+        now,
+        soft,
+        degrade_after,
+        backend,
+    )
 
 
 def clear_route_strategy_cache(group=None, host=None):
@@ -556,11 +596,11 @@ def clear_route_strategy_cache(group=None, host=None):
     return removed
 
 
-def route_health_snapshot(now=None):
+def _health_snapshot_from(store, windows, now=None, include_identity=False):
     now = time.time() if now is None else now
     snap = {}
-    for group, item in _route_health.items():
-        q = _route_failure_windows.setdefault(group, deque())
+    for key, item in store.items():
+        q = windows.setdefault(key, deque())
         cutoff = now - CANARY_FAILURE_WINDOW
         while q and q[0] < cutoff:
             q.popleft()
@@ -569,8 +609,15 @@ def route_health_snapshot(now=None):
         if not q and clone.get("state") in {HEALTH_DEGRADED, HEALTH_BLOCKED}:
             clone["state"] = HEALTH_UNKNOWN
             clone["last_failure"] = ""
-        snap[group] = clone
+        if include_identity:
+            clone.setdefault("name", key)
+            clone.setdefault("group", key)
+        snap[key] = clone
     return snap
+
+
+def route_health_snapshot(now=None):
+    return _health_snapshot_from(_route_health, _route_failure_windows, now)
 
 
 def route_health_unknown(group, route_class, host="", now=None):
@@ -593,6 +640,145 @@ def route_health_unknown(group, route_class, host="", now=None):
         "last_route_class": route_class,
         "last_backend": "",
     }
+
+
+def _canary_key(spec):
+    return spec.get("name") or spec.get("group") or SERVICE_GENERIC
+
+
+def _canary_state_rank(state):
+    if state == HEALTH_BLOCKED:
+        return 4
+    if state == HEALTH_DEGRADED:
+        return 3
+    if state == HEALTH_OK:
+        return 2
+    return 1
+
+
+def _canary_windows_for_group(group, now):
+    cutoff = now - CANARY_FAILURE_WINDOW
+    windows = []
+    for key, item in _canary_health.items():
+        if item.get("group") != group:
+            continue
+        q = _canary_failure_windows.setdefault(key, deque())
+        while q and q[0] < cutoff:
+            q.popleft()
+        windows.extend(q)
+    return deque(sorted(windows))
+
+
+def _aggregate_canary_group(group, route_class, now=None):
+    now = time.time() if now is None else now
+    checks = [
+        item for item in canary_health_snapshot(now).values()
+        if item.get("group") == group
+    ]
+    if not checks:
+        return
+
+    best = max(
+        checks,
+        key=lambda item: (
+            _canary_state_rank(item.get("state", HEALTH_UNKNOWN)),
+            item.get("last_checked", 0.0),
+        ),
+    )
+    latest_warning = max(
+        (item for item in checks if item.get("last_warning")),
+        key=lambda item: item.get("last_checked", 0.0),
+        default={},
+    )
+    state = best.get("state", HEALTH_UNKNOWN)
+    previous = _route_health.get(group, _route_health_default(group, route_class))
+    if state == HEALTH_UNKNOWN and previous.get("state") == HEALTH_OK:
+        best = previous
+        state = HEALTH_OK
+    aggregate = {
+        "state": state,
+        "last_failure": (
+            best.get("last_failure", "")
+            if state in {HEALTH_DEGRADED, HEALTH_BLOCKED}
+            else ""
+        ),
+        "last_warning": latest_warning.get("last_warning", ""),
+        "last_warning_host": latest_warning.get("last_warning_host", ""),
+        "last_checked": max(item.get("last_checked", 0.0) for item in checks),
+        "failures_5m": sum(int(item.get("failures_5m") or 0) for item in checks),
+        "last_host": best.get("last_host", ""),
+        "last_route_class": best.get("last_route_class", route_class) or route_class,
+        "last_backend": best.get("last_backend", ""),
+    }
+    _route_health[group] = aggregate
+    _route_failure_windows[group] = _canary_windows_for_group(group, now)
+
+
+def canary_health_event(
+    spec,
+    route_class,
+    host="",
+    ok=True,
+    reason="",
+    state=None,
+    now=None,
+    soft=False,
+    degrade_after=1,
+    backend="",
+):
+    key = _canary_key(spec)
+    group = spec.get("group", SERVICE_GENERIC)
+    item = _record_health_event(
+        _canary_health,
+        _canary_failure_windows,
+        key,
+        group,
+        route_class,
+        host,
+        ok,
+        reason,
+        state,
+        now,
+        soft,
+        degrade_after,
+        backend,
+        include_identity=True,
+    )
+    _aggregate_canary_group(group, route_class, now)
+    return item
+
+
+def canary_health_unknown(spec, route_class, host="", now=None):
+    now = time.time() if now is None else now
+    key = _canary_key(spec)
+    group = spec.get("group", SERVICE_GENERIC)
+    q = _canary_failure_windows.setdefault(key, deque())
+    cutoff = now - CANARY_FAILURE_WINDOW
+    while q and q[0] < cutoff:
+        q.popleft()
+    _canary_health[key] = {
+        "name": key,
+        "group": group,
+        "state": HEALTH_UNKNOWN,
+        "last_failure": "",
+        "last_warning": "",
+        "last_warning_host": "",
+        "last_checked": now,
+        "failures_5m": len(q),
+        "last_host": normalize_host(host),
+        "last_route_class": route_class,
+        "last_backend": "",
+    }
+    _aggregate_canary_group(group, route_class, now)
+
+
+def canary_health_snapshot(now=None):
+    return _health_snapshot_from(
+        _canary_health,
+        _canary_failure_windows,
+        now,
+        include_identity=True,
+    )
 
 
 def system_proxy_status_from_scutil(raw):
@@ -1120,30 +1306,30 @@ def _canary_host(spec):
 async def _run_local_bypass_canary(spec):
     host = _canary_host(spec)
     if not host:
-        route_health_unknown(spec["group"], ROUTE_LOCAL_BYPASS)
+        canary_health_unknown(spec, ROUTE_LOCAL_BYPASS)
         return None
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_LOCAL_BYPASS:
-        route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
+        canary_health_event(spec, policy["route_class"], host, False, "policy mismatch")
         return False
     ips = await resolve_connection_ips(host, None)
     if not ips:
-        route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "dns failed")
+        canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, False, "dns failed")
         clear_route_strategy_cache(group=spec["group"])
         return False
     if spec.get("transport_probe") == "quic_version_negotiation":
         if await _run_quic_version_negotiation_probe(ips):
-            route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
+            canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
             return True
-        route_health_event(
-            spec["group"],
+        canary_health_event(
+            spec,
             ROUTE_LOCAL_BYPASS,
             host,
             False,
             "quic probe failed",
             degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
         )
-        health = route_health_snapshot().get(spec["group"], {})
+        health = canary_health_snapshot().get(_canary_key(spec), {})
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
@@ -1162,23 +1348,23 @@ async def _run_local_bypass_canary(spec):
                     continue
                 if _strat_cache.get(host) != strat["name"]:
                     remember_strategy(host, strat["name"])
-                route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
+                canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
                 return True
     clear_route_strategy_cache(group=spec["group"])
     if payload_failed:
-        route_health_event(
-            spec["group"],
+        canary_health_event(
+            spec,
             ROUTE_LOCAL_BYPASS,
             host,
             False,
             "payload probe failed",
             degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
         )
-        health = route_health_snapshot().get(spec["group"], {})
+        health = canary_health_snapshot().get(_canary_key(spec), {})
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
-    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
+    canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
     return False
 
 
@@ -1186,23 +1372,37 @@ async def _run_geo_exit_canary(spec):
     host = spec["host"]
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_GEO_EXIT:
-        route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
+        canary_health_event(spec, policy["route_class"], host, False, "policy mismatch")
         return False
     if smart_dns_available():
         smart_dns_ok = await _run_smart_dns_geo_canary(spec)
         if smart_dns_ok:
+            canary_health_event(
+                spec,
+                ROUTE_GEO_EXIT,
+                host,
+                True,
+                backend=GEO_BACKEND_SMART_DNS,
+            )
             return True
     if not _geph_up:
-        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, False, "tunnel down", HEALTH_BLOCKED)
+        canary_health_event(
+            spec,
+            ROUTE_GEO_EXIT,
+            host,
+            False,
+            "tunnel down",
+            HEALTH_BLOCKED,
+        )
         return False
     result = await dial_via_geph(host, 443, build_fake_clienthello(host))
     if result:
         _close_probe_result(result)
         clear_geph_route_failure()
-        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
+        canary_health_event(spec, ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
         return True
-    route_health_event(
-        spec["group"],
+    canary_health_event(
+        spec,
         ROUTE_GEO_EXIT,
         host,
         False,
@@ -1216,8 +1416,8 @@ async def _run_geo_exit_canary(spec):
 
 async def _run_telegram_proxy_canary(spec):
     ok = _tgws_state == "ready"
-    route_health_event(
-        spec["group"], ROUTE_DIRECT, "127.0.0.1",
+    canary_health_event(
+        spec, ROUTE_DIRECT, "127.0.0.1",
         ok=ok,
         reason="" if ok else f"telegram proxy {_tgws_state}",
         state=HEALTH_DEGRADED,
@@ -1238,8 +1438,8 @@ async def run_route_canaries(reason="periodic"):
             elif policy["route_class"] == ROUTE_GEO_EXIT:
                 passed = await _run_geo_exit_canary(spec)
             else:
-                route_health_event(
-                    spec["group"], policy["route_class"], spec.get("host", ""),
+                canary_health_event(
+                    spec, policy["route_class"], spec.get("host", ""),
                     ok=False,
                     reason="unknown route policy",
                 )
@@ -1254,8 +1454,8 @@ async def run_route_canaries(reason="periodic"):
                 degraded += 1
         except Exception as e:
             degraded += 1
-            route_health_event(
-                spec["group"], ROUTE_UNKNOWN, spec.get("host", ""),
+            canary_health_event(
+                spec, ROUTE_UNKNOWN, spec.get("host", ""),
                 ok=False,
                 reason=f"canary error: {e}",
             )
@@ -1319,6 +1519,7 @@ def canary_status_snapshot(now=None):
         "degraded": _canary_state.get("degraded", 0),
         "warnings": _canary_state.get("warnings", 0),
         "unknown": _canary_state.get("unknown", 0),
+        "checks": canary_health_snapshot(),
     }
 
 

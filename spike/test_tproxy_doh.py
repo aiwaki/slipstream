@@ -18,10 +18,16 @@ def reset_smart_dns_state():
     dns_cache = dict(tproxy._system_dns_cache)
     smart_ok = dict(tproxy._smart_dns_ok_until)
     smart_failure = dict(tproxy._smart_dns_last_failure)
+    canary_health = {key: dict(value) for key, value in tproxy._canary_health.items()}
+    canary_windows = {
+        key: deque(value) for key, value in tproxy._canary_failure_windows.items()
+    }
     try:
         tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
         tproxy._smart_dns_ok_until.clear()
         tproxy._smart_dns_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+        tproxy._canary_health.clear()
+        tproxy._canary_failure_windows.clear()
         yield
     finally:
         tproxy._system_dns_cache.clear()
@@ -30,6 +36,10 @@ def reset_smart_dns_state():
         tproxy._smart_dns_ok_until.update(smart_ok)
         tproxy._smart_dns_last_failure.clear()
         tproxy._smart_dns_last_failure.update(smart_failure)
+        tproxy._canary_health.clear()
+        tproxy._canary_health.update(canary_health)
+        tproxy._canary_failure_windows.clear()
+        tproxy._canary_failure_windows.update(canary_windows)
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -619,6 +629,75 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
         q.extend(original_window)
 
 
+def test_canary_health_keeps_endpoint_failure_visible_after_sibling_ok():
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+    gateway = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_gateway")
+    cdn = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_cdn")
+    now = tproxy.time.time()
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+        tproxy.canary_health_event(
+            gateway,
+            tproxy.ROUTE_LOCAL_BYPASS,
+            "gateway.discord.gg",
+            ok=False,
+            reason="websocket upgrade failed",
+            now=now,
+        )
+        tproxy.canary_health_event(
+            cdn,
+            tproxy.ROUTE_LOCAL_BYPASS,
+            "cdn.discordapp.com",
+            ok=True,
+            now=now + 10.0,
+        )
+
+        checks = tproxy.canary_status_snapshot()["checks"]
+        assert checks["discord_gateway"]["state"] == tproxy.HEALTH_DEGRADED
+        assert checks["discord_gateway"]["last_failure"] == "websocket upgrade failed"
+        assert checks["discord_cdn"]["state"] == tproxy.HEALTH_OK
+
+        health = tproxy.route_health_snapshot(now=now + 10.0)[tproxy.SERVICE_DISCORD]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_host"] == "gateway.discord.gg"
+        assert health["last_failure"] == "websocket upgrade failed"
+        assert health["failures_5m"] == 1
+    finally:
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
+def test_canary_status_keeps_legacy_summary_fields_with_check_details():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "discord_update")
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+
+    try:
+        tproxy.canary_health_event(
+            spec,
+            tproxy.ROUTE_LOCAL_BYPASS,
+            "updates.discord.com",
+            ok=True,
+            now=tproxy.time.time(),
+        )
+
+        snapshot = tproxy.canary_status_snapshot()
+
+        for key in ("running", "last_run", "total", "ok", "degraded", "warnings", "unknown"):
+            assert key in snapshot
+        assert snapshot["checks"]["discord_update"]["group"] == tproxy.SERVICE_DISCORD
+        assert snapshot["checks"]["discord_update"]["last_host"] == "updates.discord.com"
+    finally:
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_youtube_canary_prefers_observed_video_host_then_redirector_fallback():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
     tproxy._strat_cache.clear()
@@ -868,6 +947,51 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         health = tproxy.route_health_snapshot(now=120.0)[tproxy.SERVICE_OPENAI]
         assert health["state"] == tproxy.HEALTH_BLOCKED
         assert health["last_failure"] == "tunnel down"
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
+        q.clear()
+        q.extend(original_window)
+
+
+def test_canary_health_secondary_geo_warning_does_not_override_core_ok():
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
+    core = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_core")
+    billing = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_billing")
+    now = tproxy.time.time()
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
+        tproxy.canary_health_event(
+            core,
+            tproxy.ROUTE_GEO_EXIT,
+            "chatgpt.com",
+            ok=True,
+            backend=tproxy.GEO_BACKEND_GEPH,
+            now=now,
+        )
+        tproxy.canary_health_event(
+            billing,
+            tproxy.ROUTE_GEO_EXIT,
+            "billing.openai.com",
+            ok=False,
+            reason="SOCKS connect failed",
+            soft=True,
+            now=now + 10.0,
+        )
+
+        checks = tproxy.canary_health_snapshot(now=now + 10.0)
+        assert checks["openai_core"]["state"] == tproxy.HEALTH_OK
+        assert checks["openai_billing"]["state"] == tproxy.HEALTH_UNKNOWN
+        assert checks["openai_billing"]["last_warning"] == "SOCKS connect failed"
+
+        health = tproxy.route_health_snapshot(now=now + 10.0)[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_host"] == "chatgpt.com"
+        assert health["last_failure"] == ""
+        assert health["last_warning"] == "SOCKS connect failed"
+        assert health["last_warning_host"] == "billing.openai.com"
     finally:
         tproxy._route_health[tproxy.SERVICE_OPENAI] = original
         q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]

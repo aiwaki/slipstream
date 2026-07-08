@@ -20,7 +20,7 @@ not a release promise.
 | Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
 | Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
-| Detailed route diagnostics | implemented in daemon status and tray detail |
+| Detailed route diagnostics | implemented in daemon status and tray summary; per-canary check details are in daemon status |
 | Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |

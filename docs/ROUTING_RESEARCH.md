@@ -17,7 +17,8 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | SonicDPI forged RST detection | Future platform work | TTL-baseline RST filtering is useful only with inbound packet visibility. | Revisit with Network Extension, WinDivert, or another packet adapter. |
 | 2026-07-08 | SonicDPI macOS Network Extension | Future platform work | Full UDP/voice handling on macOS belongs in a System Extension path, not the current pf/TCP layer. | Keep routing core adapter-independent. |
 | 2026-07-08 | Unblock-Pro connectivity probes | Adopted where safe | Use real Gateway WebSocket-style probing for Discord readiness. | Keep canaries autonomous and non-mutating. |
-| 2026-07-08 | Unblock-Pro endpoint gates | Backlog | A route is healthy only when both UI shell and delivery endpoints work. | Split canaries by service class: shell, media/video, gateway. |
+| 2026-07-08 | Unblock-Pro endpoint gates | Partially adopted | A route is healthy only when both UI shell and delivery endpoints work. | Keep expanding canary coverage by evidence-backed service class. |
+| 2026-07-08 | Slipstream canary check details | Implemented | Group health must not let a passing sibling endpoint hide a failing gateway/CDN/video check. | Use `canaries.checks` in diagnostics; keep tray summary compact. |
 | 2026-07-08 | Unblock-Pro GitHub mirrors | Backlog | App-owned downloads may try mirror URLs only with integrity validation. | Consider for updater/binary fetch reliability. |
 | 2026-07-08 | Unblock-Pro DNS/hosts/proxy mutations | Rejected | Do not mutate `/etc/hosts`, system DNS, system proxy, PAC, or external VPN configuration. | Detect and warn only. |
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
@@ -92,6 +93,9 @@ Indexed routing projects:
   API plus CDN; and a real Gateway WebSocket upgrade. This is a good canary
   structure for Slipstream's route health because a homepage or thumbnail can
   work while playback or app login still fails.
+- Slipstream now keeps per-check canary health in `canaries.checks` and reduces
+  it into the backward-compatible group-level `route_health`. A passing
+  `discord_cdn` canary no longer hides a failing `discord_gateway` canary.
 - Flowseal-style rules include Discord voice UDP ranges and `discord.media`
   alternate TCP ports `2053,2083,2087,2096,8443`. These are useful references,
   but should only be used with host/IP evidence. No global alternate-port
@@ -127,9 +131,9 @@ Safe candidates:
   Broader Google domains such as `googleapis.com` and `googleusercontent.com`
   need observed evidence before they join local bypass.
 - Use a fresh WebSocket nonce in the Discord Gateway canary.
-- Split route-health canaries into service classes so "page loads" is not
-  mistaken for "video/app transport works": YouTube web, YouTube video delivery,
-  Discord API/CDN, Discord Gateway WebSocket, and Telegram local proxy.
+- Continue splitting route-health canaries into service classes so "page loads"
+  is not mistaken for "video/app transport works": YouTube web, YouTube video
+  delivery, Discord API/CDN, Discord Gateway WebSocket, and Telegram local proxy.
 - Add autonomous route-health scoring based on wins/losses with exploration
   over time, similar to SonicDPI's Wilson-rank plus age-bonus model.
 - Add install-time validation for bundled daemon binaries before replacement.
