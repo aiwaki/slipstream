@@ -4,6 +4,8 @@ import json
 import logging
 import re
 import ssl
+import sys
+from types import SimpleNamespace
 from collections import OrderedDict
 
 import tproxy
@@ -15,6 +17,22 @@ def test_doh_ssl_context_verifies_resolver_certificate():
 
     assert ctx.check_hostname is True
     assert ctx.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_local_payload_ssl_context_prefers_certifi(monkeypatch):
+    calls = []
+    fake_certifi = SimpleNamespace(where=lambda: "/tmp/fake-ca.pem")
+
+    monkeypatch.setitem(sys.modules, "certifi", fake_certifi)
+    monkeypatch.setattr(
+        tproxy.ssl,
+        "create_default_context",
+        lambda **kwargs: calls.append(kwargs) or object(),
+    )
+
+    tproxy._local_payload_ssl_context()
+
+    assert calls == [{"cafile": "/tmp/fake-ca.pem"}]
 
 
 def test_doh_request_percent_encodes_host():

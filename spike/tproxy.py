@@ -749,6 +749,15 @@ def _local_payload_canary_request(host, spec=None):
     ).encode("ascii", "ignore")
 
 
+def _local_payload_ssl_context():
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANARY_TIMEOUT):
     """Complete a real TLS request over the candidate local-bypass strategy.
 
@@ -757,7 +766,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
     HEAD request and read decrypted response bytes, catching stalled paths where
     the handshake succeeds but application data does not move.
     """
-    ctx = ssl.create_default_context()
+    ctx = _local_payload_ssl_context()
     inbio, outbio = ssl.MemoryBIO(), ssl.MemoryBIO()
     obj = ctx.wrap_bio(inbio, outbio, server_hostname=host)
     sock = None
