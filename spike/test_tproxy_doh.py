@@ -284,6 +284,103 @@ def test_local_bypass_canary_failure_decays_only_local_strategy_cache(monkeypatc
         tproxy._strat_cache.clear()
 
 
+def test_local_bypass_canary_requires_payload_success(monkeypatch):
+    host = "updates.discord.com"
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+    payload_calls = []
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def ips(_host, _fallback_ip):
+        return ["203.0.113.10"]
+
+    async def connected(ip, port, head, body, sni, strat):
+        return object(), DummyWriter(), b"\x16\x03\x03"
+
+    async def payload(ip, sni, strat):
+        payload_calls.append((ip, sni, strat["name"]))
+        return tproxy.LOCAL_PAYLOAD_CANARY_MIN_BYTES
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+        tproxy._strat_cache.clear()
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", ips)
+        monkeypatch.setattr(
+            tproxy,
+            "strategy_order",
+            lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
+        )
+        monkeypatch.setattr(tproxy, "dial_strategy", connected)
+        monkeypatch.setattr(tproxy, "_run_local_payload_probe", payload)
+
+        spec = {"group": tproxy.SERVICE_DISCORD, "host": host}
+        assert asyncio.run(tproxy._run_local_bypass_canary(spec))
+
+        assert payload_calls == [("203.0.113.10", host, "split64+fake")]
+        assert tproxy._strat_cache[host] == "split64+fake"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_DISCORD]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_failure"] == ""
+        assert health["last_host"] == host
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
+def test_local_bypass_canary_payload_failure_decays_strategy_cache(monkeypatch):
+    host = "updates.discord.com"
+    original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def ips(_host, _fallback_ip):
+        return ["203.0.113.10"]
+
+    async def connected(ip, port, head, body, sni, strat):
+        return object(), DummyWriter(), b"\x16\x03\x03"
+
+    async def no_payload(ip, sni, strat):
+        return 0
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
+        tproxy._strat_cache.clear()
+        tproxy._strat_cache[host] = "split64+fake"
+        tproxy._strat_cache["billing.openai.com"] = "split64+fake"
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", ips)
+        monkeypatch.setattr(
+            tproxy,
+            "strategy_order",
+            lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
+        )
+        monkeypatch.setattr(tproxy, "dial_strategy", connected)
+        monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
+
+        spec = {"group": tproxy.SERVICE_DISCORD, "host": host}
+        assert not asyncio.run(tproxy._run_local_bypass_canary(spec))
+
+        assert host not in tproxy._strat_cache
+        assert tproxy._strat_cache["billing.openai.com"] == "split64+fake"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_DISCORD]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_failure"] == "payload probe failed"
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._route_health[tproxy.SERVICE_DISCORD] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_youtube_canary_waits_for_observed_video_host(monkeypatch):
     calls = []
 

@@ -21,7 +21,7 @@ not a release promise.
 | Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
 | Detailed route diagnostics | implemented in daemon status and tray detail |
-| Throughput canary | not implemented |
+| Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -54,8 +54,8 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 Goal: detect degradation before the user has to diagnose it manually.
 
 - Automatic re-sweep when a known strategy stops working.
-- Throughput canary for local-bypass hosts, not just TLS handshake success.
-- Broaden periodic canaries with payload/throughput checks.
+- Broaden local-bypass canaries from small HTTPS payload checks to throughput
+  thresholds where that is safe.
 - Signed strategy-list updates without rebuilding the app.
 - More explicit policy tables for Geph hosts, local-bypass hosts, and attempt
   limits.
