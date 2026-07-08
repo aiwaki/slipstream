@@ -589,6 +589,10 @@ def log_geph_route_failure(host, reason, now=None):
     print(f">> geph route failed for {host}: {reason}", file=sys.stderr)
 
 
+def clear_geph_route_failure():
+    _geph_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+
+
 def load_auto_geph():
     global _auto_geph
     try:
@@ -752,6 +756,7 @@ async def _run_geo_exit_canary(spec):
     result = await dial_via_geph(host, 443, build_fake_clienthello(host))
     if result:
         _close_probe_result(result)
+        clear_geph_route_failure()
         route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True)
         return True
     route_health_event(
@@ -2058,6 +2063,8 @@ async def _handle_impl(reader, writer):
                 down_b = res[1] or 0
                 if down_b == 0 and time.monotonic() - t0 < 10:
                     log_geph_route_failure(host, "remote closed without response")
+                else:
+                    clear_geph_route_failure()
                 return
             log_geph_route_failure(host, "SOCKS connect failed")
         else:
