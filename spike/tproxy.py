@@ -41,6 +41,8 @@ import threading
 import time
 from urllib.parse import urlencode
 
+from primes import build_fake_stun, classify as classify_voice_payload
+
 
 class _ScapyMacNoiseFilter(logging.Filter):
     def filter(self, record):
@@ -1742,6 +1744,8 @@ def inject_fake(src_ip, src_port, dst_ip, dst_port, ttl=FAKE_TTL, repeats=6):
 
 # ------------------------------------------------------- UDP voice plane
 VOICE_LO, VOICE_HI = 50000, 65535   # Discord voice server UDP port range
+VOICE_SETUP_LO, VOICE_SETUP_HI = 19294, 19344
+VOICE_PORT_RANGES = ((VOICE_SETUP_LO, VOICE_SETUP_HI), (VOICE_LO, VOICE_HI))
 VOICE_TTL = 4
 VOICE_REPEAT = 6
 VOICE_CUTOFF = 5                    # prime the first N datagrams of each flow
@@ -1750,7 +1754,7 @@ VOICE_FLOW_IDLE_TTL = 5 * 60.0
 
 
 def _fake_stun(txn=b"\x00" * 12):
-    return struct.pack("!HHI", 0x0001, 0x0000, 0x2112A442) + txn   # STUN binding req
+    return build_fake_stun(txn)
 
 
 def prune_voice_flows(flows, now, max_flows=VOICE_FLOWS_MAX, idle_ttl=VOICE_FLOW_IDLE_TTL):
@@ -1774,6 +1778,24 @@ def observe_voice_flow(flows, key, now=None):
     return should_prime, count
 
 
+def _voice_port_filter():
+    return " or ".join(
+        f"dst portrange {lo}-{hi}" for lo, hi in VOICE_PORT_RANGES
+    )
+
+
+def _voice_port_ranges_label():
+    return ", ".join(f"{lo}-{hi}" for lo, hi in VOICE_PORT_RANGES)
+
+
+def should_prime_voice_payload(dst_port, payload):
+    if VOICE_LO <= dst_port <= VOICE_HI:
+        return True
+    if VOICE_SETUP_LO <= dst_port <= VOICE_SETUP_HI:
+        return classify_voice_payload(payload) != "other"
+    return False
+
+
 def default_iface():
     for line in _run("route", "get", "default").stdout.splitlines():
         line = line.strip()
@@ -1783,7 +1805,7 @@ def default_iface():
 
 
 def _voice_bpf(localip):
-    return (f"udp and src host {localip} and dst portrange {VOICE_LO}-{VOICE_HI} "
+    return (f"udp and src host {localip} and ({_voice_port_filter()}) "
             "and not dst net 192.168.0.0/16 and not dst net 10.0.0.0/8 "
             "and not dst net 172.16.0.0/12 and not dst net 169.254.0.0/16 "
             "and not dst net 224.0.0.0/4 and not dst host 255.255.255.255")
@@ -1800,9 +1822,9 @@ def network_monitor(port, voice=True):
     """Long-running guard thread. (1) Keeps the voice sniffer bound to the CURRENT
     default interface so voice survives Wi-Fi/Ethernet/sleep changes. (2) Re-applies
     pf if it ever gets flushed (sleep/wake or another tool). Voice itself: Discord
-    RTP is UDP to *.discord.media:50000-65535, bypassing the TCP pf-rdr, so we
-    BPF-observe it and raw-inject low-TTL decoy STUN primes on the 5-tuple, leaving
-    the real flow untouched."""
+    RTP is UDP to *.discord.media:50000-65535, with some setup paths observed on
+    19294-19344, bypassing the TCP pf-rdr. We BPF-observe it and raw-inject
+    low-TTL decoy STUN primes on the 5-tuple, leaving the real flow untouched."""
     global _pf_applied, _geph_up
     AsyncSniffer = send = IP = UDP = TCP = Raw = get_if_addr = None
     if voice:
@@ -1830,6 +1852,8 @@ def network_monitor(port, voice=True):
         if not (p.haslayer(IP) and p.haslayer(UDP)):
             return
         ip, udp = p[IP], p[UDP]
+        if not should_prime_voice_payload(udp.dport, bytes(udp.payload)):
+            return
         key = (ip.src, udp.sport, ip.dst, udp.dport)
         should_prime, n = observe_voice_flow(flows, key)
         if not should_prime:
@@ -1913,7 +1937,7 @@ def network_monitor(port, voice=True):
                                            prn=on_pkt, store=0)
                     sniffer.start()
                     cur_iface = iface
-                    print(f">> voice plane: priming UDP {VOICE_LO}-{VOICE_HI} "
+                    print(f">> voice plane: priming UDP {_voice_port_ranges_label()} "
                           f"+ SYN-seq capture on {iface}")
                 except Exception as e:
                     print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
