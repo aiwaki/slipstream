@@ -362,19 +362,25 @@ def test_route_policy_classifies_service_groups():
 
 
 def test_local_payload_canary_request_supports_discord_gateway_websocket():
+    spec = {"payload_probe": "websocket_upgrade"}
     req = tproxy._local_payload_canary_request(
         "gateway.discord.gg",
-        {"payload_probe": "websocket_upgrade"},
+        spec,
     )
+    req2 = tproxy._local_payload_canary_request("gateway.discord.gg", spec)
 
     assert req.startswith(b"GET /?v=10&encoding=json HTTP/1.1\r\n")
     assert b"Host: gateway.discord.gg\r\n" in req
     assert b"Upgrade: websocket\r\n" in req
     assert b"Sec-WebSocket-Version: 13\r\n" in req
     key = re.search(rb"Sec-WebSocket-Key: ([^\r]+)", req).group(1)
+    key2 = re.search(rb"Sec-WebSocket-Key: ([^\r]+)", req2).group(1)
     decoded = base64.b64decode(key)
+    decoded2 = base64.b64decode(key2)
     assert len(decoded) == 16
+    assert len(decoded2) == 16
     assert decoded != b"the sample nonce"
+    assert key2 != key
 
 
 def test_local_payload_canary_request_supports_specific_http_path():

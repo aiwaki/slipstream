@@ -111,6 +111,9 @@ Fresh external snapshots checked on 2026-07-08:
 - The useful connectivity probe is a real Discord Gateway WebSocket handshake
   against `gateway.discord.gg`. Slipstream already has an equivalent payload
   canary.
+- The Discord Gateway WebSocket canary now generates a fresh
+  `Sec-WebSocket-Key` for every probe, so it behaves like a real handshake
+  rather than replaying a static sample nonce.
 - Unblock-Pro avoids false positives by requiring both service shell and
   delivery endpoints: YouTube web plus `redirector.googlevideo.com`; Discord
   API plus CDN; and a real Gateway WebSocket upgrade. This is a good canary
@@ -175,7 +178,6 @@ Safe candidates:
 - Add narrow YouTube-family policy coverage for `youtu.be` and `ggpht.com`.
   Broader Google domains such as `googleapis.com` and `googleusercontent.com`
   need observed evidence before they join local bypass.
-- Use a fresh WebSocket nonce in the Discord Gateway canary.
 - Continue adding service-class canaries only when there is evidence that a
   separate endpoint class can fail independently.
 - Continue refining read-only DNS diagnostics only from evidence; keep resolver
