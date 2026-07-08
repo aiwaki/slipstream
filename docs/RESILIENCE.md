@@ -69,3 +69,6 @@ YouTube/googlevideo.
 QUIC is not globally blocked. YouTube/googlevideo playback depends on preserving
 working HTTP/3 paths where available. Any future QUIC intervention must be scoped
 to a clearly identified failure mode and must not become a global UDP/443 block.
+
+Routing research and external implementation notes are tracked in
+[ROUTING_RESEARCH.md](ROUTING_RESEARCH.md).

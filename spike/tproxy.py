@@ -20,6 +20,7 @@ ESCAPE HATCH if connectivity breaks (other terminal):
 import argparse
 import asyncio
 import atexit
+import base64
 import fcntl
 import ipaddress
 import json
@@ -138,7 +139,10 @@ DISCORD_HOSTS = (
     "discordmerch.com", "discordpartygames.com", "discordsays.com",
     "discordsez.com", "discordstatus.com", "dis.gd",
 )
-GOOGLE_VIDEO = ("googlevideo.com", "youtube.com", "ytimg.com", "gvt1.com", "gvt2.com")
+GOOGLE_VIDEO = (
+    "googlevideo.com", "youtube.com", "youtu.be", "ytimg.com", "ggpht.com",
+    "gvt1.com", "gvt2.com",
+)
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
 
@@ -864,12 +868,13 @@ def _canary_client_hello(host):
 
 def _local_payload_canary_request(host, spec=None):
     if spec and spec.get("payload_probe") == "websocket_upgrade":
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
         return (
             "GET /?v=10&encoding=json HTTP/1.1\r\n"
             f"Host: {host}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
             "Sec-WebSocket-Version: 13\r\n"
             "User-Agent: SlipstreamRouteCanary/1\r\n"
             "\r\n"

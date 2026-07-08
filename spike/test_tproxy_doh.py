@@ -283,6 +283,8 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("rr2---sn-ntq7yner.googlevideo.com")["service_group"] == (
         tproxy.SERVICE_YOUTUBE
     )
+    assert tproxy.route_policy("youtu.be")["service_group"] == tproxy.SERVICE_YOUTUBE
+    assert tproxy.route_policy("yt3.ggpht.com")["service_group"] == tproxy.SERVICE_YOUTUBE
     assert tproxy.route_policy("billing.openai.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
     assert tproxy.route_policy("claude.ai")["service_group"] == tproxy.SERVICE_ANTHROPIC
     assert tproxy.route_policy("t.me")["service_group"] == tproxy.SERVICE_TELEGRAM
@@ -299,7 +301,9 @@ def test_local_payload_canary_request_supports_discord_gateway_websocket():
     assert b"Upgrade: websocket\r\n" in req
     assert b"Sec-WebSocket-Version: 13\r\n" in req
     key = re.search(rb"Sec-WebSocket-Key: ([^\r]+)", req).group(1)
-    assert len(base64.b64decode(key)) == 16
+    decoded = base64.b64decode(key)
+    assert len(decoded) == 16
+    assert decoded != b"the sample nonce"
 
 
 def test_local_payload_canary_request_supports_specific_http_path():
