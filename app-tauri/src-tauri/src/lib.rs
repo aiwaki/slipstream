@@ -8,7 +8,7 @@
 // later; main.rs is a thin desktop shim.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -348,6 +348,30 @@ fn launchd_plist_uses_daemon(raw: &str, daemon: &Path) -> bool {
     raw.contains(&format!("<string>{}</string>", daemon.display()))
 }
 
+fn daemon_binary_format(path: &Path) -> Option<&'static str> {
+    let mut magic = [0u8; 4];
+    fs::File::open(path).ok()?.read_exact(&mut magic).ok()?;
+    match magic {
+        [0xfe, 0xed, 0xfa, 0xce]
+        | [0xce, 0xfa, 0xed, 0xfe]
+        | [0xfe, 0xed, 0xfa, 0xcf]
+        | [0xcf, 0xfa, 0xed, 0xfe] => Some("mach-o"),
+        [0xca, 0xfe, 0xba, 0xbe]
+        | [0xbe, 0xba, 0xfe, 0xca]
+        | [0xca, 0xfe, 0xba, 0xbf]
+        | [0xbf, 0xba, 0xfe, 0xca] => Some("fat-mach-o"),
+        _ => None,
+    }
+}
+
+fn daemon_binary_executable(path: &Path) -> Option<bool> {
+    Some(fs::metadata(path).ok()?.permissions().mode() & 0o111 != 0)
+}
+
+fn valid_bundled_daemon(path: &Path) -> bool {
+    daemon_binary_format(path).is_some() && daemon_binary_executable(path) == Some(true)
+}
+
 fn install_diagnostic_value(
     bundled_daemon: Option<&Path>,
     installed_daemon: &Path,
@@ -355,6 +379,15 @@ fn install_diagnostic_value(
 ) -> Value {
     let bundled_daemon_path = bundled_daemon.map(|path| path.to_string_lossy().into_owned());
     let bundled_daemon_exists = bundled_daemon.map(|path| path.exists()).unwrap_or(false);
+    let bundled_daemon_format = bundled_daemon.and_then(daemon_binary_format);
+    let bundled_daemon_executable = bundled_daemon.and_then(daemon_binary_executable);
+    let bundled_daemon_valid = bundled_daemon.and_then(|path| {
+        if path.exists() {
+            Some(valid_bundled_daemon(path))
+        } else {
+            None
+        }
+    });
     let installed_daemon_exists = installed_daemon.exists();
     let installed_daemon_matches_bundle = bundled_daemon.and_then(|path| {
         if path.exists() && installed_daemon_exists {
@@ -372,6 +405,9 @@ fn install_diagnostic_value(
         "bundled_daemon_path": bundled_daemon_path,
         "installed_daemon_exists": installed_daemon_exists,
         "bundled_daemon_exists": bundled_daemon_exists,
+        "bundled_daemon_format": bundled_daemon_format,
+        "bundled_daemon_executable": bundled_daemon_executable,
+        "bundled_daemon_valid": bundled_daemon_valid,
         "installed_daemon_matches_bundle": installed_daemon_matches_bundle,
         "launchd_label": LAUNCHD_LABEL,
         "launchd_plist": launchd_plist.to_string_lossy(),
@@ -482,7 +518,7 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
     let Some(bin) = bundled_daemon_path(app) else {
         return false;
     };
-    bin.exists() && !daemon_needs_install(&bin)
+    valid_bundled_daemon(&bin) && !daemon_needs_install(&bin)
 }
 
 fn should_recover_daemon(missing_status_polls: u8, cooldown_ready: bool, installed: bool) -> bool {
@@ -519,6 +555,13 @@ fn ensure_daemon_installed(app: &AppHandle) {
     };
     if !bin.exists() {
         return; // dev build without the bundled daemon
+    }
+    if !valid_bundled_daemon(&bin) {
+        eprintln!(
+            "Slipstream bundled daemon is not a valid executable: {}",
+            bin.display()
+        );
+        return;
     }
     if daemon_needs_install(&bin) {
         let bin = bin.to_string_lossy();
@@ -1688,11 +1731,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_log_snapshot_direct, daemon_recovery_shell, diagnostic_snapshot_value,
-        diagnostic_log_tail, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell, diagnostic_log_tail,
+        diagnostic_snapshot_value, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
         log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
-        system_proxy_from_status, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        routing_health_summary, shell_quote, should_recover_daemon,
+        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
+        valid_bundled_daemon, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -1732,10 +1776,8 @@ mod tests {
 
     #[test]
     fn copy_log_snapshot_direct_copies_and_clamps_permissions() {
-        let dir = std::env::temp_dir().join(format!(
-            "slipstream-log-copy-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("slipstream-log-copy-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("source.log");
@@ -1744,21 +1786,28 @@ mod tests {
         std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o640)).unwrap();
 
         assert!(copy_log_snapshot_direct(src.to_str().unwrap(), &dst));
-        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "line one\nline two\n");
-        assert_eq!(std::fs::metadata(&dst).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&dst).unwrap(),
+            "line one\nline two\n"
+        );
+        assert_eq!(
+            std::fs::metadata(&dst).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn copy_log_snapshot_direct_returns_false_when_unreadable() {
-        let dst = std::env::temp_dir().join(format!(
-            "slipstream-missing-log-{}.log",
-            std::process::id()
-        ));
+        let dst =
+            std::env::temp_dir().join(format!("slipstream-missing-log-{}.log", std::process::id()));
         let _ = std::fs::remove_file(&dst);
 
-        assert!(!copy_log_snapshot_direct("/definitely/missing/slipstream.log", &dst));
+        assert!(!copy_log_snapshot_direct(
+            "/definitely/missing/slipstream.log",
+            &dst
+        ));
     }
 
     #[test]
@@ -1803,6 +1852,35 @@ mod tests {
     }
 
     #[test]
+    fn bundled_daemon_validation_accepts_executable_macho_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-daemon-format-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let macho = dir.join("slipstreamd");
+        let text = dir.join("slipstreamd.txt");
+        let noexec = dir.join("slipstreamd-noexec");
+
+        std::fs::write(&macho, [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 0]).unwrap();
+        std::fs::set_permissions(&macho, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&text, b"not a daemon").unwrap();
+        std::fs::set_permissions(&text, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&noexec, [0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 0]).unwrap();
+        std::fs::set_permissions(&noexec, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(daemon_binary_format(&macho), Some("mach-o"));
+        assert!(valid_bundled_daemon(&macho));
+        assert_eq!(daemon_binary_format(&text), None);
+        assert!(!valid_bundled_daemon(&text));
+        assert_eq!(daemon_binary_format(&noexec), Some("fat-mach-o"));
+        assert!(!valid_bundled_daemon(&noexec));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn install_diagnostics_report_bundled_daemon_sync() {
         let dir = std::env::temp_dir().join(format!(
             "slipstream-install-diagnostic-test-{}",
@@ -1813,8 +1891,11 @@ mod tests {
         let bundled = dir.join("bundled-slipstreamd");
         let installed = dir.join("installed-slipstreamd");
         let plist = dir.join("dev.slipstream.tproxy.plist");
-        std::fs::write(&bundled, "daemon-v1").unwrap();
-        std::fs::write(&installed, "daemon-v1").unwrap();
+        let daemon_v1 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 1];
+        let daemon_v2 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 2];
+        std::fs::write(&bundled, daemon_v1).unwrap();
+        std::fs::set_permissions(&bundled, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&installed, daemon_v1).unwrap();
         std::fs::write(
             &plist,
             format!(
@@ -1827,6 +1908,9 @@ mod tests {
         let synced = install_diagnostic_value(Some(&bundled), &installed, &plist);
         assert_eq!(synced["bundled_daemon_exists"], true);
         assert_eq!(synced["installed_daemon_exists"], true);
+        assert_eq!(synced["bundled_daemon_format"], "mach-o");
+        assert_eq!(synced["bundled_daemon_executable"], true);
+        assert_eq!(synced["bundled_daemon_valid"], true);
         assert_eq!(synced["installed_daemon_matches_bundle"], true);
         assert_eq!(synced["launchd_plist_uses_installed_daemon"], true);
         assert_eq!(
@@ -1834,12 +1918,14 @@ mod tests {
             bundled.to_string_lossy().as_ref()
         );
 
-        std::fs::write(&installed, "daemon-v2").unwrap();
+        std::fs::write(&installed, daemon_v2).unwrap();
         let stale = install_diagnostic_value(Some(&bundled), &installed, &plist);
         assert_eq!(stale["installed_daemon_matches_bundle"], false);
 
         let missing_bundle = install_diagnostic_value(None, &installed, &plist);
         assert_eq!(missing_bundle["bundled_daemon_exists"], false);
+        assert!(missing_bundle["bundled_daemon_format"].is_null());
+        assert!(missing_bundle["bundled_daemon_valid"].is_null());
         assert!(missing_bundle["installed_daemon_matches_bundle"].is_null());
 
         let _ = std::fs::remove_dir_all(&dir);
