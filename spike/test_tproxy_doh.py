@@ -329,6 +329,24 @@ def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
     ]
 
 
+def test_youtube_redirector_canary_stays_local_bypass_and_fake_only():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
+    host = spec["fallback_host"]
+
+    assert tproxy.route_policy(host) == {
+        "host": "redirector.googlevideo.com",
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "service_group": tproxy.SERVICE_YOUTUBE,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+    }
+    assert not tproxy.geph_route(host)
+    assert [s["name"] for s in tproxy.strategy_order(host)] == [
+        "split64+fake",
+        "split16+fake",
+        "fake5",
+    ]
+
+
 def test_system_proxy_status_from_scutil_reports_kind_without_mutating():
     raw = """
 HTTPEnable : 1
@@ -576,24 +594,18 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
         q.extend(original_window)
 
 
-def test_youtube_canary_waits_for_observed_video_host(monkeypatch):
-    calls = []
-
-    async def unexpected_resolve(host, fallback_ip):
-        calls.append(host)
-        return ["203.0.113.1"]
-
-    monkeypatch.setattr(tproxy, "resolve_connection_ips", unexpected_resolve)
+def test_youtube_canary_prefers_observed_video_host_then_redirector_fallback():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
     tproxy._strat_cache.clear()
 
-    spec = {"group": tproxy.SERVICE_YOUTUBE, "host": ""}
-    assert asyncio.run(tproxy._run_local_bypass_canary(spec)) is None
+    try:
+        assert tproxy._canary_host(spec) == "redirector.googlevideo.com"
 
-    assert calls == []
-    health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
-    assert health["state"] == tproxy.HEALTH_UNKNOWN
-    assert health["last_failure"] == ""
-    assert health["failures_5m"] == 0
+        tproxy._strat_cache["rr2---sn-ntq7yner.googlevideo.com"] = "fake5"
+
+        assert tproxy._canary_host(spec) == "rr2---sn-ntq7yner.googlevideo.com"
+    finally:
+        tproxy._strat_cache.clear()
 
 
 def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):

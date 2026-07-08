@@ -829,7 +829,12 @@ CANARY_SPECS = (
         "host": "cdn.discordapp.com",
         "payload_path": "/embed/avatars/0.png",
     },
-    {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": ""},
+    {
+        "name": "youtube_video",
+        "group": SERVICE_YOUTUBE,
+        "host": "",
+        "fallback_host": "redirector.googlevideo.com",
+    },
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
     {
         "name": "openai_billing",
@@ -1046,7 +1051,11 @@ def _observed_canary_host(group):
 
 
 def _canary_host(spec):
-    return spec.get("host") or _observed_canary_host(spec["group"])
+    return (
+        spec.get("host")
+        or _observed_canary_host(spec["group"])
+        or spec.get("fallback_host", "")
+    )
 
 
 async def _run_local_bypass_canary(spec):
