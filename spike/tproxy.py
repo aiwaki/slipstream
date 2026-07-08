@@ -23,6 +23,7 @@ import atexit
 import base64
 import filecmp
 import fcntl
+import hashlib
 import ipaddress
 import json
 import logging
@@ -145,6 +146,8 @@ LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
 IP_ATTEMPT_LIMIT_BY_ROUTE = {
     ROUTE_LOCAL_BYPASS: LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
 }
+ROUTE_POLICY_VERSION = 1
+ROUTE_POLICY_SOURCE = "bundled"
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
@@ -299,6 +302,71 @@ def _match_policy(host, policies):
         if _host_matches(host, policy["domains"]):
             return policy
     return None
+
+
+def route_policy_manifest():
+    return {
+        "version": ROUTE_POLICY_VERSION,
+        "source": ROUTE_POLICY_SOURCE,
+        "static_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "route_class": policy["route_class"],
+                "service_group": policy["service_group"],
+                "strategy_set": policy["strategy_set"],
+            }
+            for policy in ROUTE_POLICY_TABLE
+        ],
+        "geo_exit_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "service_group": policy["service_group"],
+                "route_class": ROUTE_GEO_EXIT,
+                "strategy_set": STRATEGY_GEPH,
+            }
+            for policy in GEO_EXIT_POLICY_TABLE
+        ],
+        "attempt_limits": {
+            "default": DEFAULT_IP_ATTEMPT_LIMIT,
+            **IP_ATTEMPT_LIMIT_BY_ROUTE,
+        },
+    }
+
+
+def route_policy_hash(manifest=None):
+    manifest = route_policy_manifest() if manifest is None else manifest
+    raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def route_policy_status_snapshot():
+    manifest = route_policy_manifest()
+    domains = {ROUTE_DIRECT: 0, ROUTE_LOCAL_BYPASS: 0, ROUTE_GEO_EXIT: 0}
+    groups = {}
+    for policy in manifest["static_routes"]:
+        route_class = policy["route_class"]
+        domains[route_class] = domains.get(route_class, 0) + len(policy["domains"])
+        groups[policy["service_group"]] = {
+            "route_class": route_class,
+            "strategy_set": policy["strategy_set"],
+            "domains": len(policy["domains"]),
+        }
+    for policy in manifest["geo_exit_routes"]:
+        domains[ROUTE_GEO_EXIT] = domains.get(ROUTE_GEO_EXIT, 0) + len(policy["domains"])
+        groups[policy["service_group"]] = {
+            "route_class": ROUTE_GEO_EXIT,
+            "strategy_set": STRATEGY_GEPH,
+            "domains": groups.get(policy["service_group"], {}).get("domains", 0)
+            + len(policy["domains"]),
+        }
+    return {
+        "version": manifest["version"],
+        "source": manifest["source"],
+        "sha256": route_policy_hash(manifest),
+        "domains": domains,
+        "groups": groups,
+        "attempt_limits": manifest["attempt_limits"],
+    }
 
 
 def route_policy(host, now=None):
@@ -1938,6 +2006,7 @@ def write_status(state, iface, voice_iface):
             "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
             "geph_learned": len(_auto_geph),
             "auto_geo_exit": auto_geo_exit_status_snapshot(now),
+            "routing_policy": route_policy_status_snapshot(),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),

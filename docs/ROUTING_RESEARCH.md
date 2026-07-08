@@ -39,6 +39,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Steam Store web | Adopted narrowly | Route Steam Store web hosts through geo-exit; keep Steam CM/game/download paths out until separately proven. | Watch real Steam logs before widening host coverage. |
 | 2026-07-09 | Runtime local-bypass recheck | Implemented | Full local-bypass runtime strategy failure clears only that route group's strategy cache and force-schedules canary recheck. | Keep observing real failures before changing thresholds. |
 | 2026-07-09 | Explicit route policy tables | Implemented | Static direct, local-bypass, geo-exit, and attempt-limit policy now lives in inspectable tables instead of a hand-written route-policy branch chain. | Use this shape for signed policy updates and OS adapters. |
+| 2026-07-09 | Policy metadata in diagnostics | Implemented | Daemon status and copied diagnostics expose bundled policy version, source, hash, domain counts, and attempt limits. | Use this as the base for signed remote policy verification. |
 
 ## Codebase Graph
 

@@ -555,6 +555,24 @@ fn diagnostic_summary_value(status: Option<&Value>) -> Value {
         .and_then(|status| status.get("auto_geo_exit"))
         .cloned()
         .unwrap_or_else(|| json!({"enabled": false, "learned": 0, "pending": 0}));
+    let routing_policy = status
+        .and_then(|status| status.get("routing_policy"))
+        .map(|policy| {
+            json!({
+                "version": policy.get("version").and_then(|value| value.as_i64()).unwrap_or(0),
+                "source": value_string(Some(policy), "source", "unknown"),
+                "sha256": value_string(Some(policy), "sha256", ""),
+                "domains": policy
+                    .get("domains")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+                "attempt_limits": policy
+                    .get("attempt_limits")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+            })
+        })
+        .unwrap_or_else(|| json!({"version": 0, "source": "unknown", "sha256": ""}));
     let geph_detail = status
         .and_then(|status| status.get("geph_detail"))
         .map(|detail| {
@@ -583,6 +601,7 @@ fn diagnostic_summary_value(status: Option<&Value>) -> Value {
         "pf_state": pf_state,
         "canaries": canaries,
         "auto_geo_exit": auto_geo_exit,
+        "routing_policy": routing_policy,
         "geph_detail": geph_detail,
         "problems": diagnostic_problem_rows(status),
     })
@@ -2047,6 +2066,27 @@ mod tests {
                     "pending": 0,
                     "last_host": "payments.example.com"
                 },
+                "routing_policy": {
+                    "version": 1,
+                    "source": "bundled",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "domains": {
+                        "direct_passthrough": 5,
+                        "local_bypass": 30,
+                        "geo_exit": 15
+                    },
+                    "attempt_limits": {
+                        "default": 2,
+                        "local_bypass": 4
+                    },
+                    "groups": {
+                        "discord": {
+                            "route_class": "local_bypass",
+                            "strategy_set": "fake_only",
+                            "domains": 23
+                        }
+                    }
+                },
                 "secrets": {
                     "account_secret": "very-secret",
                     "nested": {
@@ -2077,6 +2117,20 @@ mod tests {
         assert_eq!(snapshot["summary"]["routes"]["geo_exit"], "ok");
         assert_eq!(snapshot["summary"]["system_dns"]["resolution_state"], "ok");
         assert_eq!(snapshot["summary"]["auto_geo_exit"]["learned"], 1);
+        assert_eq!(snapshot["summary"]["routing_policy"]["version"], 1);
+        assert_eq!(snapshot["summary"]["routing_policy"]["source"], "bundled");
+        assert_eq!(
+            snapshot["summary"]["routing_policy"]["sha256"],
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            snapshot["summary"]["routing_policy"]["domains"]["local_bypass"],
+            30
+        );
+        assert_eq!(
+            snapshot["summary"]["routing_policy"]["attempt_limits"]["local_bypass"],
+            4
+        );
         assert_eq!(snapshot["summary"]["problems"].as_array().unwrap().len(), 2);
         assert_eq!(
             snapshot["daemon_recovery"]["last"]["result"],
@@ -2101,6 +2155,9 @@ mod tests {
         assert_eq!(summary["routes"]["local_bypass"], "unknown");
         assert_eq!(summary["routes"]["geo_exit"], "unknown");
         assert_eq!(summary["auto_geo_exit"]["enabled"], false);
+        assert_eq!(summary["routing_policy"]["version"], 0);
+        assert_eq!(summary["routing_policy"]["source"], "unknown");
+        assert_eq!(summary["routing_policy"]["sha256"], "");
         assert_eq!(summary["problems"].as_array().unwrap().len(), 0);
     }
 
@@ -2435,5 +2492,31 @@ mod tests {
             Some("Needs attention".to_string())
         );
         assert_eq!(routing_health_summary(Some(&status), "off", false), None);
+    }
+
+    #[test]
+    fn routing_health_summary_ignores_warning_only_checks() {
+        let status = json!({
+            "route_health": {
+                "youtube_video": {
+                    "state": "ok",
+                    "last_route_class": "local_bypass",
+                    "last_warning": "strategy probe failed",
+                    "last_warning_host": "www.youtube.com"
+                },
+                "openai": {
+                    "state": "ok",
+                    "last_route_class": "geo_exit",
+                    "last_warning": "SOCKS connect failed",
+                    "last_warning_host": "billing.openai.com"
+                }
+            },
+            "canaries": {
+                "warnings": 2,
+                "degraded": 0
+            }
+        });
+
+        assert_eq!(routing_health_summary(Some(&status), "up", false), None);
     }
 }

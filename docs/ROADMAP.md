@@ -23,6 +23,7 @@ not a release promise.
 | Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
 | Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
 | Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
+| Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
 | Signed auto-update | implemented |
@@ -60,7 +61,8 @@ Goal: detect degradation before the user has to diagnose it manually.
 - Broaden local-bypass canaries from small HTTPS payload checks to throughput
   thresholds where that is safe.
 - Signed strategy-list updates without rebuilding the app.
-- Prepare explicit policy tables for signed updates and OS-specific adapters.
+- Move the bundled policy metadata/hash into signed policy updates and
+  OS-specific adapters.
 
 ## P2 - Desktop Portability
 

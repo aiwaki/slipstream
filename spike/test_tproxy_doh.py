@@ -326,6 +326,12 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["auto_geo_exit"]["enabled"] is True
     assert status["auto_geo_exit"]["learned"] == 0
     assert status["auto_geo_exit"]["pending"] == 0
+    assert status["routing_policy"]["version"] == tproxy.ROUTE_POLICY_VERSION
+    assert status["routing_policy"]["source"] == tproxy.ROUTE_POLICY_SOURCE
+    assert len(status["routing_policy"]["sha256"]) == 64
+    assert status["routing_policy"]["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
+        len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
+    )
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
@@ -443,6 +449,49 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
     assert tproxy.SERVICE_STEAM_STORE in geo
     assert "discord.com" not in tproxy.GEPH_HOSTS
     assert "youtube.com" not in tproxy.GEPH_HOSTS
+
+
+def test_route_policy_manifest_has_stable_diagnostic_shape():
+    manifest = tproxy.route_policy_manifest()
+    status = tproxy.route_policy_status_snapshot()
+
+    assert manifest["version"] == tproxy.ROUTE_POLICY_VERSION
+    assert manifest["source"] == tproxy.ROUTE_POLICY_SOURCE
+    assert status["version"] == tproxy.ROUTE_POLICY_VERSION
+    assert status["source"] == tproxy.ROUTE_POLICY_SOURCE
+    assert status["sha256"] == tproxy.route_policy_hash(manifest)
+    assert len(status["sha256"]) == 64
+    assert status["attempt_limits"]["default"] == tproxy.DEFAULT_IP_ATTEMPT_LIMIT
+    assert status["attempt_limits"][tproxy.ROUTE_LOCAL_BYPASS] == (
+        tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT
+    )
+
+    static_groups = {policy["service_group"] for policy in manifest["static_routes"]}
+    geo_groups = {policy["service_group"] for policy in manifest["geo_exit_routes"]}
+    assert tproxy.SERVICE_DISCORD in static_groups
+    assert tproxy.SERVICE_YOUTUBE in static_groups
+    assert tproxy.SERVICE_TELEGRAM in static_groups
+    assert tproxy.SERVICE_OPENAI in geo_groups
+    assert tproxy.SERVICE_ANTHROPIC in geo_groups
+    assert tproxy.SERVICE_STEAM_STORE in geo_groups
+    assert tproxy.SERVICE_DISCORD not in geo_groups
+    assert tproxy.SERVICE_YOUTUBE not in geo_groups
+
+    assert status["domains"][tproxy.ROUTE_DIRECT] == len(tproxy.TELEGRAM_HOSTS)
+    assert status["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
+        len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
+    )
+    assert status["domains"][tproxy.ROUTE_GEO_EXIT] == len(tproxy.GEPH_HOSTS)
+    assert status["groups"][tproxy.SERVICE_DISCORD] == {
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+        "domains": len(tproxy.DISCORD_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_OPENAI] == {
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+        "domains": len(tproxy.OPENAI_HOSTS) + 1,
+    }
 
 
 def test_ip_attempt_limits_follow_route_policy():
