@@ -246,6 +246,8 @@ def _route_health_default(group, route_class=ROUTE_UNKNOWN):
     return {
         "state": HEALTH_UNKNOWN,
         "last_failure": "",
+        "last_warning": "",
+        "last_warning_host": "",
         "last_checked": 0.0,
         "failures_5m": 0,
         "last_host": "",
@@ -433,11 +435,14 @@ def geph_route(host):
     return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
-def route_health_event(group, route_class, host="", ok=True, reason="", state=None, now=None):
+def route_health_event(
+    group, route_class, host="", ok=True, reason="", state=None, now=None, soft=False
+):
     now = time.time() if now is None else now
     if group not in _route_health:
         _route_health[group] = _route_health_default(group, route_class)
         _route_failure_windows[group] = deque()
+    previous = _route_health.get(group, _route_health_default(group, route_class))
     q = _route_failure_windows.setdefault(group, deque())
     cutoff = now - CANARY_FAILURE_WINDOW
     while q and q[0] < cutoff:
@@ -445,13 +450,25 @@ def route_health_event(group, route_class, host="", ok=True, reason="", state=No
     if ok:
         health_state = HEALTH_OK
         last_failure = ""
+        last_warning = ""
+        last_warning_host = ""
     else:
         q.append(now)
         health_state = state or HEALTH_DEGRADED
         last_failure = reason[:200]
+        if soft and health_state == HEALTH_DEGRADED:
+            health_state = previous.get("state", HEALTH_UNKNOWN)
+            last_warning = reason[:200]
+            last_warning_host = normalize_host(host)
+            last_failure = previous.get("last_failure", "")
+        else:
+            last_warning = ""
+            last_warning_host = ""
     _route_health[group] = {
         "state": health_state,
         "last_failure": last_failure,
+        "last_warning": last_warning,
+        "last_warning_host": last_warning_host,
         "last_checked": now,
         "failures_5m": len(q),
         "last_host": normalize_host(host),
@@ -485,6 +502,9 @@ def route_health_snapshot(now=None):
             q.popleft()
         clone = dict(item)
         clone["failures_5m"] = len(q)
+        if not q and clone.get("state") in {HEALTH_DEGRADED, HEALTH_BLOCKED}:
+            clone["state"] = HEALTH_UNKNOWN
+            clone["last_failure"] = ""
         snap[group] = clone
     return snap
 
@@ -501,6 +521,8 @@ def route_health_unknown(group, route_class, host="", now=None):
     _route_health[group] = {
         "state": HEALTH_UNKNOWN,
         "last_failure": "",
+        "last_warning": "",
+        "last_warning_host": "",
         "last_checked": now,
         "failures_5m": len(q),
         "last_host": normalize_host(host),
@@ -645,7 +667,12 @@ CANARY_SPECS = (
     {"name": "discord_update", "group": SERVICE_DISCORD, "host": "updates.discord.com"},
     {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": ""},
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
-    {"name": "openai_billing", "group": SERVICE_OPENAI, "host": "billing.openai.com"},
+    {
+        "name": "openai_billing",
+        "group": SERVICE_OPENAI,
+        "host": "billing.openai.com",
+        "soft": True,
+    },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
     {"name": "telegram_proxy", "group": SERVICE_TELEGRAM, "host": ""},
 )
@@ -726,7 +753,14 @@ async def _run_geo_exit_canary(spec):
         _close_probe_result(result)
         route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True)
         return True
-    route_health_event(spec["group"], ROUTE_GEO_EXIT, host, False, "SOCKS connect failed")
+    route_health_event(
+        spec["group"],
+        ROUTE_GEO_EXIT,
+        host,
+        False,
+        "SOCKS connect failed",
+        soft=bool(spec.get("soft")),
+    )
     return False
 
 
