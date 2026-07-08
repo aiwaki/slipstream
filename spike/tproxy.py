@@ -474,20 +474,33 @@ def is_russian(host):
 
 
 # Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
-# strategies. A host the app keeps reconnecting to that returns NO real content
-# over local desync (TLS ok, but a 403 / challenge / RST — the "reconnecting…"
-# symptom) is geo-blocked → promote it to the geph tunnel and remember it (TTL'd).
-# We count low-content CLOSES, not raw connects, so a normal page's parallel burst
-# (which transfers real data) never trips it. Guard: if MANY distinct hosts fail
-# at once it's a network problem, not a per-host geo-block, so don't promote.
+# strategies, but only after proof. A host the app keeps reconnecting to that
+# returns no real content over local desync becomes a candidate. It is promoted
+# only if a separate HTTPS payload probe through Geph succeeds. We count
+# low-content closes, not raw connects, so a normal page's parallel burst does
+# not trip it. Guard: if many distinct hosts fail at once, it is a network
+# problem, not a per-host geo-block, so don't promote.
 AUTO_GEPH_WINDOW = 60.0       # seconds to accumulate a host's failures over
 AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = STUCK
 AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
+AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
+AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
+AUTO_GEPH_CONFIRM_MIN_BYTES = 64
 _auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
+_auto_geph_confirming = {}    # host -> monotonic start time
+_auto_geph_last_probe = {}    # host -> monotonic last proof attempt
+_auto_geph_last_status = {
+    "state": "idle",
+    "host": "",
+    "reason": "",
+    "ts": 0.0,
+    "bytes": 0,
+}
+_auto_geph_lock = threading.RLock()
 _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
 GEPH_FAIL_LOG_TTL = 60.0
 _geph_fail_log = {}           # (host, reason) -> last log monotonic
@@ -1044,6 +1057,18 @@ def clear_geph_route_failure():
     _geph_last_failure.update({"host": "", "reason": "", "ts": 0.0})
 
 
+def prune_auto_geph(now=None):
+    now = time.time() if now is None else now
+    expired = [
+        host for host, expiry in list(_auto_geph.items())
+        if not isinstance(expiry, (int, float)) or expiry <= now
+    ]
+    for host in expired:
+        _auto_geph.pop(host, None)
+    if expired:
+        save_auto_geph()
+
+
 def load_auto_geph():
     global _auto_geph
     try:
@@ -1064,37 +1089,194 @@ def save_auto_geph():
         pass
 
 
-# Adaptive auto-routing is OFF by default: from OUTSIDE the TLS we can't tell a
-# 403 geo-block from a normal long-lived low-traffic connection (Apple push,
-# telemetry, websockets), so it over-promotes those into the tunnel. The static
-# GEPH_HOSTS list + the user adding hosts is reliable; opt in with SLIP_AUTOGEPH=1.
-AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "0") == "1"
+# Adaptive auto-routing is on by default, but promotion is proof-gated: local
+# low-content hangs only schedule a candidate, and Geph must return HTTPS payload
+# before the exact host is learned. SLIP_AUTOGEPH=0 disables this learning layer.
+AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "1") != "0"
 
 
-def note_local_result(host, down_bytes, duration):
+def _auto_geph_candidate_allowed(host):
+    h = normalize_host(host)
+    if not h:
+        return False
+    if is_russian(h) or _is_geph_infra(h):
+        return False
+    policy = route_policy(h)
+    return policy["route_class"] == ROUTE_UNKNOWN
+
+
+def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
+    _auto_geph_last_status.update({
+        "state": state,
+        "host": normalize_host(host),
+        "reason": reason[:200],
+        "ts": time.time(),
+        "bytes": int(bytes_read or 0),
+    })
+
+
+def _socks5_connect_blocking(host, port, timeout=3.0):
+    socks_port = _geph_port
+    if not socks_port:
+        return None
+    sock = None
+    try:
+        sock = socket.create_connection(("127.0.0.1", socks_port), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(b"\x05\x01\x00")
+        if sock.recv(2)[:2] != b"\x05\x00":
+            raise IOError("socks5 no-auth refused")
+        hb = host.encode("ascii", "ignore")[:255]
+        sock.sendall(
+            b"\x05\x01\x00\x03"
+            + bytes([len(hb)])
+            + hb
+            + struct.pack("!H", port)
+        )
+        rep = sock.recv(4)
+        if len(rep) < 4 or rep[1] != 0x00:
+            raise IOError(f"socks5 connect rep={rep[1] if len(rep) >= 2 else 'short'}")
+        atyp = rep[3]
+        if atyp == 0x01:
+            sock.recv(4)
+        elif atyp == 0x03:
+            ln = sock.recv(1)
+            if not ln:
+                raise IOError("short socks5 domain reply")
+            sock.recv(ln[0])
+        elif atyp == 0x04:
+            sock.recv(16)
+        sock.recv(2)
+        return sock
+    except Exception:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        return None
+
+
+def _geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
+    sock = _socks5_connect_blocking(host, 443, timeout)
+    if sock is None:
+        return 0
+    tls_sock = None
+    try:
+        ctx = _local_payload_ssl_context()
+        tls_sock = ctx.wrap_socket(sock, server_hostname=host)
+        tls_sock.settimeout(timeout)
+        req = (
+            "HEAD / HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            "User-Agent: SlipstreamAutoGeo/1\r\n"
+            "Accept: */*\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii", "ignore")
+        tls_sock.sendall(req)
+        data = tls_sock.recv(4096)
+        if data.startswith(b"HTTP/"):
+            return len(data)
+        return 0
+    except Exception:
+        return 0
+    finally:
+        try:
+            (tls_sock or sock).close()
+        except Exception:
+            pass
+
+
+def _confirm_auto_geph(host):
+    h = normalize_host(host)
+    if not AUTO_GEPH_ENABLED or not _geph_up or not _auto_geph_candidate_allowed(h):
+        _set_auto_geph_status("skipped", h, "not eligible")
+        return False
+    bytes_read = _geph_payload_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        _set_auto_geph_status("rejected", h, "geph payload probe failed", bytes_read)
+        return False
+    with _auto_geph_lock:
+        if not _auto_geph_candidate_allowed(h):
+            _set_auto_geph_status("skipped", h, "route changed")
+            return False
+        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+        _auto_fail.pop(h, None)
+        save_auto_geph()
+        _set_auto_geph_status("learned", h, "geph payload confirmed", bytes_read)
+    print(
+        f">> auto-route: {h} works through Geph after local stalls "
+        f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _schedule_auto_geph_confirmation(host, now=None, runner=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if not h:
+        return False
+    with _auto_geph_lock:
+        last = _auto_geph_last_probe.get(h, 0.0)
+        if last and now - last < AUTO_GEPH_CONFIRM_COOLDOWN:
+            return False
+        started = _auto_geph_confirming.get(h)
+        if started is not None and now - started < AUTO_GEPH_CONFIRM_TIMEOUT * 2:
+            return False
+        _auto_geph_last_probe[h] = now
+        _auto_geph_confirming[h] = now
+        _set_auto_geph_status("checking", h, "local stalls observed")
+
+    def run():
+        try:
+            (runner or _confirm_auto_geph)(h)
+        finally:
+            with _auto_geph_lock:
+                _auto_geph_confirming.pop(h, None)
+
+    if runner is not None:
+        run()
+        return True
+    threading.Thread(target=run, daemon=True).start()
+    return True
+
+
+def auto_geo_exit_status_snapshot(now=None):
+    prune_auto_geph(now)
+    with _auto_geph_lock:
+        return {
+            "enabled": AUTO_GEPH_ENABLED,
+            "learned": len(_auto_geph),
+            "pending": len(_auto_geph_confirming),
+            "last_state": _auto_geph_last_status["state"],
+            "last_host": _auto_geph_last_status["host"],
+            "last_reason": _auto_geph_last_status["reason"],
+            "last_at": _auto_geph_last_status["ts"],
+            "last_bytes": _auto_geph_last_status["bytes"],
+        }
+
+
+def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=None):
     """Called after a NON-geph local-desync close. A "stuck" close — the
     connection was held a long time but returned no real content (the
-    "reconnecting…" hang) — is the geo-block signal; a storm of them for one host
-    learns it for the geph tunnel. FAST low-content closes (redirects / 204 /
-    beacons, e.g. google) are normal and must NOT count, or they'd be falsely
-    tunnelled. Real content resets the host's failure noise."""
+    "reconnecting…" hang) — is the candidate signal. A storm of them for one host
+    schedules a Geph payload proof; only that proof learns the host. Fast
+    low-content closes (redirects / 204 / beacons, e.g. google) are normal and
+    must not count. Real content resets the host's failure noise."""
     if not AUTO_GEPH_ENABLED:
-        return                                  # opt-in only (see AUTO_GEPH_ENABLED)
-    if (
-        not host
-        or is_russian(host)
-        or is_local_bypass_host(host)
-        or geph_route(host)
-        or _is_geph_infra(host)
-    ):
+        return
+    h = normalize_host(host)
+    if not _auto_geph_candidate_allowed(h):
         return                                  # RU, already tunnelled, or geph's own
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
-        _auto_fail.pop(host, None)              # got real content -> not blocked
+        _auto_fail.pop(h, None)                 # got real content -> not blocked
         return
     if duration < AUTO_GEPH_HANG:
         return                                  # fast + low content = normal, ignore
-    now = time.monotonic()
-    q = _auto_fail.setdefault(host, [])
+    now = time.monotonic() if now is None else now
+    q = _auto_fail.setdefault(h, [])
     q.append(now)
     cutoff = now - AUTO_GEPH_WINDOW
     while q and q[0] < cutoff:
@@ -1112,11 +1294,7 @@ def note_local_result(host, down_bytes, duration):
                   if sum(1 for t in v if t >= cutoff) >= 2)
     if failing >= AUTO_GEPH_NET_BAD:
         return
-    h = host.lower().rstrip(".")
-    _auto_geph[h] = time.time() + AUTO_GEPH_TTL
-    save_auto_geph()
-    print(f">> auto-route: {host} keeps failing locally -> geph tunnel "
-          f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)", file=sys.stderr)
+    _schedule_auto_geph_confirmation(h, now=now, runner=confirmation_runner)
 
 
 CANARY_SPECS = (
@@ -1144,6 +1322,7 @@ CANARY_SPECS = (
         "group": SERVICE_YOUTUBE,
         "host": "www.youtube.com",
         "payload_path": "/generate_204",
+        "soft": True,
     },
     {
         "name": "youtube_video",
@@ -1439,12 +1618,30 @@ async def _run_local_bypass_canary(spec):
         return None
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_LOCAL_BYPASS:
-        canary_health_event(spec, policy["route_class"], host, False, "policy mismatch")
+        canary_health_event(
+            spec,
+            policy["route_class"],
+            host,
+            False,
+            "policy mismatch",
+            soft=bool(spec.get("soft")),
+        )
+        if spec.get("soft"):
+            return "warning"
         return False
     ips = await resolve_connection_ips(host, None)
     if not ips:
-        canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, False, "dns failed")
+        canary_health_event(
+            spec,
+            ROUTE_LOCAL_BYPASS,
+            host,
+            False,
+            "dns failed",
+            soft=bool(spec.get("soft")),
+        )
         clear_route_strategy_cache(group=spec["group"])
+        if spec.get("soft"):
+            return "warning"
         return False
     if spec.get("transport_probe") == "quic_version_negotiation":
         if await _run_quic_version_negotiation_probe(ips):
@@ -1493,12 +1690,24 @@ async def _run_local_bypass_canary(spec):
             False,
             "payload probe failed",
             degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
+            soft=bool(spec.get("soft")),
         )
         health = canary_health_snapshot().get(_canary_key(spec), {})
+        if spec.get("soft"):
+            return "warning"
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
-    canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
+    canary_health_event(
+        spec,
+        ROUTE_LOCAL_BYPASS,
+        host,
+        False,
+        "strategy probe failed",
+        soft=bool(spec.get("soft")),
+    )
+    if spec.get("soft"):
+        return "warning"
     return False
 
 
@@ -1661,6 +1870,7 @@ def write_status(state, iface, voice_iface):
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
+        prune_auto_geph(now)
         consume_telegram_proxy_acceptance()
         st = {
             "state": state,            # "active" | "dormant"
@@ -1673,6 +1883,7 @@ def write_status(state, iface, voice_iface):
             "dead": len(_dead),
             "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
             "geph_learned": len(_auto_geph),
+            "auto_geo_exit": auto_geo_exit_status_snapshot(now),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),

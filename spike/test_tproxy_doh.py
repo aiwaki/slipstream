@@ -18,6 +18,11 @@ def reset_smart_dns_state():
     dns_cache = dict(tproxy._system_dns_cache)
     smart_ok = dict(tproxy._smart_dns_ok_until)
     smart_failure = dict(tproxy._smart_dns_last_failure)
+    auto_fail = {host: list(values) for host, values in tproxy._auto_fail.items()}
+    auto_geph = dict(tproxy._auto_geph)
+    auto_confirming = dict(tproxy._auto_geph_confirming)
+    auto_last_probe = dict(tproxy._auto_geph_last_probe)
+    auto_last_status = dict(tproxy._auto_geph_last_status)
     strat_scores = OrderedDict(
         (host, {name: dict(value) for name, value in per_host.items()})
         for host, per_host in tproxy._strat_scores.items()
@@ -35,6 +40,17 @@ def reset_smart_dns_state():
         })
         tproxy._smart_dns_ok_until.clear()
         tproxy._smart_dns_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+        tproxy._auto_fail.clear()
+        tproxy._auto_geph.clear()
+        tproxy._auto_geph_confirming.clear()
+        tproxy._auto_geph_last_probe.clear()
+        tproxy._auto_geph_last_status.update({
+            "state": "idle",
+            "host": "",
+            "reason": "",
+            "ts": 0.0,
+            "bytes": 0,
+        })
         tproxy._strat_scores.clear()
         tproxy._canary_health.clear()
         tproxy._canary_failure_windows.clear()
@@ -46,6 +62,16 @@ def reset_smart_dns_state():
         tproxy._smart_dns_ok_until.update(smart_ok)
         tproxy._smart_dns_last_failure.clear()
         tproxy._smart_dns_last_failure.update(smart_failure)
+        tproxy._auto_fail.clear()
+        tproxy._auto_fail.update(auto_fail)
+        tproxy._auto_geph.clear()
+        tproxy._auto_geph.update(auto_geph)
+        tproxy._auto_geph_confirming.clear()
+        tproxy._auto_geph_confirming.update(auto_confirming)
+        tproxy._auto_geph_last_probe.clear()
+        tproxy._auto_geph_last_probe.update(auto_last_probe)
+        tproxy._auto_geph_last_status.clear()
+        tproxy._auto_geph_last_status.update(auto_last_status)
         tproxy._strat_scores.clear()
         tproxy._strat_scores.update(strat_scores)
         tproxy._canary_health.clear()
@@ -297,6 +323,9 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["hosts_learned"] == 1
     assert status["dead"] == 1
     assert status["geph"] == "up"
+    assert status["auto_geo_exit"]["enabled"] is True
+    assert status["auto_geo_exit"]["learned"] == 0
+    assert status["auto_geo_exit"]["pending"] == 0
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
@@ -509,6 +538,7 @@ def test_youtube_redirector_canary_stays_local_bypass_and_fake_only():
 def test_youtube_web_canary_stays_local_bypass_and_fake_only():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_web")
 
+    assert spec["soft"] is True
     assert tproxy.route_policy(spec["host"]) == {
         "host": "www.youtube.com",
         "route_class": tproxy.ROUTE_LOCAL_BYPASS,
@@ -897,6 +927,36 @@ def test_youtube_canary_prefers_observed_video_host_then_redirector_fallback():
         assert tproxy._canary_host(spec) == "rr2---sn-ntq7yner.googlevideo.com"
     finally:
         tproxy._strat_cache.clear()
+
+
+def test_youtube_web_canary_failure_is_warning_only(monkeypatch):
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_web")
+    original = dict(tproxy._route_health[tproxy.SERVICE_YOUTUBE])
+    original_window = deque(tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE])
+
+    async def fake_resolve(host, fallback_ip):
+        return ["203.0.113.10"]
+
+    async def fake_dial(ip, port, head, body, host, strat):
+        return None
+
+    try:
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_resolve)
+        monkeypatch.setattr(tproxy, "dial_strategy", fake_dial)
+
+        assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
+
+        check = tproxy.canary_health_snapshot()["youtube_web"]
+        assert check["state"] == tproxy.HEALTH_UNKNOWN
+        assert check["last_warning"] == "strategy probe failed"
+        assert check["failures_5m"] == 0
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
+        assert health["state"] != tproxy.HEALTH_DEGRADED
+    finally:
+        tproxy._route_health[tproxy.SERVICE_YOUTUBE] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE]
+        q.clear()
+        q.extend(original_window)
 
 
 def test_youtube_canary_uses_quic_transport_probe(monkeypatch):
@@ -1428,6 +1488,106 @@ def test_local_bypass_hosts_ignore_stale_auto_geph_cache():
         assert not tproxy.geph_route("rr2---sn-ntq7yner.googlevideo.com")
     finally:
         tproxy._auto_geph.clear()
+
+
+def test_auto_geph_candidate_allows_only_unknown_hosts():
+    assert tproxy._auto_geph_candidate_allowed("payments.example.com")
+
+    assert not tproxy._auto_geph_candidate_allowed("updates.discord.com")
+    assert not tproxy._auto_geph_candidate_allowed("rr2---sn-ntq7yner.googlevideo.com")
+    assert not tproxy._auto_geph_candidate_allowed("t.me")
+    assert not tproxy._auto_geph_candidate_allowed("vk.com")
+    assert not tproxy._auto_geph_candidate_allowed("chatgpt.com")
+    assert not tproxy._auto_geph_candidate_allowed("kubernetes.io")
+
+
+def test_auto_geph_learns_exact_host_after_local_stalls_and_geph_payload(monkeypatch):
+    saves = []
+
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_payload_probe", lambda host: 128)
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(True))
+
+    for idx in range(tproxy.AUTO_GEPH_STORM - 1):
+        tproxy.note_local_result(
+            "payments.example.com",
+            down_bytes=100,
+            duration=tproxy.AUTO_GEPH_HANG + 1,
+            now=100.0 + idx,
+            confirmation_runner=tproxy._confirm_auto_geph,
+        )
+        assert not tproxy.geph_route("payments.example.com")
+
+    tproxy.note_local_result(
+        "payments.example.com",
+        down_bytes=100,
+        duration=tproxy.AUTO_GEPH_HANG + 1,
+        now=120.0,
+        confirmation_runner=tproxy._confirm_auto_geph,
+    )
+
+    assert tproxy.geph_route("payments.example.com")
+    assert not tproxy.geph_route("example.com")
+    assert saves
+    snap = tproxy.auto_geo_exit_status_snapshot()
+    assert snap["last_state"] == "learned"
+    assert snap["last_host"] == "payments.example.com"
+    assert snap["last_bytes"] == 128
+
+
+def test_auto_geph_requires_geph_payload_proof(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_payload_probe", lambda host: 0)
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
+
+    for idx in range(tproxy.AUTO_GEPH_STORM):
+        tproxy.note_local_result(
+            "payments.example.com",
+            down_bytes=100,
+            duration=tproxy.AUTO_GEPH_HANG + 1,
+            now=100.0 + idx,
+            confirmation_runner=tproxy._confirm_auto_geph,
+        )
+
+    assert not tproxy.geph_route("payments.example.com")
+    snap = tproxy.auto_geo_exit_status_snapshot()
+    assert snap["last_state"] == "rejected"
+    assert snap["last_reason"] == "geph payload probe failed"
+
+
+def test_auto_geph_network_wide_guard_blocks_learning(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+
+    cutoff_base = 100.0
+    for idx in range(tproxy.AUTO_GEPH_NET_BAD):
+        tproxy._auto_fail[f"noisy-{idx}.example.com"] = [cutoff_base, cutoff_base + 1]
+
+    for idx in range(tproxy.AUTO_GEPH_STORM):
+        tproxy.note_local_result(
+            "payments.example.com",
+            down_bytes=100,
+            duration=tproxy.AUTO_GEPH_HANG + 1,
+            now=cutoff_base + 2 + idx,
+            confirmation_runner=lambda host: calls.append(host),
+        )
+
+    assert calls == []
+    assert not tproxy.geph_route("payments.example.com")
+
+
+def test_auto_geph_prunes_expired_learned_hosts(monkeypatch):
+    saves = []
+    tproxy._auto_geph["old.example.com"] = 100.0
+    tproxy._auto_geph["fresh.example.com"] = 300.0
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(True))
+
+    snap = tproxy.auto_geo_exit_status_snapshot(now=200.0)
+
+    assert "old.example.com" not in tproxy._auto_geph
+    assert "fresh.example.com" in tproxy._auto_geph
+    assert snap["learned"] == 1
+    assert saves
 
 
 def test_local_bypass_resolution_uses_system_dns_when_doh_is_empty(monkeypatch):

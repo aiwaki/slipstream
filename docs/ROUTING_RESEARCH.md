@@ -246,6 +246,24 @@ Fresh external snapshots checked on 2026-07-09:
 - Do not route `steamserver.net`, Steam CM, game traffic, or broad Akamai/Fastly
   hostnames through Geph without endpoint-level evidence.
 
+## Auto Geo-Exit Learning
+
+- The old adaptive `AUTO_GEPH` path is now proof-gated and enabled by default.
+  Local low-content hangs only make an unknown HTTPS host a candidate; promotion
+  requires a separate HTTPS payload probe through Slipstream's Geph tunnel.
+- Learned entries are exact-host, TTL-bound, and persisted in
+  `/var/run/slipstream-autogeph.json`. Runtime status exposes a compact
+  `auto_geo_exit` snapshot with enabled/learned/pending and last proof state.
+- Exclusions remain hard-coded: Discord and YouTube/googlevideo stay
+  `local_bypass`; Telegram and Russian services stay out of Geph; Geph
+  infrastructure is never auto-routed through itself.
+- YouTube web-shell probing is warning-only; the hard YouTube health signal is
+  the `youtube_video`/googlevideo path because browsers can reach the web shell
+  through IPv6/QUIC while daemon-side IPv4/TCP probes are noisy.
+- This is intended to cover Steam-like future cases without adding a manual
+  service rule first. Static policy is still preferred when a service class is
+  well understood and has multiple endpoint families.
+
 ## Transfer Backlog
 
 Safe candidates:

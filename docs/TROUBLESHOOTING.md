@@ -70,6 +70,9 @@ If Discord stalls:
 
 YouTube/video traffic should not require a global UDP/443 block. QUIC is left
 open by default because working HTTP/3 paths are often required for playback.
+`youtube_video` is the hard health signal. `youtube_web` is warning-only because
+the web shell can succeed over browser IPv6/QUIC even when a daemon-side IPv4/TCP
+probe is noisy.
 
 If playback fails:
 
@@ -98,6 +101,19 @@ tail -n 120 "$HOME/Library/Application Support/Steam/logs/bootstrap_log.txt"
 Do not widen Steam routing without endpoint-level evidence. Steam can use
 store/CDN/update hosts plus CM WebSocket and UDP paths, so one working endpoint
 does not prove the whole app is healthy.
+
+## Auto Geo-Exit Learning
+
+Slipstream can learn an unknown HTTPS host as temporary `geo_exit` only after
+both conditions are true:
+
+- local desync repeatedly returns little or no application data for that exact
+  host;
+- a separate HTTPS payload probe through Slipstream's Geph tunnel succeeds.
+
+The learned entry is exact-host only and TTL-based. It does not apply to
+Discord, YouTube/googlevideo, Telegram, Russian services, Geph infrastructure,
+or external DNS/proxy/PAC/VPN settings.
 
 ## Installed Daemon
 
