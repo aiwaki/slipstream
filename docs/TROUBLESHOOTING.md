@@ -37,6 +37,19 @@ The `--noproxy '*'` flag matters when another local proxy is running. It keeps
 the test on Slipstream's transparent `pf` path instead of a browser or shell
 proxy.
 
+## External DNS, Proxy, PAC, VPN
+
+Slipstream does not own external DNS, proxy, PAC, or VPN settings. If one of
+them is active, treat it as outside state:
+
+1. Record it in diagnostics.
+2. Warn when it may bypass Slipstream routing.
+3. Do not disable, rewrite, restore, or replace it automatically.
+
+This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
+of the user's working setup, but Slipstream should not silently enable or remove
+them.
+
 ## Discord
 
 Expected indicators:
