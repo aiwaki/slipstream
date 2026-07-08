@@ -270,6 +270,7 @@ _canary_state = {
     "total": 0,
     "ok": 0,
     "degraded": 0,
+    "unknown": 0,
 }
 _geph_last_failure = {"host": "", "reason": "", "ts": 0.0}
 
@@ -488,6 +489,25 @@ def route_health_snapshot(now=None):
     return snap
 
 
+def route_health_unknown(group, route_class, host="", now=None):
+    now = time.time() if now is None else now
+    if group not in _route_health:
+        _route_health[group] = _route_health_default(group, route_class)
+        _route_failure_windows[group] = deque()
+    q = _route_failure_windows.setdefault(group, deque())
+    cutoff = now - CANARY_FAILURE_WINDOW
+    while q and q[0] < cutoff:
+        q.popleft()
+    _route_health[group] = {
+        "state": HEALTH_UNKNOWN,
+        "last_failure": "",
+        "last_checked": now,
+        "failures_5m": len(q),
+        "last_host": normalize_host(host),
+        "last_route_class": route_class,
+    }
+
+
 def system_proxy_status_from_scutil(raw):
     kind_by_key = {
         "HTTPEnable": "http",
@@ -623,7 +643,7 @@ def note_local_result(host, down_bytes, duration):
 
 CANARY_SPECS = (
     {"name": "discord_update", "group": SERVICE_DISCORD, "host": "updates.discord.com"},
-    {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": "www.youtube.com"},
+    {"name": "youtube_video", "group": SERVICE_YOUTUBE, "host": ""},
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
     {"name": "openai_billing", "group": SERVICE_OPENAI, "host": "billing.openai.com"},
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
@@ -650,8 +670,22 @@ def _close_probe_result(result):
         pass
 
 
+def _observed_canary_host(group):
+    for host in reversed(_strat_cache):
+        if route_policy(host)["service_group"] == group:
+            return host
+    return ""
+
+
+def _canary_host(spec):
+    return spec.get("host") or _observed_canary_host(spec["group"])
+
+
 async def _run_local_bypass_canary(spec):
-    host = spec["host"]
+    host = _canary_host(spec)
+    if not host:
+        route_health_unknown(spec["group"], ROUTE_LOCAL_BYPASS)
+        return None
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_LOCAL_BYPASS:
         route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
@@ -708,14 +742,14 @@ async def _run_telegram_proxy_canary(spec):
 
 
 async def run_route_canaries(reason="periodic"):
-    ok = degraded = total = 0
+    ok = degraded = unknown = total = 0
     for spec in CANARY_SPECS:
         total += 1
         try:
             policy = route_policy(spec.get("host"))
             if spec["group"] == SERVICE_TELEGRAM:
                 passed = await _run_telegram_proxy_canary(spec)
-            elif policy["route_class"] == ROUTE_LOCAL_BYPASS:
+            elif spec["group"] in (SERVICE_DISCORD, SERVICE_YOUTUBE):
                 passed = await _run_local_bypass_canary(spec)
             elif policy["route_class"] == ROUTE_GEO_EXIT:
                 passed = await _run_geo_exit_canary(spec)
@@ -726,7 +760,9 @@ async def run_route_canaries(reason="periodic"):
                     reason="unknown route policy",
                 )
                 passed = False
-            if passed:
+            if passed is None:
+                unknown += 1
+            elif passed:
                 ok += 1
             else:
                 degraded += 1
@@ -743,6 +779,7 @@ async def run_route_canaries(reason="periodic"):
         "total": total,
         "ok": ok,
         "degraded": degraded,
+        "unknown": unknown,
     })
     return ok, degraded
 
@@ -793,6 +830,7 @@ def canary_status_snapshot(now=None):
         "total": _canary_state.get("total", 0),
         "ok": _canary_state.get("ok", 0),
         "degraded": _canary_state.get("degraded", 0),
+        "unknown": _canary_state.get("unknown", 0),
     }
 
 

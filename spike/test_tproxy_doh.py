@@ -256,6 +256,26 @@ def test_local_bypass_canary_failure_decays_only_local_strategy_cache(monkeypatc
         tproxy._strat_cache.clear()
 
 
+def test_youtube_canary_waits_for_observed_video_host(monkeypatch):
+    calls = []
+
+    async def unexpected_resolve(host, fallback_ip):
+        calls.append(host)
+        return ["203.0.113.1"]
+
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", unexpected_resolve)
+    tproxy._strat_cache.clear()
+
+    spec = {"group": tproxy.SERVICE_YOUTUBE, "host": ""}
+    assert asyncio.run(tproxy._run_local_bypass_canary(spec)) is None
+
+    assert calls == []
+    health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
+    assert health["state"] == tproxy.HEALTH_UNKNOWN
+    assert health["last_failure"] == ""
+    assert health["failures_5m"] == 0
+
+
 def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", False)
 
