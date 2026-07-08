@@ -2184,11 +2184,22 @@ LOG_BACKUPS = 5
 
 
 class RotatingLogWriter:
-    def __init__(self, path, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUPS, redirect_fds=False):
+    def __init__(
+        self,
+        path,
+        max_bytes=LOG_MAX_BYTES,
+        backups=LOG_BACKUPS,
+        redirect_fds=False,
+        timestamp=False,
+        clock=None,
+    ):
         self.path = path
         self.max_bytes = max_bytes
         self.backups = backups
         self.redirect_fds = redirect_fds
+        self.timestamp = timestamp
+        self.clock = clock or time.time
+        self._line_start = True
         self._lock = threading.RLock()
         self._file = None
         if os.path.exists(self.path) and os.path.getsize(self.path) >= self.max_bytes:
@@ -2226,10 +2237,26 @@ class RotatingLogWriter:
             os.replace(self.path, self._archive_path(1))
         self._open()
 
+    def _timestamp(self):
+        return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(self.clock()))
+
+    def _format(self, data):
+        if not self.timestamp:
+            return data
+        out = []
+        for part in data.splitlines(keepends=True):
+            if self._line_start:
+                out.append(self._timestamp())
+                out.append(" ")
+            out.append(part)
+            self._line_start = part.endswith("\n")
+        return "".join(out)
+
     def write(self, data):
         if not data:
             return 0
         with self._lock:
+            data = self._format(data)
             size = os.path.getsize(self.path) if os.path.exists(self.path) else 0
             incoming = len(data.encode("utf-8", errors="replace"))
             if size and size + incoming > self.max_bytes:
@@ -2247,7 +2274,7 @@ class RotatingLogWriter:
 
 
 def setup_rotating_logs():
-    writer = RotatingLogWriter(LOG_PATH, redirect_fds=True)
+    writer = RotatingLogWriter(LOG_PATH, redirect_fds=True, timestamp=True)
     sys.stdout = writer
     sys.stderr = writer
     return writer
@@ -2493,8 +2520,7 @@ def start_tgws_proxy():
                 time.sleep(5)
 
     threading.Thread(target=_loop, daemon=True, name="tg-ws-proxy").start()
-    print(f">> tg-ws-proxy ready on 127.0.0.1:{TGWS_PORT}; Telegram link: {link}",
-          file=sys.stderr)
+    print(f">> tg-ws-proxy ready on 127.0.0.1:{TGWS_PORT}", file=sys.stderr)
 
 
 def main():

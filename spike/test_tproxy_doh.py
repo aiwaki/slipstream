@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import ssl
 from collections import OrderedDict
 
@@ -631,6 +632,31 @@ def test_rotating_log_writer_rotates_oversized_existing_log(tmp_path):
 
     assert log.read_text() == "fresh\n"
     assert (tmp_path / "slipstream.log.1").read_text() == "already too large\n"
+
+
+def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
+    log = tmp_path / "slipstream.log"
+    writer = tproxy.RotatingLogWriter(
+        str(log),
+        max_bytes=1024,
+        backups=1,
+        timestamp=True,
+        clock=lambda: 1783512000.0,
+    )
+
+    writer.write("alpha")
+    writer.write("\n")
+    writer.write("beta")
+    writer.write(" continued\n")
+    writer.flush()
+
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4} alpha$", lines[0])
+    assert re.match(
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4} beta continued$",
+        lines[1],
+    )
 
 
 def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
