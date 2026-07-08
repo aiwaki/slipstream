@@ -112,8 +112,14 @@ _env_geph_port = os.environ.get("SLIP_GEPH_PORT")
 GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [9954, 9909]
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
-_system_dns_cache = {"ts": 0.0, "status": None}
+_system_dns_cache = {
+    "ts": 0.0,
+    "status": None,
+    "resolution_ts": 0.0,
+    "resolution_checks": None,
+}
 SYSTEM_DNS_STATUS_TTL = 30.0
+SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
@@ -165,6 +171,19 @@ SERVICE_OPENAI = "openai"
 SERVICE_ANTHROPIC = "anthropic"
 SERVICE_TELEGRAM = "telegram"
 SERVICE_GENERIC = "generic"
+
+DNS_DIAGNOSTIC_HOSTS = (
+    ("updates.discord.com", SERVICE_DISCORD),
+    ("gateway.discord.gg", SERVICE_DISCORD),
+    ("www.youtube.com", SERVICE_YOUTUBE),
+    ("redirector.googlevideo.com", SERVICE_YOUTUBE),
+)
+DNS_POISON_STUB_NETS = tuple(
+    ipaddress.ip_network(net)
+    for net in (
+        "87.228.47.0/24",  # observed ISP poison stub range
+    )
+)
 
 STRATEGY_FAKE_ONLY = "fake_only"
 STRATEGY_GEPH = "geph"
@@ -833,6 +852,75 @@ def system_dns_status_from_scutil(raw):
     }
 
 
+def _suspicious_dns_answer(ip):
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    if any(addr in net for net in DNS_POISON_STUB_NETS):
+        return True
+    return not addr.is_global
+
+
+def system_dns_resolution_checks(resolver=None):
+    resolver = resolver or system_resolve
+    checks = []
+    saw_suspicious = False
+    saw_unknown = False
+    for host, group in DNS_DIAGNOSTIC_HOSTS:
+        try:
+            ips = _dedupe_ips(resolver(host))[:4]
+        except Exception as exc:
+            ips = []
+            error = str(exc)[:120]
+        else:
+            error = ""
+
+        suspicious = [ip for ip in ips if _suspicious_dns_answer(ip)]
+        if suspicious:
+            state = "suspicious"
+            saw_suspicious = True
+        elif ips:
+            state = "ok"
+        else:
+            state = "unknown"
+            saw_unknown = True
+
+        item = {
+            "host": host,
+            "group": group,
+            "state": state,
+            "ips": ips,
+        }
+        if suspicious:
+            item["suspicious_ips"] = suspicious[:4]
+        if error:
+            item["error"] = error
+        checks.append(item)
+
+    state = "suspicious" if saw_suspicious else ("unknown" if saw_unknown else "ok")
+    return {
+        "state": state,
+        "checks": checks,
+    }
+
+
+def current_system_dns_resolution_checks(now=None):
+    now = time.monotonic() if now is None else now
+    cached = _system_dns_cache.get("resolution_checks")
+    if (
+        cached is not None
+        and now - _system_dns_cache.get("resolution_ts", 0.0) < SYSTEM_DNS_RESOLUTION_TTL
+    ):
+        return dict(cached)
+    checks = system_dns_resolution_checks()
+    _system_dns_cache.update({
+        "resolution_ts": now,
+        "resolution_checks": dict(checks),
+    })
+    return checks
+
+
 def current_system_dns_status(now=None):
     now = time.monotonic() if now is None else now
     cached = _system_dns_cache.get("status")
@@ -849,6 +937,7 @@ def current_system_dns_status(now=None):
         }
     else:
         status = system_dns_status_from_scutil(res.stdout)
+    status["resolution_checks"] = current_system_dns_resolution_checks(now)
     _system_dns_cache.update({"ts": now, "status": dict(status)})
     return status
 

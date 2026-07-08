@@ -23,7 +23,12 @@ def reset_smart_dns_state():
         key: deque(value) for key, value in tproxy._canary_failure_windows.items()
     }
     try:
-        tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
+        tproxy._system_dns_cache.update({
+            "ts": 0.0,
+            "status": None,
+            "resolution_ts": 0.0,
+            "resolution_checks": None,
+        })
         tproxy._smart_dns_ok_until.clear()
         tproxy._smart_dns_last_failure.update({"host": "", "reason": "", "ts": 0.0})
         tproxy._canary_health.clear()
@@ -263,11 +268,17 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "system_resolve", lambda host: ["142.250.186.46"])
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
     tproxy._dead.clear()
     tproxy._dead["blocked.example"] = 999.0
-    tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
+    tproxy._system_dns_cache.update({
+        "ts": 0.0,
+        "status": None,
+        "resolution_ts": 0.0,
+        "resolution_checks": None,
+    })
     monkeypatch.setattr(tproxy, "_geph_up", True)
 
     tproxy.write_status("active", "en0", "en0")
@@ -282,12 +293,11 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
-    assert status["system_dns"] == {
-        "state": "xbox_dns",
-        "providers": "xbox_dns",
-        "servers": ["111.88.96.50", "111.88.96.51"],
-        "managed_by_slipstream": False,
-    }
+    assert status["system_dns"]["state"] == "xbox_dns"
+    assert status["system_dns"]["providers"] == "xbox_dns"
+    assert status["system_dns"]["servers"] == ["111.88.96.50", "111.88.96.51"]
+    assert status["system_dns"]["managed_by_slipstream"] is False
+    assert status["system_dns"]["resolution_checks"]["state"] == "ok"
     assert status["smart_dns"] == {
         "state": "available",
         "providers": "xbox_dns",
@@ -530,8 +540,34 @@ resolver #1
     }
 
 
+def test_system_dns_resolution_checks_flag_null_private_and_stub_answers():
+    answers = {
+        "updates.discord.com": ["0.0.0.0"],
+        "gateway.discord.gg": ["10.0.0.42"],
+        "www.youtube.com": ["142.250.186.46"],
+        "redirector.googlevideo.com": ["87.228.47.11"],
+    }
+
+    status = tproxy.system_dns_resolution_checks(lambda host: answers.get(host, []))
+    checks = {item["host"]: item for item in status["checks"]}
+
+    assert status["state"] == "suspicious"
+    assert checks["updates.discord.com"]["state"] == "suspicious"
+    assert checks["gateway.discord.gg"]["suspicious_ips"] == ["10.0.0.42"]
+    assert checks["www.youtube.com"]["state"] == "ok"
+    assert checks["redirector.googlevideo.com"]["suspicious_ips"] == ["87.228.47.11"]
+
+
+def test_system_dns_resolution_checks_report_unknown_without_mutating():
+    status = tproxy.system_dns_resolution_checks(lambda host: [])
+
+    assert status["state"] == "unknown"
+    assert all(item["state"] == "unknown" for item in status["checks"])
+
+
 def test_current_system_dns_status_is_cached(monkeypatch):
     calls = []
+    resolves = []
 
     def fake_run(*args):
         calls.append(args)
@@ -541,14 +577,29 @@ def test_current_system_dns_status_is_cached(monkeypatch):
             "stderr": "",
         })()
 
+    def fake_resolve(host):
+        resolves.append(host)
+        return ["142.250.186.46"]
+
     original = dict(tproxy._system_dns_cache)
     try:
-        tproxy._system_dns_cache.update({"ts": 0.0, "status": None})
+        tproxy._system_dns_cache.update({
+            "ts": 0.0,
+            "status": None,
+            "resolution_ts": 0.0,
+            "resolution_checks": None,
+        })
         monkeypatch.setattr(tproxy, "_run", fake_run)
+        monkeypatch.setattr(tproxy, "system_resolve", fake_resolve)
 
-        assert tproxy.current_system_dns_status(now=100.0)["state"] == "xbox_dns"
-        assert tproxy.current_system_dns_status(now=110.0)["state"] == "xbox_dns"
+        first = tproxy.current_system_dns_status(now=100.0)
+        second = tproxy.current_system_dns_status(now=110.0)
+
+        assert first["state"] == "xbox_dns"
+        assert first["resolution_checks"]["state"] == "ok"
+        assert second["state"] == "xbox_dns"
         assert calls == [("scutil", "--dns")]
+        assert resolves == [host for host, _group in tproxy.DNS_DIAGNOSTIC_HOSTS]
     finally:
         tproxy._system_dns_cache.clear()
         tproxy._system_dns_cache.update(original)

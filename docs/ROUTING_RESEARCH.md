@@ -18,6 +18,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | SonicDPI passive DNS cache | Future platform work | DNS-observed IP binding is the right way to classify hidden-SNI/QUIC targets without global guesses. | Use for future packet adapters; add read-only DNS diagnostics first. |
 | 2026-07-08 | SonicDPI MSS clamp | Future platform work | MSS clamp can help Cloudflare-fronted Discord mid-stream resets, but only with SYN visibility and tight target gating. | Revisit under packet adapters; never clamp broadly. |
 | 2026-07-08 | SonicDPI macOS Network Extension | Future platform work | Full UDP/voice handling on macOS belongs in a System Extension path, not the current pf/TCP layer. | Keep routing core adapter-independent. |
+| 2026-07-08 | Read-only DNS diagnostics | Implemented | Status now records active resolvers and cached sentinel resolution checks for null/private/poison-stub answers. | Keep it diagnostic-only; do not mutate DNS. |
 | 2026-07-08 | Unblock-Pro connectivity probes | Adopted where safe | Use real Gateway WebSocket-style probing for Discord readiness. | Keep canaries autonomous and non-mutating. |
 | 2026-07-08 | Unblock-Pro endpoint gates | Partially adopted | A route is healthy only when both UI shell and delivery endpoints work. | Keep expanding canary coverage by evidence-backed service class. |
 | 2026-07-08 | Slipstream canary check details | Implemented | Group health must not let a passing sibling endpoint hide a failing gateway/CDN/video check. | Use `canaries.checks` in diagnostics; keep tray summary compact. |
@@ -76,6 +77,10 @@ Fresh external snapshots checked on 2026-07-08:
   not "own DNS", but "remember verified host-to-IP evidence briefly." The
   current macOS pf/TCP daemon cannot passively observe UDP/53, so this belongs
   either in read-only diagnostics now or in a future packet adapter.
+- Slipstream now adds read-only DNS diagnostics to status: active resolver
+  detection, `xbox-dns.ru` provider detection, and cached sentinel resolutions
+  for Discord/YouTube hosts that flag null, private, or known poison-stub
+  answers. This records evidence without changing DNS settings.
 - SonicDPI has a lightweight probing model that records wins/losses, ranks
   profiles by a Wilson lower-bound, and gives old entries a small age bonus so
   alternatives get re-tested. Slipstream can borrow this shape for autonomous
@@ -173,9 +178,8 @@ Safe candidates:
 - Use a fresh WebSocket nonce in the Discord Gateway canary.
 - Continue adding service-class canaries only when there is evidence that a
   separate endpoint class can fail independently.
-- Add read-only DNS diagnostics: active resolver list, obvious poisoned/null
-  answers for known local-bypass hosts, and whether user-managed DNS such as
-  `xbox-dns.ru` appears active. Do not rewrite resolver settings.
+- Continue refining read-only DNS diagnostics only from evidence; keep resolver
+  settings immutable.
 - Add autonomous route-health scoring based on wins/losses with exploration
   over time, similar to SonicDPI's Wilson-rank plus age-bonus model.
 - For future packet adapters, evaluate MSS clamp only for verified
