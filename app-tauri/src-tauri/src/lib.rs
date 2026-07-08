@@ -341,21 +341,13 @@ fn telegram_proxy_detail(proxy: &str, suggested: bool, ru: bool) -> Option<&'sta
     }
 
     match proxy {
-        "ready" => Some(if ru {
-            "Telegram-прокси готов"
-        } else {
-            "Telegram proxy ready"
-        }),
+        "ready" => None,
         "starting" => Some(if ru {
             "Telegram-прокси запускается"
         } else {
             "Telegram proxy starting"
         }),
-        "in_use" => Some(if ru {
-            "Telegram-прокси занят"
-        } else {
-            "Telegram proxy in use"
-        }),
+        "in_use" => None,
         "unavailable" | "error" => Some(if ru {
             "Telegram-прокси недоступен"
         } else {
@@ -448,113 +440,31 @@ fn route_class_health(st: Option<&Value>, route_class: &str) -> Option<String> {
     worst.map(str::to_string)
 }
 
-fn route_health_detail(st: Option<&Value>, geph: &str, ru: bool) -> Vec<String> {
-    let mut parts = Vec::new();
-    if let Some(local) = route_class_health(st, "local_bypass") {
-        parts.push(
-            match local.as_str() {
-                "blocked" | "degraded" => {
-                    if ru {
-                        "Локальный обход: сбой"
-                    } else {
-                        "Local bypass degraded"
-                    }
-                }
-                "ok" => {
-                    if ru {
-                        "Локальный обход OK"
-                    } else {
-                        "Local bypass OK"
-                    }
-                }
-                _ => {
-                    if ru {
-                        "Локальный обход проверяется"
-                    } else {
-                        "Local bypass checking"
-                    }
-                }
-            }
-            .to_string(),
-        );
-    }
-
-    if geph != "off" {
-        let geo = route_class_health(st, "geo_exit");
-        parts.push(
-            match (geph, geo.as_deref()) {
-                ("up", Some("blocked" | "degraded")) => {
-                    if ru {
-                        "Geph: сбой"
-                    } else {
-                        "Geph degraded"
-                    }
-                }
-                ("up", _) => {
-                    if ru {
-                        "Geph OK"
-                    } else {
-                        "Geph OK"
-                    }
-                }
-                ("down", _) => {
-                    if ru {
-                        "Geph: недоступен"
-                    } else {
-                        "Geph unavailable"
-                    }
-                }
-                _ => {
-                    if ru {
-                        "Geph проверяется"
-                    } else {
-                        "Geph checking"
-                    }
-                }
-            }
-            .to_string(),
-        );
-    }
-    parts
-}
-
-fn last_route_failure_detail(st: Option<&Value>, ru: bool) -> Option<String> {
-    let routes = st?.get("route_health")?.as_object()?;
-    let mut best: Option<(&str, &str, &str)> = None;
-    for item in routes.values() {
-        let reason = item
-            .get("last_failure")
-            .and_then(|x| x.as_str())
-            .unwrap_or("");
-        if reason.is_empty() {
-            continue;
-        }
-        let state = item
-            .get("state")
-            .and_then(|x| x.as_str())
-            .unwrap_or("unknown");
-        let host = item.get("last_host").and_then(|x| x.as_str()).unwrap_or("");
-        if match best {
-            Some(current) => health_rank(state) > health_rank(current.0),
-            None => true,
-        } {
-            best = Some((state, host, reason));
-        }
-    }
-    let (_, host, reason) = best?;
-    let mut text = if host.is_empty() {
-        reason.to_string()
+fn routing_health_summary(st: Option<&Value>, geph: &str, ru: bool) -> Option<String> {
+    let local = route_class_health(st, "local_bypass");
+    let geo = if geph == "off" {
+        None
     } else {
-        format!("{host}: {reason}")
+        route_class_health(st, "geo_exit").or_else(|| Some("unknown".to_string()))
     };
-    if text.chars().count() > 72 {
-        text = text.chars().take(69).collect::<String>() + "...";
-    }
-    Some(if ru {
-        format!("Сбой: {text}")
+
+    let local_failed = local
+        .as_deref()
+        .is_some_and(|s| matches!(s, "blocked" | "degraded"));
+    let geph_failed = geo
+        .as_deref()
+        .is_some_and(|s| matches!(s, "blocked" | "degraded"))
+        || geph == "down";
+
+    if local_failed || geph_failed {
+        Some(if ru {
+            "Требует внимания".to_string()
+        } else {
+            "Needs attention".to_string()
+        })
     } else {
-        format!("Last failure: {text}")
-    })
+        None
+    }
 }
 
 /// Refresh the two status info-items from the daemon status.
@@ -635,11 +545,8 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         ),
     };
     if matches!(state.as_str(), "active" | "dormant") {
-        for part in route_health_detail(st.as_ref(), &geph, ru) {
-            push_detail_part(&mut detail, &part);
-        }
-        if let Some(last_failure) = last_route_failure_detail(st.as_ref(), ru) {
-            push_detail_part(&mut detail, &last_failure);
+        if let Some(routing) = routing_health_summary(st.as_ref(), &geph, ru) {
+            push_detail_part(&mut detail, &routing);
         }
         if let Some(tg) = telegram_proxy_detail(&telegram_proxy, telegram_proxy_suggested, ru) {
             push_detail_part(&mut detail, tg);
@@ -1517,10 +1424,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_recovery_shell, last_route_failure_detail, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, route_class_health, route_health_detail,
-        shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
-        system_proxy_from_status, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        daemon_recovery_shell, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, route_class_health, routing_health_summary, shell_quote,
+        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
+        telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
 
@@ -1615,10 +1522,12 @@ mod tests {
     }
 
     #[test]
-    fn telegram_proxy_detail_reports_ready_and_errors() {
+    fn telegram_proxy_detail_reports_only_actionable_states() {
+        assert_eq!(telegram_proxy_detail("ready", false, false), None);
+        assert_eq!(telegram_proxy_detail("in_use", false, false), None);
         assert_eq!(
-            telegram_proxy_detail("ready", false, false),
-            Some("Telegram proxy ready")
+            telegram_proxy_detail("starting", false, false),
+            Some("Telegram proxy starting")
         );
         assert_eq!(
             telegram_proxy_detail("error", false, true),
@@ -1694,12 +1603,32 @@ mod tests {
             Some("degraded".to_string())
         );
         assert_eq!(
-            route_health_detail(Some(&status), "up", false),
-            vec!["Local bypass degraded".to_string(), "Geph OK".to_string()]
+            routing_health_summary(Some(&status), "up", false),
+            Some("Needs attention".to_string())
         );
+    }
+
+    #[test]
+    fn routing_health_summary_stays_short_for_geph_failures() {
+        let status = json!({
+            "route_health": {
+                "youtube_video": {
+                    "state": "unknown",
+                    "last_route_class": "local_bypass"
+                },
+                "openai": {
+                    "state": "degraded",
+                    "last_route_class": "geo_exit",
+                    "last_host": "billing.openai.com",
+                    "last_failure": "SOCKS connect failed"
+                }
+            }
+        });
+
         assert_eq!(
-            last_route_failure_detail(Some(&status), false),
-            Some("Last failure: www.youtube.com: strategy probe failed".to_string())
+            routing_health_summary(Some(&status), "up", false),
+            Some("Needs attention".to_string())
         );
+        assert_eq!(routing_health_summary(Some(&status), "off", false), None);
     }
 }
