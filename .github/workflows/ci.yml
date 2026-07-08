@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python test deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest scapy cryptography certifi
+
+      - name: Check version metadata
+        run: python3 scripts/sync_version.py --check
+
+      - name: Test release metadata scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Appcast CLI smoke
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          printf 'test-signature\n' > /tmp/slipstream-test.sig
+          python3 scripts/make_appcast.py \
+            --version "$version" \
+            --tag "v$version" \
+            --repository "${{ github.repository }}" \
+            --signature-file /tmp/slipstream-test.sig \
+            --output /tmp/slipstream-latest.json \
+            --pub-date 2026-07-08T12:00:00Z
+          python3 -m json.tool /tmp/slipstream-latest.json >/dev/null
+
+      - name: Python compile check
+        run: |
+          python3 -m py_compile \
+            spike/tproxy.py \
+            spike/test_tproxy_doh.py \
+            scripts/sync_version.py \
+            scripts/make_appcast.py \
+            scripts/test_make_appcast.py
+
+      - name: Daemon unit tests
+        run: python3 -m pytest -q spike
+
+      - name: Prepare Tauri test resources
+        run: |
+          mkdir -p app-tauri/src-tauri/binaries
+          printf '#!/bin/sh\nexit 0\n' > app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          mkdir -p app-tauri/src-tauri/slipstreamd
+          printf '#!/bin/sh\nexit 0\n' > app-tauri/src-tauri/slipstreamd/slipstreamd
+          chmod +x app-tauri/src-tauri/slipstreamd/slipstreamd
+
+      - name: Rust tray tests
+        working-directory: app-tauri/src-tauri
+        run: cargo test
