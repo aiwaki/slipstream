@@ -288,6 +288,35 @@ def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):
     assert health["last_route_class"] == tproxy.ROUTE_GEO_EXIT
 
 
+def test_geo_exit_canary_success_clears_stale_geph_failure(monkeypatch):
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    original_failure = dict(tproxy._geph_last_failure)
+
+    class DummyWriter:
+        def close(self):
+            pass
+
+    async def connected(host, port, first_flight):
+        return object(), DummyWriter()
+
+    try:
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+        monkeypatch.setattr(tproxy, "dial_via_geph", connected)
+        tproxy._geph_last_failure.update({
+            "host": "chatgpt.com",
+            "reason": "tunnel down",
+            "ts": 100.0,
+        })
+
+        spec = {"group": tproxy.SERVICE_OPENAI, "host": "chatgpt.com"}
+        assert asyncio.run(tproxy._run_geo_exit_canary(spec))
+
+        assert tproxy._geph_last_failure == {"host": "", "reason": "", "ts": 0.0}
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+        tproxy._geph_last_failure.update(original_failure)
+
+
 def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
     original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
