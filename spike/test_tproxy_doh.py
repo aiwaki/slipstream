@@ -149,6 +149,11 @@ def test_default_iface_tracks_interface(monkeypatch):
 def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     status_path = tmp_path / "slipstream.status"
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *args: type("Result", (), {"returncode": 0, "stdout": "HTTPEnable : 0\n", "stderr": ""})(),
+    )
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
     tproxy._dead.clear()
@@ -165,8 +170,102 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["dead"] == 1
     assert status["geph"] == "up"
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
-    assert "route" not in status
-    assert "canary" not in status
+    assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
+    assert status["system_proxy"] == {"state": "off", "kind": ""}
+    assert status["geph_detail"]["port"] == 0
+    assert "canaries" in status
+
+
+def test_route_policy_classifies_service_groups():
+    assert tproxy.route_policy("updates.discord.com") == {
+        "host": "updates.discord.com",
+        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "service_group": tproxy.SERVICE_DISCORD,
+        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+    }
+    assert tproxy.route_policy("rr2---sn-ntq7yner.googlevideo.com")["service_group"] == (
+        tproxy.SERVICE_YOUTUBE
+    )
+    assert tproxy.route_policy("billing.openai.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
+    assert tproxy.route_policy("claude.ai")["service_group"] == tproxy.SERVICE_ANTHROPIC
+    assert tproxy.route_policy("t.me")["service_group"] == tproxy.SERVICE_TELEGRAM
+
+
+def test_system_proxy_status_from_scutil_reports_kind_without_mutating():
+    raw = """
+HTTPEnable : 1
+HTTPSEnable : 1
+SOCKSEnable : 0
+ProxyAutoConfigEnable : 1
+"""
+
+    assert tproxy.system_proxy_status_from_scutil(raw) == {
+        "state": "active",
+        "kind": "http,https,pac",
+    }
+    assert tproxy.system_proxy_status_from_scutil("HTTPEnable : 0\n") == {
+        "state": "off",
+        "kind": "",
+    }
+
+
+def test_canary_scheduler_runs_on_forced_and_periodic_triggers(monkeypatch):
+    calls = []
+    tproxy._canary_state.update({
+        "running": False,
+        "last_run": 0.0,
+        "last_started": 0.0,
+        "next_due": 0.0,
+        "last_reason": "",
+        "total": 0,
+        "ok": 0,
+        "degraded": 0,
+    })
+    monkeypatch.setattr(tproxy, "CANARY_INTERVAL", 10.0)
+    monkeypatch.setattr(tproxy, "CANARY_JITTER", 1.0)
+
+    assert tproxy.start_canaries_if_due("startup", force=True, now=100.0, runner=calls.append)
+    assert calls == ["startup"]
+    assert not tproxy._canary_state["running"]
+    assert tproxy._canary_state["next_due"] == 110.0
+
+    assert not tproxy.start_canaries_if_due("periodic", now=105.0, runner=calls.append)
+    assert tproxy.start_canaries_if_due("periodic", now=111.0, runner=calls.append)
+    assert calls == ["startup", "periodic"]
+
+
+def test_local_bypass_canary_failure_decays_only_local_strategy_cache(monkeypatch):
+    async def no_ips(host, fallback_ip):
+        return []
+
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", no_ips)
+    tproxy._strat_cache.clear()
+    tproxy._strat_cache["updates.discord.com"] = "split64+fake"
+    tproxy._strat_cache["billing.openai.com"] = "split64+fake"
+
+    try:
+        spec = {"group": tproxy.SERVICE_DISCORD, "host": "updates.discord.com"}
+        assert not asyncio.run(tproxy._run_local_bypass_canary(spec))
+
+        assert "updates.discord.com" not in tproxy._strat_cache
+        assert tproxy._strat_cache["billing.openai.com"] == "split64+fake"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_DISCORD]
+        assert health["state"] == tproxy.HEALTH_DEGRADED
+        assert health["last_failure"] == "dns failed"
+    finally:
+        tproxy._strat_cache.clear()
+
+
+def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+
+    spec = {"group": tproxy.SERVICE_OPENAI, "host": "billing.openai.com"}
+    assert not asyncio.run(tproxy._run_geo_exit_canary(spec))
+
+    assert tproxy.geph_route("billing.openai.com")
+    health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
+    assert health["state"] == tproxy.HEALTH_BLOCKED
+    assert health["last_route_class"] == tproxy.ROUTE_GEO_EXIT
 
 
 def test_pf_rules_leave_quic_unblocked():

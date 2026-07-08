@@ -17,10 +17,10 @@ not a release promise.
 | Rotating support logs | implemented |
 | Voice-flow TTL/LRU cleanup | implemented |
 | QUIC handling | preserved by default; no global UDP/443 block |
-| Wake/network re-arm | partial: pf and voice capture are re-armed |
+| Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
 | Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
-| Periodic route canaries | not implemented |
-| Detailed route diagnostics | not implemented |
+| Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
+| Detailed route diagnostics | implemented in daemon status and tray detail |
 | Throughput canary | not implemented |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
@@ -55,7 +55,7 @@ Goal: detect degradation before the user has to diagnose it manually.
 
 - Automatic re-sweep when a known strategy stops working.
 - Throughput canary for local-bypass hosts, not just TLS handshake success.
-- Periodic canary after wake/network change.
+- Broaden periodic canaries with payload/throughput checks.
 - Signed strategy-list updates without rebuilding the app.
 - More explicit policy tables for Geph hosts, local-bypass hosts, and attempt
   limits.
