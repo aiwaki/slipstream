@@ -50,6 +50,7 @@ const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
 const DAEMON_WATCHDOG_COOLDOWN_SECS: u64 = 5 * 60;
+const DIAGNOSTIC_LOG_TAIL_LINES: usize = 80;
 
 /// Is the system UI language Russian? Cached — the locale doesn't change while we
 /// run. Most users are in RU, so the tray speaks Russian when the Mac does.
@@ -232,11 +233,123 @@ fn sanitize_json(value: &mut Value) {
                 sanitize_json(item);
             }
         }
+        Value::String(text) => {
+            *text = redact_sensitive_text(text);
+        }
         _ => {}
     }
 }
 
-fn diagnostic_snapshot_value(app_version: &str, status: Option<Value>, generated_at: f64) -> Value {
+fn redact_sensitive_text(input: &str) -> String {
+    const KEYS: [&str; 4] = ["secret", "token", "password", "private_key"];
+    let lower = input.to_ascii_lowercase();
+    let mut out = String::with_capacity(input.len());
+    let mut pos = 0;
+
+    while pos < input.len() {
+        let next = KEYS
+            .iter()
+            .filter_map(|key| lower[pos..].find(key).map(|offset| (pos + offset, *key)))
+            .min_by_key(|(idx, _)| *idx);
+        let Some((key_start, key)) = next else {
+            out.push_str(&input[pos..]);
+            break;
+        };
+
+        let after_key = key_start + key.len();
+        let mut sep_end = None;
+        for (offset, ch) in input[after_key..].char_indices() {
+            if ch == '=' || ch == ':' {
+                sep_end = Some(after_key + offset + ch.len_utf8());
+                break;
+            }
+            if !(ch.is_whitespace() || ch == '"' || ch == '\'') {
+                break;
+            }
+        }
+        let Some(sep_end) = sep_end else {
+            out.push_str(&input[pos..after_key]);
+            pos = after_key;
+            continue;
+        };
+
+        out.push_str(&input[pos..sep_end]);
+        out.push_str("<redacted>");
+        pos = sep_end;
+
+        while pos < input.len() {
+            let Some(ch) = input[pos..].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() {
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        let quoted = input[pos..]
+            .chars()
+            .next()
+            .filter(|ch| *ch == '"' || *ch == '\'');
+        if let Some(quote) = quoted {
+            pos += quote.len_utf8();
+            while pos < input.len() {
+                let Some(ch) = input[pos..].chars().next() else {
+                    break;
+                };
+                pos += ch.len_utf8();
+                if ch == quote {
+                    break;
+                }
+            }
+        } else {
+            while pos < input.len() {
+                let Some(ch) = input[pos..].chars().next() else {
+                    break;
+                };
+                if ch.is_whitespace() || matches!(ch, '&' | ',' | ';' | '}' | ']') {
+                    break;
+                }
+                pos += ch.len_utf8();
+            }
+        }
+    }
+
+    out
+}
+
+fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
+    match fs::read_to_string(log_path) {
+        Ok(raw) => {
+            let all_lines: Vec<&str> = raw.lines().collect();
+            let start = all_lines.len().saturating_sub(max_lines);
+            let lines: Vec<String> = all_lines[start..]
+                .iter()
+                .map(|line| redact_sensitive_text(line))
+                .collect();
+            json!({
+                "path": log_path,
+                "available": true,
+                "truncated": start > 0,
+                "lines": lines,
+            })
+        }
+        Err(err) => json!({
+            "path": log_path,
+            "available": false,
+            "error": format!("{:?}", err.kind()),
+            "lines": [],
+        }),
+    }
+}
+
+fn diagnostic_snapshot_value(
+    app_version: &str,
+    status: Option<Value>,
+    generated_at: f64,
+    log_tail: Option<Value>,
+) -> Value {
     let mut snapshot = json!({
         "app": {
             "name": "Slipstream",
@@ -252,6 +365,9 @@ fn diagnostic_snapshot_value(app_version: &str, status: Option<Value>, generated
             "log_path": LOG_PATH,
         },
     });
+    if let Some(log_tail) = log_tail {
+        snapshot["log_tail"] = log_tail;
+    }
     sanitize_json(&mut snapshot);
     snapshot
 }
@@ -285,6 +401,7 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
         &app.package_info().version.to_string(),
         read_status(),
         unix_now_secs(),
+        Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
     );
     let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
         return false;
@@ -1534,8 +1651,9 @@ pub fn run() {
 mod tests {
     use super::{
         copy_log_snapshot_direct, daemon_recovery_shell, diagnostic_snapshot_value,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
+        diagnostic_log_tail, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, redact_sensitive_text, route_class_health,
+        routing_health_summary, shell_quote, should_recover_daemon,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
         DAEMON_WATCHDOG_MISSES,
     };
@@ -1627,6 +1745,10 @@ mod tests {
                 }
             })),
             123.0,
+            Some(json!({
+                "available": true,
+                "lines": ["tg://proxy?server=127.0.0.1&secret=old-secret"]
+            })),
         );
         let text = serde_json::to_string(&snapshot).unwrap();
 
@@ -1638,7 +1760,61 @@ mod tests {
         assert!(!text.contains("very-secret"));
         assert!(!text.contains("token-value"));
         assert!(!text.contains("pass-value"));
+        assert!(!text.contains("old-secret"));
         assert!(text.contains("<redacted>"));
+    }
+
+    #[test]
+    fn redact_sensitive_text_handles_urls_yaml_and_json() {
+        assert_eq!(
+            redact_sensitive_text("tg://proxy?server=127.0.0.1&secret=abc123&port=1443"),
+            "tg://proxy?server=127.0.0.1&secret=<redacted>&port=1443"
+        );
+        assert_eq!(
+            redact_sensitive_text("account: { password: \"hunter2\", api_token: token-value }"),
+            "account: { password:<redacted>, api_token:<redacted> }"
+        );
+        assert_eq!(
+            redact_sensitive_text("secret-entry dialog stays visible"),
+            "secret-entry dialog stays visible"
+        );
+    }
+
+    #[test]
+    fn diagnostic_log_tail_is_bounded_and_redacted() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-tail-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("slipstream.log");
+        std::fs::write(
+            &log,
+            "one\nsecret=first\nthree\npassword: \"last-secret\"\n",
+        )
+        .unwrap();
+
+        let tail = diagnostic_log_tail(log.to_str().unwrap(), 3);
+        let text = serde_json::to_string(&tail).unwrap();
+
+        assert_eq!(tail["available"], true);
+        assert_eq!(tail["truncated"], true);
+        assert_eq!(tail["lines"].as_array().unwrap().len(), 3);
+        assert!(!text.contains("first"));
+        assert!(!text.contains("last-secret"));
+        assert!(text.contains("<redacted>"));
+        assert!(!text.contains("one"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diagnostic_log_tail_reports_unavailable_log() {
+        let tail = diagnostic_log_tail("/definitely/missing/slipstream.log", 10);
+
+        assert_eq!(tail["available"], false);
+        assert_eq!(tail["lines"].as_array().unwrap().len(), 0);
     }
 
     #[test]
