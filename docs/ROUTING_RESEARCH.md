@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-08
+Updated: 2026-07-09
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -29,6 +29,14 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
 | 2026-07-08 | Install hygiene ideas | Adopted where safe | Safe-copy and binary-format validation are useful for daemon install reliability. | Keep monitoring real reinstall logs for locked-file edge cases. |
 | 2026-07-08 | `xbox-dns.ru` external DNS | Reference only | Treat user-managed DNS as external state, not something Slipstream enables or rewrites. | Detect in diagnostics if useful; never auto-configure it. |
+| 2026-07-09 | Darkware Zapret UI | Reference only | Borrow the compact MenuBarExtra-style status layout, not its manual strategy workflow. | Redesign tray diagnostics as short status rows with details behind a button. |
+| 2026-07-09 | Darkware Zapret system mutations | Rejected | Do not copy system SOCKS proxy toggles or broad sudoers `NOPASSWD` service control. | Keep Slipstream-owned state scoped to its daemon, pf rules, and status files. |
+| 2026-07-09 | Darkware Zapret bruteforce probe | Backlog | Headless re-sweep can borrow the temporary-proxy probing idea without exposing a picker. | Consider only for autonomous local-bypass recovery. |
+| 2026-07-09 | Context Mode | Agent tooling | Installed for Codex session context hygiene; not a Slipstream runtime dependency. | Keep out of project code and docs except this research note. |
+| 2026-07-09 | Superpowers | Agent tooling | Installed as a general Codex workflow aid; not a Slipstream runtime dependency. | Use opportunistically after session reload exposes its skills. |
+| 2026-07-09 | ECC | Not installed | Current Codex plugin path is broad and upstream-doc-fragile for this repo. | Revisit only for a focused workflow need. |
+| 2026-07-09 | Ruflo | Not installed | Too much global agent harness behavior for current Slipstream work. | Mine health-check and ADR ideas only. |
+| 2026-07-09 | Steam slowdown | Needs evidence | Steam is not currently classified by policy; observed CDN/update endpoints are mostly fast while store body/CM WebSocket paths can stall. | Add diagnostics before any routing change. |
 
 ## Codebase Graph
 
@@ -58,6 +66,14 @@ Fresh external snapshots checked on 2026-07-08:
 
 - `by-sonic/sonicdpi` at `ebd08f71d33ce8cbeb671742b06054471adbdfd5`
 - `by-sonic/unblock-pro` at `a075902efca70392cf7e07f97c85a8b280cb571c`
+
+Fresh external snapshots checked on 2026-07-09:
+
+- `roninreilly/darkware-zapret` at `1d9834a5716d65b6140df24dd64fec350d461bb9`
+- `mksglu/context-mode` at `43a2066da943572546ff316ceca79026163be0b1`
+- `obra/superpowers` at `d884ae04edebef577e82ff7c4e143debd0bbec99`
+- `affaan-m/ECC` at `4130457d674d2180c5af2c5f634f3cae4cbc6c4f`
+- `ruvnet/ruflo` at `a444930d88d753e04793f55bd38861e82d9cb062`
 
 ## SonicDPI Findings
 
@@ -173,6 +189,57 @@ Fresh external snapshots checked on 2026-07-08:
   like other external DNS state: report it in diagnostics if relevant, but never
   enable, replace, or restore it automatically.
 
+## Darkware Zapret Findings
+
+- The pleasant menu is a SwiftUI `MenuBarExtra` with `.menuBarExtraStyle(.window)`,
+  a fixed-width material popover, a title row, a large toggle, one status row,
+  compact picker rows, and icon-only footer actions with tooltips.
+- This is a useful reference for Slipstream's future tray diagnostics: a calm
+  compact popover can show "working", "needs attention", and a small details
+  action without stretching the native menu line.
+- Do not copy the visible engine/strategy picker as the main workflow.
+  Slipstream should keep strategy selection autonomous and evidence-driven.
+- Darkware's `tpws` path is a transparent TCP proxy. Its `ciadpi` path uses a
+  system SOCKS proxy for TCP and UDP. The system SOCKS mutation is not suitable
+  for Slipstream because external proxy/PAC/VPN state is user-owned.
+- Do not copy the installer sudoers pattern that grants `NOPASSWD` for a service
+  control script. Slipstream should keep privilege boundaries tighter and auditable.
+- The bruteforce helper is useful as a diagnostic pattern: start a temporary
+  local proxy, try candidate strategies with real endpoint requests, then record
+  winners. Slipstream can adapt that as a headless re-sweep after local-bypass
+  failures, not as a manual picker.
+
+## Agent Tooling Findings
+
+- `context-mode@context-mode` is installed and its doctor passes for Codex hooks,
+  MCP server startup, SQLite/FTS5, and plugin registration. It required using the
+  bundled Codex Node runtime because the system Node was too old for the plugin.
+- `superpowers@openai-curated` is installed and enabled. It is a process-skill
+  bundle for planning, debugging, verification, and branch finishing. It should
+  remain agent-side tooling, not a Slipstream dependency.
+- `affaan-m/ECC` was inspected but not installed. The repo's own Codex plugin
+  notes describe the current Codex plugin path as fragile, and the skill bundle
+  is too broad for this project without a focused need.
+- `ruvnet/ruflo` was inspected but not installed. It brings a large meta-harness,
+  swarms, MCP behavior, hooks, and daemon-style features. Useful ideas are ADRs,
+  health checks, witness manifests, and tool-description audits; the harness is
+  too much global behavior for Slipstream right now.
+
+## Steam Observation
+
+- Current Slipstream policy has no Steam-specific routing class or canary.
+  Treat Steam as `unknown`/direct evidence until a concrete failure mode is
+  observed.
+- Runtime status on 2026-07-09 showed Slipstream active, pf applied, system proxy
+  off, `xbox_dns` detected as external DNS, and existing route-health groups OK.
+- Direct endpoint probes showed Steam CDN/update hosts responding quickly, while
+  `store.steampowered.com` returned HTTP 200 but stalled while transferring the
+  body. Steam's own logs showed WebSocket CM attempts timing out before a later
+  successful UDP connection.
+- Do not route Steam through Geph or local bypass by default. First useful step is
+  a diagnostic snapshot for Steam: store shell, update host, CM WebSocket/UDP,
+  and CDN timing, with no system proxy/DNS mutation.
+
 ## Transfer Backlog
 
 Safe candidates:
@@ -188,6 +255,12 @@ Safe candidates:
   settings immutable.
 - Keep tuning autonomous strategy scoring from real logs; do not expose a manual
   strategy picker in the tray.
+- Consider a compact tray diagnostic popover inspired by Darkware's layout, but
+  keep Slipstream's native-menu simplicity and autonomous routing model.
+- Consider a headless local-bypass re-sweep that uses temporary proxy probes and
+  endpoint outcomes, without exposing a manual strategy picker.
+- Add direct-passthrough diagnostics for Steam-like apps before deciding whether
+  any routing policy is needed.
 - For future packet adapters, evaluate MSS clamp only for verified
   Cloudflare-fronted Discord update/download flows.
 - Watch reinstall logs for any remaining locked-file or permission edge cases.
@@ -207,6 +280,9 @@ Unsafe candidates:
 - Mutating `/etc/hosts`.
 - Rewriting system DNS, system proxy, PAC, or external VPN configuration.
 - Auto-configuring third-party DNS such as `xbox-dns.ru`.
+- Auto-configuring system SOCKS proxy to support an engine.
+- Granting broad `NOPASSWD` sudoers entries for service control.
+- Adding Steam to Geph or local bypass without endpoint-level evidence.
 - Global MSS clamp or MSS clamp on broad Cloudflare/Google traffic.
 - Importing upstream strategy scripts without a pinned, verified, and reviewed
   policy bundle.

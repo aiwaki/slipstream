@@ -78,6 +78,25 @@ If playback fails:
 3. Check whether external proxy/PAC settings are bypassing Slipstream.
 4. Avoid global QUIC blocks unless a new scoped failure mode is proven.
 
+## Steam
+
+Steam is not currently a Slipstream routing target. Treat slow store pages,
+update checks, or CM reconnect loops as direct-path diagnostics first.
+
+Useful checks:
+
+```bash
+curl --noproxy '*' -L -o /dev/null -sS \
+  -w 'http=%{http_code} connect=%{time_connect} start=%{time_starttransfer} total=%{time_total} ip=%{remote_ip}\n' \
+  https://store.steampowered.com/
+tail -n 120 "$HOME/Library/Application Support/Steam/logs/connection_log.txt"
+tail -n 120 "$HOME/Library/Application Support/Steam/logs/bootstrap_log.txt"
+```
+
+Do not add Steam to Geph or local bypass without endpoint-level evidence. Steam
+can use store/CDN/update hosts plus CM WebSocket and UDP paths, so one working
+endpoint does not prove the whole app is healthy.
+
 ## Installed Daemon
 
 After rebuilding the daemon, keep all copies in sync:
