@@ -1046,6 +1046,27 @@ def test_voice_flow_prune_evicts_lru_overflow_without_full_clear():
     assert list(flows) == ["middle", "newest"]
 
 
+def test_voice_bpf_includes_discord_setup_and_primary_ranges():
+    bpf = tproxy._voice_bpf("10.0.0.2")
+
+    assert "dst portrange 19294-19344" in bpf
+    assert "dst portrange 50000-65535" in bpf
+    assert "(dst portrange 19294-19344 or dst portrange 50000-65535)" in bpf
+
+
+def test_voice_payload_gate_preserves_existing_primary_range():
+    assert tproxy.should_prime_voice_payload(50000, b"unclassified")
+    assert tproxy.should_prime_voice_payload(65535, b"")
+
+
+def test_voice_payload_gate_requires_known_setup_payload_on_setup_range():
+    assert tproxy.should_prime_voice_payload(19294, tproxy._fake_stun())
+    assert tproxy.should_prime_voice_payload(19344, b"\x80\x78" + (b"\x00" * 10))
+
+    assert not tproxy.should_prime_voice_payload(19294, b"unclassified")
+    assert not tproxy.should_prime_voice_payload(19345, tproxy._fake_stun())
+
+
 def test_rotating_log_writer_keeps_bounded_archives(tmp_path):
     log = tmp_path / "slipstream.log"
     writer = tproxy.RotatingLogWriter(str(log), max_bytes=10, backups=2)
