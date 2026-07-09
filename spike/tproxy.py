@@ -1429,10 +1429,13 @@ AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
+AUTO_GEPH_RUNTIME_MISS_WINDOW = 120.0
+AUTO_GEPH_RUNTIME_MISS_STORM = 2
 _auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _auto_geph_confirming = {}    # host -> monotonic start time
 _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
+_auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -2045,6 +2048,7 @@ def log_geph_route_failure(host, reason, now=None):
         degrade_after=1 if reason == "tunnel down" else GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     )
     note_geph_restart_failure(host, reason, now=wall_now)
+    note_auto_geph_runtime_failure(host, reason, now=wall_now)
     if not host:
         return
     now = time.monotonic() if now is None else now
@@ -2302,6 +2306,66 @@ def _confirm_auto_geph(host):
         file=sys.stderr,
     )
     return True
+
+
+def _is_auto_geph_runtime_miss(reason):
+    return reason in {
+        "remote closed without response",
+        "SOCKS connect failed",
+    }
+
+
+def _auto_geph_learned_exact_host(host, now=None):
+    h = normalize_host(host)
+    if not h:
+        return False
+    wall_now = time.time() if now is None else now
+    if _auto_geph.get(h, 0.0) <= wall_now:
+        return False
+    static_routes, geo_exit_routes = route_policy_tables()
+    if _match_policy(h, static_routes) or _match_policy(h, geo_exit_routes):
+        return False
+    return True
+
+
+def _forget_auto_geph_host(host, reason):
+    h = normalize_host(host)
+    if not h:
+        return False
+    with _auto_geph_lock:
+        if h not in _auto_geph:
+            return False
+        _auto_geph.pop(h, None)
+        _auto_fail.pop(h, None)
+        _auto_geph_runtime_failures.pop(h, None)
+        save_auto_geph()
+        _set_auto_geph_status("reset", h, reason)
+    print(f">> auto-route: reset {h} after Geph runtime retries", file=sys.stderr)
+    return True
+
+
+def note_auto_geph_runtime_failure(host, reason, now=None):
+    if not _is_auto_geph_runtime_miss(reason):
+        return False
+    h = normalize_host(host)
+    if not _auto_geph_learned_exact_host(h, now):
+        return False
+    wall_now = time.time() if now is None else now
+    with _auto_geph_lock:
+        if not _auto_geph_learned_exact_host(h, wall_now):
+            return False
+        q = _auto_geph_runtime_failures.setdefault(h, [])
+        q.append(wall_now)
+        cutoff = wall_now - AUTO_GEPH_RUNTIME_MISS_WINDOW
+        while q and q[0] < cutoff:
+            q.pop(0)
+        if len(_auto_geph_runtime_failures) > 4096:
+            for old_host, values in list(_auto_geph_runtime_failures.items()):
+                if not values or values[-1] < cutoff:
+                    _auto_geph_runtime_failures.pop(old_host, None)
+        if len(q) < AUTO_GEPH_RUNTIME_MISS_STORM:
+            return False
+    return _forget_auto_geph_host(h, "geph runtime retries")
 
 
 def _schedule_auto_geph_confirmation(host, now=None, runner=None):

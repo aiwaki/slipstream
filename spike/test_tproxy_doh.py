@@ -24,6 +24,10 @@ def reset_smart_dns_state():
     auto_geph = dict(tproxy._auto_geph)
     auto_confirming = dict(tproxy._auto_geph_confirming)
     auto_last_probe = dict(tproxy._auto_geph_last_probe)
+    auto_runtime_failures = {
+        host: list(values)
+        for host, values in tproxy._auto_geph_runtime_failures.items()
+    }
     auto_last_status = dict(tproxy._auto_geph_last_status)
     policy_remote = dict(tproxy._route_policy_remote)
     strat_scores = OrderedDict(
@@ -49,6 +53,7 @@ def reset_smart_dns_state():
         tproxy._auto_geph.clear()
         tproxy._auto_geph_confirming.clear()
         tproxy._auto_geph_last_probe.clear()
+        tproxy._auto_geph_runtime_failures.clear()
         tproxy._auto_geph_last_status.update({
             "state": "idle",
             "host": "",
@@ -83,6 +88,8 @@ def reset_smart_dns_state():
         tproxy._auto_geph_confirming.update(auto_confirming)
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_last_probe.update(auto_last_probe)
+        tproxy._auto_geph_runtime_failures.clear()
+        tproxy._auto_geph_runtime_failures.update(auto_runtime_failures)
         tproxy._auto_geph_last_status.clear()
         tproxy._auto_geph_last_status.update(auto_last_status)
         tproxy._route_policy_remote.clear()
@@ -2572,6 +2579,42 @@ def test_auto_geph_learns_exact_host_after_local_stalls_and_geph_payload(monkeyp
     assert snap["last_state"] == "learned"
     assert snap["last_host"] == "payments.example.com"
     assert snap["last_bytes"] == 128
+
+
+def test_auto_geph_forgets_learned_host_after_repeated_geph_runtime_misses(monkeypatch, capsys):
+    saves = []
+    host = "payments.example.com"
+    tproxy._auto_geph[host] = tproxy.time.time() + 3600
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
+
+    tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)
+    assert tproxy.geph_route(host)
+
+    tproxy.log_geph_route_failure(host, "remote closed without response", now=1001.0)
+
+    assert not tproxy.geph_route(host)
+    assert saves and host not in saves[-1]
+    snap = tproxy.auto_geo_exit_status_snapshot()
+    assert snap["last_state"] == "reset"
+    assert snap["last_host"] == host
+    assert snap["last_reason"] == "geph runtime retries"
+    capsys.readouterr()
+
+
+def test_auto_geph_runtime_misses_keep_explicit_geo_hosts(monkeypatch, capsys):
+    saves = []
+    host = "chatgpt.com"
+    expiry = tproxy.time.time() + 3600
+    tproxy._auto_geph[host] = expiry
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
+
+    tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)
+    tproxy.log_geph_route_failure(host, "remote closed without response", now=1001.0)
+
+    assert tproxy.geph_route(host)
+    assert tproxy._auto_geph[host] == expiry
+    assert not saves
+    capsys.readouterr()
 
 
 def test_auto_geph_requires_geph_payload_proof(monkeypatch):

@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-09
+Updated: 2026-07-10
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -57,6 +57,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Lid-close wake recovery | Implemented | Adrafinil keeps idle sleep away but does not prevent macOS lid-close SleepService/DarkWake cycles; repeated post-wake geo-exit failures now recommend a rate-limited restart of Slipstream's owned Geph process. | Move more Geph lifecycle ownership into the daemon when keychain/config constraints are solved. |
 | 2026-07-09 | Stale proxy exceptions | Implemented | External proxy tools can leave disabled `ExceptionsList` entries after proxy autoconfigure is turned off; Slipstream reports them in status without treating the proxy as active or mutating settings. | Use diagnostics to explain stale browser/network behavior; do not auto-delete user-owned proxy state. |
 | 2026-07-09 | Runtime re-arm visibility | Implemented | Daemon status now records the last wake/network re-arm reason, interface, gap, count, and age so sleep-related recovery is visible without reading logs first. | Keep using logs for full `pmset` correlation; status is a compact runtime snapshot. |
+| 2026-07-10 | Auto geo-exit stale learned hosts | Implemented | Repeated Geph runtime retries now reset only exact hosts that were learned by auto geo-exit; explicit geo-exit and local-bypass routes are preserved. | Watch logs for new retry reasons before widening the reset trigger. |
 
 ## Codebase Graph
 
@@ -134,6 +135,12 @@ Fresh external snapshots checked on 2026-07-09:
   open a SOCKS/TLS stream. It now performs a small HTTPS GET for `/` and requires
   a minimum payload so "page shell starts, then stalls" is visible to autonomous
   health instead of requiring manual browser testing.
+- 2026-07-10: Browser symptoms where the main page loads but some subresources
+  stall can come from a stale exact-host entry in auto geo-exit. Logs showed
+  repeated Geph route retries such as `remote closed without response` for
+  learned generic/static hosts. Slipstream now resets only those auto-learned
+  exact hosts after repeated runtime retries, so the next request can return to
+  the local route and re-learn only if a fresh Geph payload proof succeeds.
 - SonicDPI detects likely forged inbound TCP RST packets by learning a target
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied

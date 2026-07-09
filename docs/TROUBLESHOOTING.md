@@ -186,6 +186,12 @@ The learned entry is exact-host only and TTL-based. It does not apply to
 Discord, YouTube/googlevideo, Telegram, Russian services, Geph infrastructure,
 or external DNS/proxy/PAC/VPN settings.
 
+If a page shell loads but a payment form, video, image CDN, or static resource
+keeps stalling, check daemon logs for repeated Geph route retries on the same
+learned host. Slipstream resets only auto-learned exact hosts after repeated
+runtime retries, then lets the normal local route and proof-based learning run
+again. Explicit geo-exit hosts are not reset this way.
+
 ## Installed Daemon
 
 After rebuilding the daemon, keep all copies in sync:
