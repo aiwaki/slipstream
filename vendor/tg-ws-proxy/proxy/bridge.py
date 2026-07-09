@@ -204,9 +204,9 @@ async def _cfproxy_worker_fallback(reader, writer, relay_init, label,
             except Exception as exc:
                 log_limited(
                     log.warning,
-                    ("cf_worker_failed", dc, is_media, worker_domain,
+                    ("cf_worker_unavailable", dc, is_media, worker_domain,
                      type(exc).__name__, repr(exc)[:120]),
-                    "[%s] DC%d%s CF worker %s failed: %s",
+                    "[%s] DC%d%s CF worker %s unavailable: %s",
                     label, dc, media_tag, worker_domain, repr(exc),
                 )
                 continue
@@ -240,9 +240,9 @@ async def _cfproxy_fallback(reader, writer, relay_init, label,
         except Exception as exc:
             log_limited(
                 log.warning,
-                ("cf_proxy_failed", dc, is_media, type(exc).__name__,
+                ("cf_proxy_unavailable", dc, is_media, type(exc).__name__,
                  repr(exc)[:120]),
-                "[%s] DC%d%s CF proxy failed: %s",
+                "[%s] DC%d%s CF proxy unavailable: %s",
                 label, dc, media_tag, repr(exc),
             )
 
@@ -267,9 +267,9 @@ async def _tcp_fallback(reader, writer, dst, port, relay_init, label, ctx: Crypt
     except Exception as exc:
         log_limited(
             log.warning,
-            ("tcp_fallback_failed", dst, port, type(exc).__name__,
+            ("tcp_fallback_unavailable", dst, port, type(exc).__name__,
              repr(exc)[:120]),
-            "[%s] TCP fallback to %s:%d failed: %s",
+            "[%s] TCP fallback to %s:%d unavailable: %s",
             label, dst, port, repr(exc),
         )
         return False

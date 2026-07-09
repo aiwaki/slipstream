@@ -6,6 +6,7 @@ import logging
 import re
 import ssl
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from collections import OrderedDict, deque
 
@@ -2448,10 +2449,37 @@ def test_geph_route_failure_log_is_rate_limited(capsys):
 
         err = capsys.readouterr().err
         assert err.count("billing.openai.com") == 3
+        assert "geph route retry for billing.openai.com" in err
+        assert "geph route failed" not in err
         assert "SOCKS connect failed" in err
         assert "remote closed without response" in err
     finally:
         tproxy._geph_fail_log.clear()
+
+
+def test_transient_runtime_logs_avoid_failed_wording():
+    root = Path(__file__).resolve().parents[1]
+    sources = [
+        root / "spike" / "tproxy.py",
+        root / "vendor" / "tg-ws-proxy" / "proxy" / "tg_ws_proxy.py",
+        root / "vendor" / "tg-ws-proxy" / "proxy" / "bridge.py",
+        root / "vendor" / "tg-ws-proxy" / "proxy" / "config.py",
+    ]
+    text = "\n".join(path.read_text() for path in sources)
+
+    for alarming in [
+        "geph route failed",
+        "route canaries failed",
+        "voice sniffer failed",
+        "fronting failed",
+        "WS connect failed",
+        "CF proxy failed",
+        "CF worker %s failed",
+        "TCP fallback to %s:%d failed",
+        "Failed to fetch CF proxy domain list",
+        "CF proxy domain refresh failed",
+    ]:
+        assert alarming not in text
 
 
 def test_geo_exit_failures_after_wake_recommend_owned_geph_restart(capsys):

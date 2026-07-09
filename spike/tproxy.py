@@ -2058,7 +2058,7 @@ def log_geph_route_failure(host, reason, now=None):
         for old_key, old_time in list(_geph_fail_log.items()):
             if old_time < cutoff:
                 _geph_fail_log.pop(old_key, None)
-    print(f">> geph route failed for {host}: {reason}", file=sys.stderr)
+    print(f">> geph route retry for {host}: {reason}", file=sys.stderr)
 
 
 def clear_geph_route_failure():
@@ -3039,7 +3039,7 @@ def _canary_thread_main(reason):
     try:
         asyncio.run(run_route_canaries(reason))
     except Exception as e:
-        print(f">> route canaries failed: {e}", file=sys.stderr)
+        print(f">> route canaries error: {e}", file=sys.stderr)
     finally:
         finish_canaries()
 
@@ -4002,7 +4002,7 @@ def network_monitor(port, voice=True):
                     print(f">> voice plane: priming UDP {_voice_port_ranges_label()} "
                           f"+ SYN-seq capture on {iface}")
                 except Exception as e:
-                    print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
+                    print(f">> voice sniffer unavailable on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
         write_status("dormant" if vpn else "active", iface, cur_iface)
         if first_tick:

@@ -359,9 +359,9 @@ async def _handle_client(reader, writer, secret: bytes):
                 stats.ws_errors += 1
                 log_limited(
                     log.warning,
-                    ("fronting_failed", dc, is_media, type(exc).__name__,
+                    ("fronting_unavailable", dc, is_media, type(exc).__name__,
                      repr(exc)[:120]),
-                    "[%s] DC%d%s fronting failed: %s",
+                    "[%s] DC%d%s fronting unavailable: %s",
                     label, dc, media_tag, repr(exc),
                 )
             if ws:
@@ -419,9 +419,9 @@ async def _handle_client(reader, writer, secret: bytes):
                     all_redirects = False
                     log_limited(
                         log.warning,
-                        ("ws_connect_failed", dc, is_media, domain,
+                        ("ws_connect_unavailable", dc, is_media, domain,
                          type(exc).__name__, repr(exc)[:120]),
-                        "[%s] DC%d%s WS connect failed: %s",
+                        "[%s] DC%d%s WS connect unavailable: %s",
                         label, dc, media_tag, repr(exc),
                     )
 
@@ -439,9 +439,9 @@ async def _handle_client(reader, writer, secret: bytes):
                 stats.ws_errors += 1
                 log_limited(
                     log.warning,
-                    ("fronting_failed", dc, is_media, type(exc).__name__,
+                    ("fronting_unavailable", dc, is_media, type(exc).__name__,
                      repr(exc)[:120]),
-                    "[%s] DC%d%s fronting failed: %s",
+                    "[%s] DC%d%s fronting unavailable: %s",
                     label, dc, media_tag, repr(exc),
                 )
             if ws:
