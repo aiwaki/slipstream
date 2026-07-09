@@ -39,7 +39,7 @@ YouTube/googlevideo.
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
-| Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle builder/validator, trusted-key distribution path, local persist, rollback, explicit opt-in remote fetch scheduler with health gates, and release workflow packaging for signed channel assets | configure real production key custody and publish a release-channel policy asset |
+| Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle builder/validator, trusted-key distribution path, local persist, rollback, explicit opt-in remote fetch scheduler with health gates, release workflow packaging, and release artifact preflight for signed channel assets | configure real production key custody and publish a release-channel policy asset |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
 | Logs | rotating daemon log, tray snapshot, route-health failure summaries, stale external proxy exception reporting, and copied diagnostic summary | attachable diagnostic file/export UX |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
@@ -50,7 +50,8 @@ YouTube/googlevideo.
 
 - Keep the installed daemon and app-bundled daemon identical after releases.
 - Keep log snapshot/open-log behavior reliable.
-- Keep version, appcast, and release artifacts consistent.
+- Keep version, appcast, and release artifacts consistent with verifier-backed
+  preflight.
 - Keep hard-kill/stale-`pf` cleanup visible in diagnostics.
 
 ### P1 - Routing Quality

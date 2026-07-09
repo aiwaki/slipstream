@@ -47,10 +47,14 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("spike/route-policy-keys.json", workflow)
         self.assertIn("Package signed route policy channel", workflow)
         self.assertIn("SLIP_ROUTE_POLICY_PRIVATE_KEY", workflow)
+        self.assertIn("spike/.buildvenv/bin/python -m unittest", workflow)
         self.assertIn("--bundled-manifest", workflow)
         self.assertIn("--channel-index", workflow)
         self.assertIn("route-policy-latest.json", workflow)
         self.assertIn("dist-release/route-policy.json", workflow)
+        self.assertIn("Verify release artifacts", workflow)
+        self.assertIn("scripts/verify_release_artifacts.py", workflow)
+        self.assertIn("--release-dir dist-release", workflow)
 
 
 if __name__ == "__main__":

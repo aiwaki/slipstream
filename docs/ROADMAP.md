@@ -26,7 +26,7 @@ not a release promise.
 | Direct passthrough policy | implemented for Telegram, Russian hosts, and GitHub developer/download endpoints |
 | Strategy success metrics | implemented as privacy-safe aggregate status without hostnames |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
-| Signed policy updates | implemented as bundled-manifest bundle builder, validator/verifier, local persist/rollback, explicit opt-in remote fetch scheduler with health gates, and release workflow packaging for signed channel assets |
+| Signed policy updates | implemented as bundled-manifest bundle builder, validator/verifier, local persist/rollback, explicit opt-in remote fetch scheduler with health gates, release workflow packaging, and release artifact preflight for signed channel assets |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Payload canaries | partial: Discord CDN verifies local-bypass throughput; Steam Store verifies geo-exit HTTPS payload through Geph |
 | Signed auto-update | implemented |
@@ -54,7 +54,8 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 - Keep install/reinstall idempotent across app relaunches.
 - Keep bundled daemon resources and installed daemon in sync.
 - Make log access reliable from the tray.
-- Keep release versioning and appcast metadata consistent.
+- Keep release versioning, appcast metadata, and signed route-policy channel
+  artifacts consistent.
 
 ## P1 - Routing Quality
 

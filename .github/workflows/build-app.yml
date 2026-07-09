@@ -106,7 +106,7 @@ jobs:
         run: python3 scripts/sync_version.py --check
 
       - name: Test release metadata scripts
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+        run: spike/.buildvenv/bin/python -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Build + sign the app
         working-directory: app-tauri
@@ -169,6 +169,15 @@ jobs:
           python3 -m json.tool "$OUT/route-policy.json" >/dev/null
           python3 -m json.tool "$OUT/route-policy-latest.json" >/dev/null
           python3 -m json.tool "$OUT/route-policy-keys.json" >/dev/null
+
+      - name: Verify release artifacts
+        run: |
+          set -euo pipefail
+          spike/.buildvenv/bin/python scripts/verify_release_artifacts.py \
+            --release-dir dist-release \
+            --repository "${{ github.repository }}" \
+            --tag "${{ steps.ver.outputs.tag }}" \
+            --version "${{ steps.ver.outputs.version }}"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

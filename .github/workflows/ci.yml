@@ -91,8 +91,10 @@ jobs:
             scripts/sync_version.py \
             scripts/make_appcast.py \
             scripts/make_route_policy_bundle.py \
+            scripts/verify_release_artifacts.py \
             scripts/test_make_appcast.py \
-            scripts/test_make_route_policy_bundle.py
+            scripts/test_make_route_policy_bundle.py \
+            scripts/test_verify_release_artifacts.py
 
       - name: Daemon unit tests
         run: python3 -m pytest -q spike
