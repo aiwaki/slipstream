@@ -2372,6 +2372,41 @@ def test_geph_route_failure_log_is_rate_limited(capsys):
         tproxy._geph_fail_log.clear()
 
 
+def test_geo_exit_failures_after_wake_recommend_owned_geph_restart(capsys):
+    original_geph_up = tproxy._geph_up
+    original_hint = dict(tproxy._geph_restart_hint)
+    tproxy._geph_fail_log.clear()
+    tproxy._geph_restart_failures.clear()
+
+    try:
+        tproxy._geph_up = True
+        tproxy.note_geph_wake(1000.0)
+
+        tproxy.log_geph_route_failure("chatgpt.com", "SOCKS connect failed", now=1001.0)
+        assert not tproxy.geph_restart_hint_snapshot(now=1001.0)["recommended"]
+
+        tproxy.log_geph_route_failure(
+            "persistent.oaistatic.com",
+            "remote closed without response",
+            now=1002.0,
+        )
+        tproxy.log_geph_route_failure("api.anthropic.com", "SOCKS connect failed", now=1003.0)
+
+        hint = tproxy.geph_restart_hint_snapshot(now=1003.0)
+        assert hint["recommended"] is True
+        assert hint["reason"] == "geo-exit tunnel stale after wake"
+        assert hint["failures_5m"] == 3
+        assert hint["hosts_5m"] == 3
+        assert hint["last_failure_host"] == "api.anthropic.com"
+    finally:
+        capsys.readouterr()
+        tproxy._geph_up = original_geph_up
+        tproxy._geph_fail_log.clear()
+        tproxy._geph_restart_failures.clear()
+        tproxy._geph_restart_hint.clear()
+        tproxy._geph_restart_hint.update(original_hint)
+
+
 def test_local_bypass_hosts_ignore_stale_auto_geph_cache():
     tproxy._auto_geph.clear()
     tproxy._auto_geph["updates.discord.com"] = tproxy.time.time() + 3600

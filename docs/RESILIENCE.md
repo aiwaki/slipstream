@@ -35,7 +35,7 @@ YouTube/googlevideo.
 | Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
-| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph | add only evidence-backed payload probes for user-visible stalled pages |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; repeated post-wake geo-exit failures can trigger a rate-limited restart of Slipstream's owned Geph process | add only evidence-backed payload probes for user-visible stalled pages; move more Geph lifecycle ownership into the daemon |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |

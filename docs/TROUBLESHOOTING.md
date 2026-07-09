@@ -64,6 +64,31 @@ This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
 of the user's working setup, but Slipstream should not silently enable or remove
 them.
 
+## Sleep, Lid Close, And Wake
+
+Adrafinil-style keep-awake tools may hold `PreventUserIdleSystemSleep` without
+holding `PreventSystemSleep`. With the lid closed, macOS can still enter
+SleepService/DarkWake cycles. In daemon logs this appears as:
+
+```text
+>> woke from sleep (gap 903s) -> re-arming
+```
+
+After wake, a Geph process can keep its local SOCKS port open while the tunnel
+inside it returns `SOCKS connect failed` or closes payload probes without a
+response. Slipstream records this under `geph_detail`; repeated post-wake
+geo-exit failures across multiple hosts set `restart_recommended`, and the tray
+rate-limits a restart of Slipstream's own `geph5-client`.
+
+Useful checks:
+
+```bash
+pmset -g assertions
+pmset -g log | egrep 'Entering Sleep|Wake from|DarkWake|SleepService|Adrafinil|lid'
+python3 -m json.tool /var/run/slipstream.status
+tail -n 160 /var/log/slipstream.log
+```
+
 ## Discord
 
 Expected indicators:

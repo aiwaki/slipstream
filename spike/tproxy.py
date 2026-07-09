@@ -331,6 +331,10 @@ QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
+GEPH_RESTART_FAILURE_THRESHOLD = 3
+GEPH_RESTART_MIN_HOSTS = 2
+GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
+GEPH_RESTART_COOLDOWN = 10 * 60.0
 SMART_DNS_OK_TTL = 10 * 60.0
 SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
 _smart_dns_ok_until = {}
@@ -1251,6 +1255,16 @@ _route_health = {
     SERVICE_STEAM_STORE: _route_health_default(SERVICE_STEAM_STORE, ROUTE_GEO_EXIT),
 }
 _route_failure_windows = {group: deque() for group in _route_health}
+_geph_restart_failures = deque()
+_geph_restart_hint = {
+    "recommended": False,
+    "reason": "",
+    "last_failure_host": "",
+    "last_failure_reason": "",
+    "last_failure_at": 0.0,
+    "last_wake_at": 0.0,
+    "last_requested_at": 0.0,
+}
 _canary_health = {}
 _canary_failure_windows = {}
 _canary_state = {
@@ -1983,10 +1997,11 @@ def smart_dns_status_snapshot(now=None):
 
 
 def log_geph_route_failure(host, reason, now=None):
+    wall_now = time.time() if now is None else now
     _geph_last_failure.update({
         "host": normalize_host(host),
         "reason": reason[:200],
-        "ts": time.time(),
+        "ts": wall_now,
     })
     policy = route_policy(host)
     route_health_event(
@@ -1996,6 +2011,7 @@ def log_geph_route_failure(host, reason, now=None):
         state=HEALTH_BLOCKED if reason == "tunnel down" else HEALTH_DEGRADED,
         degrade_after=1 if reason == "tunnel down" else GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     )
+    note_geph_restart_failure(host, reason, now=wall_now)
     if not host:
         return
     now = time.monotonic() if now is None else now
@@ -2014,6 +2030,89 @@ def log_geph_route_failure(host, reason, now=None):
 
 def clear_geph_route_failure():
     _geph_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+    clear_geph_restart_hint()
+
+
+def note_geph_wake(now=None):
+    now = time.time() if now is None else now
+    _geph_restart_hint["last_wake_at"] = now
+
+
+def _prune_geph_restart_failures(now):
+    cutoff = now - CANARY_FAILURE_WINDOW
+    while _geph_restart_failures and _geph_restart_failures[0][0] < cutoff:
+        _geph_restart_failures.popleft()
+
+
+def note_geph_restart_failure(host, reason, now=None):
+    now = time.time() if now is None else now
+    if not _geph_up:
+        return
+    if reason not in {"SOCKS connect failed", "remote closed without response"}:
+        return
+    wake_at = _geph_restart_hint.get("last_wake_at", 0.0)
+    if not wake_at or now - wake_at > GEPH_RESTART_WAKE_WINDOW:
+        return
+
+    normalized = normalize_host(host)
+    _geph_restart_failures.append((now, normalized, reason[:200]))
+    _prune_geph_restart_failures(now)
+    hosts = {item[1] for item in _geph_restart_failures if item[1]}
+    if len(_geph_restart_failures) < GEPH_RESTART_FAILURE_THRESHOLD:
+        return
+    if len(hosts) < GEPH_RESTART_MIN_HOSTS:
+        return
+    last_requested = _geph_restart_hint.get("last_requested_at", 0.0)
+    if last_requested and now - last_requested < GEPH_RESTART_COOLDOWN:
+        return
+    _geph_restart_hint.update({
+        "recommended": True,
+        "reason": "geo-exit tunnel stale after wake",
+        "last_failure_host": normalized,
+        "last_failure_reason": reason[:200],
+        "last_failure_at": now,
+        "last_requested_at": now,
+    })
+
+
+def clear_geph_restart_hint():
+    _geph_restart_failures.clear()
+    _geph_restart_hint.update({
+        "recommended": False,
+        "reason": "",
+        "last_failure_host": "",
+        "last_failure_reason": "",
+        "last_failure_at": 0.0,
+    })
+
+
+def geph_restart_hint_snapshot(now=None):
+    now = time.time() if now is None else now
+    _prune_geph_restart_failures(now)
+    if not _geph_restart_failures and _geph_restart_hint.get("recommended"):
+        _geph_restart_hint.update({
+            "recommended": False,
+            "reason": "",
+            "last_failure_host": "",
+            "last_failure_reason": "",
+            "last_failure_at": 0.0,
+        })
+    hosts = {item[1] for item in _geph_restart_failures if item[1]}
+    return {
+        "recommended": bool(_geph_restart_hint.get("recommended")),
+        "reason": _geph_restart_hint.get("reason", ""),
+        "last_failure_host": _geph_restart_hint.get("last_failure_host", ""),
+        "last_failure_reason": _geph_restart_hint.get("last_failure_reason", ""),
+        "last_failure_at": _geph_restart_hint.get("last_failure_at", 0.0),
+        "last_wake_at": _geph_restart_hint.get("last_wake_at", 0.0),
+        "failures_5m": len(_geph_restart_failures),
+        "hosts_5m": len(hosts),
+        "cooldown_until": (
+            _geph_restart_hint.get("last_requested_at", 0.0) + GEPH_RESTART_COOLDOWN
+            if _geph_restart_hint.get("last_requested_at", 0.0)
+            else 0.0
+        ),
+    }
 
 
 def prune_auto_geph(now=None):
@@ -2955,6 +3054,7 @@ def write_status(state, iface, voice_iface):
         prune_telegram_direct_failures(now)
         prune_auto_geph(now)
         consume_telegram_proxy_acceptance()
+        geph_restart = geph_restart_hint_snapshot(now)
         st = {
             "state": state,            # "active" | "dormant"
             "version": DAEMON_VERSION,
@@ -2984,6 +3084,11 @@ def write_status(state, iface, voice_iface):
                 "failure_reason": _geph_last_failure["reason"],
                 "last_failure_host": _geph_last_failure["host"],
                 "last_failure_at": _geph_last_failure["ts"],
+                "restart_recommended": geph_restart["recommended"],
+                "restart_reason": geph_restart["reason"],
+                "restart_failures_5m": geph_restart["failures_5m"],
+                "restart_hosts_5m": geph_restart["hosts_5m"],
+                "last_wake_at": geph_restart["last_wake_at"],
             },
             "canaries": canary_status_snapshot(),
         }
@@ -3773,6 +3878,7 @@ def network_monitor(port, voice=True):
             print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
+            note_geph_wake(now)
             start_canaries_if_due("wake", force=True)
         last_tick = now
         iface = default_iface()
