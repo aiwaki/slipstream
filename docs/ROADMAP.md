@@ -14,7 +14,7 @@ not a release promise.
 | Geph sidecar | implemented for selected geo-blocked hosts |
 | Telegram Desktop proxy offer | implemented |
 | Single version source | implemented |
-| Rotating support logs | implemented |
+| Rotating support logs | implemented; tray log access uses a named administrator prompt when needed |
 | Voice-flow TTL/LRU cleanup | implemented |
 | QUIC handling | preserved by default; no global UDP/443 block |
 | Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
@@ -53,7 +53,7 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 
 - Keep install/reinstall idempotent across app relaunches.
 - Keep bundled daemon resources and installed daemon in sync.
-- Make log access reliable from the tray.
+- Keep log access reliable from the tray.
 - Keep release versioning, appcast metadata, and signed route-policy channel
   artifacts consistent.
 

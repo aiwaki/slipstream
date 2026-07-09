@@ -41,6 +41,17 @@ Daemon log:
 tail -f /var/log/slipstream.log
 ```
 
+Administrator prompts:
+
+Slipstream asks macOS for administrator access only for privileged maintenance:
+
+- installing or upgrading the background daemon;
+- restarting or repairing the background daemon;
+- copying the root-owned daemon log for `Open Log`.
+
+The prompt should name Slipstream and the specific action. Cancel unrelated or
+unnamed `osascript` password prompts.
+
 Transparent-path curl test:
 
 ```bash

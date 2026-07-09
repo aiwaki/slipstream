@@ -136,19 +136,29 @@ fn read_status() -> Option<Value> {
     Some(v)
 }
 
+fn applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn admin_shell_script(shell: &str, prompt: &str) -> String {
+    let escaped_shell = applescript_string(shell);
+    let escaped_prompt = applescript_string(prompt);
+    format!(
+        "do shell script \"{escaped_shell}\" with administrator privileges with prompt \"{escaped_prompt}\""
+    )
+}
+
 /// Run a privileged shell line via one osascript admin prompt.
-fn run_admin(shell: &str) {
-    let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("do shell script \"{escaped}\" with administrator privileges");
+fn run_admin(shell: &str, prompt: &str) {
+    let script = admin_shell_script(shell, prompt);
     let _ = Command::new("/usr/bin/osascript")
         .arg("-e")
         .arg(script)
         .spawn();
 }
 
-fn run_admin_status(shell: &str) -> bool {
-    let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("do shell script \"{escaped}\" with administrator privileges");
+fn run_admin_status(shell: &str, prompt: &str) -> bool {
+    let script = admin_shell_script(shell, prompt);
     Command::new("/usr/bin/osascript")
         .arg("-e")
         .arg(script)
@@ -200,7 +210,10 @@ fn open_log_snapshot() -> bool {
             return false;
         };
         let shell = log_snapshot_shell(LOG_PATH, &snapshot, &uid, &gid);
-        if !run_admin_status(&shell) {
+        if !run_admin_status(
+            &shell,
+            "Slipstream needs administrator access to copy its daemon log.",
+        ) {
             return false;
         }
     }
@@ -791,7 +804,10 @@ fn ensure_daemon_installed(app: &AppHandle) {
     }
     if daemon_needs_install(&bin) {
         let bin = bin.to_string_lossy();
-        run_admin(&format!("{} --install", shell_quote(bin.as_ref())));
+        run_admin(
+            &format!("{} --install", shell_quote(bin.as_ref())),
+            "Slipstream needs administrator access to install its background daemon.",
+        );
     }
 }
 
@@ -1821,7 +1837,10 @@ pub fn run() {
                         }
                         ID_RESTART => {
                             tg_offer_reset_menu.fetch_add(1, Ordering::Relaxed);
-                            run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"));
+                            run_admin(
+                                &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
+                                "Slipstream needs administrator access to restart its background daemon.",
+                            );
                         }
                         ID_LOG => {
                             if !open_log_snapshot() {
@@ -1891,7 +1910,10 @@ pub fn run() {
                     ) {
                         next_daemon_recovery =
                             now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
-                        run_admin(&daemon_recovery_shell());
+                        run_admin(
+                            &daemon_recovery_shell(),
+                            "Slipstream needs administrator access to repair its background daemon.",
+                        );
                     }
                     if now >= next_geph_self_heal && geph_enabled(&app_handle) {
                         if let Some(reason) = geph_restart_recommendation(status.as_ref()) {
@@ -1990,14 +2012,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
+        admin_shell_script, copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
         daemon_recovery_status_value, diagnostic_log_tail, diagnostic_snapshot_value,
         diagnostic_summary_value, geph_restart_recommendation, install_diagnostic_value,
         launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
         redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon,
-        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        valid_bundled_daemon, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
+        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
+        telegram_proxy_detail, valid_bundled_daemon, DAEMON_RECOVERY_STATUS_PATH,
+        DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2016,6 +2038,18 @@ mod tests {
             shell_quote("/tmp/Bob's Apps/slipstreamd"),
             "'/tmp/Bob'\\''s Apps/slipstreamd'"
         );
+    }
+
+    #[test]
+    fn admin_shell_script_names_prompt_and_escapes_applescript_strings() {
+        let script = admin_shell_script(
+            "/bin/echo \"hi\" \\ done",
+            "Slipstream \"daemon\" \\ prompt",
+        );
+
+        assert!(script.contains("with administrator privileges with prompt"));
+        assert!(script.contains("/bin/echo \\\"hi\\\" \\\\ done"));
+        assert!(script.contains("Slipstream \\\"daemon\\\" \\\\ prompt"));
     }
 
     #[test]
@@ -2567,7 +2601,7 @@ mod tests {
 
     #[test]
     fn routing_health_summary_stays_short_for_geph_failures() {
-    let status = json!({
+        let status = json!({
         "route_health": {
             "youtube_video": {
                     "state": "unknown",
