@@ -7,6 +7,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -41,6 +42,29 @@ def _public_key_b64(private_key) -> str:
         format=serialization.PublicFormat.Raw,
     )
     return base64.b64encode(public_key).decode("ascii")
+
+
+def _private_key_b64(private_key) -> str:
+    from cryptography.hazmat.primitives import serialization
+
+    private_key_bytes = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return base64.b64encode(private_key_bytes).decode("ascii")
+
+
+def generate_route_policy_keypair(*, key_id: str) -> tuple[str, dict[str, str]]:
+    if not isinstance(key_id, str) or not key_id.strip():
+        raise ValueError("key id is required")
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    except ImportError as exc:
+        raise ValueError("policy signature support unavailable") from exc
+    private_key = Ed25519PrivateKey.generate()
+    key_id = key_id.strip()
+    return _private_key_b64(private_key), {key_id: _public_key_b64(private_key)}
 
 
 def build_signed_route_policy_bundle(
@@ -112,20 +136,30 @@ def build_route_policy_channel_index(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--generate-keypair", action="store_true")
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--channel-index", action="store_true")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--bundled-manifest", action="store_true")
     parser.add_argument("--key-id")
     parser.add_argument("--private-key-file", type=Path)
+    parser.add_argument("--private-key-output", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--public-keys-output", type=Path)
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--bundle-url")
     parser.add_argument("--public-keys", type=Path)
     args = parser.parse_args(argv)
-    if args.verify and args.channel_index:
-        parser.error("choose only one of --verify or --channel-index")
+    modes = sum(bool(value) for value in (args.generate_keypair, args.verify, args.channel_index))
+    if modes > 1:
+        parser.error("choose only one of --generate-keypair, --verify, or --channel-index")
+    if args.generate_keypair:
+        if not args.key_id or not args.private_key_output or not args.public_keys_output:
+            parser.error(
+                "--generate-keypair requires --key-id, --private-key-output, "
+                "and --public-keys-output"
+            )
+        return args
     if args.verify:
         if not args.bundle or not args.public_keys:
             parser.error("--verify requires --bundle and --public-keys")
@@ -156,8 +190,42 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _write_text_exclusive(path: Path, text: str, *, mode: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except Exception:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _write_json_exclusive(path: Path, data: dict) -> None:
+    _write_text_exclusive(
+        path,
+        json.dumps(data, indent=2, sort_keys=True) + "\n",
+        mode=0o644,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.generate_keypair:
+        private_key, public_keys = generate_route_policy_keypair(key_id=args.key_id)
+        _write_text_exclusive(args.private_key_output, private_key + "\n", mode=0o600)
+        try:
+            _write_json_exclusive(args.public_keys_output, {"keys": public_keys})
+        except Exception:
+            try:
+                args.private_key_output.unlink()
+            except FileNotFoundError:
+                pass
+            raise
+        return 0
     if args.verify:
         verify_signed_route_policy_bundle_file(
             bundle_path=args.bundle,

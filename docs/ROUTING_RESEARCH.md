@@ -45,7 +45,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Policy persistence and rollback | Implemented | Verified policy bundles can be saved under Slipstream-owned state, loaded on daemon start, and rolled back to the previous bundle or bundled policy. | Add remote fetch only after signing keys and post-apply health gates are explicit. |
 | 2026-07-09 | Remote policy health gate | Implemented | Remote policy helper is disabled by default, requires HTTPS, trusted Ed25519 keys, and a passing health gate before persisting an update. | Add a scheduler only after cadence, backoff, and production key distribution are explicit. |
 | 2026-07-09 | Remote policy scheduler | Implemented | Remote policy fetch is explicit opt-in via `SLIP_ROUTE_POLICY_URL`, uses retry backoff, skips while canaries run, and only persists after the health gate passes. | Define production signing-key distribution and release-channel hosting before enabling for users. |
-| 2026-07-09 | Signed policy release tooling | Implemented | `scripts/make_route_policy_bundle.py` builds and verifies Ed25519-signed policy bundles, can sign the bundled manifest directly, writes the trusted public-key map, and includes a verifier-checked manifest hash. | Add real production keys and a hosted release-channel policy path before user enablement. |
+| 2026-07-09 | Signed policy release tooling | Implemented | `scripts/make_route_policy_bundle.py` generates Ed25519 keypairs, builds and verifies signed policy bundles, signs the bundled manifest directly, writes trusted public-key maps, and includes verifier-checked hashes. | Create real production keys outside git and host the release channel before user enablement. |
 | 2026-07-09 | Bundled policy key distribution | Implemented | The daemon loads trusted policy keys from embedded constants, an optional bundled `route-policy-keys.json`, and a root-owned state override; PyInstaller includes the bundled key map only when release tooling provides it. | Generate and protect real production keys outside git before hosting policies. |
 | 2026-07-09 | Remote policy channel index | Implemented | `SLIP_ROUTE_POLICY_URL` may point to a stable HTTPS channel index with bundle URL and sha256; the daemon verifies the bundle digest before signature and health-gate checks. | Host this only after real production keys and rollback notes exist. |
 | 2026-07-09 | Discord CDN throughput canary | Implemented | Discord CDN local-bypass canary now uses a scoped GET payload threshold, while warning before degrading and leaving YouTube/QUIC/global UDP untouched. | Add throughput thresholds only for endpoints with predictable small payloads. |
@@ -315,6 +315,9 @@ Fresh external snapshots checked on 2026-07-09:
   for release hosting. It also verifies generated bundles against the key map.
   The daemon verifier accepts legacy bundles without a hash, but any provided
   `sha256` must match the canonical manifest hash.
+- The same helper can generate a raw Ed25519 release keypair. Private keys are
+  created with `0600` permissions and existing key files are not overwritten.
+  Real production private keys must stay outside git.
 - Trusted public keys can be embedded in code, bundled as `route-policy-keys.json`
   next to the frozen daemon, or overridden from Slipstream-owned state under
   `/var/db/slipstream`. The repo does not contain real production keys.

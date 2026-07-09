@@ -60,14 +60,17 @@ jobs:
       - name: Route policy bundle CLI smoke
         run: |
           set -euo pipefail
-          python3 -c 'import base64; print(base64.b64encode(b"\x05" * 32).decode("ascii"))' \
-            >/tmp/slipstream-route-policy.key
+          python3 scripts/make_route_policy_bundle.py \
+            --generate-keypair \
+            --key-id ci-test \
+            --private-key-output /tmp/slipstream-route-policy.key \
+            --public-keys-output /tmp/slipstream-route-policy-keys.json
           python3 scripts/make_route_policy_bundle.py \
             --bundled-manifest \
             --key-id ci-test \
             --private-key-file /tmp/slipstream-route-policy.key \
             --output /tmp/slipstream-route-policy.json \
-            --public-keys-output /tmp/slipstream-route-policy-keys.json
+            --public-keys-output /tmp/slipstream-route-policy-derived-keys.json
           python3 -m json.tool /tmp/slipstream-route-policy.json >/dev/null
           python3 scripts/make_route_policy_bundle.py \
             --verify \

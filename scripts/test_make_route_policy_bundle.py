@@ -228,6 +228,73 @@ class MakeRoutePolicyBundleTests(unittest.TestCase):
                 make_route_policy_bundle.hash_file(bundle_path),
             )
 
+    def test_cli_generates_keypair_without_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            private_path = root / "route-policy.key"
+            public_keys_path = root / "route-policy-keys.json"
+            bundle_path = root / "route-policy.json"
+
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--generate-keypair",
+                        "--key-id",
+                        "generated",
+                        "--private-key-output",
+                        str(private_path),
+                        "--public-keys-output",
+                        str(public_keys_path),
+                    ]
+                ),
+                0,
+            )
+
+            self.assertEqual(private_path.stat().st_mode & 0o777, 0o600)
+            private_key = private_path.read_text(encoding="utf-8").strip()
+            public_keys = make_route_policy_bundle.tproxy.load_trusted_route_policy_keys(
+                path=str(public_keys_path),
+                embedded_keys={},
+            )
+            self.assertIn("generated", public_keys)
+
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--bundled-manifest",
+                        "--key-id",
+                        "generated",
+                        "--private-key-file",
+                        str(private_path),
+                        "--output",
+                        str(bundle_path),
+                    ]
+                ),
+                0,
+            )
+            bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                make_route_policy_bundle.tproxy.verify_signed_route_policy_bundle(
+                    bundle,
+                    public_keys,
+                )["source"],
+                "bundled",
+            )
+            self.assertGreater(len(base64.b64decode(private_key)), 0)
+
+            with self.assertRaises(FileExistsError):
+                make_route_policy_bundle.main(
+                    [
+                        "--generate-keypair",
+                        "--key-id",
+                        "generated",
+                        "--private-key-output",
+                        str(private_path),
+                        "--public-keys-output",
+                        str(public_keys_path),
+                    ]
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
