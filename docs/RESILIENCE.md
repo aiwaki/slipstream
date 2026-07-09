@@ -66,7 +66,8 @@ YouTube/googlevideo.
 ### P2 - Maintenance Horizon
 
 - Fetch signed strategy-list updates.
-- Track strategy success rates without storing sensitive traffic data.
+- Track strategy success rates without storing or exposing sensitive traffic
+  data. Daemon status exposes aggregate group/strategy counters, not hostnames.
 - Add optional relay handling only for confirmed IP null-route cases.
 
 ## Notes

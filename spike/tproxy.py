@@ -2888,6 +2888,7 @@ def write_status(state, iface, voice_iface):
             "routing_policy": route_policy_status_snapshot(),
             "routing_policy_storage": route_policy_storage_snapshot(),
             "routing_policy_remote": route_policy_remote_snapshot(),
+            "strategy_scores": strategy_score_snapshot(),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),
@@ -3277,6 +3278,56 @@ def _record_strategy_result(host, name, ok, now=None):
     _strat_scores.move_to_end(host)
     while len(_strat_scores) > STRAT_SCORE_MAX_HOSTS:
         _strat_scores.popitem(last=False)
+
+
+def _strategy_score_bucket():
+    return {"hosts": 0, "ok": 0, "fail": 0, "last_seen": 0.0}
+
+
+def _add_strategy_score(bucket, ok, fail, last):
+    bucket["hosts"] += 1
+    bucket["ok"] += int(ok or 0)
+    bucket["fail"] += int(fail or 0)
+    bucket["last_seen"] = max(float(bucket["last_seen"]), float(last or 0.0))
+
+
+def strategy_score_snapshot():
+    """Privacy-safe strategy telemetry.
+
+    `_strat_scores` is keyed by host for routing decisions. Status must not
+    expose those hostnames, so diagnostics only publish aggregate counts by
+    service group and strategy name.
+    """
+    groups = {}
+    strategies = {}
+    for host, per_host in _strat_scores.items():
+        policy = route_policy(host)
+        group_name = policy["service_group"]
+        group = groups.setdefault(group_name, {"hosts": 0, "strategies": {}})
+        group["hosts"] += 1
+        for name, item in per_host.items():
+            if name not in STRAT_BY_NAME:
+                continue
+            ok = item.get("ok", 0)
+            fail = item.get("fail", 0)
+            last = item.get("last", 0.0)
+            _add_strategy_score(
+                group["strategies"].setdefault(name, _strategy_score_bucket()),
+                ok,
+                fail,
+                last,
+            )
+            _add_strategy_score(
+                strategies.setdefault(name, _strategy_score_bucket()),
+                ok,
+                fail,
+                last,
+            )
+    return {
+        "hosts": len(_strat_scores),
+        "groups": groups,
+        "strategies": strategies,
+    }
 
 
 def _strategy_rank(host, name, base_index, cached, now):

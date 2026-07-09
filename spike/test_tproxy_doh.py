@@ -309,6 +309,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "system_resolve", lambda host: ["142.250.186.46"])
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
+    tproxy._record_strategy_result("discord.com", "split64+fake", True, now=100.0)
     tproxy._dead.clear()
     tproxy._dead["blocked.example"] = 999.0
     tproxy._system_dns_cache.update({
@@ -341,6 +342,8 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["routing_policy_storage"]["state"] == "bundled"
     assert status["routing_policy_storage"]["source"] == tproxy.ROUTE_POLICY_SOURCE
     assert status["routing_policy_remote"]["state"] == "disabled"
+    assert status["strategy_scores"]["hosts"] == 1
+    assert status["strategy_scores"]["groups"][tproxy.SERVICE_DISCORD]["hosts"] == 1
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
     assert status["system_proxy"] == {"state": "off", "kind": ""}
@@ -361,6 +364,32 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["pf_state"] == {"applied": False, "enabled": False, "rules_loaded": False}
     assert status["geph_detail"]["port"] == 0
     assert "canaries" in status
+
+
+def test_strategy_score_snapshot_is_aggregated_without_hostnames():
+    tproxy._record_strategy_result("discord.com", "split64+fake", True, now=100.0)
+    tproxy._record_strategy_result("cdn.discordapp.com", "split64+fake", False, now=110.0)
+    tproxy._record_strategy_result("rr1---sn-test.googlevideo.com", "fake5", True, now=120.0)
+
+    snapshot = tproxy.strategy_score_snapshot()
+
+    assert snapshot["hosts"] == 3
+    assert snapshot["groups"][tproxy.SERVICE_DISCORD]["hosts"] == 2
+    assert snapshot["groups"][tproxy.SERVICE_DISCORD]["strategies"]["split64+fake"] == {
+        "hosts": 2,
+        "ok": 1,
+        "fail": 1,
+        "last_seen": 110.0,
+    }
+    assert snapshot["groups"][tproxy.SERVICE_YOUTUBE]["strategies"]["fake5"] == {
+        "hosts": 1,
+        "ok": 1,
+        "fail": 0,
+        "last_seen": 120.0,
+    }
+    serialized = json.dumps(snapshot)
+    assert "discord.com" not in serialized
+    assert "googlevideo.com" not in serialized
 
 
 def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):

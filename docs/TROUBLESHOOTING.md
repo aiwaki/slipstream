@@ -21,6 +21,9 @@ Daemon status:
 /usr/local/slipstream/slipstreamd --status
 ```
 
+`strategy_scores` in daemon status is aggregate-only: it reports host counts and
+ok/fail totals by service group and strategy, but does not expose hostnames.
+
 Tray diagnostics:
 
 - `Copy Diagnostics` copies a redacted JSON snapshot with a short `summary`

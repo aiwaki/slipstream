@@ -24,6 +24,7 @@ not a release promise.
 | Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
 | Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
 | Direct passthrough policy | implemented for Telegram, Russian hosts, and GitHub developer/download endpoints |
+| Strategy success metrics | implemented as privacy-safe aggregate status without hostnames |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
 | Signed policy bundle validation | implemented as validator/verifier, local persist/rollback, and explicit opt-in remote fetch scheduler with health gates |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
@@ -67,6 +68,8 @@ Goal: detect degradation before the user has to diagnose it manually.
 - Signed strategy-list/policy updates without rebuilding the app; the local
   verifier, rollback path, and opt-in health-gated remote fetch scheduler are
   in place.
+- Keep strategy success metrics aggregate-only; do not expose per-host browsing
+  history in status or diagnostics.
 - Move the bundled policy metadata/hash into signed policy updates and
   OS-specific adapters.
 
