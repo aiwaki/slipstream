@@ -112,6 +112,10 @@ Do not widen Steam routing without endpoint-level evidence. Steam can use
 store/CDN/update hosts plus CM WebSocket and UDP paths, so one working endpoint
 does not prove the whole app is healthy.
 
+The `steam_store` canary checks real HTTPS payload through Geph. A passing
+SOCKS/TLS connect alone is not enough to mark the store healthy, because the
+browser-visible failure can happen after the page starts loading.
+
 ## GitHub
 
 GitHub developer endpoints use `direct_passthrough`. If `gh api` works but

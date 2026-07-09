@@ -48,6 +48,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Discord CDN throughput canary | Implemented | Discord CDN local-bypass canary now uses a scoped GET payload threshold, while warning before degrading and leaving YouTube/QUIC/global UDP untouched. | Add throughput thresholds only for endpoints with predictable small payloads. |
 | 2026-07-09 | Geo-exit endpoint gates | Implemented | Repeated failure of important secondary geo-exit endpoints, such as OpenAI billing, can degrade the group after a grace threshold instead of being hidden by a passing core endpoint. | Keep adding endpoint gates only where user-visible workflows are proven to fail independently. |
 | 2026-07-09 | GitHub developer endpoints | Implemented | GitHub HTTPS/Git endpoints are direct-passthrough and plain-only; generic desync can break longer smart-HTTP transfers even when short API calls succeed. | Use direct-passthrough for similar developer/download endpoints only with evidence, not as a broad allowlist. |
+| 2026-07-09 | Steam Store payload canary | Implemented | Steam Store geo-exit health now requires a real HTTPS GET payload through Geph, not just SOCKS CONNECT or TLS first bytes. | Add payload probes for other geo-exit flows only when TLS success can hide a user-visible stalled page. |
 
 ## Codebase Graph
 
@@ -121,6 +122,10 @@ Fresh external snapshots checked on 2026-07-09:
   `objects.githubusercontent.com` were still classified as `unknown/generic`.
   The safer route is direct-passthrough, plain-only, because these developer
   endpoints do not need local DPI desync or Geph.
+- 2026-07-09: Steam Store's original geo-exit canary only proved that Geph could
+  open a SOCKS/TLS stream. It now performs a small HTTPS GET for `/` and requires
+  a minimum payload so "page shell starts, then stalls" is visible to autonomous
+  health instead of requiring manual browser testing.
 - SonicDPI detects likely forged inbound TCP RST packets by learning a target
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied

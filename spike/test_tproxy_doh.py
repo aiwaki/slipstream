@@ -1850,22 +1850,18 @@ def test_geo_exit_canary_falls_back_to_geph_when_smart_dns_fails(monkeypatch):
 def test_steam_store_canary_skips_smart_dns_and_uses_geph(monkeypatch):
     original = dict(tproxy._route_health[tproxy.SERVICE_STEAM_STORE])
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def smart_should_not_run(spec):
         raise AssertionError("Steam Store should not use Smart DNS")
 
-    async def geph_connect(host, port, first_flight):
+    async def geph_payload_probe(host, spec):
         assert host == "store.steampowered.com"
-        assert port == 443
-        return object(), DummyWriter()
+        assert spec["payload_probe"] == "https_payload"
+        return spec["payload_min_bytes"]
 
     try:
         monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
         monkeypatch.setattr(tproxy, "_run_smart_dns_geo_canary", smart_should_not_run)
-        monkeypatch.setattr(tproxy, "dial_via_geph", geph_connect)
+        monkeypatch.setattr(tproxy, "_run_geph_payload_probe", geph_payload_probe)
         monkeypatch.setattr(tproxy, "_geph_up", True)
 
         spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "steam_store")
@@ -1876,6 +1872,60 @@ def test_steam_store_canary_skips_smart_dns_and_uses_geph(monkeypatch):
         assert health["last_backend"] == tproxy.GEO_BACKEND_GEPH
     finally:
         tproxy._route_health[tproxy.SERVICE_STEAM_STORE] = original
+
+
+def test_steam_store_canary_spec_requires_payload_probe():
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "steam_store")
+
+    assert spec["payload_probe"] == "https_payload"
+    assert spec["payload_method"] == "GET"
+    assert spec["payload_path"] == "/"
+    assert spec["payload_min_bytes"] >= 1024
+    assert spec["degrade_after"] == tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER
+
+
+def test_geo_exit_payload_canary_warns_on_short_payload(monkeypatch):
+    original = dict(tproxy._route_health[tproxy.SERVICE_STEAM_STORE])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_STEAM_STORE])
+
+    async def payload_probe(host, spec):
+        assert host == "store.steampowered.com"
+        assert spec["payload_probe"] == "https_payload"
+        return spec["payload_min_bytes"] - 1
+
+    async def basic_connect_should_not_hide_payload_failure(host, port, first_flight):
+        raise AssertionError("payload canary should not stop at SOCKS/TLS connect")
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_STEAM_STORE].clear()
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: False)
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+        monkeypatch.setattr(tproxy, "_run_geph_payload_probe", payload_probe, raising=False)
+        monkeypatch.setattr(tproxy, "dial_via_geph", basic_connect_should_not_hide_payload_failure)
+
+        spec = {
+            "name": "steam_store",
+            "group": tproxy.SERVICE_STEAM_STORE,
+            "host": "store.steampowered.com",
+            "smart_dns": False,
+            "payload_probe": "https_payload",
+            "payload_method": "GET",
+            "payload_path": "/",
+            "payload_min_bytes": 2048,
+            "degrade_after": tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
+        }
+
+        assert asyncio.run(tproxy._run_geo_exit_canary(spec)) == "warning"
+
+        health = tproxy.canary_health_snapshot()["steam_store"]
+        assert health["state"] == tproxy.HEALTH_UNKNOWN
+        assert health["last_warning"] == "payload throughput below threshold"
+        assert health["last_warning_host"] == "store.steampowered.com"
+    finally:
+        tproxy._route_health[tproxy.SERVICE_STEAM_STORE] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_STEAM_STORE]
+        q.clear()
+        q.extend(original_window)
 
 
 def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():

@@ -323,6 +323,7 @@ LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
 LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
+GEO_PAYLOAD_CANARY_TIMEOUT = 6.0
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
@@ -2222,6 +2223,11 @@ CANARY_SPECS = (
         "group": SERVICE_STEAM_STORE,
         "host": "store.steampowered.com",
         "smart_dns": False,
+        "payload_probe": "https_payload",
+        "payload_method": "GET",
+        "payload_path": "/",
+        "payload_min_bytes": 2048,
+        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     },
     {"name": "telegram_proxy", "group": SERVICE_TELEGRAM, "host": ""},
 )
@@ -2435,6 +2441,77 @@ async def _run_local_payload_probe(ip, host, strat, spec=None):
     return await loop.run_in_executor(_POOL, _local_payload_probe, ip, host, strat, spec)
 
 
+def _geph_payload_probe(host, spec=None, timeout=GEO_PAYLOAD_CANARY_TIMEOUT):
+    """Complete a small HTTPS request through Geph's SOCKS listener.
+
+    SOCKS CONNECT plus TLS bytes only proves that an exit stream opens. Store and
+    payment pages can still stall at HTTP payload time, so selected geo-exit
+    canaries drive the request far enough to read decrypted response bytes.
+    """
+    port_socks = _geph_port
+    if not port_socks:
+        return 0
+    sock = None
+    total = 0
+    min_bytes = _local_payload_min_bytes(spec)
+    deadline = time.monotonic() + timeout
+    try:
+        sock = socket.create_connection(("127.0.0.1", port_socks), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(b"\x05\x01\x00")
+        if sock.recv(2)[:2] != b"\x05\x00":
+            return 0
+        hb = host.encode("ascii", "ignore")[:255]
+        sock.sendall(
+            b"\x05\x01\x00\x03" + bytes([len(hb)]) + hb + struct.pack("!H", 443)
+        )
+        rep = sock.recv(4)
+        if len(rep) < 4 or rep[1] != 0x00:
+            return 0
+        atyp = rep[3]
+        if atyp == 0x01:
+            sock.recv(4)
+        elif atyp == 0x03:
+            ln = sock.recv(1)
+            if not ln:
+                return 0
+            sock.recv(ln[0])
+        elif atyp == 0x04:
+            sock.recv(16)
+        sock.recv(2)
+
+        ctx = _local_payload_ssl_context()
+        tls = ctx.wrap_socket(sock, server_hostname=host)
+        sock = tls
+        tls.settimeout(timeout)
+        tls.sendall(_local_payload_canary_request(host, spec))
+        while time.monotonic() < deadline:
+            tls.settimeout(max(0.1, deadline - time.monotonic()))
+            try:
+                data = tls.recv(65536)
+            except socket.timeout:
+                break
+            if not data:
+                break
+            total += len(data)
+            if total >= min_bytes:
+                return total
+    except Exception:
+        return 0
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    return total
+
+
+async def _run_geph_payload_probe(host, spec=None):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_POOL, _geph_payload_probe, host, spec)
+
+
 def _close_probe_result(result):
     if not result:
         return
@@ -2630,6 +2707,32 @@ async def _run_geo_exit_canary(spec):
             "tunnel down",
             HEALTH_BLOCKED,
         )
+        return False
+    if spec.get("payload_probe") == "https_payload":
+        payload_bytes = await _run_geph_payload_probe(host, spec)
+        if payload_bytes >= _local_payload_min_bytes(spec):
+            clear_geph_route_failure()
+            canary_health_event(spec, ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
+            return True
+        reason = (
+            "payload throughput below threshold"
+            if payload_bytes > 0
+            else "payload probe failed"
+        )
+        canary_health_event(
+            spec,
+            ROUTE_GEO_EXIT,
+            host,
+            False,
+            reason,
+            soft=bool(spec.get("soft")),
+            degrade_after=int(spec.get("degrade_after", 1) or 1),
+        )
+        if spec.get("soft"):
+            return "warning"
+        health = canary_health_snapshot().get(_canary_key(spec), {})
+        if health.get("state") != HEALTH_DEGRADED:
+            return "warning"
         return False
     result = await dial_via_geph(host, 443, build_fake_clienthello(host))
     if result:
