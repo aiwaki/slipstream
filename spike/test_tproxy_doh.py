@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import re
@@ -1006,6 +1007,52 @@ def test_remote_route_policy_fetch_applies_after_health_gate(tmp_path):
     assert remote["state"] == "applied"
     assert remote["last_source"] == "signed:remote"
     assert len(remote["last_sha256"]) == 64
+
+
+def test_remote_route_policy_fetch_accepts_channel_index(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:channel"
+    manifest["geo_exit_routes"].append({
+        "domains": ["channel.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+    bundle_bytes = json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
+    channel = {
+        "kind": tproxy.ROUTE_POLICY_CHANNEL_KIND,
+        "schema": tproxy.ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+        "bundle_url": "https://policy.example.org/channel/route-policy.json",
+        "sha256": hashlib.sha256(bundle_bytes).hexdigest(),
+    }
+    calls = []
+
+    def fetcher(url):
+        calls.append(url)
+        if url.endswith("latest.json"):
+            return json.dumps(channel).encode()
+        return bundle_bytes
+
+    assert tproxy.update_route_policy_from_remote(
+        url="https://policy.example.org/channel/latest.json",
+        public_keys=public_keys,
+        fetcher=fetcher,
+        health_runner=lambda: (5, 0),
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+
+    assert calls == [
+        "https://policy.example.org/channel/latest.json",
+        "https://policy.example.org/channel/route-policy.json",
+    ]
+    assert tproxy.route_policy("channel.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
 
 
 def test_ip_attempt_limits_follow_route_policy():

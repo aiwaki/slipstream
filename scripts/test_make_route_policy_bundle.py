@@ -173,6 +173,61 @@ class MakeRoutePolicyBundleTests(unittest.TestCase):
                 0,
             )
 
+    def test_cli_writes_channel_index_for_generated_bundle(self) -> None:
+        private_key = base64.b64encode(b"\x05" * 32).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key_path = root / "route-policy.key"
+            bundle_path = root / "route-policy.json"
+            index_path = root / "latest.json"
+            key_path.write_text(private_key + "\n", encoding="utf-8")
+
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--bundled-manifest",
+                        "--key-id",
+                        "channel",
+                        "--private-key-file",
+                        str(key_path),
+                        "--output",
+                        str(bundle_path),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--channel-index",
+                        "--bundle",
+                        str(bundle_path),
+                        "--bundle-url",
+                        "https://policy.example.org/channel/route-policy.json",
+                        "--output",
+                        str(index_path),
+                    ]
+                ),
+                0,
+            )
+
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                index["kind"],
+                make_route_policy_bundle.tproxy.ROUTE_POLICY_CHANNEL_KIND,
+            )
+            self.assertEqual(
+                index["schema"],
+                make_route_policy_bundle.tproxy.ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+            )
+            self.assertEqual(index["key_id"], "channel")
+            self.assertEqual(index["source"], "bundled")
+            self.assertEqual(
+                index["sha256"],
+                make_route_policy_bundle.hash_file(bundle_path),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

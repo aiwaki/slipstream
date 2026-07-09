@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -83,9 +84,36 @@ def verify_signed_route_policy_bundle_file(
     }
 
 
+def hash_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def build_route_policy_channel_index(
+    *,
+    bundle_path: Path,
+    bundle_url: str,
+) -> dict:
+    bundle_url = tproxy.validate_route_policy_remote_url(bundle_url)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    manifest = tproxy.validate_route_policy_manifest(bundle.get("manifest"))
+    key_id = bundle.get("key_id")
+    if not isinstance(key_id, str) or not key_id.strip():
+        raise ValueError("bundle key_id is required")
+    return {
+        "kind": tproxy.ROUTE_POLICY_CHANNEL_KIND,
+        "schema": tproxy.ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+        "bundle_url": bundle_url,
+        "sha256": hash_file(bundle_path),
+        "key_id": key_id,
+        "policy_schema": bundle.get("schema"),
+        "source": manifest["source"],
+    }
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--channel-index", action="store_true")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--bundled-manifest", action="store_true")
     parser.add_argument("--key-id")
@@ -93,11 +121,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--public-keys-output", type=Path)
     parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--bundle-url")
     parser.add_argument("--public-keys", type=Path)
     args = parser.parse_args(argv)
+    if args.verify and args.channel_index:
+        parser.error("choose only one of --verify or --channel-index")
     if args.verify:
         if not args.bundle or not args.public_keys:
             parser.error("--verify requires --bundle and --public-keys")
+        return args
+    if args.channel_index:
+        if not args.bundle or not args.bundle_url or not args.output:
+            parser.error("--channel-index requires --bundle, --bundle-url, and --output")
         return args
     if args.bundled_manifest == bool(args.manifest):
         parser.error("choose exactly one of --manifest or --bundled-manifest")
@@ -128,6 +163,13 @@ def main(argv: list[str] | None = None) -> int:
             bundle_path=args.bundle,
             public_keys_path=args.public_keys,
         )
+        return 0
+    if args.channel_index:
+        index = build_route_policy_channel_index(
+            bundle_path=args.bundle,
+            bundle_url=args.bundle_url,
+        )
+        _write_json(args.output, index)
         return 0
     manifest = _read_manifest(args)
     private_key = args.private_key_file.read_text(encoding="utf-8")

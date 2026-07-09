@@ -152,6 +152,8 @@ IP_ATTEMPT_LIMIT_BY_ROUTE = {
 ROUTE_POLICY_VERSION = 1
 ROUTE_POLICY_SOURCE = "bundled"
 ROUTE_POLICY_SCHEMA_VERSION = 1
+ROUTE_POLICY_CHANNEL_KIND = "slipstream.route_policy_channel"
+ROUTE_POLICY_CHANNEL_SCHEMA_VERSION = 1
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
@@ -832,14 +834,13 @@ def validate_route_policy_remote_url(url):
     return url.strip()
 
 
-def fetch_signed_route_policy_bundle(
+def _fetch_remote_policy_json(
     url,
     *,
     fetcher=None,
     timeout=ROUTE_POLICY_FETCH_TIMEOUT,
     max_bytes=ROUTE_POLICY_MAX_BYTES,
 ):
-    url = validate_route_policy_remote_url(url)
     if fetcher is not None:
         data = fetcher(url)
     else:
@@ -853,14 +854,78 @@ def fetch_signed_route_policy_bundle(
         with urllib.request.urlopen(req, timeout=timeout) as response:
             data = response.read(max_bytes + 1)
     if isinstance(data, dict):
-        return data
+        body = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return data, body
     if isinstance(data, str):
         data = data.encode("utf-8")
     if not isinstance(data, (bytes, bytearray)):
         raise ValueError("remote policy response must be JSON")
     if len(data) > max_bytes:
         raise ValueError("remote policy response is too large")
-    return json.loads(bytes(data).decode("utf-8"))
+    body = bytes(data)
+    return json.loads(body.decode("utf-8")), body
+
+
+def _is_route_policy_channel(data):
+    return isinstance(data, dict) and "bundle_url" in data
+
+
+def _fetch_signed_route_policy_bundle_from_channel(
+    channel,
+    *,
+    fetcher=None,
+    timeout=ROUTE_POLICY_FETCH_TIMEOUT,
+    max_bytes=ROUTE_POLICY_MAX_BYTES,
+):
+    if channel.get("kind") != ROUTE_POLICY_CHANNEL_KIND:
+        raise ValueError("remote policy channel kind is not supported")
+    schema = _require_policy_int(
+        channel.get("schema"),
+        "channel.schema",
+        min_value=ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+        max_value=ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+    )
+    if schema != ROUTE_POLICY_CHANNEL_SCHEMA_VERSION:
+        raise ValueError("unsupported remote policy channel schema")
+    expected_hash = channel.get("sha256")
+    if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+        raise ValueError("remote policy channel sha256 is required")
+    bundle_url = validate_route_policy_remote_url(channel.get("bundle_url"))
+    bundle, bundle_bytes = _fetch_remote_policy_json(
+        bundle_url,
+        fetcher=fetcher,
+        timeout=timeout,
+        max_bytes=max_bytes,
+    )
+    actual_hash = hashlib.sha256(bundle_bytes).hexdigest()
+    if actual_hash != expected_hash:
+        raise ValueError("remote policy bundle hash mismatch")
+    return bundle
+
+
+def fetch_signed_route_policy_bundle(
+    url,
+    *,
+    fetcher=None,
+    timeout=ROUTE_POLICY_FETCH_TIMEOUT,
+    max_bytes=ROUTE_POLICY_MAX_BYTES,
+):
+    url = validate_route_policy_remote_url(url)
+    data, _body = _fetch_remote_policy_json(
+        url,
+        fetcher=fetcher,
+        timeout=timeout,
+        max_bytes=max_bytes,
+    )
+    if _is_route_policy_channel(data):
+        return _fetch_signed_route_policy_bundle_from_channel(
+            data,
+            fetcher=fetcher,
+            timeout=timeout,
+            max_bytes=max_bytes,
+        )
+    return data
+
 
 
 def _route_policy_health_gate_passed(result):

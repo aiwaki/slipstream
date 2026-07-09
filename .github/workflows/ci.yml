@@ -73,6 +73,12 @@ jobs:
             --verify \
             --bundle /tmp/slipstream-route-policy.json \
             --public-keys /tmp/slipstream-route-policy-keys.json
+          python3 scripts/make_route_policy_bundle.py \
+            --channel-index \
+            --bundle /tmp/slipstream-route-policy.json \
+            --bundle-url https://policy.example.org/channel/route-policy.json \
+            --output /tmp/slipstream-route-policy-latest.json
+          python3 -m json.tool /tmp/slipstream-route-policy-latest.json >/dev/null
 
       - name: Python compile check
         run: |
