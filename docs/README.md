@@ -14,6 +14,7 @@ support notes here.
 | Resilience model and known limits | [RESILIENCE.md](RESILIENCE.md) |
 | Routing research and external repo findings | [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) |
 | Icon and visual identity brief | [ICON_BRIEF.md](ICON_BRIEF.md) |
+| Agent workflow notes | [../AGENTS.md](../AGENTS.md) |
 | Older implementation plans and specs | [plans/](plans/) and [specs/](specs/) |
 
 ## Knowledge Capture Rules
