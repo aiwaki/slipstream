@@ -70,7 +70,7 @@ Goal: detect degradation before the user has to diagnose it manually.
   fetch scheduler are in place.
 - Keep strategy success metrics aggregate-only; do not expose per-host browsing
   history in status or diagnostics.
-- Add production signing-key distribution and release-channel policy hosting.
+- Add real production signing-key custody and release-channel policy hosting.
 - Move OS-specific policy adapters out from the current macOS daemon shape.
 
 ## P2 - Desktop Portability

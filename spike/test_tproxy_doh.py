@@ -788,6 +788,28 @@ def test_trusted_route_policy_keys_load_from_file_and_validate(tmp_path):
         tproxy.load_trusted_route_policy_keys(path=str(path))
 
 
+def test_trusted_route_policy_keys_merge_embedded_bundled_and_override(tmp_path):
+    embedded_key = base64.b64encode(b"\x01" * 32).decode("ascii")
+    bundled_key = base64.b64encode(b"\x02" * 32).decode("ascii")
+    override_key = base64.b64encode(b"\x03" * 32).decode("ascii")
+    bundled_path = tmp_path / "bundled-keys.json"
+    override_path = tmp_path / "override-keys.json"
+    bundled_path.write_text(json.dumps({"keys": {"prod": bundled_key}}))
+    override_path.write_text(json.dumps({"keys": {"prod": override_key}}))
+
+    assert tproxy.load_trusted_route_policy_keys(
+        path=str(override_path),
+        bundled_path=str(bundled_path),
+        embedded_keys={"prod": embedded_key},
+    ) == {"prod": override_key}
+
+    assert tproxy.load_trusted_route_policy_keys(
+        path="",
+        bundled_path=str(bundled_path),
+        embedded_keys={"prod": embedded_key},
+    ) == {"prod": bundled_key}
+
+
 def test_remote_route_policy_url_must_be_https():
     with pytest.raises(ValueError, match="https"):
         tproxy.validate_route_policy_remote_url("http://example.org/policy.json")

@@ -46,6 +46,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Remote policy health gate | Implemented | Remote policy helper is disabled by default, requires HTTPS, trusted Ed25519 keys, and a passing health gate before persisting an update. | Add a scheduler only after cadence, backoff, and production key distribution are explicit. |
 | 2026-07-09 | Remote policy scheduler | Implemented | Remote policy fetch is explicit opt-in via `SLIP_ROUTE_POLICY_URL`, uses retry backoff, skips while canaries run, and only persists after the health gate passes. | Define production signing-key distribution and release-channel hosting before enabling for users. |
 | 2026-07-09 | Signed policy release tooling | Implemented | `scripts/make_route_policy_bundle.py` builds and verifies Ed25519-signed policy bundles, can sign the bundled manifest directly, writes the trusted public-key map, and includes a verifier-checked manifest hash. | Add real production keys and a hosted release-channel policy path before user enablement. |
+| 2026-07-09 | Bundled policy key distribution | Implemented | The daemon loads trusted policy keys from embedded constants, an optional bundled `route-policy-keys.json`, and a root-owned state override; PyInstaller includes the bundled key map only when release tooling provides it. | Generate and protect real production keys outside git before hosting policies. |
 | 2026-07-09 | Discord CDN throughput canary | Implemented | Discord CDN local-bypass canary now uses a scoped GET payload threshold, while warning before degrading and leaving YouTube/QUIC/global UDP untouched. | Add throughput thresholds only for endpoints with predictable small payloads. |
 | 2026-07-09 | Geo-exit endpoint gates | Implemented | Repeated failure of important secondary geo-exit endpoints, such as OpenAI billing, can degrade the group after a grace threshold instead of being hidden by a passing core endpoint. | Keep adding endpoint gates only where user-visible workflows are proven to fail independently. |
 | 2026-07-09 | GitHub developer endpoints | Implemented | GitHub HTTPS/Git endpoints are direct-passthrough and plain-only; generic desync can break longer smart-HTTP transfers even when short API calls succeed. | Use direct-passthrough for similar developer/download endpoints only with evidence, not as a broad allowlist. |
@@ -313,6 +314,9 @@ Fresh external snapshots checked on 2026-07-09:
   for release hosting. It also verifies generated bundles against the key map.
   The daemon verifier accepts legacy bundles without a hash, but any provided
   `sha256` must match the canonical manifest hash.
+- Trusted public keys can be embedded in code, bundled as `route-policy-keys.json`
+  next to the frozen daemon, or overridden from Slipstream-owned state under
+  `/var/db/slipstream`. The repo does not contain real production keys.
 
 ## Transfer Backlog
 

@@ -33,6 +33,12 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn(f'DAEMON_VERSION = "{version}"', daemon)
 
+    def test_daemon_bundle_can_include_route_policy_keys(self) -> None:
+        spec = (ROOT / "spike/slipstreamd.spec").read_text(encoding="utf-8")
+
+        self.assertIn("route-policy-keys.json", spec)
+        self.assertIn("datas.append", spec)
+
 
 if __name__ == "__main__":
     unittest.main()

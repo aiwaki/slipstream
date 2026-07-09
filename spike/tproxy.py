@@ -263,6 +263,7 @@ POLICY_STATE_DIR = "/var/db/slipstream"
 ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
 ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
 ROUTE_POLICY_KEYS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy-keys.json")
+ROUTE_POLICY_BUNDLED_KEYS_FILENAME = "route-policy-keys.json"
 ROUTE_POLICY_REMOTE_URL_ENV = "SLIP_ROUTE_POLICY_URL"
 ROUTE_POLICY_KEYS_PATH_ENV = "SLIP_ROUTE_POLICY_KEYS_PATH"
 ROUTE_POLICY_FETCH_TIMEOUT = 5.0
@@ -791,20 +792,34 @@ def _validate_route_policy_key_map(keys):
     return normalized
 
 
+def route_policy_bundled_keys_path():
+    root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, ROUTE_POLICY_BUNDLED_KEYS_FILENAME)
+
+
+def _load_route_policy_key_file(path):
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        data = json.load(f)
+    if isinstance(data, dict) and "keys" in data:
+        data = data["keys"]
+    return _validate_route_policy_key_map(data)
+
+
 def load_trusted_route_policy_keys(
     *,
     path=None,
     embedded_keys=None,
+    bundled_path=None,
 ):
     keys = dict(TRUSTED_ROUTE_POLICY_KEYS if embedded_keys is None else embedded_keys)
+    if bundled_path is None:
+        bundled_path = route_policy_bundled_keys_path()
+    keys.update(_load_route_policy_key_file(bundled_path))
     if path is None:
         path = os.environ.get(ROUTE_POLICY_KEYS_PATH_ENV, ROUTE_POLICY_KEYS_PATH)
-    if path and os.path.exists(path):
-        with open(path) as f:
-            data = json.load(f)
-        if isinstance(data, dict) and "keys" in data:
-            data = data["keys"]
-        keys.update(_validate_route_policy_key_map(data))
+    keys.update(_load_route_policy_key_file(path))
     return _validate_route_policy_key_map(keys)
 
 
