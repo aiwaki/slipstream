@@ -27,7 +27,7 @@ not a release promise.
 | Strategy success metrics | implemented as privacy-safe aggregate status without hostnames |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
 | Signed policy updates | implemented as bundled-manifest bundle builder, validator/verifier, local persist/rollback, explicit opt-in remote fetch scheduler with health gates, release workflow packaging, and release artifact preflight for signed channel assets |
-| Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
+| Detailed route diagnostics | implemented in daemon status, tray summary, copied diagnostic snapshot, and attachable diagnostic file |
 | Payload canaries | partial: Discord CDN verifies local-bypass throughput; Steam Store verifies geo-exit HTTPS payload through Geph |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |

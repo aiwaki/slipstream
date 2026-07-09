@@ -41,7 +41,7 @@ YouTube/googlevideo.
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
 | Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle builder/validator, trusted-key distribution path, local persist, rollback, explicit opt-in remote fetch scheduler with health gates, release workflow packaging, and release artifact preflight for signed channel assets | configure real production key custody and publish a release-channel policy asset |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
-| Logs | rotating daemon log, tray snapshot, route-health failure summaries, stale external proxy exception reporting, and copied diagnostic summary | attachable diagnostic file/export UX |
+| Logs | rotating daemon log, tray snapshot, route-health failure summaries, stale external proxy exception reporting, and copied plus file-backed diagnostic summary | attachable diagnostic export polish |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
 
 ## Priority Order

@@ -698,6 +698,21 @@ fn copy_text_to_clipboard(text: &str) -> bool {
     child.wait().map(|status| status.success()).unwrap_or(false)
 }
 
+fn diagnostic_snapshot_path() -> PathBuf {
+    std::env::temp_dir().join("slipstream-diagnostics.json")
+}
+
+fn write_diagnostic_snapshot_file(path: &Path, text: &str) -> bool {
+    if fs::write(path, text).is_err() {
+        return false;
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).is_ok()
+}
+
+fn reveal_file_in_finder(path: &Path) {
+    let _ = Command::new("/usr/bin/open").arg("-R").arg(path).spawn();
+}
+
 fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
     let bundled_daemon = bundled_daemon_path(app);
     let snapshot = diagnostic_snapshot_value(
@@ -711,7 +726,13 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
     let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
         return false;
     };
-    copy_text_to_clipboard(&text)
+    let copied = copy_text_to_clipboard(&text);
+    let path = diagnostic_snapshot_path();
+    let saved = write_diagnostic_snapshot_file(&path, &text);
+    if saved {
+        reveal_file_in_finder(&path);
+    }
+    copied && saved
 }
 
 fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
@@ -1849,7 +1870,7 @@ pub fn run() {
                         }
                         ID_DIAGNOSTICS => {
                             if copy_diagnostic_snapshot(app) {
-                                notify(app, "Slipstream diagnostics copied");
+                                notify(app, "Slipstream diagnostics copied and saved");
                             } else {
                                 notify(app, "Unable to copy Slipstream diagnostics");
                             }
@@ -2018,8 +2039,8 @@ mod tests {
         launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
         redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
         should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
-        telegram_proxy_detail, valid_bundled_daemon, DAEMON_RECOVERY_STATUS_PATH,
-        DAEMON_WATCHDOG_MISSES,
+        telegram_proxy_detail, valid_bundled_daemon, write_diagnostic_snapshot_file,
+        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2103,6 +2124,26 @@ mod tests {
             "/definitely/missing/slipstream.log",
             &dst
         ));
+    }
+
+    #[test]
+    fn write_diagnostic_snapshot_file_clamps_permissions() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-export-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("slipstream-diagnostics.json");
+
+        assert!(write_diagnostic_snapshot_file(&path, "{\"ok\":true}\n"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"ok\":true}\n");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
