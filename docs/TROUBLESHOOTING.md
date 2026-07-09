@@ -112,6 +112,14 @@ Do not widen Steam routing without endpoint-level evidence. Steam can use
 store/CDN/update hosts plus CM WebSocket and UDP paths, so one working endpoint
 does not prove the whole app is healthy.
 
+## GitHub
+
+GitHub developer endpoints use `direct_passthrough`. If `gh api` works but
+`git fetch` or `git push` hangs, check that `github.com`,
+`objects.githubusercontent.com`, and `codeload.github.com` still resolve to the
+`github` direct policy and plain-only strategy. They should not use Geph or the
+generic desync ladder.
+
 ## Auto Geo-Exit Learning
 
 Slipstream can learn an unknown HTTPS host as temporary `geo_exit` only after

@@ -47,6 +47,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Remote policy scheduler | Implemented | Remote policy fetch is explicit opt-in via `SLIP_ROUTE_POLICY_URL`, uses retry backoff, skips while canaries run, and only persists after the health gate passes. | Define production signing-key distribution and release-channel hosting before enabling for users. |
 | 2026-07-09 | Discord CDN throughput canary | Implemented | Discord CDN local-bypass canary now uses a scoped GET payload threshold, while warning before degrading and leaving YouTube/QUIC/global UDP untouched. | Add throughput thresholds only for endpoints with predictable small payloads. |
 | 2026-07-09 | Geo-exit endpoint gates | Implemented | Repeated failure of important secondary geo-exit endpoints, such as OpenAI billing, can degrade the group after a grace threshold instead of being hidden by a passing core endpoint. | Keep adding endpoint gates only where user-visible workflows are proven to fail independently. |
+| 2026-07-09 | GitHub developer endpoints | Implemented | GitHub HTTPS/Git endpoints are direct-passthrough and plain-only; generic desync can break longer smart-HTTP transfers even when short API calls succeed. | Use direct-passthrough for similar developer/download endpoints only with evidence, not as a broad allowlist. |
 
 ## Codebase Graph
 
@@ -115,6 +116,11 @@ Fresh external snapshots checked on 2026-07-09:
   strategy. Runtime and canary outcomes record wins/losses, cached winners get a
   small bias, stale entries get a small age bonus, and fake-only policies remain
   fake-only.
+- 2026-07-09: GitHub API requests were reachable, but Git smart-HTTP transfer
+  could hang after the initial refs response while `github.com` and
+  `objects.githubusercontent.com` were still classified as `unknown/generic`.
+  The safer route is direct-passthrough, plain-only, because these developer
+  endpoints do not need local DPI desync or Geph.
 - SonicDPI detects likely forged inbound TCP RST packets by learning a target
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied

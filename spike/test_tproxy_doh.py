@@ -425,6 +425,15 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("cmp1-fra1.steamserver.net")["route_class"] == (
         tproxy.ROUTE_UNKNOWN
     )
+    assert tproxy.route_policy("github.com") == {
+        "host": "github.com",
+        "route_class": tproxy.ROUTE_DIRECT,
+        "service_group": tproxy.SERVICE_GITHUB,
+        "strategy_set": tproxy.STRATEGY_DIRECT,
+    }
+    assert tproxy.route_policy("objects.githubusercontent.com")["service_group"] == (
+        tproxy.SERVICE_GITHUB
+    )
 
 
 def test_route_policy_tables_are_explicit_and_keep_boundaries():
@@ -452,12 +461,23 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
         tproxy.ROUTE_DIRECT,
         tproxy.STRATEGY_DIRECT,
     ) in static
+    assert (
+        tproxy.SERVICE_GITHUB,
+        tproxy.ROUTE_DIRECT,
+        tproxy.STRATEGY_DIRECT,
+    ) in static
     assert tproxy.SERVICE_DISCORD not in geo
     assert tproxy.SERVICE_YOUTUBE not in geo
     assert tproxy.SERVICE_OPENAI in geo
     assert tproxy.SERVICE_STEAM_STORE in geo
     assert "discord.com" not in tproxy.GEPH_HOSTS
     assert "youtube.com" not in tproxy.GEPH_HOSTS
+
+
+def test_direct_passthrough_hosts_use_plain_strategy_only():
+    assert [s["name"] for s in tproxy.strategy_order("github.com")] == ["plain"]
+    assert [s["name"] for s in tproxy.strategy_order("t.me")] == ["plain"]
+    assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
 
 
 def test_route_policy_manifest_has_stable_diagnostic_shape():
@@ -480,13 +500,16 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
     assert tproxy.SERVICE_DISCORD in static_groups
     assert tproxy.SERVICE_YOUTUBE in static_groups
     assert tproxy.SERVICE_TELEGRAM in static_groups
+    assert tproxy.SERVICE_GITHUB in static_groups
     assert tproxy.SERVICE_OPENAI in geo_groups
     assert tproxy.SERVICE_ANTHROPIC in geo_groups
     assert tproxy.SERVICE_STEAM_STORE in geo_groups
     assert tproxy.SERVICE_DISCORD not in geo_groups
     assert tproxy.SERVICE_YOUTUBE not in geo_groups
 
-    assert status["domains"][tproxy.ROUTE_DIRECT] == len(tproxy.TELEGRAM_HOSTS)
+    assert status["domains"][tproxy.ROUTE_DIRECT] == (
+        len(tproxy.TELEGRAM_HOSTS) + len(tproxy.GITHUB_HOSTS)
+    )
     assert status["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
         len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
     )
@@ -495,6 +518,11 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
         "route_class": tproxy.ROUTE_LOCAL_BYPASS,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
         "domains": len(tproxy.DISCORD_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_GITHUB] == {
+        "route_class": tproxy.ROUTE_DIRECT,
+        "strategy_set": tproxy.STRATEGY_DIRECT,
+        "domains": len(tproxy.GITHUB_HOSTS),
     }
     assert status["groups"][tproxy.SERVICE_OPENAI] == {
         "route_class": tproxy.ROUTE_GEO_EXIT,

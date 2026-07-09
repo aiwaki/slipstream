@@ -136,6 +136,7 @@ SERVICE_OPENAI = "openai"
 SERVICE_ANTHROPIC = "anthropic"
 SERVICE_TELEGRAM = "telegram"
 SERVICE_STEAM_STORE = "steam_store"
+SERVICE_GITHUB = "github"
 SERVICE_GENERIC = "generic"
 
 STRATEGY_FAKE_ONLY = "fake_only"
@@ -186,6 +187,18 @@ GOOGLE_VIDEO = (
 )
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
+GITHUB_HOSTS = (
+    "github.com",
+    "githubassets.com",
+    "githubusercontent.com",
+    "github.io",
+    "github.githubassets.com",
+    "api.github.com",
+    "codeload.github.com",
+    "objects.githubusercontent.com",
+    "raw.githubusercontent.com",
+    "gist.githubusercontent.com",
+)
 
 XBOX_DNS_SERVERS = (
     "111.88.96.50",
@@ -199,6 +212,12 @@ ROUTE_POLICY_TABLE = (
         "domains": TELEGRAM_HOSTS,
         "route_class": ROUTE_DIRECT,
         "service_group": SERVICE_TELEGRAM,
+        "strategy_set": STRATEGY_DIRECT,
+    },
+    {
+        "domains": GITHUB_HOSTS,
+        "route_class": ROUTE_DIRECT,
+        "service_group": SERVICE_GITHUB,
         "strategy_set": STRATEGY_DIRECT,
     },
     {
@@ -232,6 +251,7 @@ POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
     SERVICE_ANTHROPIC,
     SERVICE_TELEGRAM,
     SERVICE_STEAM_STORE,
+    SERVICE_GITHUB,
     SERVICE_GENERIC,
 ))
 POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
@@ -3201,6 +3221,8 @@ GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16",
 
 def strategy_order(host):
     policy = route_policy(host)
+    if policy["route_class"] == ROUTE_DIRECT:
+        return [STRAT_BY_NAME["plain"]]
     # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
     # so it uses the fake-only set and ignores any stale non-fake cache entry.
     if policy["service_group"] == SERVICE_DISCORD:
