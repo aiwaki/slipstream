@@ -39,6 +39,19 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("route-policy-keys.json", spec)
         self.assertIn("datas.append", spec)
 
+    def test_release_workflow_packages_signed_route_policy_channel(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Prepare route policy trust keys", workflow)
+        self.assertIn("SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON", workflow)
+        self.assertIn("spike/route-policy-keys.json", workflow)
+        self.assertIn("Package signed route policy channel", workflow)
+        self.assertIn("SLIP_ROUTE_POLICY_PRIVATE_KEY", workflow)
+        self.assertIn("--bundled-manifest", workflow)
+        self.assertIn("--channel-index", workflow)
+        self.assertIn("route-policy-latest.json", workflow)
+        self.assertIn("dist-release/route-policy.json", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
