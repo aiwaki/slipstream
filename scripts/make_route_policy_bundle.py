@@ -66,14 +66,54 @@ def build_signed_route_policy_bundle(
     return bundle, public_keys
 
 
+def verify_signed_route_policy_bundle_file(
+    *,
+    bundle_path: Path,
+    public_keys_path: Path,
+) -> dict:
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    public_keys = tproxy.load_trusted_route_policy_keys(
+        path=str(public_keys_path),
+        embedded_keys={},
+    )
+    manifest = tproxy.verify_signed_route_policy_bundle(bundle, public_keys)
+    return {
+        "source": manifest["source"],
+        "sha256": tproxy.route_policy_hash(manifest),
+    }
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--manifest", required=True, type=Path)
-    parser.add_argument("--key-id", required=True)
-    parser.add_argument("--private-key-file", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--bundled-manifest", action="store_true")
+    parser.add_argument("--key-id")
+    parser.add_argument("--private-key-file", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--public-keys-output", type=Path)
-    return parser.parse_args(argv)
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--public-keys", type=Path)
+    args = parser.parse_args(argv)
+    if args.verify:
+        if not args.bundle or not args.public_keys:
+            parser.error("--verify requires --bundle and --public-keys")
+        return args
+    if args.bundled_manifest == bool(args.manifest):
+        parser.error("choose exactly one of --manifest or --bundled-manifest")
+    if not args.key_id:
+        parser.error("--key-id is required")
+    if not args.private_key_file:
+        parser.error("--private-key-file is required")
+    if not args.output:
+        parser.error("--output is required")
+    return args
+
+
+def _read_manifest(args: argparse.Namespace) -> dict:
+    if args.bundled_manifest:
+        return tproxy.route_policy_manifest()
+    return json.loads(args.manifest.read_text(encoding="utf-8"))
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -83,7 +123,13 @@ def _write_json(path: Path, data: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    if args.verify:
+        verify_signed_route_policy_bundle_file(
+            bundle_path=args.bundle,
+            public_keys_path=args.public_keys,
+        )
+        return 0
+    manifest = _read_manifest(args)
     private_key = args.private_key_file.read_text(encoding="utf-8")
     bundle, public_keys = build_signed_route_policy_bundle(
         manifest=manifest,

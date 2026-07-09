@@ -98,6 +98,81 @@ class MakeRoutePolicyBundleTests(unittest.TestCase):
                 manifest,
             )
 
+    def test_cli_can_sign_bundled_manifest_without_manifest_file(self) -> None:
+        private_key = base64.b64encode(b"\x03" * 32).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key_path = root / "route-policy.key"
+            output_path = root / "route-policy.json"
+            public_keys_path = root / "route-policy-keys.json"
+            key_path.write_text(private_key + "\n", encoding="utf-8")
+
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--bundled-manifest",
+                        "--key-id",
+                        "bundled",
+                        "--private-key-file",
+                        str(key_path),
+                        "--output",
+                        str(output_path),
+                        "--public-keys-output",
+                        str(public_keys_path),
+                    ]
+                ),
+                0,
+            )
+
+            bundle = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(bundle["manifest"]["source"], "bundled")
+            self.assertEqual(
+                bundle["sha256"],
+                make_route_policy_bundle.tproxy.route_policy_hash(
+                    make_route_policy_bundle.tproxy.route_policy_manifest()
+                ),
+            )
+
+    def test_cli_verify_accepts_generated_bundle(self) -> None:
+        private_key = base64.b64encode(b"\x04" * 32).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key_path = root / "route-policy.key"
+            output_path = root / "route-policy.json"
+            public_keys_path = root / "route-policy-keys.json"
+            key_path.write_text(private_key + "\n", encoding="utf-8")
+
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--bundled-manifest",
+                        "--key-id",
+                        "verify",
+                        "--private-key-file",
+                        str(key_path),
+                        "--output",
+                        str(output_path),
+                        "--public-keys-output",
+                        str(public_keys_path),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                make_route_policy_bundle.main(
+                    [
+                        "--verify",
+                        "--bundle",
+                        str(output_path),
+                        "--public-keys",
+                        str(public_keys_path),
+                    ]
+                ),
+                0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
