@@ -1265,6 +1265,13 @@ _geph_restart_hint = {
     "last_wake_at": 0.0,
     "last_requested_at": 0.0,
 }
+_rearm_state = {
+    "last_at": 0.0,
+    "last_reason": "",
+    "last_gap": 0.0,
+    "last_iface": "",
+    "count": 0,
+}
 _canary_health = {}
 _canary_failure_windows = {}
 _canary_state = {
@@ -1806,6 +1813,28 @@ def canary_health_snapshot(now=None):
     )
 
 
+def _scutil_proxy_exceptions(raw):
+    exceptions = []
+    in_exceptions = False
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("ExceptionsList"):
+            in_exceptions = True
+            continue
+        if not in_exceptions:
+            continue
+        if stripped.startswith("}"):
+            in_exceptions = False
+            continue
+        key, sep, value = stripped.partition(":")
+        if not sep or not key.strip().isdigit():
+            continue
+        exception = value.strip()
+        if exception and exception not in exceptions:
+            exceptions.append(exception)
+    return exceptions
+
+
 def system_proxy_status_from_scutil(raw):
     kind_by_key = {
         "HTTPEnable": "http",
@@ -1822,9 +1851,13 @@ def system_proxy_status_from_scutil(raw):
         kind = kind_by_key.get(key.strip())
         if kind and kind not in kinds:
             kinds.append(kind)
+    exceptions = _scutil_proxy_exceptions(raw)
     return {
         "state": "active" if kinds else "off",
         "kind": ",".join(kinds),
+        "exceptions_count": len(exceptions),
+        "exceptions_sample": exceptions[:3],
+        "stale_exceptions": bool(exceptions and not kinds),
     }
 
 
@@ -3048,6 +3081,30 @@ def canary_status_snapshot(now=None):
     }
 
 
+def note_runtime_rearm(reason, gap=0.0, iface="", now=None):
+    now = time.time() if now is None else now
+    _rearm_state.update({
+        "last_at": now,
+        "last_reason": str(reason or "")[:80],
+        "last_gap": max(0.0, float(gap or 0.0)),
+        "last_iface": str(iface or "")[:80],
+        "count": int(_rearm_state.get("count", 0)) + 1,
+    })
+
+
+def rearm_status_snapshot(now=None):
+    now = time.time() if now is None else now
+    last_at = float(_rearm_state.get("last_at", 0.0) or 0.0)
+    return {
+        "last_at": last_at,
+        "last_reason": _rearm_state.get("last_reason", ""),
+        "last_gap": int(float(_rearm_state.get("last_gap", 0.0) or 0.0)),
+        "last_iface": _rearm_state.get("last_iface", ""),
+        "count": int(_rearm_state.get("count", 0) or 0),
+        "seconds_since": int(max(0.0, now - last_at)) if last_at else 0,
+    }
+
+
 def write_status(state, iface, voice_iface):
     try:
         now = time.time()
@@ -3079,6 +3136,7 @@ def write_status(state, iface, voice_iface):
             "system_dns": current_system_dns_status(),
             "smart_dns": smart_dns_status_snapshot(now),
             "pf_state": pf_state_snapshot(PROXY_PORT),
+            "rearm": rearm_status_snapshot(now),
             "geph_detail": {
                 "port": _geph_port or 0,
                 "failure_reason": _geph_last_failure["reason"],
@@ -3875,15 +3933,18 @@ def network_monitor(port, voice=True):
             # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
             # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
             # _l3send self-heals, and the pf/geph checks below re-arm the rest.
-            print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
+            gap = now - last_tick
+            print(f">> woke from sleep (gap {gap:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
+            note_runtime_rearm("wake", gap=gap, iface=last_iface or "")
             note_geph_wake(now)
             start_canaries_if_due("wake", force=True)
         last_tick = now
         iface = default_iface()
         if iface != last_iface:
             if last_iface is not None:
+                note_runtime_rearm("network_change", iface=iface or "")
                 start_canaries_if_due("network_change", force=True)
             last_iface = iface
         # Hysteresis: a few failed probes (geph busy under load, or briefly

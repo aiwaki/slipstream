@@ -64,6 +64,10 @@ This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
 of the user's working setup, but Slipstream should not silently enable or remove
 them.
 
+External proxy tools may also leave disabled `ExceptionsList` entries after
+their proxy is turned off. Slipstream reports this as `system_proxy` stale
+exceptions in status/diagnostics, but still treats the system proxy as off.
+
 ## Sleep, Lid Close, And Wake
 
 Adrafinil-style keep-awake tools may hold `PreventUserIdleSystemSleep` without
@@ -79,6 +83,9 @@ inside it returns `SOCKS connect failed` or closes payload probes without a
 response. Slipstream records this under `geph_detail`; repeated post-wake
 geo-exit failures across multiple hosts set `restart_recommended`, and the tray
 rate-limits a restart of Slipstream's own `geph5-client`.
+
+`rearm` in daemon status records the last sleep-gap or network-change re-arm
+observed by Slipstream.
 
 Useful checks:
 

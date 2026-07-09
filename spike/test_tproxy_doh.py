@@ -33,6 +33,7 @@ def reset_smart_dns_state():
     canary_windows = {
         key: deque(value) for key, value in tproxy._canary_failure_windows.items()
     }
+    rearm_state = dict(tproxy._rearm_state)
     try:
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
@@ -57,6 +58,13 @@ def reset_smart_dns_state():
         tproxy._strat_scores.clear()
         tproxy._canary_health.clear()
         tproxy._canary_failure_windows.clear()
+        tproxy._rearm_state.update({
+            "last_at": 0.0,
+            "last_reason": "",
+            "last_gap": 0.0,
+            "last_iface": "",
+            "count": 0,
+        })
         yield
     finally:
         tproxy.reset_route_policy_manifest()
@@ -84,6 +92,8 @@ def reset_smart_dns_state():
         tproxy._canary_health.update(canary_health)
         tproxy._canary_failure_windows.clear()
         tproxy._canary_failure_windows.update(canary_windows)
+        tproxy._rearm_state.clear()
+        tproxy._rearm_state.update(rearm_state)
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -347,7 +357,9 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["strategy_scores"]["groups"][tproxy.SERVICE_DISCORD]["hosts"] == 1
     assert status["telegram_proxy"] in {"ready", "starting", "error"}
     assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
-    assert status["system_proxy"] == {"state": "off", "kind": ""}
+    assert status["system_proxy"]["state"] == "off"
+    assert status["system_proxy"]["kind"] == ""
+    assert status["system_proxy"]["stale_exceptions"] is False
     assert status["system_dns"]["state"] == "xbox_dns"
     assert status["system_dns"]["providers"] == "xbox_dns"
     assert status["system_dns"]["servers"] == ["111.88.96.50", "111.88.96.51"]
@@ -364,6 +376,8 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     }
     assert status["pf_state"] == {"applied": False, "enabled": False, "rules_loaded": False}
     assert status["geph_detail"]["port"] == 0
+    assert status["rearm"]["last_reason"] == ""
+    assert status["rearm"]["count"] == 0
     assert "canaries" in status
 
 
@@ -1232,11 +1246,79 @@ ProxyAutoConfigEnable : 1
     assert tproxy.system_proxy_status_from_scutil(raw) == {
         "state": "active",
         "kind": "http,https,pac",
+        "exceptions_count": 0,
+        "exceptions_sample": [],
+        "stale_exceptions": False,
     }
     assert tproxy.system_proxy_status_from_scutil("HTTPEnable : 0\n") == {
         "state": "off",
         "kind": "",
+        "exceptions_count": 0,
+        "exceptions_sample": [],
+        "stale_exceptions": False,
     }
+
+
+def test_system_proxy_status_reports_disabled_external_proxy_exceptions():
+    raw = """
+<dictionary> {
+  ExceptionsList : <array> {
+    0 : *.googlevideo.com
+    1 : *.youtube.com
+    2 : youtube.com
+    3 : youtu.be
+  }
+  HTTPEnable : 0
+  HTTPSEnable : 0
+  SOCKSEnable : 0
+  ProxyAutoConfigEnable : 0
+  ProxyAutoDiscoveryEnable : 0
+}
+"""
+
+    assert tproxy.system_proxy_status_from_scutil(raw) == {
+        "state": "off",
+        "kind": "",
+        "exceptions_count": 4,
+        "exceptions_sample": ["*.googlevideo.com", "*.youtube.com", "youtube.com"],
+        "stale_exceptions": True,
+    }
+
+
+def test_rearm_status_tracks_wake_and_network_rearms():
+    original = dict(tproxy._rearm_state)
+    try:
+        tproxy._rearm_state.update({
+            "last_at": 0.0,
+            "last_reason": "",
+            "last_gap": 0.0,
+            "last_iface": "",
+            "count": 0,
+        })
+
+        tproxy.note_runtime_rearm("wake", gap=903.4, iface="en0", now=1000.0)
+        snapshot = tproxy.rearm_status_snapshot(now=1010.0)
+
+        assert snapshot == {
+            "last_at": 1000.0,
+            "last_reason": "wake",
+            "last_gap": 903,
+            "last_iface": "en0",
+            "count": 1,
+            "seconds_since": 10,
+        }
+
+        tproxy.note_runtime_rearm("network_change", iface="en1", now=1020.0)
+        snapshot = tproxy.rearm_status_snapshot(now=1025.0)
+
+        assert snapshot["last_reason"] == "network_change"
+        assert snapshot["last_gap"] == 0
+        assert snapshot["last_iface"] == "en1"
+        assert snapshot["count"] == 2
+        assert snapshot["seconds_since"] == 5
+    finally:
+        tproxy._rearm_state.clear()
+        tproxy._rearm_state.update(original)
 
 
 def test_system_dns_status_detects_xbox_dns_without_mutating():

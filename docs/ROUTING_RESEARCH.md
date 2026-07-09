@@ -54,6 +54,8 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | GitHub developer endpoints | Implemented | GitHub HTTPS/Git endpoints are direct-passthrough and plain-only; generic desync can break longer smart-HTTP transfers even when short API calls succeed. | Use direct-passthrough for similar developer/download endpoints only with evidence, not as a broad allowlist. |
 | 2026-07-09 | Steam Store payload canary | Implemented | Steam Store geo-exit health now requires a real HTTPS GET payload through Geph, not just SOCKS CONNECT or TLS first bytes. | Add payload probes for other geo-exit flows only when TLS success can hide a user-visible stalled page. |
 | 2026-07-09 | Lid-close wake recovery | Implemented | Adrafinil keeps idle sleep away but does not prevent macOS lid-close SleepService/DarkWake cycles; repeated post-wake geo-exit failures now recommend a rate-limited restart of Slipstream's owned Geph process. | Move more Geph lifecycle ownership into the daemon when keychain/config constraints are solved. |
+| 2026-07-09 | Stale proxy exceptions | Implemented | External proxy tools can leave disabled `ExceptionsList` entries after proxy autoconfigure is turned off; Slipstream reports them in status without treating the proxy as active or mutating settings. | Use diagnostics to explain stale browser/network behavior; do not auto-delete user-owned proxy state. |
+| 2026-07-09 | Runtime re-arm visibility | Implemented | Daemon status now records the last wake/network re-arm reason, interface, gap, count, and age so sleep-related recovery is visible without reading logs first. | Keep using logs for full `pmset` correlation; status is a compact runtime snapshot. |
 
 ## Codebase Graph
 

@@ -32,7 +32,7 @@ YouTube/googlevideo.
 | Crash restart | launchd `KeepAlive` | none |
 | Clean exit | restores `pf` on normal termination | non-tray watchdog for app-not-running cases |
 | Stale `pf` recovery | daemon re-applies rules while active; tray watchdog kickstarts daemon and resets `pf` if recovery fails | non-tray watchdog if both app and daemon are gone |
-| Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader endpoint-safe payload canaries |
+| Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
 | Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; repeated post-wake geo-exit failures can trigger a rate-limited restart of Slipstream's owned Geph process | add only evidence-backed payload probes for user-visible stalled pages; move more Geph lifecycle ownership into the daemon |
@@ -41,7 +41,7 @@ YouTube/googlevideo.
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
 | Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle builder/validator, trusted-key distribution path, local persist, rollback, explicit opt-in remote fetch scheduler with health gates, and release workflow packaging for signed channel assets | configure real production key custody and publish a release-channel policy asset |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
-| Logs | rotating daemon log, tray snapshot, route-health failure summaries, and copied diagnostic summary | attachable diagnostic file/export UX |
+| Logs | rotating daemon log, tray snapshot, route-health failure summaries, stale external proxy exception reporting, and copied diagnostic summary | attachable diagnostic file/export UX |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
 
 ## Priority Order
