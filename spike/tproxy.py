@@ -607,6 +607,9 @@ def verify_signed_route_policy_bundle(bundle, public_keys):
         raise ValueError("policy signature or key is not valid base64") from exc
 
     manifest = validate_route_policy_manifest(bundle.get("manifest"))
+    expected_hash = bundle.get("sha256")
+    if expected_hash is not None and expected_hash != route_policy_hash(manifest):
+        raise ValueError("policy hash mismatch")
     try:
         from cryptography.exceptions import InvalidSignature
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey

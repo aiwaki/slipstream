@@ -39,7 +39,7 @@ YouTube/googlevideo.
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
-| Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle validator, local persist, rollback, and explicit opt-in remote fetch scheduler with health gates | production key distribution and release-channel policy hosting |
+| Strategy cache and policy | bounded/versioned cache plus explicit policy tables, diagnostic policy hash, signed-bundle builder/validator, local persist, rollback, and explicit opt-in remote fetch scheduler with health gates | production key distribution and release-channel policy hosting |
 | Voice flows | TTL/LRU cleanup | long-run load audit |
 | Logs | rotating daemon log, tray snapshot, route-health failure summaries, and copied diagnostic summary | attachable diagnostic file/export UX |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
@@ -59,9 +59,8 @@ YouTube/googlevideo.
   and route class are predictable.
 - Extend runtime/canary failures into signed strategy update flows.
 - Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
-- Move explicit host policy, attempt limits, and policy hash into production
-  signed policy hosting using the opt-in scheduler, local rollback, and
-  health-gate path.
+- Add production signing keys and release-channel hosting for signed policy
+  bundles using the opt-in scheduler, local rollback, and health-gate path.
 
 ### P2 - Maintenance Horizon
 

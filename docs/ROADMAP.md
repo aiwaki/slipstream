@@ -26,7 +26,7 @@ not a release promise.
 | Direct passthrough policy | implemented for Telegram, Russian hosts, and GitHub developer/download endpoints |
 | Strategy success metrics | implemented as privacy-safe aggregate status without hostnames |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
-| Signed policy bundle validation | implemented as validator/verifier, local persist/rollback, and explicit opt-in remote fetch scheduler with health gates |
+| Signed policy updates | implemented as bundle builder, validator/verifier, local persist/rollback, and explicit opt-in remote fetch scheduler with health gates |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
 | Payload canaries | partial: Discord CDN verifies local-bypass throughput; Steam Store verifies geo-exit HTTPS payload through Geph |
 | Signed auto-update | implemented |
@@ -65,13 +65,13 @@ Goal: detect degradation before the user has to diagnose it manually.
   while preserving grace thresholds for transient failures.
 - Broaden payload thresholds only for endpoints where response size, method, and
   routing class are safe to probe.
-- Signed strategy-list/policy updates without rebuilding the app; the local
-  verifier, rollback path, and opt-in health-gated remote fetch scheduler are
-  in place.
+- Signed route-policy updates without rebuilding the app; the bundle builder,
+  local verifier, rollback path, and opt-in health-gated remote fetch scheduler
+  are in place.
 - Keep strategy success metrics aggregate-only; do not expose per-host browsing
   history in status or diagnostics.
-- Move the bundled policy metadata/hash into signed policy updates and
-  OS-specific adapters.
+- Add production signing-key distribution and release-channel policy hosting.
+- Move OS-specific policy adapters out from the current macOS daemon shape.
 
 ## P2 - Desktop Portability
 
