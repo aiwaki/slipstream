@@ -574,6 +574,10 @@ fn diagnostic_summary_value(status: Option<&Value>) -> Value {
             })
         })
         .unwrap_or_else(|| json!({"version": 0, "source": "unknown", "sha256": ""}));
+    let strategy_scores = status
+        .and_then(|status| status.get("strategy_scores"))
+        .cloned()
+        .unwrap_or_else(|| json!({"hosts": 0, "groups": {}, "strategies": {}}));
     let geph_detail = status
         .and_then(|status| status.get("geph_detail"))
         .map(|detail| {
@@ -604,6 +608,7 @@ fn diagnostic_summary_value(status: Option<&Value>) -> Value {
         "canaries": canaries,
         "auto_geo_exit": auto_geo_exit,
         "routing_policy": routing_policy,
+        "strategy_scores": strategy_scores,
         "geph_detail": geph_detail,
         "problems": diagnostic_problem_rows(status),
     })
@@ -2090,6 +2095,33 @@ mod tests {
                         }
                     }
                 },
+                "strategy_scores": {
+                    "hosts": 2,
+                    "groups": {
+                        "discord": {
+                            "hosts": 1,
+                            "strategies": {
+                                "split64+fake": {
+                                    "hosts": 1,
+                                    "ok": 3,
+                                    "fail": 0,
+                                    "last_seen": 100.0
+                                }
+                            }
+                        },
+                        "youtube_video": {
+                            "hosts": 1,
+                            "strategies": {
+                                "fake5": {
+                                    "hosts": 1,
+                                    "ok": 1,
+                                    "fail": 1,
+                                    "last_seen": 110.0
+                                }
+                            }
+                        }
+                    }
+                },
                 "secrets": {
                     "account_secret": "very-secret",
                     "nested": {
@@ -2135,6 +2167,14 @@ mod tests {
             snapshot["summary"]["routing_policy"]["attempt_limits"]["local_bypass"],
             4
         );
+        assert_eq!(snapshot["summary"]["strategy_scores"]["hosts"], 2);
+        assert_eq!(
+            snapshot["summary"]["strategy_scores"]["groups"]["discord"]["strategies"]
+                ["split64+fake"]["ok"],
+            3
+        );
+        let strategy_summary =
+            serde_json::to_string(&snapshot["summary"]["strategy_scores"]).unwrap();
         assert_eq!(snapshot["summary"]["problems"].as_array().unwrap().len(), 2);
         assert_eq!(
             snapshot["daemon_recovery"]["last"]["result"],
@@ -2145,6 +2185,8 @@ mod tests {
             "chatgpt.com"
         );
         assert!(!text.contains("very-secret"));
+        assert!(!strategy_summary.contains("discord.com"));
+        assert!(!strategy_summary.contains("googlevideo.com"));
         assert!(!text.contains("token-value"));
         assert!(!text.contains("pass-value"));
         assert!(!text.contains("old-secret"));
