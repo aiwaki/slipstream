@@ -23,10 +23,11 @@ not a release promise.
 | Periodic route canaries | implemented for local-bypass, Geph, Telegram proxy readiness, and repeated secondary endpoint failures |
 | Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
 | Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
+| Direct passthrough policy | implemented for Telegram, Russian hosts, and GitHub developer/download endpoints |
 | Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
 | Signed policy bundle validation | implemented as validator/verifier, local persist/rollback, and explicit opt-in remote fetch scheduler with health gates |
 | Detailed route diagnostics | implemented in daemon status, tray summary, and copied diagnostic snapshot |
-| Throughput canary | partial: Discord CDN local-bypass canary verifies a small GET payload threshold |
+| Payload canaries | partial: Discord CDN verifies local-bypass throughput; Steam Store verifies geo-exit HTTPS payload through Geph |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -61,8 +62,8 @@ Goal: detect degradation before the user has to diagnose it manually.
 - Continue tuning automatic re-sweep when a known strategy stops working.
 - Keep important secondary endpoints from being hidden by passing core endpoints,
   while preserving grace thresholds for transient failures.
-- Broaden local-bypass throughput thresholds only for endpoints where response
-  size and semantics are safe to probe.
+- Broaden payload thresholds only for endpoints where response size, method, and
+  routing class are safe to probe.
 - Signed strategy-list/policy updates without rebuilding the app; the local
   verifier, rollback path, and opt-in health-gated remote fetch scheduler are
   in place.

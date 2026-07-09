@@ -32,9 +32,10 @@ YouTube/googlevideo.
 | Crash restart | launchd `KeepAlive` | none |
 | Clean exit | restores `pf` on normal termination | non-tray watchdog for app-not-running cases |
 | Stale `pf` recovery | daemon re-applies rules while active; tray watchdog kickstarts daemon and resets `pf` if recovery fails | non-tray watchdog if both app and daemon are gone |
-| Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader endpoint-safe throughput canaries |
+| Network transitions | detects default interface and re-arms pf/voice capture/canaries | broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
-| Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe throughput checks |
+| Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph | add only evidence-backed payload probes for user-visible stalled pages |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
@@ -54,7 +55,8 @@ YouTube/googlevideo.
 
 ### P1 - Routing Quality
 
-- Extend local-bypass payload canaries into endpoint-safe throughput checks where response size and method are predictable.
+- Extend payload canaries into endpoint-safe checks where response size, method,
+  and route class are predictable.
 - Extend runtime/canary failures into signed strategy update flows.
 - Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
 - Move explicit host policy, attempt limits, and policy hash into production
