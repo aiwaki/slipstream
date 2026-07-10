@@ -82,6 +82,25 @@ redirect rules; it never writes that file.
 If the required `com.apple/*` parent anchor is absent from the host PF setup,
 Slipstream exits safely instead of taking ownership of global PF configuration.
 
+Only one transparent HTTPS redirect can own a connection. If another active
+PF interceptor appears before `com.apple/*`, PF sends real application traffic
+to it before Slipstream's private anchor is considered. Slipstream reports
+`state: conflict`, shows `Paused` in the tray, clears only its own anchor, and
+automatically re-arms after the conflict disappears. It does not stop or edit
+the other product.
+
+Inspect ordering and the reported conflicts:
+
+```bash
+sudo pfctl -sn
+sudo pfctl -sr
+python3 -m json.tool /var/run/slipstream.status
+```
+
+An anchor can remain declared in `/etc/pf.conf` without being a conflict; only
+an active earlier HTTPS `rdr` plus matching `route-to` counts. If two transparent
+bypass tools are installed, stop one through its own UI or service controls.
+
 Transparent-path curl test:
 
 ```bash
@@ -154,9 +173,11 @@ Expected indicators:
 If Discord stalls:
 
 1. Check that it is not being routed through Geph.
-2. Check `/var/log/slipstream.log` for `NO RESPONSE` lines.
-3. Restart Discord after the daemon is active.
-4. A runtime miss automatically starts a deduplicated exact-host re-sweep of
+2. Check `pf_state.interceptor_conflicts`; a second transparent filter can
+   receive Discord before Slipstream while internal canaries still look healthy.
+3. Check `/var/log/slipstream.log` for `NO RESPONSE` lines.
+4. Restart Discord after the daemon is active.
+5. A runtime miss automatically starts a deduplicated exact-host re-sweep of
    the allowed local-bypass strategies. If the same endpoint keeps failing,
    capture diagnostics instead of selecting a strategy manually.
 

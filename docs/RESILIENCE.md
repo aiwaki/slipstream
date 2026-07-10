@@ -30,7 +30,7 @@ YouTube/googlevideo.
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
 | Crash restart | launchd `KeepAlive` | none |
-| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point | privileged sentinel coverage on every release |
+| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors pause Slipstream without mutation and auto-recover when clear | privileged sentinel plus competing-interceptor coverage on every release |
 | Clean exit | flushes only the private anchor and releases Slipstream's PF enable token | none after the privileged gate passes |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |

@@ -27,6 +27,8 @@ Target: before `v0.1.5`.
 - Require ownership proof for bundled Geph on `:9954`; treat external `:9909` as
   read-only diagnostics unless explicitly selected.
 - Keep Geph config owner-only and secret-bearing files at `0600`.
+- Detect active transparent HTTPS interceptors that precede `com.apple/*`;
+  pause without touching their anchors and re-arm when the conflict clears.
 - Keep `LICENSE` canonical, list bundled licenses separately, and remove unused
   README assets.
 - Make scheduled vendor updates open PRs; require a passing `checks` job before
