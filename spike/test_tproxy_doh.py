@@ -411,6 +411,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "enabled": False,
         "anchor": tproxy.PF_ANCHOR,
         "parent_loaded": False,
+        "interceptor_conflicts": [],
         "rules_loaded": False,
     }
     assert status["geph_detail"]["port"] == 0
@@ -487,8 +488,69 @@ def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):
         "enabled": True,
         "anchor": tproxy.PF_ANCHOR,
         "parent_loaded": True,
+        "interceptor_conflicts": [],
         "rules_loaded": True,
     }
+
+
+def test_pf_detects_nested_https_interceptor_before_parent(monkeypatch):
+    outputs = {
+        ("pfctl", "-sn"): 'rdr-anchor "zapret" all\nrdr-anchor "com.apple/*" all\n',
+        ("pfctl", "-sr"): 'anchor "zapret" all\nanchor "com.apple/*" all\n',
+        ("pfctl", "-a", "zapret", "-sn"): 'rdr-anchor "/zapret-v4" inet\n',
+        ("pfctl", "-a", "zapret-v4", "-sn"): (
+            "rdr on lo0 inet proto tcp to any port = 443 -> 127.0.0.1 port 988\n"
+        ),
+        ("pfctl", "-a", "zapret", "-sr"): 'anchor "/zapret-v4" inet\n',
+        ("pfctl", "-a", "zapret-v4", "-sr"): (
+            "pass out route-to (lo0 127.0.0.1) inet proto tcp to any port = 443\n"
+        ),
+    }
+
+    def fake_run(*args):
+        return type("Result", (), {
+            "returncode": 0,
+            "stdout": outputs[args],
+            "stderr": "",
+        })()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert tproxy.pf_preceding_https_interceptors() == ["zapret"]
+
+
+def test_pf_ignores_empty_or_later_external_anchor(monkeypatch):
+    outputs = {
+        ("pfctl", "-sn"): 'rdr-anchor "com.apple/*" all\nrdr-anchor "later" all\n',
+        ("pfctl", "-sr"): 'anchor "com.apple/*" all\nanchor "later" all\n',
+    }
+
+    def fake_run(*args):
+        return type("Result", (), {
+            "returncode": 0,
+            "stdout": outputs[args],
+            "stderr": "",
+        })()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert tproxy.pf_preceding_https_interceptors() == []
+
+
+def test_pf_setup_pauses_without_mutating_prior_interceptor(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_available", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_preceding_https_interceptors", lambda: ["zapret"])
+    monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: calls.append("token"))
+    monkeypatch.setattr(tproxy, "_pf_load", lambda _port: calls.append("load"))
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+
+    assert not tproxy.pf_setup(1080)
+    assert calls == []
+    assert not tproxy._pf_applied
+    assert tproxy._pf_interceptor_conflicts == ["zapret"]
 
 
 def test_pf_parent_anchor_requires_rdr_and_filter_declarations(tmp_path):

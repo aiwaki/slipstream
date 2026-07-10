@@ -71,6 +71,7 @@ PF_ANCHOR = "com.apple/slipstream"
 PF_PARENT_ANCHOR = "com.apple/*"
 PF_CONFIG_PATH = "/etc/pf.conf"
 PF_TOKEN_PATH = "/var/run/slipstream-pf.token"
+PF_CONFLICT_CHECK_INTERVAL = 15.0
 PF_RULES = """\
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
@@ -85,6 +86,7 @@ pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user !
 _pf_applied = False
 _pf_fd = None
 _pf_enable_token = None
+_pf_interceptor_conflicts = []
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
@@ -3302,7 +3304,7 @@ def write_status(state, iface, voice_iface):
         consume_telegram_proxy_acceptance()
         geph_restart = geph_restart_hint_snapshot(now)
         st = {
-            "state": state,            # "active" | "dormant"
+            "state": state,            # "active" | "dormant" | "conflict"
             "version": DAEMON_VERSION,
             "pid": os.getpid(),
             "ts": now,
@@ -3393,6 +3395,87 @@ def pf_parent_anchor_loaded():
     if nat.returncode != 0 or rules.returncode != 0:
         return False
     return _pf_parent_declarations(nat.stdout + "\n" + rules.stdout)
+
+
+def _pf_anchor_calls(text, directive):
+    pattern = re.compile(
+        rf'^\s*{re.escape(directive)}\s+"([^"]+)"', re.MULTILINE
+    )
+    return pattern.findall(text)
+
+
+def _pf_anchor_child(parent, child):
+    if child.startswith("/"):
+        return child.lstrip("/")
+    if not parent:
+        return child
+    return f"{parent}/{child}"
+
+
+def _pf_rule_targets_https(line, action):
+    action_match = (
+        re.search(r"^\s*rdr\b", line)
+        if action == "rdr"
+        else re.search(r"\broute-to\b", line)
+    )
+    return bool(
+        action_match and re.search(r"\bport\b[^\n]*\b443\b", line)
+    )
+
+
+def _pf_anchor_has_https_action(anchor, action, directive, visited=None):
+    visited = set() if visited is None else visited
+    anchor = anchor.lstrip("/")
+    if not anchor or anchor in visited:
+        return False
+    visited.add(anchor)
+    flag = "-sn" if action == "rdr" else "-sr"
+    result = _run("pfctl", "-a", anchor, flag)
+    if result.returncode != 0:
+        return False
+    if any(_pf_rule_targets_https(line, action) for line in result.stdout.splitlines()):
+        return True
+    return any(
+        _pf_anchor_has_https_action(
+            _pf_anchor_child(anchor, child), action, directive, visited
+        )
+        for child in _pf_anchor_calls(result.stdout, directive)
+    )
+
+
+def _pf_anchors_before_parent(text, directive):
+    anchors = []
+    for anchor in _pf_anchor_calls(text, directive):
+        if anchor == PF_PARENT_ANCHOR:
+            break
+        anchors.append(anchor.lstrip("/"))
+    return anchors
+
+
+def pf_preceding_https_interceptors():
+    """Return active PF anchors that capture HTTPS before Slipstream's parent.
+
+    PF translation uses the first matching rdr rule. A transparent proxy whose
+    anchor appears before ``com.apple/*`` therefore receives the real traffic
+    even though Slipstream's own anchor is loaded. Internal canaries do not see
+    that ordering, so treating this as an explicit runtime conflict prevents a
+    false "Active / OK" state without mutating the other product's rules.
+    """
+    nat = _run("pfctl", "-sn")
+    rules = _run("pfctl", "-sr")
+    if nat.returncode != 0 or rules.returncode != 0:
+        return []
+    redirects = {
+        anchor
+        for anchor in _pf_anchors_before_parent(nat.stdout, "rdr-anchor")
+        if _pf_anchor_has_https_action(anchor, "rdr", "rdr-anchor")
+    }
+    routes = {
+        anchor
+        for anchor in _pf_anchors_before_parent(rules.stdout, "anchor")
+        if _pf_anchor_has_https_action(anchor, "route-to", "anchor")
+    }
+    return sorted(redirects & routes)
 
 
 def _pf_token_from_result(result):
@@ -3509,7 +3592,7 @@ def _pf_load(port):
 
 
 def pf_setup(port):
-    global _pf_applied
+    global _pf_applied, _pf_interceptor_conflicts
     if not pf_parent_anchor_available() or not pf_parent_anchor_loaded():
         print(
             f"pf parent anchor {PF_PARENT_ANCHOR} is unavailable; "
@@ -3517,6 +3600,15 @@ def pf_setup(port):
             file=sys.stderr,
         )
         sys.exit(1)
+    _pf_interceptor_conflicts = pf_preceding_https_interceptors()
+    if _pf_interceptor_conflicts:
+        _pf_applied = False
+        print(
+            ">> another transparent HTTPS filter is active before Slipstream "
+            f"({', '.join(_pf_interceptor_conflicts)}) -> paused; external rules untouched",
+            file=sys.stderr,
+        )
+        return False
     if not _pf_acquire_enable_token():
         print("pfctl did not provide a releasable enable token", file=sys.stderr)
         sys.exit(1)
@@ -3531,6 +3623,7 @@ def pf_setup(port):
         f">> pf anchor {PF_ANCHOR} active: TCP/443 -> 127.0.0.1:{port}; "
         "QUIC untouched"
     )
+    return True
 
 
 def pf_has_rules(port):
@@ -3557,6 +3650,7 @@ def pf_state_snapshot(port=PROXY_PORT):
         "enabled": info.returncode == 0 and "Status: Enabled" in info.stdout,
         "anchor": PF_ANCHOR,
         "parent_loaded": parent_loaded,
+        "interceptor_conflicts": list(_pf_interceptor_conflicts),
         "rules_loaded": (
             parent_loaded
             and anchor_nat.returncode == 0
@@ -3568,7 +3662,7 @@ def pf_state_snapshot(port=PROXY_PORT):
 
 
 def pf_teardown():
-    global _pf_applied
+    global _pf_applied, _pf_interceptor_conflicts
     try:
         os.remove(STATUS_PATH)        # daemon is going away -> app shows "off"
     except Exception:
@@ -3576,6 +3670,7 @@ def pf_teardown():
     _pf_flush()
     _pf_release_enable_token()
     _pf_applied = False
+    _pf_interceptor_conflicts = []
     print(">> Slipstream pf anchor cleared")
 
 
@@ -4173,7 +4268,7 @@ def network_monitor(port, voice=True):
     RTP is UDP to *.discord.media:50000-65535, with some setup paths observed on
     19294-19344, bypassing the TCP pf-rdr. We BPF-observe it and raw-inject
     low-TTL decoy STUN primes on the 5-tuple, leaving the real flow untouched."""
-    global _pf_applied, _geph_up
+    global _pf_applied, _geph_up, _pf_interceptor_conflicts
     AsyncSniffer = send = IP = UDP = TCP = Raw = get_if_addr = None
     if voice:
         try:
@@ -4217,6 +4312,7 @@ def network_monitor(port, voice=True):
     last_tick = time.time()
     last_iface = None
     first_tick = True
+    last_conflict_check = time.time()
     while True:
         now = time.time()
         if now - last_tick > 30:
@@ -4265,10 +4361,29 @@ def network_monitor(port, voice=True):
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
         vpn = bool(iface) and iface.startswith("utun")
+        if now - last_conflict_check >= PF_CONFLICT_CHECK_INTERVAL:
+            conflicts = pf_preceding_https_interceptors()
+            last_conflict_check = now
+        else:
+            conflicts = list(_pf_interceptor_conflicts)
+        if conflicts != _pf_interceptor_conflicts:
+            if conflicts:
+                print(
+                    ">> another transparent HTTPS filter became active before "
+                    f"Slipstream ({', '.join(conflicts)}) -> pausing",
+                    file=sys.stderr,
+                )
+            elif _pf_interceptor_conflicts:
+                print(">> transparent HTTPS filter conflict cleared -> re-arming")
+            _pf_interceptor_conflicts = conflicts
         if vpn:
             if _pf_applied:
                 print(f">> VPN up (default via {iface}) -> Slipstream dormant",
                       file=sys.stderr)
+                _pf_flush()
+                _pf_applied = False
+        elif conflicts:
+            if _pf_applied:
                 _pf_flush()
                 _pf_applied = False
         else:
@@ -4322,13 +4437,16 @@ def network_monitor(port, voice=True):
                 except Exception as e:
                     print(f">> voice sniffer unavailable on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
-        write_status("dormant" if vpn else "active", iface, cur_iface)
+        runtime_state = "dormant" if vpn else ("conflict" if conflicts else "active")
+        write_status(runtime_state, iface, cur_iface)
         if first_tick:
-            start_canaries_if_due("startup", force=True)
+            if not conflicts:
+                start_canaries_if_due("startup", force=True)
             start_route_policy_remote_update_if_due("startup")
             first_tick = False
         else:
-            start_canaries_if_due("periodic")
+            if not conflicts:
+                start_canaries_if_due("periodic")
             start_route_policy_remote_update_if_due("periodic")
         time.sleep(5)
 

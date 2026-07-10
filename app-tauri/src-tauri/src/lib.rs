@@ -1044,6 +1044,69 @@ fn routing_health_summary(st: Option<&Value>, geph: &str, ru: bool) -> Option<St
     }
 }
 
+fn daemon_state_text(state: &str, conns: i64, learned: i64, ru: bool) -> (String, String) {
+    match state {
+        "active" => {
+            let detail = if ru {
+                format!("{conns} соединений · хостов: {learned}")
+            } else {
+                format!("{conns} connections · {learned} hosts learned")
+            };
+            (
+                (if ru {
+                    "Slipstream — активен"
+                } else {
+                    "Slipstream — Active"
+                })
+                .to_string(),
+                detail,
+            )
+        }
+        "dormant" => (
+            (if ru {
+                "Slipstream — спит"
+            } else {
+                "Slipstream — Dormant"
+            })
+            .to_string(),
+            (if ru {
+                "VPN включён; обходом занимается он"
+            } else {
+                "VPN is up; the VPN handles bypass"
+            })
+            .to_string(),
+        ),
+        "conflict" => (
+            (if ru {
+                "Slipstream — приостановлен"
+            } else {
+                "Slipstream — Paused"
+            })
+            .to_string(),
+            (if ru {
+                "Активен другой фильтр трафика"
+            } else {
+                "Another traffic filter is active"
+            })
+            .to_string(),
+        ),
+        _ => (
+            (if ru {
+                "Slipstream — выключен"
+            } else {
+                "Slipstream — Off"
+            })
+            .to_string(),
+            (if ru {
+                "Фоновый прокси не запущен"
+            } else {
+                "Background proxy is not running"
+            })
+            .to_string(),
+        ),
+    }
+}
+
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
@@ -1075,52 +1138,7 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         .unwrap_or(false);
 
     let ru = ui_ru();
-    let (title, mut detail) = match state.as_str() {
-        "active" => {
-            let d = if ru {
-                format!("{conns} соединений · хостов: {learned}")
-            } else {
-                format!("{conns} connections · {learned} hosts learned")
-            };
-            (
-                (if ru {
-                    "Slipstream — активен"
-                } else {
-                    "Slipstream — Active"
-                })
-                .to_string(),
-                d,
-            )
-        }
-        "dormant" => (
-            (if ru {
-                "Slipstream — спит"
-            } else {
-                "Slipstream — Dormant"
-            })
-            .to_string(),
-            (if ru {
-                "VPN включён; обходом занимается он"
-            } else {
-                "VPN is up; the VPN handles bypass"
-            })
-            .to_string(),
-        ),
-        _ => (
-            (if ru {
-                "Slipstream — выключен"
-            } else {
-                "Slipstream — Off"
-            })
-            .to_string(),
-            (if ru {
-                "Фоновый прокси не запущен"
-            } else {
-                "Background proxy is not running"
-            })
-            .to_string(),
-        ),
-    };
+    let (title, mut detail) = daemon_state_text(&state, conns, learned, ru);
     if matches!(state.as_str(), "active" | "dormant") {
         if let Some(routing) = routing_health_summary(st.as_ref(), &geph, ru) {
             push_detail_part(&mut detail, &routing);
@@ -1153,7 +1171,7 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
 /// Set the menu-bar mark for the given state (called only on a state change).
 fn set_tray_icon(app: &AppHandle, state: &str) {
     if let Some(tray) = app.tray_by_id("main") {
-        let name = if state == "off" {
+        let name = if matches!(state, "off" | "conflict") {
             "slip-menubar-mark-off.png"
         } else {
             "slip-menubar-mark.png"
@@ -2266,14 +2284,14 @@ pub fn run() {
 mod tests {
     use super::{
         admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
-        daemon_recovery_shell, daemon_recovery_status_value, diagnostic_log_tail,
-        diagnostic_snapshot_value, diagnostic_summary_value, geph_restart_recommendation,
-        harden_geph_dir, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon,
-        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        valid_bundled_daemon, write_diagnostic_snapshot_file, write_private_atomic,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, PF_TOKEN_PATH,
+        daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
+        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value,
+        geph_restart_recommendation, harden_geph_dir, install_diagnostic_value,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
+        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
+        telegram_proxy_detail, valid_bundled_daemon, write_diagnostic_snapshot_file,
+        write_private_atomic, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2951,6 +2969,17 @@ mod tests {
             Some("Needs attention".to_string())
         );
         assert_eq!(routing_health_summary(Some(&status), "off", false), None);
+    }
+
+    #[test]
+    fn competing_pf_interceptor_has_clear_compact_state_text() {
+        assert_eq!(
+            daemon_state_text("conflict", 0, 0, false),
+            (
+                "Slipstream — Paused".to_string(),
+                "Another traffic filter is active".to_string(),
+            )
+        );
     }
 
     #[test]

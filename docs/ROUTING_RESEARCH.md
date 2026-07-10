@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-10 | Competing transparent PF interceptors | Fixed and live-verified | An active HTTPS `rdr`/`route-to` before `com.apple/*` receives real app traffic first. Detect nested anchors, pause without mutation, and auto-rearm when clear instead of trusting internal canaries. | Keep a two-interceptor integration fixture and surface the exact paused reason. |
 | 2026-07-10 | Global PF ruleset ownership | Fixed and live-verified | Slipstream now loads only `com.apple/slipstream` below the existing `com.apple/*` anchor point; global reload/disable is forbidden during normal lifecycle and recovery. | Keep the privileged sentinel cycle in release qualification. |
 | 2026-07-10 | PF reference ownership | Fixed and live-verified | Store the token returned by `pfctl -E` in a root-only runtime file and release it with `pfctl -X`; never infer that Slipstream owns global PF state. | Preserve restart/uninstall/reinstall coverage. |
 | 2026-07-10 | Bundled Geph listener ownership | Fixed and live-verified | PID, exact executable, config path, and `:9954` listener must match the private ownership record; unknown listeners fail closed immediately. | Preserve the unknown-listener integration gate. |
@@ -155,6 +156,14 @@ Fresh external snapshots checked on 2026-07-09:
   used to drop the recovery recheck and leave the tray in `needs attention` until
   the next periodic run. Forced recovery triggers now queue a short pending rerun
   and preserve the original reason.
+- 2026-07-10: `darkware-zapret` was simultaneously active through root anchor
+  `zapret`, nested `zapret-v4`, and `tpws` on `127.0.0.1:988`. Its root anchor
+  precedes `com.apple/*`, so PF's first matching `rdr` sent all real HTTPS there
+  while Slipstream's internal Discord canaries still reported healthy. Discord
+  updater then failed TLS with macOS error `-9806`; stopping only Darkware's
+  runtime moved connections to Slipstream `:1080`, completed the update check in
+  about six seconds, and reached Gateway `READY`. This is an interceptor
+  ownership conflict, not a reason to route Discord through Geph.
 - SonicDPI detects likely forged inbound TCP RST packets by learning a target
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied
