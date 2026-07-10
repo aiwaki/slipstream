@@ -59,6 +59,8 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Runtime re-arm visibility | Implemented | Daemon status now records the last wake/network re-arm reason, interface, gap, count, and age so sleep-related recovery is visible without reading logs first. | Keep using logs for full `pmset` correlation; status is a compact runtime snapshot. |
 | 2026-07-10 | Auto geo-exit stale learned hosts | Implemented | Repeated Geph runtime retries now reset only exact hosts that were learned by auto geo-exit; explicit geo-exit and local-bypass routes are preserved. | Watch logs for new retry reasons before widening the reset trigger. |
 | 2026-07-10 | Wake canary recovery rerun | Implemented | Forced canary triggers that arrive during an in-flight wake check are queued for a short rerun instead of being dropped by the force cooldown. | Keep wake recovery event-driven; do not lengthen normal canary cadence. |
+| 2026-07-10 | Exact-host local-bypass re-sweep | Implemented | A real Discord/YouTube runtime miss starts a deduplicated background strategy sweep for that exact host and clears its negative cache only after a fake/desync strategy succeeds. | Tune cooldowns only from observed runtime evidence. |
+| 2026-07-10 | Geph-down log semantics | Corrected | Geo-exit routes already fail closed while Geph is down; the old log text incorrectly claimed they used local desync. | Keep runtime messages aligned with route behavior so diagnostics do not imply an RU-IP leak. |
 
 ## Codebase Graph
 
@@ -314,6 +316,10 @@ Fresh external snapshots checked on 2026-07-09:
 - Slipstream now reports full runtime local-bypass strategy failures into route
   health, clears only the affected local-bypass route group's strategy cache,
   and force-schedules route canaries with the existing cooldown.
+- The same failure also schedules a private exact-host re-sweep. It tries only
+  the host's allowed local-bypass fake/desync strategies, caches the first
+  working strategy, and then clears that host's negative cache. The scheduler
+  is deduplicated and does not expose a visited-host history in status.
 - Runtime success marks the affected local-bypass group healthy. Discord and
   YouTube/googlevideo remain local-bypass only; this path never promotes them
   to Geph.
@@ -361,8 +367,6 @@ Safe candidates:
   strategy picker in the tray.
 - Consider a compact tray diagnostic popover inspired by Darkware's layout, but
   keep Slipstream's native-menu simplicity and autonomous routing model.
-- Consider a headless local-bypass re-sweep that uses temporary proxy probes and
-  endpoint outcomes, without exposing a manual strategy picker.
 - Keep Steam Store geo-exit narrow; add direct-passthrough diagnostics before
   widening Steam CM, game, or download routing.
 - For future packet adapters, evaluate MSS clamp only for verified

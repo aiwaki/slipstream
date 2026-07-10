@@ -327,6 +327,8 @@ LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
 LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
+LOCAL_BYPASS_RESWEEP_COOLDOWN = 60.0
+LOCAL_BYPASS_RESWEEP_STALE_AFTER = 120.0
 GEO_PAYLOAD_CANARY_TIMEOUT = 6.0
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
@@ -1450,6 +1452,13 @@ _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
 GEPH_FAIL_LOG_TTL = 60.0
 _geph_fail_log = {}           # (host, reason) -> last log monotonic
 
+# Runtime local-bypass failures start a private exact-host re-sweep. The state is
+# deliberately process-local and aggregate-free: status must not become browsing
+# history, and Discord/YouTube must never escape to Geph while recovering.
+_local_bypass_resweep_active = {}  # host -> monotonic start time
+_local_bypass_resweep_last = {}    # host -> monotonic last attempt
+_local_bypass_resweep_lock = threading.RLock()
+
 # geph's own broker-fronting domains — NEVER desync/auto-route these (our daemon
 # would otherwise mangle geph's broker access or route geph through itself).
 GEPH_INFRA = ("kubernetes.io", "cdn77.org", "cdn77.com", "netlify.app", "vuejs.org")
@@ -1615,6 +1624,7 @@ def note_local_bypass_runtime_result(
         )
 
     clear_route_strategy_cache(group=group)
+    schedule_local_bypass_resweep(host)
     item = route_health_event(
         group,
         ROUTE_LOCAL_BYPASS,
@@ -2962,6 +2972,89 @@ async def _run_local_bypass_canary(spec):
     return False
 
 
+async def _resweep_local_bypass_host(host):
+    h = normalize_host(host)
+    policy = route_policy(h)
+    if not h or policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        return False
+    ips = await resolve_connection_ips(h, None)
+    if not ips:
+        return False
+
+    head, body = _canary_client_hello(h)
+    attempts = 0
+    for strat in strategy_order(h):
+        if not strat.get("fake"):
+            continue
+        strat_ok = False
+        for ip in ips[:ip_attempt_limit(h)]:
+            attempts += 1
+            result = await dial_strategy(ip, 443, head, body, h, strat)
+            if result:
+                _close_probe_result(result)
+                strat_ok = True
+                _record_strategy_result(h, strat["name"], True)
+                if _strat_cache.get(h) != strat["name"]:
+                    remember_strategy(h, strat["name"])
+                _dead.pop(h, None)
+                return True
+            if attempts >= 7:
+                break
+        if not strat_ok:
+            _record_strategy_result(h, strat["name"], False)
+        if attempts >= 7:
+            break
+    return False
+
+
+def _run_local_bypass_resweep(host):
+    try:
+        return asyncio.run(_resweep_local_bypass_host(host))
+    except Exception as exc:
+        if VERBOSE:
+            group = route_policy(host)["service_group"]
+            print(
+                f">> local bypass re-sweep unavailable ({group}): "
+                f"{type(exc).__name__}",
+                file=sys.stderr,
+            )
+        return False
+
+
+def schedule_local_bypass_resweep(host, now=None, runner=None):
+    h = normalize_host(host)
+    policy = route_policy(h)
+    if not h or policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        return False
+    now = time.monotonic() if now is None else now
+    with _local_bypass_resweep_lock:
+        last = _local_bypass_resweep_last.get(h, 0.0)
+        if last and now - last < LOCAL_BYPASS_RESWEEP_COOLDOWN:
+            return False
+        started = _local_bypass_resweep_active.get(h)
+        if started is not None and now - started < LOCAL_BYPASS_RESWEEP_STALE_AFTER:
+            return False
+        _local_bypass_resweep_last[h] = now
+        _local_bypass_resweep_active[h] = now
+
+    def run():
+        try:
+            (runner or _run_local_bypass_resweep)(h)
+        finally:
+            with _local_bypass_resweep_lock:
+                _local_bypass_resweep_active.pop(h, None)
+
+    if runner is not None:
+        run()
+        return True
+    threading.Thread(
+        target=run,
+        daemon=True,
+        name=f"local-bypass-resweep-{policy['service_group']}",
+    ).start()
+    return True
+
+
 async def _run_geo_exit_canary(spec):
     host = spec["host"]
     policy = route_policy(host)
@@ -4036,9 +4129,9 @@ def network_monitor(port, voice=True):
                 note_runtime_rearm("network_change", iface=iface or "")
                 start_canaries_if_due("network_change", force=True)
             last_iface = iface
-        # Hysteresis: a few failed probes (geph busy under load, or briefly
-        # re-establishing its tunnel) must NOT flip us to "down" — that drops
-        # geo-blocked hosts to local desync (RU exit IP -> Anthropic/CF 403).
+        # Hysteresis: a few missed probes (Geph busy under load, or briefly
+        # re-establishing its tunnel) must not flap the route-health state.
+        # Confirmed downtime keeps geo-exit hosts fail-closed until Geph returns.
         # Only declare down after 3 consecutive misses (~15s of real outage).
         if probe_geph():
             geph_strikes = 0
@@ -4049,8 +4142,9 @@ def network_monitor(port, voice=True):
         was_geph, _geph_up = _geph_up, up
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
-                  f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-blocked hosts "
-                  f"{'tunnelled' if _geph_up else 'on local desync'}", file=sys.stderr)
+                  f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-exit hosts "
+                  f"{'tunnelled' if _geph_up else 'fail-closed until recovery'}",
+                  file=sys.stderr)
             if not first_tick:
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default

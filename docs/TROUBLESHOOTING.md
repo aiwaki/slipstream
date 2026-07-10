@@ -128,8 +128,9 @@ If Discord stalls:
 1. Check that it is not being routed through Geph.
 2. Check `/var/log/slipstream.log` for `NO RESPONSE` lines.
 3. Restart Discord after the daemon is active.
-4. If only one CDN edge fails, retry after DNS rotation or clear the strategy
-   cache.
+4. A runtime miss automatically starts a deduplicated exact-host re-sweep of
+   the allowed local-bypass strategies. If the same endpoint keeps failing,
+   capture diagnostics instead of selecting a strategy manually.
 
 ## YouTube
 
@@ -145,6 +146,9 @@ If playback fails:
 2. Confirm the daemon is active.
 3. Check whether external proxy/PAC settings are bypassing Slipstream.
 4. Avoid global QUIC blocks unless a new scoped failure mode is proven.
+
+TCP local-bypass misses trigger the same exact-host re-sweep as Discord. The
+recovery path remains local and never promotes YouTube/googlevideo to Geph.
 
 ## Steam
 

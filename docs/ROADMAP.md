@@ -61,6 +61,8 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 
 Goal: detect degradation before the user has to diagnose it manually.
 
+- Exact-host local-bypass re-sweep now runs after real Discord/YouTube runtime
+  misses, without adding a manual strategy picker or Geph fallback.
 - Continue tuning automatic re-sweep when a known strategy stops working.
 - Keep important secondary endpoints from being hidden by passing core endpoints,
   while preserving grace thresholds for transient failures.

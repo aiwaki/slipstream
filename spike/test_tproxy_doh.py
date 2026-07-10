@@ -29,6 +29,8 @@ def reset_smart_dns_state():
         for host, values in tproxy._auto_geph_runtime_failures.items()
     }
     auto_last_status = dict(tproxy._auto_geph_last_status)
+    local_resweep_active = dict(tproxy._local_bypass_resweep_active)
+    local_resweep_last = dict(tproxy._local_bypass_resweep_last)
     policy_remote = dict(tproxy._route_policy_remote)
     strat_scores = OrderedDict(
         (host, {name: dict(value) for name, value in per_host.items()})
@@ -55,6 +57,8 @@ def reset_smart_dns_state():
         tproxy._auto_geph_confirming.clear()
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_runtime_failures.clear()
+        tproxy._local_bypass_resweep_active.clear()
+        tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
             "state": "idle",
             "host": "",
@@ -104,6 +108,10 @@ def reset_smart_dns_state():
         tproxy._auto_geph_last_probe.update(auto_last_probe)
         tproxy._auto_geph_runtime_failures.clear()
         tproxy._auto_geph_runtime_failures.update(auto_runtime_failures)
+        tproxy._local_bypass_resweep_active.clear()
+        tproxy._local_bypass_resweep_active.update(local_resweep_active)
+        tproxy._local_bypass_resweep_last.clear()
+        tproxy._local_bypass_resweep_last.update(local_resweep_last)
         tproxy._auto_geph_last_status.clear()
         tproxy._auto_geph_last_status.update(auto_last_status)
         tproxy._route_policy_remote.clear()
@@ -1542,9 +1550,16 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
     original_canary_state = dict(tproxy._canary_state)
     calls = []
+    resweeps = []
 
     try:
         monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
+        monkeypatch.setattr(
+            tproxy,
+            "schedule_local_bypass_resweep",
+            lambda candidate: resweeps.append(candidate) or True,
+            raising=False,
+        )
         tproxy._route_failure_windows[tproxy.SERVICE_DISCORD].clear()
         tproxy._canary_state.update({
             "running": False,
@@ -1585,6 +1600,7 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
         assert "gateway.discord.gg" not in tproxy._strat_cache
         assert tproxy._strat_cache["billing.openai.com"] == "split64+fake"
         assert calls == [f"runtime:{tproxy.SERVICE_DISCORD}"]
+        assert resweeps == [host]
 
         for offset in range(1, tproxy.LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER):
             tproxy.note_local_bypass_runtime_result(
@@ -1600,6 +1616,7 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
         assert health["state"] == tproxy.HEALTH_DEGRADED
         assert health["last_failure"] == "runtime strategy probe failed"
         assert calls == [f"runtime:{tproxy.SERVICE_DISCORD}"]
+        assert resweeps == [host] * tproxy.LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER
         assert not tproxy.geph_route(host)
     finally:
         tproxy._strat_cache.clear()
@@ -1609,6 +1626,99 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
         q = tproxy._route_failure_windows[tproxy.SERVICE_DISCORD]
         q.clear()
         q.extend(original_window)
+
+
+def test_local_bypass_resweep_scheduler_deduplicates_and_rejects_other_routes():
+    calls = []
+
+    assert tproxy.schedule_local_bypass_resweep(
+        "updates.discord.com",
+        now=100.0,
+        runner=calls.append,
+    )
+    assert calls == ["updates.discord.com"]
+    assert not tproxy.schedule_local_bypass_resweep(
+        "updates.discord.com",
+        now=101.0,
+        runner=calls.append,
+    )
+    assert not tproxy.schedule_local_bypass_resweep(
+        "chatgpt.com",
+        now=200.0,
+        runner=calls.append,
+    )
+    assert not tproxy.schedule_local_bypass_resweep(
+        "payments.example.com",
+        now=200.0,
+        runner=calls.append,
+    )
+    assert calls == ["updates.discord.com"]
+
+
+def test_local_bypass_resweep_scheduler_starts_group_named_thread(monkeypatch):
+    threads = []
+
+    class DummyThread:
+        def __init__(self, *, target, daemon, name):
+            threads.append({"target": target, "daemon": daemon, "name": name})
+
+        def start(self):
+            threads[-1]["started"] = True
+
+    monkeypatch.setattr(tproxy.threading, "Thread", DummyThread)
+
+    assert tproxy.schedule_local_bypass_resweep("updates.discord.com", now=100.0)
+    assert len(threads) == 1
+    assert threads[0]["daemon"] is True
+    assert threads[0]["name"] == "local-bypass-resweep-discord"
+    assert threads[0]["started"] is True
+
+
+def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
+    host = "updates.discord.com"
+    attempts = []
+
+    async def resolve(_host, _fallback_ip):
+        return ["203.0.113.10"]
+
+    async def dial(ip, port, head, body, candidate, strategy):
+        attempts.append((candidate, strategy["name"], strategy["fake"]))
+        if strategy["name"] == "split16+fake":
+            return object()
+        return None
+
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", resolve)
+    monkeypatch.setattr(tproxy, "dial_strategy", dial)
+    monkeypatch.setattr(tproxy, "_close_probe_result", lambda result: None)
+    monkeypatch.setattr(tproxy, "save_strat_cache", lambda: None)
+    tproxy._strat_cache.clear()
+    tproxy._strat_scores.clear()
+    tproxy._dead[host] = 999.0
+
+    try:
+        assert asyncio.run(tproxy._resweep_local_bypass_host(host))
+
+        assert attempts == [
+            (host, "split64+fake", True),
+            (host, "split16+fake", True),
+        ]
+        assert tproxy._strat_cache[host] == "split16+fake"
+        assert host not in tproxy._dead
+        assert not tproxy.geph_route(host)
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+        tproxy._dead.pop(host, None)
+
+
+def test_local_bypass_resweep_contains_background_probe_errors(monkeypatch):
+    async def broken(_host):
+        raise OSError("probe unavailable")
+
+    monkeypatch.setattr(tproxy, "_resweep_local_bypass_host", broken)
+    monkeypatch.setattr(tproxy, "VERBOSE", False)
+
+    assert not tproxy._run_local_bypass_resweep("updates.discord.com")
 
 
 def test_local_bypass_runtime_success_marks_route_ok():
