@@ -19,7 +19,8 @@ on:
       - ".github/workflows/build-geph.yml"
 
 permissions:
-  contents: write               # publish the vendored binary as a release asset
+  contents: write               # publish the vendored binary + update branch
+  pull-requests: write          # propose vendor/geph/VERSION through a PR
 
 env:
   GEPH_REPO: geph-official/geph5
@@ -165,19 +166,38 @@ jobs:
             Consumed by the app-build workflow -> Slipstream.app/Contents/Resources.
           files: out/*
 
-  # 3) Record the version we vendored so the next scheduled run is a no-op until
-  #    geph ships something newer.
+  # 3) Propose the vendored version through a PR. Scheduled automation must not
+  #    bypass main-branch review or required checks.
   bump:
     needs: [resolve, build]
     if: needs.resolve.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Bump vendor/geph/VERSION
+      - name: Open vendor version PR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "${{ needs.resolve.outputs.version }}" > vendor/geph/VERSION
+          set -euo pipefail
+          version="${{ needs.resolve.outputs.version }}"
+          branch="automation/geph-${version}"
+          if git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"; then
+            git checkout -B "${branch}" "origin/${branch}"
+          else
+            git checkout -B "${branch}"
+          fi
+          echo "$version" > vendor/geph/VERSION
           git config user.name  "slipstream-ci"
           git config user.email "ci@slipstream.local"
           git add vendor/geph/VERSION
-          git commit -m "vendor: geph5-client ${{ needs.resolve.outputs.version }}" || echo "no change"
-          git push || echo "push skipped (no remote/perms)"
+          if ! git diff --cached --quiet; then
+            git commit -m "vendor: geph5-client ${version}"
+            git push --force-with-lease origin "HEAD:refs/heads/${branch}"
+          fi
+          if ! gh pr view "$branch" --json number >/dev/null 2>&1; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "vendor: geph5-client ${version}" \
+              --body "Automated vendored Geph update. The matching release asset was built from crates.io, smoke-checked for the aws_lambda feature, licensed, and published with SHA-256 checksums."
+          fi

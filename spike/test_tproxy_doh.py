@@ -406,7 +406,13 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "last_failure_at": 0.0,
         "managed_by_slipstream": False,
     }
-    assert status["pf_state"] == {"applied": False, "enabled": False, "rules_loaded": False}
+    assert status["pf_state"] == {
+        "applied": False,
+        "enabled": False,
+        "anchor": tproxy.PF_ANCHOR,
+        "parent_loaded": False,
+        "rules_loaded": False,
+    }
     assert status["geph_detail"]["port"] == 0
     assert status["rearm"]["last_reason"] == ""
     assert status["rearm"]["count"] == 0
@@ -450,7 +456,25 @@ def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):
         if args == ("pfctl", "-sn"):
             return type("Result", (), {
                 "returncode": 0,
-                "stdout": "rdr pass on en0 inet proto tcp to any port 443 -> 127.0.0.1 port 1080\n",
+                "stdout": 'rdr-anchor "com.apple/*" all\n',
+                "stderr": "",
+            })()
+        if args == ("pfctl", "-sr"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": 'anchor "com.apple/*" all\n',
+                "stderr": "",
+            })()
+        if args == ("pfctl", "-a", tproxy.PF_ANCHOR, "-sn"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "rdr pass inet proto tcp to any port 443 -> 127.0.0.1 port 1080\n",
+                "stderr": "",
+            })()
+        if args == ("pfctl", "-a", tproxy.PF_ANCHOR, "-sr"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "pass out route-to (lo0 127.0.0.1) inet proto tcp to any port 443\n",
                 "stderr": "",
             })()
         raise AssertionError(args)
@@ -461,8 +485,238 @@ def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):
     assert tproxy.pf_state_snapshot(1080) == {
         "applied": True,
         "enabled": True,
+        "anchor": tproxy.PF_ANCHOR,
+        "parent_loaded": True,
         "rules_loaded": True,
     }
+
+
+def test_pf_parent_anchor_requires_rdr_and_filter_declarations(tmp_path):
+    config = tmp_path / "pf.conf"
+    config.write_text(
+        'rdr-anchor "com.apple/*"\n'
+        'anchor "com.apple/*"\n'
+        'anchor "zapret"\n'
+    )
+
+    assert tproxy.pf_parent_anchor_available(str(config))
+
+    config.write_text('anchor "com.apple/*"\nanchor "zapret"\n')
+    assert not tproxy.pf_parent_anchor_available(str(config))
+
+
+def test_pf_token_file_is_private_and_token_parser_is_strict(tmp_path):
+    token_path = tmp_path / "pf.token"
+    result = type("Result", (), {
+        "stdout": "pf enabled\nToken : 123456\n",
+        "stderr": "",
+    })()
+
+    token = tproxy._pf_token_from_result(result)
+    tproxy._write_pf_token(token, str(token_path))
+
+    assert token == "123456"
+    assert tproxy._read_pf_token(str(token_path)) == "123456"
+    assert token_path.stat().st_mode & 0o777 == 0o600
+    token_path.write_text("123;pfctl -d\n")
+    assert tproxy._read_pf_token(str(token_path)) is None
+
+
+def test_pf_load_targets_only_private_anchor(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        if args[:4] == ("pfctl", "-a", tproxy.PF_ANCHOR, "-f"):
+            rules = open(args[4]).read()
+            assert "proto tcp" in rules
+            assert "proto udp" not in rules
+            return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        raise AssertionError(args)
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert tproxy._pf_load(1080).returncode == 0
+    assert len(calls) == 1
+
+
+def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path):
+    calls = []
+    status_path = tmp_path / "status"
+    status_path.write_text("{}")
+
+    def fake_run(*args):
+        calls.append(args)
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_pf_enable_token", "123456")
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+
+    tproxy.pf_teardown()
+
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all") in calls
+    assert ("pfctl", "-X", "123456") in calls
+    assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
+    assert not any(args[:2] == ("pfctl", "-d") for args in calls)
+    assert not status_path.exists()
+
+
+def test_pf_release_failure_preserves_token_for_recovery(monkeypatch):
+    removed = []
+    result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "busy"})()
+    monkeypatch.setattr(tproxy, "_run", lambda *args: result)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda path=None: removed.append(path))
+    monkeypatch.setattr(tproxy, "_pf_enable_token", "123456")
+
+    assert tproxy._pf_release_enable_token() is result
+    assert tproxy._pf_enable_token == "123456"
+    assert removed == []
+
+
+def test_pf_acquire_requires_releasable_token(monkeypatch):
+    result = type("Result", (), {
+        "returncode": 0,
+        "stdout": "pf enabled without token\n",
+        "stderr": "",
+    })()
+    monkeypatch.setattr(tproxy, "_run", lambda *args: result)
+    monkeypatch.setattr(tproxy, "_read_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_pf_enable_token", None)
+
+    assert not tproxy._pf_acquire_enable_token()
+    assert tproxy._pf_enable_token is None
+
+
+def test_legacy_pf_restore_is_explicit_and_preserves_config_source(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        if args == ("pfctl", "-sn"):
+            stdout = "rdr pass proto tcp to any port = 443 -> 127.0.0.1 port 1080\n"
+        elif args == ("pfctl", "-sr"):
+            stdout = "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 443\n"
+        else:
+            stdout = ""
+        return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert tproxy._restore_legacy_pf_rules(1080)
+    assert calls[-1] == ("pfctl", "-f", tproxy.PF_CONFIG_PATH)
+
+
+def test_legacy_pf_restore_ignores_unrelated_route_to_rule(monkeypatch):
+    def fake_run(*args):
+        if args == ("pfctl", "-sn"):
+            stdout = "rdr pass proto tcp to any port = 80 -> 127.0.0.1 port 1080\n"
+        elif args == ("pfctl", "-sr"):
+            stdout = "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 80\n"
+        else:
+            raise AssertionError(args)
+        return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert not tproxy._restore_legacy_pf_rules(1080)
+
+
+def test_cleanup_stale_never_uses_process_pattern_or_global_pf_disable(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        if args in (("pfctl", "-sn"), ("pfctl", "-sr")):
+            return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "running_from_install_dir", lambda: True)
+    monkeypatch.setattr(tproxy, "_read_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda path=None: None)
+
+    tproxy.cleanup_stale()
+
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all") in calls
+    assert not any(args[0] in {"pgrep", "pkill", "kill"} for args in calls)
+    assert not any(args[:2] == ("pfctl", "-d") for args in calls)
+    assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
+
+
+def test_geph_ownership_requires_pid_executable_and_config_match():
+    state = {
+        "pid": 4242,
+        "executable": "/Applications/Slipstream.app/Contents/MacOS/geph5-client",
+        "config": "/Users/test/Library/Application Support/dev.slipstream.tray/geph-active.yaml",
+    }
+    command = (
+        "/Applications/Slipstream.app/Contents/MacOS/geph5-client --config "
+        "/Users/test/Library/Application Support/dev.slipstream.tray/geph-active.yaml"
+    )
+
+    assert tproxy._geph_state_matches(state, 4242, command)
+    assert not tproxy._geph_state_matches(state, 4243, command)
+    assert not tproxy._geph_state_matches(state, 4242, "/tmp/geph5-client --config /tmp/x")
+    assert not tproxy._geph_state_matches(state, 4242, state["executable"])
+    assert not tproxy._geph_state_matches(state, 4242, command + ".untrusted")
+
+
+def test_probe_geph_rejects_unknown_owned_port_and_only_detects_external(monkeypatch):
+    live_calls = []
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+    monkeypatch.setattr(tproxy, "_env_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_external_geph_detected", False)
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: False)
+    monkeypatch.setattr(
+        tproxy,
+        "_tcp_listener_present",
+        lambda port: port in {tproxy.GEPH_OWNED_PORT, tproxy.GEPH_EXTERNAL_PORT},
+    )
+    monkeypatch.setattr(tproxy, "_geph_live", lambda port: live_calls.append(port) or True)
+
+    assert not tproxy.probe_geph()
+    assert live_calls == []
+    assert tproxy._geph_port_conflict is True
+    assert tproxy._external_geph_detected is True
+    assert tproxy._geph_owned is False
+    assert tproxy._geph_port is None
+
+
+def test_probe_geph_disabled_clears_external_detection(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", True)
+    monkeypatch.setattr(tproxy, "_external_geph_detected", True)
+
+    assert not tproxy.probe_geph()
+    assert tproxy._geph_port is None
+    assert tproxy._geph_owned is False
+    assert tproxy._geph_port_conflict is False
+    assert tproxy._external_geph_detected is False
+
+
+def test_probe_geph_accepts_verified_owned_listener(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+    monkeypatch.setattr(tproxy, "_env_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+    monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda _port: False)
+    monkeypatch.setattr(tproxy, "_geph_live", lambda port: port == tproxy.GEPH_OWNED_PORT)
+
+    assert tproxy.probe_geph()
+    assert tproxy._geph_port == tproxy.GEPH_OWNED_PORT
+    assert tproxy._geph_owned is True
+    assert tproxy._geph_port_conflict is False
 
 
 def test_route_policy_classifies_service_groups():
@@ -2514,7 +2768,7 @@ def test_runtime_geo_exit_failures_require_repeated_signal():
 
 
 def test_pf_rules_leave_quic_unblocked():
-    assert "table <slipstream_quic_block> persist" in tproxy.PF_RULES
+    assert "slipstream_quic_block" not in tproxy.PF_RULES
     assert "proto udp" not in tproxy.PF_RULES
     assert "block return quick inet proto udp from any to any port 443" not in tproxy.PF_RULES
 

@@ -13,6 +13,11 @@ survive across sessions and agents.
 | 2026-07-08 | Repo docs are the primary source of project knowledge. Codex memory stores durable agent/user preferences and pointers, not long investigations. | Active |
 | 2026-07-09 | GitHub developer/download endpoints use direct passthrough and plain TLS; they should not route through Geph or the generic desync ladder. | Active |
 | 2026-07-09 | Human-facing runtime logs should avoid `failed` for expected transient retry/fallback events; reserve alarming wording for action-required errors. | Active |
+| 2026-07-10 | Slipstream owns only the `com.apple/slipstream` PF anchor. It must not load Slipstream rules into the global ruleset, edit `/etc/pf.conf`, or disable PF globally. | Active |
+| 2026-07-10 | PF enablement is reference-counted with the token returned by `pfctl -E`; cleanup flushes only the private anchor and releases only that token. | Active |
+| 2026-07-10 | The bundled Geph listener on `127.0.0.1:9954` is usable only when PID, executable, config path, and listener ownership agree. An unknown listener is a fail-closed conflict. | Active |
+| 2026-07-10 | A separately managed Geph listener on `127.0.0.1:9909` is diagnostic-only unless the user explicitly opts into that port. Slipstream never stops it. | Active |
+| 2026-07-10 | Geph configuration directories are owner-only (`0700`); secret-bearing config, cache, and ownership files are `0600` and written atomically. | Active |
 
 ## Notes
 

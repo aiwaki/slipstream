@@ -3,16 +3,19 @@ import os
 import sys
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-# Make the vendored tg-ws-proxy `proxy` package importable at spec-eval time so
-# collect_submodules below can actually discover it.
-_TGWS = os.path.abspath(os.path.join(os.getcwd(), '..', 'vendor', 'tg-ws-proxy'))
+# Resolve inputs from the spec location, not the caller's working directory.
+# Release CI, local scripts, and direct PyInstaller invocations must bundle the
+# same daemon and vendored Telegram proxy.
+_HERE = os.path.abspath(SPECPATH)
+_ROOT = os.path.dirname(_HERE)
+_TGWS = os.path.join(_ROOT, 'vendor', 'tg-ws-proxy')
 if _TGWS not in sys.path:
     sys.path.insert(0, _TGWS)
 
 datas = []
 binaries = []
 hiddenimports = []
-_POLICY_KEYS = os.path.abspath('route-policy-keys.json')
+_POLICY_KEYS = os.path.join(_HERE, 'route-policy-keys.json')
 if os.path.exists(_POLICY_KEYS):
     datas.append((_POLICY_KEYS, '.'))
 # scapy (fake-mode raw packets + voice) and cryptography (tg-ws-proxy AES) must be
@@ -26,8 +29,8 @@ hiddenimports += collect_submodules('proxy')
 
 
 a = Analysis(
-    ['tproxy.py'],
-    pathex=['../vendor/tg-ws-proxy'],  # makes the vendored `proxy` package importable at build
+    [os.path.join(_HERE, 'tproxy.py')],
+    pathex=[_TGWS],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
