@@ -2964,12 +2964,14 @@ def test_transient_runtime_logs_avoid_failed_wording():
 
 def test_geo_exit_failures_after_wake_recommend_owned_geph_restart(capsys):
     original_geph_up = tproxy._geph_up
+    original_geph_owned = tproxy._geph_owned
     original_hint = dict(tproxy._geph_restart_hint)
     tproxy._geph_fail_log.clear()
     tproxy._geph_restart_failures.clear()
 
     try:
         tproxy._geph_up = True
+        tproxy._geph_owned = True
         tproxy.note_geph_wake(1000.0)
 
         tproxy.log_geph_route_failure("chatgpt.com", "SOCKS connect failed", now=1001.0)
@@ -2991,6 +2993,47 @@ def test_geo_exit_failures_after_wake_recommend_owned_geph_restart(capsys):
     finally:
         capsys.readouterr()
         tproxy._geph_up = original_geph_up
+        tproxy._geph_owned = original_geph_owned
+        tproxy._geph_fail_log.clear()
+        tproxy._geph_restart_failures.clear()
+        tproxy._geph_restart_hint.clear()
+        tproxy._geph_restart_hint.update(original_hint)
+
+
+def test_geo_exit_failures_never_request_unowned_geph_restart(capsys):
+    original_geph_up = tproxy._geph_up
+    original_geph_owned = tproxy._geph_owned
+    original_hint = dict(tproxy._geph_restart_hint)
+    tproxy._geph_fail_log.clear()
+    tproxy._geph_restart_failures.clear()
+
+    try:
+        tproxy._geph_up = True
+        tproxy._geph_owned = False
+        tproxy.note_geph_wake(1000.0)
+
+        for offset, host in enumerate(
+            ("chatgpt.com", "persistent.oaistatic.com", "api.anthropic.com"),
+            start=1,
+        ):
+            tproxy.log_geph_route_failure(
+                host,
+                "SOCKS connect failed",
+                now=1000.0 + offset,
+            )
+
+        hint = tproxy.geph_restart_hint_snapshot(now=1003.0)
+        assert hint["recommended"] is False
+        assert hint["failures_5m"] == 3
+        assert not tproxy.request_owned_geph_restart(
+            "chatgpt.com",
+            "SOCKS connect failed",
+            now=1004.0,
+        )
+    finally:
+        capsys.readouterr()
+        tproxy._geph_up = original_geph_up
+        tproxy._geph_owned = original_geph_owned
         tproxy._geph_fail_log.clear()
         tproxy._geph_restart_failures.clear()
         tproxy._geph_restart_hint.clear()
@@ -3058,6 +3101,7 @@ def test_auto_geph_forgets_learned_host_after_repeated_geph_runtime_misses(monke
     saves = []
     host = "payments.example.com"
     tproxy._auto_geph[host] = tproxy.time.time() + 3600
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
 
     tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)

@@ -44,6 +44,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
 
@@ -326,6 +327,100 @@ HEALTH_OK = "ok"
 HEALTH_DEGRADED = "degraded"
 HEALTH_BLOCKED = "blocked"
 HEALTH_UNKNOWN = "unknown"
+
+RECOVERY_NONE = "none"
+RECOVERY_INVALIDATE_STRATEGY = "invalidate_strategy"
+RECOVERY_RESWEEP_EXACT_HOST = "resweep_exact_host"
+RECOVERY_RESTART_OWNED_GEPH = "restart_owned_geph"
+RECOVERY_RECHECK = "recheck"
+RECOVERY_WARN_EXTERNAL = "warn_external"
+
+FAILURE_PHASE_BACKEND = "backend"
+FAILURE_PHASE_CONNECT = "connect"
+FAILURE_PHASE_FIRST_PAYLOAD = "first_payload"
+FAILURE_PHASE_STREAM = "stream"
+
+BACKEND_LOCAL_ENGINE = "local_engine"
+BACKEND_DIRECT = "direct"
+BACKEND_EXTERNAL = "external"
+
+
+@dataclass(frozen=True)
+class ConnectionOutcome:
+    host: str
+    service_group: str
+    route_class: str
+    backend: str
+    failure_phase: str
+    bytes_received: int
+    duration: float
+    reason: str
+    ok: bool
+
+
+@dataclass(frozen=True)
+class RecoveryContext:
+    backend_owned: bool = False
+    restart_recommended: bool = False
+    restart_rate_limited: bool = False
+    strategy_invalidation_recommended: bool = False
+    recheck_recommended: bool = False
+    external_state: bool = False
+
+
+@dataclass(frozen=True)
+class RecoveryAction:
+    kind: str
+    target: str = ""
+    reason: str = ""
+
+
+def reduce_connection_outcome(outcome, context=None):
+    """Choose safe recovery work without performing any side effects."""
+    context = context or RecoveryContext()
+    if outcome.ok:
+        return (RecoveryAction(RECOVERY_NONE),)
+
+    reason = outcome.reason[:200]
+    protected_local = outcome.service_group in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS
+    if protected_local or outcome.route_class == ROUTE_LOCAL_BYPASS:
+        return (
+            RecoveryAction(
+                RECOVERY_INVALIDATE_STRATEGY,
+                outcome.service_group,
+                reason,
+            ),
+            RecoveryAction(RECOVERY_RESWEEP_EXACT_HOST, outcome.host, reason),
+            RecoveryAction(RECOVERY_RECHECK, outcome.service_group, reason),
+        )
+
+    if context.external_state:
+        return (RecoveryAction(RECOVERY_WARN_EXTERNAL, outcome.backend, reason),)
+
+    if outcome.route_class == ROUTE_GEO_EXIT:
+        actions = []
+        if context.strategy_invalidation_recommended:
+            actions.append(
+                RecoveryAction(RECOVERY_INVALIDATE_STRATEGY, outcome.host, reason)
+            )
+        if (
+            context.backend_owned
+            and context.restart_recommended
+            and not context.restart_rate_limited
+        ):
+            actions.append(
+                RecoveryAction(RECOVERY_RESTART_OWNED_GEPH, outcome.backend, reason)
+            )
+        else:
+            actions.append(
+                RecoveryAction(RECOVERY_RECHECK, outcome.service_group, reason)
+            )
+        return tuple(actions)
+
+    if outcome.route_class == ROUTE_UNKNOWN and context.recheck_recommended:
+        return (RecoveryAction(RECOVERY_RECHECK, outcome.host, reason),)
+
+    return (RecoveryAction(RECOVERY_NONE),)
 
 CANARY_INTERVAL = 10 * 60.0
 CANARY_JITTER = 90.0
@@ -1244,6 +1339,29 @@ def route_policy(host, now=None):
     return _policy_result(h, ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
 
 
+def connection_outcome_for_host(
+    host,
+    ok,
+    backend,
+    failure_phase="",
+    bytes_received=0,
+    duration=0.0,
+    reason="",
+):
+    policy = route_policy(host)
+    return ConnectionOutcome(
+        host=policy["host"],
+        service_group=policy["service_group"],
+        route_class=policy["route_class"],
+        backend=backend,
+        failure_phase=failure_phase,
+        bytes_received=max(0, int(bytes_received or 0)),
+        duration=max(0.0, float(duration or 0.0)),
+        reason=str(reason or "")[:200],
+        ok=bool(ok),
+    )
+
+
 def _route_health_default(group, route_class=ROUTE_UNKNOWN):
     return {
         "state": HEALTH_UNKNOWN,
@@ -1619,10 +1737,16 @@ def note_local_bypass_runtime_result(
     canary_now=None,
     canary_runner=None,
 ):
-    policy = route_policy(host, now=now)
-    if policy["route_class"] != ROUTE_LOCAL_BYPASS:
+    outcome = connection_outcome_for_host(
+        host,
+        ok,
+        BACKEND_LOCAL_ENGINE,
+        failure_phase=FAILURE_PHASE_FIRST_PAYLOAD,
+        reason=reason,
+    )
+    if outcome.route_class != ROUTE_LOCAL_BYPASS:
         return None
-    group = policy["service_group"]
+    group = outcome.service_group
     if ok:
         return route_health_event(
             group,
@@ -1632,8 +1756,18 @@ def note_local_bypass_runtime_result(
             now=now,
         )
 
-    clear_route_strategy_cache(group=group)
-    schedule_local_bypass_resweep(host)
+    for action in reduce_connection_outcome(outcome):
+        if action.kind == RECOVERY_INVALIDATE_STRATEGY:
+            clear_route_strategy_cache(group=action.target)
+        elif action.kind == RECOVERY_RESWEEP_EXACT_HOST:
+            schedule_local_bypass_resweep(action.target)
+        elif action.kind == RECOVERY_RECHECK:
+            start_canaries_if_due(
+                f"runtime:{action.target}",
+                force=True,
+                now=canary_now,
+                runner=canary_runner,
+            )
     item = route_health_event(
         group,
         ROUTE_LOCAL_BYPASS,
@@ -1642,12 +1776,6 @@ def note_local_bypass_runtime_result(
         reason or "runtime local bypass failed",
         now=now,
         degrade_after=LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER,
-    )
-    start_canaries_if_due(
-        f"runtime:{group}",
-        force=True,
-        now=canary_now,
-        runner=canary_runner,
     )
     return item
 
@@ -2068,8 +2196,38 @@ def log_geph_route_failure(host, reason, now=None):
         state=HEALTH_BLOCKED if reason == "tunnel down" else HEALTH_DEGRADED,
         degrade_after=1 if reason == "tunnel down" else GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     )
-    note_geph_restart_failure(host, reason, now=wall_now)
-    note_auto_geph_runtime_failure(host, reason, now=wall_now)
+    restart_evidence = note_geph_restart_failure(host, reason, now=wall_now)
+    reset_learned_route = note_auto_geph_runtime_failure(host, reason, now=wall_now)
+    failure_phase = (
+        FAILURE_PHASE_BACKEND
+        if reason == "tunnel down"
+        else FAILURE_PHASE_CONNECT
+        if reason == "SOCKS connect failed"
+        else FAILURE_PHASE_FIRST_PAYLOAD
+    )
+    backend = GEO_BACKEND_GEPH if _geph_owned else BACKEND_EXTERNAL
+    outcome = connection_outcome_for_host(
+        host,
+        False,
+        backend,
+        failure_phase=failure_phase,
+        reason=reason,
+    )
+    recovery = reduce_connection_outcome(
+        outcome,
+        RecoveryContext(
+            backend_owned=bool(_geph_owned),
+            restart_recommended=restart_evidence["recommended"],
+            restart_rate_limited=restart_evidence["rate_limited"],
+            strategy_invalidation_recommended=reset_learned_route,
+            external_state=not _geph_owned,
+        ),
+    )
+    for action in recovery:
+        if action.kind == RECOVERY_INVALIDATE_STRATEGY:
+            _forget_auto_geph_host(action.target, "geph runtime retries")
+        elif action.kind == RECOVERY_RESTART_OWNED_GEPH:
+            request_owned_geph_restart(host, reason, now=wall_now)
     if not host:
         return
     now = time.monotonic() if now is None else now
@@ -2103,34 +2261,45 @@ def _prune_geph_restart_failures(now):
 
 
 def note_geph_restart_failure(host, reason, now=None):
+    evidence = {"recommended": False, "rate_limited": False}
     now = time.time() if now is None else now
     if not _geph_up:
-        return
+        return evidence
     if reason not in {"SOCKS connect failed", "remote closed without response"}:
-        return
+        return evidence
     wake_at = _geph_restart_hint.get("last_wake_at", 0.0)
     if not wake_at or now - wake_at > GEPH_RESTART_WAKE_WINDOW:
-        return
+        return evidence
 
     normalized = normalize_host(host)
     _geph_restart_failures.append((now, normalized, reason[:200]))
     _prune_geph_restart_failures(now)
     hosts = {item[1] for item in _geph_restart_failures if item[1]}
     if len(_geph_restart_failures) < GEPH_RESTART_FAILURE_THRESHOLD:
-        return
+        return evidence
     if len(hosts) < GEPH_RESTART_MIN_HOSTS:
-        return
+        return evidence
     last_requested = _geph_restart_hint.get("last_requested_at", 0.0)
     if last_requested and now - last_requested < GEPH_RESTART_COOLDOWN:
-        return
+        evidence["rate_limited"] = True
+        return evidence
+    evidence["recommended"] = True
+    return evidence
+
+
+def request_owned_geph_restart(host, reason, now=None):
+    if not _geph_owned:
+        return False
+    now = time.time() if now is None else now
     _geph_restart_hint.update({
         "recommended": True,
         "reason": "geo-exit tunnel stale after wake",
-        "last_failure_host": normalized,
+        "last_failure_host": normalize_host(host),
         "last_failure_reason": reason[:200],
         "last_failure_at": now,
         "last_requested_at": now,
     })
+    return True
 
 
 def clear_geph_restart_hint():
@@ -2386,7 +2555,7 @@ def note_auto_geph_runtime_failure(host, reason, now=None):
                     _auto_geph_runtime_failures.pop(old_host, None)
         if len(q) < AUTO_GEPH_RUNTIME_MISS_STORM:
             return False
-    return _forget_auto_geph_host(h, "geph runtime retries")
+    return True
 
 
 def _schedule_auto_geph_confirmation(host, now=None, runner=None):
@@ -2470,7 +2639,21 @@ def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=
                   if sum(1 for t in v if t >= cutoff) >= 2)
     if failing >= AUTO_GEPH_NET_BAD:
         return
-    _schedule_auto_geph_confirmation(h, now=now, runner=confirmation_runner)
+    outcome = connection_outcome_for_host(
+        h,
+        False,
+        BACKEND_LOCAL_ENGINE,
+        failure_phase=FAILURE_PHASE_STREAM,
+        bytes_received=down_bytes,
+        duration=duration,
+        reason="repeated local stalls",
+    )
+    actions = reduce_connection_outcome(
+        outcome,
+        RecoveryContext(recheck_recommended=True),
+    )
+    if any(action.kind == RECOVERY_RECHECK for action in actions):
+        _schedule_auto_geph_confirmation(h, now=now, runner=confirmation_runner)
 
 
 CANARY_SPECS = (

@@ -87,6 +87,7 @@ jobs:
         run: |
           python3 -m py_compile \
             spike/tproxy.py \
+            spike/test_recovery.py \
             spike/test_tproxy_doh.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
