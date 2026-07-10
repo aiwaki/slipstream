@@ -20,6 +20,8 @@ survive across sessions and agents.
 | 2026-07-10 | Geph configuration directories are owner-only (`0700`); secret-bearing config, cache, and ownership files are `0600` and written atomically. | Active |
 | 2026-07-10 | A transparent HTTPS PF redirect loaded before `com.apple/*` owns the real traffic path because PF uses the first matching translation. Slipstream must pause, report the conflicting anchor, and recover automatically when it disappears; it must not flush, stop, or rewrite the other product. | Active |
 | 2026-07-10 | Runtime recovery is selected by a pure reducer. Discord/YouTube outcomes can produce only local strategy invalidation, exact-host re-sweep, and recheck; only a verified owned Geph backend can produce a restart action; external state produces a warning only. | Active |
+| 2026-07-11 | When an intercepted geo-exit connection cannot reach its backend, Slipstream clears only its PF anchor and stays dormant until a fresh OpenAI geo-exit canary proves recovery. It does not leave TCP/443 captured for client retry loops. | Active |
+| 2026-07-11 | Tray health handling must not stop or restart Geph automatically: that action can sever live long-lived geo-exit streams. Lifecycle changes remain explicit or are handled by the owned supervisor outside the tray. | Active |
 
 ## Notes
 

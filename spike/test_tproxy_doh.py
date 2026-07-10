@@ -408,6 +408,8 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     }
     assert status["pf_state"] == {
         "applied": False,
+        "paused": False,
+        "pause_reason": "",
         "enabled": False,
         "anchor": tproxy.PF_ANCHOR,
         "parent_loaded": False,
@@ -485,6 +487,8 @@ def test_pf_state_snapshot_reports_enabled_and_loaded_rules(monkeypatch):
 
     assert tproxy.pf_state_snapshot(1080) == {
         "applied": True,
+        "paused": False,
+        "pause_reason": "",
         "enabled": True,
         "anchor": tproxy.PF_ANCHOR,
         "parent_loaded": True,
@@ -551,6 +555,26 @@ def test_pf_setup_pauses_without_mutating_prior_interceptor(monkeypatch):
     assert calls == []
     assert not tproxy._pf_applied
     assert tproxy._pf_interceptor_conflicts == ["zapret"]
+
+
+def test_pf_setup_waits_for_live_geo_exit_backend(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_available", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_preceding_https_interceptors", lambda: [])
+    monkeypatch.setattr(tproxy, "_pf_pause_reason", "")
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: calls.append("token"))
+    monkeypatch.setattr(tproxy, "_pf_load", lambda _port: calls.append("load"))
+    monkeypatch.setattr(
+        tproxy,
+        "pause_pf_for_geo_exit_failure",
+        lambda: calls.append("pause"),
+    )
+
+    assert not tproxy.pf_setup(1080)
+    assert calls == ["pause"]
+    assert not tproxy._pf_applied
 
 
 def test_pf_parent_anchor_requires_rdr_and_filter_declarations(tmp_path):
@@ -624,6 +648,107 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
     assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
     assert not status_path.exists()
+
+
+def test_geo_exit_failure_pauses_only_slipstream_anchor(monkeypatch):
+    calls = []
+    canary_calls = []
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_pause_reason", "")
+    monkeypatch.setattr(tproxy, "_pf_pause_since", 0.0)
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: calls.append("flush"))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: calls.append("release"))
+    monkeypatch.setattr(
+        tproxy,
+        "start_canaries_if_due",
+        lambda *args, **kwargs: canary_calls.append((args, kwargs)),
+    )
+
+    tproxy.pause_pf_for_geo_exit_failure()
+
+    assert calls == ["flush", "release"]
+    assert not tproxy._pf_applied
+    assert tproxy._pf_pause_reason == "geo_exit backend unavailable"
+    assert canary_calls == [(("geo_exit_backend_pause",), {"force": True})]
+
+
+def test_geo_exit_pause_requires_fresh_openai_canary_before_rearm(monkeypatch):
+    monkeypatch.setattr(tproxy, "_pf_pause_reason", "geo_exit backend unavailable")
+    monkeypatch.setattr(tproxy, "_pf_pause_since", 100.0)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    tproxy._canary_health["openai_core"] = {
+        "state": tproxy.HEALTH_OK,
+        "last_backend": tproxy.GEO_BACKEND_GEPH,
+        "last_checked": 99.0,
+    }
+
+    assert not tproxy.pf_pause_recovery_ready()
+    assert not tproxy.resume_pf_after_geo_exit_recovery()
+
+    tproxy._canary_health["openai_core"]["last_checked"] = 101.0
+    assert tproxy.pf_pause_recovery_ready()
+    assert tproxy.resume_pf_after_geo_exit_recovery()
+    assert tproxy._pf_pause_reason == ""
+
+
+def test_pf_rearm_refuses_while_geo_exit_is_paused(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_pf_pause_reason", "geo_exit backend unavailable")
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: calls.append("token"))
+    monkeypatch.setattr(tproxy, "_pf_load", lambda _port: calls.append("load"))
+
+    assert not tproxy.try_rearm_pf(1080)
+    assert calls == []
+
+
+def test_openai_geo_exit_backend_miss_pauses_pf_before_closing_client(monkeypatch):
+    pauses = []
+    failures = []
+
+    class Reader:
+        def __init__(self):
+            self.calls = 0
+
+        async def readexactly(self, _size):
+            self.calls += 1
+            return b"\x16\x03\x03\x00\x00" if self.calls == 1 else b""
+
+        async def read(self, _size):
+            return b""
+
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+
+        def get_extra_info(self, _name):
+            return object()
+
+        def close(self):
+            self.closed += 1
+
+    writer = Writer()
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.10", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(
+        tproxy,
+        "log_geph_route_failure",
+        lambda host, reason: failures.append((host, reason)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "pause_pf_for_geo_exit_failure",
+        lambda: pauses.append("paused"),
+    )
+
+    asyncio.run(tproxy._handle_impl(Reader(), writer))
+
+    assert tproxy.geph_route("chatgpt.com")
+    assert failures == [("chatgpt.com", "tunnel down")]
+    assert pauses == ["paused"]
+    assert writer.closed == 1
 
 
 def test_pf_release_failure_preserves_token_for_recovery(monkeypatch):

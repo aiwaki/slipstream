@@ -79,6 +79,18 @@ only that reference during normal teardown. An upgrade from a legacy build may
 reload the canonical `/etc/pf.conf` once after detecting old global Slipstream
 redirect rules; it never writes that file.
 
+## ChatGPT Or Codex Reconnecting
+
+If native ChatGPT/Codex reports a WebSocket reconnect loop while Safari still
+works, inspect `pf_state` in the diagnostic snapshot. A current daemon pauses its
+own anchor after a geo-exit backend miss, so repeated retries should no longer
+remain captured. The emergency anchor cleanup above is still the scoped recovery
+for an older installed build.
+
+Do not change system DNS, PAC, proxy settings, browser caches, certificates, or
+network preference files for this symptom. Those settings are external state and
+are not part of the Slipstream rollback path.
+
 If the required `com.apple/*` parent anchor is absent from the host PF setup,
 Slipstream exits safely instead of taking ownership of global PF configuration.
 

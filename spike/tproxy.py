@@ -88,6 +88,9 @@ _pf_applied = False
 _pf_fd = None
 _pf_enable_token = None
 _pf_interceptor_conflicts = []
+_pf_pause_lock = threading.RLock()
+_pf_pause_reason = ""
+_pf_pause_since = 0.0
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
@@ -111,8 +114,10 @@ _conn_count = 0                # live proxied connections
 # only the handful of services that hard-block Russian IPs server-side (OpenAI,
 # Anthropic, ...) are tunnelled through geph's local SOCKS5 — and ONLY when geph is
 # actually running. Russian services are split-tunnel-EXCLUDED: they must never
-# enter the tunnel (privacy + they'd break, geph exits abroad). geph absent ->
-# _geph_up stays False -> this whole path is inert and behaviour is unchanged.
+# enter the tunnel (privacy + they'd break, geph exits abroad). If an intercepted
+# geo-exit connection cannot get a backend, the daemon clears only its own PF
+# anchor before closing that already-intercepted socket. Subsequent retries then
+# bypass Slipstream until a fresh geo-exit canary proves recovery.
 GEPH_ENABLED = os.environ.get("SLIP_GEPH", "1") != "0"
 # Use Slipstream's owned geph5-client (:9954). A separately-running Geph.app on
 # :9909 is diagnostics-only unless SLIP_GEPH_PORT explicitly opts into it.
@@ -3741,6 +3746,76 @@ def _pf_flush():
     return _run("pfctl", "-a", PF_ANCHOR, "-F", "all")
 
 
+def pause_pf_for_geo_exit_failure():
+    """Fail safe after an intercepted geo-exit connection cannot reach its backend.
+
+    The accepted socket cannot be returned to its original kernel route, so its
+    current client has to reconnect. Clearing only our private PF anchor before
+    that close ensures the retry is not captured again. A later monitor tick may
+    re-arm the anchor only after a new successful OpenAI geo-exit canary.
+    """
+    global _pf_applied, _pf_pause_reason, _pf_pause_since
+    with _pf_pause_lock:
+        already_paused = bool(_pf_pause_reason)
+        _pf_pause_reason = "geo_exit backend unavailable"
+        _pf_pause_since = time.time()
+        _pf_flush()
+        _pf_release_enable_token()
+        _pf_applied = False
+    if not already_paused:
+        print(
+            ">> geo-exit backend unavailable -> Slipstream dormant; "
+            "private PF anchor cleared",
+            file=sys.stderr,
+        )
+    # A repeated miss updates the freshness boundary, so queue a new proof even
+    # when a prior forced canary is already running or rate-limited.
+    start_canaries_if_due("geo_exit_backend_pause", force=True)
+
+
+def pf_pause_recovery_ready():
+    """Can a geo-exit safety pause be lifted without guessing?"""
+    with _pf_pause_lock:
+        paused = bool(_pf_pause_reason)
+        since = _pf_pause_since
+    if not paused:
+        return True
+    if not _geph_up:
+        return False
+    core = _canary_health.get("openai_core", {})
+    return (
+        core.get("state") == HEALTH_OK
+        and core.get("last_backend") in {GEO_BACKEND_GEPH, GEO_BACKEND_SMART_DNS}
+        and float(core.get("last_checked", 0.0) or 0.0) >= since
+    )
+
+
+def resume_pf_after_geo_exit_recovery():
+    """Clear the local pause marker once a post-pause backend canary succeeds."""
+    global _pf_pause_reason, _pf_pause_since
+    if not pf_pause_recovery_ready():
+        return False
+    with _pf_pause_lock:
+        if not _pf_pause_reason:
+            return False
+        _pf_pause_reason = ""
+        _pf_pause_since = 0.0
+    print(">> geo-exit backend recovered -> Slipstream may re-arm PF")
+    return True
+
+
+def try_rearm_pf(port):
+    """Load the private anchor only when no concurrent geo-exit pause exists."""
+    global _pf_applied
+    with _pf_pause_lock:
+        if _pf_pause_reason or not pf_parent_anchor_loaded():
+            return False
+        if _pf_acquire_enable_token() and _pf_load(port).returncode == 0:
+            _pf_applied = True
+            return True
+    return False
+
+
 def _legacy_pf_rules_loaded(port):
     nat = _run("pfctl", "-sn")
     rules = _run("pfctl", "-sr")
@@ -3792,6 +3867,12 @@ def pf_setup(port):
             file=sys.stderr,
         )
         return False
+    if _pf_pause_reason:
+        _pf_applied = False
+        return False
+    if not _geph_up:
+        pause_pf_for_geo_exit_failure()
+        return False
     if not _pf_acquire_enable_token():
         print("pfctl did not provide a releasable enable token", file=sys.stderr)
         sys.exit(1)
@@ -3830,6 +3911,8 @@ def pf_state_snapshot(port=PROXY_PORT):
     parent_loaded = pf_parent_anchor_loaded()
     return {
         "applied": bool(_pf_applied),
+        "paused": bool(_pf_pause_reason),
+        "pause_reason": _pf_pause_reason,
         "enabled": info.returncode == 0 and "Status: Enabled" in info.stdout,
         "anchor": PF_ANCHOR,
         "parent_loaded": parent_loaded,
@@ -3845,7 +3928,7 @@ def pf_state_snapshot(port=PROXY_PORT):
 
 
 def pf_teardown():
-    global _pf_applied, _pf_interceptor_conflicts
+    global _pf_applied, _pf_interceptor_conflicts, _pf_pause_reason, _pf_pause_since
     try:
         os.remove(STATUS_PATH)        # daemon is going away -> app shows "off"
     except Exception:
@@ -3854,6 +3937,8 @@ def pf_teardown():
     _pf_release_enable_token()
     _pf_applied = False
     _pf_interceptor_conflicts = []
+    _pf_pause_reason = ""
+    _pf_pause_since = 0.0
     print(">> Slipstream pf anchor cleared")
 
 
@@ -4569,15 +4654,15 @@ def network_monitor(port, voice=True):
             if _pf_applied:
                 _pf_flush()
                 _pf_applied = False
+        elif _pf_pause_reason and not resume_pf_after_geo_exit_recovery():
+            if _pf_applied:
+                _pf_flush()
+                _pf_release_enable_token()
+                _pf_applied = False
         else:
             if not _pf_applied:
                 print(">> no VPN -> Slipstream active", file=sys.stderr)
-                if (
-                    pf_parent_anchor_loaded()
-                    and _pf_acquire_enable_token()
-                    and _pf_load(port).returncode == 0
-                ):
-                    _pf_applied = True
+                if try_rearm_pf(port):
                     start_canaries_if_due("pf_reapply", force=True)
                 else:
                     print(
@@ -4588,10 +4673,7 @@ def network_monitor(port, voice=True):
             elif not pf_has_rules(port):
                 if pf_parent_anchor_loaded():
                     print(">> Slipstream pf anchor vanished — re-applying", file=sys.stderr)
-                    if (
-                        _pf_acquire_enable_token()
-                        and _pf_load(port).returncode == 0
-                    ):
+                    if try_rearm_pf(port):
                         start_canaries_if_due("pf_reapply", force=True)
                 else:
                     print(
@@ -4620,7 +4702,11 @@ def network_monitor(port, voice=True):
                 except Exception as e:
                     print(f">> voice sniffer unavailable on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
-        runtime_state = "dormant" if vpn else ("conflict" if conflicts else "active")
+        runtime_state = (
+            "dormant"
+            if vpn or _pf_pause_reason
+            else ("conflict" if conflicts else "active")
+        )
         write_status(runtime_state, iface, cur_iface)
         if first_tick:
             if not conflicts:
@@ -5284,9 +5370,13 @@ async def _handle_impl(reader, writer):
             log_geph_route_failure(host, "SOCKS connect failed")
         else:
             log_geph_route_failure(host, "tunnel down")
+        pause_pf_for_geo_exit_failure()
         if VERBOSE:
-            print(f"  geph unavailable for geo-host {host} -> fail closed "
-                  f"(no RU leak, client will retry)", file=sys.stderr)
+            print(
+                f"  geo-exit unavailable for {host} -> private PF anchor cleared; "
+                "next client retry bypasses Slipstream",
+                file=sys.stderr,
+            )
         writer.close()
         return
 
@@ -5620,6 +5710,7 @@ def do_uninstall():
 
 
 async def amain(port, voice=True):
+    global _geph_up
     try:
         server = await asyncio.start_server(
             handle, "127.0.0.1", port, reuse_address=True)
@@ -5629,6 +5720,10 @@ async def amain(port, voice=True):
                   f"kill it and retry:\n  sudo lsof -ti tcp:{port} | xargs sudo kill\n",
                   file=sys.stderr)
         raise
+    # Do not capture system HTTPS until the geo-exit backend has a live local
+    # listener. If it is still starting, `pf_setup` leaves the daemon dormant
+    # and the monitor re-arms only after a fresh post-pause canary succeeds.
+    _geph_up = probe_geph()
     pf_setup(port)                       # grab pf only AFTER we hold the port
     # Start recovery/health monitoring only after the initial PF reference and
     # private anchor are established. Starting it earlier races `_pf_load()`

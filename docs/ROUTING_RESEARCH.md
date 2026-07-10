@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-11 | OpenAI/Codex transparent-proxy incident | Implemented in this branch | `chatgpt.com` and related OpenAI hosts are explicit geo-exit routes; a Geph miss previously closed the captured client socket while PF remained active, creating reconnect loops. PF now stays dormant at startup until the local backend is live; a later miss clears only `com.apple/slipstream` and pauses re-arm until a fresh OpenAI canary succeeds. Tray no longer force-stops Geph from a health hint. | Add a privileged install/restart/uninstall integration fixture before the next app release. |
 | 2026-07-10 | Unified runtime recovery reducer | Implemented | Normalize local, geo-exit, and unknown-host evidence as `ConnectionOutcome`; a pure reducer may invalidate only the relevant strategy, re-sweep an exact local host, restart only verified owned Geph, recheck, or warn about external state. | Move owned Geph lifecycle into a user LaunchAgent and expose a privacy-bounded action summary in `StatusV2`. |
 | 2026-07-10 | Competing transparent PF interceptors | Fixed and live-verified | An active HTTPS `rdr`/`route-to` before `com.apple/*` receives real app traffic first. Detect nested anchors, pause without mutation, and auto-rearm when clear instead of trusting internal canaries. | Keep a two-interceptor integration fixture and surface the exact paused reason. |
 | 2026-07-10 | Global PF ruleset ownership | Fixed and live-verified | Slipstream now loads only `com.apple/slipstream` below the existing `com.apple/*` anchor point; global reload/disable is forbidden during normal lifecycle and recovery. | Keep the privileged sentinel cycle in release qualification. |
