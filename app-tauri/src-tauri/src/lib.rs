@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -37,16 +37,19 @@ use tauri_plugin_notification::NotificationExt;
 const GEPH_SOCKS_PORT: u16 = 9954;
 // geph's JSON-RPC control listener — we query it for the LIVE exit list.
 const GEPH_CONTROL_PORT: u16 = 9955;
+const GEPH_OWNERSHIP_FILE: &str = "geph-owned.json";
 
-// geph5-client is spawned DETACHED (its own process group) so it survives a tray
-// restart/reinstall — see geph_supervisor. We track/kill it by process match, not
-// a held child handle, so no GephState is needed.
+// geph5-client is spawned DETACHED so it survives a tray restart. Ownership is
+// persisted as a private PID/executable/config record; a listener alone is never
+// sufficient proof that Slipstream may adopt or terminate a process.
 
 const STATUS_PATH: &str = "/var/run/slipstream.status";
 const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
+const PF_ANCHOR: &str = "com.apple/slipstream";
+const PF_TOKEN_PATH: &str = "/var/run/slipstream-pf.token";
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
@@ -782,6 +785,8 @@ fn daemon_recovery_shell() -> String {
     let plist = shell_quote(LAUNCHD_PLIST);
     let daemon = shell_quote(INSTALLED_DAEMON);
     let recovery = shell_quote(DAEMON_RECOVERY_STATUS_PATH);
+    let anchor = shell_quote(PF_ANCHOR);
+    let pf_token_path = shell_quote(PF_TOKEN_PATH);
     format!(
         "recovery_status={recovery}; \
          write_recovery() {{ \
@@ -797,9 +802,16 @@ fn daemon_recovery_shell() -> String {
          if printf '%s\\n' \"$status\" \
             | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
          then write_recovery daemon_recovered; exit 0; fi; \
-         /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; \
-         /sbin/pfctl -d >/dev/null 2>&1 || true; \
-         write_recovery pf_reset"
+         /sbin/pfctl -a {anchor} -F all >/dev/null 2>&1 || true; \
+         if [ -f {pf_token_path} ]; then \
+           pf_token=$(/bin/cat {pf_token_path} 2>/dev/null || true); \
+           case \"$pf_token\" in \
+             *[!0-9]*|'') ;; \
+             *) /sbin/pfctl -X \"$pf_token\" >/dev/null 2>&1 || true ;; \
+           esac; \
+           /bin/rm -f {pf_token_path}; \
+         fi; \
+         write_recovery anchor_cleared"
     )
 }
 
@@ -889,7 +901,7 @@ fn geph_config_set(app: &AppHandle, key: &str, val: &str) {
         .unwrap_or_default();
     cfg.insert(key.to_string(), Value::String(val.to_string()));
     if let Ok(s) = serde_json::to_string_pretty(&Value::Object(cfg)) {
-        let _ = fs::write(&path, s);
+        let _ = write_private_atomic(&path, s.as_bytes());
     }
 }
 
@@ -1574,11 +1586,142 @@ fn geph_bin_path() -> Option<std::path::PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join("geph5-client"))
 }
 
-/// Cheap liveness: is geph's SOCKS5 listener up on GEPH_SOCKS_PORT? A plain TCP
-/// connect is enough to ADOPT an already-running geph (its active config already
-/// matched). A full SOCKS handshake here can transiently time out under load and
-/// cause a needless respawn — which defeats the whole survive-across-restart
-/// design — so we deliberately keep this to a connect check.
+fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(mode);
+    fs::set_permissions(path, permissions)
+}
+
+fn harden_geph_dir(dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    set_mode(dir, 0o700)?;
+    for name in [
+        "geph-active.yaml",
+        "geph-cache.db",
+        "geph-cache.db-shm",
+        "geph-cache.db-wal",
+        "geph-exits.json",
+        "geph.json",
+        GEPH_OWNERSHIP_FILE,
+    ] {
+        let path = dir.join(name);
+        if path.exists() {
+            set_mode(&path, 0o600)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_private_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("private file has no parent"))?;
+    harden_geph_dir(parent)?;
+    let tmp = parent.join(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("private"),
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        set_mode(&tmp, 0o600)?;
+        fs::rename(&tmp, path)?;
+        set_mode(path, 0o600)
+    })();
+    let _ = fs::remove_file(&tmp);
+    result
+}
+
+fn geph_ownership_path(dir: &Path) -> PathBuf {
+    dir.join(GEPH_OWNERSHIP_FILE)
+}
+
+fn write_geph_ownership(dir: &Path, pid: u32, executable: &Path, config: &Path) -> bool {
+    let value = json!({
+        "pid": pid,
+        "executable": executable.to_string_lossy(),
+        "config": config.to_string_lossy(),
+    });
+    serde_json::to_vec(&value)
+        .ok()
+        .and_then(|content| write_private_atomic(&geph_ownership_path(dir), &content).ok())
+        .is_some()
+}
+
+fn read_geph_ownership(dir: &Path) -> Option<Value> {
+    let raw = fs::read(geph_ownership_path(dir)).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
+fn geph_process_command(pid: u32) -> Option<String> {
+    let output = Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|command| !command.is_empty())
+}
+
+fn command_matches_geph(command: &str, executable: &Path, config: &Path) -> bool {
+    let executable = executable.to_string_lossy();
+    let config = config.to_string_lossy();
+    command.trim() == format!("{executable} --config {config}")
+}
+
+fn geph_listener_pid() -> Option<u32> {
+    let output = Command::new("/usr/sbin/lsof")
+        .args([
+            "-nP",
+            &format!("-iTCP:{GEPH_SOCKS_PORT}"),
+            "-sTCP:LISTEN",
+            "-t",
+        ])
+        .output()
+        .ok()?;
+    output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()?
+            .trim()
+            .parse()
+            .ok()
+    })?
+}
+
+fn owned_geph_pid(dir: &Path) -> Option<u32> {
+    let state = read_geph_ownership(dir)?;
+    let pid = state.get("pid")?.as_u64()?.try_into().ok()?;
+    let executable = PathBuf::from(state.get("executable")?.as_str()?);
+    let config = PathBuf::from(state.get("config")?.as_str()?);
+    let command = geph_process_command(pid)?;
+    (geph_listener_pid() == Some(pid) && command_matches_geph(&command, &executable, &config))
+        .then_some(pid)
+}
+
+fn adopt_legacy_owned_geph(dir: &Path, executable: &Path, config: &Path) -> bool {
+    let Some(pid) = geph_listener_pid() else {
+        return false;
+    };
+    let Some(command) = geph_process_command(pid) else {
+        return false;
+    };
+    command_matches_geph(&command, executable, config)
+        && write_geph_ownership(dir, pid, executable, config)
+}
+
+/// Cheap liveness only. Ownership is checked separately before adoption.
 fn geph_socks_alive() -> bool {
     std::net::TcpStream::connect_timeout(
         &(std::net::Ipv4Addr::LOCALHOST, GEPH_SOCKS_PORT).into(),
@@ -1587,17 +1730,85 @@ fn geph_socks_alive() -> bool {
     .is_ok()
 }
 
-/// Kill the geph5-client WE launched (matched by our unique config path). Used
-/// before a deliberate reconfigure (exit change) or when Geph is disabled.
-fn geph_kill_running() {
-    let _ = Command::new("/usr/bin/pkill")
-        .args(["-f", "geph5-client.*geph-active.yaml"])
+fn geph_owned_socks_alive(dir: &Path, executable: &Path, config: &Path) -> bool {
+    if !geph_socks_alive() {
+        return false;
+    }
+    owned_geph_pid(dir).is_some() || adopt_legacy_owned_geph(dir, executable, config)
+}
+
+/// Stop only a process whose PID, executable, config, and listener all match the
+/// private ownership record. Unknown listeners are external state.
+fn geph_kill_owned(dir: &Path) {
+    let Some(state) = read_geph_ownership(dir) else {
+        let _ = fs::remove_file(geph_ownership_path(dir));
+        return;
+    };
+    let Some(pid) = state
+        .get("pid")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    else {
+        let _ = fs::remove_file(geph_ownership_path(dir));
+        return;
+    };
+    let executable = state
+        .get("executable")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let config = state
+        .get("config")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let initially_owned =
+        executable
+            .as_deref()
+            .zip(config.as_deref())
+            .is_some_and(|(executable, config)| {
+                geph_listener_pid() == Some(pid)
+                    && geph_process_command(pid)
+                        .is_some_and(|command| command_matches_geph(&command, executable, config))
+            });
+    if !initially_owned {
+        let _ = fs::remove_file(geph_ownership_path(dir));
+        return;
+    }
+    let pid_string = pid.to_string();
+    let _ = Command::new("/bin/kill")
+        .args(["-TERM", &pid_string])
         .status();
+    for _ in 0..20 {
+        if Command::new("/bin/kill")
+            .args(["-0", &pid_string])
+            .status()
+            .map(|status| !status.success())
+            .unwrap_or(true)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if let (Some(executable), Some(config), Some(command)) = (
+        executable.as_deref(),
+        config.as_deref(),
+        geph_process_command(pid),
+    ) {
+        // Revalidate immediately before SIGKILL so a rapidly recycled PID can
+        // never turn an owned-process shutdown into a broad process kill.
+        if geph_listener_pid() == Some(pid) && command_matches_geph(&command, executable, config) {
+            let _ = Command::new("/bin/kill")
+                .args(["-KILL", &pid_string])
+                .status();
+        }
+    }
+    let _ = fs::remove_file(geph_ownership_path(dir));
 }
 
 /// Stop a running geph5-client (e.g. before respawning with a new config).
-fn geph_stop(_app: &AppHandle) {
-    geph_kill_running();
+fn geph_stop(app: &AppHandle) {
+    if let Ok(dir) = app.path().app_config_dir() {
+        geph_kill_owned(&dir);
+    }
 }
 
 /// Supervisor: keep the bundled geph5-client running whenever Geph is enabled and
@@ -1611,7 +1822,7 @@ fn geph_stop(_app: &AppHandle) {
 async fn geph_supervisor(app: AppHandle) {
     loop {
         if !geph_enabled(&app) {
-            geph_kill_running(); // user disabled Geph -> ensure ours is down
+            geph_stop(&app);
             tokio::time::sleep(Duration::from_secs(3)).await;
             continue;
         }
@@ -1624,40 +1835,61 @@ async fn geph_supervisor(app: AppHandle) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             continue;
         };
-        let _ = fs::create_dir_all(&dir);
+        if let Err(error) = harden_geph_dir(&dir) {
+            eprintln!("geph config permissions unavailable: {error}");
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            continue;
+        }
         let cfg_path = dir.join("geph-active.yaml");
         let cache_path = dir.join("geph-cache.db").to_string_lossy().into_owned();
         let desired = geph_config_yaml(&secret, &exit, &cache_path);
 
-        // ADOPT: if a geph is already tunnelling on :9954 (e.g. it survived this
-        // tray's restart/reinstall), do NOT respawn it — respawning drops every
-        // connection riding the tunnel (the user's Claude app included). We only
-        // (re)spawn when :9954 is actually DOWN. A deliberate config change (exit
-        // or account) calls geph_stop(), which frees :9954, so the next pass here
-        // sees it down and respawns with the new config. (No config-equality check
-        // — it was too brittle and forced a churn on every launch.)
-        if geph_socks_alive() {
-            tokio::time::sleep(Duration::from_secs(6)).await;
-            continue;
-        }
-
-        // geph is down -> spawn a fresh, DETACHED geph with the current config.
-        geph_kill_running();
-        let _ = fs::write(&cfg_path, &desired);
         let Some(bin) = geph_bin_path() else {
             tokio::time::sleep(Duration::from_secs(10)).await;
             continue;
         };
+
+        // Adopt only a process proven by PID + executable + config + listener.
+        if geph_owned_socks_alive(&dir, &bin, &cfg_path) {
+            tokio::time::sleep(Duration::from_secs(6)).await;
+            continue;
+        }
+
+        // A listener without ownership proof belongs to another process. Never
+        // adopt it, never kill it, and do not race it for the port.
+        if geph_socks_alive() {
+            eprintln!("geph port {GEPH_SOCKS_PORT} is owned by another process");
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        }
+
+        // geph is down -> spawn a fresh, DETACHED geph with the current config.
+        let _ = fs::remove_file(geph_ownership_path(&dir));
+        if let Err(error) = write_private_atomic(&cfg_path, desired.as_bytes()) {
+            eprintln!("geph config write failed: {error}");
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            continue;
+        }
         let spawned = Command::new(&bin)
             .args(["--config", &cfg_path.to_string_lossy()])
             .process_group(0) // detach: not in the tray's group -> survives tray exit
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
-        if let Err(e) = spawned {
-            eprintln!("geph spawn failed: {e}");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
+        match spawned {
+            Ok(child) => {
+                if !write_geph_ownership(&dir, child.id(), &bin, &cfg_path) {
+                    eprintln!("geph ownership record unavailable; stopping untracked process");
+                    let _ = Command::new("/bin/kill")
+                        .args(["-TERM", &child.id().to_string()])
+                        .status();
+                }
+            }
+            Err(error) => {
+                eprintln!("geph spawn failed: {error}");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
         }
         // Let it bind + start tunnelling before the next health check.
         tokio::time::sleep(Duration::from_secs(8)).await;
@@ -2033,14 +2265,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_shell_script, copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
-        daemon_recovery_status_value, diagnostic_log_tail, diagnostic_snapshot_value,
-        diagnostic_summary_value, geph_restart_recommendation, install_diagnostic_value,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
-        telegram_proxy_detail, valid_bundled_daemon, write_diagnostic_snapshot_file,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
+        admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
+        daemon_recovery_shell, daemon_recovery_status_value, diagnostic_log_tail,
+        diagnostic_snapshot_value, diagnostic_summary_value, geph_restart_recommendation,
+        harden_geph_dir, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
+        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
+        routing_health_summary, shell_quote, should_recover_daemon,
+        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
+        valid_bundled_daemon, write_diagnostic_snapshot_file, write_private_atomic,
+        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2539,10 +2772,66 @@ mod tests {
         assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
         assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
         assert!(shell.contains("daemon_recovered"));
-        assert!(shell.contains("pf_reset"));
-        assert!(shell.contains("/sbin/pfctl -f /etc/pf.conf"));
+        assert!(shell.contains("anchor_cleared"));
+        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F all"));
+        assert!(shell.contains(PF_TOKEN_PATH));
+        assert!(!shell.contains("/sbin/pfctl -f /etc/pf.conf"));
+        assert!(!shell.contains("/sbin/pfctl -d"));
         assert!(shell.find("kickstart").unwrap() < shell.find("pfctl").unwrap());
         assert!(shell.find("--status").unwrap() < shell.find("pfctl").unwrap());
+    }
+
+    #[test]
+    fn geph_private_files_and_directory_use_owner_only_permissions() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-geph-permissions-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("geph-active.yaml");
+        std::fs::write(&config, "credentials:\n secret: test\n").unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        harden_geph_dir(&dir).unwrap();
+        write_private_atomic(&config, b"credentials:\n secret: replaced\n").unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&config).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn geph_command_match_requires_exact_executable_and_config() {
+        let executable =
+            std::path::Path::new("/Applications/Slipstream.app/Contents/MacOS/geph5-client");
+        let config = std::path::Path::new(
+            "/Users/test/Library/Application Support/dev.slipstream.tray/geph-active.yaml",
+        );
+        let command = format!("{} --config {}", executable.display(), config.display());
+
+        assert!(command_matches_geph(&command, executable, config));
+        assert!(!command_matches_geph(
+            "/tmp/geph5-client --config /tmp/geph-active.yaml",
+            executable,
+            config
+        ));
+        assert!(!command_matches_geph(
+            executable.to_str().unwrap(),
+            executable,
+            config
+        ));
+        assert!(!command_matches_geph(
+            &(command + ".untrusted"),
+            executable,
+            config
+        ));
     }
 
     #[test]

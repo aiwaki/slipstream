@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tproxy — TRANSPARENT tlsrec proxy + DoH via pf rdr (Spike 4, needs root).
+"""tproxy — transparent tlsrec proxy + DoH via a private pf anchor.
 
 Two blocks were found on the target network:
   1. SNI DPI  -> beaten by tlsrec (tiny first TLS record).
@@ -7,15 +7,15 @@ Two blocks were found on the target network:
      real server, so desync is useless. Beaten by re-resolving the SNI over DoH
      (DNS-over-HTTPS) and connecting to the REAL IP.
 
-A transparent pf redirect captures ALL local TCP/443 (browser, Discord, the
-updater) with no per-app config and blocks QUIC. For each connection we read the
-ClientHello, parse the SNI, DoH-resolve it to the real IP, then forward a
-tlsrec-split ClientHello to that real IP.
+A transparent pf redirect captures local TCP/443 (browser, Discord, the updater)
+without replacing the system ruleset. QUIC remains untouched. For each connection
+we read the ClientHello, parse the SNI, DoH-resolve it to the real IP, then
+forward a tlsrec-split ClientHello to that real IP.
 
 Run:   sudo python3 tproxy.py [--verbose]
-Stop:  Ctrl-C  (auto-restores pf + connectivity)
+Stop:  Ctrl-C  (flushes only Slipstream's private pf anchor)
 ESCAPE HATCH if connectivity breaks (other terminal):
-    sudo pfctl -f /etc/pf.conf ; sudo pfctl -d
+    sudo pfctl -a com.apple/slipstream -F all
 """
 import argparse
 import asyncio
@@ -32,6 +32,7 @@ from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
 import pwd
+import re
 import resource
 import signal
 import socket
@@ -66,8 +67,11 @@ VERBOSE = False
 # DPI-blocked -> we tlsrec its ClientHello too.
 DOH = [("1.1.1.1", "cloudflare-dns.com"), ("8.8.8.8", "dns.google")]
 
+PF_ANCHOR = "com.apple/slipstream"
+PF_PARENT_ANCHOR = "com.apple/*"
+PF_CONFIG_PATH = "/etc/pf.conf"
+PF_TOKEN_PATH = "/var/run/slipstream-pf.token"
 PF_RULES = """\
-table <slipstream_quic_block> persist
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
 """
@@ -75,14 +79,12 @@ pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user !
 # over QUIC/HTTP3, and QUIC to those hosts WORKS on this TSPU (verified 2026-07-07:
 # Version-Negotiation replies in ~0.04s). The old QUIC block (Codex #11-#15) forced
 # the browser onto TCP, which IS DPI-dropped for googlevideo -> video died. Leaving
-# QUIC alone restores native HTTP3 playback. The <slipstream_quic_block> table is
-# kept (empty, unreferenced) so the legacy note_quic_block_ips() calls don't error.
+# QUIC alone restores native HTTP3 playback. Slipstream therefore owns no UDP/443
+# block table at all.
 
 _pf_applied = False
 _pf_fd = None
-QUIC_BLOCK_TABLE = "slipstream_quic_block"
-QUIC_BLOCK_MAX = 4096
-_quic_block_ips = OrderedDict()
+_pf_enable_token = None
 _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # Dedicated pool for the blocking off-loop work (DoH resolves, fake injection).
 # The default asyncio executor is tiny (~cpu+4); a browser opening many new hosts
@@ -109,13 +111,18 @@ _conn_count = 0                # live proxied connections
 # enter the tunnel (privacy + they'd break, geph exits abroad). geph absent ->
 # _geph_up stays False -> this whole path is inert and behaviour is unchanged.
 GEPH_ENABLED = os.environ.get("SLIP_GEPH", "1") != "0"
-# Prefer Slipstream's OWN bundled geph5-client (:9954, started by the menu-bar app
-# with the user's account secret); fall back to a separately-running Geph.app
-# (:9909). SLIP_GEPH_PORT overrides with a single explicit port.
+# Use Slipstream's owned geph5-client (:9954). A separately-running Geph.app on
+# :9909 is diagnostics-only unless SLIP_GEPH_PORT explicitly opts into it.
 _env_geph_port = os.environ.get("SLIP_GEPH_PORT")
-GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [9954, 9909]
+GEPH_OWNED_PORT = 9954
+GEPH_EXTERNAL_PORT = 9909
+GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [GEPH_OWNED_PORT]
+GEPH_OWNERSHIP_FILE = "geph-owned.json"
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
+_geph_owned = False
+_geph_port_conflict = False
+_external_geph_detected = False
 _system_dns_cache = {
     "ts": 0.0,
     "status": None,
@@ -3321,6 +3328,9 @@ def write_status(state, iface, voice_iface):
             "rearm": rearm_status_snapshot(now),
             "geph_detail": {
                 "port": _geph_port or 0,
+                "owned": bool(_geph_owned),
+                "port_conflict": bool(_geph_port_conflict),
+                "external_detected": bool(_external_geph_detected),
                 "failure_reason": _geph_last_failure["reason"],
                 "last_failure_host": _geph_last_failure["host"],
                 "last_failure_at": _geph_last_failure["ts"],
@@ -3342,7 +3352,7 @@ def write_status(state, iface, voice_iface):
 
 
 # ---------------------------------------------------------------- pf plumbing
-# LaunchDaemons start with an empty PATH, so bare 'pfctl'/'route'/'pgrep' aren't
+# LaunchDaemons start with an empty PATH, so bare 'pfctl'/'route' aren't
 # found and the daemon silently does nothing — force the system dirs onto PATH.
 _RUN_ENV = dict(os.environ)
 _RUN_ENV["PATH"] = "/sbin:/usr/sbin:/bin:/usr/bin:" + _RUN_ENV.get("PATH", "")
@@ -3355,56 +3365,142 @@ def _run(*args):
         return subprocess.CompletedProcess(args, 127, "", f"not found: {args[0]}")
 
 
-def _quic_blockable_ip(ip):
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    return (
-        addr.version == 4
-        and not addr.is_loopback
-        and not addr.is_link_local
-        and not addr.is_multicast
-        and not addr.is_private
-        and not _ip_in_nets(ip, TELEGRAM_NETS)
+def _pf_parent_declarations(text):
+    rdr = re.search(
+        rf'^\s*rdr-anchor\s+"{re.escape(PF_PARENT_ANCHOR)}"(?:\s+.*)?$',
+        text,
+        re.MULTILINE,
     )
+    rules = re.search(
+        rf'^\s*anchor\s+"{re.escape(PF_PARENT_ANCHOR)}"(?:\s+.*)?$',
+        text,
+        re.MULTILINE,
+    )
+    return bool(rdr and rules)
 
 
-def sync_quic_block_table():
-    ips = list(_quic_block_ips)
-    if ips:
-        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "replace", *ips)
+def pf_parent_anchor_available(config_path=PF_CONFIG_PATH):
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return _pf_parent_declarations(f.read())
+    except OSError:
+        return False
+
+
+def pf_parent_anchor_loaded():
+    nat = _run("pfctl", "-sn")
+    rules = _run("pfctl", "-sr")
+    if nat.returncode != 0 or rules.returncode != 0:
+        return False
+    return _pf_parent_declarations(nat.stdout + "\n" + rules.stdout)
+
+
+def _pf_token_from_result(result):
+    output = f"{result.stdout}\n{result.stderr}"
+    match = re.search(r"Token\s*:\s*([0-9]+)", output, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _write_pf_token(token, path=None):
+    path = PF_TOKEN_PATH if path is None else path
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w", encoding="ascii") as f:
+            f.write(token + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _read_pf_token(path=None):
+    path = PF_TOKEN_PATH if path is None else path
+    try:
+        token = open(path, encoding="ascii").read().strip()
+    except OSError:
+        return None
+    return token if token.isdigit() else None
+
+
+def _remove_pf_token(path=None):
+    path = PF_TOKEN_PATH if path is None else path
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def _pf_release_enable_token():
+    global _pf_enable_token
+    token = _pf_enable_token or _read_pf_token()
+    if not token:
+        _pf_enable_token = None
+        _remove_pf_token()
+        return None
+    result = _run("pfctl", "-X", token)
+    if result.returncode == 0:
+        _pf_enable_token = None
+        _remove_pf_token()
     else:
-        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "flush")
+        # Keep the token recoverable. Overwriting it with a new reference would
+        # leak PF ownership and make a later uninstall unable to release it.
+        _pf_enable_token = token
+    return result
 
 
-def note_quic_block_ips(ips, max_ips=QUIC_BLOCK_MAX):
-    new_ips = []
-    for ip in ips:
-        if not _quic_blockable_ip(ip):
-            continue
-        exists = ip in _quic_block_ips
-        _quic_block_ips[ip] = time.monotonic()
-        _quic_block_ips.move_to_end(ip)
-        if not exists:
-            new_ips.append(ip)
-    evicted = False
-    while len(_quic_block_ips) > max_ips:
-        _quic_block_ips.popitem(last=False)
-        evicted = True
-    if _pf_applied and evicted:
-        sync_quic_block_table()
-    elif _pf_applied and new_ips:
-        _run("pfctl", "-t", QUIC_BLOCK_TABLE, "-T", "add", *new_ips)
+def _pf_acquire_enable_token():
+    global _pf_enable_token
+    persisted = _read_pf_token()
+    if _pf_enable_token and persisted == _pf_enable_token:
+        return True
+    if _pf_enable_token or persisted:
+        released = _pf_release_enable_token()
+        if released is not None and released.returncode != 0:
+            return False
+    enabled = _run("pfctl", "-E")
+    if enabled.returncode != 0:
+        return False
+    token = _pf_token_from_result(enabled)
+    if not token:
+        return False
+    _pf_enable_token = token
+    _write_pf_token(token)
+    return True
+
+
+def _pf_flush():
+    return _run("pfctl", "-a", PF_ANCHOR, "-F", "all")
+
+
+def _legacy_pf_rules_loaded(port):
+    nat = _run("pfctl", "-sn")
+    rules = _run("pfctl", "-sr")
+    if nat.returncode != 0 or rules.returncode != 0:
+        return False
+    redirect = f"-> 127.0.0.1 port {port}" in nat.stdout
+    route = "route-to (lo0 127.0.0.1)" in rules.stdout
+    https = re.search(r"\bport\s*(?:=\s*)?443\b", rules.stdout)
+    return bool(redirect and route and https)
+
+
+def _restore_legacy_pf_rules(port):
+    if not _legacy_pf_rules_loaded(port):
+        return False
+    result = _run("pfctl", "-f", PF_CONFIG_PATH)
+    if result.returncode != 0:
+        raise RuntimeError("unable to restore the pre-anchor pf ruleset")
+    print(">> migrated legacy global pf rules to the private Slipstream anchor")
+    return True
 
 
 def _pf_load(port):
     f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
     f.write(PF_RULES.format(port=port))
     f.close()
-    r = _run("pfctl", "-f", f.name)
-    if r.returncode == 0:
-        sync_quic_block_table()
+    r = _run("pfctl", "-a", PF_ANCHOR, "-f", f.name)
     try:
         os.unlink(f.name)
     except Exception:
@@ -3414,28 +3510,60 @@ def _pf_load(port):
 
 def pf_setup(port):
     global _pf_applied
-    _run("pfctl", "-f", "/etc/pf.conf")
-    _run("pfctl", "-E")                 # enable pf (ref-counted) — once
+    if not pf_parent_anchor_available() or not pf_parent_anchor_loaded():
+        print(
+            f"pf parent anchor {PF_PARENT_ANCHOR} is unavailable; "
+            "refusing to replace the system ruleset",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not _pf_acquire_enable_token():
+        print("pfctl did not provide a releasable enable token", file=sys.stderr)
+        sys.exit(1)
     r = _pf_load(port)
     if r.returncode != 0:
+        _pf_flush()
+        _pf_release_enable_token()
         print("pfctl load failed:\n" + r.stderr, file=sys.stderr)
         sys.exit(1)
     _pf_applied = True
-    print(f">> pf active: all TCP/443 -> 127.0.0.1:{port}; QUIC scoped by table")
+    print(
+        f">> pf anchor {PF_ANCHOR} active: TCP/443 -> 127.0.0.1:{port}; "
+        "QUIC untouched"
+    )
 
 
 def pf_has_rules(port):
     """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
-    return f"port {port}" in _run("pfctl", "-sn").stdout
+    if not pf_parent_anchor_loaded():
+        return False
+    nat = _run("pfctl", "-a", PF_ANCHOR, "-sn")
+    rules = _run("pfctl", "-a", PF_ANCHOR, "-sr")
+    return (
+        nat.returncode == 0
+        and rules.returncode == 0
+        and f"port {port}" in nat.stdout
+        and "route-to (lo0 127.0.0.1)" in rules.stdout
+    )
 
 
 def pf_state_snapshot(port=PROXY_PORT):
     info = _run("pfctl", "-s", "info")
-    rules = _run("pfctl", "-sn")
+    anchor_nat = _run("pfctl", "-a", PF_ANCHOR, "-sn")
+    anchor_rules = _run("pfctl", "-a", PF_ANCHOR, "-sr")
+    parent_loaded = pf_parent_anchor_loaded()
     return {
         "applied": bool(_pf_applied),
         "enabled": info.returncode == 0 and "Status: Enabled" in info.stdout,
-        "rules_loaded": rules.returncode == 0 and f"port {port}" in rules.stdout,
+        "anchor": PF_ANCHOR,
+        "parent_loaded": parent_loaded,
+        "rules_loaded": (
+            parent_loaded
+            and anchor_nat.returncode == 0
+            and anchor_rules.returncode == 0
+            and f"port {port}" in anchor_nat.stdout
+            and "route-to (lo0 127.0.0.1)" in anchor_rules.stdout
+        ),
     }
 
 
@@ -3445,12 +3573,10 @@ def pf_teardown():
         os.remove(STATUS_PATH)        # daemon is going away -> app shows "off"
     except Exception:
         pass
-    if not _pf_applied:
-        return
-    _run("pfctl", "-f", "/etc/pf.conf")
-    _run("pfctl", "-d")
+    _pf_flush()
+    _pf_release_enable_token()
     _pf_applied = False
-    print(">> pf restored")
+    print(">> Slipstream pf anchor cleared")
 
 
 def running_from_install_dir(file_path=None, executable=None, frozen=None):
@@ -3535,31 +3661,13 @@ def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
     raise last
 
 
-def cleanup_stale():
-    """Self-heal: kill any leftover tproxy instances (e.g. a Ctrl+Z-suspended
-    one still holding the port) and reset pf to the clean default, so a fresh
-    start always works without manual lsof/kill/escape."""
-    me, parent = os.getpid(), os.getppid()
-    # A MANUAL run (from the repo, not the installed daemon) must stop the daemon
-    # first: launchd KeepAlive would instantly restart a kill-9'd daemon and
-    # re-grab :1080. PyInstaller sets __file__ under _internal, so frozen daemons
-    # must be identified by sys.executable instead.
+def cleanup_stale(port=PROXY_PORT):
+    """Clear only Slipstream-owned state left by a prior daemon instance."""
     if not running_from_install_dir():
         _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
-    killed = 0
-    for pattern in ("tproxy.py", "slipstreamd"):
-        res = _run("pgrep", "-f", pattern)
-        for line in res.stdout.split():
-            try:
-                pid = int(line)
-            except ValueError:
-                continue
-            if pid not in (me, parent):
-                _run("kill", "-9", str(pid))
-                killed += 1
-    _run("pfctl", "-f", "/etc/pf.conf")     # drop any stale rules from a crash
-    if killed:
-        print(f">> self-heal: killed {killed} stale tproxy instance(s), reset pf")
+    _restore_legacy_pf_rules(port)
+    _pf_flush()
+    _pf_release_enable_token()
 
 
 def orig_dst(sock):
@@ -4136,6 +4244,12 @@ def network_monitor(port, voice=True):
         if probe_geph():
             geph_strikes = 0
             up = True
+        elif _geph_port_conflict:
+            # Ownership conflicts are not transient tunnel misses. Keeping the
+            # previous port alive through hysteresis could send geo-exit traffic
+            # to an unrelated SOCKS listener, so fail closed immediately.
+            geph_strikes = 3
+            up = False
         else:
             geph_strikes += 1
             up = geph_strikes < 3
@@ -4155,18 +4269,39 @@ def network_monitor(port, voice=True):
             if _pf_applied:
                 print(f">> VPN up (default via {iface}) -> Slipstream dormant",
                       file=sys.stderr)
-                _run("pfctl", "-f", "/etc/pf.conf")
+                _pf_flush()
                 _pf_applied = False
         else:
             if not _pf_applied:
                 print(">> no VPN -> Slipstream active", file=sys.stderr)
-                _pf_load(port)
-                _pf_applied = True
-                start_canaries_if_due("pf_reapply", force=True)
+                if (
+                    pf_parent_anchor_loaded()
+                    and _pf_acquire_enable_token()
+                    and _pf_load(port).returncode == 0
+                ):
+                    _pf_applied = True
+                    start_canaries_if_due("pf_reapply", force=True)
+                else:
+                    print(
+                        f">> pf parent anchor {PF_PARENT_ANCHOR} unavailable; "
+                        "leaving external rules untouched",
+                        file=sys.stderr,
+                    )
             elif not pf_has_rules(port):
-                print(">> pf rules vanished — re-applying", file=sys.stderr)
-                _pf_load(port)
-                start_canaries_if_due("pf_reapply", force=True)
+                if pf_parent_anchor_loaded():
+                    print(">> Slipstream pf anchor vanished — re-applying", file=sys.stderr)
+                    if (
+                        _pf_acquire_enable_token()
+                        and _pf_load(port).returncode == 0
+                    ):
+                        start_canaries_if_due("pf_reapply", force=True)
+                else:
+                    print(
+                        f">> pf parent anchor {PF_PARENT_ANCHOR} vanished; "
+                        "leaving external rules untouched",
+                        file=sys.stderr,
+                    )
+                    _pf_applied = False
         if send is not None:                       # scapy available
             if iface and iface != cur_iface:
                 if sniffer is not None:
@@ -4420,8 +4555,98 @@ async def pump(reader, up_w):
     return total
 
 
-# Control-RPC port paired with each SOCKS port (ours :9955 / the GUI's :12222).
+# Control-RPC port paired with each SOCKS port. The external mapping is used only
+# when SLIP_GEPH_PORT explicitly opts into the user's separately-running Geph.
 GEPH_CONTROL = {9954: 9955, 9909: 12222}
+
+
+def _console_user_home():
+    try:
+        uid = os.stat("/dev/console").st_uid
+        if uid == 0:
+            return None
+        return pwd.getpwuid(uid).pw_dir
+    except (OSError, KeyError):
+        return None
+
+
+def geph_ownership_path(home=None):
+    home = _console_user_home() if home is None else home
+    if not home:
+        return None
+    return os.path.join(
+        home,
+        "Library",
+        "Application Support",
+        "dev.slipstream.tray",
+        GEPH_OWNERSHIP_FILE,
+    )
+
+
+def _read_geph_ownership(path=None):
+    path = geph_ownership_path() if path is None else path
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _geph_listener_pid(port):
+    result = _run(
+        "/usr/sbin/lsof",
+        "-nP",
+        f"-iTCP:{port}",
+        "-sTCP:LISTEN",
+        "-t",
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.splitlines()[0].strip())
+    except (IndexError, ValueError):
+        return None
+
+
+def _geph_process_command(pid):
+    result = _run("/bin/ps", "-p", str(pid), "-o", "command=")
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _geph_state_matches(state, listener_pid, command):
+    if not isinstance(state, dict) or not isinstance(listener_pid, int):
+        return False
+    try:
+        state_pid = int(state.get("pid"))
+    except (TypeError, ValueError):
+        return False
+    executable = state.get("executable")
+    config = state.get("config")
+    if state_pid != listener_pid or not isinstance(executable, str) or not executable:
+        return False
+    if not isinstance(config, str) or not config:
+        return False
+    return command.strip() == f"{executable} --config {config}"
+
+
+def geph_listener_owned(port=GEPH_OWNED_PORT, state=None, listener_pid=None, command=None):
+    state = _read_geph_ownership() if state is None else state
+    listener_pid = _geph_listener_pid(port) if listener_pid is None else listener_pid
+    command = _geph_process_command(listener_pid) if command is None and listener_pid else command
+    return _geph_state_matches(state, listener_pid, command or "")
+
+
+def _tcp_listener_present(port, timeout=0.25):
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
 
 
 def probe_geph():
@@ -4431,20 +4656,35 @@ def probe_geph():
     intermittently failed under normal tunnel load, mis-reporting geph "down",
     which fired fail-closed and dropped live app connections (the Claude/Codex
     reconnects). geph's own process was stable throughout; only our probe flapped."""
-    global _geph_port
+    global _geph_port, _geph_owned, _geph_port_conflict, _external_geph_detected
     if not GEPH_ENABLED:
         _geph_port = None
+        _geph_owned = False
+        _geph_port_conflict = False
+        _external_geph_detected = False
         return False
-    # Sticky: re-check the LAST-GOOD port first, only then the rest. Stops the
-    # daemon oscillating 9954<->9909 (ours vs the user's GUI) when both are up —
-    # port churn mid-session breaks live connections and spams up/down logs.
+    _external_geph_detected = _tcp_listener_present(GEPH_EXTERNAL_PORT)
+    _geph_port_conflict = False
+    # Sticky re-check is retained only for an explicit port override. The default
+    # path has one owned port and can never drift to the user's external Geph.
     order = GEPH_PORTS
     if _geph_port in GEPH_PORTS and _geph_port != GEPH_PORTS[0]:
         order = [_geph_port] + [p for p in GEPH_PORTS if p != _geph_port]
     for p in order:
+        owned = p == GEPH_OWNED_PORT and geph_listener_owned(p)
+        if _env_geph_port is None and not owned:
+            if _tcp_listener_present(p):
+                _geph_port_conflict = True
+                _geph_port = None
+            _geph_owned = False
+            continue
         if _geph_live(p):
             _geph_port = p
+            _geph_owned = owned
             return True
+    _geph_owned = False
+    if _geph_port_conflict:
+        _geph_port = None
     return False    # transient miss -> keep last good _geph_port; hysteresis decides
 
 
@@ -4695,7 +4935,6 @@ async def _handle_impl(reader, writer):
     # that the DNS-provided path is live; any runtime miss falls back to Geph.
     if is_tls and geph_route(host):
         policy = route_policy(host)
-        note_quic_block_ips([dst_ip])
         if smart_dns_route_enabled(host):
             smart = await _try_smart_dns_geo_connect(host, dst_port, head + body)
             if smart:
@@ -4795,8 +5034,6 @@ async def _handle_impl(reader, writer):
                 _dead.pop(host, None)
                 if _strat_cache.get(host) != chosen_name:
                     remember_strategy(host, chosen_name)
-                if chosen_name != "plain":
-                    note_quic_block_ips([dst_ip, chosen, *real_ips[:ip_limit]])
         elif host:
             _dead[host] = now + DEAD_TTL        # arm the negative cache
             if len(_dead) > 4096:
@@ -5071,17 +5308,17 @@ def do_uninstall():
     except Exception:
         pass
     remove_obsolete_newsyslog_config()
-    _run("pfctl", "-f", "/etc/pf.conf")
-    _run("pfctl", "-d")
+    _pf_flush()
+    _pf_release_enable_token()
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
     try:
         os.remove(_STRAT_PATH)             # drop any stale strategy cache
     except Exception:
         pass
-    print("uninstalled + pf restored")
+    print("uninstalled + Slipstream pf anchor cleared")
 
 
-async def amain(port):
+async def amain(port, voice=True):
     try:
         server = await asyncio.start_server(
             handle, "127.0.0.1", port, reuse_address=True)
@@ -5092,6 +5329,15 @@ async def amain(port):
                   file=sys.stderr)
         raise
     pf_setup(port)                       # grab pf only AFTER we hold the port
+    # Start recovery/health monitoring only after the initial PF reference and
+    # private anchor are established. Starting it earlier races `_pf_load()`
+    # against `pf_setup()` and can create an unowned reapply.
+    threading.Thread(
+        target=network_monitor,
+        args=(port,),
+        kwargs={"voice": voice},
+        daemon=True,
+    ).start()
     print(f">> transparent tlsrec+DoH proxy on 127.0.0.1:{port}  (root)")
     print(">> quit + reopen Discord normally; its updater is captured too")
     print(">> Ctrl-C (or close terminal) to stop and restore pf")
@@ -5258,7 +5504,7 @@ def main():
     except Exception:
         pass
 
-    cleanup_stale()        # kill leftover instances + reset pf before we start
+    cleanup_stale()        # release only state owned by the previous daemon
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel
@@ -5269,10 +5515,6 @@ def main():
         _set_route_policy_remote("key_error", error=str(exc))
         print(f">> route policy keys unavailable: {exc}", file=sys.stderr)
     load_persisted_route_policy(trusted_policy_keys)
-
-    # guard thread: voice sniffer follows the default iface + pf self-heal
-    threading.Thread(target=network_monitor, args=(args.port,),
-                     kwargs={"voice": not args.no_voice}, daemon=True).start()
 
     # bundled Telegram MTProto proxy (tg-ws-proxy) — local :1443, points Telegram
     # past the DC-IP block via WSS. Best-effort; never blocks daemon startup.
@@ -5286,7 +5528,7 @@ def main():
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
     try:
-        asyncio.run(amain(args.port))
+        asyncio.run(amain(args.port, voice=not args.no_voice))
     except KeyboardInterrupt:
         pass
     finally:

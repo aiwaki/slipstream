@@ -30,12 +30,15 @@ YouTube/googlevideo.
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
 | Crash restart | launchd `KeepAlive` | none |
-| Clean exit | restores `pf` on normal termination | non-tray watchdog for app-not-running cases |
-| Stale `pf` recovery | daemon re-applies rules while active; tray watchdog kickstarts daemon and resets `pf` if recovery fails | non-tray watchdog if both app and daemon are gone |
+| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point | privileged sentinel coverage on every release |
+| Clean exit | flushes only the private anchor and releases Slipstream's PF enable token | none after the privileged gate passes |
+| Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
-| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; repeated post-wake geo-exit failures can trigger a rate-limited restart of Slipstream's owned Geph process | add only evidence-backed payload probes for user-visible stalled pages; move more Geph lifecycle ownership into the daemon |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; repeated post-wake geo-exit failures can trigger a rate-limited restart of a verified owned Geph process | move Geph to a user LaunchAgent independent of the tray |
+| Geph coexistence | owned `:9954` listener requires PID/executable/config/listener proof; external `:9909` is diagnostics-only | explicit user opt-in contract for any external backend |
+| Secret storage | Geph directory `0700`; config/cache/ownership files `0600` and atomic | move the account secret to Keychain |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
@@ -46,29 +49,23 @@ YouTube/googlevideo.
 
 ## Priority Order
 
-### P0 - Release Hygiene
+### M0 - Safe Base
 
-- Keep the installed daemon and app-bundled daemon identical after releases.
-- Keep log snapshot/open-log behavior reliable.
-- Keep version, appcast, and release artifacts consistent with verifier-backed
-  preflight.
-- Keep hard-kill/stale-`pf` cleanup visible in diagnostics.
+- Prove an installed restart and uninstall preserve external PF anchors.
+- Prove unknown listeners and PID reuse cannot cause unrelated process signals.
+- Keep secrets owner-only and remove direct-to-main automation.
 
-### P1 - Routing Quality
+### M1 - Autonomous Routing
 
-- Extend payload canaries into endpoint-safe checks where response size, method,
-  and route class are predictable.
-- Extend runtime/canary failures into signed strategy update flows.
-- Keep local-bypass, Geph, Telegram proxy, and last-failure state visible in the tray.
-- Configure real production signing keys and publish signed release-channel
-  policy assets for the opt-in scheduler, local rollback, and health-gate path.
+- Normalize connection outcomes and safe recovery actions in one reducer.
+- Keep local bypass and geo-exit recovery strictly separated.
+- Move owned Geph lifecycle into a user LaunchAgent so the tray is optional.
 
-### P2 - Maintenance Horizon
+### M2+ - Contracts And Platforms
 
-- Fetch signed strategy-list updates.
-- Track strategy success rates without storing or exposing sensitive traffic
-  data. Daemon status exposes aggregate group/strategy counters, not hostnames.
-- Add optional relay handling only for confirmed IP null-route cases.
+- Introduce a privacy-bounded, versioned `StatusV2` contract.
+- Split policy/reducer/probes/backends/adapters without rewriting transport.
+- Make releases reproducible before extracting a shared Rust core and OS adapters.
 
 ## Notes
 

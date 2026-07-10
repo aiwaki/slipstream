@@ -35,7 +35,7 @@ Tray diagnostics:
 - The summary includes both app version and daemon version so install drift is
   visible in bug reports.
 - The snapshot includes `daemon_recovery` when the tray watchdog recently tried
-  to recover the root daemon or reset stale `pf` rules.
+  to recover the root daemon or clear Slipstream's private PF anchor.
 
 Daemon log:
 
@@ -53,6 +53,34 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
+
+## PF Ownership
+
+Slipstream owns only `com.apple/slipstream`. Normal lifecycle and recovery do
+not load Slipstream rules into the global PF ruleset, edit `/etc/pf.conf`, or
+disable PF. This preserves macOS rules and external anchors such as `zapret`.
+
+Inspect the private anchor:
+
+```bash
+sudo pfctl -a com.apple/slipstream -sr
+sudo pfctl -a com.apple/slipstream -sn
+```
+
+Emergency cleanup is scoped to that anchor:
+
+```bash
+sudo pfctl -a com.apple/slipstream -F all
+```
+
+Do not use `pfctl -d` or load a replacement global ruleset as Slipstream
+recovery. The daemon stores its own PF enable token under `/var/run` and releases
+only that reference during normal teardown. An upgrade from a legacy build may
+reload the canonical `/etc/pf.conf` once after detecting old global Slipstream
+redirect rules; it never writes that file.
+
+If the required `com.apple/*` parent anchor is absent from the host PF setup,
+Slipstream exits safely instead of taking ownership of global PF configuration.
 
 Transparent-path curl test:
 

@@ -1,111 +1,119 @@
 # Roadmap
 
-Roadmap is informational. It describes the current implementation order; it is
-not a release promise.
+Roadmap is informational and not a release promise. Each milestone lands as a
+small PR with tests and matching documentation.
 
-## Current State
+## Baseline
 
-| Area | Status |
-|---|---|
-| macOS Apple Silicon app | early build |
-| Tauri tray UI | implemented |
-| Root routing daemon | implemented for macOS |
-| Local DPI bypass | implemented for current macOS daemon |
-| Geph sidecar | implemented for selected geo-blocked hosts |
-| Telegram Desktop proxy offer | implemented |
-| Single version source | implemented |
-| Rotating support logs | implemented; tray log access uses a named administrator prompt when needed |
-| Voice-flow TTL/LRU cleanup | implemented |
-| QUIC handling | preserved by default; no global UDP/443 block |
-| Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
-| Daemon watchdog / stale `pf` recovery | implemented in tray: kickstart daemon first, reset `pf` only if recovery fails |
-| Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
-| Periodic route canaries | implemented for local-bypass, Geph, Telegram proxy readiness, and repeated secondary endpoint failures |
-| Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
-| Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
-| Direct passthrough policy | implemented for Telegram, Russian hosts, and GitHub developer/download endpoints |
-| Strategy success metrics | implemented as privacy-safe aggregate status without hostnames |
-| Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
-| Signed policy updates | implemented as bundled-manifest bundle builder, validator/verifier, local persist/rollback, explicit opt-in remote fetch scheduler with health gates, release workflow packaging, and release artifact preflight for signed channel assets |
-| Detailed route diagnostics | implemented in daemon status, tray summary, copied diagnostic snapshot, and attachable diagnostic file |
-| Payload canaries | partial: Discord CDN verifies local-bypass throughput; Steam Store verifies geo-exit HTTPS payload through Geph |
-| Signed auto-update | implemented |
-| Apple notarization | not implemented |
-| Windows | not implemented |
-| Linux | not implemented |
-| iOS | not implemented |
-| Android | not implemented |
+The July 2026 audit found the existing routing layer ahead of the previous
+roadmap: routing health, canaries, signed policy bundles, rollback, auto
+geo-exit, and exact-host recovery already exist. The baseline passed 152 Python
+tests and 30 Rust tests.
 
-## Routing Model
+The main risks were below routing policy: global PF ownership, broad process
+recovery, Geph secret permissions and listener identity, unversioned status,
+large lifecycle modules, and a non-reproducible release pipeline.
 
-Slipstream has two separate routing tools.
+## M0 - Safe Base
 
-Local bypass is used for DPI/SNI interference. Discord and YouTube/googlevideo
-stay on the normal network route and use local desync/fake strategies.
+Target: before `v0.1.5`.
 
-Geph is used only for hosts that require a foreign exit because the service
-itself rejects Russian IP addresses. It is not the default answer for Discord,
-YouTube, or other local-bypass hosts.
+- Keep Slipstream rules in the private `com.apple/slipstream` anchor.
+- Never load Slipstream rules into the global PF ruleset, edit `/etc/pf.conf`,
+  or call `pfctl -d`.
+- Pair `pfctl -E` with its owned token and `pfctl -X`.
+- Manage daemon and Geph by launchd label plus verified PID/executable identity;
+  never use broad process-pattern kills.
+- Require ownership proof for bundled Geph on `:9954`; treat external `:9909` as
+  read-only diagnostics unless explicitly selected.
+- Keep Geph config owner-only and secret-bearing files at `0600`.
+- Keep `LICENSE` canonical, list bundled licenses separately, and remove unused
+  README assets.
+- Make scheduled vendor updates open PRs; require a passing `checks` job before
+  merging to `main`.
 
-## P0 - macOS Release Hardening
+Gate: install, restart, update, and uninstall leave an external PF sentinel and
+`zapret` anchor unchanged; unknown processes are never signalled; secrets are
+not readable outside the owning user.
 
-Goal: keep the current macOS build safe to install, run, diagnose, and update.
+## M1 - Autonomous Routing V1
 
-- Keep install/reinstall idempotent across app relaunches.
-- Keep bundled daemon resources and installed daemon in sync.
-- Keep log access reliable from the tray.
-- Keep release versioning, appcast metadata, and signed route-policy channel
-  artifacts consistent.
+- Normalize runtime evidence as `ConnectionOutcome`: service group, route
+  class, backend, failure phase, bytes, duration, and reason.
+- Select rate-limited safe actions through a pure `RecoveryAction` reducer.
+- Keep Discord and YouTube on local bypass with exact-host re-sweep. They never
+  fall through to Geph.
+- Keep geo-exit fail-closed and restart only a verified owned Geph process.
+- Let unknown hosts try the local adaptive ladder first. Temporary geo-exit
+  requires repeated local misses plus a successful Geph payload proof.
+- Move Geph to a user LaunchAgent with `KeepAlive`; the tray becomes a settings
+  client rather than a lifecycle dependency.
+- Keep external DNS, VPN, PAC, and proxy state read-only.
 
-## P1 - Routing Quality
+Gate: routing and Geph recover after tray crash, browser restart, network
+change, and sleep/wake without manual buttons.
 
-Goal: detect degradation before the user has to diagnose it manually.
+## M2 - Contracts And Code
 
-- Exact-host local-bypass re-sweep now runs after real Discord/YouTube runtime
-  misses, without adding a manual strategy picker or Geph fallback.
-- Continue tuning automatic re-sweep when a known strategy stops working.
-- Keep important secondary endpoints from being hidden by passing core endpoints,
-  while preserving grace thresholds for transient failures.
-- Broaden payload thresholds only for endpoints where response size, method, and
-  routing class are safe to probe.
-- Signed route-policy updates without rebuilding the app; the bundled-manifest
-  bundle builder, local verifier, rollback path, and opt-in health-gated remote
-  fetch scheduler are in place.
-- Keep strategy success metrics aggregate-only; do not expose per-host browsing
-  history in status or diagnostics.
-- Configure real production signing-key custody and run the release-channel
-  hosting workflow on an actual release.
-- Move OS-specific policy adapters out from the current macOS daemon shape.
+- Introduce privacy-bounded `StatusV2` sections for daemon, routes, backends,
+  environment, and recovery state.
+- Keep hostname-level and detailed network events out of world-readable status;
+  make raw logs `0600` and diagnostic exports sanitized/user-owned.
+- Let the tray read V1 and V2 for one transition release.
+- Split the Python daemon into policy, reducer, probes, Geph backend, macOS PF
+  adapter, and lifecycle modules.
+- Split the Rust tray into status client, diagnostics, installer, Geph config,
+  and menu orchestration.
+- Keep Python transport; avoid a big-bang rewrite.
+- Add language-neutral policy fixtures and recovery vectors.
 
-## P2 - Desktop Portability
+## M3 - Release-Grade macOS
 
-Goal: prepare Windows and Linux without changing the product model.
+- Pin Python/PyInstaller dependencies with hashes.
+- Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
+  checksum, architecture, and provenance.
+- Set an explicit Tauri target and publish an artifact manifest plus SBOM.
+- Run full tests and a privileged PF-anchor sentinel test in release CI.
+- Separate preview and stable channels. Stable requires Developer ID, hardened
+  runtime, notarization, and stapling.
+- Define production custody and rotation for policy-signing keys. Remote policy
+  stays off by default until that workflow and rollback are reviewed.
 
-- Split the daemon into shared routing policy and OS-specific adapters.
-- Build and publish `geph5-client` artifacts for Windows and Linux.
-- Windows adapter: service install, route/filter layer, local DPI bypass backend,
-  tray integration.
-- Linux adapter: systemd service, route/filter layer, local DPI bypass backend,
-  tray integration.
-- Keep Geph, Telegram proxy, route policy, and UI concepts consistent across
-  desktop platforms.
+Gate: clean install, update, rollback, and uninstall need no manual PF, proxy,
+or file cleanup.
 
-## P3 - Mobile
+## M4 - Cross-Platform Core
 
-Goal: define mobile as a separate platform track, not a direct port of the macOS
-daemon.
+- Extract a pure Rust `slipstream-core` for policy parsing, classification,
+  recovery reduction, signed updates, and StatusV2 types.
+- Keep sockets and OS calls in adapters; run Python and Rust against identical
+  golden vectors.
+- Adapter order: Windows, Android, Linux, then an iOS feasibility gate.
+- Treat Tauri as the shared shell only. Networking remains native per platform.
+- External VPN coexistence remains explicit and non-mutating, especially where
+  Android permits only one active VPN service.
 
-- iOS: Network Extension-based design, entitlement and signing requirements,
-  split-routing constraints.
-- Android: `VpnService`-based design, split-routing policy, background
-  lifecycle.
-- Decide which features are feasible on mobile: Geph routing, Telegram proxy,
-  local DPI bypass, diagnostics.
-- Build mobile-specific UX around system VPN/profile constraints.
+## M5 - Packet-Level Capabilities
 
-## Out Of Scope For Now
+Only after adapters stabilize:
 
-- Full Apple notarization and Developer ID distribution.
-- Relay/VPN fallback for full IP null-route cases.
-- Rewriting the current daemon in Rust.
-- App Store distribution.
+- bounded DNS-observed host/IP evidence;
+- scoped QUIC/UDP handling;
+- Discord voice classification;
+- forged RST detection;
+- target-specific MSS clamp;
+- relay fallback for proven IP null-route cases.
+
+No global UDP/443 block, broad IP guessing, or manual strategy picker.
+
+## Milestone Checks
+
+- Unit tests and cross-language golden vectors.
+- Fake DNS/SOCKS/TLS endpoints for stall, reset, empty response, and partial
+  payload.
+- PF sentinel and process-ownership integration tests.
+- Install/update/uninstall integration test.
+- Safari, Chrome, Discord, YouTube, OpenAI files/billing, Telegram, and Steam
+  Store smoke matrix.
+- Sleep/wake and network-change soak.
+- Assertion that Discord and YouTube never appear in Geph route events.

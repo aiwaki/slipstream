@@ -38,6 +38,8 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("route-policy-keys.json", spec)
         self.assertIn("datas.append", spec)
+        self.assertIn("SPECPATH", spec)
+        self.assertNotIn("os.getcwd()", spec)
 
     def test_release_workflow_packages_signed_route_policy_channel(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
@@ -55,6 +57,18 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("Verify release artifacts", workflow)
         self.assertIn("scripts/verify_release_artifacts.py", workflow)
         self.assertIn("--release-dir dist-release", workflow)
+
+    def test_geph_vendor_workflow_proposes_a_pr(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("pull-requests: write", workflow)
+        self.assertIn('branch="automation/geph-${version}"', workflow)
+        self.assertIn("gh pr create", workflow)
+        self.assertIn("--base main", workflow)
+        self.assertNotIn("git push origin HEAD:main", workflow)
+        self.assertNotIn("git push ||", workflow)
 
 
 if __name__ == "__main__":
