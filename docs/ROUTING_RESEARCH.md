@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-10 | Unified runtime recovery reducer | Implemented | Normalize local, geo-exit, and unknown-host evidence as `ConnectionOutcome`; a pure reducer may invalidate only the relevant strategy, re-sweep an exact local host, restart only verified owned Geph, recheck, or warn about external state. | Move owned Geph lifecycle into a user LaunchAgent and expose a privacy-bounded action summary in `StatusV2`. |
 | 2026-07-10 | Competing transparent PF interceptors | Fixed and live-verified | An active HTTPS `rdr`/`route-to` before `com.apple/*` receives real app traffic first. Detect nested anchors, pause without mutation, and auto-rearm when clear instead of trusting internal canaries. | Keep a two-interceptor integration fixture and surface the exact paused reason. |
 | 2026-07-10 | Global PF ruleset ownership | Fixed and live-verified | Slipstream now loads only `com.apple/slipstream` below the existing `com.apple/*` anchor point; global reload/disable is forbidden during normal lifecycle and recovery. | Keep the privileged sentinel cycle in release qualification. |
 | 2026-07-10 | PF reference ownership | Fixed and live-verified | Store the token returned by `pfctl -E` in a root-only runtime file and release it with `pfctl -X`; never infer that Slipstream owns global PF state. | Preserve restart/uninstall/reinstall coverage. |

@@ -52,6 +52,10 @@ not readable outside the owning user.
   client rather than a lifecycle dependency.
 - Keep external DNS, VPN, PAC, and proxy state read-only.
 
+Progress: runtime local-bypass misses, geo-exit failures, and repeated unknown
+host stalls now enter one normalized reducer. The remaining M1 lifecycle step is
+moving owned Geph out of the tray and into a user LaunchAgent.
+
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
 

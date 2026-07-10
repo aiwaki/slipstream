@@ -19,6 +19,7 @@ survive across sessions and agents.
 | 2026-07-10 | A separately managed Geph listener on `127.0.0.1:9909` is diagnostic-only unless the user explicitly opts into that port. Slipstream never stops it. | Active |
 | 2026-07-10 | Geph configuration directories are owner-only (`0700`); secret-bearing config, cache, and ownership files are `0600` and written atomically. | Active |
 | 2026-07-10 | A transparent HTTPS PF redirect loaded before `com.apple/*` owns the real traffic path because PF uses the first matching translation. Slipstream must pause, report the conflicting anchor, and recover automatically when it disappears; it must not flush, stop, or rewrite the other product. | Active |
+| 2026-07-10 | Runtime recovery is selected by a pure reducer. Discord/YouTube outcomes can produce only local strategy invalidation, exact-host re-sweep, and recheck; only a verified owned Geph backend can produce a restart action; external state produces a warning only. | Active |
 
 ## Notes
 
