@@ -38,6 +38,7 @@ def reset_smart_dns_state():
     canary_windows = {
         key: deque(value) for key, value in tproxy._canary_failure_windows.items()
     }
+    canary_state = dict(tproxy._canary_state)
     rearm_state = dict(tproxy._rearm_state)
     try:
         tproxy.reset_route_policy_manifest()
@@ -64,6 +65,19 @@ def reset_smart_dns_state():
         tproxy._strat_scores.clear()
         tproxy._canary_health.clear()
         tproxy._canary_failure_windows.clear()
+        tproxy._canary_state.update({
+            "running": False,
+            "last_run": 0.0,
+            "last_started": 0.0,
+            "last_reason": "",
+            "next_due": 0.0,
+            "pending_reason": "",
+            "total": 0,
+            "ok": 0,
+            "degraded": 0,
+            "warnings": 0,
+            "unknown": 0,
+        })
         tproxy._rearm_state.update({
             "last_at": 0.0,
             "last_reason": "",
@@ -100,6 +114,8 @@ def reset_smart_dns_state():
         tproxy._canary_health.update(canary_health)
         tproxy._canary_failure_windows.clear()
         tproxy._canary_failure_windows.update(canary_windows)
+        tproxy._canary_state.clear()
+        tproxy._canary_state.update(canary_state)
         tproxy._rearm_state.clear()
         tproxy._rearm_state.update(rearm_state)
 
@@ -1465,6 +1481,37 @@ def test_canary_scheduler_runs_on_forced_and_periodic_triggers(monkeypatch):
     assert not tproxy.start_canaries_if_due("periodic", now=105.0, runner=calls.append)
     assert tproxy.start_canaries_if_due("periodic", now=111.0, runner=calls.append)
     assert calls == ["startup", "periodic"]
+
+
+def test_canary_scheduler_preserves_forced_recheck_while_running(monkeypatch):
+    calls = []
+    tproxy._canary_state.update({
+        "running": True,
+        "last_run": 0.0,
+        "last_started": 100.0,
+        "next_due": 999.0,
+        "last_reason": "wake",
+        "total": 0,
+        "ok": 0,
+        "degraded": 0,
+        "warnings": 0,
+        "unknown": 0,
+    })
+    monkeypatch.setattr(tproxy, "CANARY_INTERVAL", 10.0)
+    monkeypatch.setattr(tproxy, "CANARY_JITTER", 1.0)
+    monkeypatch.setattr(tproxy, "CANARY_FORCE_RETRY_DELAY", 5.0)
+
+    assert not tproxy.start_canaries_if_due("geph_up", force=True, now=105.0, runner=calls.append)
+    assert tproxy._canary_state["pending_reason"] == "geph_up"
+    assert tproxy._canary_state["next_due"] == 110.0
+
+    tproxy.finish_canaries(now=106.0)
+    assert not tproxy._canary_state["running"]
+    assert tproxy._canary_state["next_due"] == 110.0
+
+    assert not tproxy.start_canaries_if_due("periodic", now=109.0, runner=calls.append)
+    assert tproxy.start_canaries_if_due("periodic", now=111.0, runner=calls.append)
+    assert calls == ["geph_up"]
 
 
 def test_local_bypass_canary_failure_decays_only_local_strategy_cache(monkeypatch):

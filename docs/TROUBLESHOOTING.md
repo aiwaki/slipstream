@@ -97,6 +97,12 @@ response. Slipstream records this under `geph_detail`; repeated post-wake
 geo-exit failures across multiple hosts set `restart_recommended`, and the tray
 rate-limits a restart of Slipstream's own `geph5-client`.
 
+Wake canaries may briefly run before Geph/DNS recovery is complete. If a tray
+summary still says routing needs attention after the tunnel is back, check
+`canaries.last_reason`, `route_health`, and recent `geph SOCKS up/down` log
+lines. Forced recovery triggers should queue a short rerun instead of waiting for
+the normal periodic interval.
+
 `rearm` in daemon status records the last sleep-gap or network-change re-arm
 observed by Slipstream.
 

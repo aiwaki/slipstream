@@ -12,11 +12,13 @@
 ## Code Discovery
 
 - Prefer codebase-memory-mcp graph tools for code discovery:
-  `search_graph`, `trace_path`, `get_code_snippet`, `query_graph`, `search_code`.
+  `search_graph`, `get_code_snippet`, and `search_code`.
 - If the graph transport fails with `Transport closed`, record the fallback in
   repo docs when relevant and use narrow `rtk rg` / `rtk sed` searches.
 - Use grep-style search for string literals, config values, generated files, and
   non-code docs.
+- Use context-mode for large logs, status dumps, or broad file summaries so raw
+  output stays out of the chat context.
 
 ## Routing Invariants
 

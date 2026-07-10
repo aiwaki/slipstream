@@ -321,6 +321,7 @@ HEALTH_UNKNOWN = "unknown"
 CANARY_INTERVAL = 10 * 60.0
 CANARY_JITTER = 90.0
 CANARY_FORCE_MIN_GAP = 60.0
+CANARY_FORCE_RETRY_DELAY = 15.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
 LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
@@ -1279,6 +1280,7 @@ _canary_state = {
     "last_run": 0.0,
     "last_started": 0.0,
     "next_due": 0.0,
+    "pending_reason": "",
     "last_reason": "",
     "total": 0,
     "ok": 0,
@@ -3095,8 +3097,24 @@ async def run_route_canaries(reason="periodic"):
 
 def finish_canaries(now=None):
     now = time.monotonic() if now is None else now
+    normal_next_due = now + _canary_delay(now)
+    pending_reason = _canary_state.get("pending_reason", "")
+    pending_due = _canary_state.get("next_due", 0.0)
     _canary_state["running"] = False
-    _canary_state["next_due"] = now + _canary_delay(now)
+    if pending_reason and pending_due:
+        _canary_state["next_due"] = min(pending_due, normal_next_due)
+    else:
+        _canary_state["next_due"] = normal_next_due
+
+
+def _schedule_forced_canary_retry(reason, now):
+    if not reason:
+        return
+    retry_due = now + CANARY_FORCE_RETRY_DELAY
+    current_due = _canary_state.get("next_due", 0.0)
+    if not current_due or retry_due < current_due:
+        _canary_state["next_due"] = retry_due
+    _canary_state["pending_reason"] = reason
 
 
 def _canary_thread_main(reason):
@@ -3111,20 +3129,27 @@ def _canary_thread_main(reason):
 def start_canaries_if_due(reason="periodic", force=False, now=None, runner=None):
     now = time.monotonic() if now is None else now
     if _canary_state["running"]:
+        if force:
+            _schedule_forced_canary_retry(reason, now)
         return False
     if force and _canary_state["last_started"] and now - _canary_state["last_started"] < CANARY_FORCE_MIN_GAP:
+        _schedule_forced_canary_retry(reason, now)
         return False
     if not force and _canary_state["next_due"] and now < _canary_state["next_due"]:
         return False
+    run_reason = reason
+    if not force and _canary_state.get("pending_reason"):
+        run_reason = _canary_state["pending_reason"]
+        _canary_state["pending_reason"] = ""
     _canary_state["running"] = True
     _canary_state["last_started"] = now
     if runner is not None:
         try:
-            runner(reason)
+            runner(run_reason)
         finally:
             finish_canaries(now)
         return True
-    threading.Thread(target=_canary_thread_main, args=(reason,), daemon=True).start()
+    threading.Thread(target=_canary_thread_main, args=(run_reason,), daemon=True).start()
     return True
 
 

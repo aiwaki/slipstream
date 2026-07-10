@@ -58,6 +58,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Stale proxy exceptions | Implemented | External proxy tools can leave disabled `ExceptionsList` entries after proxy autoconfigure is turned off; Slipstream reports them in status without treating the proxy as active or mutating settings. | Use diagnostics to explain stale browser/network behavior; do not auto-delete user-owned proxy state. |
 | 2026-07-09 | Runtime re-arm visibility | Implemented | Daemon status now records the last wake/network re-arm reason, interface, gap, count, and age so sleep-related recovery is visible without reading logs first. | Keep using logs for full `pmset` correlation; status is a compact runtime snapshot. |
 | 2026-07-10 | Auto geo-exit stale learned hosts | Implemented | Repeated Geph runtime retries now reset only exact hosts that were learned by auto geo-exit; explicit geo-exit and local-bypass routes are preserved. | Watch logs for new retry reasons before widening the reset trigger. |
+| 2026-07-10 | Wake canary recovery rerun | Implemented | Forced canary triggers that arrive during an in-flight wake check are queued for a short rerun instead of being dropped by the force cooldown. | Keep wake recovery event-driven; do not lengthen normal canary cadence. |
 
 ## Codebase Graph
 
@@ -141,6 +142,11 @@ Fresh external snapshots checked on 2026-07-09:
   learned generic/static hosts. Slipstream now resets only those auto-learned
   exact hosts after repeated runtime retries, so the next request can return to
   the local route and re-learn only if a fresh Geph payload proof succeeds.
+- 2026-07-10: After wake, route canaries can run before Geph/DNS are fully back.
+  If `geph_up` arrives while that wake check is still running, the force cooldown
+  used to drop the recovery recheck and leave the tray in `needs attention` until
+  the next periodic run. Forced recovery triggers now queue a short pending rerun
+  and preserve the original reason.
 - SonicDPI detects likely forged inbound TCP RST packets by learning a target
   flow's baseline server TTL and dropping early RSTs with a large TTL delta.
   This is useful research for packet-level adapters, but it cannot be copied
