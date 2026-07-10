@@ -14,14 +14,21 @@ not a release promise.
 | Geph sidecar | implemented for selected geo-blocked hosts |
 | Telegram Desktop proxy offer | implemented |
 | Single version source | implemented |
-| Rotating support logs | implemented |
+| Rotating support logs | implemented; tray log access uses a named administrator prompt when needed |
 | Voice-flow TTL/LRU cleanup | implemented |
 | QUIC handling | preserved by default; no global UDP/443 block |
 | Wake/network re-arm | implemented: pf, voice capture, and route-health canaries are re-armed |
-| Daemon watchdog / stale `pf` recovery | partial: daemon self-heals on restart |
-| Periodic route canaries | implemented for local-bypass, Geph, and Telegram proxy readiness |
-| Detailed route diagnostics | implemented in daemon status and tray detail |
-| Throughput canary | partial: local-bypass canaries verify HTTPS response bytes |
+| Daemon watchdog / stale `pf` recovery | implemented in tray: kickstart daemon first, reset `pf` only if recovery fails |
+| Bundled daemon install hygiene | implemented: app checks bundled daemon format; daemon uses temp-copy/swap during install |
+| Periodic route canaries | implemented for local-bypass, Geph, Telegram proxy readiness, and repeated secondary endpoint failures |
+| Runtime local-bypass recheck | implemented: full strategy failure clears local cache and schedules a canary recheck |
+| Explicit route policy tables | implemented for static direct/local-bypass/geo-exit policy and attempt limits |
+| Direct passthrough policy | implemented for Telegram, Russian hosts, and GitHub developer/download endpoints |
+| Strategy success metrics | implemented as privacy-safe aggregate status without hostnames |
+| Route policy metadata | implemented in daemon status and copied diagnostic snapshots |
+| Signed policy updates | implemented as bundled-manifest bundle builder, validator/verifier, local persist/rollback, explicit opt-in remote fetch scheduler with health gates, release workflow packaging, and release artifact preflight for signed channel assets |
+| Detailed route diagnostics | implemented in daemon status, tray summary, copied diagnostic snapshot, and attachable diagnostic file |
+| Payload canaries | partial: Discord CDN verifies local-bypass throughput; Steam Store verifies geo-exit HTTPS payload through Geph |
 | Signed auto-update | implemented |
 | Apple notarization | not implemented |
 | Windows | not implemented |
@@ -46,19 +53,29 @@ Goal: keep the current macOS build safe to install, run, diagnose, and update.
 
 - Keep install/reinstall idempotent across app relaunches.
 - Keep bundled daemon resources and installed daemon in sync.
-- Make log access reliable from the tray.
-- Keep release versioning and appcast metadata consistent.
+- Keep log access reliable from the tray.
+- Keep release versioning, appcast metadata, and signed route-policy channel
+  artifacts consistent.
 
 ## P1 - Routing Quality
 
 Goal: detect degradation before the user has to diagnose it manually.
 
-- Automatic re-sweep when a known strategy stops working.
-- Broaden local-bypass canaries from small HTTPS payload checks to throughput
-  thresholds where that is safe.
-- Signed strategy-list updates without rebuilding the app.
-- More explicit policy tables for Geph hosts, local-bypass hosts, and attempt
-  limits.
+- Exact-host local-bypass re-sweep now runs after real Discord/YouTube runtime
+  misses, without adding a manual strategy picker or Geph fallback.
+- Continue tuning automatic re-sweep when a known strategy stops working.
+- Keep important secondary endpoints from being hidden by passing core endpoints,
+  while preserving grace thresholds for transient failures.
+- Broaden payload thresholds only for endpoints where response size, method, and
+  routing class are safe to probe.
+- Signed route-policy updates without rebuilding the app; the bundled-manifest
+  bundle builder, local verifier, rollback path, and opt-in health-gated remote
+  fetch scheduler are in place.
+- Keep strategy success metrics aggregate-only; do not expose per-host browsing
+  history in status or diagnostics.
+- Configure real production signing-key custody and run the release-channel
+  hosting workflow on an actual release.
+- Move OS-specific policy adapters out from the current macOS daemon shape.
 
 ## P2 - Desktop Portability
 

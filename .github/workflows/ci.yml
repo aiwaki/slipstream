@@ -57,6 +57,32 @@ jobs:
             --pub-date 2026-07-08T12:00:00Z
           python3 -m json.tool /tmp/slipstream-latest.json >/dev/null
 
+      - name: Route policy bundle CLI smoke
+        run: |
+          set -euo pipefail
+          python3 scripts/make_route_policy_bundle.py \
+            --generate-keypair \
+            --key-id ci-test \
+            --private-key-output /tmp/slipstream-route-policy.key \
+            --public-keys-output /tmp/slipstream-route-policy-keys.json
+          python3 scripts/make_route_policy_bundle.py \
+            --bundled-manifest \
+            --key-id ci-test \
+            --private-key-file /tmp/slipstream-route-policy.key \
+            --output /tmp/slipstream-route-policy.json \
+            --public-keys-output /tmp/slipstream-route-policy-derived-keys.json
+          python3 -m json.tool /tmp/slipstream-route-policy.json >/dev/null
+          python3 scripts/make_route_policy_bundle.py \
+            --verify \
+            --bundle /tmp/slipstream-route-policy.json \
+            --public-keys /tmp/slipstream-route-policy-keys.json
+          python3 scripts/make_route_policy_bundle.py \
+            --channel-index \
+            --bundle /tmp/slipstream-route-policy.json \
+            --bundle-url https://policy.example.org/channel/route-policy.json \
+            --output /tmp/slipstream-route-policy-latest.json
+          python3 -m json.tool /tmp/slipstream-route-policy-latest.json >/dev/null
+
       - name: Python compile check
         run: |
           python3 -m py_compile \
@@ -64,7 +90,11 @@ jobs:
             spike/test_tproxy_doh.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
-            scripts/test_make_appcast.py
+            scripts/make_route_policy_bundle.py \
+            scripts/verify_release_artifacts.py \
+            scripts/test_make_appcast.py \
+            scripts/test_make_route_policy_bundle.py \
+            scripts/test_verify_release_artifacts.py
 
       - name: Daemon unit tests
         run: python3 -m pytest -q spike

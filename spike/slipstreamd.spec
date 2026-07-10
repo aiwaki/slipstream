@@ -12,6 +12,9 @@ if _TGWS not in sys.path:
 datas = []
 binaries = []
 hiddenimports = []
+_POLICY_KEYS = os.path.abspath('route-policy-keys.json')
+if os.path.exists(_POLICY_KEYS):
+    datas.append((_POLICY_KEYS, '.'))
 # scapy (fake-mode raw packets + voice) and cryptography (tg-ws-proxy AES) must be
 # fully bundled — the frozen daemon has no system Python/venv to fall back on.
 for _pkg in ('scapy', 'cryptography'):

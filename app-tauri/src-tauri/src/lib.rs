@@ -8,7 +8,7 @@
 // later; main.rs is a thin desktop shim.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -48,8 +48,10 @@ const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
+const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
 const DAEMON_WATCHDOG_COOLDOWN_SECS: u64 = 5 * 60;
+const GEPH_SELF_HEAL_COOLDOWN_SECS: u64 = 10 * 60;
 const DIAGNOSTIC_LOG_TAIL_LINES: usize = 80;
 
 /// Is the system UI language Russian? Cached — the locale doesn't change while we
@@ -134,19 +136,29 @@ fn read_status() -> Option<Value> {
     Some(v)
 }
 
+fn applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn admin_shell_script(shell: &str, prompt: &str) -> String {
+    let escaped_shell = applescript_string(shell);
+    let escaped_prompt = applescript_string(prompt);
+    format!(
+        "do shell script \"{escaped_shell}\" with administrator privileges with prompt \"{escaped_prompt}\""
+    )
+}
+
 /// Run a privileged shell line via one osascript admin prompt.
-fn run_admin(shell: &str) {
-    let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("do shell script \"{escaped}\" with administrator privileges");
+fn run_admin(shell: &str, prompt: &str) {
+    let script = admin_shell_script(shell, prompt);
     let _ = Command::new("/usr/bin/osascript")
         .arg("-e")
         .arg(script)
         .spawn();
 }
 
-fn run_admin_status(shell: &str) -> bool {
-    let escaped = shell.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("do shell script \"{escaped}\" with administrator privileges");
+fn run_admin_status(shell: &str, prompt: &str) -> bool {
+    let script = admin_shell_script(shell, prompt);
     Command::new("/usr/bin/osascript")
         .arg("-e")
         .arg(script)
@@ -198,7 +210,10 @@ fn open_log_snapshot() -> bool {
             return false;
         };
         let shell = log_snapshot_shell(LOG_PATH, &snapshot, &uid, &gid);
-        if !run_admin_status(&shell) {
+        if !run_admin_status(
+            &shell,
+            "Slipstream needs administrator access to copy its daemon log.",
+        ) {
             return false;
         }
     }
@@ -344,8 +359,55 @@ fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
     }
 }
 
+fn daemon_recovery_status_value(path: &str) -> Value {
+    match fs::read_to_string(path) {
+        Ok(raw) => {
+            let parsed = serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| {
+                json!({
+                    "parse_error": true,
+                    "raw": raw,
+                })
+            });
+            json!({
+                "path": path,
+                "available": true,
+                "last": parsed,
+            })
+        }
+        Err(err) => json!({
+            "path": path,
+            "available": false,
+            "error": format!("{:?}", err.kind()),
+        }),
+    }
+}
+
 fn launchd_plist_uses_daemon(raw: &str, daemon: &Path) -> bool {
     raw.contains(&format!("<string>{}</string>", daemon.display()))
+}
+
+fn daemon_binary_format(path: &Path) -> Option<&'static str> {
+    let mut magic = [0u8; 4];
+    fs::File::open(path).ok()?.read_exact(&mut magic).ok()?;
+    match magic {
+        [0xfe, 0xed, 0xfa, 0xce]
+        | [0xce, 0xfa, 0xed, 0xfe]
+        | [0xfe, 0xed, 0xfa, 0xcf]
+        | [0xcf, 0xfa, 0xed, 0xfe] => Some("mach-o"),
+        [0xca, 0xfe, 0xba, 0xbe]
+        | [0xbe, 0xba, 0xfe, 0xca]
+        | [0xca, 0xfe, 0xba, 0xbf]
+        | [0xbf, 0xba, 0xfe, 0xca] => Some("fat-mach-o"),
+        _ => None,
+    }
+}
+
+fn daemon_binary_executable(path: &Path) -> Option<bool> {
+    Some(fs::metadata(path).ok()?.permissions().mode() & 0o111 != 0)
+}
+
+fn valid_bundled_daemon(path: &Path) -> bool {
+    daemon_binary_format(path).is_some() && daemon_binary_executable(path) == Some(true)
 }
 
 fn install_diagnostic_value(
@@ -355,6 +417,15 @@ fn install_diagnostic_value(
 ) -> Value {
     let bundled_daemon_path = bundled_daemon.map(|path| path.to_string_lossy().into_owned());
     let bundled_daemon_exists = bundled_daemon.map(|path| path.exists()).unwrap_or(false);
+    let bundled_daemon_format = bundled_daemon.and_then(daemon_binary_format);
+    let bundled_daemon_executable = bundled_daemon.and_then(daemon_binary_executable);
+    let bundled_daemon_valid = bundled_daemon.and_then(|path| {
+        if path.exists() {
+            Some(valid_bundled_daemon(path))
+        } else {
+            None
+        }
+    });
     let installed_daemon_exists = installed_daemon.exists();
     let installed_daemon_matches_bundle = bundled_daemon.and_then(|path| {
         if path.exists() && installed_daemon_exists {
@@ -372,6 +443,9 @@ fn install_diagnostic_value(
         "bundled_daemon_path": bundled_daemon_path,
         "installed_daemon_exists": installed_daemon_exists,
         "bundled_daemon_exists": bundled_daemon_exists,
+        "bundled_daemon_format": bundled_daemon_format,
+        "bundled_daemon_executable": bundled_daemon_executable,
+        "bundled_daemon_valid": bundled_daemon_valid,
         "installed_daemon_matches_bundle": installed_daemon_matches_bundle,
         "launchd_label": LAUNCHD_LABEL,
         "launchd_plist": launchd_plist.to_string_lossy(),
@@ -381,19 +455,208 @@ fn install_diagnostic_value(
     })
 }
 
+fn value_string(value: Option<&Value>, key: &str, default: &str) -> String {
+    value
+        .and_then(|item| item.get(key))
+        .and_then(|item| item.as_str())
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn diagnostic_problem_row(source: &str, name: &str, item: &Value) -> Option<Value> {
+    let failure = item
+        .get("last_failure")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let warning = item
+        .get("last_warning")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if failure.is_empty() && warning.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "source": source,
+        "name": name,
+        "state": value_string(Some(item), "state", "unknown"),
+        "route_class": value_string(Some(item), "last_route_class", ""),
+        "host": value_string(Some(item), "last_host", ""),
+        "backend": value_string(Some(item), "last_backend", ""),
+        "failure": failure,
+        "warning": warning,
+        "warning_host": value_string(Some(item), "last_warning_host", ""),
+        "failures_5m": item.get("failures_5m").and_then(|value| value.as_i64()).unwrap_or(0),
+    }))
+}
+
+fn diagnostic_problem_rows(status: Option<&Value>) -> Value {
+    let mut rows = Vec::new();
+    if let Some(routes) = status
+        .and_then(|status| status.get("route_health"))
+        .and_then(|value| value.as_object())
+    {
+        for (name, item) in routes {
+            if let Some(row) = diagnostic_problem_row("route_health", name, item) {
+                rows.push(row);
+            }
+        }
+    }
+    if let Some(checks) = status
+        .and_then(|status| status.get("canaries"))
+        .and_then(|value| value.get("checks"))
+        .and_then(|value| value.as_object())
+    {
+        for (name, item) in checks {
+            if let Some(row) = diagnostic_problem_row("canary", name, item) {
+                rows.push(row);
+            }
+        }
+    }
+    Value::Array(rows)
+}
+
+fn diagnostic_summary_value(status: Option<&Value>) -> Value {
+    let daemon_state = value_string(status, "state", "off");
+    let daemon_version = value_string(status, "version", "unknown");
+    let geph = value_string(status, "geph", "unknown");
+    let telegram_proxy = value_string(status, "telegram_proxy", "unknown");
+    let local_bypass = route_class_health(status, "local_bypass").unwrap_or("unknown".to_string());
+    let geo_exit = if geph == "off" {
+        "off".to_string()
+    } else {
+        route_class_health(status, "geo_exit").unwrap_or("unknown".to_string())
+    };
+    let system_proxy = status
+        .and_then(|status| status.get("system_proxy"))
+        .cloned()
+        .unwrap_or_else(|| json!({"state": "unknown", "kind": ""}));
+    let system_dns = status
+        .and_then(|status| status.get("system_dns"))
+        .map(|dns| {
+            json!({
+                "state": value_string(Some(dns), "state", "unknown"),
+                "providers": value_string(Some(dns), "providers", ""),
+                "managed_by_slipstream": dns
+                    .get("managed_by_slipstream")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+                "resolution_state": dns
+                    .get("resolution_checks")
+                    .and_then(|value| value.get("state"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown"),
+            })
+        })
+        .unwrap_or_else(|| json!({"state": "unknown"}));
+    let pf_state = status
+        .and_then(|status| status.get("pf_state"))
+        .cloned()
+        .unwrap_or_else(|| json!({"applied": false, "enabled": false, "rules_loaded": false}));
+    let canaries = status
+        .and_then(|status| status.get("canaries"))
+        .map(|canaries| {
+            json!({
+                "running": canaries.get("running").and_then(|value| value.as_bool()).unwrap_or(false),
+                "last_reason": value_string(Some(canaries), "last_reason", ""),
+                "total": canaries.get("total").and_then(|value| value.as_i64()).unwrap_or(0),
+                "ok": canaries.get("ok").and_then(|value| value.as_i64()).unwrap_or(0),
+                "warnings": canaries.get("warnings").and_then(|value| value.as_i64()).unwrap_or(0),
+                "degraded": canaries.get("degraded").and_then(|value| value.as_i64()).unwrap_or(0),
+                "unknown": canaries.get("unknown").and_then(|value| value.as_i64()).unwrap_or(0),
+            })
+        })
+        .unwrap_or_else(|| json!({"total": 0, "ok": 0, "warnings": 0, "degraded": 0}));
+    let auto_geo_exit = status
+        .and_then(|status| status.get("auto_geo_exit"))
+        .cloned()
+        .unwrap_or_else(|| json!({"enabled": false, "learned": 0, "pending": 0}));
+    let routing_policy = status
+        .and_then(|status| status.get("routing_policy"))
+        .map(|policy| {
+            json!({
+                "version": policy.get("version").and_then(|value| value.as_i64()).unwrap_or(0),
+                "source": value_string(Some(policy), "source", "unknown"),
+                "sha256": value_string(Some(policy), "sha256", ""),
+                "domains": policy
+                    .get("domains")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+                "attempt_limits": policy
+                    .get("attempt_limits")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+            })
+        })
+        .unwrap_or_else(|| json!({"version": 0, "source": "unknown", "sha256": ""}));
+    let strategy_scores = status
+        .and_then(|status| status.get("strategy_scores"))
+        .cloned()
+        .unwrap_or_else(|| json!({"hosts": 0, "groups": {}, "strategies": {}}));
+    let geph_detail = status
+        .and_then(|status| status.get("geph_detail"))
+        .map(|detail| {
+            json!({
+                "port": detail.get("port").and_then(|value| value.as_i64()).unwrap_or(0),
+                "failure_reason": value_string(Some(detail), "failure_reason", ""),
+                "last_failure_host": value_string(Some(detail), "last_failure_host", ""),
+                "last_failure_at": detail
+                    .get("last_failure_at")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0),
+                "restart_recommended": detail
+                    .get("restart_recommended")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+                "restart_reason": value_string(Some(detail), "restart_reason", ""),
+                "restart_failures_5m": detail
+                    .get("restart_failures_5m")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0),
+                "restart_hosts_5m": detail
+                    .get("restart_hosts_5m")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0),
+            })
+        })
+        .unwrap_or_else(|| json!({"port": 0}));
+
+    json!({
+        "daemon_state": daemon_state,
+        "daemon_version": daemon_version,
+        "geph": geph,
+        "telegram_proxy": telegram_proxy,
+        "routes": {
+            "local_bypass": local_bypass,
+            "geo_exit": geo_exit,
+        },
+        "system_proxy": system_proxy,
+        "system_dns": system_dns,
+        "pf_state": pf_state,
+        "canaries": canaries,
+        "auto_geo_exit": auto_geo_exit,
+        "routing_policy": routing_policy,
+        "strategy_scores": strategy_scores,
+        "geph_detail": geph_detail,
+        "problems": diagnostic_problem_rows(status),
+    })
+}
+
 fn diagnostic_snapshot_value(
     app_version: &str,
     status: Option<Value>,
     generated_at: f64,
     log_tail: Option<Value>,
+    daemon_recovery: Option<Value>,
     bundled_daemon: Option<&Path>,
 ) -> Value {
+    let summary = diagnostic_summary_value(status.as_ref());
     let mut snapshot = json!({
         "app": {
             "name": "Slipstream",
             "version": app_version,
         },
         "generated_at_unix": generated_at,
+        "summary": summary,
         "daemon": status.unwrap_or_else(|| json!({"state": "off"})),
         "install": install_diagnostic_value(
             bundled_daemon,
@@ -403,6 +666,9 @@ fn diagnostic_snapshot_value(
     });
     if let Some(log_tail) = log_tail {
         snapshot["log_tail"] = log_tail;
+    }
+    if let Some(daemon_recovery) = daemon_recovery {
+        snapshot["daemon_recovery"] = daemon_recovery;
     }
     sanitize_json(&mut snapshot);
     snapshot
@@ -432,6 +698,21 @@ fn copy_text_to_clipboard(text: &str) -> bool {
     child.wait().map(|status| status.success()).unwrap_or(false)
 }
 
+fn diagnostic_snapshot_path() -> PathBuf {
+    std::env::temp_dir().join("slipstream-diagnostics.json")
+}
+
+fn write_diagnostic_snapshot_file(path: &Path, text: &str) -> bool {
+    if fs::write(path, text).is_err() {
+        return false;
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).is_ok()
+}
+
+fn reveal_file_in_finder(path: &Path) {
+    let _ = Command::new("/usr/bin/open").arg("-R").arg(path).spawn();
+}
+
 fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
     let bundled_daemon = bundled_daemon_path(app);
     let snapshot = diagnostic_snapshot_value(
@@ -439,12 +720,19 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
         read_status(),
         unix_now_secs(),
         Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
+        Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
         bundled_daemon.as_deref(),
     );
     let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
         return false;
     };
-    copy_text_to_clipboard(&text)
+    let copied = copy_text_to_clipboard(&text);
+    let path = diagnostic_snapshot_path();
+    let saved = write_diagnostic_snapshot_file(&path, &text);
+    if saved {
+        reveal_file_in_finder(&path);
+    }
+    copied && saved
 }
 
 fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
@@ -482,7 +770,7 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
     let Some(bin) = bundled_daemon_path(app) else {
         return false;
     };
-    bin.exists() && !daemon_needs_install(&bin)
+    valid_bundled_daemon(&bin) && !daemon_needs_install(&bin)
 }
 
 fn should_recover_daemon(missing_status_polls: u8, cooldown_ready: bool, installed: bool) -> bool {
@@ -493,17 +781,25 @@ fn daemon_recovery_shell() -> String {
     let label = shell_quote(&format!("system/{LAUNCHD_LABEL}"));
     let plist = shell_quote(LAUNCHD_PLIST);
     let daemon = shell_quote(INSTALLED_DAEMON);
+    let recovery = shell_quote(DAEMON_RECOVERY_STATUS_PATH);
     format!(
-        "/bin/launchctl kickstart -k {label} >/dev/null 2>&1 \
+        "recovery_status={recovery}; \
+         write_recovery() {{ \
+           /bin/printf '{{\"result\":\"%s\",\"ts\":%s}}\\n' \"$1\" \"$(/bin/date +%s)\" \
+             > \"$recovery_status\"; \
+           /bin/chmod 644 \"$recovery_status\"; \
+         }}; \
+         /bin/launchctl kickstart -k {label} >/dev/null 2>&1 \
          || /bin/launchctl bootstrap system {plist} >/dev/null 2>&1 \
          || true; \
          /bin/sleep 3; \
          status=$({daemon} --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
          if printf '%s\\n' \"$status\" \
             | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
-         then exit 0; fi; \
+         then write_recovery daemon_recovered; exit 0; fi; \
          /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; \
-         /sbin/pfctl -d >/dev/null 2>&1 || true"
+         /sbin/pfctl -d >/dev/null 2>&1 || true; \
+         write_recovery pf_reset"
     )
 }
 
@@ -520,9 +816,19 @@ fn ensure_daemon_installed(app: &AppHandle) {
     if !bin.exists() {
         return; // dev build without the bundled daemon
     }
+    if !valid_bundled_daemon(&bin) {
+        eprintln!(
+            "Slipstream bundled daemon is not a valid executable: {}",
+            bin.display()
+        );
+        return;
+    }
     if daemon_needs_install(&bin) {
         let bin = bin.to_string_lossy();
-        run_admin(&format!("{} --install", shell_quote(bin.as_ref())));
+        run_admin(
+            &format!("{} --install", shell_quote(bin.as_ref())),
+            "Slipstream needs administrator access to install its background daemon.",
+        );
     }
 }
 
@@ -678,7 +984,10 @@ fn health_rank(state: &str) -> u8 {
 fn route_class_health(st: Option<&Value>, route_class: &str) -> Option<String> {
     let routes = st?.get("route_health")?.as_object()?;
     let mut worst: Option<&str> = None;
-    for item in routes.values() {
+    for (name, item) in routes {
+        if name == "generic" {
+            continue;
+        }
         if item.get("last_route_class").and_then(|x| x.as_str()) != Some(route_class) {
             continue;
         }
@@ -1238,6 +1547,27 @@ fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     )
 }
 
+fn geph_restart_recommendation(status: Option<&Value>) -> Option<String> {
+    let status = status?;
+    if value_string(Some(status), "geph", "") != "up" {
+        return None;
+    }
+    let detail = status.get("geph_detail")?;
+    if !detail
+        .get("restart_recommended")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let reason = value_string(Some(detail), "restart_reason", "");
+    Some(if reason.is_empty() {
+        "geo-exit tunnel stale".to_string()
+    } else {
+        reason
+    })
+}
+
 /// Absolute path to the bundled geph5-client, which sits next to our own
 /// executable (Slipstream.app/Contents/MacOS/geph5-client).
 fn geph_bin_path() -> Option<std::path::PathBuf> {
@@ -1528,7 +1858,10 @@ pub fn run() {
                         }
                         ID_RESTART => {
                             tg_offer_reset_menu.fetch_add(1, Ordering::Relaxed);
-                            run_admin(&format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"));
+                            run_admin(
+                                &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
+                                "Slipstream needs administrator access to restart its background daemon.",
+                            );
                         }
                         ID_LOG => {
                             if !open_log_snapshot() {
@@ -1537,7 +1870,7 @@ pub fn run() {
                         }
                         ID_DIAGNOSTICS => {
                             if copy_diagnostic_snapshot(app) {
-                                notify(app, "Slipstream diagnostics copied");
+                                notify(app, "Slipstream diagnostics copied and saved");
                             } else {
                                 notify(app, "Unable to copy Slipstream diagnostics");
                             }
@@ -1572,6 +1905,7 @@ pub fn run() {
                 let mut seen_tg_offer_reset = tg_offer_reset_watch.load(Ordering::Relaxed);
                 let mut missing_status_polls: u8 = 0;
                 let mut next_daemon_recovery = Instant::now();
+                let mut next_geph_self_heal = Instant::now();
                 loop {
                     let state = refresh(&s, &d);
                     if state != last_state {
@@ -1597,7 +1931,18 @@ pub fn run() {
                     ) {
                         next_daemon_recovery =
                             now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
-                        run_admin(&daemon_recovery_shell());
+                        run_admin(
+                            &daemon_recovery_shell(),
+                            "Slipstream needs administrator access to repair its background daemon.",
+                        );
+                    }
+                    if now >= next_geph_self_heal && geph_enabled(&app_handle) {
+                        if let Some(reason) = geph_restart_recommendation(status.as_ref()) {
+                            next_geph_self_heal =
+                                now + Duration::from_secs(GEPH_SELF_HEAL_COOLDOWN_SECS);
+                            eprintln!("geph self-heal restart requested: {reason}");
+                            geph_stop(&app_handle);
+                        }
                     }
                     if let Some(up) = status
                         .as_ref()
@@ -1688,11 +2033,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_log_snapshot_direct, daemon_recovery_shell, diagnostic_snapshot_value,
-        diagnostic_log_tail, install_diagnostic_value, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
-        system_proxy_from_status, telegram_proxy_detail, DAEMON_WATCHDOG_MISSES,
+        admin_shell_script, copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
+        daemon_recovery_status_value, diagnostic_log_tail, diagnostic_snapshot_value,
+        diagnostic_summary_value, geph_restart_recommendation, install_diagnostic_value,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
+        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
+        telegram_proxy_detail, valid_bundled_daemon, write_diagnostic_snapshot_file,
+        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -1714,6 +2062,18 @@ mod tests {
     }
 
     #[test]
+    fn admin_shell_script_names_prompt_and_escapes_applescript_strings() {
+        let script = admin_shell_script(
+            "/bin/echo \"hi\" \\ done",
+            "Slipstream \"daemon\" \\ prompt",
+        );
+
+        assert!(script.contains("with administrator privileges with prompt"));
+        assert!(script.contains("/bin/echo \\\"hi\\\" \\\\ done"));
+        assert!(script.contains("Slipstream \\\"daemon\\\" \\\\ prompt"));
+    }
+
+    #[test]
     fn log_snapshot_shell_quotes_paths_and_uses_user_owner() {
         let shell = log_snapshot_shell(
             "/var/log/slipstream.log",
@@ -1732,10 +2092,8 @@ mod tests {
 
     #[test]
     fn copy_log_snapshot_direct_copies_and_clamps_permissions() {
-        let dir = std::env::temp_dir().join(format!(
-            "slipstream-log-copy-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("slipstream-log-copy-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("source.log");
@@ -1744,21 +2102,48 @@ mod tests {
         std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o640)).unwrap();
 
         assert!(copy_log_snapshot_direct(src.to_str().unwrap(), &dst));
-        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "line one\nline two\n");
-        assert_eq!(std::fs::metadata(&dst).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&dst).unwrap(),
+            "line one\nline two\n"
+        );
+        assert_eq!(
+            std::fs::metadata(&dst).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn copy_log_snapshot_direct_returns_false_when_unreadable() {
-        let dst = std::env::temp_dir().join(format!(
-            "slipstream-missing-log-{}.log",
-            std::process::id()
-        ));
+        let dst =
+            std::env::temp_dir().join(format!("slipstream-missing-log-{}.log", std::process::id()));
         let _ = std::fs::remove_file(&dst);
 
-        assert!(!copy_log_snapshot_direct("/definitely/missing/slipstream.log", &dst));
+        assert!(!copy_log_snapshot_direct(
+            "/definitely/missing/slipstream.log",
+            &dst
+        ));
+    }
+
+    #[test]
+    fn write_diagnostic_snapshot_file_clamps_permissions() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-export-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("slipstream-diagnostics.json");
+
+        assert!(write_diagnostic_snapshot_file(&path, "{\"ok\":true}\n"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"ok\":true}\n");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1767,13 +2152,100 @@ mod tests {
             "0.1.5",
             Some(json!({
                 "state": "active",
+                "version": "0.1.5",
+                "geph": "up",
+                "telegram_proxy": "ready",
                 "route_health": {
                     "openai": {
                         "state": "ok",
-                        "last_host": "chatgpt.com"
+                        "last_host": "chatgpt.com",
+                        "last_route_class": "geo_exit"
+                    },
+                    "youtube_video": {
+                        "state": "ok",
+                        "last_host": "redirector.googlevideo.com",
+                        "last_route_class": "local_bypass",
+                        "last_warning": "strategy probe failed",
+                        "last_warning_host": "www.youtube.com"
                     }
                 },
-                "geph": {
+                "canaries": {
+                    "total": 2,
+                    "ok": 1,
+                    "warnings": 1,
+                    "degraded": 0,
+                    "checks": {
+                        "youtube_web": {
+                            "state": "unknown",
+                            "last_route_class": "local_bypass",
+                            "last_warning": "strategy probe failed",
+                            "last_warning_host": "www.youtube.com"
+                        }
+                    }
+                },
+                "system_proxy": {"state": "off", "kind": ""},
+                "system_dns": {
+                    "state": "xbox_dns",
+                    "providers": "xbox_dns",
+                    "managed_by_slipstream": false,
+                    "resolution_checks": {"state": "ok"}
+                },
+                "pf_state": {"applied": true, "enabled": true, "rules_loaded": true},
+                "auto_geo_exit": {
+                    "enabled": true,
+                    "learned": 1,
+                    "pending": 0,
+                    "last_host": "payments.example.com"
+                },
+                "routing_policy": {
+                    "version": 1,
+                    "source": "bundled",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "domains": {
+                        "direct_passthrough": 5,
+                        "local_bypass": 30,
+                        "geo_exit": 15
+                    },
+                    "attempt_limits": {
+                        "default": 2,
+                        "local_bypass": 4
+                    },
+                    "groups": {
+                        "discord": {
+                            "route_class": "local_bypass",
+                            "strategy_set": "fake_only",
+                            "domains": 23
+                        }
+                    }
+                },
+                "strategy_scores": {
+                    "hosts": 2,
+                    "groups": {
+                        "discord": {
+                            "hosts": 1,
+                            "strategies": {
+                                "split64+fake": {
+                                    "hosts": 1,
+                                    "ok": 3,
+                                    "fail": 0,
+                                    "last_seen": 100.0
+                                }
+                            }
+                        },
+                        "youtube_video": {
+                            "hosts": 1,
+                            "strategies": {
+                                "fake5": {
+                                    "hosts": 1,
+                                    "ok": 1,
+                                    "fail": 1,
+                                    "last_seen": 110.0
+                                }
+                            }
+                        }
+                    }
+                },
+                "secrets": {
                     "account_secret": "very-secret",
                     "nested": {
                         "api_token": "token-value",
@@ -1786,20 +2258,134 @@ mod tests {
                 "available": true,
                 "lines": ["tg://proxy?server=127.0.0.1&secret=old-secret"]
             })),
+            Some(json!({
+                "available": true,
+                "last": {
+                    "result": "daemon_recovered",
+                    "ts": 12345
+                }
+            })),
             None,
         );
         let text = serde_json::to_string(&snapshot).unwrap();
 
         assert_eq!(snapshot["app"]["version"], "0.1.5");
+        assert_eq!(snapshot["summary"]["daemon_state"], "active");
+        assert_eq!(snapshot["summary"]["daemon_version"], "0.1.5");
+        assert_eq!(snapshot["summary"]["routes"]["local_bypass"], "ok");
+        assert_eq!(snapshot["summary"]["routes"]["geo_exit"], "ok");
+        assert_eq!(snapshot["summary"]["system_dns"]["resolution_state"], "ok");
+        assert_eq!(snapshot["summary"]["auto_geo_exit"]["learned"], 1);
+        assert_eq!(snapshot["summary"]["routing_policy"]["version"], 1);
+        assert_eq!(snapshot["summary"]["routing_policy"]["source"], "bundled");
+        assert_eq!(
+            snapshot["summary"]["routing_policy"]["sha256"],
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            snapshot["summary"]["routing_policy"]["domains"]["local_bypass"],
+            30
+        );
+        assert_eq!(
+            snapshot["summary"]["routing_policy"]["attempt_limits"]["local_bypass"],
+            4
+        );
+        assert_eq!(snapshot["summary"]["strategy_scores"]["hosts"], 2);
+        assert_eq!(
+            snapshot["summary"]["strategy_scores"]["groups"]["discord"]["strategies"]
+                ["split64+fake"]["ok"],
+            3
+        );
+        let strategy_summary =
+            serde_json::to_string(&snapshot["summary"]["strategy_scores"]).unwrap();
+        assert_eq!(snapshot["summary"]["problems"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            snapshot["daemon_recovery"]["last"]["result"],
+            "daemon_recovered"
+        );
         assert_eq!(
             snapshot["daemon"]["route_health"]["openai"]["last_host"],
             "chatgpt.com"
         );
         assert!(!text.contains("very-secret"));
+        assert!(!strategy_summary.contains("discord.com"));
+        assert!(!strategy_summary.contains("googlevideo.com"));
         assert!(!text.contains("token-value"));
         assert!(!text.contains("pass-value"));
         assert!(!text.contains("old-secret"));
         assert!(text.contains("<redacted>"));
+    }
+
+    #[test]
+    fn diagnostic_summary_reports_off_state_without_daemon_status() {
+        let summary = diagnostic_summary_value(None);
+
+        assert_eq!(summary["daemon_state"], "off");
+        assert_eq!(summary["daemon_version"], "unknown");
+        assert_eq!(summary["routes"]["local_bypass"], "unknown");
+        assert_eq!(summary["routes"]["geo_exit"], "unknown");
+        assert_eq!(summary["auto_geo_exit"]["enabled"], false);
+        assert_eq!(summary["routing_policy"]["version"], 0);
+        assert_eq!(summary["routing_policy"]["source"], "unknown");
+        assert_eq!(summary["routing_policy"]["sha256"], "");
+        assert_eq!(summary["problems"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn daemon_recovery_status_reports_last_watchdog_result() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-daemon-recovery-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon-recovery.json");
+        std::fs::write(&path, r#"{"result":"pf_reset","ts":12345}"#).unwrap();
+
+        let status = daemon_recovery_status_value(path.to_str().unwrap());
+
+        assert_eq!(status["available"], true);
+        assert_eq!(status["last"]["result"], "pf_reset");
+        assert_eq!(status["last"]["ts"], 12345);
+
+        std::fs::write(&path, "not json secret=hidden").unwrap();
+        let broken = daemon_recovery_status_value(path.to_str().unwrap());
+        assert_eq!(broken["available"], true);
+        assert_eq!(broken["last"]["parse_error"], true);
+
+        let missing = daemon_recovery_status_value("/definitely/missing/recovery.json");
+        assert_eq!(missing["available"], false);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bundled_daemon_validation_accepts_executable_macho_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-daemon-format-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let macho = dir.join("slipstreamd");
+        let text = dir.join("slipstreamd.txt");
+        let noexec = dir.join("slipstreamd-noexec");
+
+        std::fs::write(&macho, [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 0]).unwrap();
+        std::fs::set_permissions(&macho, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&text, b"not a daemon").unwrap();
+        std::fs::set_permissions(&text, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&noexec, [0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 0]).unwrap();
+        std::fs::set_permissions(&noexec, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(daemon_binary_format(&macho), Some("mach-o"));
+        assert!(valid_bundled_daemon(&macho));
+        assert_eq!(daemon_binary_format(&text), None);
+        assert!(!valid_bundled_daemon(&text));
+        assert_eq!(daemon_binary_format(&noexec), Some("fat-mach-o"));
+        assert!(!valid_bundled_daemon(&noexec));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1813,8 +2399,11 @@ mod tests {
         let bundled = dir.join("bundled-slipstreamd");
         let installed = dir.join("installed-slipstreamd");
         let plist = dir.join("dev.slipstream.tproxy.plist");
-        std::fs::write(&bundled, "daemon-v1").unwrap();
-        std::fs::write(&installed, "daemon-v1").unwrap();
+        let daemon_v1 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 1];
+        let daemon_v2 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 2];
+        std::fs::write(&bundled, daemon_v1).unwrap();
+        std::fs::set_permissions(&bundled, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&installed, daemon_v1).unwrap();
         std::fs::write(
             &plist,
             format!(
@@ -1827,6 +2416,9 @@ mod tests {
         let synced = install_diagnostic_value(Some(&bundled), &installed, &plist);
         assert_eq!(synced["bundled_daemon_exists"], true);
         assert_eq!(synced["installed_daemon_exists"], true);
+        assert_eq!(synced["bundled_daemon_format"], "mach-o");
+        assert_eq!(synced["bundled_daemon_executable"], true);
+        assert_eq!(synced["bundled_daemon_valid"], true);
         assert_eq!(synced["installed_daemon_matches_bundle"], true);
         assert_eq!(synced["launchd_plist_uses_installed_daemon"], true);
         assert_eq!(
@@ -1834,12 +2426,14 @@ mod tests {
             bundled.to_string_lossy().as_ref()
         );
 
-        std::fs::write(&installed, "daemon-v2").unwrap();
+        std::fs::write(&installed, daemon_v2).unwrap();
         let stale = install_diagnostic_value(Some(&bundled), &installed, &plist);
         assert_eq!(stale["installed_daemon_matches_bundle"], false);
 
         let missing_bundle = install_diagnostic_value(None, &installed, &plist);
         assert_eq!(missing_bundle["bundled_daemon_exists"], false);
+        assert!(missing_bundle["bundled_daemon_format"].is_null());
+        assert!(missing_bundle["bundled_daemon_valid"].is_null());
         assert!(missing_bundle["installed_daemon_matches_bundle"].is_null());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1943,8 +2537,12 @@ mod tests {
 
         assert!(shell.contains("/bin/launchctl kickstart -k 'system/dev.slipstream.tproxy'"));
         assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
+        assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
+        assert!(shell.contains("daemon_recovered"));
+        assert!(shell.contains("pf_reset"));
         assert!(shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(shell.find("kickstart").unwrap() < shell.find("pfctl").unwrap());
+        assert!(shell.find("--status").unwrap() < shell.find("pfctl").unwrap());
     }
 
     #[test]
@@ -2045,8 +2643,8 @@ mod tests {
     #[test]
     fn routing_health_summary_stays_short_for_geph_failures() {
         let status = json!({
-            "route_health": {
-                "youtube_video": {
+        "route_health": {
+            "youtube_video": {
                     "state": "unknown",
                     "last_route_class": "local_bypass"
                 },
@@ -2064,5 +2662,87 @@ mod tests {
             Some("Needs attention".to_string())
         );
         assert_eq!(routing_health_summary(Some(&status), "off", false), None);
+    }
+
+    #[test]
+    fn routing_health_summary_ignores_warning_only_checks() {
+        let status = json!({
+            "route_health": {
+                "youtube_video": {
+                    "state": "ok",
+                    "last_route_class": "local_bypass",
+                    "last_warning": "strategy probe failed",
+                    "last_warning_host": "www.youtube.com"
+                },
+                "openai": {
+                    "state": "ok",
+                    "last_route_class": "geo_exit",
+                    "last_warning": "SOCKS connect failed",
+                    "last_warning_host": "billing.openai.com"
+                }
+            },
+            "canaries": {
+                "warnings": 2,
+                "degraded": 0
+            }
+        });
+
+        assert_eq!(routing_health_summary(Some(&status), "up", false), None);
+    }
+
+    #[test]
+    fn routing_health_summary_ignores_generic_geo_exit_noise() {
+        let status = json!({
+            "route_health": {
+                "openai": {
+                    "state": "ok",
+                    "last_route_class": "geo_exit"
+                },
+                "generic": {
+                    "state": "degraded",
+                    "last_route_class": "geo_exit",
+                    "last_host": "gue1-spclient.spotify.com",
+                    "last_failure": "remote closed without response"
+                }
+            }
+        });
+
+        assert_eq!(routing_health_summary(Some(&status), "up", false), None);
+    }
+
+    #[test]
+    fn geph_restart_recommendation_requires_daemon_hint() {
+        let status = json!({
+            "geph": "up",
+            "geph_detail": {
+                "restart_recommended": true,
+                "restart_reason": "geo-exit tunnel stale after wake"
+            }
+        });
+
+        assert_eq!(
+            geph_restart_recommendation(Some(&status)),
+            Some("geo-exit tunnel stale after wake".to_string())
+        );
+        assert_eq!(
+            geph_restart_recommendation(Some(&json!({
+                "geph": "up",
+                "geph_detail": {
+                    "restart_recommended": false,
+                    "restart_reason": "geo-exit tunnel stale after wake"
+                }
+            }))),
+            None
+        );
+        assert_eq!(
+            geph_restart_recommendation(Some(&json!({
+                "geph": "down",
+                "geph_detail": {
+                    "restart_recommended": true,
+                    "restart_reason": "geo-exit tunnel stale after wake"
+                }
+            }))),
+            None
+        );
     }
 }

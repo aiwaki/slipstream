@@ -27,10 +27,12 @@ auto-updates the whole bundle.
 cd app-tauri
 ./make-icons.sh                 # SVG -> tray PNGs + app .icns (AppKit, macOS)
 npm ci
-npm run tauri build             # -> src-tauri/target/release/bundle/{macos,dmg}/
+npm run build:local             # -> src-tauri/target/release/bundle/{macos,dmg}/
 ```
 
-`npm run tauri dev` for a live tray during development.
+`npm run tauri dev` for a live tray during development. `npm run build:local`
+uses `src-tauri/tauri.local.conf.json` and skips updater artifact signing.
+`npm run build` is the release path and requires `TAURI_SIGNING_PRIVATE_KEY`.
 
 ## Auto-updater keys
 

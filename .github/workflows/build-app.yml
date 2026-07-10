@@ -7,6 +7,9 @@
 # tauri.conf.json) and published as a GitHub Release, along with a `latest.json`
 # appcast at the URL the app's updater polls
 # (releases/latest/download/latest.json). Existing installs then auto-update.
+# It also publishes signed route-policy assets for the opt-in remote-policy
+# channel. The app does not enable that channel by default; this only gives
+# reviewed releases a signed, hash-checked policy bundle to point at later.
 #
 # NOTE: the .app is NOT Apple-notarized (no Developer ID), so a FIRST download
 # still hits Gatekeeper (right-click > Open). The updater signature is minisign,
@@ -61,6 +64,15 @@ jobs:
       - name: System build deps
         run: brew install protobuf cmake pkg-config || true
 
+      - name: Prepare route policy trust keys
+        env:
+          SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON: ${{ secrets.SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON }}
+        run: |
+          set -euo pipefail
+          : "${SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON:?missing SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON}"
+          printf '%s\n' "$SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON" > spike/route-policy-keys.json
+          python3 -m json.tool spike/route-policy-keys.json >/dev/null
+
       - name: Build the self-contained daemon (slipstreamd, PyInstaller)
         run: |
           set -euo pipefail
@@ -94,7 +106,7 @@ jobs:
         run: python3 scripts/sync_version.py --check
 
       - name: Test release metadata scripts
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+        run: spike/.buildvenv/bin/python -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Build + sign the app
         working-directory: app-tauri
@@ -125,6 +137,48 @@ jobs:
             --output "$OUT/latest.json"
           echo "made appcast:"; cat "$OUT/latest.json"
 
+      - name: Package signed route policy channel
+        env:
+          SLIP_ROUTE_POLICY_KEY_ID: ${{ secrets.SLIP_ROUTE_POLICY_KEY_ID }}
+          SLIP_ROUTE_POLICY_PRIVATE_KEY: ${{ secrets.SLIP_ROUTE_POLICY_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${SLIP_ROUTE_POLICY_KEY_ID:?missing SLIP_ROUTE_POLICY_KEY_ID}"
+          : "${SLIP_ROUTE_POLICY_PRIVATE_KEY:?missing SLIP_ROUTE_POLICY_PRIVATE_KEY}"
+          OUT=dist-release
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file" "$OUT/route-policy-derived-keys.json"' EXIT
+          umask 077
+          printf '%s\n' "$SLIP_ROUTE_POLICY_PRIVATE_KEY" > "$key_file"
+          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
+            --bundled-manifest \
+            --key-id "$SLIP_ROUTE_POLICY_KEY_ID" \
+            --private-key-file "$key_file" \
+            --output "$OUT/route-policy.json" \
+            --public-keys-output "$OUT/route-policy-derived-keys.json"
+          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
+            --verify \
+            --bundle "$OUT/route-policy.json" \
+            --public-keys spike/route-policy-keys.json
+          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
+            --channel-index \
+            --bundle "$OUT/route-policy.json" \
+            --bundle-url "https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/route-policy.json" \
+            --output "$OUT/route-policy-latest.json"
+          cp spike/route-policy-keys.json "$OUT/route-policy-keys.json"
+          python3 -m json.tool "$OUT/route-policy.json" >/dev/null
+          python3 -m json.tool "$OUT/route-policy-latest.json" >/dev/null
+          python3 -m json.tool "$OUT/route-policy-keys.json" >/dev/null
+
+      - name: Verify release artifacts
+        run: |
+          set -euo pipefail
+          spike/.buildvenv/bin/python scripts/verify_release_artifacts.py \
+            --release-dir dist-release \
+            --repository "${{ github.repository }}" \
+            --tag "${{ steps.ver.outputs.tag }}" \
+            --version "${{ steps.ver.outputs.version }}"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -139,4 +193,7 @@ jobs:
             dist-release/Slipstream.app.tar.gz
             dist-release/Slipstream.app.tar.gz.sig
             dist-release/latest.json
+            dist-release/route-policy.json
+            dist-release/route-policy-latest.json
+            dist-release/route-policy-keys.json
             dist-release/*.dmg

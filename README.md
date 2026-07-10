@@ -79,7 +79,7 @@ cd app-tauri
 npm ci
 # для чистого локального релиз-билда нужен geph sidecar:
 # app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-npm run tauri build
+npm run build:local
 
 # фоновая служба (десинк + роутинг) — приложение ставит её само,
 # но при разработке можно вручную из корня репозитория:
@@ -90,6 +90,8 @@ sudo python3 spike/tproxy.py --install
 Встроенный `geph5-client` собирается из исходников в CI
 ([`build-geph.yml`](.github/workflows/build-geph.yml)) и помещается в
 `app-tauri/src-tauri/binaries/`.
+Релизная сборка приложения (`npm run build`) дополнительно подписывает updater
+artifact и требует `TAURI_SIGNING_PRIVATE_KEY`.
 
 ## Что где
 
@@ -99,7 +101,7 @@ sudo python3 spike/tproxy.py --install
 | `spike/tproxy.py` | Служба десинка и раздельного роутинга для macOS (Python, root). |
 | `vendor/tg-ws-proxy/` | Встроенный Telegram-прокси MTProto-over-WebSocket. |
 | `vendor/geph/` | Сборка встроенного `geph5-client`. |
-| `docs/` | Заметки по устройству и безопасности. |
+| [`docs/`](docs/README.md) | Карта документации, решений и инженерных заметок. |
 
 ## Приватность
 

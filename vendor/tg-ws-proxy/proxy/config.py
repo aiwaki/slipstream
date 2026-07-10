@@ -113,7 +113,7 @@ def _fetch_cfproxy_domain_list() -> List[str]:
         ]
         return [_dd(d) for d in encoded]
     except Exception as exc:
-        log.warning("Failed to fetch CF proxy domain list: %s", repr(exc))
+        log.warning("CF proxy domain list unavailable: %s", repr(exc))
         return []
 
 
@@ -172,7 +172,7 @@ def refresh_cfproxy_domains() -> None:
         )
     else:
         log.warning(
-            "CF proxy domain refresh failed or empty response; "
+            "CF proxy domain refresh unavailable or empty response; "
             "keeping current domain pool",
         )
 

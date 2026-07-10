@@ -20,10 +20,14 @@ ESCAPE HATCH if connectivity breaks (other terminal):
 import argparse
 import asyncio
 import atexit
+import base64
+import filecmp
 import fcntl
+import hashlib
 import ipaddress
 import json
 import logging
+import math
 from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -39,7 +43,8 @@ import sys
 import tempfile
 import threading
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
+import urllib.request
 
 from primes import build_fake_stun, classify as classify_voice_payload
 
@@ -93,6 +98,7 @@ _dead = {}                     # host -> expiry_monotonic
 
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
+DAEMON_VERSION = "0.1.5"
 _conn_count = 0                # live proxied connections
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
@@ -110,21 +116,60 @@ _env_geph_port = os.environ.get("SLIP_GEPH_PORT")
 GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [9954, 9909]
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
-_system_dns_cache = {"ts": 0.0, "status": None}
+_system_dns_cache = {
+    "ts": 0.0,
+    "status": None,
+    "resolution_ts": 0.0,
+    "resolution_checks": None,
+}
 SYSTEM_DNS_STATUS_TTL = 30.0
+SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
+
+ROUTE_LOCAL_BYPASS = "local_bypass"
+ROUTE_GEO_EXIT = "geo_exit"
+ROUTE_DIRECT = "direct_passthrough"
+ROUTE_UNKNOWN = "unknown"
+
+SERVICE_DISCORD = "discord"
+SERVICE_YOUTUBE = "youtube_video"
+SERVICE_OPENAI = "openai"
+SERVICE_ANTHROPIC = "anthropic"
+SERVICE_TELEGRAM = "telegram"
+SERVICE_STEAM_STORE = "steam_store"
+SERVICE_GITHUB = "github"
+SERVICE_GENERIC = "generic"
+
+STRATEGY_FAKE_ONLY = "fake_only"
+STRATEGY_GEPH = "geph"
+STRATEGY_DIRECT = "direct"
+STRATEGY_GENERAL = "general"
+
+DEFAULT_IP_ATTEMPT_LIMIT = 2
+LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
+IP_ATTEMPT_LIMIT_BY_ROUTE = {
+    ROUTE_LOCAL_BYPASS: LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
+}
+ROUTE_POLICY_VERSION = 1
+ROUTE_POLICY_SOURCE = "bundled"
+ROUTE_POLICY_SCHEMA_VERSION = 1
+ROUTE_POLICY_CHANNEL_KIND = "slipstream.route_policy_channel"
+ROUTE_POLICY_CHANNEL_SCHEMA_VERSION = 1
 
 # Services that refuse Russian IPs at the application layer (desync can't help —
 # only an exit abroad does). Suffix match. Telegram is deliberately ABSENT: per
 # product decision it is NOT tunnelled through geph; its DPI block is handled by
 # the bundled tg-ws-proxy (local MTProto proxy), and its raw DC-IP sockets are
 # passed direct (see TELEGRAM_NETS) so our desync never mangles MTProto.
-GEPH_HOSTS = (
-    "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
-    "anthropic.com", "claude.ai", "claudeusercontent.com",
-    "intercomcdn.com",            # OpenAI/Anthropic support widget assets
-)
 OPENAI_HOSTS = ("openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com")
 ANTHROPIC_HOSTS = ("anthropic.com", "claude.ai", "claudeusercontent.com")
+STEAM_STORE_HOSTS = (
+    "steampowered.com", "steamcommunity.com", "steamstatic.com",
+    "steamusercontent.com",
+    "steamcdn-a.akamaihd.net", "steamcommunity-a.akamaihd.net",
+)
+GEPH_MISC_HOSTS = (
+    "intercomcdn.com",            # OpenAI/Anthropic support widget assets
+)
 
 # Flowseal/zapret-style hostlists mark services for LOCAL DPI bypass, not for a
 # foreign VPN exit. These hosts should stay on the user's normal route and use
@@ -138,9 +183,24 @@ DISCORD_HOSTS = (
     "discordmerch.com", "discordpartygames.com", "discordsays.com",
     "discordsez.com", "discordstatus.com", "dis.gd",
 )
-GOOGLE_VIDEO = ("googlevideo.com", "youtube.com", "ytimg.com", "gvt1.com", "gvt2.com")
+GOOGLE_VIDEO = (
+    "googlevideo.com", "youtube.com", "youtu.be", "ytimg.com", "ggpht.com",
+    "gvt1.com", "gvt2.com",
+)
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
+GITHUB_HOSTS = (
+    "github.com",
+    "githubassets.com",
+    "githubusercontent.com",
+    "github.io",
+    "github.githubassets.com",
+    "api.github.com",
+    "codeload.github.com",
+    "objects.githubusercontent.com",
+    "raw.githubusercontent.com",
+    "gist.githubusercontent.com",
+)
 
 XBOX_DNS_SERVERS = (
     "111.88.96.50",
@@ -149,22 +209,106 @@ XBOX_DNS_SERVERS = (
     "2a00:ab00:1233:26::51",
 )
 
-ROUTE_LOCAL_BYPASS = "local_bypass"
-ROUTE_GEO_EXIT = "geo_exit"
-ROUTE_DIRECT = "direct_passthrough"
-ROUTE_UNKNOWN = "unknown"
+ROUTE_POLICY_TABLE = (
+    {
+        "domains": TELEGRAM_HOSTS,
+        "route_class": ROUTE_DIRECT,
+        "service_group": SERVICE_TELEGRAM,
+        "strategy_set": STRATEGY_DIRECT,
+    },
+    {
+        "domains": GITHUB_HOSTS,
+        "route_class": ROUTE_DIRECT,
+        "service_group": SERVICE_GITHUB,
+        "strategy_set": STRATEGY_DIRECT,
+    },
+    {
+        "domains": DISCORD_HOSTS,
+        "route_class": ROUTE_LOCAL_BYPASS,
+        "service_group": SERVICE_DISCORD,
+        "strategy_set": STRATEGY_FAKE_ONLY,
+    },
+    {
+        "domains": GOOGLE_VIDEO,
+        "route_class": ROUTE_LOCAL_BYPASS,
+        "service_group": SERVICE_YOUTUBE,
+        "strategy_set": STRATEGY_FAKE_ONLY,
+    },
+)
 
-SERVICE_DISCORD = "discord"
-SERVICE_YOUTUBE = "youtube_video"
-SERVICE_OPENAI = "openai"
-SERVICE_ANTHROPIC = "anthropic"
-SERVICE_TELEGRAM = "telegram"
-SERVICE_GENERIC = "generic"
+GEO_EXIT_POLICY_TABLE = (
+    {"domains": OPENAI_HOSTS + ("billing.openai.com",), "service_group": SERVICE_OPENAI},
+    {"domains": ANTHROPIC_HOSTS, "service_group": SERVICE_ANTHROPIC},
+    {"domains": STEAM_STORE_HOSTS, "service_group": SERVICE_STEAM_STORE},
+    {"domains": GEPH_MISC_HOSTS, "service_group": SERVICE_GENERIC},
+)
+GEPH_HOSTS = tuple(
+    domain for policy in GEO_EXIT_POLICY_TABLE for domain in policy["domains"]
+)
+POLICY_PROTECTED_LOCAL_BYPASS_GROUPS = frozenset((SERVICE_DISCORD, SERVICE_YOUTUBE))
+POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
+    SERVICE_DISCORD,
+    SERVICE_YOUTUBE,
+    SERVICE_OPENAI,
+    SERVICE_ANTHROPIC,
+    SERVICE_TELEGRAM,
+    SERVICE_STEAM_STORE,
+    SERVICE_GITHUB,
+    SERVICE_GENERIC,
+))
+POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
+    ROUTE_DIRECT: frozenset((STRATEGY_DIRECT,)),
+    ROUTE_LOCAL_BYPASS: frozenset((STRATEGY_FAKE_ONLY,)),
+    ROUTE_GEO_EXIT: frozenset((STRATEGY_GEPH,)),
+}
+POLICY_STATE_DIR = "/var/db/slipstream"
+ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
+ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
+ROUTE_POLICY_KEYS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy-keys.json")
+ROUTE_POLICY_BUNDLED_KEYS_FILENAME = "route-policy-keys.json"
+ROUTE_POLICY_REMOTE_URL_ENV = "SLIP_ROUTE_POLICY_URL"
+ROUTE_POLICY_KEYS_PATH_ENV = "SLIP_ROUTE_POLICY_KEYS_PATH"
+ROUTE_POLICY_FETCH_TIMEOUT = 5.0
+ROUTE_POLICY_MAX_BYTES = 256 * 1024
+ROUTE_POLICY_REMOTE_INTERVAL = 6 * 60 * 60.0
+ROUTE_POLICY_REMOTE_JITTER = 5 * 60.0
+ROUTE_POLICY_REMOTE_RETRY_BASE = 15 * 60.0
+ROUTE_POLICY_REMOTE_RETRY_MAX = 6 * 60 * 60.0
+TRUSTED_ROUTE_POLICY_KEYS = {}
+_active_route_policy_manifest = None
+_route_policy_storage = {
+    "state": "bundled",
+    "path": ROUTE_POLICY_STATE_PATH,
+    "source": ROUTE_POLICY_SOURCE,
+    "sha256": "",
+    "last_error": "",
+    "updated_at": 0.0,
+}
+_route_policy_remote = {
+    "state": "disabled",
+    "url": "",
+    "last_error": "",
+    "last_checked": 0.0,
+    "last_source": "",
+    "last_sha256": "",
+    "next_due": 0.0,
+    "running": False,
+    "failures": 0,
+    "last_reason": "",
+}
 
-STRATEGY_FAKE_ONLY = "fake_only"
-STRATEGY_GEPH = "geph"
-STRATEGY_DIRECT = "direct"
-STRATEGY_GENERAL = "general"
+DNS_DIAGNOSTIC_HOSTS = (
+    ("updates.discord.com", SERVICE_DISCORD),
+    ("gateway.discord.gg", SERVICE_DISCORD),
+    ("www.youtube.com", SERVICE_YOUTUBE),
+    ("redirector.googlevideo.com", SERVICE_YOUTUBE),
+)
+DNS_POISON_STUB_NETS = tuple(
+    ipaddress.ip_network(net)
+    for net in (
+        "87.228.47.0/24",  # observed ISP poison stub range
+    )
+)
 
 GEO_BACKEND_GEPH = "geph"
 GEO_BACKEND_SMART_DNS = "smart_dns"
@@ -177,15 +321,25 @@ HEALTH_UNKNOWN = "unknown"
 CANARY_INTERVAL = 10 * 60.0
 CANARY_JITTER = 90.0
 CANARY_FORCE_MIN_GAP = 60.0
+CANARY_FORCE_RETRY_DELAY = 15.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
 LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
+LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
+LOCAL_BYPASS_RESWEEP_COOLDOWN = 60.0
+LOCAL_BYPASS_RESWEEP_STALE_AFTER = 120.0
+GEO_PAYLOAD_CANARY_TIMEOUT = 6.0
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
+GEPH_RESTART_FAILURE_THRESHOLD = 3
+GEPH_RESTART_MIN_HOSTS = 2
+GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
+GEPH_RESTART_COOLDOWN = 10 * 60.0
 SMART_DNS_OK_TTL = 10 * 60.0
+SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
 _smart_dns_ok_until = {}
 _smart_dns_last_failure = {"host": "", "reason": "", "ts": 0.0}
 
@@ -205,71 +359,880 @@ def is_google_video_host(host):
     return _host_matches(host, GOOGLE_VIDEO)
 
 
-def is_local_bypass_host(host):
-    return _host_matches(host, LOCAL_BYPASS_HOSTS)
-
-
 def normalize_host(host):
     return host.lower().rstrip(".") if host else ""
+
+
+def _policy_result(host, route_class, service_group, strategy_set):
+    return {
+        "host": host,
+        "route_class": route_class,
+        "service_group": service_group,
+        "strategy_set": strategy_set,
+    }
+
+
+def _match_policy(host, policies):
+    for policy in policies:
+        if _host_matches(host, policy["domains"]):
+            return policy
+    return None
+
+
+def bundled_route_policy_manifest():
+    return {
+        "version": ROUTE_POLICY_VERSION,
+        "source": ROUTE_POLICY_SOURCE,
+        "static_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "route_class": policy["route_class"],
+                "service_group": policy["service_group"],
+                "strategy_set": policy["strategy_set"],
+            }
+            for policy in ROUTE_POLICY_TABLE
+        ],
+        "geo_exit_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "service_group": policy["service_group"],
+                "route_class": ROUTE_GEO_EXIT,
+                "strategy_set": STRATEGY_GEPH,
+            }
+            for policy in GEO_EXIT_POLICY_TABLE
+        ],
+        "attempt_limits": {
+            "default": DEFAULT_IP_ATTEMPT_LIMIT,
+            **IP_ATTEMPT_LIMIT_BY_ROUTE,
+        },
+    }
+
+
+def _copy_route_policy_manifest(manifest):
+    return {
+        "version": manifest["version"],
+        "source": manifest["source"],
+        "static_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "route_class": policy["route_class"],
+                "service_group": policy["service_group"],
+                "strategy_set": policy["strategy_set"],
+            }
+            for policy in manifest["static_routes"]
+        ],
+        "geo_exit_routes": [
+            {
+                "domains": list(policy["domains"]),
+                "route_class": policy["route_class"],
+                "service_group": policy["service_group"],
+                "strategy_set": policy["strategy_set"],
+            }
+            for policy in manifest["geo_exit_routes"]
+        ],
+        "attempt_limits": dict(manifest["attempt_limits"]),
+    }
+
+
+def route_policy_manifest():
+    manifest = _active_route_policy_manifest
+    if manifest is None:
+        manifest = bundled_route_policy_manifest()
+    return _copy_route_policy_manifest(manifest)
+
+
+def route_policy_tables(manifest=None):
+    manifest = route_policy_manifest() if manifest is None else manifest
+    normalized = validate_route_policy_manifest(manifest)
+    return normalized["static_routes"], normalized["geo_exit_routes"]
+
+
+def active_geph_hosts(manifest=None):
+    _static_routes, geo_exit_routes = route_policy_tables(manifest)
+    return tuple(domain for policy in geo_exit_routes for domain in policy["domains"])
+
+
+def is_local_bypass_host(host):
+    static_routes, _geo_exit_routes = route_policy_tables()
+    return any(
+        policy["route_class"] == ROUTE_LOCAL_BYPASS
+        and _host_matches(host, policy["domains"])
+        for policy in static_routes
+    )
+
+
+def _require_policy_int(value, name, *, min_value=0, max_value=100):
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    if value < min_value or value > max_value:
+        raise ValueError(f"{name} out of range")
+    return value
+
+
+def _normalize_policy_domains(domains, name):
+    if not isinstance(domains, (list, tuple)) or not domains:
+        raise ValueError(f"{name}.domains must be a non-empty list")
+    normalized = []
+    seen = set()
+    for domain in domains:
+        if not isinstance(domain, str):
+            raise ValueError(f"{name}.domains entries must be strings")
+        host = normalize_host(domain)
+        if (
+            not host
+            or "*" in host
+            or "/" in host
+            or ":" in host
+            or any(part == "" for part in host.split("."))
+        ):
+            raise ValueError(f"{name}.domains contains invalid host {domain!r}")
+        if host not in seen:
+            normalized.append(host)
+            seen.add(host)
+    return normalized
+
+
+def _normalize_policy_entry(
+    entry, name, *, default_route_class=None, default_strategy_set=None,
+):
+    if not isinstance(entry, dict):
+        raise ValueError(f"{name} must be an object")
+    group = entry.get("service_group")
+    if group not in POLICY_ALLOWED_SERVICE_GROUPS:
+        raise ValueError(f"{name}.service_group is not supported")
+    route_class = entry.get("route_class", default_route_class)
+    if route_class not in POLICY_ALLOWED_STRATEGY_BY_ROUTE:
+        raise ValueError(f"{name}.route_class is not supported")
+    strategy_set = entry.get("strategy_set", default_strategy_set)
+    if strategy_set not in POLICY_ALLOWED_STRATEGY_BY_ROUTE[route_class]:
+        raise ValueError(f"{name}.strategy_set does not match route_class")
+    if group in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS and (
+        route_class != ROUTE_LOCAL_BYPASS or strategy_set != STRATEGY_FAKE_ONLY
+    ):
+        raise ValueError(f"{group} must stay local_bypass/fake_only")
+    return {
+        "domains": _normalize_policy_domains(entry.get("domains"), name),
+        "route_class": route_class,
+        "service_group": group,
+        "strategy_set": strategy_set,
+    }
+
+
+def validate_route_policy_manifest(manifest):
+    if not isinstance(manifest, dict):
+        raise ValueError("policy manifest must be an object")
+    normalized = {
+        "version": _require_policy_int(
+            manifest.get("version"),
+            "version",
+            min_value=1,
+            max_value=1_000_000,
+        ),
+        "source": manifest.get("source"),
+        "static_routes": [],
+        "geo_exit_routes": [],
+        "attempt_limits": {},
+    }
+    if not isinstance(normalized["source"], str) or not normalized["source"].strip():
+        raise ValueError("source must be a non-empty string")
+
+    static_routes = manifest.get("static_routes")
+    geo_exit_routes = manifest.get("geo_exit_routes")
+    if not isinstance(static_routes, list) or not static_routes:
+        raise ValueError("static_routes must be a non-empty list")
+    if not isinstance(geo_exit_routes, list):
+        raise ValueError("geo_exit_routes must be a list")
+
+    protected_seen = set()
+    for index, entry in enumerate(static_routes):
+        item = _normalize_policy_entry(entry, f"static_routes[{index}]")
+        normalized["static_routes"].append(item)
+        if item["service_group"] in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS:
+            protected_seen.add(item["service_group"])
+    missing = POLICY_PROTECTED_LOCAL_BYPASS_GROUPS - protected_seen
+    if missing:
+        raise ValueError(f"protected local-bypass groups missing: {', '.join(sorted(missing))}")
+
+    for index, entry in enumerate(geo_exit_routes):
+        item = _normalize_policy_entry(
+            entry,
+            f"geo_exit_routes[{index}]",
+            default_route_class=ROUTE_GEO_EXIT,
+            default_strategy_set=STRATEGY_GEPH,
+        )
+        if item["route_class"] != ROUTE_GEO_EXIT:
+            raise ValueError(f"geo_exit_routes[{index}] must be geo_exit")
+        normalized["geo_exit_routes"].append(item)
+
+    attempt_limits = manifest.get("attempt_limits")
+    if not isinstance(attempt_limits, dict):
+        raise ValueError("attempt_limits must be an object")
+    for route_class, value in attempt_limits.items():
+        if route_class != "default" and route_class not in POLICY_ALLOWED_STRATEGY_BY_ROUTE:
+            raise ValueError(f"attempt_limits has unsupported route {route_class!r}")
+        normalized["attempt_limits"][route_class] = _require_policy_int(
+            value,
+            f"attempt_limits[{route_class}]",
+            min_value=1,
+            max_value=8,
+        )
+    if "default" not in normalized["attempt_limits"]:
+        raise ValueError("attempt_limits.default is required")
+    return normalized
+
+
+def route_policy_canonical_bytes(manifest=None):
+    manifest = route_policy_manifest() if manifest is None else manifest
+    normalized = validate_route_policy_manifest(manifest)
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def route_policy_hash(manifest=None):
+    return hashlib.sha256(route_policy_canonical_bytes(manifest)).hexdigest()
+
+
+def verify_signed_route_policy_bundle(bundle, public_keys):
+    if not isinstance(bundle, dict):
+        raise ValueError("signed policy bundle must be an object")
+    if not isinstance(public_keys, dict) or not public_keys:
+        raise ValueError("trusted policy keys are required")
+    schema = _require_policy_int(
+        bundle.get("schema"),
+        "schema",
+        min_value=ROUTE_POLICY_SCHEMA_VERSION,
+        max_value=ROUTE_POLICY_SCHEMA_VERSION,
+    )
+    if schema != ROUTE_POLICY_SCHEMA_VERSION:
+        raise ValueError("unsupported policy bundle schema")
+    key_id = bundle.get("key_id")
+    if not isinstance(key_id, str) or key_id not in public_keys:
+        raise ValueError("unknown policy key")
+    signature = bundle.get("signature")
+    if not isinstance(signature, str):
+        raise ValueError("policy signature must be base64")
+    try:
+        signature_bytes = base64.b64decode(signature, validate=True)
+        public_key_bytes = base64.b64decode(public_keys[key_id], validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("policy signature or key is not valid base64") from exc
+
+    manifest = validate_route_policy_manifest(bundle.get("manifest"))
+    expected_hash = bundle.get("sha256")
+    if expected_hash is not None and expected_hash != route_policy_hash(manifest):
+        raise ValueError("policy hash mismatch")
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError as exc:
+        raise ValueError("policy signature support unavailable") from exc
+    try:
+        Ed25519PublicKey.from_public_bytes(public_key_bytes).verify(
+            signature_bytes,
+            route_policy_canonical_bytes(manifest),
+        )
+    except InvalidSignature as exc:
+        raise ValueError("policy signature verification failed") from exc
+    return manifest
+
+
+def apply_route_policy_manifest(manifest):
+    """Activate a validated route policy manifest in memory.
+
+    Remote fetch/persistence is deliberately outside this function. This keeps
+    policy updates staged: verify first, activate atomically, then expose the
+    active hash in status for diagnostics/rollback decisions.
+    """
+    global _active_route_policy_manifest
+    normalized = validate_route_policy_manifest(manifest)
+    _active_route_policy_manifest = _copy_route_policy_manifest(normalized)
+    return route_policy_status_snapshot()
+
+
+def apply_signed_route_policy_bundle(bundle, public_keys):
+    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    return apply_route_policy_manifest(manifest)
+
+
+def _set_route_policy_storage(state, *, source=None, sha256="", error="", path=None):
+    _route_policy_storage.update({
+        "state": state,
+        "path": path or ROUTE_POLICY_STATE_PATH,
+        "source": source or "",
+        "sha256": sha256,
+        "last_error": error,
+        "updated_at": time.time(),
+    })
+    return route_policy_storage_snapshot()
+
+
+def route_policy_storage_snapshot():
+    return dict(_route_policy_storage)
+
+
+def _set_route_policy_remote(
+    state,
+    *,
+    url="",
+    error="",
+    source="",
+    sha256="",
+    now=None,
+):
+    _route_policy_remote.update({
+        "state": state,
+        "url": url,
+        "last_error": error,
+        "last_checked": time.time() if now is None else now,
+        "last_source": source,
+        "last_sha256": sha256,
+    })
+    return route_policy_remote_snapshot()
+
+
+def route_policy_remote_snapshot():
+    return dict(_route_policy_remote)
+
+
+def route_policy_remote_url():
+    return os.environ.get(ROUTE_POLICY_REMOTE_URL_ENV, "").strip()
+
+
+def _route_policy_remote_delay(success, failures, now=None):
+    now = time.monotonic() if now is None else now
+    jitter = int(now) % int(ROUTE_POLICY_REMOTE_JITTER or 1)
+    if success:
+        return ROUTE_POLICY_REMOTE_INTERVAL + jitter
+    failures = max(1, int(failures or 1))
+    delay = ROUTE_POLICY_REMOTE_RETRY_BASE * (2 ** (failures - 1))
+    return min(ROUTE_POLICY_REMOTE_RETRY_MAX, delay) + jitter
+
+
+def _finish_route_policy_remote_update(success, now=None):
+    now = time.monotonic() if now is None else now
+    failures = 0 if success else int(_route_policy_remote.get("failures") or 0) + 1
+    _route_policy_remote["running"] = False
+    _route_policy_remote["failures"] = failures
+    _route_policy_remote["next_due"] = now + _route_policy_remote_delay(success, failures, now)
+
+
+def _route_policy_remote_health_runner(reason):
+    return asyncio.run(run_route_canaries(f"policy_update:{reason}"))
+
+
+def _route_policy_remote_thread_main(reason, url):
+    success = False
+    try:
+        success = update_route_policy_from_remote(
+            url=url,
+            health_runner=lambda: _route_policy_remote_health_runner(reason),
+        )
+    except Exception as exc:
+        _set_route_policy_remote("error", url=url, error=str(exc))
+    finally:
+        _finish_route_policy_remote_update(success)
+
+
+def start_route_policy_remote_update_if_due(
+    reason="periodic",
+    *,
+    force=False,
+    now=None,
+    runner=None,
+):
+    now = time.monotonic() if now is None else now
+    url = route_policy_remote_url()
+    if not url:
+        _set_route_policy_remote("disabled", now=time.time())
+        _route_policy_remote["running"] = False
+        _route_policy_remote["next_due"] = 0.0
+        _route_policy_remote["failures"] = 0
+        _route_policy_remote["last_reason"] = reason
+        return False
+    if _route_policy_remote.get("running"):
+        return False
+    if _canary_state.get("running"):
+        return False
+    next_due = float(_route_policy_remote.get("next_due") or 0.0)
+    if not force and next_due and now < next_due:
+        return False
+    try:
+        url = validate_route_policy_remote_url(url)
+    except Exception as exc:
+        _set_route_policy_remote("error", url=url, error=str(exc))
+        _finish_route_policy_remote_update(False, now)
+        return False
+    _route_policy_remote["running"] = True
+    _route_policy_remote["last_reason"] = reason
+    if runner is not None:
+        success = False
+        try:
+            success = bool(runner(reason, url))
+            return success
+        except Exception as exc:
+            _set_route_policy_remote("error", url=url, error=str(exc))
+            return False
+        finally:
+            _finish_route_policy_remote_update(success, now)
+    threading.Thread(
+        target=_route_policy_remote_thread_main,
+        args=(reason, url),
+        daemon=True,
+        name="route-policy-update",
+    ).start()
+    return True
+
+
+def _validate_route_policy_key_map(keys):
+    if not isinstance(keys, dict):
+        raise ValueError("trusted policy keys must be an object")
+    normalized = {}
+    for key_id, value in keys.items():
+        if not isinstance(key_id, str) or not key_id.strip():
+            raise ValueError("trusted policy key id must be a non-empty string")
+        if not isinstance(value, str):
+            raise ValueError(f"trusted policy key {key_id!r} must be base64")
+        try:
+            raw = base64.b64decode(value, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"trusted policy key {key_id!r} is not valid base64") from exc
+        if len(raw) != 32:
+            raise ValueError(f"trusted policy key {key_id!r} is not an Ed25519 key")
+        normalized[key_id] = value
+    return normalized
+
+
+def route_policy_bundled_keys_path():
+    root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, ROUTE_POLICY_BUNDLED_KEYS_FILENAME)
+
+
+def _load_route_policy_key_file(path):
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        data = json.load(f)
+    if isinstance(data, dict) and "keys" in data:
+        data = data["keys"]
+    return _validate_route_policy_key_map(data)
+
+
+def load_trusted_route_policy_keys(
+    *,
+    path=None,
+    embedded_keys=None,
+    bundled_path=None,
+):
+    keys = dict(TRUSTED_ROUTE_POLICY_KEYS if embedded_keys is None else embedded_keys)
+    if bundled_path is None:
+        bundled_path = route_policy_bundled_keys_path()
+    keys.update(_load_route_policy_key_file(bundled_path))
+    if path is None:
+        path = os.environ.get(ROUTE_POLICY_KEYS_PATH_ENV, ROUTE_POLICY_KEYS_PATH)
+    keys.update(_load_route_policy_key_file(path))
+    return _validate_route_policy_key_map(keys)
+
+
+def validate_route_policy_remote_url(url):
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("remote policy url is empty")
+    parsed = urlparse(url.strip())
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("remote policy url must use https")
+    return url.strip()
+
+
+def _fetch_remote_policy_json(
+    url,
+    *,
+    fetcher=None,
+    timeout=ROUTE_POLICY_FETCH_TIMEOUT,
+    max_bytes=ROUTE_POLICY_MAX_BYTES,
+):
+    if fetcher is not None:
+        data = fetcher(url)
+    else:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "SlipstreamPolicyUpdater/1",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = response.read(max_bytes + 1)
+    if isinstance(data, dict):
+        body = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return data, body
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("remote policy response must be JSON")
+    if len(data) > max_bytes:
+        raise ValueError("remote policy response is too large")
+    body = bytes(data)
+    return json.loads(body.decode("utf-8")), body
+
+
+def _is_route_policy_channel(data):
+    return isinstance(data, dict) and "bundle_url" in data
+
+
+def _fetch_signed_route_policy_bundle_from_channel(
+    channel,
+    *,
+    fetcher=None,
+    timeout=ROUTE_POLICY_FETCH_TIMEOUT,
+    max_bytes=ROUTE_POLICY_MAX_BYTES,
+):
+    if channel.get("kind") != ROUTE_POLICY_CHANNEL_KIND:
+        raise ValueError("remote policy channel kind is not supported")
+    schema = _require_policy_int(
+        channel.get("schema"),
+        "channel.schema",
+        min_value=ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+        max_value=ROUTE_POLICY_CHANNEL_SCHEMA_VERSION,
+    )
+    if schema != ROUTE_POLICY_CHANNEL_SCHEMA_VERSION:
+        raise ValueError("unsupported remote policy channel schema")
+    expected_hash = channel.get("sha256")
+    if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+        raise ValueError("remote policy channel sha256 is required")
+    bundle_url = validate_route_policy_remote_url(channel.get("bundle_url"))
+    bundle, bundle_bytes = _fetch_remote_policy_json(
+        bundle_url,
+        fetcher=fetcher,
+        timeout=timeout,
+        max_bytes=max_bytes,
+    )
+    actual_hash = hashlib.sha256(bundle_bytes).hexdigest()
+    if actual_hash != expected_hash:
+        raise ValueError("remote policy bundle hash mismatch")
+    return bundle
+
+
+def fetch_signed_route_policy_bundle(
+    url,
+    *,
+    fetcher=None,
+    timeout=ROUTE_POLICY_FETCH_TIMEOUT,
+    max_bytes=ROUTE_POLICY_MAX_BYTES,
+):
+    url = validate_route_policy_remote_url(url)
+    data, _body = _fetch_remote_policy_json(
+        url,
+        fetcher=fetcher,
+        timeout=timeout,
+        max_bytes=max_bytes,
+    )
+    if _is_route_policy_channel(data):
+        return _fetch_signed_route_policy_bundle_from_channel(
+            data,
+            fetcher=fetcher,
+            timeout=timeout,
+            max_bytes=max_bytes,
+        )
+    return data
+
+
+
+def _route_policy_health_gate_passed(result):
+    if result is True:
+        return True, ""
+    if result is False:
+        return False, "health gate failed"
+    if isinstance(result, (list, tuple)) and len(result) >= 2:
+        ok, degraded = result[0], result[1]
+        try:
+            ok_count = int(ok)
+            degraded_count = int(degraded)
+        except (TypeError, ValueError):
+            return False, "health gate returned invalid counters"
+        if degraded_count == 0 and ok_count > 0:
+            return True, ""
+        return False, f"health gate degraded={degraded_count} ok={ok_count}"
+    if isinstance(result, dict):
+        degraded = int(result.get("degraded") or 0)
+        blocked = int(result.get("blocked") or 0)
+        ok = int(result.get("ok") or 0)
+        if degraded == 0 and blocked == 0 and ok > 0:
+            return True, ""
+        return False, f"health gate degraded={degraded} blocked={blocked} ok={ok}"
+    return False, "health gate did not run"
+
+
+def apply_signed_route_policy_bundle_with_health_gate(
+    bundle,
+    public_keys,
+    health_runner,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    now=None,
+):
+    previous_manifest = route_policy_manifest()
+    previous_storage = route_policy_storage_snapshot()
+    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    apply_route_policy_manifest(manifest)
+    try:
+        gate_ok, gate_error = _route_policy_health_gate_passed(health_runner())
+    except Exception as exc:
+        gate_ok, gate_error = False, f"health gate error: {exc}"
+    if not gate_ok:
+        if previous_manifest.get("source") == ROUTE_POLICY_SOURCE:
+            reset_route_policy_manifest()
+        else:
+            apply_route_policy_manifest(previous_manifest)
+        _set_route_policy_storage(
+            "rejected",
+            source=previous_storage.get("source") or previous_manifest.get("source"),
+            sha256=previous_storage.get("sha256") or route_policy_hash(previous_manifest),
+            error=gate_error,
+            path=policy_path,
+        )
+        return None
+    return save_signed_route_policy_bundle(
+        bundle,
+        public_keys,
+        policy_path=policy_path,
+        previous_path=previous_path,
+        now=now,
+    )
+
+
+def update_route_policy_from_remote(
+    *,
+    url=None,
+    public_keys=None,
+    fetcher=None,
+    health_runner=None,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    now=None,
+):
+    url = url if url is not None else os.environ.get(ROUTE_POLICY_REMOTE_URL_ENV, "")
+    now = time.time() if now is None else now
+    if not url:
+        _set_route_policy_remote("disabled", now=now)
+        return False
+    try:
+        url = validate_route_policy_remote_url(url)
+        keys = load_trusted_route_policy_keys() if public_keys is None else public_keys
+        if not keys:
+            raise ValueError("trusted policy keys are required")
+        if health_runner is None:
+            raise ValueError("remote policy health gate is required")
+        bundle = fetch_signed_route_policy_bundle(url, fetcher=fetcher)
+        status = apply_signed_route_policy_bundle_with_health_gate(
+            bundle,
+            keys,
+            health_runner,
+            policy_path=policy_path,
+            previous_path=previous_path,
+            now=now,
+        )
+        if not status:
+            error = route_policy_storage_snapshot().get("last_error", "health gate failed")
+            _set_route_policy_remote("rejected", url=url, error=error, now=now)
+            return False
+        _set_route_policy_remote(
+            "applied",
+            url=url,
+            source=status["source"],
+            sha256=status["sha256"],
+            now=now,
+        )
+        return True
+    except Exception as exc:
+        _set_route_policy_remote("error", url=url, error=str(exc), now=now)
+        return False
+
+
+def _atomic_write_json(path, data, *, mode=0o600):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f, sort_keys=True, separators=(",", ":"))
+            f.write("\n")
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+
+def signed_route_policy_state(bundle, public_keys, now=None):
+    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    return {
+        "schema": ROUTE_POLICY_SCHEMA_VERSION,
+        "saved_at": time.time() if now is None else now,
+        "sha256": route_policy_hash(manifest),
+        "source": manifest["source"],
+        "bundle": bundle,
+    }
+
+
+def save_signed_route_policy_bundle(
+    bundle,
+    public_keys,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    now=None,
+):
+    state = signed_route_policy_state(bundle, public_keys, now=now)
+    if os.path.exists(policy_path):
+        os.makedirs(os.path.dirname(previous_path), exist_ok=True)
+        shutil.copy2(policy_path, previous_path)
+    _atomic_write_json(policy_path, state)
+    apply_signed_route_policy_bundle(bundle, public_keys)
+    _set_route_policy_storage(
+        "saved",
+        source=state["source"],
+        sha256=state["sha256"],
+        path=policy_path,
+    )
+    return route_policy_status_snapshot()
+
+
+def load_persisted_route_policy(
+    public_keys,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+):
+    if not os.path.exists(policy_path):
+        reset_route_policy_manifest()
+        _set_route_policy_storage(
+            "bundled",
+            source=ROUTE_POLICY_SOURCE,
+            sha256=route_policy_hash(),
+            path=policy_path,
+        )
+        return False
+    try:
+        with open(policy_path) as f:
+            state = json.load(f)
+        if state.get("schema") != ROUTE_POLICY_SCHEMA_VERSION:
+            raise ValueError("unsupported persisted policy schema")
+        manifest = verify_signed_route_policy_bundle(state.get("bundle"), public_keys)
+        expected_hash = state.get("sha256")
+        actual_hash = route_policy_hash(manifest)
+        if expected_hash != actual_hash:
+            raise ValueError("persisted policy hash mismatch")
+        apply_route_policy_manifest(manifest)
+        _set_route_policy_storage(
+            "loaded",
+            source=manifest["source"],
+            sha256=actual_hash,
+            path=policy_path,
+        )
+        return True
+    except Exception as exc:
+        reset_route_policy_manifest()
+        _set_route_policy_storage(
+            "invalid",
+            source=ROUTE_POLICY_SOURCE,
+            sha256=route_policy_hash(),
+            error=str(exc),
+            path=policy_path,
+        )
+        return False
+
+
+def rollback_route_policy(
+    public_keys,
+    *,
+    policy_path=ROUTE_POLICY_STATE_PATH,
+    previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+):
+    if os.path.exists(previous_path):
+        os.replace(previous_path, policy_path)
+        loaded = load_persisted_route_policy(public_keys, policy_path=policy_path)
+        if loaded:
+            _route_policy_storage["state"] = "rolled_back"
+        return loaded
+    try:
+        os.remove(policy_path)
+    except FileNotFoundError:
+        pass
+    reset_route_policy_manifest()
+    _set_route_policy_storage(
+        "rolled_back_bundled",
+        source=ROUTE_POLICY_SOURCE,
+        sha256=route_policy_hash(),
+        path=policy_path,
+    )
+    return True
+
+
+def reset_route_policy_manifest():
+    global _active_route_policy_manifest
+    _active_route_policy_manifest = None
+    _set_route_policy_storage(
+        "bundled",
+        source=ROUTE_POLICY_SOURCE,
+        sha256=route_policy_hash(),
+    )
+    return route_policy_status_snapshot()
+
+
+def route_policy_status_snapshot():
+    manifest = route_policy_manifest()
+    domains = {ROUTE_DIRECT: 0, ROUTE_LOCAL_BYPASS: 0, ROUTE_GEO_EXIT: 0}
+    groups = {}
+    for policy in manifest["static_routes"]:
+        route_class = policy["route_class"]
+        domains[route_class] = domains.get(route_class, 0) + len(policy["domains"])
+        groups[policy["service_group"]] = {
+            "route_class": route_class,
+            "strategy_set": policy["strategy_set"],
+            "domains": len(policy["domains"]),
+        }
+    for policy in manifest["geo_exit_routes"]:
+        domains[ROUTE_GEO_EXIT] = domains.get(ROUTE_GEO_EXIT, 0) + len(policy["domains"])
+        groups[policy["service_group"]] = {
+            "route_class": ROUTE_GEO_EXIT,
+            "strategy_set": STRATEGY_GEPH,
+            "domains": groups.get(policy["service_group"], {}).get("domains", 0)
+            + len(policy["domains"]),
+        }
+    return {
+        "version": manifest["version"],
+        "source": manifest["source"],
+        "sha256": route_policy_hash(manifest),
+        "domains": domains,
+        "groups": groups,
+        "attempt_limits": manifest["attempt_limits"],
+    }
 
 
 def route_policy(host, now=None):
     h = normalize_host(host)
     if not h:
-        return {
-            "host": "",
-            "route_class": ROUTE_UNKNOWN,
-            "service_group": SERVICE_GENERIC,
-            "strategy_set": STRATEGY_GENERAL,
-        }
-    if _host_matches(h, TELEGRAM_HOSTS):
-        return {
-            "host": h,
-            "route_class": ROUTE_DIRECT,
-            "service_group": SERVICE_TELEGRAM,
-            "strategy_set": STRATEGY_DIRECT,
-        }
-    if is_discord_host(h):
-        return {
-            "host": h,
-            "route_class": ROUTE_LOCAL_BYPASS,
-            "service_group": SERVICE_DISCORD,
-            "strategy_set": STRATEGY_FAKE_ONLY,
-        }
-    if is_google_video_host(h):
-        return {
-            "host": h,
-            "route_class": ROUTE_LOCAL_BYPASS,
-            "service_group": SERVICE_YOUTUBE,
-            "strategy_set": STRATEGY_FAKE_ONLY,
-        }
+        return _policy_result("", ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
+    static_routes, geo_exit_routes = route_policy_tables()
+    policy = _match_policy(h, static_routes)
+    if policy:
+        return _policy_result(
+            h,
+            policy["route_class"],
+            policy["service_group"],
+            policy["strategy_set"],
+        )
     if is_russian(h):
-        return {
-            "host": h,
-            "route_class": ROUTE_DIRECT,
-            "service_group": SERVICE_GENERIC,
-            "strategy_set": STRATEGY_DIRECT,
-        }
+        return _policy_result(h, ROUTE_DIRECT, SERVICE_GENERIC, STRATEGY_DIRECT)
     wall_now = time.time() if now is None else now
-    if _host_matches(h, GEPH_HOSTS) or _auto_geph.get(h, 0) > wall_now:
-        if _host_matches(h, OPENAI_HOSTS) or h == "billing.openai.com":
-            group = SERVICE_OPENAI
-        elif _host_matches(h, ANTHROPIC_HOSTS):
-            group = SERVICE_ANTHROPIC
-        else:
-            group = SERVICE_GENERIC
-        return {
-            "host": h,
-            "route_class": ROUTE_GEO_EXIT,
-            "service_group": group,
-            "strategy_set": STRATEGY_GEPH,
-        }
-    return {
-        "host": h,
-        "route_class": ROUTE_UNKNOWN,
-        "service_group": SERVICE_GENERIC,
-        "strategy_set": STRATEGY_GENERAL,
-    }
+    geo_policy = _match_policy(h, geo_exit_routes)
+    if geo_policy or _auto_geph.get(h, 0) > wall_now:
+        group = (geo_policy or {}).get("service_group", SERVICE_GENERIC)
+        return _policy_result(h, ROUTE_GEO_EXIT, group, STRATEGY_GEPH)
+    return _policy_result(h, ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
 
 
 def _route_health_default(group, route_class=ROUTE_UNKNOWN):
@@ -292,13 +1255,34 @@ _route_health = {
     SERVICE_OPENAI: _route_health_default(SERVICE_OPENAI, ROUTE_GEO_EXIT),
     SERVICE_ANTHROPIC: _route_health_default(SERVICE_ANTHROPIC, ROUTE_GEO_EXIT),
     SERVICE_TELEGRAM: _route_health_default(SERVICE_TELEGRAM, ROUTE_DIRECT),
+    SERVICE_STEAM_STORE: _route_health_default(SERVICE_STEAM_STORE, ROUTE_GEO_EXIT),
 }
 _route_failure_windows = {group: deque() for group in _route_health}
+_geph_restart_failures = deque()
+_geph_restart_hint = {
+    "recommended": False,
+    "reason": "",
+    "last_failure_host": "",
+    "last_failure_reason": "",
+    "last_failure_at": 0.0,
+    "last_wake_at": 0.0,
+    "last_requested_at": 0.0,
+}
+_rearm_state = {
+    "last_at": 0.0,
+    "last_reason": "",
+    "last_gap": 0.0,
+    "last_iface": "",
+    "count": 0,
+}
+_canary_health = {}
+_canary_failure_windows = {}
 _canary_state = {
     "running": False,
     "last_run": 0.0,
     "last_started": 0.0,
     "next_due": 0.0,
+    "pending_reason": "",
     "last_reason": "",
     "total": 0,
     "ok": 0,
@@ -434,23 +1418,46 @@ def is_russian(host):
 
 
 # Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
-# strategies. A host the app keeps reconnecting to that returns NO real content
-# over local desync (TLS ok, but a 403 / challenge / RST — the "reconnecting…"
-# symptom) is geo-blocked → promote it to the geph tunnel and remember it (TTL'd).
-# We count low-content CLOSES, not raw connects, so a normal page's parallel burst
-# (which transfers real data) never trips it. Guard: if MANY distinct hosts fail
-# at once it's a network problem, not a per-host geo-block, so don't promote.
+# strategies, but only after proof. A host the app keeps reconnecting to that
+# returns no real content over local desync becomes a candidate. It is promoted
+# only if a separate HTTPS payload probe through Geph succeeds. We count
+# low-content closes, not raw connects, so a normal page's parallel burst does
+# not trip it. Guard: if many distinct hosts fail at once, it is a network
+# problem, not a per-host geo-block, so don't promote.
 AUTO_GEPH_WINDOW = 60.0       # seconds to accumulate a host's failures over
 AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = STUCK
 AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
+AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
+AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
+AUTO_GEPH_CONFIRM_MIN_BYTES = 64
+AUTO_GEPH_RUNTIME_MISS_WINDOW = 120.0
+AUTO_GEPH_RUNTIME_MISS_STORM = 2
 _auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
+_auto_geph_confirming = {}    # host -> monotonic start time
+_auto_geph_last_probe = {}    # host -> monotonic last proof attempt
+_auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
+_auto_geph_last_status = {
+    "state": "idle",
+    "host": "",
+    "reason": "",
+    "ts": 0.0,
+    "bytes": 0,
+}
+_auto_geph_lock = threading.RLock()
 _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
 GEPH_FAIL_LOG_TTL = 60.0
 _geph_fail_log = {}           # (host, reason) -> last log monotonic
+
+# Runtime local-bypass failures start a private exact-host re-sweep. The state is
+# deliberately process-local and aggregate-free: status must not become browsing
+# history, and Discord/YouTube must never escape to Geph while recovering.
+_local_bypass_resweep_active = {}  # host -> monotonic start time
+_local_bypass_resweep_last = {}    # host -> monotonic last attempt
+_local_bypass_resweep_lock = threading.RLock()
 
 # geph's own broker-fronting domains — NEVER desync/auto-route these (our daemon
 # would otherwise mangle geph's broker access or route geph through itself).
@@ -467,7 +1474,10 @@ def geph_route(host):
     return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
-def route_health_event(
+def _record_health_event(
+    store,
+    windows,
+    key,
     group,
     route_class,
     host="",
@@ -478,13 +1488,14 @@ def route_health_event(
     soft=False,
     degrade_after=1,
     backend="",
+    include_identity=False,
 ):
     now = time.time() if now is None else now
-    if group not in _route_health:
-        _route_health[group] = _route_health_default(group, route_class)
-        _route_failure_windows[group] = deque()
-    previous = _route_health.get(group, _route_health_default(group, route_class))
-    q = _route_failure_windows.setdefault(group, deque())
+    if key not in store:
+        store[key] = _route_health_default(group, route_class)
+        windows[key] = deque()
+    previous = store.get(key, _route_health_default(group, route_class))
+    q = windows.setdefault(key, deque())
     cutoff = now - CANARY_FAILURE_WINDOW
     while q and q[0] < cutoff:
         q.popleft()
@@ -523,7 +1534,7 @@ def route_health_event(
                 last_host = normalize_host(host)
                 last_route_class = route_class
                 last_backend = backend or previous.get("last_backend", "")
-    _route_health[group] = {
+    item = {
         "state": health_state,
         "last_failure": last_failure,
         "last_warning": last_warning,
@@ -534,12 +1545,48 @@ def route_health_event(
         "last_route_class": last_route_class,
         "last_backend": last_backend,
     }
+    if include_identity:
+        item["name"] = key
+        item["group"] = group
+    store[key] = item
+    return item
+
+
+def route_health_event(
+    group,
+    route_class,
+    host="",
+    ok=True,
+    reason="",
+    state=None,
+    now=None,
+    soft=False,
+    degrade_after=1,
+    backend="",
+):
+    return _record_health_event(
+        _route_health,
+        _route_failure_windows,
+        group,
+        group,
+        route_class,
+        host,
+        ok,
+        reason,
+        state,
+        now,
+        soft,
+        degrade_after,
+        backend,
+    )
 
 
 def clear_route_strategy_cache(group=None, host=None):
     removed = 0
     if host:
-        removed = 1 if _strat_cache.pop(normalize_host(host), None) else 0
+        h = normalize_host(host)
+        removed = 1 if _strat_cache.pop(h, None) else 0
+        _strat_scores.pop(h, None)
         if removed:
             save_strat_cache()
         return removed
@@ -547,16 +1594,60 @@ def clear_route_strategy_cache(group=None, host=None):
         if group is None or route_policy(cached_host)["service_group"] == group:
             _strat_cache.pop(cached_host, None)
             removed += 1
+    for scored_host in list(_strat_scores):
+        if group is None or route_policy(scored_host)["service_group"] == group:
+            _strat_scores.pop(scored_host, None)
     if removed:
         save_strat_cache()
     return removed
 
 
-def route_health_snapshot(now=None):
+def note_local_bypass_runtime_result(
+    host,
+    ok,
+    reason="",
+    now=None,
+    canary_now=None,
+    canary_runner=None,
+):
+    policy = route_policy(host, now=now)
+    if policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        return None
+    group = policy["service_group"]
+    if ok:
+        return route_health_event(
+            group,
+            ROUTE_LOCAL_BYPASS,
+            host,
+            True,
+            now=now,
+        )
+
+    clear_route_strategy_cache(group=group)
+    schedule_local_bypass_resweep(host)
+    item = route_health_event(
+        group,
+        ROUTE_LOCAL_BYPASS,
+        host,
+        False,
+        reason or "runtime local bypass failed",
+        now=now,
+        degrade_after=LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER,
+    )
+    start_canaries_if_due(
+        f"runtime:{group}",
+        force=True,
+        now=canary_now,
+        runner=canary_runner,
+    )
+    return item
+
+
+def _health_snapshot_from(store, windows, now=None, include_identity=False):
     now = time.time() if now is None else now
     snap = {}
-    for group, item in _route_health.items():
-        q = _route_failure_windows.setdefault(group, deque())
+    for key, item in store.items():
+        q = windows.setdefault(key, deque())
         cutoff = now - CANARY_FAILURE_WINDOW
         while q and q[0] < cutoff:
             q.popleft()
@@ -565,8 +1656,15 @@ def route_health_snapshot(now=None):
         if not q and clone.get("state") in {HEALTH_DEGRADED, HEALTH_BLOCKED}:
             clone["state"] = HEALTH_UNKNOWN
             clone["last_failure"] = ""
-        snap[group] = clone
+        if include_identity:
+            clone.setdefault("name", key)
+            clone.setdefault("group", key)
+        snap[key] = clone
     return snap
+
+
+def route_health_snapshot(now=None):
+    return _health_snapshot_from(_route_health, _route_failure_windows, now)
 
 
 def route_health_unknown(group, route_class, host="", now=None):
@@ -591,6 +1689,167 @@ def route_health_unknown(group, route_class, host="", now=None):
     }
 
 
+def _canary_key(spec):
+    return spec.get("name") or spec.get("group") or SERVICE_GENERIC
+
+
+def _canary_state_rank(state):
+    if state == HEALTH_BLOCKED:
+        return 4
+    if state == HEALTH_DEGRADED:
+        return 3
+    if state == HEALTH_OK:
+        return 2
+    return 1
+
+
+def _canary_windows_for_group(group, now):
+    cutoff = now - CANARY_FAILURE_WINDOW
+    windows = []
+    for key, item in _canary_health.items():
+        if item.get("group") != group:
+            continue
+        q = _canary_failure_windows.setdefault(key, deque())
+        while q and q[0] < cutoff:
+            q.popleft()
+        windows.extend(q)
+    return deque(sorted(windows))
+
+
+def _aggregate_canary_group(group, route_class, now=None):
+    now = time.time() if now is None else now
+    checks = [
+        item for item in canary_health_snapshot(now).values()
+        if item.get("group") == group
+    ]
+    if not checks:
+        return
+
+    best = max(
+        checks,
+        key=lambda item: (
+            _canary_state_rank(item.get("state", HEALTH_UNKNOWN)),
+            item.get("last_checked", 0.0),
+        ),
+    )
+    latest_warning = max(
+        (item for item in checks if item.get("last_warning")),
+        key=lambda item: item.get("last_checked", 0.0),
+        default={},
+    )
+    state = best.get("state", HEALTH_UNKNOWN)
+    previous = _route_health.get(group, _route_health_default(group, route_class))
+    if state == HEALTH_UNKNOWN and previous.get("state") == HEALTH_OK:
+        best = previous
+        state = HEALTH_OK
+    aggregate = {
+        "state": state,
+        "last_failure": (
+            best.get("last_failure", "")
+            if state in {HEALTH_DEGRADED, HEALTH_BLOCKED}
+            else ""
+        ),
+        "last_warning": latest_warning.get("last_warning", ""),
+        "last_warning_host": latest_warning.get("last_warning_host", ""),
+        "last_checked": max(item.get("last_checked", 0.0) for item in checks),
+        "failures_5m": sum(int(item.get("failures_5m") or 0) for item in checks),
+        "last_host": best.get("last_host", ""),
+        "last_route_class": best.get("last_route_class", route_class) or route_class,
+        "last_backend": best.get("last_backend", ""),
+    }
+    _route_health[group] = aggregate
+    _route_failure_windows[group] = _canary_windows_for_group(group, now)
+
+
+def canary_health_event(
+    spec,
+    route_class,
+    host="",
+    ok=True,
+    reason="",
+    state=None,
+    now=None,
+    soft=False,
+    degrade_after=1,
+    backend="",
+):
+    key = _canary_key(spec)
+    group = spec.get("group", SERVICE_GENERIC)
+    item = _record_health_event(
+        _canary_health,
+        _canary_failure_windows,
+        key,
+        group,
+        route_class,
+        host,
+        ok,
+        reason,
+        state,
+        now,
+        soft,
+        degrade_after,
+        backend,
+        include_identity=True,
+    )
+    _aggregate_canary_group(group, route_class, now)
+    return item
+
+
+def canary_health_unknown(spec, route_class, host="", now=None):
+    now = time.time() if now is None else now
+    key = _canary_key(spec)
+    group = spec.get("group", SERVICE_GENERIC)
+    q = _canary_failure_windows.setdefault(key, deque())
+    cutoff = now - CANARY_FAILURE_WINDOW
+    while q and q[0] < cutoff:
+        q.popleft()
+    _canary_health[key] = {
+        "name": key,
+        "group": group,
+        "state": HEALTH_UNKNOWN,
+        "last_failure": "",
+        "last_warning": "",
+        "last_warning_host": "",
+        "last_checked": now,
+        "failures_5m": len(q),
+        "last_host": normalize_host(host),
+        "last_route_class": route_class,
+        "last_backend": "",
+    }
+    _aggregate_canary_group(group, route_class, now)
+
+
+def canary_health_snapshot(now=None):
+    return _health_snapshot_from(
+        _canary_health,
+        _canary_failure_windows,
+        now,
+        include_identity=True,
+    )
+
+
+def _scutil_proxy_exceptions(raw):
+    exceptions = []
+    in_exceptions = False
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("ExceptionsList"):
+            in_exceptions = True
+            continue
+        if not in_exceptions:
+            continue
+        if stripped.startswith("}"):
+            in_exceptions = False
+            continue
+        key, sep, value = stripped.partition(":")
+        if not sep or not key.strip().isdigit():
+            continue
+        exception = value.strip()
+        if exception and exception not in exceptions:
+            exceptions.append(exception)
+    return exceptions
+
+
 def system_proxy_status_from_scutil(raw):
     kind_by_key = {
         "HTTPEnable": "http",
@@ -607,9 +1866,13 @@ def system_proxy_status_from_scutil(raw):
         kind = kind_by_key.get(key.strip())
         if kind and kind not in kinds:
             kinds.append(kind)
+    exceptions = _scutil_proxy_exceptions(raw)
     return {
         "state": "active" if kinds else "off",
         "kind": ",".join(kinds),
+        "exceptions_count": len(exceptions),
+        "exceptions_sample": exceptions[:3],
+        "stale_exceptions": bool(exceptions and not kinds),
     }
 
 
@@ -642,6 +1905,75 @@ def system_dns_status_from_scutil(raw):
     }
 
 
+def _suspicious_dns_answer(ip):
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    if any(addr in net for net in DNS_POISON_STUB_NETS):
+        return True
+    return not addr.is_global
+
+
+def system_dns_resolution_checks(resolver=None):
+    resolver = resolver or system_resolve
+    checks = []
+    saw_suspicious = False
+    saw_unknown = False
+    for host, group in DNS_DIAGNOSTIC_HOSTS:
+        try:
+            ips = _dedupe_ips(resolver(host))[:4]
+        except Exception as exc:
+            ips = []
+            error = str(exc)[:120]
+        else:
+            error = ""
+
+        suspicious = [ip for ip in ips if _suspicious_dns_answer(ip)]
+        if suspicious:
+            state = "suspicious"
+            saw_suspicious = True
+        elif ips:
+            state = "ok"
+        else:
+            state = "unknown"
+            saw_unknown = True
+
+        item = {
+            "host": host,
+            "group": group,
+            "state": state,
+            "ips": ips,
+        }
+        if suspicious:
+            item["suspicious_ips"] = suspicious[:4]
+        if error:
+            item["error"] = error
+        checks.append(item)
+
+    state = "suspicious" if saw_suspicious else ("unknown" if saw_unknown else "ok")
+    return {
+        "state": state,
+        "checks": checks,
+    }
+
+
+def current_system_dns_resolution_checks(now=None):
+    now = time.monotonic() if now is None else now
+    cached = _system_dns_cache.get("resolution_checks")
+    if (
+        cached is not None
+        and now - _system_dns_cache.get("resolution_ts", 0.0) < SYSTEM_DNS_RESOLUTION_TTL
+    ):
+        return dict(cached)
+    checks = system_dns_resolution_checks()
+    _system_dns_cache.update({
+        "resolution_ts": now,
+        "resolution_checks": dict(checks),
+    })
+    return checks
+
+
 def current_system_dns_status(now=None):
     now = time.monotonic() if now is None else now
     cached = _system_dns_cache.get("status")
@@ -658,6 +1990,7 @@ def current_system_dns_status(now=None):
         }
     else:
         status = system_dns_status_from_scutil(res.stdout)
+    status["resolution_checks"] = current_system_dns_resolution_checks(now)
     _system_dns_cache.update({"ts": now, "status": dict(status)})
     return status
 
@@ -685,6 +2018,8 @@ def smart_dns_route_enabled(host, now=None):
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_GEO_EXIT:
         return False
+    if policy["service_group"] not in SMART_DNS_GROUPS:
+        return False
     if not smart_dns_available():
         return False
     now = time.time() if now is None else now
@@ -710,10 +2045,11 @@ def smart_dns_status_snapshot(now=None):
 
 
 def log_geph_route_failure(host, reason, now=None):
+    wall_now = time.time() if now is None else now
     _geph_last_failure.update({
         "host": normalize_host(host),
         "reason": reason[:200],
-        "ts": time.time(),
+        "ts": wall_now,
     })
     policy = route_policy(host)
     route_health_event(
@@ -723,6 +2059,8 @@ def log_geph_route_failure(host, reason, now=None):
         state=HEALTH_BLOCKED if reason == "tunnel down" else HEALTH_DEGRADED,
         degrade_after=1 if reason == "tunnel down" else GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     )
+    note_geph_restart_failure(host, reason, now=wall_now)
+    note_auto_geph_runtime_failure(host, reason, now=wall_now)
     if not host:
         return
     now = time.monotonic() if now is None else now
@@ -736,11 +2074,106 @@ def log_geph_route_failure(host, reason, now=None):
         for old_key, old_time in list(_geph_fail_log.items()):
             if old_time < cutoff:
                 _geph_fail_log.pop(old_key, None)
-    print(f">> geph route failed for {host}: {reason}", file=sys.stderr)
+    print(f">> geph route retry for {host}: {reason}", file=sys.stderr)
 
 
 def clear_geph_route_failure():
     _geph_last_failure.update({"host": "", "reason": "", "ts": 0.0})
+    clear_geph_restart_hint()
+
+
+def note_geph_wake(now=None):
+    now = time.time() if now is None else now
+    _geph_restart_hint["last_wake_at"] = now
+
+
+def _prune_geph_restart_failures(now):
+    cutoff = now - CANARY_FAILURE_WINDOW
+    while _geph_restart_failures and _geph_restart_failures[0][0] < cutoff:
+        _geph_restart_failures.popleft()
+
+
+def note_geph_restart_failure(host, reason, now=None):
+    now = time.time() if now is None else now
+    if not _geph_up:
+        return
+    if reason not in {"SOCKS connect failed", "remote closed without response"}:
+        return
+    wake_at = _geph_restart_hint.get("last_wake_at", 0.0)
+    if not wake_at or now - wake_at > GEPH_RESTART_WAKE_WINDOW:
+        return
+
+    normalized = normalize_host(host)
+    _geph_restart_failures.append((now, normalized, reason[:200]))
+    _prune_geph_restart_failures(now)
+    hosts = {item[1] for item in _geph_restart_failures if item[1]}
+    if len(_geph_restart_failures) < GEPH_RESTART_FAILURE_THRESHOLD:
+        return
+    if len(hosts) < GEPH_RESTART_MIN_HOSTS:
+        return
+    last_requested = _geph_restart_hint.get("last_requested_at", 0.0)
+    if last_requested and now - last_requested < GEPH_RESTART_COOLDOWN:
+        return
+    _geph_restart_hint.update({
+        "recommended": True,
+        "reason": "geo-exit tunnel stale after wake",
+        "last_failure_host": normalized,
+        "last_failure_reason": reason[:200],
+        "last_failure_at": now,
+        "last_requested_at": now,
+    })
+
+
+def clear_geph_restart_hint():
+    _geph_restart_failures.clear()
+    _geph_restart_hint.update({
+        "recommended": False,
+        "reason": "",
+        "last_failure_host": "",
+        "last_failure_reason": "",
+        "last_failure_at": 0.0,
+    })
+
+
+def geph_restart_hint_snapshot(now=None):
+    now = time.time() if now is None else now
+    _prune_geph_restart_failures(now)
+    if not _geph_restart_failures and _geph_restart_hint.get("recommended"):
+        _geph_restart_hint.update({
+            "recommended": False,
+            "reason": "",
+            "last_failure_host": "",
+            "last_failure_reason": "",
+            "last_failure_at": 0.0,
+        })
+    hosts = {item[1] for item in _geph_restart_failures if item[1]}
+    return {
+        "recommended": bool(_geph_restart_hint.get("recommended")),
+        "reason": _geph_restart_hint.get("reason", ""),
+        "last_failure_host": _geph_restart_hint.get("last_failure_host", ""),
+        "last_failure_reason": _geph_restart_hint.get("last_failure_reason", ""),
+        "last_failure_at": _geph_restart_hint.get("last_failure_at", 0.0),
+        "last_wake_at": _geph_restart_hint.get("last_wake_at", 0.0),
+        "failures_5m": len(_geph_restart_failures),
+        "hosts_5m": len(hosts),
+        "cooldown_until": (
+            _geph_restart_hint.get("last_requested_at", 0.0) + GEPH_RESTART_COOLDOWN
+            if _geph_restart_hint.get("last_requested_at", 0.0)
+            else 0.0
+        ),
+    }
+
+
+def prune_auto_geph(now=None):
+    now = time.time() if now is None else now
+    expired = [
+        host for host, expiry in list(_auto_geph.items())
+        if not isinstance(expiry, (int, float)) or expiry <= now
+    ]
+    for host in expired:
+        _auto_geph.pop(host, None)
+    if expired:
+        save_auto_geph()
 
 
 def load_auto_geph():
@@ -763,37 +2196,254 @@ def save_auto_geph():
         pass
 
 
-# Adaptive auto-routing is OFF by default: from OUTSIDE the TLS we can't tell a
-# 403 geo-block from a normal long-lived low-traffic connection (Apple push,
-# telemetry, websockets), so it over-promotes those into the tunnel. The static
-# GEPH_HOSTS list + the user adding hosts is reliable; opt in with SLIP_AUTOGEPH=1.
-AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "0") == "1"
+# Adaptive auto-routing is on by default, but promotion is proof-gated: local
+# low-content hangs only schedule a candidate, and Geph must return HTTPS payload
+# before the exact host is learned. SLIP_AUTOGEPH=0 disables this learning layer.
+AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "1") != "0"
 
 
-def note_local_result(host, down_bytes, duration):
+def _auto_geph_candidate_allowed(host):
+    h = normalize_host(host)
+    if not h:
+        return False
+    if is_russian(h) or _is_geph_infra(h):
+        return False
+    policy = route_policy(h)
+    return policy["route_class"] == ROUTE_UNKNOWN
+
+
+def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
+    _auto_geph_last_status.update({
+        "state": state,
+        "host": normalize_host(host),
+        "reason": reason[:200],
+        "ts": time.time(),
+        "bytes": int(bytes_read or 0),
+    })
+
+
+def _socks5_connect_blocking(host, port, timeout=3.0):
+    socks_port = _geph_port
+    if not socks_port:
+        return None
+    sock = None
+    try:
+        sock = socket.create_connection(("127.0.0.1", socks_port), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(b"\x05\x01\x00")
+        if sock.recv(2)[:2] != b"\x05\x00":
+            raise IOError("socks5 no-auth refused")
+        hb = host.encode("ascii", "ignore")[:255]
+        sock.sendall(
+            b"\x05\x01\x00\x03"
+            + bytes([len(hb)])
+            + hb
+            + struct.pack("!H", port)
+        )
+        rep = sock.recv(4)
+        if len(rep) < 4 or rep[1] != 0x00:
+            raise IOError(f"socks5 connect rep={rep[1] if len(rep) >= 2 else 'short'}")
+        atyp = rep[3]
+        if atyp == 0x01:
+            sock.recv(4)
+        elif atyp == 0x03:
+            ln = sock.recv(1)
+            if not ln:
+                raise IOError("short socks5 domain reply")
+            sock.recv(ln[0])
+        elif atyp == 0x04:
+            sock.recv(16)
+        sock.recv(2)
+        return sock
+    except Exception:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        return None
+
+
+def _geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
+    sock = _socks5_connect_blocking(host, 443, timeout)
+    if sock is None:
+        return 0
+    tls_sock = None
+    try:
+        ctx = _local_payload_ssl_context()
+        tls_sock = ctx.wrap_socket(sock, server_hostname=host)
+        tls_sock.settimeout(timeout)
+        req = (
+            "HEAD / HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            "User-Agent: SlipstreamAutoGeo/1\r\n"
+            "Accept: */*\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii", "ignore")
+        tls_sock.sendall(req)
+        data = tls_sock.recv(4096)
+        if data.startswith(b"HTTP/"):
+            return len(data)
+        return 0
+    except Exception:
+        return 0
+    finally:
+        try:
+            (tls_sock or sock).close()
+        except Exception:
+            pass
+
+
+def _confirm_auto_geph(host):
+    h = normalize_host(host)
+    if not AUTO_GEPH_ENABLED or not _geph_up or not _auto_geph_candidate_allowed(h):
+        _set_auto_geph_status("skipped", h, "not eligible")
+        return False
+    bytes_read = _geph_payload_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        _set_auto_geph_status("rejected", h, "geph payload probe failed", bytes_read)
+        return False
+    with _auto_geph_lock:
+        if not _auto_geph_candidate_allowed(h):
+            _set_auto_geph_status("skipped", h, "route changed")
+            return False
+        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+        _auto_fail.pop(h, None)
+        save_auto_geph()
+        _set_auto_geph_status("learned", h, "geph payload confirmed", bytes_read)
+    print(
+        f">> auto-route: {h} works through Geph after local stalls "
+        f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _is_auto_geph_runtime_miss(reason):
+    return reason in {
+        "remote closed without response",
+        "SOCKS connect failed",
+    }
+
+
+def _auto_geph_learned_exact_host(host, now=None):
+    h = normalize_host(host)
+    if not h:
+        return False
+    wall_now = time.time() if now is None else now
+    if _auto_geph.get(h, 0.0) <= wall_now:
+        return False
+    static_routes, geo_exit_routes = route_policy_tables()
+    if _match_policy(h, static_routes) or _match_policy(h, geo_exit_routes):
+        return False
+    return True
+
+
+def _forget_auto_geph_host(host, reason):
+    h = normalize_host(host)
+    if not h:
+        return False
+    with _auto_geph_lock:
+        if h not in _auto_geph:
+            return False
+        _auto_geph.pop(h, None)
+        _auto_fail.pop(h, None)
+        _auto_geph_runtime_failures.pop(h, None)
+        save_auto_geph()
+        _set_auto_geph_status("reset", h, reason)
+    print(f">> auto-route: reset {h} after Geph runtime retries", file=sys.stderr)
+    return True
+
+
+def note_auto_geph_runtime_failure(host, reason, now=None):
+    if not _is_auto_geph_runtime_miss(reason):
+        return False
+    h = normalize_host(host)
+    if not _auto_geph_learned_exact_host(h, now):
+        return False
+    wall_now = time.time() if now is None else now
+    with _auto_geph_lock:
+        if not _auto_geph_learned_exact_host(h, wall_now):
+            return False
+        q = _auto_geph_runtime_failures.setdefault(h, [])
+        q.append(wall_now)
+        cutoff = wall_now - AUTO_GEPH_RUNTIME_MISS_WINDOW
+        while q and q[0] < cutoff:
+            q.pop(0)
+        if len(_auto_geph_runtime_failures) > 4096:
+            for old_host, values in list(_auto_geph_runtime_failures.items()):
+                if not values or values[-1] < cutoff:
+                    _auto_geph_runtime_failures.pop(old_host, None)
+        if len(q) < AUTO_GEPH_RUNTIME_MISS_STORM:
+            return False
+    return _forget_auto_geph_host(h, "geph runtime retries")
+
+
+def _schedule_auto_geph_confirmation(host, now=None, runner=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if not h:
+        return False
+    with _auto_geph_lock:
+        last = _auto_geph_last_probe.get(h, 0.0)
+        if last and now - last < AUTO_GEPH_CONFIRM_COOLDOWN:
+            return False
+        started = _auto_geph_confirming.get(h)
+        if started is not None and now - started < AUTO_GEPH_CONFIRM_TIMEOUT * 2:
+            return False
+        _auto_geph_last_probe[h] = now
+        _auto_geph_confirming[h] = now
+        _set_auto_geph_status("checking", h, "local stalls observed")
+
+    def run():
+        try:
+            (runner or _confirm_auto_geph)(h)
+        finally:
+            with _auto_geph_lock:
+                _auto_geph_confirming.pop(h, None)
+
+    if runner is not None:
+        run()
+        return True
+    threading.Thread(target=run, daemon=True).start()
+    return True
+
+
+def auto_geo_exit_status_snapshot(now=None):
+    prune_auto_geph(now)
+    with _auto_geph_lock:
+        return {
+            "enabled": AUTO_GEPH_ENABLED,
+            "learned": len(_auto_geph),
+            "pending": len(_auto_geph_confirming),
+            "last_state": _auto_geph_last_status["state"],
+            "last_host": _auto_geph_last_status["host"],
+            "last_reason": _auto_geph_last_status["reason"],
+            "last_at": _auto_geph_last_status["ts"],
+            "last_bytes": _auto_geph_last_status["bytes"],
+        }
+
+
+def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=None):
     """Called after a NON-geph local-desync close. A "stuck" close — the
     connection was held a long time but returned no real content (the
-    "reconnecting…" hang) — is the geo-block signal; a storm of them for one host
-    learns it for the geph tunnel. FAST low-content closes (redirects / 204 /
-    beacons, e.g. google) are normal and must NOT count, or they'd be falsely
-    tunnelled. Real content resets the host's failure noise."""
+    "reconnecting…" hang) — is the candidate signal. A storm of them for one host
+    schedules a Geph payload proof; only that proof learns the host. Fast
+    low-content closes (redirects / 204 / beacons, e.g. google) are normal and
+    must not count. Real content resets the host's failure noise."""
     if not AUTO_GEPH_ENABLED:
-        return                                  # opt-in only (see AUTO_GEPH_ENABLED)
-    if (
-        not host
-        or is_russian(host)
-        or is_local_bypass_host(host)
-        or geph_route(host)
-        or _is_geph_infra(host)
-    ):
+        return
+    h = normalize_host(host)
+    if not _auto_geph_candidate_allowed(h):
         return                                  # RU, already tunnelled, or geph's own
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
-        _auto_fail.pop(host, None)              # got real content -> not blocked
+        _auto_fail.pop(h, None)                 # got real content -> not blocked
         return
     if duration < AUTO_GEPH_HANG:
         return                                  # fast + low content = normal, ignore
-    now = time.monotonic()
-    q = _auto_fail.setdefault(host, [])
+    now = time.monotonic() if now is None else now
+    q = _auto_fail.setdefault(h, [])
     q.append(now)
     cutoff = now - AUTO_GEPH_WINDOW
     while q and q[0] < cutoff:
@@ -811,15 +2461,17 @@ def note_local_result(host, down_bytes, duration):
                   if sum(1 for t in v if t >= cutoff) >= 2)
     if failing >= AUTO_GEPH_NET_BAD:
         return
-    h = host.lower().rstrip(".")
-    _auto_geph[h] = time.time() + AUTO_GEPH_TTL
-    save_auto_geph()
-    print(f">> auto-route: {host} keeps failing locally -> geph tunnel "
-          f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)", file=sys.stderr)
+    _schedule_auto_geph_confirmation(h, now=now, runner=confirmation_runner)
 
 
 CANARY_SPECS = (
     {"name": "discord_update", "group": SERVICE_DISCORD, "host": "updates.discord.com"},
+    {
+        "name": "discord_api",
+        "group": SERVICE_DISCORD,
+        "host": "discord.com",
+        "payload_path": "/api/v10/gateway",
+    },
     {
         "name": "discord_gateway",
         "group": SERVICE_DISCORD,
@@ -830,7 +2482,16 @@ CANARY_SPECS = (
         "name": "discord_cdn",
         "group": SERVICE_DISCORD,
         "host": "cdn.discordapp.com",
+        "payload_method": "GET",
         "payload_path": "/embed/avatars/0.png",
+        "payload_min_bytes": 512,
+    },
+    {
+        "name": "youtube_web",
+        "group": SERVICE_YOUTUBE,
+        "host": "www.youtube.com",
+        "payload_path": "/generate_204",
+        "soft": True,
     },
     {
         "name": "youtube_video",
@@ -845,9 +2506,20 @@ CANARY_SPECS = (
         "name": "openai_billing",
         "group": SERVICE_OPENAI,
         "host": "billing.openai.com",
-        "soft": True,
+        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
     },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
+    {
+        "name": "steam_store",
+        "group": SERVICE_STEAM_STORE,
+        "host": "store.steampowered.com",
+        "smart_dns": False,
+        "payload_probe": "https_payload",
+        "payload_method": "GET",
+        "payload_path": "/",
+        "payload_min_bytes": 2048,
+        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
+    },
     {"name": "telegram_proxy", "group": SERVICE_TELEGRAM, "host": ""},
 )
 
@@ -864,27 +2536,38 @@ def _canary_client_hello(host):
 
 def _local_payload_canary_request(host, spec=None):
     if spec and spec.get("payload_probe") == "websocket_upgrade":
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
         return (
             "GET /?v=10&encoding=json HTTP/1.1\r\n"
             f"Host: {host}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
             "Sec-WebSocket-Version: 13\r\n"
             "User-Agent: SlipstreamRouteCanary/1\r\n"
             "\r\n"
         ).encode("ascii", "ignore")
+    method = (spec or {}).get("payload_method", "HEAD")
+    if method not in {"HEAD", "GET"}:
+        method = "HEAD"
     path = (spec or {}).get("payload_path", "/")
     if not isinstance(path, str) or not path.startswith("/"):
         path = "/"
     return (
-        f"HEAD {path} HTTP/1.1\r\n"
+        f"{method} {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         f"User-Agent: SlipstreamRouteCanary/1\r\n"
         f"Accept: */*\r\n"
         f"Cache-Control: no-cache\r\n"
         f"Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
+
+
+def _local_payload_min_bytes(spec=None):
+    value = (spec or {}).get("payload_min_bytes", LOCAL_PAYLOAD_CANARY_MIN_BYTES)
+    if not isinstance(value, int) or isinstance(value, bool):
+        return LOCAL_PAYLOAD_CANARY_MIN_BYTES
+    return max(1, min(value, 64 * 1024))
 
 
 def _quic_version_negotiation_probe_packet(dcid=None, scid=None):
@@ -961,6 +2644,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
     expect_websocket_upgrade = bool(
         spec and spec.get("payload_probe") == "websocket_upgrade"
     )
+    min_bytes = _local_payload_min_bytes(spec)
     observed = bytearray()
     try:
         sock = socket.create_connection((ip, 443), timeout=timeout)
@@ -1028,7 +2712,7 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
                     if first_line.startswith(b"HTTP/1.1 101 "):
                         return max(total, LOCAL_PAYLOAD_CANARY_MIN_BYTES)
                     continue
-                if total >= LOCAL_PAYLOAD_CANARY_MIN_BYTES:
+                if total >= min_bytes:
                     return total
     except Exception:
         return 0
@@ -1046,6 +2730,77 @@ def _local_payload_probe(ip, host, strat, spec=None, timeout=LOCAL_PAYLOAD_CANAR
 async def _run_local_payload_probe(ip, host, strat, spec=None):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_POOL, _local_payload_probe, ip, host, strat, spec)
+
+
+def _geph_payload_probe(host, spec=None, timeout=GEO_PAYLOAD_CANARY_TIMEOUT):
+    """Complete a small HTTPS request through Geph's SOCKS listener.
+
+    SOCKS CONNECT plus TLS bytes only proves that an exit stream opens. Store and
+    payment pages can still stall at HTTP payload time, so selected geo-exit
+    canaries drive the request far enough to read decrypted response bytes.
+    """
+    port_socks = _geph_port
+    if not port_socks:
+        return 0
+    sock = None
+    total = 0
+    min_bytes = _local_payload_min_bytes(spec)
+    deadline = time.monotonic() + timeout
+    try:
+        sock = socket.create_connection(("127.0.0.1", port_socks), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(b"\x05\x01\x00")
+        if sock.recv(2)[:2] != b"\x05\x00":
+            return 0
+        hb = host.encode("ascii", "ignore")[:255]
+        sock.sendall(
+            b"\x05\x01\x00\x03" + bytes([len(hb)]) + hb + struct.pack("!H", 443)
+        )
+        rep = sock.recv(4)
+        if len(rep) < 4 or rep[1] != 0x00:
+            return 0
+        atyp = rep[3]
+        if atyp == 0x01:
+            sock.recv(4)
+        elif atyp == 0x03:
+            ln = sock.recv(1)
+            if not ln:
+                return 0
+            sock.recv(ln[0])
+        elif atyp == 0x04:
+            sock.recv(16)
+        sock.recv(2)
+
+        ctx = _local_payload_ssl_context()
+        tls = ctx.wrap_socket(sock, server_hostname=host)
+        sock = tls
+        tls.settimeout(timeout)
+        tls.sendall(_local_payload_canary_request(host, spec))
+        while time.monotonic() < deadline:
+            tls.settimeout(max(0.1, deadline - time.monotonic()))
+            try:
+                data = tls.recv(65536)
+            except socket.timeout:
+                break
+            if not data:
+                break
+            total += len(data)
+            if total >= min_bytes:
+                return total
+    except Exception:
+        return 0
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    return total
+
+
+async def _run_geph_payload_probe(host, spec=None):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_POOL, _geph_payload_probe, host, spec)
 
 
 def _close_probe_result(result):
@@ -1115,36 +2870,57 @@ def _canary_host(spec):
 async def _run_local_bypass_canary(spec):
     host = _canary_host(spec)
     if not host:
-        route_health_unknown(spec["group"], ROUTE_LOCAL_BYPASS)
+        canary_health_unknown(spec, ROUTE_LOCAL_BYPASS)
         return None
     policy = route_policy(host)
     if policy["route_class"] != ROUTE_LOCAL_BYPASS:
-        route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
+        canary_health_event(
+            spec,
+            policy["route_class"],
+            host,
+            False,
+            "policy mismatch",
+            soft=bool(spec.get("soft")),
+        )
+        if spec.get("soft"):
+            return "warning"
         return False
     ips = await resolve_connection_ips(host, None)
     if not ips:
-        route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "dns failed")
+        canary_health_event(
+            spec,
+            ROUTE_LOCAL_BYPASS,
+            host,
+            False,
+            "dns failed",
+            soft=bool(spec.get("soft")),
+        )
         clear_route_strategy_cache(group=spec["group"])
+        if spec.get("soft"):
+            return "warning"
         return False
     if spec.get("transport_probe") == "quic_version_negotiation":
         if await _run_quic_version_negotiation_probe(ips):
-            route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
+            canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
             return True
-        route_health_event(
-            spec["group"],
+        canary_health_event(
+            spec,
             ROUTE_LOCAL_BYPASS,
             host,
             False,
             "quic probe failed",
             degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
         )
-        health = route_health_snapshot().get(spec["group"], {})
+        health = canary_health_snapshot().get(_canary_key(spec), {})
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
     head, body = _canary_client_hello(host)
     payload_failed = False
+    payload_short = False
+    min_payload_bytes = _local_payload_min_bytes(spec)
     for strat in strategy_order(host):
+        strat_ok = False
         if not strat.get("fake"):
             continue
         for ip in ips[:ip_attempt_limit(host)]:
@@ -1152,56 +2928,43 @@ async def _run_local_bypass_canary(spec):
             if result:
                 _close_probe_result(result)
                 payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
-                if payload_bytes < LOCAL_PAYLOAD_CANARY_MIN_BYTES:
+                if payload_bytes < min_payload_bytes:
                     payload_failed = True
+                    if payload_bytes > 0:
+                        payload_short = True
                     continue
+                strat_ok = True
+                _record_strategy_result(host, strat["name"], True)
                 if _strat_cache.get(host) != strat["name"]:
                     remember_strategy(host, strat["name"])
-                route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, True)
+                canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
                 return True
+        if not strat_ok:
+            _record_strategy_result(host, strat["name"], False)
     clear_route_strategy_cache(group=spec["group"])
     if payload_failed:
-        route_health_event(
-            spec["group"],
+        reason = "payload throughput below threshold" if payload_short else "payload probe failed"
+        canary_health_event(
+            spec,
             ROUTE_LOCAL_BYPASS,
             host,
             False,
-            "payload probe failed",
+            reason,
             degrade_after=LOCAL_PAYLOAD_DEGRADE_AFTER,
+            soft=bool(spec.get("soft")),
         )
-        health = route_health_snapshot().get(spec["group"], {})
+        health = canary_health_snapshot().get(_canary_key(spec), {})
+        if spec.get("soft"):
+            return "warning"
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
-    route_health_event(spec["group"], ROUTE_LOCAL_BYPASS, host, False, "strategy probe failed")
-    return False
-
-
-async def _run_geo_exit_canary(spec):
-    host = spec["host"]
-    policy = route_policy(host)
-    if policy["route_class"] != ROUTE_GEO_EXIT:
-        route_health_event(spec["group"], policy["route_class"], host, False, "policy mismatch")
-        return False
-    if smart_dns_available():
-        smart_dns_ok = await _run_smart_dns_geo_canary(spec)
-        if smart_dns_ok:
-            return True
-    if not _geph_up:
-        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, False, "tunnel down", HEALTH_BLOCKED)
-        return False
-    result = await dial_via_geph(host, 443, build_fake_clienthello(host))
-    if result:
-        _close_probe_result(result)
-        clear_geph_route_failure()
-        route_health_event(spec["group"], ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
-        return True
-    route_health_event(
-        spec["group"],
-        ROUTE_GEO_EXIT,
+    canary_health_event(
+        spec,
+        ROUTE_LOCAL_BYPASS,
         host,
         False,
-        "SOCKS connect failed",
+        "strategy probe failed",
         soft=bool(spec.get("soft")),
     )
     if spec.get("soft"):
@@ -1209,10 +2972,169 @@ async def _run_geo_exit_canary(spec):
     return False
 
 
+async def _resweep_local_bypass_host(host):
+    h = normalize_host(host)
+    policy = route_policy(h)
+    if not h or policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        return False
+    ips = await resolve_connection_ips(h, None)
+    if not ips:
+        return False
+
+    head, body = _canary_client_hello(h)
+    attempts = 0
+    for strat in strategy_order(h):
+        if not strat.get("fake"):
+            continue
+        strat_ok = False
+        for ip in ips[:ip_attempt_limit(h)]:
+            attempts += 1
+            result = await dial_strategy(ip, 443, head, body, h, strat)
+            if result:
+                _close_probe_result(result)
+                strat_ok = True
+                _record_strategy_result(h, strat["name"], True)
+                if _strat_cache.get(h) != strat["name"]:
+                    remember_strategy(h, strat["name"])
+                _dead.pop(h, None)
+                return True
+            if attempts >= 7:
+                break
+        if not strat_ok:
+            _record_strategy_result(h, strat["name"], False)
+        if attempts >= 7:
+            break
+    return False
+
+
+def _run_local_bypass_resweep(host):
+    try:
+        return asyncio.run(_resweep_local_bypass_host(host))
+    except Exception as exc:
+        if VERBOSE:
+            group = route_policy(host)["service_group"]
+            print(
+                f">> local bypass re-sweep unavailable ({group}): "
+                f"{type(exc).__name__}",
+                file=sys.stderr,
+            )
+        return False
+
+
+def schedule_local_bypass_resweep(host, now=None, runner=None):
+    h = normalize_host(host)
+    policy = route_policy(h)
+    if not h or policy["route_class"] != ROUTE_LOCAL_BYPASS:
+        return False
+    now = time.monotonic() if now is None else now
+    with _local_bypass_resweep_lock:
+        last = _local_bypass_resweep_last.get(h, 0.0)
+        if last and now - last < LOCAL_BYPASS_RESWEEP_COOLDOWN:
+            return False
+        started = _local_bypass_resweep_active.get(h)
+        if started is not None and now - started < LOCAL_BYPASS_RESWEEP_STALE_AFTER:
+            return False
+        _local_bypass_resweep_last[h] = now
+        _local_bypass_resweep_active[h] = now
+
+    def run():
+        try:
+            (runner or _run_local_bypass_resweep)(h)
+        finally:
+            with _local_bypass_resweep_lock:
+                _local_bypass_resweep_active.pop(h, None)
+
+    if runner is not None:
+        run()
+        return True
+    threading.Thread(
+        target=run,
+        daemon=True,
+        name=f"local-bypass-resweep-{policy['service_group']}",
+    ).start()
+    return True
+
+
+async def _run_geo_exit_canary(spec):
+    host = spec["host"]
+    policy = route_policy(host)
+    if policy["route_class"] != ROUTE_GEO_EXIT:
+        canary_health_event(spec, policy["route_class"], host, False, "policy mismatch")
+        return False
+    if spec.get("smart_dns", True) and smart_dns_available():
+        smart_dns_ok = await _run_smart_dns_geo_canary(spec)
+        if smart_dns_ok:
+            canary_health_event(
+                spec,
+                ROUTE_GEO_EXIT,
+                host,
+                True,
+                backend=GEO_BACKEND_SMART_DNS,
+            )
+            return True
+    if not _geph_up:
+        canary_health_event(
+            spec,
+            ROUTE_GEO_EXIT,
+            host,
+            False,
+            "tunnel down",
+            HEALTH_BLOCKED,
+        )
+        return False
+    if spec.get("payload_probe") == "https_payload":
+        payload_bytes = await _run_geph_payload_probe(host, spec)
+        if payload_bytes >= _local_payload_min_bytes(spec):
+            clear_geph_route_failure()
+            canary_health_event(spec, ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
+            return True
+        reason = (
+            "payload throughput below threshold"
+            if payload_bytes > 0
+            else "payload probe failed"
+        )
+        canary_health_event(
+            spec,
+            ROUTE_GEO_EXIT,
+            host,
+            False,
+            reason,
+            soft=bool(spec.get("soft")),
+            degrade_after=int(spec.get("degrade_after", 1) or 1),
+        )
+        if spec.get("soft"):
+            return "warning"
+        health = canary_health_snapshot().get(_canary_key(spec), {})
+        if health.get("state") != HEALTH_DEGRADED:
+            return "warning"
+        return False
+    result = await dial_via_geph(host, 443, build_fake_clienthello(host))
+    if result:
+        _close_probe_result(result)
+        clear_geph_route_failure()
+        canary_health_event(spec, ROUTE_GEO_EXIT, host, True, backend=GEO_BACKEND_GEPH)
+        return True
+    canary_health_event(
+        spec,
+        ROUTE_GEO_EXIT,
+        host,
+        False,
+        "SOCKS connect failed",
+        soft=bool(spec.get("soft")),
+        degrade_after=int(spec.get("degrade_after", 1) or 1),
+    )
+    if spec.get("soft"):
+        return "warning"
+    health = canary_health_snapshot().get(_canary_key(spec), {})
+    if health.get("state") != HEALTH_DEGRADED:
+        return "warning"
+    return False
+
+
 async def _run_telegram_proxy_canary(spec):
     ok = _tgws_state == "ready"
-    route_health_event(
-        spec["group"], ROUTE_DIRECT, "127.0.0.1",
+    canary_health_event(
+        spec, ROUTE_DIRECT, "127.0.0.1",
         ok=ok,
         reason="" if ok else f"telegram proxy {_tgws_state}",
         state=HEALTH_DEGRADED,
@@ -1233,8 +3155,8 @@ async def run_route_canaries(reason="periodic"):
             elif policy["route_class"] == ROUTE_GEO_EXIT:
                 passed = await _run_geo_exit_canary(spec)
             else:
-                route_health_event(
-                    spec["group"], policy["route_class"], spec.get("host", ""),
+                canary_health_event(
+                    spec, policy["route_class"], spec.get("host", ""),
                     ok=False,
                     reason="unknown route policy",
                 )
@@ -1249,8 +3171,8 @@ async def run_route_canaries(reason="periodic"):
                 degraded += 1
         except Exception as e:
             degraded += 1
-            route_health_event(
-                spec["group"], ROUTE_UNKNOWN, spec.get("host", ""),
+            canary_health_event(
+                spec, ROUTE_UNKNOWN, spec.get("host", ""),
                 ok=False,
                 reason=f"canary error: {e}",
             )
@@ -1268,15 +3190,31 @@ async def run_route_canaries(reason="periodic"):
 
 def finish_canaries(now=None):
     now = time.monotonic() if now is None else now
+    normal_next_due = now + _canary_delay(now)
+    pending_reason = _canary_state.get("pending_reason", "")
+    pending_due = _canary_state.get("next_due", 0.0)
     _canary_state["running"] = False
-    _canary_state["next_due"] = now + _canary_delay(now)
+    if pending_reason and pending_due:
+        _canary_state["next_due"] = min(pending_due, normal_next_due)
+    else:
+        _canary_state["next_due"] = normal_next_due
+
+
+def _schedule_forced_canary_retry(reason, now):
+    if not reason:
+        return
+    retry_due = now + CANARY_FORCE_RETRY_DELAY
+    current_due = _canary_state.get("next_due", 0.0)
+    if not current_due or retry_due < current_due:
+        _canary_state["next_due"] = retry_due
+    _canary_state["pending_reason"] = reason
 
 
 def _canary_thread_main(reason):
     try:
         asyncio.run(run_route_canaries(reason))
     except Exception as e:
-        print(f">> route canaries failed: {e}", file=sys.stderr)
+        print(f">> route canaries error: {e}", file=sys.stderr)
     finally:
         finish_canaries()
 
@@ -1284,20 +3222,27 @@ def _canary_thread_main(reason):
 def start_canaries_if_due(reason="periodic", force=False, now=None, runner=None):
     now = time.monotonic() if now is None else now
     if _canary_state["running"]:
+        if force:
+            _schedule_forced_canary_retry(reason, now)
         return False
     if force and _canary_state["last_started"] and now - _canary_state["last_started"] < CANARY_FORCE_MIN_GAP:
+        _schedule_forced_canary_retry(reason, now)
         return False
     if not force and _canary_state["next_due"] and now < _canary_state["next_due"]:
         return False
+    run_reason = reason
+    if not force and _canary_state.get("pending_reason"):
+        run_reason = _canary_state["pending_reason"]
+        _canary_state["pending_reason"] = ""
     _canary_state["running"] = True
     _canary_state["last_started"] = now
     if runner is not None:
         try:
-            runner(reason)
+            runner(run_reason)
         finally:
             finish_canaries(now)
         return True
-    threading.Thread(target=_canary_thread_main, args=(reason,), daemon=True).start()
+    threading.Thread(target=_canary_thread_main, args=(run_reason,), daemon=True).start()
     return True
 
 
@@ -1314,6 +3259,31 @@ def canary_status_snapshot(now=None):
         "degraded": _canary_state.get("degraded", 0),
         "warnings": _canary_state.get("warnings", 0),
         "unknown": _canary_state.get("unknown", 0),
+        "checks": canary_health_snapshot(),
+    }
+
+
+def note_runtime_rearm(reason, gap=0.0, iface="", now=None):
+    now = time.time() if now is None else now
+    _rearm_state.update({
+        "last_at": now,
+        "last_reason": str(reason or "")[:80],
+        "last_gap": max(0.0, float(gap or 0.0)),
+        "last_iface": str(iface or "")[:80],
+        "count": int(_rearm_state.get("count", 0)) + 1,
+    })
+
+
+def rearm_status_snapshot(now=None):
+    now = time.time() if now is None else now
+    last_at = float(_rearm_state.get("last_at", 0.0) or 0.0)
+    return {
+        "last_at": last_at,
+        "last_reason": _rearm_state.get("last_reason", ""),
+        "last_gap": int(float(_rearm_state.get("last_gap", 0.0) or 0.0)),
+        "last_iface": _rearm_state.get("last_iface", ""),
+        "count": int(_rearm_state.get("count", 0) or 0),
+        "seconds_since": int(max(0.0, now - last_at)) if last_at else 0,
     }
 
 
@@ -1321,9 +3291,12 @@ def write_status(state, iface, voice_iface):
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
+        prune_auto_geph(now)
         consume_telegram_proxy_acceptance()
+        geph_restart = geph_restart_hint_snapshot(now)
         st = {
             "state": state,            # "active" | "dormant"
+            "version": DAEMON_VERSION,
             "pid": os.getpid(),
             "ts": now,
             "conns": _conn_count,
@@ -1333,6 +3306,11 @@ def write_status(state, iface, voice_iface):
             "dead": len(_dead),
             "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
             "geph_learned": len(_auto_geph),
+            "auto_geo_exit": auto_geo_exit_status_snapshot(now),
+            "routing_policy": route_policy_status_snapshot(),
+            "routing_policy_storage": route_policy_storage_snapshot(),
+            "routing_policy_remote": route_policy_remote_snapshot(),
+            "strategy_scores": strategy_score_snapshot(),
             "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
             "telegram_direct_failures": len(_tg_direct_failures),
             "route_health": route_health_snapshot(now),
@@ -1340,11 +3318,17 @@ def write_status(state, iface, voice_iface):
             "system_dns": current_system_dns_status(),
             "smart_dns": smart_dns_status_snapshot(now),
             "pf_state": pf_state_snapshot(PROXY_PORT),
+            "rearm": rearm_status_snapshot(now),
             "geph_detail": {
                 "port": _geph_port or 0,
                 "failure_reason": _geph_last_failure["reason"],
                 "last_failure_host": _geph_last_failure["host"],
                 "last_failure_at": _geph_last_failure["ts"],
+                "restart_recommended": geph_restart["recommended"],
+                "restart_reason": geph_restart["reason"],
+                "restart_failures_5m": geph_restart["failures_5m"],
+                "restart_hosts_5m": geph_restart["hosts_5m"],
+                "last_wake_at": geph_restart["last_wake_at"],
             },
             "canaries": canary_status_snapshot(),
         }
@@ -1482,6 +3466,75 @@ def running_from_install_dir(file_path=None, executable=None, frozen=None):
     return os.path.abspath(file_path) == os.path.join(INSTALL_DIR, "tproxy.py")
 
 
+def _same_file_bytes(src, dst):
+    try:
+        return os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)
+    except Exception:
+        return False
+
+
+def _copy_file_resilient(src, dst, mode=None, attempts=3, delay=0.15):
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if _same_file_bytes(src, dst):
+        if mode is not None:
+            os.chmod(dst, mode)
+        return "unchanged"
+    last = None
+    for attempt in range(max(1, attempts)):
+        tmp = f"{dst}.tmp.{os.getpid()}.{attempt}"
+        try:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            shutil.copy2(src, tmp)
+            if mode is not None:
+                os.chmod(tmp, mode)
+            os.replace(tmp, dst)
+            return "copied"
+        except Exception as e:
+            last = e
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    raise last
+
+
+def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
+    parent = os.path.dirname(dst)
+    os.makedirs(parent, exist_ok=True)
+    last = None
+    for attempt in range(max(1, attempts)):
+        tmp = f"{dst}.tmp.{os.getpid()}.{attempt}"
+        backup = f"{dst}.bak.{os.getpid()}.{attempt}"
+        try:
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(backup, ignore_errors=True)
+            shutil.copytree(src, tmp)
+            if os.path.exists(dst):
+                os.replace(dst, backup)
+            os.replace(tmp, dst)
+            shutil.rmtree(backup, ignore_errors=True)
+            return "replaced"
+        except Exception as e:
+            last = e
+            if not os.path.exists(dst) and os.path.exists(backup):
+                try:
+                    os.replace(backup, dst)
+                except Exception:
+                    pass
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(backup, ignore_errors=True)
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    raise last
+
+
 def cleanup_stale():
     """Self-heal: kill any leftover tproxy instances (e.g. a Ctrl+Z-suspended
     one still holding the port) and reset pf to the clean default, so a fresh
@@ -1591,6 +3644,12 @@ STRAT_CACHE_MAX = 2048
 STRAT_CACHE_VERSION = 4             # bump on strategy-logic changes -> discard stale
                                     # v4: Discord uses decoy fake; video uses poison fake
 _strat_cache = OrderedDict()       # host -> winning strategy name
+STRAT_SCORE_MAX_HOSTS = 2048
+STRAT_SCORE_Z = 1.0                # light Wilson lower bound; avoids overreacting
+STRAT_SCORE_CACHED_BONUS = 0.12
+STRAT_SCORE_AGE_BONUS_MAX = 0.05
+STRAT_SCORE_AGE_BONUS_AFTER = 3600.0
+_strat_scores = OrderedDict()      # host -> strategy -> {ok, fail, last}
 
 
 def load_strat_cache():
@@ -1624,6 +3683,107 @@ def save_strat_cache():
         pass
 
 
+def _strategy_wilson_score(ok, total):
+    if total <= 0:
+        return 0.5
+    z = STRAT_SCORE_Z
+    p = ok / total
+    denom = 1.0 + (z * z / total)
+    center = p + (z * z / (2.0 * total))
+    margin = z * math.sqrt((p * (1.0 - p) + z * z / (4.0 * total)) / total)
+    return max(0.0, min(1.0, (center - margin) / denom))
+
+
+def _record_strategy_result(host, name, ok, now=None):
+    host = normalize_host(host)
+    if not host or name not in STRAT_BY_NAME:
+        return
+    now = time.time() if now is None else now
+    per_host = _strat_scores.setdefault(host, {})
+    item = per_host.setdefault(name, {"ok": 0, "fail": 0, "last": 0.0})
+    item["ok" if ok else "fail"] += 1
+    item["last"] = now
+    _strat_scores.move_to_end(host)
+    while len(_strat_scores) > STRAT_SCORE_MAX_HOSTS:
+        _strat_scores.popitem(last=False)
+
+
+def _strategy_score_bucket():
+    return {"hosts": 0, "ok": 0, "fail": 0, "last_seen": 0.0}
+
+
+def _add_strategy_score(bucket, ok, fail, last):
+    bucket["hosts"] += 1
+    bucket["ok"] += int(ok or 0)
+    bucket["fail"] += int(fail or 0)
+    bucket["last_seen"] = max(float(bucket["last_seen"]), float(last or 0.0))
+
+
+def strategy_score_snapshot():
+    """Privacy-safe strategy telemetry.
+
+    `_strat_scores` is keyed by host for routing decisions. Status must not
+    expose those hostnames, so diagnostics only publish aggregate counts by
+    service group and strategy name.
+    """
+    groups = {}
+    strategies = {}
+    for host, per_host in _strat_scores.items():
+        policy = route_policy(host)
+        group_name = policy["service_group"]
+        group = groups.setdefault(group_name, {"hosts": 0, "strategies": {}})
+        group["hosts"] += 1
+        for name, item in per_host.items():
+            if name not in STRAT_BY_NAME:
+                continue
+            ok = item.get("ok", 0)
+            fail = item.get("fail", 0)
+            last = item.get("last", 0.0)
+            _add_strategy_score(
+                group["strategies"].setdefault(name, _strategy_score_bucket()),
+                ok,
+                fail,
+                last,
+            )
+            _add_strategy_score(
+                strategies.setdefault(name, _strategy_score_bucket()),
+                ok,
+                fail,
+                last,
+            )
+    return {
+        "hosts": len(_strat_scores),
+        "groups": groups,
+        "strategies": strategies,
+    }
+
+
+def _strategy_rank(host, name, base_index, cached, now):
+    item = _strat_scores.get(host, {}).get(name)
+    if item:
+        total = item.get("ok", 0) + item.get("fail", 0)
+        score = _strategy_wilson_score(item.get("ok", 0), total)
+        age = max(0.0, now - item.get("last", now))
+        age_ratio = age / STRAT_SCORE_AGE_BONUS_AFTER
+        score += min(STRAT_SCORE_AGE_BONUS_MAX, age_ratio * STRAT_SCORE_AGE_BONUS_MAX)
+    else:
+        score = 0.5
+    if name == cached:
+        score += STRAT_SCORE_CACHED_BONUS
+    return (-score, base_index)
+
+
+def _rank_strategy_names(host, names, now=None):
+    host = normalize_host(host)
+    cached = _strat_cache.get(host)
+    now = time.time() if now is None else now
+    base_indexes = {name: index for index, name in enumerate(names)}
+    return sorted(
+        names,
+        key=lambda name: _strategy_rank(host, name, base_indexes[name], cached, now),
+    )
+
+
 DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # YouTube/googlevideo video edges are hard-blocked by SNI like Discord. The TLS probe
 # can PASS on a non-fake split (record-splitting alone completes the handshake to the
@@ -1643,23 +3803,24 @@ GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16",
 
 def strategy_order(host):
     policy = route_policy(host)
+    if policy["route_class"] == ROUTE_DIRECT:
+        return [STRAT_BY_NAME["plain"]]
     # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
     # so it uses the fake-only set and ignores any stale non-fake cache entry.
     if policy["service_group"] == SERVICE_DISCORD:
-        win = _strat_cache.get(host)
-        names = ([win] + [n for n in DISCORD_STRATS if n != win]
-                 if win in DISCORD_STRATS else DISCORD_STRATS)
+        names = _rank_strategy_names(host, DISCORD_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
     # YouTube/googlevideo: same fake-only discipline (see GOOGLE_VIDEO note above).
     if policy["service_group"] == SERVICE_YOUTUBE:
-        win = _strat_cache.get(host)
-        names = ([win] + [n for n in GOOGLE_VIDEO_STRATS if n != win]
-                 if win in GOOGLE_VIDEO_STRATS else GOOGLE_VIDEO_STRATS)
+        names = _rank_strategy_names(host, GOOGLE_VIDEO_STRATS)
         return [STRAT_BY_NAME[n] for n in names]
+    host = normalize_host(host)
     win = _strat_cache.get(host)
     if win in STRAT_BY_NAME:
-        return [STRAT_BY_NAME[win]] + [s for s in STRATEGIES if s["name"] != win]
-    return [STRAT_BY_NAME[n] for n in GENERAL_STRATS]
+        names = [win] + [n for n in GENERAL_STRATS if n != win]
+    else:
+        names = GENERAL_STRATS
+    return [STRAT_BY_NAME[n] for n in _rank_strategy_names(host, names)]
 
 
 # --------------------------------------------------- fake ClientHello (decoy)
@@ -1954,19 +4115,23 @@ def network_monitor(port, voice=True):
             # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
             # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
             # _l3send self-heals, and the pf/geph checks below re-arm the rest.
-            print(f">> woke from sleep (gap {now - last_tick:.0f}s) -> re-arming",
+            gap = now - last_tick
+            print(f">> woke from sleep (gap {gap:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
+            note_runtime_rearm("wake", gap=gap, iface=last_iface or "")
+            note_geph_wake(now)
             start_canaries_if_due("wake", force=True)
         last_tick = now
         iface = default_iface()
         if iface != last_iface:
             if last_iface is not None:
+                note_runtime_rearm("network_change", iface=iface or "")
                 start_canaries_if_due("network_change", force=True)
             last_iface = iface
-        # Hysteresis: a few failed probes (geph busy under load, or briefly
-        # re-establishing its tunnel) must NOT flip us to "down" — that drops
-        # geo-blocked hosts to local desync (RU exit IP -> Anthropic/CF 403).
+        # Hysteresis: a few missed probes (Geph busy under load, or briefly
+        # re-establishing its tunnel) must not flap the route-health state.
+        # Confirmed downtime keeps geo-exit hosts fail-closed until Geph returns.
         # Only declare down after 3 consecutive misses (~15s of real outage).
         if probe_geph():
             geph_strikes = 0
@@ -1977,8 +4142,9 @@ def network_monitor(port, voice=True):
         was_geph, _geph_up = _geph_up, up
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
-                  f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-blocked hosts "
-                  f"{'tunnelled' if _geph_up else 'on local desync'}", file=sys.stderr)
+                  f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-exit hosts "
+                  f"{'tunnelled' if _geph_up else 'fail-closed until recovery'}",
+                  file=sys.stderr)
             if not first_tick:
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
@@ -2019,14 +4185,16 @@ def network_monitor(port, voice=True):
                     print(f">> voice plane: priming UDP {_voice_port_ranges_label()} "
                           f"+ SYN-seq capture on {iface}")
                 except Exception as e:
-                    print(f">> voice sniffer failed on {iface}: {e}", file=sys.stderr)
+                    print(f">> voice sniffer unavailable on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
         write_status("dormant" if vpn else "active", iface, cur_iface)
         if first_tick:
             start_canaries_if_due("startup", force=True)
+            start_route_policy_remote_update_if_due("startup")
             first_tick = False
         else:
             start_canaries_if_due("periodic")
+            start_route_policy_remote_update_if_due("periodic")
         time.sleep(5)
 
 
@@ -2202,12 +4370,13 @@ async def resolve_connection_ips(host, fallback_ip):
     return _dedupe_ips(ips)
 
 
-DEFAULT_IP_ATTEMPT_LIMIT = 2
-LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
-
-
 def ip_attempt_limit(host):
-    return LOCAL_BYPASS_IP_ATTEMPT_LIMIT if is_local_bypass_host(host) else DEFAULT_IP_ATTEMPT_LIMIT
+    policy = route_policy(host)
+    limits = route_policy_manifest().get("attempt_limits", {})
+    return limits.get(
+        policy["route_class"],
+        limits.get("default", DEFAULT_IP_ATTEMPT_LIMIT),
+    )
 
 
 # ------------------------------------------------------------- relay
@@ -2583,6 +4752,7 @@ async def _handle_impl(reader, writer):
 
     # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
     # (fallback dst_ip). Some CDN edges are bad while neighbors work.
+    policy = route_policy(host)
     real_ips = await resolve_connection_ips(host, dst_ip)
     ip_limit = ip_attempt_limit(host)
 
@@ -2605,14 +4775,19 @@ async def _handle_impl(reader, writer):
         max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
         attempts = 0
         for strat in strategy_order(host):
+            strat_ok = False
             for ip in real_ips[:ip_limit]:
                 attempts += 1
                 result = await dial_strategy(ip, dst_port, head, body, host, strat)
                 if result:
                     chosen, chosen_name = ip, strat["name"]
+                    strat_ok = True
+                    _record_strategy_result(host, strat["name"], True)
                     break
                 if attempts >= max_attempts:
                     break
+            if not strat_ok:
+                _record_strategy_result(host, strat["name"], False)
             if result or attempts >= max_attempts:
                 break
         if result:
@@ -2628,11 +4803,20 @@ async def _handle_impl(reader, writer):
                 _dead.clear()
 
     if not result:
+        if policy["route_class"] == ROUTE_LOCAL_BYPASS:
+            note_local_bypass_runtime_result(
+                host,
+                False,
+                "runtime strategy probe failed",
+            )
         if VERBOSE:
             print(f"  {host or dst_ip} NO RESPONSE ({len(real_ips)} ips)",
                   file=sys.stderr)
         writer.close()
         return
+
+    if policy["route_class"] == ROUTE_LOCAL_BYPASS:
+        note_local_bypass_runtime_result(host, True)
 
     up_r, up_w, server_first = result
     if VERBOSE:
@@ -2801,22 +4985,20 @@ def do_install(port):
     _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # stop old daemon before replacing files
     if getattr(sys, "frozen", False):
         src = os.path.dirname(os.path.abspath(sys.executable))
-        shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-        shutil.copytree(src, INSTALL_DIR)
+        _replace_tree_resilient(src, INSTALL_DIR)
         binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
         prog_args = [binary, "--port", str(port)]
         uninstall_hint = f"sudo {binary} --uninstall"
     else:
         os.makedirs(INSTALL_DIR, exist_ok=True)
         script = os.path.join(INSTALL_DIR, "tproxy.py")
-        shutil.copy(os.path.abspath(__file__), script)
+        _copy_file_resilient(os.path.abspath(__file__), script, mode=0o644)
         # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
         # it (otherwise Telegram falls back to plain MTProto passthrough).
         _here = os.path.dirname(os.path.abspath(__file__))
         _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
         if os.path.isdir(_src_proxy):
-            shutil.rmtree(os.path.join(INSTALL_DIR, "proxy"), ignore_errors=True)
-            shutil.copytree(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
+            _replace_tree_resilient(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
         venv = os.path.join(INSTALL_DIR, "venv")
         py = os.path.join(venv, "bin", "python3")
         if not os.path.exists(py):
@@ -3080,6 +5262,13 @@ def main():
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel
+    try:
+        trusted_policy_keys = load_trusted_route_policy_keys()
+    except Exception as exc:
+        trusted_policy_keys = dict(TRUSTED_ROUTE_POLICY_KEYS)
+        _set_route_policy_remote("key_error", error=str(exc))
+        print(f">> route policy keys unavailable: {exc}", file=sys.stderr)
+    load_persisted_route_policy(trusted_policy_keys)
 
     # guard thread: voice sniffer follows the default iface + pf self-heal
     threading.Thread(target=network_monitor, args=(args.port,),
