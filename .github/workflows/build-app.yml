@@ -136,6 +136,16 @@ jobs:
           npm ci
           npm run build
 
+      - name: Qualify the release app lifecycle
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          set -euo pipefail
+          app="app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app"
+          test -d "$app"
+          sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py \
+            --app-bundle "$app"
+
       - name: Package + build the update appcast (latest.json)
         id: pkg
         run: |

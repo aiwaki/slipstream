@@ -30,6 +30,7 @@ survive across sessions and agents.
 | 2026-07-11 | A geo-exit connection that closes before delivering any payload is a backend failure even if SOCKS CONNECT succeeded. Slipstream pauses only `com.apple/slipstream` before the next client retry; it does not change DNS, proxies, VPNs, or local-bypass routing. | Active |
 | 2026-07-11 | Manual release builds publish only uniquely tagged GitHub prereleases. They are manual-download artifacts and must not replace the stable `releases/latest` updater feed. Stable releases require an exact `v<version>` tag. | Active |
 | 2026-07-11 | Preview releases omit remote policy trust keys and signed policy artifacts. Remote policy remains disabled; a stable release must supply and verify the signed policy channel. | Active |
+| 2026-07-11 | A preview is offered for installation only after the release workflow runs the privileged PF lifecycle sentinel against that exact built `.app` on a disposable GitHub macOS runner. | Active |
 
 ## Notes
 

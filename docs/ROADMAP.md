@@ -91,7 +91,9 @@ change, and sleep/wake without manual buttons.
   the matching asset version, checksum, and arm64 architecture. Done for the
   release workflow; artifact manifest and broader provenance remain pending.
 - Set an explicit Tauri target and publish an artifact manifest plus SBOM.
-- Run full tests and a privileged PF-anchor sentinel test in release CI.
+- Run full tests and a privileged PF-anchor sentinel test in release CI. The
+  release workflow now runs the sentinel against the exact signed `.app` before
+  publishing; broader release test coverage remains pending.
 - Separate preview and stable channels. Manual builds now create non-updating
   GitHub prereleases; stable requires Developer ID, hardened runtime,
   notarization, and stapling.
