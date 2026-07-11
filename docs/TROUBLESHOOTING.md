@@ -111,6 +111,48 @@ The `--noproxy '*'` flag matters when another local proxy is running. It keeps
 the test on Slipstream's transparent `pf` path instead of a browser or shell
 proxy.
 
+## ChatGPT Or Codex Reconnecting
+
+The native ChatGPT/Codex client uses long-lived streaming connections. A loop
+such as `Reconnecting 2/2` with `websocket closed by server before
+response.completed` can be caused by Slipstream capturing TCP/443 before its
+geo-exit backend is ready.
+
+The July 2026 incident had this exact sequence in the daemon log:
+
+```text
+>> pf anchor com.apple/slipstream active: TCP/443 -> 127.0.0.1:1080
+>> geph SOCKS up (:None)
+>> geph route retry for chatgpt.com: SOCKS connect failed
+>> geph SOCKS down (:[9954])
+>> geph route retry for ws.chatgpt.com: tunnel down
+```
+
+`up (:None)` is invalid. The cause was cold-start hysteresis preserving two
+failed probes even though no previously verified SOCKS port existed, while PF
+was already active. OpenAI hosts then reached the geo-exit fail-close branch in
+`_handle_impl` and the client retried into the same redirect.
+
+Required behavior:
+
+- do not arm PF until the proxy listener and enabled geo-exit backend are ready;
+- never report Geph up without a verified port;
+- on runtime geo-exit failure, clear only `com.apple/slipstream` and enter
+  dormant mode for a bounded hold;
+- do not let tray polling restart a live Geph process from endpoint failures;
+- do not modify DNS, proxy, PAC, VPN, certificates, Keychain, or network plist
+  files as a workaround.
+
+Emergency cleanup remains scoped to Slipstream:
+
+```bash
+sudo launchctl bootout system /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+sudo pfctl -a com.apple/slipstream -F all
+```
+
+Do not use a global `pfctl -F states`, `pfctl -d`, or replacement DNS as normal
+recovery.
+
 ## External DNS, Proxy, PAC, VPN
 
 Slipstream does not own external DNS, proxy, PAC, or VPN settings. If one of
@@ -141,8 +183,10 @@ SleepService/DarkWake cycles. In daemon logs this appears as:
 After wake, a Geph process can keep its local SOCKS port open while the tunnel
 inside it returns `SOCKS connect failed` or closes payload probes without a
 response. Slipstream records this under `geph_detail`; repeated post-wake
-geo-exit failures across multiple hosts set `restart_recommended`, and the tray
-rate-limits a restart of Slipstream's own `geph5-client`.
+geo-exit failures across multiple hosts may set `restart_recommended` for
+diagnostics. The tray does not act on that hint; restarting a live but stale
+process is deferred until the daemon can coordinate it without tearing down
+active streams.
 
 Wake canaries may briefly run before Geph/DNS recovery is complete. If a tray
 summary still says routing needs attention after the tunnel is back, check

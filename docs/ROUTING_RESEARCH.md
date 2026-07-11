@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-11 | OpenAI/Codex reconnect incident | Unit-verified; privileged smoke pending | Cold-start Geph hysteresis reported `up` after a failed first probe while `_geph_port` was still `None`; PF had already captured all TCP/443, so `chatgpt.com`, `chat.openai.com`, and `ws.chatgpt.com` entered the geo-exit fail-close branch repeatedly. Require a verified port before `up` or PF arm, pause only the private anchor on runtime backend failure, and do not let tray polling restart a live Geph process from endpoint failures. | Keep a regression fixture for cold start and runtime SOCKS failure; privileged smoke-test before installation. |
 | 2026-07-10 | Unified runtime recovery reducer | Implemented | Normalize local, geo-exit, and unknown-host evidence as `ConnectionOutcome`; a pure reducer may invalidate only the relevant strategy, re-sweep an exact local host, restart only verified owned Geph, recheck, or warn about external state. | Move owned Geph lifecycle into a user LaunchAgent and expose a privacy-bounded action summary in `StatusV2`. |
 | 2026-07-10 | Competing transparent PF interceptors | Fixed and live-verified | An active HTTPS `rdr`/`route-to` before `com.apple/*` receives real app traffic first. Detect nested anchors, pause without mutation, and auto-rearm when clear instead of trusting internal canaries. | Keep a two-interceptor integration fixture and surface the exact paused reason. |
 | 2026-07-10 | Global PF ruleset ownership | Fixed and live-verified | Slipstream now loads only `com.apple/slipstream` below the existing `com.apple/*` anchor point; global reload/disable is forbidden during normal lifecycle and recovery. | Keep the privileged sentinel cycle in release qualification. |
@@ -62,13 +63,13 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Geo-exit endpoint gates | Implemented | Repeated failure of important secondary geo-exit endpoints, such as OpenAI billing, can degrade the group after a grace threshold instead of being hidden by a passing core endpoint. | Keep adding endpoint gates only where user-visible workflows are proven to fail independently. |
 | 2026-07-09 | GitHub developer endpoints | Implemented | GitHub HTTPS/Git endpoints are direct-passthrough and plain-only; generic desync can break longer smart-HTTP transfers even when short API calls succeed. | Use direct-passthrough for similar developer/download endpoints only with evidence, not as a broad allowlist. |
 | 2026-07-09 | Steam Store payload canary | Implemented | Steam Store geo-exit health now requires a real HTTPS GET payload through Geph, not just SOCKS CONNECT or TLS first bytes. | Add payload probes for other geo-exit flows only when TLS success can hide a user-visible stalled page. |
-| 2026-07-09 | Lid-close wake recovery | Implemented | Adrafinil keeps idle sleep away but does not prevent macOS lid-close SleepService/DarkWake cycles; repeated post-wake geo-exit failures now recommend a rate-limited restart of Slipstream's owned Geph process. | Move more Geph lifecycle ownership into the daemon when keychain/config constraints are solved. |
+| 2026-07-09 | Lid-close wake recovery | Revised 2026-07-11 | Adrafinil keeps idle sleep away but does not prevent macOS lid-close SleepService/DarkWake cycles. Repeated post-wake failures remain diagnostic evidence; tray polling must not restart a live Geph process because it can tear down streaming sessions. | Move lifecycle ownership into the daemon before adding coordinated restart of a live backend. |
 | 2026-07-09 | Stale proxy exceptions | Implemented | External proxy tools can leave disabled `ExceptionsList` entries after proxy autoconfigure is turned off; Slipstream reports them in status without treating the proxy as active or mutating settings. | Use diagnostics to explain stale browser/network behavior; do not auto-delete user-owned proxy state. |
 | 2026-07-09 | Runtime re-arm visibility | Implemented | Daemon status now records the last wake/network re-arm reason, interface, gap, count, and age so sleep-related recovery is visible without reading logs first. | Keep using logs for full `pmset` correlation; status is a compact runtime snapshot. |
 | 2026-07-10 | Auto geo-exit stale learned hosts | Implemented | Repeated Geph runtime retries now reset only exact hosts that were learned by auto geo-exit; explicit geo-exit and local-bypass routes are preserved. | Watch logs for new retry reasons before widening the reset trigger. |
 | 2026-07-10 | Wake canary recovery rerun | Implemented | Forced canary triggers that arrive during an in-flight wake check are queued for a short rerun instead of being dropped by the force cooldown. | Keep wake recovery event-driven; do not lengthen normal canary cadence. |
 | 2026-07-10 | Exact-host local-bypass re-sweep | Implemented | A real Discord/YouTube runtime miss starts a deduplicated background strategy sweep for that exact host and clears its negative cache only after a fake/desync strategy succeeds. | Tune cooldowns only from observed runtime evidence. |
-| 2026-07-10 | Geph-down log semantics | Corrected | Geo-exit routes already fail closed while Geph is down; the old log text incorrectly claimed they used local desync. | Keep runtime messages aligned with route behavior so diagnostics do not imply an RU-IP leak. |
+| 2026-07-10 | Geph-down log semantics | Superseded 2026-07-11 | A proxied geo-exit attempt still never falls through local desync, but persistent fail-close under an active global redirect was unsafe. Backend loss now pauses only the private PF anchor and leaves native networking in control. | Keep runtime messages aligned with dormant/active PF state. |
 
 ## Codebase Graph
 

@@ -781,6 +781,271 @@ def test_probe_geph_accepts_verified_owned_listener(monkeypatch):
     assert tproxy._geph_port_conflict is False
 
 
+def test_geph_probe_hysteresis_never_invents_cold_start_readiness():
+    up, strikes = tproxy.reduce_geph_probe_state(
+        previous_up=False,
+        strikes=0,
+        probe_ok=False,
+        port=None,
+        conflict=False,
+    )
+
+    assert up is False
+    assert strikes == 1
+
+
+def test_geph_probe_hysteresis_preserves_only_a_verified_sticky_port():
+    up, strikes = tproxy.reduce_geph_probe_state(
+        previous_up=True,
+        strikes=0,
+        probe_ok=False,
+        port=tproxy.GEPH_OWNED_PORT,
+        conflict=False,
+    )
+
+    assert up is True
+    assert strikes == 1
+    up, strikes = tproxy.reduce_geph_probe_state(
+        previous_up=up,
+        strikes=strikes,
+        probe_ok=False,
+        port=tproxy.GEPH_OWNED_PORT,
+        conflict=False,
+    )
+    assert up is True
+    assert strikes == 2
+    up, strikes = tproxy.reduce_geph_probe_state(
+        previous_up=up,
+        strikes=strikes,
+        probe_ok=False,
+        port=tproxy.GEPH_OWNED_PORT,
+        conflict=False,
+    )
+    assert up is False
+    assert strikes == 3
+
+
+def test_pf_startup_waits_for_enabled_geo_exit_backend(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+
+    assert not tproxy.geo_exit_backend_ready(now=100.0)
+    assert not tproxy.pf_setup_if_ready(1080, now=100.0)
+
+
+def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
+    calls = []
+
+    class Server:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def serve_forever(self):
+            raise RuntimeError("stop test server")
+
+    class Thread:
+        def __init__(self, *args, **kwargs):
+            calls.append(("thread", args, kwargs))
+
+        def start(self):
+            calls.append(("thread_start",))
+
+    async def start_server(*_args, **_kwargs):
+        return Server()
+
+    monkeypatch.setattr(tproxy.asyncio, "start_server", start_server)
+    monkeypatch.setattr(tproxy.threading, "Thread", Thread)
+    monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(
+        tproxy,
+        "pf_setup_if_ready",
+        lambda port: calls.append(("pf_gate", port)) or False,
+    )
+
+    with pytest.raises(RuntimeError, match="stop test server"):
+        asyncio.run(tproxy.amain(1080, voice=False))
+
+    assert calls[0] == ("pf_gate", 1080)
+    assert ("thread_start",) in calls
+
+
+def test_geo_exit_backend_hold_requires_fresh_probe_after_cooldown(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 130.0)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_reason", "runtime miss")
+
+    assert not tproxy.geo_exit_backend_ready(now=120.0)
+    assert tproxy.geo_exit_backend_ready(now=131.0)
+    assert tproxy._pf_backend_hold_until == 0.0
+    assert tproxy._pf_backend_hold_reason == ""
+
+
+def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch):
+    class StopMonitor(Exception):
+        pass
+
+    pauses = []
+    states = []
+
+    def pause():
+        pauses.append(True)
+        tproxy._pf_applied = False
+        return True
+
+    def stop_sleep(_seconds):
+        raise StopMonitor
+
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
+    monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
+    monkeypatch.setattr(tproxy, "pause_private_pf", pause)
+    monkeypatch.setattr(
+        tproxy,
+        "write_status",
+        lambda state, iface, voice_iface: states.append((state, iface, voice_iface)),
+    )
+    monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        tproxy,
+        "start_route_policy_remote_update_if_due",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(tproxy.time, "sleep", stop_sleep)
+
+    with pytest.raises(StopMonitor):
+        tproxy.network_monitor(1080, voice=False)
+
+    assert pauses == [True]
+    assert states == [("dormant", "en0", None)]
+
+
+def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
+    calls = []
+
+    def load(_port):
+        calls.append("load")
+        tproxy._geph_up = False
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_load", load)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append("flush") or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: calls.append("release") or SimpleNamespace(returncode=0),
+    )
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert calls == ["load", "flush", "release"]
+    assert tproxy._pf_applied is False
+
+
+def test_suspend_transparent_routing_flushes_only_private_anchor(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_reason", "")
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append(("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all"))
+        or SimpleNamespace(returncode=0),
+    )
+
+    assert tproxy.suspend_transparent_routing("geo-exit tunnel down", now=100.0)
+    assert calls == [("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all")]
+    assert tproxy._pf_applied is False
+    assert tproxy._geph_up is False
+    assert tproxy._pf_backend_hold_until == 100.0 + tproxy.PF_BACKEND_FAILURE_HOLD
+    assert tproxy._pf_backend_hold_reason == "geo-exit tunnel down"
+
+
+def test_suspend_transparent_routing_flushes_stale_anchor_when_flag_is_false(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append(tproxy.PF_ANCHOR) or SimpleNamespace(returncode=0),
+    )
+
+    assert tproxy.suspend_transparent_routing("geo-exit tunnel down", now=100.0)
+    assert calls == [tproxy.PF_ANCHOR]
+    assert tproxy._pf_applied is False
+
+
+def test_explicit_local_only_mode_does_not_fail_close_geo_hosts(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+
+    assert not tproxy.geph_route("chatgpt.com")
+    assert tproxy.geo_exit_backend_ready(now=100.0)
+
+
+def test_geo_exit_tunnel_down_suspends_private_pf_before_close(monkeypatch):
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def __init__(self):
+            self.closed = False
+
+        def get_extra_info(self, _name):
+            return object()
+
+        def close(self):
+            self.closed = True
+
+    suspended = []
+    writer = Writer()
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspended.append)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+
+    asyncio.run(tproxy._handle_impl(Reader(), writer))
+
+    assert suspended == ["geo-exit tunnel down"]
+    assert writer.closed is True
+
+
 def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("updates.discord.com") == {
         "host": "updates.discord.com",

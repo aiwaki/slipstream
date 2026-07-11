@@ -126,6 +126,9 @@ _geph_port = None              # the live SOCKS port (set by probe_geph)
 _geph_owned = False
 _geph_port_conflict = False
 _external_geph_detected = False
+_pf_backend_hold_until = 0.0
+_pf_backend_hold_reason = ""
+_pf_state_lock = threading.Lock()
 _system_dns_cache = {
     "ts": 0.0,
     "status": None,
@@ -442,6 +445,7 @@ GEPH_RESTART_FAILURE_THRESHOLD = 3
 GEPH_RESTART_MIN_HOSTS = 2
 GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
+PF_BACKEND_FAILURE_HOLD = 30.0
 SMART_DNS_OK_TTL = 10 * 60.0
 SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
 _smart_dns_ok_until = {}
@@ -1598,7 +1602,7 @@ def _is_geph_infra(host):
 def geph_route(host):
     """Should this host go through geph's tunnel? Geo-blocked (listed OR learned)
     AND not Russian."""
-    return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+    return GEPH_ENABLED and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
 def _record_health_event(
@@ -3741,6 +3745,94 @@ def _pf_flush():
     return _run("pfctl", "-a", PF_ANCHOR, "-F", "all")
 
 
+def geo_exit_backend_ready(now=None):
+    """Whether transparent interception can safely serve every route class.
+
+    Explicitly disabling Geph restores the local-only routing mode. When Geph is
+    enabled, PF remains dormant until a verified SOCKS port is live and any
+    runtime-failure hold has elapsed.
+    """
+    global _pf_backend_hold_until, _pf_backend_hold_reason
+    if not GEPH_ENABLED:
+        return True
+    now = time.time() if now is None else now
+    ready = bool(_geph_up and _geph_port in GEPH_PORTS)
+    if not ready or now < _pf_backend_hold_until:
+        return False
+    if _pf_backend_hold_until:
+        _pf_backend_hold_until = 0.0
+        _pf_backend_hold_reason = ""
+    return True
+
+
+def pause_private_pf():
+    global _pf_applied
+    with _pf_state_lock:
+        result = _pf_flush()
+        if result.returncode != 0:
+            return False
+        _pf_applied = False
+    return True
+
+
+def arm_private_pf_if_ready(port):
+    global _pf_applied
+    with _pf_state_lock:
+        if not geo_exit_backend_ready() or not pf_parent_anchor_loaded():
+            return False
+        if not _pf_acquire_enable_token():
+            return False
+        result = _pf_load(port)
+        # A handler may have marked the backend unavailable while pfctl was
+        # loading. Recheck under the same transition lock before publishing the
+        # active state.
+        if result.returncode == 0 and geo_exit_backend_ready():
+            _pf_applied = True
+            return True
+        _pf_flush()
+        _pf_release_enable_token()
+        _pf_applied = False
+        return False
+
+
+def suspend_transparent_routing(reason, now=None):
+    """Fail safe by pausing only Slipstream's private PF anchor.
+
+    The current intercepted connection cannot be moved to a different upstream,
+    but clearing the anchor lets the client's next retry use the native network
+    path. External PF anchors, DNS, VPN, proxy settings, and global states are not
+    touched.
+    """
+    global _geph_up, _pf_applied, _pf_backend_hold_until, _pf_backend_hold_reason
+    now = time.time() if now is None else now
+    _geph_up = False
+    _pf_backend_hold_until = max(
+        _pf_backend_hold_until,
+        now + PF_BACKEND_FAILURE_HOLD,
+    )
+    _pf_backend_hold_reason = str(reason)[:200]
+    was_applied = _pf_applied
+    if not pause_private_pf():
+        print(
+            ">> unable to pause Slipstream's private pf anchor; will retry",
+            file=sys.stderr,
+        )
+        return False
+    if was_applied:
+        print(">> geo-exit backend unavailable -> transparent routing dormant", file=sys.stderr)
+    return True
+
+
+def pf_setup_if_ready(port, now=None):
+    if not geo_exit_backend_ready(now):
+        print(
+            ">> geo-exit backend not ready -> leaving transparent routing dormant",
+            file=sys.stderr,
+        )
+        return False
+    return pf_setup(port)
+
+
 def _legacy_pf_rules_loaded(port):
     nat = _run("pfctl", "-sn")
     rules = _run("pfctl", "-sr")
@@ -4444,6 +4536,20 @@ def _syn_bpf(localip):
     return f"tcp and host {localip} and port 443 and (tcp[13] & 2 != 0)"
 
 
+def reduce_geph_probe_state(previous_up, strikes, probe_ok, port, conflict=False):
+    """Apply hysteresis without inventing readiness on a cold start."""
+    if probe_ok and port is not None:
+        return True, 0
+    next_strikes = 3 if conflict else strikes + 1
+    keep_previous = bool(
+        previous_up
+        and port is not None
+        and not conflict
+        and next_strikes < 3
+    )
+    return keep_previous, next_strikes
+
+
 def network_monitor(port, voice=True):
     """Long-running guard thread. (1) Keeps the voice sniffer bound to the CURRENT
     default interface so voice survives Wi-Fi/Ethernet/sleep changes. (2) Re-applies
@@ -4518,25 +4624,22 @@ def network_monitor(port, voice=True):
             last_iface = iface
         # Hysteresis: a few missed probes (Geph busy under load, or briefly
         # re-establishing its tunnel) must not flap the route-health state.
-        # Confirmed downtime keeps geo-exit hosts fail-closed until Geph returns.
-        # Only declare down after 3 consecutive misses (~15s of real outage).
-        if probe_geph():
-            geph_strikes = 0
-            up = True
-        elif _geph_port_conflict:
-            # Ownership conflicts are not transient tunnel misses. Keeping the
-            # previous port alive through hysteresis could send geo-exit traffic
-            # to an unrelated SOCKS listener, so fail closed immediately.
-            geph_strikes = 3
-            up = False
-        else:
-            geph_strikes += 1
-            up = geph_strikes < 3
-        was_geph, _geph_up = _geph_up, up
+        # Confirmed downtime pauses the private PF anchor so native networking
+        # remains usable. Only declare down after 3 consecutive misses (~15s of
+        # real outage) when a previously verified port is being preserved.
+        probe_ok = probe_geph()
+        was_geph = _geph_up
+        _geph_up, geph_strikes = reduce_geph_probe_state(
+            previous_up=was_geph,
+            strikes=geph_strikes,
+            probe_ok=probe_ok,
+            port=_geph_port,
+            conflict=_geph_port_conflict,
+        )
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
                   f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-exit hosts "
-                  f"{'tunnelled' if _geph_up else 'fail-closed until recovery'}",
+                  f"{'tunnelled' if _geph_up else 'paused until recovery'}",
                   file=sys.stderr)
             if not first_tick:
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
@@ -4559,25 +4662,26 @@ def network_monitor(port, voice=True):
             elif _pf_interceptor_conflicts:
                 print(">> transparent HTTPS filter conflict cleared -> re-arming")
             _pf_interceptor_conflicts = conflicts
+        backend_ready = geo_exit_backend_ready(now)
         if vpn:
             if _pf_applied:
                 print(f">> VPN up (default via {iface}) -> Slipstream dormant",
                       file=sys.stderr)
-                _pf_flush()
-                _pf_applied = False
+                pause_private_pf()
         elif conflicts:
             if _pf_applied:
-                _pf_flush()
-                _pf_applied = False
+                pause_private_pf()
+        elif not backend_ready:
+            if _pf_applied:
+                print(
+                    ">> geo-exit backend unavailable -> Slipstream dormant",
+                    file=sys.stderr,
+                )
+                pause_private_pf()
         else:
             if not _pf_applied:
-                print(">> no VPN -> Slipstream active", file=sys.stderr)
-                if (
-                    pf_parent_anchor_loaded()
-                    and _pf_acquire_enable_token()
-                    and _pf_load(port).returncode == 0
-                ):
-                    _pf_applied = True
+                print(">> routing backends ready -> Slipstream active", file=sys.stderr)
+                if arm_private_pf_if_ready(port):
                     start_canaries_if_due("pf_reapply", force=True)
                 else:
                     print(
@@ -4588,10 +4692,7 @@ def network_monitor(port, voice=True):
             elif not pf_has_rules(port):
                 if pf_parent_anchor_loaded():
                     print(">> Slipstream pf anchor vanished — re-applying", file=sys.stderr)
-                    if (
-                        _pf_acquire_enable_token()
-                        and _pf_load(port).returncode == 0
-                    ):
+                    if arm_private_pf_if_ready(port):
                         start_canaries_if_due("pf_reapply", force=True)
                 else:
                     print(
@@ -4620,15 +4721,19 @@ def network_monitor(port, voice=True):
                 except Exception as e:
                     print(f">> voice sniffer unavailable on {iface}: {e}", file=sys.stderr)
                     cur_iface = None
-        runtime_state = "dormant" if vpn else ("conflict" if conflicts else "active")
+        runtime_state = (
+            "conflict" if conflicts
+            else "dormant" if vpn or not backend_ready or not _pf_applied
+            else "active"
+        )
         write_status(runtime_state, iface, cur_iface)
         if first_tick:
-            if not conflicts:
+            if runtime_state == "active":
                 start_canaries_if_due("startup", force=True)
             start_route_policy_remote_update_if_due("startup")
             first_tick = False
         else:
-            if not conflicts:
+            if runtime_state == "active":
                 start_canaries_if_due("periodic")
             start_route_policy_remote_update_if_due("periodic")
         time.sleep(5)
@@ -5228,9 +5333,9 @@ async def _handle_impl(reader, writer):
     # SOCKS5 tunnel. geph is the ONLY honest path for these hosts — local desync
     # would exit on the Russian IP and earn a hard 403 ("Request not allowed")
     # that makes apps like Claude DROP their session (forcing a manual re-login).
-    # So FAIL CLOSED on any geph trouble (down during a ~20-30s respawn, or the
-    # CONNECT failed): close the connection so the client retries until geph is
-    # back, instead of leaking the geo-host to an RU exit. (Russian services are
+    # On Geph trouble, close only this already-intercepted connection and pause
+    # Slipstream's private PF anchor. The client retry then uses the native path
+    # instead of looping through a dead local backend. (Russian services are
     # excluded by geph_route and fall through to desync as normal.) A user-owned
     # Smart DNS can take this branch first, but only after canaries have proven
     # that the DNS-provided path is live; any runtime miss falls back to Geph.
@@ -5282,11 +5387,13 @@ async def _handle_impl(reader, writer):
                     clear_geph_route_failure()
                 return
             log_geph_route_failure(host, "SOCKS connect failed")
+            suspend_transparent_routing("geo-exit SOCKS connect unavailable")
         else:
             log_geph_route_failure(host, "tunnel down")
+            suspend_transparent_routing("geo-exit tunnel down")
         if VERBOSE:
-            print(f"  geph unavailable for geo-host {host} -> fail closed "
-                  f"(no RU leak, client will retry)", file=sys.stderr)
+            print(f"  geph unavailable for geo-host {host} -> connection closed once "
+                  f"(private pf anchor paused for retry)", file=sys.stderr)
         writer.close()
         return
 
@@ -5620,6 +5727,7 @@ def do_uninstall():
 
 
 async def amain(port, voice=True):
+    global _geph_up
     try:
         server = await asyncio.start_server(
             handle, "127.0.0.1", port, reuse_address=True)
@@ -5629,10 +5737,18 @@ async def amain(port, voice=True):
                   f"kill it and retry:\n  sudo lsof -ti tcp:{port} | xargs sudo kill\n",
                   file=sys.stderr)
         raise
-    pf_setup(port)                       # grab pf only AFTER we hold the port
-    # Start recovery/health monitoring only after the initial PF reference and
-    # private anchor are established. Starting it earlier races `_pf_load()`
-    # against `pf_setup()` and can create an unowned reapply.
+    # Holding the listener is necessary but not sufficient: do not capture
+    # system HTTPS until the geo-exit backend has a verified SOCKS port.
+    probe_ok = probe_geph()
+    _geph_up, _ = reduce_geph_probe_state(
+        previous_up=False,
+        strikes=0,
+        probe_ok=probe_ok,
+        port=_geph_port,
+        conflict=_geph_port_conflict,
+    )
+    pf_setup_if_ready(port)
+    # The monitor owns later pause/re-arm decisions after the cold-start gate.
     threading.Thread(
         target=network_monitor,
         args=(port,),

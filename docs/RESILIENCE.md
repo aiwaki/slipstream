@@ -30,14 +30,14 @@ YouTube/googlevideo.
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
 | Crash restart | launchd `KeepAlive` | none |
-| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors pause Slipstream without mutation and auto-recover when clear | privileged sentinel plus competing-interceptor coverage on every release |
+| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | privileged sentinel plus competing-interceptor and backend-loss coverage on every release |
 | Clean exit | flushes only the private anchor and releases Slipstream's PF enable token | none after the privileged gate passes |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
-| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; repeated post-wake geo-exit failures can trigger a rate-limited restart of a verified owned Geph process | move Geph to a user LaunchAgent independent of the tray |
-| Recovery decisions | normalized `ConnectionOutcome` evidence and a pure reducer keep local re-sweep, learned-route reset, owned-Geph restart, unknown-host recheck, and external warnings separate | expose the bounded action summary through `StatusV2` |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path | move Geph to a user LaunchAgent, then design daemon-coordinated idle restart for a live but stale backend |
+| Recovery decisions | normalized `ConnectionOutcome` evidence and a pure reducer keep local re-sweep, learned-route reset, owned-Geph restart evidence, unknown-host recheck, and external warnings separate; tray polling does not execute live-process restart hints | expose the bounded action summary through `StatusV2` |
 | Geph coexistence | owned `:9954` listener requires PID/executable/config/listener proof; external `:9909` is diagnostics-only | explicit user opt-in contract for any external backend |
 | Secret storage | Geph directory `0700`; config/cache/ownership files `0600` and atomic | move the account secret to Keychain |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
