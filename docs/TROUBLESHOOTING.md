@@ -213,6 +213,11 @@ This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
 of the user's working setup, but Slipstream should not silently enable or remove
 them.
 
+Slipstream's on-demand Xbox DNS fallback is separate from that external state:
+after a local failure for one generic hostname, it can make one verified DoH
+query and try the returned address locally. It never changes the system resolver
+configuration.
+
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale
 exceptions in status/diagnostics, but still treats the system proxy as off.

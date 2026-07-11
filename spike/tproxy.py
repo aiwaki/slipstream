@@ -50,6 +50,7 @@ from urllib.parse import urlencode, urlparse
 import urllib.request
 
 from primes import build_fake_stun, classify as classify_voice_payload
+from xbox_dns import resolve as xbox_dns_resolve
 
 
 class _ScapyMacNoiseFilter(logging.Filter):
@@ -96,6 +97,7 @@ _doh_cache = OrderedDict()      # host -> (ips, expiry_monotonic)
 # de-dup keeps the app responsive under a browser's connection burst.
 _POOL = ThreadPoolExecutor(max_workers=64, thread_name_prefix="slip")
 _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH)
+_xbox_dns_inflight = {}        # host -> asyncio.Future (on-demand resolver only)
 # Negative cache: a host that failed the whole ladder is "dead" for a cooldown,
 # during which it gets ONE fast-fail attempt instead of 7 — stops retry-storms
 # from a persistently-blocked host (e.g. Telegram DC sockets hammering forever).
@@ -1563,6 +1565,7 @@ AUTO_GEPH_WINDOW = 60.0       # seconds to accumulate a host's failures over
 AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = STUCK
 AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
+LOCAL_STREAM_IDLE = 15.0      # client-visible downstream silence after payload
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
@@ -1586,6 +1589,14 @@ _auto_geph_lock = threading.RLock()
 _AUTO_GEPH_PATH = "/var/run/slipstream-autogeph.json"
 GEPH_FAIL_LOG_TTL = 60.0
 _geph_fail_log = {}           # (host, reason) -> last log monotonic
+
+# Xbox DNS is an app-owned, on-demand resolver backend. It never modifies
+# macOS DNS: an exact unknown host reaches it only after a local failure/stall.
+XBOX_DNS_CANDIDATE_TTL = 10 * 60.0
+_xbox_dns_candidates = {}     # host -> monotonic expiry
+XBOX_DNS_ATTEMPT_TTL = 10 * 60.0
+_xbox_dns_attempts = {}       # host -> monotonic expiry after one direct lookup
+XBOX_DNS_STATE_MAX = 4096
 
 # Runtime local-bypass failures start a private exact-host re-sweep. The state is
 # deliberately process-local and aggregate-free: status must not become browsing
@@ -2637,7 +2648,7 @@ def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=
     if len(_auto_fail) > 4096:
         for k in [k for k, v in list(_auto_fail.items()) if not v or v[-1] < cutoff]:
             _auto_fail.pop(k, None)
-    if len(q) < AUTO_GEPH_STORM or not _geph_up:
+    if len(q) < AUTO_GEPH_STORM:
         return
     # network-fine guard: if many DISTINCT hosts are failing at once it's the
     # network, not a per-host geo-block — don't sweep everything into the tunnel.
@@ -2646,6 +2657,16 @@ def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=
     failing = sum(1 for v in _auto_fail.values()
                   if sum(1 for t in v if t >= cutoff) >= 2)
     if failing >= AUTO_GEPH_NET_BAD:
+        return
+    # A low-content local storm is still ambiguous. Before the existing
+    # proof-gated geo-exit check, give this exact unknown host one chance to
+    # resolve through the app-owned Xbox DNS endpoint and connect locally.
+    # That candidate is consumed by _try_xbox_dns_local_connect on the next
+    # client retry; no system resolver setting is consulted or changed here.
+    if not _xbox_dns_attempted_recently(h, now):
+        _mark_xbox_dns_candidate(h, now)
+        return
+    if not _geph_up:
         return
     outcome = connection_outcome_for_host(
         h,
@@ -4131,6 +4152,7 @@ def _script_runtime_payload(source_file):
     payload = (
         (source_file, "tproxy.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
+        (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
     )
     missing = [src for src, _ in payload if not os.path.isfile(src)]
     if missing:
@@ -5017,6 +5039,28 @@ async def doh_resolve_async(host):
     return ips
 
 
+async def xbox_dns_resolve_async(host):
+    """Resolve one fallback host through app-owned Xbox DNS without system DNS."""
+    host = normalize_host(host)
+    if not host:
+        return []
+    fut = _xbox_dns_inflight.get(host)
+    if fut is not None:
+        return await fut
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    _xbox_dns_inflight[host] = fut
+    try:
+        ips = await loop.run_in_executor(_POOL, xbox_dns_resolve, host)
+    except Exception:
+        ips = []
+    finally:
+        _xbox_dns_inflight.pop(host, None)
+        if not fut.done():
+            fut.set_result(ips)
+    return ips
+
+
 def system_resolve(host, port=443):
     try:
         infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
@@ -5068,19 +5112,127 @@ def ip_attempt_limit(host):
 
 
 # ------------------------------------------------------------- relay
-async def splice(src, dst):
+@dataclass
+class _RelayActivity:
+    last_downstream_at: float
+    client_end_at: float = 0.0
+    server_end_at: float = 0.0
+    client_read_failed: bool = False
+    downstream_write_failed: bool = False
+
+
+def _local_stream_stalled(activity, now=None):
+    """Return true when a client gives up after a real downstream silence.
+
+    TLS is opaque here, so byte count alone cannot prove that an HTTP response
+    completed. A quiet keep-alive connection can be closed normally by the
+    client, so only an abnormal client read error or a failed downstream write
+    after a long lack of server progress can trigger recovery.
+    """
+    now = time.monotonic() if now is None else now
+    if not activity.client_end_at:
+        return False
+    return (
+        (activity.client_read_failed or activity.downstream_write_failed)
+        and now - activity.last_downstream_at >= LOCAL_STREAM_IDLE
+    )
+
+
+def _mark_xbox_dns_candidate(host, now=None):
+    h = normalize_host(host)
+    if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
+        return False
+    now = time.monotonic() if now is None else now
+    _xbox_dns_candidates[h] = now + XBOX_DNS_CANDIDATE_TTL
+    _prune_xbox_dns_state(_xbox_dns_candidates, now)
+    return True
+
+
+def _note_xbox_dns_attempt(host, now=None):
+    h = normalize_host(host)
+    if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
+        return False
+    now = time.monotonic() if now is None else now
+    _xbox_dns_attempts[h] = now + XBOX_DNS_ATTEMPT_TTL
+    _prune_xbox_dns_state(_xbox_dns_attempts, now)
+    return True
+
+
+def _prune_xbox_dns_state(state, now):
+    for stale, expiry in list(state.items()):
+        if expiry <= now:
+            state.pop(stale, None)
+    while len(state) > XBOX_DNS_STATE_MAX:
+        state.pop(next(iter(state)))
+
+
+def _xbox_dns_attempted_recently(host, now=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    expiry = _xbox_dns_attempts.get(h, 0.0)
+    if expiry > now:
+        return True
+    _xbox_dns_attempts.pop(h, None)
+    return False
+
+
+def _xbox_dns_candidate_active(host, now=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    expiry = _xbox_dns_candidates.get(h, 0.0)
+    if expiry > now:
+        return True
+    _xbox_dns_candidates.pop(h, None)
+    return False
+
+
+def _clear_xbox_dns_candidate(host):
+    _xbox_dns_candidates.pop(normalize_host(host), None)
+
+
+def note_local_stream_stall(host, strategy_name):
+    """Demote only the exact generic strategy after a partial stream stall.
+
+    A partial TLS response is not proof that a service needs a foreign exit.
+    On the next connection, use an app-owned Xbox DNS lookup before the normal
+    local ladder. Protected local groups stay entirely outside this recovery
+    path, and no host is learned for Geph here.
+    """
+    h = normalize_host(host)
+    if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
+        return False
+    if strategy_name not in STRAT_BY_NAME:
+        return False
+    _record_strategy_result(h, strategy_name, False)
+    if _strat_cache.get(h) == strategy_name:
+        _strat_cache.pop(h, None)
+    _mark_xbox_dns_candidate(h)
+    return True
+
+
+async def splice(src, dst, activity=None):
     total = 0
     try:
         while True:
-            data = await src.read(65536)
+            try:
+                data = await src.read(65536)
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                break
             if not data:
                 break
             total += len(data)
-            dst.write(data)
-            await dst.drain()
-    except (ConnectionResetError, BrokenPipeError, OSError):
-        pass
+            try:
+                dst.write(data)
+                await dst.drain()
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                if activity is not None:
+                    activity.downstream_write_failed = True
+                break
+            if activity is not None:
+                activity.last_downstream_at = time.monotonic()
     finally:
+        if activity is not None:
+            activity.server_end_at = time.monotonic()
         try:
             dst.close()
         except Exception:
@@ -5088,19 +5240,27 @@ async def splice(src, dst):
     return total
 
 
-async def pump(reader, up_w):
+async def pump(reader, up_w, activity=None):
     total = 0
     try:
         while True:
-            data = await reader.read(65536)
+            try:
+                data = await reader.read(65536)
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                if activity is not None:
+                    activity.client_read_failed = True
+                break
             if not data:
                 break
             total += len(data)
-            up_w.write(data)
-            await up_w.drain()
-    except (ConnectionResetError, BrokenPipeError, OSError):
-        pass
+            try:
+                up_w.write(data)
+                await up_w.drain()
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                break
     finally:
+        if activity is not None:
+            activity.client_end_at = time.monotonic()
         try:
             up_w.close()
         except Exception:
@@ -5416,6 +5576,20 @@ async def dial_strategy(ip, port, head, body, host, strat):
     return await dial_and_probe(ip, port, blob)
 
 
+async def _try_xbox_dns_local_connect(host, port, head, body):
+    """Try the app-owned Xbox DNS answer locally, never through Geph."""
+    if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
+        return None
+    _note_xbox_dns_attempt(host)
+    ips = await xbox_dns_resolve_async(host)
+    plain = STRAT_BY_NAME["plain"]
+    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
+        result = await dial_strategy(ip, port, head, body, host, plain)
+        if result:
+            return ip, result
+    return None
+
+
 async def handle(reader, writer):
     global _conn_count
     _conn_count += 1
@@ -5562,13 +5736,24 @@ async def _handle_impl(reader, writer):
     result = None
     chosen = real_ips[0]
     chosen_name = None
-    if not is_tls:
+    via_xbox_dns = False
+    if is_tls and host and _xbox_dns_candidate_active(host):
+        xbox = await _try_xbox_dns_local_connect(host, dst_port, head, body)
+        if xbox:
+            chosen, result = xbox
+            chosen_name = "plain"
+            via_xbox_dns = True
+            _record_strategy_result(host, chosen_name, True)
+        else:
+            _clear_xbox_dns_candidate(host)
+
+    if result is None and not is_tls:
         for ip in real_ips[:ip_limit]:
             result = await dial_and_probe(ip, dst_port, head + body)
             if result:
                 chosen = ip
                 break
-    else:
+    elif result is None:
         now = time.monotonic()
         # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
         max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
@@ -5598,6 +5783,26 @@ async def _handle_impl(reader, writer):
             _dead[host] = now + DEAD_TTL        # arm the negative cache
             if len(_dead) > 4096:
                 _dead.clear()
+
+    # A full local ladder miss can still recover this intercepted connection
+    # through Xbox DNS, using its answer locally with plain TLS. This never
+    # opens Geph and does not modify macOS DNS.
+    if (
+        result is None
+        and is_tls
+        and host
+        and policy["route_class"] == ROUTE_UNKNOWN
+    ):
+        xbox = await _try_xbox_dns_local_connect(host, dst_port, head, body)
+        if xbox:
+            chosen, result = xbox
+            chosen_name = "plain"
+            via_xbox_dns = True
+            _mark_xbox_dns_candidate(host)
+            _record_strategy_result(host, chosen_name, True)
+            _dead.pop(host, None)
+            if _strat_cache.get(host) != chosen_name:
+                remember_strategy(host, chosen_name)
 
     if not result:
         if policy["route_class"] == ROUTE_LOCAL_BYPASS:
@@ -5632,16 +5837,33 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
     t0 = time.monotonic()
-    res = await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
-    # adaptive: a host that keeps closing with no real content is geo-blocked ->
-    # learn it for the geph tunnel (this connection went local; the next routes).
+    activity = _RelayActivity(last_downstream_at=t0)
+    res = await asyncio.gather(
+        pump(reader, up_w, activity),
+        splice(up_r, writer, activity),
+    )
+    duration = time.monotonic() - t0
+    # A partial local stream stall demotes only the exact generic strategy. It
+    # teaches the next client retry to use app-owned Xbox DNS locally; protected
+    # local groups never enter this path and no host is learned for Geph here.
     if is_tls and host:
-        note_local_result(host, len(server_first) + (res[1] or 0),
-                          time.monotonic() - t0)
+        if _local_stream_stalled(activity, now=t0 + duration):
+            if via_xbox_dns:
+                _record_strategy_result(host, chosen_name, False)
+                if _strat_cache.get(host) == chosen_name:
+                    _strat_cache.pop(host, None)
+                _clear_xbox_dns_candidate(host)
+            else:
+                note_local_stream_stall(host, chosen_name)
+        note_local_result(
+            host,
+            len(server_first) + (res[1] or 0),
+            duration,
+        )
     if VERBOSE and is_discord_host(host):
         up_b, down_b = res[0] or 0, len(server_first) + (res[1] or 0)
         print(f"  closed {host}: up={up_b} down={down_b} "
-              f"dur={time.monotonic() - t0:.1f}s", file=sys.stderr)
+              f"dur={duration:.1f}s", file=sys.stderr)
 
 
 LAUNCHD_LABEL = "dev.slipstream.tproxy"

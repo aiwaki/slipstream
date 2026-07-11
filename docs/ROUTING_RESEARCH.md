@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-11 | Partial local stream stall | Fixed in this PR | A local TLS route can return an initial payload above the former 8 KiB success threshold and then stop. On the affected network, `crystalidea.com` returned HTTP 200 with 16,366 of 21,726 bytes before a 25 s client timeout, while the same page completed through the owned Geph SOCKS listener in 1.36 s. The fault was a fake/desync strategy cached after its first response, not a reason to send the site to Geph. An orderly client close after an idle keep-alive is ambiguous and must not demote a route; only an abnormal client transport abort or failed downstream write after 15 s of silence is an exact-host strategy failure. The next retry uses a direct RFC 8484 query to Xbox DNS and tries its answer locally with plain TLS. A repeated low-content generic stall must receive the same one-shot local resolver attempt before any proof-gated geo-exit check. | Keep Xbox DNS on demand, exact-host, and memory-only; observe false-positive rates before tuning the idle threshold. |
 | 2026-07-11 | Sidecar-only diagnostics | Fixed in this PR | A root daemon can be removed while the independent user Geph LaunchAgent remains. The user job does not by itself prove active transparent routing, but the previous diagnostic snapshot hid the distinction. | Preserve the bounded `summary.geph_lifecycle` signal; do not infer PF without privileged evidence. |
 | 2026-07-11 | User Geph lifecycle teardown | Fixed in this PR | Removing the root daemon manually leaves the independent user LaunchAgent alive by design, but deleting the app bundle first gave users no supported way to remove the owned sidecar and credentials. | Keep explicit tray uninstall coverage and use it before moving the app bundle to Trash. |
 | 2026-07-11 | Geo-exit early payload close | Fixed in this PR | Logs showed `chatgpt.com` returning `remote closed without response` after a successful Geph SOCKS connect. `_handle_impl` recorded that event but left its private PF redirect armed, so the next WebSocket retry re-entered the same unhealthy tunnel. | Keep the zero-byte early-close regression and validate this behavior in the next disposable installed-lifecycle smoke. |
@@ -47,7 +48,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-08 | Unblock-Pro DNS/hosts/proxy mutations | Rejected | Do not mutate `/etc/hosts`, system DNS, system proxy, PAC, or external VPN configuration. | Detect and warn only. |
 | 2026-07-08 | Unblock-Pro global UDP block | Rejected | Do not block UDP/443 or Discord voice ranges globally. | Keep QUIC/UDP handling scoped to verified host/IP evidence. |
 | 2026-07-08 | Install hygiene ideas | Adopted where safe | Safe-copy and binary-format validation are useful for daemon install reliability. | Keep monitoring real reinstall logs for locked-file edge cases. |
-| 2026-07-08 | `xbox-dns.ru` external DNS | Reference only | Treat user-managed DNS as external state, not something Slipstream enables or rewrites. | Detect in diagnostics if useful; never auto-configure it. |
+| 2026-07-08 | `xbox-dns.ru` external DNS | Active | User-managed resolver settings remain external state that Slipstream never enables or rewrites. Separately, the daemon may make a direct, verified DoH query for one failed generic hostname. | Keep the direct backend exact-host, local-only, and independent from system resolver settings. |
 | 2026-07-09 | Darkware Zapret UI | Reference only | Borrow the compact MenuBarExtra-style status layout, not its manual strategy workflow. | Redesign tray diagnostics as short status rows with details behind a button. |
 | 2026-07-09 | Darkware Zapret system mutations | Rejected | Do not copy system SOCKS proxy toggles or broad sudoers `NOPASSWD` service control. | Keep Slipstream-owned state scoped to its daemon, pf rules, and status files. |
 | 2026-07-09 | Darkware Zapret bruteforce probe | Backlog | Headless re-sweep can borrow the temporary-proxy probing idea without exposing a picker. | Consider only for autonomous local-bypass recovery. |
@@ -256,9 +257,11 @@ Fresh external snapshots checked on 2026-07-09:
   stale IPs can create worse failures than the original DPI block, and this
   violates Slipstream's rule that external DNS/hosts state is read-only.
 - Neither SonicDPI nor Unblock-Pro uses `xbox-dns.ru` directly in the inspected
-  code. If users configure it at the OS/router level, Slipstream should treat it
-  like other external DNS state: report it in diagnostics if relevant, but never
-  enable, replace, or restore it automatically.
+  code. If users configure it at the OS/router level, Slipstream treats that
+  setting like other external DNS state: report it in diagnostics if relevant,
+  but never enable, replace, or restore it automatically. This does not preclude
+  Slipstream's separate exact-host DoH fallback, which does not read or modify
+  the user's resolver configuration.
 
 ## Darkware Zapret Findings
 

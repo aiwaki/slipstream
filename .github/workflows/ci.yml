@@ -87,8 +87,10 @@ jobs:
         run: |
           python3 -m py_compile \
             spike/tproxy.py \
+            spike/xbox_dns.py \
             spike/test_recovery.py \
             spike/test_tproxy_doh.py \
+            spike/test_xbox_dns.py \
             scripts/pf_anchor_smoke.py \
             scripts/pf_installed_lifecycle_smoke.py \
             scripts/sync_version.py \
