@@ -1148,6 +1148,71 @@ def test_geo_exit_tunnel_down_suspends_private_pf_before_close(monkeypatch):
     assert writer.closed is True
 
 
+@pytest.mark.parametrize(
+    ("downstream_bytes", "expected_failure", "expected_suspend", "expected_clear"),
+    [
+        (
+            0,
+            [("chatgpt.com", "remote closed without response")],
+            ["geo-exit remote close before payload"],
+            [],
+        ),
+        (1, [], [], [True]),
+    ],
+)
+def test_geo_exit_payload_result_controls_private_pf(
+    monkeypatch,
+    downstream_bytes,
+    expected_failure,
+    expected_suspend,
+    expected_clear,
+):
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def get_extra_info(self, _name):
+            return object()
+
+    async def connected(*_args):
+        return object(), object()
+
+    async def empty_client_pump(*_args):
+        return 0
+
+    async def geph_response(*_args):
+        return downstream_bytes
+
+    failures = []
+    cleared = []
+    suspended = []
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "dial_via_geph", connected)
+    monkeypatch.setattr(tproxy, "pump", empty_client_pump)
+    monkeypatch.setattr(tproxy, "splice", geph_response)
+    monkeypatch.setattr(
+        tproxy,
+        "log_geph_route_failure",
+        lambda host, reason: failures.append((host, reason)),
+    )
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: cleared.append(True))
+    monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspended.append)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+
+    asyncio.run(tproxy._handle_impl(Reader(), Writer()))
+
+    assert failures == expected_failure
+    assert suspended == expected_suspend
+    assert cleared == expected_clear
+
+
 def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("updates.discord.com") == {
         "host": "updates.discord.com",

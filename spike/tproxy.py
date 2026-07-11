@@ -5530,6 +5530,11 @@ async def _handle_impl(reader, writer):
                 down_b = res[1] or 0
                 if down_b == 0 and time.monotonic() - t0 < 10:
                     log_geph_route_failure(host, "remote closed without response")
+                    # A successful SOCKS CONNECT is not enough to keep PF armed.
+                    # If the remote side closes before yielding any payload, leave
+                    # the next client retry on the native path instead of sending
+                    # it into the same broken geo-exit tunnel.
+                    suspend_transparent_routing("geo-exit remote close before payload")
                 else:
                     clear_geph_route_failure()
                 return

@@ -25,6 +25,7 @@ survive across sessions and agents.
 | 2026-07-11 | Packaged lifecycle qualification installs the frozen daemon from the built `.app` and preserves an independent PF connection/state through reinstall, restart, and uninstall. Cross-version rollback may begin only from the first release that passes this safety gate; pre-anchor releases are not executable rollback fixtures. | Active |
 | 2026-07-11 | World-readable daemon status uses privacy-bounded StatusV2. It exposes aggregate route, backend, environment, and recovery state, never hostname, IP, secret, or raw failure evidence. The tray accepts V1 and V2 during the transition release. | Active |
 | 2026-07-11 | Geph exit locations are selectable only from a cached or live city catalog. When neither is available, the tray shows an explicit unavailable state and never invents country-level exits. | Active |
+| 2026-07-11 | A geo-exit connection that closes before delivering any payload is a backend failure even if SOCKS CONNECT succeeded. Slipstream pauses only `com.apple/slipstream` before the next client retry; it does not change DNS, proxies, VPNs, or local-bypass routing. | Active |
 
 ## Notes
 
