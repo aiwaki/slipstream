@@ -161,8 +161,9 @@ Required behavior:
 
 - do not arm PF until the proxy listener and enabled geo-exit backend are ready;
 - never report Geph up without a verified port;
-- on runtime geo-exit failure, clear only `com.apple/slipstream` and enter
-  dormant mode for a bounded hold;
+- on runtime geo-exit failure, including a successful SOCKS connection followed
+  by an early zero-byte remote close, clear only `com.apple/slipstream` and
+  enter dormant mode for a bounded hold;
 - do not let tray polling restart a live Geph process from endpoint failures;
 - do not modify DNS, proxy, PAC, VPN, certificates, Keychain, or network plist
   files as a workaround.
