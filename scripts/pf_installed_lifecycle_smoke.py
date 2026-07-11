@@ -158,7 +158,16 @@ class PersistentSentinelConnection:
         except OSError as exc:
             raise LifecycleError(f"sentinel connection broke after {label}") from exc
         if bytes(received) != payload:
-            raise LifecycleError(f"sentinel echo mismatch after {label}")
+            child = "running"
+            if self.child_pid is not None:
+                pid, status = os.waitpid(self.child_pid, os.WNOHANG)
+                if pid:
+                    self.child_pid = None
+                    child = f"exited:{os.waitstatus_to_exitcode(status)}"
+            raise LifecycleError(
+                f"sentinel echo mismatch after {label}; "
+                f"received={bytes(received)!r}; child={child}"
+            )
 
     def _stop_child(self) -> None:
         if self.child_pid is None:
@@ -278,7 +287,16 @@ def _release_pf_reference(runner: pf.PfctlRunner, token: str | None) -> None:
 def _assert_sentinel_state(runner: pf.PfctlRunner) -> None:
     states = runner.run("-s", "states", check=True).stdout
     if str(SENTINEL_TARGET_PORT) not in states and str(SENTINEL_PROXY_PORT) not in states:
-        raise LifecycleError("sentinel PF state disappeared")
+        info = runner.run("-s", "info", check=True).stdout
+        references = runner.run("-s", "References", check=True).stdout
+        reference_count = sum(
+            1 for line in references.splitlines() if line.strip() and "TOKEN" not in line.upper()
+        )
+        enabled = "Status: Enabled" in info
+        raise LifecycleError(
+            "sentinel PF state disappeared; "
+            f"pf_enabled={enabled}; reference_rows={reference_count}"
+        )
 
 
 def _rule_has_port(rules: str, port: int) -> bool:
@@ -414,8 +432,8 @@ def run_lifecycle() -> dict:
         _assert_anchor_active(runner)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("daemon restart changed the sentinel anchor")
-        sentinel.check("daemon-restart")
         _assert_sentinel_state(runner)
+        sentinel.check("daemon-restart")
 
         system.run((str(INSTALLED_PYTHON), str(INSTALLED_DAEMON), "--uninstall"))
         _wait_for_path(LAUNCHD_PLIST, present=False)

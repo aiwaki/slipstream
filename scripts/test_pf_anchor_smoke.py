@@ -27,6 +27,7 @@ class PfAnchorSmokeTests(unittest.TestCase):
         for command in (
             ("/sbin/pfctl", "-s", "info"),
             ("/sbin/pfctl", "-s", "states"),
+            ("/sbin/pfctl", "-s", "References"),
             ("pfctl", "-sn"),
             ("pfctl", "-sr"),
             ("pfctl", "-E"),

@@ -3839,6 +3839,12 @@ def pf_setup_if_ready(port, now=None):
 
 
 def _legacy_pf_rules_loaded(port):
+    # A killed daemon can leave the private child anchor populated until the
+    # next instance starts. Some macOS pfctl listings include those effective
+    # child rules in the root view; never mistake our current anchor for the
+    # pre-anchor legacy global ruleset and reload /etc/pf.conf over it.
+    if pf_has_rules(port):
+        return False
     nat = _run("pfctl", "-sn")
     rules = _run("pfctl", "-sr")
     if nat.returncode != 0 or rules.returncode != 0:

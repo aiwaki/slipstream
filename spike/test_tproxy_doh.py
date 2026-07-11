@@ -742,6 +742,35 @@ def test_legacy_pf_restore_ignores_unrelated_route_to_rule(monkeypatch):
     assert not tproxy._restore_legacy_pf_rules(1080)
 
 
+def test_legacy_pf_restore_never_reloads_over_live_private_anchor(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        outputs = {
+            ("pfctl", "-sn"): (
+                'rdr-anchor "com.apple/*" all\n'
+                "rdr pass proto tcp to any port = 443 -> 127.0.0.1 port 1080\n"
+            ),
+            ("pfctl", "-sr"): (
+                'anchor "com.apple/*" all\n'
+                "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 443\n"
+            ),
+            ("pfctl", "-a", tproxy.PF_ANCHOR, "-sn"): (
+                "rdr pass proto tcp to any port = 443 -> 127.0.0.1 port 1080\n"
+            ),
+            ("pfctl", "-a", tproxy.PF_ANCHOR, "-sr"): (
+                "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 443\n"
+            ),
+        }
+        return SimpleNamespace(returncode=0, stdout=outputs.get(args, ""), stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert not tproxy._restore_legacy_pf_rules(1080)
+    assert not any(args[:3] == ("pfctl", "-f", tproxy.PF_CONFIG_PATH) for args in calls)
+
+
 def test_cleanup_stale_never_uses_process_pattern_or_global_pf_disable(monkeypatch):
     calls = []
 
