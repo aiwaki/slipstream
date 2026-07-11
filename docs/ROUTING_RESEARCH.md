@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-11
+Updated: 2026-07-12
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-12 | Stale PF token after false daemon recovery | Fixed in this PR | The old StatusV2 reader could label a fresh V2 snapshot `off`, then recovery cleared the private anchor and released its PF token immediately after daemon boot. The daemon still held that token only in memory, so re-arm attempts stopped after a failed release and repeated `pf anchor vanished` every five seconds. When the token file is absent and PF is definitively disabled, clear only that stale memory reference and acquire a fresh private token. | Preserve the stale-token and enabled-PF fail-closed regression tests. |
 | 2026-07-11 | Partial local stream stall | Fixed in this PR | A local TLS route can return an initial payload above the former 8 KiB success threshold and then stop. On the affected network, `crystalidea.com` returned HTTP 200 with 16,366 of 21,726 bytes before a 25 s client timeout, while the same page completed through the owned Geph SOCKS listener in 1.36 s. The fault was a fake/desync strategy cached after its first response, not a reason to send the site to Geph. An orderly client close after an idle keep-alive is ambiguous and must not demote a route; only an abnormal client transport abort or failed downstream write after 15 s of silence is an exact-host strategy failure. The next retry uses a direct RFC 8484 query to Xbox DNS and tries its answer locally with plain TLS. A repeated low-content generic stall must receive the same one-shot local resolver attempt before any proof-gated geo-exit check. | Keep Xbox DNS on demand, exact-host, and memory-only; observe false-positive rates before tuning the idle threshold. |
 | 2026-07-11 | Sidecar-only diagnostics | Fixed in this PR | A root daemon can be removed while the independent user Geph LaunchAgent remains. The user job does not by itself prove active transparent routing, but the previous diagnostic snapshot hid the distinction. | Preserve the bounded `summary.geph_lifecycle` signal; do not infer PF without privileged evidence. |
 | 2026-07-11 | User Geph lifecycle teardown | Fixed in this PR | Removing the root daemon manually leaves the independent user LaunchAgent alive by design, but deleting the app bundle first gave users no supported way to remove the owned sidecar and credentials. | Keep explicit tray uninstall coverage and use it before moving the app bundle to Trash. |

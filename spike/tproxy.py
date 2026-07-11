@@ -3872,12 +3872,27 @@ def _pf_release_enable_token():
     return result
 
 
+def _pf_enabled_state():
+    """Return PF's enabled state, or None when it cannot be inspected."""
+    info = _run("pfctl", "-s", "info")
+    if info.returncode != 0:
+        return None
+    return "Status: Enabled" in info.stdout
+
+
 def _pf_acquire_enable_token():
     global _pf_enable_token
     persisted = _read_pf_token()
     if _pf_enable_token and persisted == _pf_enable_token:
         return True
-    if _pf_enable_token or persisted:
+    stale_memory_token = bool(_pf_enable_token and not persisted)
+    if stale_memory_token and _pf_enabled_state() is False:
+        # A previous owned recovery can release PF after this daemon has already
+        # cached its token. With PF definitively disabled and no durable token,
+        # the in-memory reference cannot still be valid; acquire a fresh one.
+        _pf_enable_token = None
+        _remove_pf_token()
+    elif _pf_enable_token or persisted:
         released = _pf_release_enable_token()
         if released is not None and released.returncode != 0:
             return False

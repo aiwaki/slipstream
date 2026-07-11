@@ -758,6 +758,62 @@ def test_pf_acquire_requires_releasable_token(monkeypatch):
     assert tproxy._pf_enable_token is None
 
 
+def test_pf_acquire_replaces_stale_memory_token_after_owned_recovery(monkeypatch):
+    calls = []
+    writes = []
+
+    def fake_run(*args):
+        calls.append(args)
+        if args == ("pfctl", "-s", "info"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "Status: Disabled\n",
+                "stderr": "",
+            })()
+        if args == ("pfctl", "-E"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "Token: 789\n",
+                "stderr": "",
+            })()
+        raise AssertionError(args)
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_read_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_write_pf_token", lambda token, path=None: writes.append(token))
+    monkeypatch.setattr(tproxy, "_pf_enable_token", "456")
+
+    assert tproxy._pf_acquire_enable_token()
+    assert tproxy._pf_enable_token == "789"
+    assert writes == ["789"]
+    assert calls == [("pfctl", "-s", "info"), ("pfctl", "-E")]
+
+
+def test_pf_acquire_keeps_memory_token_when_pf_is_still_enabled(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        if args == ("pfctl", "-s", "info"):
+            return type("Result", (), {
+                "returncode": 0,
+                "stdout": "Status: Enabled\n",
+                "stderr": "",
+            })()
+        if args == ("pfctl", "-X", "456"):
+            return type("Result", (), {"returncode": 1, "stdout": "", "stderr": "busy"})()
+        raise AssertionError(args)
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_read_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_pf_enable_token", "456")
+
+    assert not tproxy._pf_acquire_enable_token()
+    assert tproxy._pf_enable_token == "456"
+    assert calls == [("pfctl", "-s", "info"), ("pfctl", "-X", "456")]
+
+
 def test_legacy_pf_restore_is_explicit_and_preserves_config_source(monkeypatch):
     calls = []
 
