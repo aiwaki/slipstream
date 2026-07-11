@@ -71,6 +71,15 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("shasum -a 256 -c SHA256SUMS", workflow)
         self.assertNotIn("select(startswith(\"geph-vendor-\"))", workflow)
 
+    def test_release_workflow_keeps_manual_previews_off_the_stable_feed(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn('tag="v${v}-preview.${GITHUB_RUN_NUMBER}"', workflow)
+        self.assertIn('prerelease="true"', workflow)
+        self.assertIn('prerelease="false"', workflow)
+        self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
+        self.assertIn("Manual runs produce prereleases", workflow)
+
     def test_geph_vendor_workflow_proposes_a_pr(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
             encoding="utf-8"

@@ -92,8 +92,9 @@ change, and sleep/wake without manual buttons.
   release workflow; artifact manifest and broader provenance remain pending.
 - Set an explicit Tauri target and publish an artifact manifest plus SBOM.
 - Run full tests and a privileged PF-anchor sentinel test in release CI.
-- Separate preview and stable channels. Stable requires Developer ID, hardened
-  runtime, notarization, and stapling.
+- Separate preview and stable channels. Manual builds now create non-updating
+  GitHub prereleases; stable requires Developer ID, hardened runtime,
+  notarization, and stapling.
 - Define production custody and rotation for policy-signing keys. Remote policy
   stays off by default until that workflow and rollback are reviewed.
 
