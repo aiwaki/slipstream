@@ -26,6 +26,10 @@ The command accepts both legacy StatusV1 (`ts`) and privacy-bounded StatusV2
 the tray recovery path relies on this check before touching Slipstream's private
 PF anchor.
 
+After install or upgrade, the tray gives the daemon a short startup grace before
+watchdog recovery. Repeated missing snapshots after that grace still trigger the
+normal daemon repair path.
+
 `strategy_scores` in daemon status and copied diagnostics summary is
 aggregate-only: it reports host counts and ok/fail totals by service group and
 strategy, but does not expose hostnames.

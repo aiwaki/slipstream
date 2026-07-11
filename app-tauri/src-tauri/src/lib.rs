@@ -59,6 +59,7 @@ const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
 const DAEMON_WATCHDOG_COOLDOWN_SECS: u64 = 5 * 60;
+const DAEMON_WATCHDOG_STARTUP_GRACE_SECS: u64 = 30;
 const DIAGNOSTIC_LOG_TAIL_LINES: usize = 80;
 const STATUS_SCHEMA_V2: u64 = 2;
 
@@ -867,8 +868,17 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
     valid_bundled_daemon(&bin) && !daemon_needs_install(&bin)
 }
 
-fn should_recover_daemon(missing_status_polls: u8, cooldown_ready: bool, installed: bool) -> bool {
-    installed && cooldown_ready && missing_status_polls >= DAEMON_WATCHDOG_MISSES
+fn should_recover_daemon(
+    missing_status_polls: u8,
+    has_seen_status: bool,
+    startup_grace_elapsed: bool,
+    cooldown_ready: bool,
+    installed: bool,
+) -> bool {
+    installed
+        && cooldown_ready
+        && missing_status_polls >= DAEMON_WATCHDOG_MISSES
+        && (has_seen_status || startup_grace_elapsed)
 }
 
 fn daemon_recovery_shell() -> String {
@@ -2602,6 +2612,8 @@ pub fn run() {
                 let mut next_tg_offer = Instant::now();
                 let mut seen_tg_offer_reset = tg_offer_reset_watch.load(Ordering::Relaxed);
                 let mut missing_status_polls: u8 = 0;
+                let mut has_seen_daemon_status = false;
+                let watchdog_started = Instant::now();
                 let mut next_daemon_recovery = Instant::now();
                 loop {
                     let state = refresh(&s, &d);
@@ -2612,6 +2624,7 @@ pub fn run() {
                     let status = read_status();
                     let now = Instant::now();
                     if status.is_some() {
+                        has_seen_daemon_status = true;
                         missing_status_polls = 0;
                     } else {
                         missing_status_polls = missing_status_polls.saturating_add(1);
@@ -2623,6 +2636,9 @@ pub fn run() {
                     }
                     if should_recover_daemon(
                         missing_status_polls,
+                        has_seen_daemon_status,
+                        now.duration_since(watchdog_started)
+                            >= Duration::from_secs(DAEMON_WATCHDOG_STARTUP_GRACE_SECS),
                         now >= next_daemon_recovery,
                         daemon_installed_for_watchdog(&app_handle),
                     ) {
@@ -3330,15 +3346,49 @@ mod tests {
     }
 
     #[test]
-    fn watchdog_waits_for_threshold_cooldown_and_installed_daemon() {
+    fn watchdog_waits_for_initial_status_or_startup_grace() {
         assert!(!should_recover_daemon(
             DAEMON_WATCHDOG_MISSES - 1,
             true,
+            false,
+            true,
             true
         ));
-        assert!(!should_recover_daemon(DAEMON_WATCHDOG_MISSES, false, true));
-        assert!(!should_recover_daemon(DAEMON_WATCHDOG_MISSES, true, false));
-        assert!(should_recover_daemon(DAEMON_WATCHDOG_MISSES, true, true));
+        assert!(!should_recover_daemon(
+            DAEMON_WATCHDOG_MISSES,
+            false,
+            false,
+            true,
+            true
+        ));
+        assert!(!should_recover_daemon(
+            DAEMON_WATCHDOG_MISSES,
+            true,
+            false,
+            false,
+            true
+        ));
+        assert!(!should_recover_daemon(
+            DAEMON_WATCHDOG_MISSES,
+            true,
+            false,
+            true,
+            false
+        ));
+        assert!(should_recover_daemon(
+            DAEMON_WATCHDOG_MISSES,
+            true,
+            false,
+            true,
+            true
+        ));
+        assert!(should_recover_daemon(
+            DAEMON_WATCHDOG_MISSES,
+            false,
+            true,
+            true,
+            true
+        ));
     }
 
     #[test]
