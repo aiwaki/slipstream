@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional version override; must match VERSION, e.g. 0.1.4"
+        description: "Optional version override; must match VERSION. Manual runs produce prereleases."
         required: false
   push:
     tags: ["v*"]
@@ -41,17 +41,24 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             v="${GITHUB_REF_NAME#v}"; tag="${GITHUB_REF_NAME}"
             [ "$v" = "$repo_v" ] || { echo "tag $tag does not match VERSION ($repo_v)"; exit 1; }
+            channel="stable"
+            prerelease="false"
           else
             input_v="${{ github.event.inputs.version }}"
             if [ -n "$input_v" ] && [ "$input_v" != "$repo_v" ]; then
               echo "workflow version $input_v does not match VERSION ($repo_v)"
               exit 1
             fi
-            v="$repo_v"; tag="v${v}"
+            v="$repo_v"
+            tag="v${v}-preview.${GITHUB_RUN_NUMBER}"
+            channel="preview"
+            prerelease="true"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Releasing $v ($tag)"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Releasing $v ($tag, $channel)"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -194,11 +201,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: "Slipstream ${{ steps.ver.outputs.version }}"
+          name: "Slipstream ${{ steps.ver.outputs.version }} (${{ steps.ver.outputs.channel }})"
+          prerelease: ${{ steps.ver.outputs.prerelease }}
           body: |
-            Slipstream ${{ steps.ver.outputs.version }} (macOS, Apple Silicon).
+            Slipstream ${{ steps.ver.outputs.version }} (${{ steps.ver.outputs.channel }}, macOS, Apple Silicon).
             Unsigned by Apple — on first download, right-click the app > Open.
-            Existing installs auto-update via the built-in updater.
+            Preview releases are manual-download builds and do not replace the stable updater feed.
           files: |
             dist-release/Slipstream-macos-arm64.zip
             dist-release/Slipstream.app.tar.gz

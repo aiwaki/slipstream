@@ -23,8 +23,12 @@ def utc_now() -> str:
 def validate_release_inputs(version: str, tag: str, repository: str, signature: str) -> None:
     if not VERSION_RE.match(version):
         raise ValueError(f"invalid version: {version!r}")
-    if tag != f"v{version}":
-        raise ValueError(f"tag {tag!r} must be v{version}")
+    stable_tag = f"v{version}"
+    preview_tag = re.compile(rf"^{re.escape(stable_tag)}-preview\.[1-9][0-9]*$")
+    if tag != stable_tag and not preview_tag.match(tag):
+        raise ValueError(
+            f"tag {tag!r} must be {stable_tag} or {stable_tag}-preview.<run>"
+        )
     if not REPOSITORY_RE.match(repository):
         raise ValueError(f"invalid repository: {repository!r}")
     if not signature.strip():

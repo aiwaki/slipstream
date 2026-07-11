@@ -37,6 +37,31 @@ class MakeAppcastTests(unittest.TestCase):
                 pub_date="2026-07-08T12:00:00Z",
             )
 
+    def test_accepts_controlled_preview_tag(self) -> None:
+        appcast = make_appcast.build_appcast(
+            version="0.1.5",
+            tag="v0.1.5-preview.42",
+            repository="aiwaki/slipstream",
+            signature="sig",
+            pub_date="2026-07-08T12:00:00Z",
+        )
+
+        self.assertEqual(
+            appcast["platforms"]["darwin-aarch64"]["url"],
+            "https://github.com/aiwaki/slipstream/releases/download/"
+            "v0.1.5-preview.42/Slipstream.app.tar.gz",
+        )
+
+    def test_rejects_uncontrolled_preview_tag(self) -> None:
+        with self.assertRaisesRegex(ValueError, "preview.<run>"):
+            make_appcast.build_appcast(
+                version="0.1.5",
+                tag="v0.1.5-preview.local",
+                repository="aiwaki/slipstream",
+                signature="sig",
+                pub_date="2026-07-08T12:00:00Z",
+            )
+
     def test_rejects_empty_signature(self) -> None:
         with self.assertRaisesRegex(ValueError, "empty updater signature"):
             make_appcast.build_appcast(
