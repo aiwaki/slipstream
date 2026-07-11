@@ -178,7 +178,8 @@ jobs:
           rm -rf app-tauri/src-tauri/slipstreamd
           cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
           test -x app-tauri/src-tauri/slipstreamd/slipstreamd
-          /usr/bin/lipo -verify_arch arm64 app-tauri/src-tauri/slipstreamd/slipstreamd
+          /usr/bin/lipo app-tauri/src-tauri/slipstreamd/slipstreamd \
+            -verify_arch arm64
 
       - name: Fetch the recorded Geph build
         env:
@@ -193,8 +194,9 @@ jobs:
           cp /tmp/geph/geph5-client \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-          /usr/bin/lipo -verify_arch arm64 \
-            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          /usr/bin/lipo \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin \
+            -verify_arch arm64
 
       - name: Build the packaged app
         working-directory: app-tauri
@@ -210,10 +212,10 @@ jobs:
           test -d "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
             = "$(tr -d '[:space:]' < VERSION)"
-          /usr/bin/lipo -verify_arch arm64 "$app/Contents/MacOS/slipstream"
-          /usr/bin/lipo -verify_arch arm64 \
-            "$app/Contents/Resources/slipstreamd/slipstreamd"
-          /usr/bin/lipo -verify_arch arm64 "$app/Contents/MacOS/geph5-client"
+          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
+          /usr/bin/lipo "$app/Contents/Resources/slipstreamd/slipstreamd" \
+            -verify_arch arm64
+          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
 
       - name: Packaged app lifecycle sentinel smoke
