@@ -3659,6 +3659,22 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     }
 
 
+def status_snapshot_updated_at(status):
+    """Return the write timestamp from either supported status schema."""
+    if not isinstance(status, dict):
+        return 0.0
+    value = status.get("ts")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    daemon = status.get("daemon")
+    if not isinstance(daemon, dict):
+        return 0.0
+    value = daemon.get("updated_at")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
+
+
 def write_status(state, iface, voice_iface):
     try:
         now = time.time()
@@ -6267,7 +6283,7 @@ def main():
                 line = f.read().strip()
             # treat a stale file (>15s) as off — the daemon writes every 5s
             st = json.loads(line)
-            if time.time() - st.get("ts", 0) > 15:
+            if time.time() - status_snapshot_updated_at(st) > 15:
                 line = '{"state": "off"}'
             print(line)
         except Exception:

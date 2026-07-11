@@ -21,6 +21,11 @@ Daemon status:
 /usr/local/slipstream/slipstreamd --status
 ```
 
+The command accepts both legacy StatusV1 (`ts`) and privacy-bounded StatusV2
+(`daemon.updated_at`). A fresh V2 snapshot must not be reported as `off`:
+the tray recovery path relies on this check before touching Slipstream's private
+PF anchor.
+
 `strategy_scores` in daemon status and copied diagnostics summary is
 aggregate-only: it reports host counts and ok/fail totals by service group and
 strategy, but does not expose hostnames.
