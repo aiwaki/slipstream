@@ -87,6 +87,14 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('--channel "${{ steps.ver.outputs.channel }}"', workflow)
         self.assertIn("Preview releases omit the remote policy channel.", workflow)
 
+    def test_release_workflow_qualifies_the_built_app_before_publish(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Qualify the release app lifecycle", workflow)
+        self.assertIn('SLIPSTREAM_DISPOSABLE_CI: "1"', workflow)
+        self.assertIn("scripts/pf_installed_lifecycle_smoke.py", workflow)
+        self.assertIn('--app-bundle "$app"', workflow)
+
     def test_geph_vendor_workflow_proposes_a_pr(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
             encoding="utf-8"
