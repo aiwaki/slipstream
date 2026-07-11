@@ -10,12 +10,11 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 
@@ -23,7 +22,8 @@ use serde_json::{json, Value};
 use tauri::{
     image::Image,
     menu::{
-        CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder,
+        CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, MenuItemKind,
+        PredefinedMenuItem, Submenu, SubmenuBuilder,
     },
     tray::TrayIconBuilder,
     AppHandle, Manager,
@@ -38,10 +38,15 @@ const GEPH_SOCKS_PORT: u16 = 9954;
 // geph's JSON-RPC control listener — we query it for the LIVE exit list.
 const GEPH_CONTROL_PORT: u16 = 9955;
 const GEPH_OWNERSHIP_FILE: &str = "geph-owned.json";
+const GEPH_LAUNCHD_LABEL: &str = "dev.slipstream.geph";
+const GEPH_LAUNCH_AGENT_PLIST: &str = "dev.slipstream.geph.plist";
+const GEPH_RUNTIME_DIR: &str = "runtime";
+const GEPH_RUNTIME_BIN: &str = "geph5-client";
+const GEPH_LAUNCHER_FILE: &str = "geph-launcher";
 
-// geph5-client is spawned DETACHED so it survives a tray restart. Ownership is
-// persisted as a private PID/executable/config record; a listener alone is never
-// sufficient proof that Slipstream may adopt or terminate a process.
+// geph5-client is owned by a per-user LaunchAgent. A private launcher writes the
+// current PID/executable/config record immediately before exec; a listener alone
+// is never sufficient proof that Slipstream may adopt or terminate a process.
 
 const STATUS_PATH: &str = "/var/run/slipstream.status";
 const LOG_PATH: &str = "/var/log/slipstream.log";
@@ -1282,7 +1287,7 @@ fn geph_config_unset(app: &AppHandle, key: &str) {
     };
     if cfg.remove(key).is_some() {
         if let Ok(s) = serde_json::to_string_pretty(&Value::Object(cfg)) {
-            let _ = fs::write(&path, s);
+            let _ = write_private_atomic(&path, s.as_bytes());
         }
     }
 }
@@ -1460,27 +1465,30 @@ fn geph_net_status_catalog() -> Option<Vec<(String, String, String)>> {
     )
 }
 
-/// Exit catalog for the tray menu: the LIVE country list if geph's control RPC
-/// answers now (also cached to geph-exits.json), else the last cached list, else
-/// the static EXITS_FALLBACK_CC. Never hardcodes the live catalog.
-fn exit_catalog(cache_path: Option<std::path::PathBuf>) -> Vec<(String, String, String)> {
-    if let Some(live) = geph_net_status_catalog() {
-        if let Some(p) = &cache_path {
-            if let Ok(j) = serde_json::to_string(&live) {
-                let _ = fs::write(p, j);
-            }
-        }
-        return live;
+type ExitCatalog = Vec<(String, String, String)>;
+
+struct ExitMenuItems {
+    choices: Vec<(String, CheckMenuItem<tauri::Wry>)>,
+    dynamic: Vec<MenuItemKind<tauri::Wry>>,
+}
+
+fn cached_exit_catalog(cache_path: Option<&Path>) -> Option<ExitCatalog> {
+    let path = cache_path?;
+    let raw = fs::read_to_string(path).ok()?;
+    let catalog = serde_json::from_str::<ExitCatalog>(&raw).ok()?;
+    (!catalog.is_empty()).then_some(catalog)
+}
+
+fn cache_exit_catalog(cache_path: Option<&Path>, catalog: &ExitCatalog) {
+    let Some(path) = cache_path else {
+        return;
+    };
+    if let Ok(json) = serde_json::to_string(catalog) {
+        let _ = write_private_atomic(path, json.as_bytes());
     }
-    if let Some(p) = &cache_path {
-        if let Ok(s) = fs::read_to_string(p) {
-            if let Ok(c) = serde_json::from_str::<Vec<(String, String, String)>>(&s) {
-                if !c.is_empty() {
-                    return c;
-                }
-            }
-        }
-    }
+}
+
+fn fallback_exit_catalog() -> ExitCatalog {
     EXITS_FALLBACK_CC
         .iter()
         .map(|cc| {
@@ -1493,23 +1501,107 @@ fn exit_catalog(cache_path: Option<std::path::PathBuf>) -> Vec<(String, String, 
         .collect()
 }
 
-/// Background one-shot: once geph's control RPC comes up after launch, write the
-/// live country list to geph-exits.json so the NEXT tray build shows the real
-/// catalog (the menu is built once at startup, before geph has connected).
-fn refresh_exit_cache(cache_path: Option<std::path::PathBuf>) {
+/// Exit catalog for the tray menu. A known-good cached city list wins over a
+/// potentially slow control RPC, so a tray relaunch stays responsive. Fresh
+/// installs briefly use the country fallback until refresh_exit_menu receives
+/// the live city catalog and replaces it in place.
+fn exit_catalog(cache_path: Option<std::path::PathBuf>) -> Vec<(String, String, String)> {
+    if let Some(cached) = cached_exit_catalog(cache_path.as_deref()) {
+        return cached;
+    }
+    if let Some(live) = geph_net_status_catalog() {
+        cache_exit_catalog(cache_path.as_deref(), &live);
+        return live;
+    }
+    fallback_exit_catalog()
+}
+
+fn refresh_exit_menu(
+    app: AppHandle<tauri::Wry>,
+    cache_path: Option<PathBuf>,
+    geph_menu: Submenu<tauri::Wry>,
+    exit_items: Arc<Mutex<ExitMenuItems>>,
+) {
     std::thread::spawn(move || {
         for _ in 0..20 {
             std::thread::sleep(Duration::from_secs(2));
             if let Some(live) = geph_net_status_catalog() {
-                if let Some(p) = &cache_path {
-                    if let Ok(j) = serde_json::to_string(&live) {
-                        let _ = fs::write(p, j);
+                cache_exit_catalog(cache_path.as_deref(), &live);
+                let selected = geph_field(&app, "exit").unwrap_or_else(|| "auto".into());
+                let ui_app = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if let Err(error) =
+                        replace_exit_menu_items(&ui_app, &geph_menu, &exit_items, &selected, &live)
+                    {
+                        eprintln!("geph exit menu refresh unavailable: {error}");
                     }
-                }
+                });
                 return;
             }
         }
     });
+}
+
+fn replace_exit_menu_items(
+    app: &AppHandle<tauri::Wry>,
+    geph_menu: &Submenu<tauri::Wry>,
+    exit_items: &Arc<Mutex<ExitMenuItems>>,
+    selected: &str,
+    catalog: &ExitCatalog,
+) -> tauri::Result<()> {
+    let mut items = exit_items.lock().expect("exit menu lock poisoned");
+    for item in items.dynamic.drain(..) {
+        geph_menu.remove(&item)?;
+    }
+    items.choices.retain(|(value, _)| value == "auto");
+
+    let mut categories: Vec<String> = catalog
+        .iter()
+        .map(|(_, _, category)| category.clone())
+        .collect();
+    categories.sort();
+    categories.dedup();
+    categories.sort_by_key(|category| match category.as_str() {
+        "core" => (0u8, String::new()),
+        "streaming" => (1u8, String::new()),
+        other => (2u8, other.to_string()),
+    });
+
+    for category in categories {
+        let separator = PredefinedMenuItem::separator(app)?;
+        geph_menu.append(&separator)?;
+        items.dynamic.push(MenuItemKind::Predefined(separator));
+
+        let title = match category.as_str() {
+            "core" => tr("Core"),
+            "streaming" => tr("Streaming"),
+            other => {
+                let mut chars = other.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => other.to_string(),
+                }
+            }
+        };
+        let header = MenuItemBuilder::with_id(format!("hdr_{category}"), title)
+            .enabled(false)
+            .build(app)?;
+        geph_menu.append(&header)?;
+        items.dynamic.push(MenuItemKind::MenuItem(header));
+
+        for (value, label, entry_category) in catalog {
+            if entry_category != &category {
+                continue;
+            }
+            let item = CheckMenuItemBuilder::with_id(format!("exit:{value}"), label)
+                .checked(value == selected)
+                .build(app)?;
+            geph_menu.append(&item)?;
+            items.choices.push((value.clone(), item.clone()));
+            items.dynamic.push(MenuItemKind::Check(item));
+        }
+    }
+    Ok(())
 }
 
 // geph5-client's broker config — REQUIRED. Verified: WITHOUT a `broker` field,
@@ -1583,6 +1675,35 @@ fn geph_bin_path() -> Option<std::path::PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join("geph5-client"))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GephLaunchAgentPaths {
+    config_dir: PathBuf,
+    runtime_dir: PathBuf,
+    executable: PathBuf,
+    launcher: PathBuf,
+    config: PathBuf,
+    cache: PathBuf,
+    ownership: PathBuf,
+    plist: PathBuf,
+}
+
+fn geph_launch_agent_paths(config_dir: &Path, home: &Path) -> GephLaunchAgentPaths {
+    let runtime_dir = config_dir.join(GEPH_RUNTIME_DIR);
+    GephLaunchAgentPaths {
+        config_dir: config_dir.to_path_buf(),
+        executable: runtime_dir.join(GEPH_RUNTIME_BIN),
+        launcher: runtime_dir.join(GEPH_LAUNCHER_FILE),
+        runtime_dir,
+        config: config_dir.join("geph-active.yaml"),
+        cache: config_dir.join("geph-cache.db"),
+        ownership: config_dir.join(GEPH_OWNERSHIP_FILE),
+        plist: home
+            .join("Library")
+            .join("LaunchAgents")
+            .join(GEPH_LAUNCH_AGENT_PLIST),
+    }
+}
+
 fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     let mut permissions = fs::metadata(path)?.permissions();
     permissions.set_mode(mode);
@@ -1592,6 +1713,10 @@ fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
 fn harden_geph_dir(dir: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
     set_mode(dir, 0o700)?;
+    let runtime_dir = dir.join(GEPH_RUNTIME_DIR);
+    if runtime_dir.exists() {
+        set_mode(&runtime_dir, 0o700)?;
+    }
     for name in [
         "geph-active.yaml",
         "geph-cache.db",
@@ -1606,14 +1731,20 @@ fn harden_geph_dir(dir: &Path) -> std::io::Result<()> {
             set_mode(&path, 0o600)?;
         }
     }
+    for name in [GEPH_RUNTIME_BIN, GEPH_LAUNCHER_FILE] {
+        let path = runtime_dir.join(name);
+        if path.exists() {
+            set_mode(&path, 0o700)?;
+        }
+    }
     Ok(())
 }
 
-fn write_private_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
+fn write_atomic_mode(path: &Path, content: &[u8], mode: u32) -> std::io::Result<()> {
     let parent = path
         .parent()
-        .ok_or_else(|| std::io::Error::other("private file has no parent"))?;
-    harden_geph_dir(parent)?;
+        .ok_or_else(|| std::io::Error::other("atomic file has no parent"))?;
+    fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(
         ".{}.tmp-{}",
         path.file_name()
@@ -1626,37 +1757,205 @@ fn write_private_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
             .create(true)
             .truncate(true)
             .write(true)
-            .mode(0o600)
+            .mode(mode)
             .open(&tmp)?;
         file.write_all(content)?;
         file.sync_all()?;
-        set_mode(&tmp, 0o600)?;
+        set_mode(&tmp, mode)?;
         fs::rename(&tmp, path)?;
-        set_mode(path, 0o600)
+        set_mode(path, mode)
     })();
     let _ = fs::remove_file(&tmp);
     result
+}
+
+fn write_private_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("private file has no parent"))?;
+    harden_geph_dir(parent)?;
+    write_atomic_mode(path, content, 0o600)
+}
+
+fn write_private_if_changed(path: &Path, content: &[u8]) -> std::io::Result<bool> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("private file has no parent"))?;
+    harden_geph_dir(parent)?;
+    write_atomic_if_changed(path, content, 0o600)
+}
+
+fn write_atomic_if_changed(path: &Path, content: &[u8], mode: u32) -> std::io::Result<bool> {
+    if fs::read(path).ok().as_deref() == Some(content) {
+        set_mode(path, mode)?;
+        return Ok(false);
+    }
+    write_atomic_mode(path, content, mode)?;
+    Ok(true)
+}
+
+fn files_equal(left: &Path, right: &Path) -> bool {
+    let Ok(left_meta) = fs::metadata(left) else {
+        return false;
+    };
+    let Ok(right_meta) = fs::metadata(right) else {
+        return false;
+    };
+    if left_meta.len() != right_meta.len() {
+        return false;
+    }
+    let (Ok(mut left), Ok(mut right)) = (fs::File::open(left), fs::File::open(right)) else {
+        return false;
+    };
+    let mut left_buf = [0u8; 64 * 1024];
+    let mut right_buf = [0u8; 64 * 1024];
+    loop {
+        let Ok(left_read) = left.read(&mut left_buf) else {
+            return false;
+        };
+        let Ok(right_read) = right.read(&mut right_buf) else {
+            return false;
+        };
+        if left_read != right_read || left_buf[..left_read] != right_buf[..right_read] {
+            return false;
+        }
+        if left_read == 0 {
+            return true;
+        }
+    }
+}
+
+fn sync_private_executable(source: &Path, target: &Path) -> std::io::Result<bool> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| std::io::Error::other("runtime executable has no parent"))?;
+    fs::create_dir_all(parent)?;
+    set_mode(parent, 0o700)?;
+    if files_equal(source, target) {
+        set_mode(target, 0o700)?;
+        return Ok(false);
+    }
+    let tmp = parent.join(format!(".{GEPH_RUNTIME_BIN}.tmp-{}", std::process::id()));
+    let result = (|| {
+        fs::copy(source, &tmp)?;
+        set_mode(&tmp, 0o700)?;
+        fs::rename(&tmp, target)?;
+        set_mode(target, 0o700)
+    })();
+    let _ = fs::remove_file(&tmp);
+    result.map(|_| true)
 }
 
 fn geph_ownership_path(dir: &Path) -> PathBuf {
     dir.join(GEPH_OWNERSHIP_FILE)
 }
 
-fn write_geph_ownership(dir: &Path, pid: u32, executable: &Path, config: &Path) -> bool {
-    let value = json!({
-        "pid": pid,
-        "executable": executable.to_string_lossy(),
-        "config": config.to_string_lossy(),
-    });
-    serde_json::to_vec(&value)
-        .ok()
-        .and_then(|content| write_private_atomic(&geph_ownership_path(dir), &content).ok())
-        .is_some()
-}
-
 fn read_geph_ownership(dir: &Path) -> Option<Value> {
     let raw = fs::read(geph_ownership_path(dir)).ok()?;
     serde_json::from_slice(&raw).ok()
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
+    let executable = paths.executable.to_string_lossy().into_owned();
+    let config = paths.config.to_string_lossy().into_owned();
+    let ownership = paths.ownership.to_string_lossy().into_owned();
+    let executable_json = serde_json::to_string(&executable).unwrap_or_else(|_| "\"\"".into());
+    let config_json = serde_json::to_string(&config).unwrap_or_else(|_| "\"\"".into());
+    let label_json = serde_json::to_string(GEPH_LAUNCHD_LABEL).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "#!/bin/sh\n\
+         set -eu\n\
+         umask 077\n\
+         executable={}\n\
+         config={}\n\
+         ownership={}\n\
+         /bin/rm -f \"$ownership\"\n\
+         while /usr/bin/nc -z -w 1 127.0.0.1 {GEPH_SOCKS_PORT} >/dev/null 2>&1; do\n\
+         \x20 /bin/sleep 5\n\
+         done\n\
+         tmp=\"${{ownership}}.tmp.$$\"\n\
+         /usr/bin/printf '{{\"pid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" {} {} {} > \"$tmp\"\n\
+         /bin/chmod 600 \"$tmp\"\n\
+         /bin/mv -f \"$tmp\" \"$ownership\"\n\
+         exec \"$executable\" --config \"$config\"\n",
+        shell_quote(&executable),
+        shell_quote(&config),
+        shell_quote(&ownership),
+        shell_quote(&executable_json),
+        shell_quote(&config_json),
+        shell_quote(&label_json),
+    )
+}
+
+fn geph_launch_agent_plist(paths: &GephLaunchAgentPaths) -> String {
+    let launcher = xml_escape(&paths.launcher.to_string_lossy());
+    let workdir = xml_escape(&paths.config_dir.to_string_lossy());
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \\\n+         \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <plist version=\"1.0\"><dict>\n\
+         <key>Label</key><string>{GEPH_LAUNCHD_LABEL}</string>\n\
+         <key>ProgramArguments</key><array><string>{launcher}</string></array>\n\
+         <key>RunAtLoad</key><true/>\n\
+         <key>KeepAlive</key><true/>\n\
+         <key>ThrottleInterval</key><integer>10</integer>\n\
+         <key>ProcessType</key><string>Background</string>\n\
+         <key>WorkingDirectory</key><string>{workdir}</string>\n\
+         <key>StandardOutPath</key><string>/dev/null</string>\n\
+         <key>StandardErrorPath</key><string>/dev/null</string>\n\
+         </dict></plist>\n"
+    )
+}
+
+fn geph_launch_domain(uid: &str) -> String {
+    format!("gui/{uid}")
+}
+
+fn geph_launch_target(uid: &str) -> String {
+    format!("{}/{GEPH_LAUNCHD_LABEL}", geph_launch_domain(uid))
+}
+
+fn geph_launch_agent_loaded(uid: &str) -> bool {
+    Command::new("/bin/launchctl")
+        .args(["print", &geph_launch_target(uid)])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn geph_launch_agent_bootout(uid: &str) -> bool {
+    Command::new("/bin/launchctl")
+        .args(["bootout", &geph_launch_target(uid)])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn geph_launch_agent_bootstrap(uid: &str, plist: &Path) -> bool {
+    Command::new("/bin/launchctl")
+        .arg("bootstrap")
+        .arg(geph_launch_domain(uid))
+        .arg(plist)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn geph_launch_agent_kickstart(uid: &str) -> bool {
+    Command::new("/bin/launchctl")
+        .args(["kickstart", "-k", &geph_launch_target(uid)])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn geph_process_command(pid: u32) -> Option<String> {
@@ -1695,43 +1994,6 @@ fn geph_listener_pid() -> Option<u32> {
             .parse()
             .ok()
     })?
-}
-
-fn owned_geph_pid(dir: &Path) -> Option<u32> {
-    let state = read_geph_ownership(dir)?;
-    let pid = state.get("pid")?.as_u64()?.try_into().ok()?;
-    let executable = PathBuf::from(state.get("executable")?.as_str()?);
-    let config = PathBuf::from(state.get("config")?.as_str()?);
-    let command = geph_process_command(pid)?;
-    (geph_listener_pid() == Some(pid) && command_matches_geph(&command, &executable, &config))
-        .then_some(pid)
-}
-
-fn adopt_legacy_owned_geph(dir: &Path, executable: &Path, config: &Path) -> bool {
-    let Some(pid) = geph_listener_pid() else {
-        return false;
-    };
-    let Some(command) = geph_process_command(pid) else {
-        return false;
-    };
-    command_matches_geph(&command, executable, config)
-        && write_geph_ownership(dir, pid, executable, config)
-}
-
-/// Cheap liveness only. Ownership is checked separately before adoption.
-fn geph_socks_alive() -> bool {
-    std::net::TcpStream::connect_timeout(
-        &(std::net::Ipv4Addr::LOCALHOST, GEPH_SOCKS_PORT).into(),
-        Duration::from_secs(1),
-    )
-    .is_ok()
-}
-
-fn geph_owned_socks_alive(dir: &Path, executable: &Path, config: &Path) -> bool {
-    if !geph_socks_alive() {
-        return false;
-    }
-    owned_geph_pid(dir).is_some() || adopt_legacy_owned_geph(dir, executable, config)
 }
 
 /// Stop only a process whose PID, executable, config, and listener all match the
@@ -1801,96 +2063,88 @@ fn geph_kill_owned(dir: &Path) {
     let _ = fs::remove_file(geph_ownership_path(dir));
 }
 
-/// Stop a running geph5-client (e.g. before respawning with a new config).
-fn geph_stop(app: &AppHandle) {
-    if let Ok(dir) = app.path().app_config_dir() {
-        geph_kill_owned(&dir);
-    }
+fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPaths, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("geph config directory unavailable: {error}"))?;
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("home directory unavailable: {error}"))?;
+    Ok(geph_launch_agent_paths(&config_dir, &home))
 }
 
-/// Supervisor: keep the bundled geph5-client running whenever Geph is enabled and
-/// a secret is set. geph is spawned DETACHED (its own process group) so it SURVIVES
-/// a tray restart/reinstall — the tunnel the user's apps ride does NOT drop just
-/// because the menu-bar app was swapped. On each pass we ADOPT an already-running
-/// geph whose active config still matches, and only (re)spawn when geph is actually
-/// down or the config (exit/secret) changed. This ends the "reinstall -> restart
-/// your app" pain. geph5-client also retries/reconnects internally, so we never
-/// kill a live one mid-recovery (that churned broker sessions).
-async fn geph_supervisor(app: AppHandle) {
-    loop {
-        if !geph_enabled(&app) {
-            geph_stop(&app);
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            continue;
-        }
-        let Some(secret) = geph_secret(&app) else {
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            continue;
-        };
-        let exit = geph_field(&app, "exit").unwrap_or_else(|| "auto".into());
-        let Ok(dir) = app.path().app_config_dir() else {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
-        };
-        if let Err(error) = harden_geph_dir(&dir) {
-            eprintln!("geph config permissions unavailable: {error}");
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            continue;
-        }
-        let cfg_path = dir.join("geph-active.yaml");
-        let cache_path = dir.join("geph-cache.db").to_string_lossy().into_owned();
-        let desired = geph_config_yaml(&secret, &exit, &cache_path);
-
-        let Some(bin) = geph_bin_path() else {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            continue;
-        };
-
-        // Adopt only a process proven by PID + executable + config + listener.
-        if geph_owned_socks_alive(&dir, &bin, &cfg_path) {
-            tokio::time::sleep(Duration::from_secs(6)).await;
-            continue;
-        }
-
-        // A listener without ownership proof belongs to another process. Never
-        // adopt it, never kill it, and do not race it for the port.
-        if geph_socks_alive() {
-            eprintln!("geph port {GEPH_SOCKS_PORT} is owned by another process");
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            continue;
-        }
-
-        // geph is down -> spawn a fresh, DETACHED geph with the current config.
-        let _ = fs::remove_file(geph_ownership_path(&dir));
-        if let Err(error) = write_private_atomic(&cfg_path, desired.as_bytes()) {
-            eprintln!("geph config write failed: {error}");
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            continue;
-        }
-        let spawned = Command::new(&bin)
-            .args(["--config", &cfg_path.to_string_lossy()])
-            .process_group(0) // detach: not in the tray's group -> survives tray exit
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        match spawned {
-            Ok(child) => {
-                if !write_geph_ownership(&dir, child.id(), &bin, &cfg_path) {
-                    eprintln!("geph ownership record unavailable; stopping untracked process");
-                    let _ = Command::new("/bin/kill")
-                        .args(["-TERM", &child.id().to_string()])
-                        .status();
-                }
-            }
-            Err(error) => {
-                eprintln!("geph spawn failed: {error}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        }
-        // Let it bind + start tunnelling before the next health check.
-        tokio::time::sleep(Duration::from_secs(8)).await;
+fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
+    let paths = geph_launch_agent_paths_for_app(app)?;
+    let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
+    if geph_launch_agent_loaded(&uid) && !geph_launch_agent_bootout(&uid) {
+        return Err("geph LaunchAgent bootout unavailable".into());
     }
+    // One-time migration can leave the old detached process outside launchd.
+    // Stop it only through the existing PID/executable/config/listener proof.
+    geph_kill_owned(&paths.config_dir);
+    let _ = fs::remove_file(&paths.ownership);
+    let _ = fs::remove_file(&paths.plist);
+    Ok(())
+}
+
+/// Install or refresh the user LaunchAgent that owns Geph independently of the
+/// tray process. Returns false when Geph is intentionally disabled or no account
+/// secret has been configured yet.
+fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool, String> {
+    if !geph_enabled(app) {
+        geph_launch_agent_disable(app)?;
+        return Ok(false);
+    }
+    let Some(secret) = geph_secret(app) else {
+        // Keep an already-configured job alive if Keychain is temporarily locked.
+        return Ok(false);
+    };
+    let paths = geph_launch_agent_paths_for_app(app)?;
+    harden_geph_dir(&paths.config_dir)
+        .map_err(|error| format!("geph config permissions unavailable: {error}"))?;
+    fs::create_dir_all(&paths.runtime_dir)
+        .map_err(|error| format!("geph runtime directory unavailable: {error}"))?;
+    set_mode(&paths.runtime_dir, 0o700)
+        .map_err(|error| format!("geph runtime permissions unavailable: {error}"))?;
+
+    let source = geph_bin_path().ok_or_else(|| "bundled geph unavailable".to_string())?;
+    let binary_changed = sync_private_executable(&source, &paths.executable)
+        .map_err(|error| format!("geph runtime sync unavailable: {error}"))?;
+    let exit = geph_field(app, "exit").unwrap_or_else(|| "auto".into());
+    let desired = geph_config_yaml(&secret, &exit, &paths.cache.to_string_lossy());
+    let config_changed = write_private_if_changed(&paths.config, desired.as_bytes())
+        .map_err(|error| format!("geph config write unavailable: {error}"))?;
+    let launcher = geph_launcher_script(&paths);
+    let launcher_changed = write_atomic_if_changed(&paths.launcher, launcher.as_bytes(), 0o700)
+        .map_err(|error| format!("geph launcher write unavailable: {error}"))?;
+    let plist = geph_launch_agent_plist(&paths);
+    let plist_changed = write_atomic_if_changed(&paths.plist, plist.as_bytes(), 0o600)
+        .map_err(|error| format!("geph LaunchAgent write unavailable: {error}"))?;
+
+    let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
+    let mut loaded = geph_launch_agent_loaded(&uid);
+    if loaded && plist_changed {
+        if !geph_launch_agent_bootout(&uid) {
+            return Err("geph LaunchAgent reload unavailable".into());
+        }
+        loaded = false;
+    }
+    if !loaded {
+        // Replace the legacy detached process once, after the stable runtime is
+        // ready. Unknown listeners do not match ownership and are never killed;
+        // the launcher waits on the occupied port instead.
+        geph_kill_owned(&paths.config_dir);
+        if !geph_launch_agent_bootstrap(&uid, &paths.plist) && !geph_launch_agent_loaded(&uid) {
+            return Err("geph LaunchAgent bootstrap unavailable".into());
+        }
+    } else if force_restart || binary_changed || config_changed || launcher_changed {
+        if !geph_launch_agent_kickstart(&uid) {
+            return Err("geph LaunchAgent restart unavailable".into());
+        }
+    }
+    Ok(true)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1922,24 +2176,18 @@ pub fn run() {
                 .build(app)?;
 
             // ---- Geph submenu: Account… + checkable exit list (grouped) ------
-            let saved_exit = app
-                .path()
-                .app_config_dir()
-                .ok()
-                .map(|d| d.join("geph.json"))
-                .and_then(|p| fs::read_to_string(p).ok())
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .and_then(|v| v.get("exit").and_then(|x| x.as_str()).map(String::from))
-                .unwrap_or_else(|| "auto".into());
+            let saved_exit = geph_field(app.handle(), "exit").unwrap_or_else(|| "auto".into());
 
-            let mut exit_items: Vec<(String, CheckMenuItem<tauri::Wry>)> = Vec::new();
             let mk = |app: &tauri::App, val: &str, label: &str| {
                 CheckMenuItemBuilder::with_id(format!("exit:{val}"), label)
                     .checked(val == saved_exit)
                     .build(app)
             };
             let auto = mk(app, "auto", &tr("Automatic"))?;
-            exit_items.push(("auto".into(), auto.clone()));
+            let exit_items = Arc::new(Mutex::new(ExitMenuItems {
+                choices: vec![("auto".into(), auto.clone())],
+                dynamic: Vec::new(),
+            }));
 
             let geph_enable = CheckMenuItemBuilder::with_id(ID_GEPH_ENABLE, tr("Enable Geph"))
                 .checked(geph_enabled(app.handle()))
@@ -1953,7 +2201,7 @@ pub fn run() {
                 .map(|d| d.join("geph-exits.json"));
             let catalog = exit_catalog(exits_cache);
 
-            let mut gb = SubmenuBuilder::new(app, "Geph")
+            let geph_menu = SubmenuBuilder::new(app, "Geph")
                 .item(
                     &MenuItemBuilder::with_id(ID_ACCOUNT, tr("Account…"))
                         .accelerator("CmdOrCtrl+,")
@@ -1961,45 +2209,15 @@ pub fn run() {
                 )
                 .item(&geph_enable)
                 .separator()
-                .item(&auto);
-            // Group cities by category under disabled section headers — Core first,
-            // then Streaming, then anything else — mirroring geph's own grouping.
-            // (Core = general exits; Streaming = Plus-only, tuned for Netflix-class
-            // services.) The category is live from net_status, never hardcoded.
-            let mut cats: Vec<String> = catalog.iter().map(|(_, _, c)| c.clone()).collect();
-            cats.sort();
-            cats.dedup();
-            cats.sort_by_key(|c| match c.as_str() {
-                "core" => (0u8, String::new()),
-                "streaming" => (1u8, String::new()),
-                other => (2u8, other.to_string()),
-            });
-            for cat in &cats {
-                let title = match cat.as_str() {
-                    "core" => tr("Core"),
-                    "streaming" => tr("Streaming"),
-                    other => {
-                        let mut ch = other.chars();
-                        match ch.next() {
-                            Some(f) => f.to_uppercase().collect::<String>() + ch.as_str(),
-                            None => other.to_string(),
-                        }
-                    }
-                };
-                gb = gb.separator().item(
-                    &MenuItemBuilder::with_id(format!("hdr_{cat}"), title)
-                        .enabled(false)
-                        .build(app)?,
-                );
-                for (val, label, c) in &catalog {
-                    if c == cat {
-                        let it = mk(app, val, label)?;
-                        exit_items.push((val.clone(), it.clone()));
-                        gb = gb.item(&it);
-                    }
-                }
-            }
-            let geph_menu = gb.build()?;
+                .item(&auto)
+                .build()?;
+            replace_exit_menu_items(
+                app.handle(),
+                &geph_menu,
+                &exit_items,
+                &saved_exit,
+                &catalog,
+            )?;
 
             let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
             let launch = CheckMenuItemBuilder::with_id(ID_LAUNCH, tr("Launch at Login"))
@@ -2048,6 +2266,7 @@ pub fn run() {
             let launch_h = launch.clone();
             let enable_h = geph_enable.clone();
             let tg_offer_reset_menu = tg_offer_reset.clone();
+            let exit_items_menu = exit_items.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -2055,11 +2274,16 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     let id = event.id().as_ref();
                     if let Some(val) = id.strip_prefix("exit:") {
-                        for (v, item) in &exit_items {
-                            let _ = item.set_checked(v == val);
+                        {
+                            let items = exit_items_menu.lock().expect("exit menu lock poisoned");
+                            for (value, item) in &items.choices {
+                                let _ = item.set_checked(value == val);
+                            }
                         }
                         geph_config_set(app, "exit", val);
-                        geph_stop(app); // supervisor respawns geph with the new exit
+                        if let Err(error) = ensure_geph_launch_agent(app, true) {
+                            eprintln!("geph exit update unavailable: {error}");
+                        }
                         return;
                     }
                     match id {
@@ -2067,17 +2291,26 @@ pub fn run() {
                             let cur = geph_secret(app).unwrap_or_default();
                             if let Some(secret) = prompt_secret(&cur) {
                                 keychain_set(&secret); // Keychain, not plaintext config
-                                geph_stop(app); // supervisor (re)starts geph with the new secret
+                                if let Err(error) = ensure_geph_launch_agent(app, true) {
+                                    eprintln!("geph account update unavailable: {error}");
+                                }
                             }
                         }
                         ID_GEPH_ENABLE => {
                             let new_on = !geph_enabled(app);
                             geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
                             let _ = enable_h.set_checked(new_on);
-                            if !new_on {
-                                geph_stop(app); // free the account so the user's own VPN/Geph can connect
+                            if new_on {
+                                if let Err(error) = ensure_geph_launch_agent(app, false) {
+                                    eprintln!("geph enable unavailable: {error}");
+                                }
+                            } else {
+                                // Boot out only Slipstream's user LaunchAgent and
+                                // clean up any verified legacy detached process.
+                                if let Err(error) = geph_launch_agent_disable(app) {
+                                    eprintln!("geph disable unavailable: {error}");
+                                }
                             }
-                            // enabling -> the supervisor starts geph next loop (secret permitting)
                         }
                         ID_LAUNCH => {
                             let mgr = app.autolaunch();
@@ -2212,22 +2445,22 @@ pub fn run() {
                 }
             });
 
-            // NB: we deliberately do NOT kill a leftover geph at startup — a geph
-            // that SURVIVED this tray's restart/reinstall (spawned detached) is what
-            // lets the supervisor ADOPT it, keeping the tunnel (and the user's apps)
-            // up across a reinstall. The account has no device limit, so a lingering
-            // geph never blocks the user's own Geph.
-
-            // geph supervisor: runs the bundled geph5-client (detached) whenever a
-            // secret is set; survives tray restarts, adopts an already-running one.
-            tauri::async_runtime::spawn(geph_supervisor(app.handle().clone()));
-            // Populate the live exit catalog cache once geph's control RPC is up,
-            // so the next tray build shows real countries instead of the fallback.
-            refresh_exit_cache(
+            // Geph belongs to a user LaunchAgent, not this tray process. The first
+            // call migrates the old detached sidecar to a stable private runtime;
+            // later calls only sync changed app/config artifacts.
+            if let Err(error) = ensure_geph_launch_agent(app.handle(), false) {
+                eprintln!("geph LaunchAgent setup unavailable: {error}");
+            }
+            // A fresh install may not have Geph's city catalog yet. Once its control
+            // RPC is ready, replace the temporary country fallback in this live menu.
+            refresh_exit_menu(
+                app.handle().clone(),
                 app.path()
                     .app_config_dir()
                     .ok()
                     .map(|d| d.join("geph-exits.json")),
+                geph_menu.clone(),
+                exit_items.clone(),
             );
 
             Ok(())
@@ -2235,12 +2468,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Slipstream tray");
 
-    // No windows -> keep the app alive on the tray. We do NOT stop geph on exit:
-    // it's spawned detached so it SURVIVES the tray quitting/restarting/reinstalling,
-    // and the next tray ADOPTS the survivor — that's what keeps the user's apps
-    // connected across a reinstall (no "restart your app" dance). The routing daemon
-    // is a separate LaunchDaemon that already outlives the tray, so a running tunnel
-    // after quit is consistent. To actually stop geph, disable Geph in the menu.
+    // No windows -> keep the app alive on the tray. We do not stop Geph on exit:
+    // its user LaunchAgent remains responsible for the tunnel and crash recovery.
+    // The routing daemon also outlives the tray, so a running tunnel after quit is
+    // consistent. To actually stop Geph, disable it in the menu.
     app.run(|_app, event| {
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             if code.is_none() {
@@ -2255,13 +2486,15 @@ mod tests {
     use super::{
         admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
         daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
-        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, harden_geph_dir,
-        install_diagnostic_value, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, route_class_health, routing_health_summary,
-        shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
+        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
+        geph_launch_agent_paths, geph_launch_agent_plist, geph_launch_domain, geph_launch_target,
+        geph_launcher_script, harden_geph_dir, install_diagnostic_value,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
+        should_recover_daemon, sync_private_executable, system_proxy_active_from_scutil,
         system_proxy_from_status, telegram_proxy_detail, valid_bundled_daemon,
-        write_diagnostic_snapshot_file, write_private_atomic, DAEMON_RECOVERY_STATUS_PATH,
-        DAEMON_WATCHDOG_MISSES, PF_TOKEN_PATH,
+        write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
+        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2280,6 +2513,31 @@ mod tests {
             shell_quote("/tmp/Bob's Apps/slipstreamd"),
             "'/tmp/Bob'\\''s Apps/slipstreamd'"
         );
+    }
+
+    #[test]
+    fn exit_catalog_prefers_cached_city_entries_without_waiting_for_control_rpc() {
+        let path = std::env::temp_dir().join(format!(
+            "slipstream-exit-catalog-test-{}.json",
+            std::process::id()
+        ));
+        let expected = vec![
+            (
+                "ca|Montreal".to_string(),
+                "CA / Montreal".to_string(),
+                "core".to_string(),
+            ),
+            (
+                "jp|Tokyo".to_string(),
+                "JP / Tokyo".to_string(),
+                "core".to_string(),
+            ),
+        ];
+        std::fs::write(&path, serde_json::to_string(&expected).unwrap()).unwrap();
+
+        assert_eq!(exit_catalog(Some(path.clone())), expected);
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -2781,8 +3039,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let config = dir.join("geph-active.yaml");
+        let runtime_dir = dir.join("runtime");
+        let runtime_bin = runtime_dir.join("geph5-client");
         std::fs::write(&config, "credentials:\n secret: test\n").unwrap();
         std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::create_dir_all(&runtime_dir).unwrap();
+        std::fs::write(&runtime_bin, b"binary").unwrap();
+        std::fs::set_permissions(&runtime_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&runtime_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         harden_geph_dir(&dir).unwrap();
         write_private_atomic(&config, b"credentials:\n secret: replaced\n").unwrap();
@@ -2795,7 +3059,157 @@ mod tests {
             std::fs::metadata(&config).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        assert_eq!(
+            std::fs::metadata(&runtime_dir)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&runtime_bin)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn geph_launch_agent_uses_stable_private_runtime_and_keepalive() {
+        let config_dir =
+            std::path::Path::new("/Users/test/Library/Application Support/dev.slipstream.tray");
+        let home = std::path::Path::new("/Users/test");
+        let paths = geph_launch_agent_paths(config_dir, home);
+        let plist = geph_launch_agent_plist(&paths);
+
+        assert_eq!(
+            paths.executable,
+            config_dir.join("runtime").join("geph5-client")
+        );
+        assert_eq!(
+            paths.plist,
+            home.join("Library")
+                .join("LaunchAgents")
+                .join("dev.slipstream.geph.plist")
+        );
+        assert!(plist.contains(&format!("<string>{GEPH_LAUNCHD_LABEL}</string>")));
+        assert!(plist.contains("<key>KeepAlive</key><true/>"));
+        assert!(plist.contains("<key>RunAtLoad</key><true/>"));
+        assert!(plist.contains(&format!("<string>{}</string>", paths.launcher.display())));
+        assert!(!plist.contains("geph-active.yaml"));
+        assert!(!plist.contains("secret"));
+    }
+
+    #[test]
+    fn geph_launcher_waits_for_unknown_listener_and_records_exec_identity() {
+        let config_dir =
+            std::path::Path::new("/Users/O'Neil/Library/Application Support/dev.slipstream.tray");
+        let paths = geph_launch_agent_paths(config_dir, std::path::Path::new("/Users/O'Neil"));
+        let script = geph_launcher_script(&paths);
+
+        assert!(script.contains("/usr/bin/nc -z -w 1 127.0.0.1 9954"));
+        assert!(script.contains("\"pid\":%s"));
+        assert!(script.contains("\"launchd_label\":%s"));
+        let ownership_write = script
+            .lines()
+            .find(|line| line.contains("/usr/bin/printf"))
+            .expect("launcher writes an ownership record");
+        assert!(ownership_write.contains("\"$$\""));
+        assert!(ownership_write.contains("> \"$tmp\""));
+        assert!(!script.contains("\n+"));
+        assert!(script.contains("exec \"$executable\" --config \"$config\""));
+        assert!(script.contains("'\\''"));
+        assert!(!script.contains("pkill"));
+        assert!(!script.contains("killall"));
+        assert!(!script.contains("/bin/kill"));
+    }
+
+    #[test]
+    fn geph_runtime_sync_is_atomic_idempotent_and_owner_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-geph-runtime-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source");
+        let target = dir.join("runtime").join("geph5-client");
+        std::fs::write(&source, b"version-one").unwrap();
+
+        assert!(sync_private_executable(&source, &target).unwrap());
+        assert!(!sync_private_executable(&source, &target).unwrap());
+        assert_eq!(std::fs::read(&target).unwrap(), b"version-one");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        std::fs::write(&source, b"version-two").unwrap();
+        assert!(sync_private_executable(&source, &target).unwrap());
+        assert_eq!(std::fs::read(&target).unwrap(), b"version-two");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn geph_launch_agent_plist_write_does_not_change_parent_permissions() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-geph-launchagent-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let plist = dir.join("dev.slipstream.geph.plist");
+
+        assert!(write_atomic_if_changed(&plist, b"plist-v1", 0o600).unwrap());
+        assert!(!write_atomic_if_changed(&plist, b"plist-v1", 0o600).unwrap());
+        assert_eq!(
+            std::fs::metadata(&plist).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generated_geph_launch_artifacts_parse_on_macos() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-geph-launch-artifacts-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let config_dir = dir.join("Application Support").join("dev.slipstream.tray");
+        let home = dir.join("home");
+        let paths = geph_launch_agent_paths(&config_dir, &home);
+        std::fs::create_dir_all(paths.launcher.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(paths.plist.parent().unwrap()).unwrap();
+        std::fs::write(&paths.launcher, geph_launcher_script(&paths)).unwrap();
+        std::fs::write(&paths.plist, geph_launch_agent_plist(&paths)).unwrap();
+
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-n", paths.launcher.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("/usr/bin/plutil")
+            .args(["-lint", paths.plist.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn geph_launchctl_scope_is_exactly_the_user_job() {
+        assert_eq!(geph_launch_domain("502"), "gui/502");
+        assert_eq!(geph_launch_target("502"), "gui/502/dev.slipstream.geph");
     }
 
     #[test]

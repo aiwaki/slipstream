@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Slipstream",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "identifier": "dev.slipstream.tray",
   "build": {
     "frontendDist": "../src"
@@ -15,10 +15,20 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": ["icons/icon.icns"],
-    "resources": ["icons/*.png", "slipstreamd/**/*"],
-    "externalBin": ["binaries/geph5-client"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.icns"
+    ],
+    "resources": [
+      "icons/*.png",
+      "slipstreamd/**/*"
+    ],
+    "externalBin": [
+      "binaries/geph5-client"
+    ],
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-"
@@ -31,7 +41,9 @@
         "https://github.com/aiwaki/slipstream/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdGQzQ3RUM3MEIyNjcyNkUKUldSdWNpWUx4MzdFZjNXZHFhUjFWSG05OTUrU2ltbWFmQ2VXdUkyeW0zTHp5M2NnMUl5NTdQNzgK",
-      "windows": { "installMode": "passive" }
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

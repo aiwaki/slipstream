@@ -104,7 +104,7 @@ _dead = {}                     # host -> expiry_monotonic
 
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
-DAEMON_VERSION = "0.1.5"
+DAEMON_VERSION = "0.1.7"
 _conn_count = 0                # live proxied connections
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
@@ -2447,7 +2447,7 @@ def _socks5_connect_blocking(host, port, timeout=3.0):
         return None
 
 
-def _geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
+def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     sock = _socks5_connect_blocking(host, 443, timeout)
     if sock is None:
         return 0
@@ -2483,7 +2483,7 @@ def _confirm_auto_geph(host):
     if not AUTO_GEPH_ENABLED or not _geph_up or not _auto_geph_candidate_allowed(h):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
-    bytes_read = _geph_payload_probe(h)
+    bytes_read = _auto_geph_payload_probe(h)
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
         _set_auto_geph_status("rejected", h, "geph payload probe failed", bytes_read)
         return False
@@ -4715,12 +4715,14 @@ def network_monitor(port, voice=True):
                 print(">> routing backends ready -> Slipstream active", file=sys.stderr)
                 if arm_private_pf_if_ready(port):
                     start_canaries_if_due("pf_reapply", force=True)
-                else:
+                elif not pf_parent_anchor_loaded():
                     print(
                         f">> pf parent anchor {PF_PARENT_ANCHOR} unavailable; "
                         "leaving external rules untouched",
                         file=sys.stderr,
                     )
+                else:
+                    print(">> routing backend changed before PF could be armed", file=sys.stderr)
             elif not pf_has_rules(port):
                 if pf_parent_anchor_loaded():
                     print(">> Slipstream pf anchor vanished — re-applying", file=sys.stderr)
@@ -5424,8 +5426,8 @@ async def _handle_impl(reader, writer):
             log_geph_route_failure(host, "tunnel down")
             suspend_transparent_routing("geo-exit tunnel down")
         if VERBOSE:
-            print(f"  geph unavailable for geo-host {host} -> connection closed once "
-                  f"(private pf anchor paused for retry)", file=sys.stderr)
+            print(f"  geph unavailable for geo-host {host} -> fail closed "
+                  f"(private pf anchor paused for the retry)", file=sys.stderr)
         writer.close()
         return
 

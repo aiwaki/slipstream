@@ -54,6 +54,17 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
 
+## Geph Exit Locations
+
+The Geph submenu normally lists city-level exits such as `CA / Montreal`. On a
+fresh launch, Geph may not have answered its local control RPC yet; Slipstream
+temporarily shows country-level fallback entries and replaces them in the open
+tray menu as soon as the live catalog is available. A restart is not required.
+
+If the menu stays country-only after Geph is connected, use `Copy Diagnostics`.
+The app caches the last verified city catalog locally, so later launches should
+show the city list immediately even while Geph is reconnecting.
+
 ## PF Ownership
 
 Slipstream owns only `com.apple/slipstream`. Normal lifecycle and recovery do
@@ -198,9 +209,9 @@ After wake, a Geph process can keep its local SOCKS port open while the tunnel
 inside it returns `SOCKS connect failed` or closes payload probes without a
 response. Slipstream records this under `geph_detail`; repeated post-wake
 geo-exit failures across multiple hosts may set `restart_recommended` for
-diagnostics. The tray does not act on that hint; restarting a live but stale
-process is deferred until the daemon can coordinate it without tearing down
-active streams.
+diagnostics. The tray does not act on that hint: the Geph LaunchAgent recovers a
+dead process through `KeepAlive`, while restarting a live but stale process is
+deferred until the daemon can coordinate it without tearing down active streams.
 
 Wake canaries may briefly run before Geph/DNS recovery is complete. If a tray
 summary still says routing needs attention after the tunnel is back, check
