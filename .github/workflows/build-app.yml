@@ -89,18 +89,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # pick the newest geph-vendor-* release TAG (release list's first column is
-          # the title, not the tag, so query tag_name directly).
-          tag=$(gh api "repos/${{ github.repository }}/releases" --paginate \
-            --jq '[.[].tag_name | select(startswith("geph-vendor-"))] | first // empty')
-          [ -n "$tag" ] || { echo "no geph-vendor release yet — run build-geph first"; exit 1; }
+          version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
+          tag="geph-vendor-$version"
           echo "using geph vendor tag: $tag"
+          rm -rf /tmp/geph
           mkdir -p app-tauri/src-tauri/binaries /tmp/geph
           gh release download "$tag" --repo "${{ github.repository }}" \
-            --pattern 'geph5-client' --dir /tmp/geph
+            --pattern 'geph5-client' \
+            --pattern 'geph5-client.VERSION' \
+            --pattern 'geph5-client.LICENSE' \
+            --pattern 'SHA256SUMS' \
+            --dir /tmp/geph
+          asset_version="$(tr -d '[:space:]' < /tmp/geph/geph5-client.VERSION)"
+          [ "$asset_version" = "$version" ] || {
+            echo "vendored Geph version mismatch: expected $version, got $asset_version"
+            exit 1
+          }
+          ( cd /tmp/geph && shasum -a 256 -c SHA256SUMS )
           cp /tmp/geph/geph5-client \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          /usr/bin/lipo \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin \
+            -verify_arch arm64
 
       - name: Check version metadata
         run: python3 scripts/sync_version.py --check

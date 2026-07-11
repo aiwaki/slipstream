@@ -88,7 +88,8 @@ change, and sleep/wake without manual buttons.
 
 - Pin Python/PyInstaller dependencies with hashes.
 - Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
-  checksum, architecture, and provenance.
+  the matching asset version, checksum, and arm64 architecture. Done for the
+  release workflow; artifact manifest and broader provenance remain pending.
 - Set an explicit Tauri target and publish an artifact manifest plus SBOM.
 - Run full tests and a privileged PF-anchor sentinel test in release CI.
 - Separate preview and stable channels. Stable requires Developer ID, hardened
