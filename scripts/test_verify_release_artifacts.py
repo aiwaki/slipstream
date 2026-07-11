@@ -13,7 +13,13 @@ import verify_release_artifacts
 
 
 class VerifyReleaseArtifactsTests(unittest.TestCase):
-    def _write_release_dir(self, root: Path, *, tag: str = "v0.1.5") -> None:
+    def _write_release_dir(
+        self,
+        root: Path,
+        *,
+        tag: str = "v0.1.5",
+        include_route_policy: bool = True,
+    ) -> None:
         version = "0.1.5"
         repository = "aiwaki/slipstream"
         (root / "Slipstream-macos-arm64.zip").write_bytes(b"zip")
@@ -34,31 +40,32 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        private_key, public_keys = make_route_policy_bundle.generate_route_policy_keypair(
-            key_id="release"
-        )
-        bundle, _ = make_route_policy_bundle.build_signed_route_policy_bundle(
-            manifest=make_route_policy_bundle.tproxy.route_policy_manifest(),
-            key_id="release",
-            private_key=private_key,
-        )
-        bundle_path = root / "route-policy.json"
-        bundle_path.write_text(json.dumps(bundle, indent=2) + "\n", encoding="utf-8")
-        (root / "route-policy-keys.json").write_text(
-            json.dumps({"keys": public_keys}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        channel = make_route_policy_bundle.build_route_policy_channel_index(
-            bundle_path=bundle_path,
-            bundle_url=(
-                f"https://github.com/aiwaki/slipstream/releases/download/"
-                f"{tag}/route-policy.json"
-            ),
-        )
-        (root / "route-policy-latest.json").write_text(
-            json.dumps(channel, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        if include_route_policy:
+            private_key, public_keys = make_route_policy_bundle.generate_route_policy_keypair(
+                key_id="release"
+            )
+            bundle, _ = make_route_policy_bundle.build_signed_route_policy_bundle(
+                manifest=make_route_policy_bundle.tproxy.route_policy_manifest(),
+                key_id="release",
+                private_key=private_key,
+            )
+            bundle_path = root / "route-policy.json"
+            bundle_path.write_text(json.dumps(bundle, indent=2) + "\n", encoding="utf-8")
+            (root / "route-policy-keys.json").write_text(
+                json.dumps({"keys": public_keys}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            policy_channel = make_route_policy_bundle.build_route_policy_channel_index(
+                bundle_path=bundle_path,
+                bundle_url=(
+                    f"https://github.com/aiwaki/slipstream/releases/download/"
+                    f"{tag}/route-policy.json"
+                ),
+            )
+            (root / "route-policy-latest.json").write_text(
+                json.dumps(policy_channel, indent=2) + "\n",
+                encoding="utf-8",
+            )
 
     def test_accepts_complete_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,17 +87,34 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             tag = "v0.1.5-preview.42"
-            self._write_release_dir(root, tag=tag)
+            self._write_release_dir(root, tag=tag, include_route_policy=False)
 
             result = verify_release_artifacts.verify_release_artifacts(
                 release_dir=root,
                 repository="aiwaki/slipstream",
                 tag=tag,
                 version="0.1.5",
+                channel="preview",
             )
 
             self.assertEqual(result["tag"], tag)
             self.assertTrue(result["appcast"]["url"].endswith(f"/{tag}/Slipstream.app.tar.gz"))
+            self.assertNotIn("route_policy", result)
+
+    def test_rejects_preview_tag_for_stable_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tag = "v0.1.5-preview.42"
+            self._write_release_dir(root, tag=tag)
+
+            with self.assertRaisesRegex(ValueError, "does not match tag"):
+                verify_release_artifacts.verify_release_artifacts(
+                    release_dir=root,
+                    repository="aiwaki/slipstream",
+                    tag=tag,
+                    version="0.1.5",
+                    channel="stable",
+                )
 
     def test_rejects_route_policy_channel_hash_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +171,8 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                             "v0.1.5",
                             "--version",
                             "0.1.5",
+                            "--channel",
+                            "stable",
                         ]
                     ),
                     0,

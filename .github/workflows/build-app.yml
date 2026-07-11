@@ -72,6 +72,7 @@ jobs:
         run: brew install protobuf cmake pkg-config || true
 
       - name: Prepare route policy trust keys
+        if: steps.ver.outputs.channel == 'stable'
         env:
           SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON: ${{ secrets.SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON }}
         run: |
@@ -156,6 +157,7 @@ jobs:
           echo "made appcast:"; cat "$OUT/latest.json"
 
       - name: Package signed route policy channel
+        if: steps.ver.outputs.channel == 'stable'
         env:
           SLIP_ROUTE_POLICY_KEY_ID: ${{ secrets.SLIP_ROUTE_POLICY_KEY_ID }}
           SLIP_ROUTE_POLICY_PRIVATE_KEY: ${{ secrets.SLIP_ROUTE_POLICY_PRIVATE_KEY }}
@@ -195,7 +197,8 @@ jobs:
             --release-dir dist-release \
             --repository "${{ github.repository }}" \
             --tag "${{ steps.ver.outputs.tag }}" \
-            --version "${{ steps.ver.outputs.version }}"
+            --version "${{ steps.ver.outputs.version }}" \
+            --channel "${{ steps.ver.outputs.channel }}"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -207,6 +210,7 @@ jobs:
             Slipstream ${{ steps.ver.outputs.version }} (${{ steps.ver.outputs.channel }}, macOS, Apple Silicon).
             Unsigned by Apple — on first download, right-click the app > Open.
             Preview releases are manual-download builds and do not replace the stable updater feed.
+            Preview releases omit the remote policy channel.
           files: |
             dist-release/Slipstream-macos-arm64.zip
             dist-release/Slipstream.app.tar.gz

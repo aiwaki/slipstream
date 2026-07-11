@@ -62,6 +62,13 @@ class MakeAppcastTests(unittest.TestCase):
                 pub_date="2026-07-08T12:00:00Z",
             )
 
+    def test_release_channel_matches_controlled_tag(self) -> None:
+        self.assertEqual(make_appcast.release_channel_for_tag("0.1.5", "v0.1.5"), "stable")
+        self.assertEqual(
+            make_appcast.release_channel_for_tag("0.1.5", "v0.1.5-preview.42"),
+            "preview",
+        )
+
     def test_rejects_empty_signature(self) -> None:
         with self.assertRaisesRegex(ValueError, "empty updater signature"):
             make_appcast.build_appcast(

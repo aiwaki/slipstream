@@ -20,15 +20,20 @@ def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def validate_release_inputs(version: str, tag: str, repository: str, signature: str) -> None:
+def release_channel_for_tag(version: str, tag: str) -> str:
     if not VERSION_RE.match(version):
         raise ValueError(f"invalid version: {version!r}")
     stable_tag = f"v{version}"
     preview_tag = re.compile(rf"^{re.escape(stable_tag)}-preview\.[1-9][0-9]*$")
-    if tag != stable_tag and not preview_tag.match(tag):
-        raise ValueError(
-            f"tag {tag!r} must be {stable_tag} or {stable_tag}-preview.<run>"
-        )
+    if tag == stable_tag:
+        return "stable"
+    if preview_tag.match(tag):
+        return "preview"
+    raise ValueError(f"tag {tag!r} must be {stable_tag} or {stable_tag}-preview.<run>")
+
+
+def validate_release_inputs(version: str, tag: str, repository: str, signature: str) -> None:
+    release_channel_for_tag(version, tag)
     if not REPOSITORY_RE.match(repository):
         raise ValueError(f"invalid repository: {repository!r}")
     if not signature.strip():

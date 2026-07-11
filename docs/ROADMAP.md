@@ -96,7 +96,8 @@ change, and sleep/wake without manual buttons.
   GitHub prereleases; stable requires Developer ID, hardened runtime,
   notarization, and stapling.
 - Define production custody and rotation for policy-signing keys. Remote policy
-  stays off by default until that workflow and rollback are reviewed.
+  stays off by default; preview releases omit its channel until stable custody
+  and rollback are reviewed.
 
 Gate: clean install, update, rollback, and uninstall need no manual PF, proxy,
 or file cleanup.
