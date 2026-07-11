@@ -54,7 +54,6 @@ const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
 const DAEMON_WATCHDOG_COOLDOWN_SECS: u64 = 5 * 60;
-const GEPH_SELF_HEAL_COOLDOWN_SECS: u64 = 10 * 60;
 const DIAGNOSTIC_LOG_TAIL_LINES: usize = 80;
 
 /// Is the system UI language Russian? Cached — the locale doesn't change while we
@@ -802,7 +801,8 @@ fn daemon_recovery_shell() -> String {
          if printf '%s\\n' \"$status\" \
             | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
          then write_recovery daemon_recovered; exit 0; fi; \
-         /sbin/pfctl -a {anchor} -F all >/dev/null 2>&1 || true; \
+         /sbin/pfctl -a {anchor} -F rules >/dev/null 2>&1 || true; \
+         /sbin/pfctl -a {anchor} -F nat >/dev/null 2>&1 || true; \
          if [ -f {pf_token_path} ]; then \
            pf_token=$(/bin/cat {pf_token_path} 2>/dev/null || true); \
            case \"$pf_token\" in \
@@ -1577,27 +1577,6 @@ fn geph_config_yaml(secret: &str, exit: &str, cache_path: &str) -> String {
     )
 }
 
-fn geph_restart_recommendation(status: Option<&Value>) -> Option<String> {
-    let status = status?;
-    if value_string(Some(status), "geph", "") != "up" {
-        return None;
-    }
-    let detail = status.get("geph_detail")?;
-    if !detail
-        .get("restart_recommended")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    let reason = value_string(Some(detail), "restart_reason", "");
-    Some(if reason.is_empty() {
-        "geo-exit tunnel stale".to_string()
-    } else {
-        reason
-    })
-}
-
 /// Absolute path to the bundled geph5-client, which sits next to our own
 /// executable (Slipstream.app/Contents/MacOS/geph5-client).
 fn geph_bin_path() -> Option<std::path::PathBuf> {
@@ -2155,7 +2134,6 @@ pub fn run() {
                 let mut seen_tg_offer_reset = tg_offer_reset_watch.load(Ordering::Relaxed);
                 let mut missing_status_polls: u8 = 0;
                 let mut next_daemon_recovery = Instant::now();
-                let mut next_geph_self_heal = Instant::now();
                 loop {
                     let state = refresh(&s, &d);
                     if state != last_state {
@@ -2185,14 +2163,6 @@ pub fn run() {
                             &daemon_recovery_shell(),
                             "Slipstream needs administrator access to repair its background daemon.",
                         );
-                    }
-                    if now >= next_geph_self_heal && geph_enabled(&app_handle) {
-                        if let Some(reason) = geph_restart_recommendation(status.as_ref()) {
-                            next_geph_self_heal =
-                                now + Duration::from_secs(GEPH_SELF_HEAL_COOLDOWN_SECS);
-                            eprintln!("geph self-heal restart requested: {reason}");
-                            geph_stop(&app_handle);
-                        }
                     }
                     if let Some(up) = status
                         .as_ref()
@@ -2285,13 +2255,13 @@ mod tests {
     use super::{
         admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
         daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
-        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value,
-        geph_restart_recommendation, harden_geph_dir, install_diagnostic_value,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon, system_proxy_active_from_scutil, system_proxy_from_status,
-        telegram_proxy_detail, valid_bundled_daemon, write_diagnostic_snapshot_file,
-        write_private_atomic, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, PF_TOKEN_PATH,
+        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, harden_geph_dir,
+        install_diagnostic_value, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, redact_sensitive_text, route_class_health, routing_health_summary,
+        shell_quote, should_recover_daemon, system_proxy_active_from_scutil,
+        system_proxy_from_status, telegram_proxy_detail, valid_bundled_daemon,
+        write_diagnostic_snapshot_file, write_private_atomic, DAEMON_RECOVERY_STATUS_PATH,
+        DAEMON_WATCHDOG_MISSES, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2791,7 +2761,10 @@ mod tests {
         assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
         assert!(shell.contains("daemon_recovered"));
         assert!(shell.contains("anchor_cleared"));
-        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F all"));
+        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F rules"));
+        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F nat"));
+        assert!(!shell.contains("-F all"));
+        assert!(!shell.contains("-F states"));
         assert!(shell.contains(PF_TOKEN_PATH));
         assert!(!shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(!shell.contains("/sbin/pfctl -d"));
@@ -3026,41 +2999,5 @@ mod tests {
         });
 
         assert_eq!(routing_health_summary(Some(&status), "up", false), None);
-    }
-
-    #[test]
-    fn geph_restart_recommendation_requires_daemon_hint() {
-        let status = json!({
-            "geph": "up",
-            "geph_detail": {
-                "restart_recommended": true,
-                "restart_reason": "geo-exit tunnel stale after wake"
-            }
-        });
-
-        assert_eq!(
-            geph_restart_recommendation(Some(&status)),
-            Some("geo-exit tunnel stale after wake".to_string())
-        );
-        assert_eq!(
-            geph_restart_recommendation(Some(&json!({
-                "geph": "up",
-                "geph_detail": {
-                    "restart_recommended": false,
-                    "restart_reason": "geo-exit tunnel stale after wake"
-                }
-            }))),
-            None
-        );
-        assert_eq!(
-            geph_restart_recommendation(Some(&json!({
-                "geph": "down",
-                "geph_detail": {
-                    "restart_recommended": true,
-                    "restart_reason": "geo-exit tunnel stale after wake"
-                }
-            }))),
-            None
-        );
     }
 }

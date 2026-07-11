@@ -181,10 +181,11 @@ its TTL trick from the algorithm.
 
 ## 7. Crash-safety (the #1 reliability detail)
 
-`bypassd` writes `/var/run/slipstream.state`. On start it replays teardown of any
-stale pf anchor / routes / utun from a prior crash. `atexit` + `SIGTERM`/`SIGINT`
-handler runs `pfctl -a slipstream -F all`, restores `/etc/pf.conf`, closes bpf/raw,
-tears down any utun + routes. **A crash must never strand the user offline.**
+This early design is superseded by private-anchor ownership. Current teardown
+flushes only `rules` and `nat` from `com.apple/slipstream`, releases its own PF
+enable token, and never restores or replaces `/etc/pf.conf`. `-F all` is forbidden
+because it includes the shared PF state table. **A crash must never strand the
+user offline or mutate unrelated network state.**
 
 ---
 

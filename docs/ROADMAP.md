@@ -45,7 +45,10 @@ not readable outside the owning user.
 - Select rate-limited safe actions through a pure `RecoveryAction` reducer.
 - Keep Discord and YouTube on local bypass with exact-host re-sweep. They never
   fall through to Geph.
-- Keep geo-exit fail-closed and restart only a verified owned Geph process.
+- Never fall an intercepted geo-exit connection through local desync. If the
+  required backend is unavailable, pause the private PF anchor and enter dormant
+  mode so Slipstream no longer owns system HTTPS. Restarting a live Geph process
+  must be daemon-coordinated after routing is idle.
 - Let unknown hosts try the local adaptive ladder first. Temporary geo-exit
   requires repeated local misses plus a successful Geph payload proof.
 - Move Geph to a user LaunchAgent with `KeepAlive`; the tray becomes a settings
@@ -53,8 +56,10 @@ not readable outside the owning user.
 - Keep external DNS, VPN, PAC, and proxy state read-only.
 
 Progress: runtime local-bypass misses, geo-exit failures, and repeated unknown
-host stalls now enter one normalized reducer. The remaining M1 lifecycle step is
-moving owned Geph out of the tray and into a user LaunchAgent.
+host stalls now enter one normalized reducer. Cold-start and runtime backend
+failure also gate or pause the private PF anchor. The remaining M1 lifecycle
+step is moving owned Geph out of the tray and into a user LaunchAgent without
+reintroducing live-stream restarts.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
