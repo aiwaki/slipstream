@@ -96,6 +96,7 @@ fn tr(en: &str) -> String {
         "Account…" => "Аккаунт…",
         "Enable Geph" => "Включить Geph",
         "Automatic" => "Автоматически",
+        "Locations unavailable" => "Локации недоступны",
         "Core" => "Основные",
         "Streaming" => "Стриминг",
         "Launch at Login" => "Запускать при входе",
@@ -121,13 +122,6 @@ const ID_QUIT: &str = "quit";
 // tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
 // in one click (no manual host/port/secret entry).
 const TGWS_LINK_PATH: &str = "/var/run/slipstream-tgws.link";
-
-// Fallback exit list used ONLY on the first-ever launch, before geph's control
-// RPC (net_status) has answered once. After that the LIVE country list is cached
-// to geph-exits.json and used instead — no hardcoded catalog. Country-level to
-// match the {country: cc} exit_constraint we emit; flags are derived from the CC
-// at runtime (cc_flag), so there's no hardcoded flag/label table either.
-const EXITS_FALLBACK_CC: &[&str] = &["ca", "us", "ch", "de", "nl", "se", "jp", "sg"];
 
 fn status_updated_at(status: &Value) -> f64 {
     if status.get("schema_version").and_then(Value::as_u64) == Some(STATUS_SCHEMA_V2) {
@@ -1549,6 +1543,12 @@ fn geph_net_status_catalog() -> Option<Vec<(String, String, String)>> {
 
 type ExitCatalog = Vec<(String, String, String)>;
 
+#[derive(Debug, PartialEq, Eq)]
+enum ExitCatalogAvailability {
+    Available(ExitCatalog),
+    Unavailable,
+}
+
 struct ExitMenuItems {
     choices: Vec<(String, CheckMenuItem<tauri::Wry>)>,
     dynamic: Vec<MenuItemKind<tauri::Wry>>,
@@ -1570,32 +1570,26 @@ fn cache_exit_catalog(cache_path: Option<&Path>, catalog: &ExitCatalog) {
     }
 }
 
-fn fallback_exit_catalog() -> ExitCatalog {
-    EXITS_FALLBACK_CC
-        .iter()
-        .map(|cc| {
-            (
-                cc.to_string(),
-                format!("{} {}", cc_flag(cc), cc.to_uppercase()),
-                "core".to_string(),
-            )
-        })
-        .collect()
+fn exit_catalog_availability(catalog: Option<ExitCatalog>) -> ExitCatalogAvailability {
+    match catalog.filter(|catalog| !catalog.is_empty()) {
+        Some(catalog) => ExitCatalogAvailability::Available(catalog),
+        None => ExitCatalogAvailability::Unavailable,
+    }
 }
 
 /// Exit catalog for the tray menu. A known-good cached city list wins over a
-/// potentially slow control RPC, so a tray relaunch stays responsive. Fresh
-/// installs briefly use the country fallback until refresh_exit_menu receives
-/// the live city catalog and replaces it in place.
-fn exit_catalog(cache_path: Option<std::path::PathBuf>) -> Vec<(String, String, String)> {
+/// potentially slow control RPC, so a tray relaunch stays responsive. Until a
+/// live city catalog exists, the menu exposes an explicit unavailable state
+/// rather than inventing selectable country-level exits.
+fn exit_catalog(cache_path: Option<std::path::PathBuf>) -> ExitCatalogAvailability {
     if let Some(cached) = cached_exit_catalog(cache_path.as_deref()) {
-        return cached;
+        return exit_catalog_availability(Some(cached));
     }
-    if let Some(live) = geph_net_status_catalog() {
-        cache_exit_catalog(cache_path.as_deref(), &live);
-        return live;
+    let live = geph_net_status_catalog();
+    if let Some(catalog) = live.as_ref() {
+        cache_exit_catalog(cache_path.as_deref(), catalog);
     }
-    fallback_exit_catalog()
+    exit_catalog_availability(live)
 }
 
 fn refresh_exit_menu(
@@ -1611,10 +1605,15 @@ fn refresh_exit_menu(
                 cache_exit_catalog(cache_path.as_deref(), &live);
                 let selected = geph_field(&app, "exit").unwrap_or_else(|| "auto".into());
                 let ui_app = app.clone();
+                let catalog = ExitCatalogAvailability::Available(live);
                 let _ = app.run_on_main_thread(move || {
-                    if let Err(error) =
-                        replace_exit_menu_items(&ui_app, &geph_menu, &exit_items, &selected, &live)
-                    {
+                    if let Err(error) = replace_exit_menu_items(
+                        &ui_app,
+                        &geph_menu,
+                        &exit_items,
+                        &selected,
+                        &catalog,
+                    ) {
                         eprintln!("geph exit menu refresh unavailable: {error}");
                     }
                 });
@@ -1629,13 +1628,29 @@ fn replace_exit_menu_items(
     geph_menu: &Submenu<tauri::Wry>,
     exit_items: &Arc<Mutex<ExitMenuItems>>,
     selected: &str,
-    catalog: &ExitCatalog,
+    catalog: &ExitCatalogAvailability,
 ) -> tauri::Result<()> {
     let mut items = exit_items.lock().expect("exit menu lock poisoned");
     for item in items.dynamic.drain(..) {
         geph_menu.remove(&item)?;
     }
     items.choices.retain(|(value, _)| value == "auto");
+
+    let catalog = match catalog {
+        ExitCatalogAvailability::Available(catalog) => catalog,
+        ExitCatalogAvailability::Unavailable => {
+            let separator = PredefinedMenuItem::separator(app)?;
+            geph_menu.append(&separator)?;
+            items.dynamic.push(MenuItemKind::Predefined(separator));
+            let unavailable =
+                MenuItemBuilder::with_id("exit_locations_unavailable", tr("Locations unavailable"))
+                    .enabled(false)
+                    .build(app)?;
+            geph_menu.append(&unavailable)?;
+            items.dynamic.push(MenuItemKind::MenuItem(unavailable));
+            return Ok(());
+        }
+    };
 
     let mut categories: Vec<String> = catalog
         .iter()
@@ -2534,7 +2549,7 @@ pub fn run() {
                 eprintln!("geph LaunchAgent setup unavailable: {error}");
             }
             // A fresh install may not have Geph's city catalog yet. Once its control
-            // RPC is ready, replace the temporary country fallback in this live menu.
+            // RPC is ready, replace the explicit unavailable state in this live menu.
             refresh_exit_menu(
                 app.handle().clone(),
                 app.path()
@@ -2569,15 +2584,15 @@ mod tests {
         admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
         daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
         diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
-        geph_launch_agent_paths, geph_launch_agent_plist, geph_launch_domain, geph_launch_target,
-        geph_launcher_script, harden_geph_dir, install_diagnostic_value,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon, status_for_tray, status_updated_at, sync_private_executable,
-        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        valid_bundled_daemon, write_atomic_if_changed, write_diagnostic_snapshot_file,
-        write_private_atomic, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
-        GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
+        exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
+        geph_launch_domain, geph_launch_target, geph_launcher_script, harden_geph_dir,
+        install_diagnostic_value, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, redact_sensitive_text, route_class_health, routing_health_summary,
+        shell_quote, should_recover_daemon, status_for_tray, status_updated_at,
+        sync_private_executable, system_proxy_active_from_scutil, system_proxy_from_status,
+        telegram_proxy_detail, valid_bundled_daemon, write_atomic_if_changed,
+        write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
+        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2618,9 +2633,20 @@ mod tests {
         ];
         std::fs::write(&path, serde_json::to_string(&expected).unwrap()).unwrap();
 
-        assert_eq!(exit_catalog(Some(path.clone())), expected);
+        assert_eq!(
+            exit_catalog(Some(path.clone())),
+            ExitCatalogAvailability::Available(expected)
+        );
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unavailable_exit_catalog_never_invents_country_choices() {
+        assert_eq!(
+            exit_catalog_availability(None),
+            ExitCatalogAvailability::Unavailable
+        );
     }
 
     #[test]
