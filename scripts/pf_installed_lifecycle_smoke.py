@@ -296,6 +296,15 @@ def _read_status() -> dict | None:
         return None
 
 
+def _daemon_status(status: dict | None) -> dict | None:
+    if not isinstance(status, dict):
+        return None
+    if status.get("schema_version") == 2:
+        daemon = status.get("daemon")
+        return daemon if isinstance(daemon, dict) else None
+    return status
+
+
 def _wait_for_status(
     expected: str,
     *,
@@ -306,12 +315,14 @@ def _wait_for_status(
     last = None
     while time.monotonic() < deadline:
         last = _read_status()
-        if last and last.get("state") == expected:
-            pid = int(last.get("pid") or 0)
-            fresh = time.time() - float(last.get("ts") or 0) < 15
+        daemon = _daemon_status(last)
+        if daemon and daemon.get("state") == expected:
+            pid = int(daemon.get("pid") or 0)
+            updated_at = daemon.get("updated_at", daemon.get("ts", 0))
+            fresh = time.time() - float(updated_at or 0) < 15
             changed = previous_pid is None or (pid and pid != previous_pid)
             if fresh and changed:
-                return last
+                return daemon
         time.sleep(0.5)
     raise LifecycleError(f"daemon did not reach {expected}; last status={last!r}")
 

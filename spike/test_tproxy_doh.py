@@ -408,6 +408,12 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
     tproxy._record_strategy_result("discord.com", "split64+fake", True, now=100.0)
+    tproxy.route_health_event(
+        tproxy.SERVICE_DISCORD,
+        tproxy.ROUTE_LOCAL_BYPASS,
+        "discord.com",
+        now=100.0,
+    )
     tproxy._dead.clear()
     tproxy._dead["blocked.example"] = 999.0
     tproxy._system_dns_cache.update({
@@ -421,58 +427,54 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     tproxy.write_status("active", "en0", "en0")
 
     status = json.loads(status_path.read_text())
-    assert status["state"] == "active"
-    assert status["version"] == tproxy.DAEMON_VERSION
-    assert status["iface"] == "en0"
-    assert status["voice"] == "en0"
-    assert status["hosts_learned"] == 1
-    assert status["dead"] == 1
-    assert status["geph"] == "up"
-    assert status["auto_geo_exit"]["enabled"] is True
-    assert status["auto_geo_exit"]["learned"] == 0
-    assert status["auto_geo_exit"]["pending"] == 0
-    assert status["routing_policy"]["version"] == tproxy.ROUTE_POLICY_VERSION
-    assert status["routing_policy"]["source"] == tproxy.ROUTE_POLICY_SOURCE
-    assert len(status["routing_policy"]["sha256"]) == 64
-    assert status["routing_policy"]["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
-        len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
-    )
-    assert status["routing_policy_storage"]["state"] == "bundled"
-    assert status["routing_policy_storage"]["source"] == tproxy.ROUTE_POLICY_SOURCE
-    assert status["routing_policy_remote"]["state"] == "disabled"
-    assert status["strategy_scores"]["hosts"] == 1
-    assert status["strategy_scores"]["groups"][tproxy.SERVICE_DISCORD]["hosts"] == 1
-    assert status["telegram_proxy"] in {"ready", "starting", "error"}
-    assert status["route_health"]["discord"]["last_route_class"] == tproxy.ROUTE_LOCAL_BYPASS
-    assert status["system_proxy"]["state"] == "off"
-    assert status["system_proxy"]["kind"] == ""
-    assert status["system_proxy"]["stale_exceptions"] is False
-    assert status["system_dns"]["state"] == "xbox_dns"
-    assert status["system_dns"]["providers"] == "xbox_dns"
-    assert status["system_dns"]["servers"] == ["111.88.96.50", "111.88.96.51"]
-    assert status["system_dns"]["managed_by_slipstream"] is False
-    assert status["system_dns"]["resolution_checks"]["state"] == "ok"
-    assert status["smart_dns"] == {
-        "state": "available",
-        "providers": "xbox_dns",
-        "enabled_groups": [],
-        "last_failure_host": "",
-        "last_failure_reason": "",
-        "last_failure_at": 0.0,
+    assert status["schema_version"] == tproxy.STATUS_SCHEMA_VERSION
+    assert status["daemon"]["state"] == "active"
+    assert status["daemon"]["version"] == tproxy.DAEMON_VERSION
+    assert status["daemon"]["hosts_learned"] == 1
+    assert status["daemon"]["dead_hosts"] == 1
+    assert status["routes"][tproxy.ROUTE_LOCAL_BYPASS]["state"] == tproxy.HEALTH_OK
+    assert status["backends"]["geph"]["state"] == "up"
+    auto_geo_exit = status["backends"]["geph"]["auto_geo_exit"]
+    assert auto_geo_exit["enabled"] is True
+    assert auto_geo_exit["learned"] >= 0
+    assert auto_geo_exit["pending"] >= 0
+    assert "last_host" not in auto_geo_exit
+    assert "last_reason" not in auto_geo_exit
+    assert status["backends"]["telegram"]["state"] in {"ready", "starting", "error"}
+    assert status["environment"]["proxy"] == {
+        "state": "off",
+        "kind": "",
         "managed_by_slipstream": False,
     }
-    assert status["pf_state"] == {
+    assert status["environment"]["dns"] == {
+        "state": "xbox_dns",
+        "providers": "xbox_dns",
+        "managed_by_slipstream": False,
+        "resolution_state": "ok",
+    }
+    assert status["environment"]["pf"] == {
+        "state": "off",
         "applied": False,
         "enabled": False,
-        "anchor": tproxy.PF_ANCHOR,
-        "parent_loaded": False,
-        "interceptor_conflicts": [],
         "rules_loaded": False,
+        "interceptor_conflict": False,
     }
-    assert status["geph_detail"]["port"] == 0
-    assert status["rearm"]["last_reason"] == ""
-    assert status["rearm"]["count"] == 0
+    assert status["recovery"]["last_action"] == "none"
+    assert status["recovery"]["count"] == 0
     assert "canaries" in status
+    assert status_path.stat().st_mode & 0o777 == tproxy.STATUS_PUBLIC_MODE
+
+    public_text = status_path.read_text()
+    for private_value in (
+        "example.com",
+        "blocked.example",
+        "discord.com",
+        "111.88.96.50",
+        "142.250.186.46",
+        "split64+fake",
+        "en0",
+    ):
+        assert private_value not in public_text
 
 
 def test_strategy_score_snapshot_is_aggregated_without_hostnames():

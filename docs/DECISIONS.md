@@ -23,6 +23,7 @@ survive across sessions and agents.
 | 2026-07-11 | Transparent PF interception is armed only after the local listener and the enabled geo-exit backend have a verified usable port. A runtime geo-exit failure pauses only `com.apple/slipstream`; retries use the native path until a bounded hold expires and backend readiness is re-established. | Active |
 | 2026-07-11 | Geph health hysteresis may preserve a previously verified port, but it must never invent an `up` state on cold start. Endpoint failures do not let the tray restart a live Geph process; LaunchAgent `KeepAlive` handles process death, and any future live-process restart must be daemon-coordinated after routing is idle. | Active |
 | 2026-07-11 | Packaged lifecycle qualification installs the frozen daemon from the built `.app` and preserves an independent PF connection/state through reinstall, restart, and uninstall. Cross-version rollback may begin only from the first release that passes this safety gate; pre-anchor releases are not executable rollback fixtures. | Active |
+| 2026-07-11 | World-readable daemon status uses privacy-bounded StatusV2. It exposes aggregate route, backend, environment, and recovery state, never hostname, IP, secret, or raw failure evidence. The tray accepts V1 and V2 during the transition release. | Active |
 
 ## Notes
 
