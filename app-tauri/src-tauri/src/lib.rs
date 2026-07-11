@@ -729,12 +729,14 @@ fn diagnostic_summary_value(status: Option<&Value>) -> Value {
 fn diagnostic_snapshot_value(
     app_version: &str,
     status: Option<Value>,
+    geph_lifecycle: Value,
     generated_at: f64,
     log_tail: Option<Value>,
     daemon_recovery: Option<Value>,
     bundled_daemon: Option<&Path>,
 ) -> Value {
-    let summary = diagnostic_summary_value(status.as_ref());
+    let mut summary = diagnostic_summary_value(status.as_ref());
+    summary["geph_lifecycle"] = geph_lifecycle;
     let mut snapshot = json!({
         "app": {
             "name": "Slipstream",
@@ -800,9 +802,16 @@ fn reveal_file_in_finder(path: &Path) {
 
 fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
     let bundled_daemon = bundled_daemon_path(app);
+    let status = read_status();
+    let daemon_status_present = status.is_some();
     let snapshot = diagnostic_snapshot_value(
         &app.package_info().version.to_string(),
-        read_status(),
+        status,
+        geph_lifecycle_diagnostic_value(
+            Path::new(INSTALLED_DAEMON).exists() && Path::new(LAUNCHD_PLIST).exists(),
+            daemon_status_present,
+            current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
+        ),
         unix_now_secs(),
         Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
         Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
@@ -2086,6 +2095,34 @@ fn geph_launch_agent_loaded(uid: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Diagnostics may report the app-owned launch job, but never infer PF state
+/// without privileged evidence and never expose PID, config path, or secrets.
+fn geph_lifecycle_diagnostic_value(
+    daemon_installed: bool,
+    daemon_status_present: bool,
+    launch_agent_loaded: bool,
+) -> Value {
+    let root_daemon = if daemon_status_present {
+        "running"
+    } else if daemon_installed {
+        "installed"
+    } else {
+        "absent"
+    };
+    let state = if !daemon_installed && !daemon_status_present && launch_agent_loaded {
+        "sidecar_only"
+    } else if launch_agent_loaded {
+        "managed"
+    } else {
+        "off"
+    };
+    json!({
+        "state": state,
+        "root_daemon": root_daemon,
+        "owned_launch_agent": if launch_agent_loaded { "loaded" } else { "absent" },
+    })
+}
+
 fn geph_launch_agent_bootout(uid: &str) -> bool {
     Command::new("/bin/launchctl")
         .args(["bootout", &geph_launch_target(uid)])
@@ -2687,11 +2724,12 @@ mod tests {
         daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
         diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
         exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
-        geph_launch_domain, geph_launch_target, geph_launcher_script, harden_geph_dir,
-        install_diagnostic_value, keychain_delete_args, launchd_plist_uses_bundled_daemon,
-        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text,
-        remove_owned_geph_runtime, route_class_health, routing_health_summary, shell_quote,
-        should_recover_daemon, status_for_tray, status_updated_at, sync_private_executable,
+        geph_launch_domain, geph_launch_target, geph_launcher_script,
+        geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
+        keychain_delete_args, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
+        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
+        status_for_tray, status_updated_at, sync_private_executable,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
         uninstall_dialog_script_for, uninstall_shell, valid_bundled_daemon,
         write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
@@ -3001,6 +3039,7 @@ mod tests {
                     }
                 }
             })),
+            geph_lifecycle_diagnostic_value(false, true, true),
             123.0,
             Some(json!({
                 "available": true,
@@ -3019,6 +3058,7 @@ mod tests {
 
         assert_eq!(snapshot["app"]["version"], "0.1.5");
         assert_eq!(snapshot["summary"]["daemon_state"], "active");
+        assert_eq!(snapshot["summary"]["geph_lifecycle"]["state"], "managed");
         assert_eq!(snapshot["summary"]["daemon_version"], "0.1.5");
         assert_eq!(snapshot["summary"]["routes"]["local_bypass"], "ok");
         assert_eq!(snapshot["summary"]["routes"]["geo_exit"], "ok");
@@ -3077,6 +3117,28 @@ mod tests {
         assert_eq!(summary["routing_policy"]["source"], "unknown");
         assert_eq!(summary["routing_policy"]["sha256"], "");
         assert_eq!(summary["problems"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn geph_lifecycle_reports_owned_sidecar_without_claiming_pf_state() {
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, true);
+        let text = serde_json::to_string(&lifecycle).unwrap();
+
+        assert_eq!(lifecycle["state"], "sidecar_only");
+        assert_eq!(lifecycle["root_daemon"], "absent");
+        assert_eq!(lifecycle["owned_launch_agent"], "loaded");
+        assert!(!text.contains("pid"));
+        assert!(!text.contains("config"));
+        assert!(!text.contains("pf"));
+    }
+
+    #[test]
+    fn geph_lifecycle_marks_no_owned_sidecar_as_off() {
+        let lifecycle = geph_lifecycle_diagnostic_value(false, false, false);
+
+        assert_eq!(lifecycle["state"], "off");
+        assert_eq!(lifecycle["root_daemon"], "absent");
+        assert_eq!(lifecycle["owned_launch_agent"], "absent");
     }
 
     #[test]

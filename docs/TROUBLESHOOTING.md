@@ -60,6 +60,11 @@ unnamed `osascript` password prompts.
 routing service and owned Geph LaunchAgent running. This preserves routing if
 the menu process exits or crashes.
 
+`Copy Diagnostics` reports `summary.geph_lifecycle: sidecar_only` when the root
+daemon is absent but Slipstream's own Geph LaunchAgent remains loaded. This does
+not claim an active PF redirect; it identifies the remaining user-side job so it
+is not mistaken for an external VPN or proxy.
+
 To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
 native dialog. It removes the Slipstream root daemon and private PF state first,
 then removes only Slipstream's verified Geph LaunchAgent, private runtime, and
