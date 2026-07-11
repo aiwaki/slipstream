@@ -102,9 +102,12 @@ _doh_inflight = {}             # host -> asyncio.Future (collapse concurrent DoH
 DEAD_TTL = 60.0
 _dead = {}                     # host -> expiry_monotonic
 
-# Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
+# Public status the menu-bar app polls. It intentionally carries only a compact
+# health contract; raw host-level evidence stays in the owner-only log.
 STATUS_PATH = "/var/run/slipstream.status"
-DAEMON_VERSION = "0.1.7"
+STATUS_SCHEMA_VERSION = 2
+STATUS_PUBLIC_MODE = 0o644
+DAEMON_VERSION = "0.1.8"
 _conn_count = 0                # live proxied connections
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
@@ -3484,58 +3487,168 @@ def rearm_status_snapshot(now=None):
     }
 
 
+def _public_route_state(route_health, route_class):
+    matching = [
+        item for item in route_health.values()
+        if item.get("last_route_class") == route_class
+    ]
+    if not matching:
+        return {"state": HEALTH_UNKNOWN, "updated_at": 0.0}
+    best = max(
+        matching,
+        key=lambda item: (
+            _canary_state_rank(item.get("state", HEALTH_UNKNOWN)),
+            float(item.get("last_checked", 0.0) or 0.0),
+        ),
+    )
+    return {
+        "state": best.get("state", HEALTH_UNKNOWN),
+        "updated_at": float(best.get("last_checked", 0.0) or 0.0),
+    }
+
+
+def _public_pf_status(pf_state):
+    conflict = bool(pf_state.get("interceptor_conflicts"))
+    if conflict:
+        state = "conflict"
+    elif pf_state.get("rules_loaded"):
+        state = "ready"
+    elif pf_state.get("enabled"):
+        state = "inactive"
+    else:
+        state = "off"
+    return {
+        "state": state,
+        "applied": bool(pf_state.get("applied")),
+        "enabled": bool(pf_state.get("enabled")),
+        "rules_loaded": bool(pf_state.get("rules_loaded")),
+        "interceptor_conflict": conflict,
+    }
+
+
+def _public_proxy_status(proxy):
+    return {
+        "state": proxy.get("state", "unknown"),
+        "kind": proxy.get("kind", ""),
+        "managed_by_slipstream": bool(proxy.get("managed_by_slipstream")),
+    }
+
+
+def _public_dns_status(dns):
+    resolution = dns.get("resolution_checks")
+    if not isinstance(resolution, dict):
+        resolution = {}
+    return {
+        "state": dns.get("state", "unknown"),
+        "providers": dns.get("providers", ""),
+        "managed_by_slipstream": bool(dns.get("managed_by_slipstream")),
+        "resolution_state": resolution.get("state", "unknown"),
+    }
+
+
+def status_v2_snapshot(state, iface, voice_iface, now=None):
+    del iface, voice_iface  # Interface names are not part of the public contract.
+    now = time.time() if now is None else now
+    route_health = route_health_snapshot(now)
+    pf_state = pf_state_snapshot(PROXY_PORT)
+    system_proxy = current_system_proxy_status()
+    system_dns = current_system_dns_status()
+    canaries = canary_status_snapshot()
+    rearm = rearm_status_snapshot(now)
+    geph_restart = geph_restart_hint_snapshot(now)
+    auto_geo_exit = auto_geo_exit_status_snapshot(now)
+    telegram = tgws_status(now)
+    geph_state = "up" if _geph_up else ("off" if not GEPH_ENABLED else "down")
+
+    if geph_restart["recommended"]:
+        recovery_state = "attention"
+        recovery_reason = "owned_geph_restart_recommended"
+    elif rearm["last_at"]:
+        recovery_state = "rearmed"
+        recovery_reason = ""
+    else:
+        recovery_state = "idle"
+        recovery_reason = ""
+
+    return {
+        "schema_version": STATUS_SCHEMA_VERSION,
+        "daemon": {
+            "version": DAEMON_VERSION,
+            "state": state,
+            "pid": os.getpid(),
+            "updated_at": now,
+            "connections": _conn_count,
+            "hosts_learned": len(_strat_cache),
+            "dead_hosts": len(_dead),
+        },
+        "routes": {
+            route_class: _public_route_state(route_health, route_class)
+            for route_class in (ROUTE_LOCAL_BYPASS, ROUTE_GEO_EXIT, ROUTE_DIRECT)
+        },
+        "backends": {
+            "local_engine": {
+                "state": (
+                    "ready" if pf_state.get("rules_loaded")
+                    else ("conflict" if pf_state.get("interceptor_conflicts") else "inactive")
+                ),
+            },
+            "geph": {
+                "state": geph_state,
+                "owned": bool(_geph_owned),
+                "port_conflict": bool(_geph_port_conflict),
+                "external_detected": bool(_external_geph_detected),
+                "restart_recommended": bool(geph_restart["recommended"]),
+                "auto_geo_exit": {
+                    "enabled": bool(auto_geo_exit["enabled"]),
+                    "learned": int(auto_geo_exit["learned"]),
+                    "pending": int(auto_geo_exit["pending"]),
+                    "last_state": auto_geo_exit["last_state"],
+                    "updated_at": float(auto_geo_exit["last_at"] or 0.0),
+                },
+            },
+            "telegram": {
+                "state": telegram["telegram_proxy"],
+                "suggested": now < _tg_proxy_suggest_until,
+            },
+        },
+        "environment": {
+            "pf": _public_pf_status(pf_state),
+            "proxy": _public_proxy_status(system_proxy),
+            "dns": _public_dns_status(system_dns),
+        },
+        "recovery": {
+            "state": recovery_state,
+            "last_action": rearm["last_reason"] or "none",
+            "reason": recovery_reason,
+            "updated_at": max(
+                float(rearm["last_at"] or 0.0),
+                float(geph_restart["last_wake_at"] or 0.0),
+            ),
+            "count": int(rearm["count"]),
+        },
+        "canaries": {
+            "running": bool(canaries["running"]),
+            "total": int(canaries["total"]),
+            "ok": int(canaries["ok"]),
+            "warnings": int(canaries["warnings"]),
+            "degraded": int(canaries["degraded"]),
+            "unknown": int(canaries["unknown"]),
+            "next_due_in": int(canaries["next_due_in"]),
+        },
+    }
+
+
 def write_status(state, iface, voice_iface):
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
         prune_auto_geph(now)
         consume_telegram_proxy_acceptance()
-        geph_restart = geph_restart_hint_snapshot(now)
-        st = {
-            "state": state,            # "active" | "dormant" | "conflict"
-            "version": DAEMON_VERSION,
-            "pid": os.getpid(),
-            "ts": now,
-            "conns": _conn_count,
-            "iface": iface or "",
-            "voice": voice_iface or "",
-            "hosts_learned": len(_strat_cache),
-            "dead": len(_dead),
-            "geph": "up" if _geph_up else ("off" if not GEPH_ENABLED else "down"),
-            "geph_learned": len(_auto_geph),
-            "auto_geo_exit": auto_geo_exit_status_snapshot(now),
-            "routing_policy": route_policy_status_snapshot(),
-            "routing_policy_storage": route_policy_storage_snapshot(),
-            "routing_policy_remote": route_policy_remote_snapshot(),
-            "strategy_scores": strategy_score_snapshot(),
-            "telegram_proxy_suggest": now < _tg_proxy_suggest_until,
-            "telegram_direct_failures": len(_tg_direct_failures),
-            "route_health": route_health_snapshot(now),
-            "system_proxy": current_system_proxy_status(),
-            "system_dns": current_system_dns_status(),
-            "smart_dns": smart_dns_status_snapshot(now),
-            "pf_state": pf_state_snapshot(PROXY_PORT),
-            "rearm": rearm_status_snapshot(now),
-            "geph_detail": {
-                "port": _geph_port or 0,
-                "owned": bool(_geph_owned),
-                "port_conflict": bool(_geph_port_conflict),
-                "external_detected": bool(_external_geph_detected),
-                "failure_reason": _geph_last_failure["reason"],
-                "last_failure_host": _geph_last_failure["host"],
-                "last_failure_at": _geph_last_failure["ts"],
-                "restart_recommended": geph_restart["recommended"],
-                "restart_reason": geph_restart["reason"],
-                "restart_failures_5m": geph_restart["failures_5m"],
-                "restart_hosts_5m": geph_restart["hosts_5m"],
-                "last_wake_at": geph_restart["last_wake_at"],
-            },
-            "canaries": canary_status_snapshot(),
-        }
-        st.update(tgws_status(now))
+        st = status_v2_snapshot(state, iface, voice_iface, now)
         tmp = STATUS_PATH + ".tmp"
         with open(tmp, "w") as f:
             json.dump(st, f)
+        os.chmod(tmp, STATUS_PUBLIC_MODE)
         os.replace(tmp, STATUS_PATH)
     except Exception:
         pass

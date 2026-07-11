@@ -72,10 +72,11 @@ change, and sleep/wake without manual buttons.
 ## M2 - Contracts And Code
 
 - Introduce privacy-bounded `StatusV2` sections for daemon, routes, backends,
-  environment, and recovery state.
-- Keep hostname-level and detailed network events out of world-readable status;
-  make raw logs `0600` and diagnostic exports sanitized/user-owned.
-- Let the tray read V1 and V2 for one transition release.
+  environment, and recovery state. Done in the transition release.
+- Keep hostname-level and detailed network events out of world-readable status.
+  Done for StatusV2; raw logs `0600` remains pending. Diagnostic exports stay
+  sanitized and user-owned.
+- Let the tray read V1 and V2 for one transition release. Done.
 - Split the Python daemon into policy, reducer, probes, Geph backend, macOS PF
   adapter, and lifecycle modules.
 - Split the Rust tray into status client, diagnostics, installer, Geph config,

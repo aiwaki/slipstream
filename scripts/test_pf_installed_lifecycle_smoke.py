@@ -122,6 +122,17 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertTrue(lifecycle._rule_has_port("port 1080", 1080))
         self.assertFalse(lifecycle._rule_has_port("port = 4430", 443))
 
+    def test_status_daemon_view_accepts_v1_and_v2(self) -> None:
+        v1 = {"state": "active", "pid": 11, "ts": 100.0}
+        v2 = {
+            "schema_version": 2,
+            "daemon": {"state": "active", "pid": 22, "updated_at": 200.0},
+        }
+
+        self.assertEqual(lifecycle._daemon_status(v1), v1)
+        self.assertEqual(lifecycle._daemon_status(v2), v2["daemon"])
+        self.assertIsNone(lifecycle._daemon_status({"schema_version": 2}))
+
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
