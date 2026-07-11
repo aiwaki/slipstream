@@ -62,6 +62,8 @@ and uninstalls it. A non-root TCP connection and its PF state must survive the
 entire cycle, the sibling sentinel rules must remain byte-for-byte unchanged,
 and the global PF snapshot must match after cleanup. The script refuses to run
 unless GitHub Actions and `SLIPSTREAM_DISPOSABLE_CI=1` are both present.
+The qualified cycle passes with dormant cold install, a new PID after restart,
+clean uninstall, preserved sentinel connection/state, and unchanged global PF.
 
 ## Priority Order
 
