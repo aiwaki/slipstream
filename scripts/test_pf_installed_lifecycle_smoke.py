@@ -82,6 +82,11 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 with self.assertRaises(lifecycle.LifecycleError):
                     lifecycle._require_disposable_ci()
 
+    def test_pf_rule_port_parser_accepts_macos_output(self) -> None:
+        self.assertTrue(lifecycle._rule_has_port("to any port = 443", 443))
+        self.assertTrue(lifecycle._rule_has_port("port 1080", 1080))
+        self.assertFalse(lifecycle._rule_has_port("port = 4430", 443))
+
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

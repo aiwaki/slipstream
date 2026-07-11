@@ -281,10 +281,17 @@ def _assert_sentinel_state(runner: pf.PfctlRunner) -> None:
         raise LifecycleError("sentinel PF state disappeared")
 
 
+def _rule_has_port(rules: str, port: int) -> bool:
+    return bool(re.search(rf"\bport\s*(?:=\s*)?{port}\b", rules))
+
+
 def _assert_anchor_active(runner: pf.PfctlRunner) -> None:
     nat, rules = pf._anchor_snapshot(runner, pf.SLIPSTREAM_ANCHOR)
-    if "port 443" not in nat or "port 1080" not in nat or "route-to" not in rules:
-        raise LifecycleError("installed daemon did not arm the production private anchor")
+    if not _rule_has_port(nat, 443) or not _rule_has_port(nat, 1080) or "route-to" not in rules:
+        raise LifecycleError(
+            "installed daemon did not arm the production private anchor: "
+            f"nat={nat!r}, rules={rules!r}"
+        )
 
 
 def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
