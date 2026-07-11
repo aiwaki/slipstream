@@ -27,7 +27,9 @@
 - Geph is only for geo-exit cases where the service rejects Russian IPs.
 - Do not globally block QUIC or UDP/443.
 - Do not mutate external DNS, proxy, PAC, VPN, or user-managed DNS such as
-  `xbox-dns.ru`; detect and warn only.
+  `xbox-dns.ru`. Its app-owned direct DoH fallback is allowed only for one
+  exact unknown host after a local failure; it never changes resolver settings
+  or sends Discord/YouTube through Geph.
 
 ## Knowledge Capture
 

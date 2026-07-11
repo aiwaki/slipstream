@@ -29,6 +29,8 @@ def reset_smart_dns_state():
         host: list(values)
         for host, values in tproxy._auto_geph_runtime_failures.items()
     }
+    xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
+    xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
     auto_last_status = dict(tproxy._auto_geph_last_status)
     local_resweep_active = dict(tproxy._local_bypass_resweep_active)
     local_resweep_last = dict(tproxy._local_bypass_resweep_last)
@@ -58,6 +60,8 @@ def reset_smart_dns_state():
         tproxy._auto_geph_confirming.clear()
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_runtime_failures.clear()
+        tproxy._xbox_dns_candidates.clear()
+        tproxy._xbox_dns_attempts.clear()
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
@@ -109,6 +113,10 @@ def reset_smart_dns_state():
         tproxy._auto_geph_last_probe.update(auto_last_probe)
         tproxy._auto_geph_runtime_failures.clear()
         tproxy._auto_geph_runtime_failures.update(auto_runtime_failures)
+        tproxy._xbox_dns_candidates.clear()
+        tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
+        tproxy._xbox_dns_attempts.clear()
+        tproxy._xbox_dns_attempts.update(xbox_dns_attempts)
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_active.update(local_resweep_active)
         tproxy._local_bypass_resweep_last.clear()
@@ -303,17 +311,19 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
     assert not (dst / "fresh.txt").exists()
 
 
-def test_copy_script_runtime_includes_primes(tmp_path):
+def test_copy_script_runtime_includes_local_modules(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import primes\n")
+    (source / "tproxy.py").write_text("import primes\nimport xbox_dns\n")
     (source / "primes.py").write_text("VALUE = 1\n")
+    (source / "xbox_dns.py").write_text("VALUE = 2\n")
 
     tproxy._copy_script_runtime(source / "tproxy.py", install)
 
-    assert (install / "tproxy.py").read_text() == "import primes\n"
+    assert (install / "tproxy.py").read_text() == "import primes\nimport xbox_dns\n"
     assert (install / "primes.py").read_text() == "VALUE = 1\n"
+    assert (install / "xbox_dns.py").read_text() == "VALUE = 2\n"
 
 
 def test_copy_script_runtime_fails_before_partial_install(tmp_path):
@@ -3495,12 +3505,171 @@ def test_auto_geph_candidate_allows_only_unknown_hosts():
     assert not tproxy._auto_geph_candidate_allowed("kubernetes.io")
 
 
+def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle():
+    activity = tproxy._RelayActivity(
+        last_downstream_at=100.0,
+        client_end_at=130.0,
+        server_end_at=130.1,
+    )
+
+    assert not tproxy._local_stream_stalled(activity, now=130.1)
+
+    activity.client_read_failed = True
+    assert tproxy._local_stream_stalled(activity, now=130.1)
+
+    activity.client_read_failed = False
+    activity.downstream_write_failed = True
+    assert tproxy._local_stream_stalled(activity, now=130.1)
+
+    activity.downstream_write_failed = False
+    activity.last_downstream_at = 120.0
+    assert not tproxy._local_stream_stalled(activity, now=130.1)
+
+
+def test_pump_records_transport_error_but_not_orderly_eof():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class ResetReader:
+        async def read(self, _size):
+            raise ConnectionResetError("client reset")
+
+    class Writer:
+        def close(self):
+            pass
+
+    orderly = tproxy._RelayActivity(last_downstream_at=100.0)
+    assert asyncio.run(tproxy.pump(EofReader(), Writer(), orderly)) == 0
+    assert orderly.client_end_at
+    assert not orderly.client_read_failed
+
+    aborted = tproxy._RelayActivity(last_downstream_at=100.0)
+    assert asyncio.run(tproxy.pump(ResetReader(), Writer(), aborted)) == 0
+    assert aborted.client_end_at
+    assert aborted.client_read_failed
+
+
+def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
+    host = "crystalidea.example"
+    tproxy._strat_cache[host] = "split64+fake"
+
+    try:
+        assert tproxy.note_local_stream_stall(host, "split64+fake")
+        assert host not in tproxy._strat_cache
+        assert tproxy._xbox_dns_candidate_active(host)
+        assert not tproxy.geph_route(host)
+        assert [strategy["name"] for strategy in tproxy.strategy_order(host)][0] == "split16+fake"
+
+        tproxy._strat_cache["updates.discord.com"] = "split64+fake"
+        assert not tproxy.note_local_stream_stall("updates.discord.com", "split64+fake")
+        assert tproxy._strat_cache["updates.discord.com"] == "split64+fake"
+        assert not tproxy._xbox_dns_candidate_active("updates.discord.com")
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+
+
+def test_xbox_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
+    calls = []
+
+    async def resolve(host):
+        assert host == "payments.example.com"
+        return ["203.0.113.42"]
+
+    async def dial(ip, port, head, body, host, strategy):
+        calls.append((ip, port, host, strategy["name"], strategy["fake"]))
+        return ("reader", "writer", b"server-first")
+
+    monkeypatch.setattr(tproxy, "xbox_dns_resolve_async", resolve)
+    monkeypatch.setattr(tproxy, "dial_strategy", dial)
+
+    result = asyncio.run(
+        tproxy._try_xbox_dns_local_connect(
+            "payments.example.com",
+            443,
+            b"head",
+            b"body",
+        )
+    )
+
+    assert result == ("203.0.113.42", ("reader", "writer", b"server-first"))
+    assert calls == [("203.0.113.42", 443, "payments.example.com", "plain", False)]
+    assert tproxy._xbox_dns_attempted_recently("payments.example.com")
+
+
+def test_xbox_dns_fallback_excludes_discord_and_youtube(monkeypatch):
+    calls = []
+
+    async def resolve(host):
+        calls.append(host)
+        return ["203.0.113.42"]
+
+    monkeypatch.setattr(tproxy, "xbox_dns_resolve_async", resolve)
+
+    assert asyncio.run(
+        tproxy._try_xbox_dns_local_connect("updates.discord.com", 443, b"head", b"body")
+    ) is None
+    assert asyncio.run(
+        tproxy._try_xbox_dns_local_connect(
+            "rr2---sn-ntq7yner.googlevideo.com", 443, b"head", b"body"
+        )
+    ) is None
+    assert calls == []
+
+
+def test_auto_geph_waits_for_xbox_dns_attempt(monkeypatch):
+    host = "payments.example.com"
+    confirmations = []
+
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    for index in range(tproxy.AUTO_GEPH_STORM):
+        tproxy.note_local_result(
+            host,
+            down_bytes=100,
+            duration=tproxy.AUTO_GEPH_HANG + 1,
+            now=100.0 + index,
+            confirmation_runner=lambda value: confirmations.append(value),
+        )
+
+    assert confirmations == []
+    assert tproxy._xbox_dns_candidate_active(host, now=103.0)
+
+    tproxy._xbox_dns_attempts[host] = 1_000.0
+    tproxy.note_local_result(
+        host,
+        down_bytes=100,
+        duration=tproxy.AUTO_GEPH_HANG + 1,
+        now=103.0,
+        confirmation_runner=lambda value: confirmations.append(value),
+    )
+
+    assert confirmations == [host]
+
+
+def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
+    host = "payments.example.com"
+
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    for index in range(tproxy.AUTO_GEPH_STORM):
+        tproxy.note_local_result(
+            host,
+            down_bytes=100,
+            duration=tproxy.AUTO_GEPH_HANG + 1,
+            now=100.0 + index,
+        )
+
+    assert tproxy._xbox_dns_candidate_active(host, now=103.0)
+    assert not tproxy.geph_route(host)
+
+
 def test_auto_geph_learns_exact_host_after_local_stalls_and_geph_payload(monkeypatch):
     saves = []
 
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 128)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(True))
+    tproxy._xbox_dns_attempts["payments.example.com"] = 1_000.0
 
     for idx in range(tproxy.AUTO_GEPH_STORM - 1):
         tproxy.note_local_result(
@@ -3570,6 +3739,7 @@ def test_auto_geph_requires_geph_payload_proof(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 0)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
+    tproxy._xbox_dns_attempts["payments.example.com"] = 1_000.0
 
     for idx in range(tproxy.AUTO_GEPH_STORM):
         tproxy.note_local_result(
