@@ -102,6 +102,7 @@ class PersistentSentinelConnection:
         self.gid = gid
         self.connection: socket.socket | None = None
         self.child_pid: int | None = None
+        self.child_error_fd: int | None = None
         self.counter = 0
 
     def start(self) -> None:
@@ -110,10 +111,12 @@ class PersistentSentinelConnection:
         listener.settimeout(6)
         listener.bind(("127.0.0.1", self.proxy_port))
         listener.listen(1)
+        error_read, error_write = os.pipe()
         pid = os.fork()
         if pid == 0:
             try:
                 listener.close()
+                os.close(error_read)
                 os.setgroups([])
                 os.setgid(self.gid)
                 os.setuid(self.uid)
@@ -127,9 +130,16 @@ class PersistentSentinelConnection:
                             break
                         client.sendall(data)
                 os._exit(0)
-            except BaseException:
+            except BaseException as exc:
+                try:
+                    os.write(error_write, repr(exc).encode("utf-8", errors="replace")[:1000])
+                except OSError:
+                    pass
                 os._exit(3)
 
+        os.close(error_write)
+        os.set_blocking(error_read, False)
+        self.child_error_fd = error_read
         self.child_pid = pid
         try:
             connection, _ = listener.accept()
@@ -164,9 +174,15 @@ class PersistentSentinelConnection:
                 if pid:
                     self.child_pid = None
                     child = f"exited:{os.waitstatus_to_exitcode(status)}"
+            detail = b""
+            if self.child_error_fd is not None:
+                try:
+                    detail = os.read(self.child_error_fd, 1000)
+                except BlockingIOError:
+                    pass
             raise LifecycleError(
                 f"sentinel echo mismatch after {label}; "
-                f"received={bytes(received)!r}; child={child}"
+                f"received={bytes(received)!r}; child={child}; detail={detail!r}"
             )
 
     def _stop_child(self) -> None:
@@ -195,6 +211,9 @@ class PersistentSentinelConnection:
             self.connection.close()
             self.connection = None
         self._stop_child()
+        if self.child_error_fd is not None:
+            os.close(self.child_error_fd)
+            self.child_error_fd = None
 
 
 def _require_disposable_ci() -> None:
@@ -284,9 +303,23 @@ def _release_pf_reference(runner: pf.PfctlRunner, token: str | None) -> None:
     runner.run("-X", token, check=True)
 
 
-def _assert_sentinel_state(runner: pf.PfctlRunner) -> None:
+def _sentinel_state_lines(runner: pf.PfctlRunner) -> tuple[str, ...]:
     states = runner.run("-s", "states", check=True).stdout
-    if str(SENTINEL_TARGET_PORT) not in states and str(SENTINEL_PROXY_PORT) not in states:
+    return tuple(
+        sorted(
+            line.strip()
+            for line in states.splitlines()
+            if str(SENTINEL_TARGET_PORT) in line or str(SENTINEL_PROXY_PORT) in line
+        )
+    )
+
+
+def _assert_sentinel_state(
+    runner: pf.PfctlRunner,
+    expected: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    lines = _sentinel_state_lines(runner)
+    if not lines:
         info = runner.run("-s", "info", check=True).stdout
         references = runner.run("-s", "References", check=True).stdout
         reference_count = sum(
@@ -297,6 +330,24 @@ def _assert_sentinel_state(runner: pf.PfctlRunner) -> None:
             "sentinel PF state disappeared; "
             f"pf_enabled={enabled}; reference_rows={reference_count}"
         )
+    if expected is not None and lines != expected:
+        raise LifecycleError(
+            f"sentinel PF state changed; before={expected!r}; after={lines!r}"
+        )
+    return lines
+
+
+def _daemon_pf_log_tail() -> tuple[str, ...]:
+    try:
+        lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ()
+    selected = [
+        line[-500:]
+        for line in lines
+        if any(word in line.lower() for word in (" pf ", "anchor", "legacy", "cleanup"))
+    ]
+    return tuple(selected[-20:])
 
 
 def _rule_has_port(rules: str, port: int) -> bool:
@@ -378,6 +429,7 @@ def run_lifecycle() -> dict:
     test_token: str | None = None
     sentinel: PersistentSentinelConnection | None = None
     sentinel_snapshot: tuple[str, str] | None = None
+    sentinel_states: tuple[str, ...] | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
 
@@ -402,7 +454,7 @@ def run_lifecycle() -> dict:
             gid,
         )
         sentinel.start()
-        _assert_sentinel_state(runner)
+        sentinel_states = _assert_sentinel_state(runner)
 
         system.run((sys.executable, str(SOURCE_DAEMON), "--install"))
         cold = _wait_for_status("dormant", timeout=90)
@@ -412,7 +464,7 @@ def run_lifecycle() -> dict:
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("cold install changed the sentinel anchor")
         sentinel.check("cold-install")
-        _assert_sentinel_state(runner)
+        _assert_sentinel_state(runner, sentinel_states)
 
         system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)))
         _wait_for_path(STATUS_PATH, present=False)
@@ -421,7 +473,7 @@ def run_lifecycle() -> dict:
         active = _wait_for_status("active", previous_pid=int(cold["pid"]), timeout=60)
         _assert_anchor_active(runner)
         sentinel.check("active-start")
-        _assert_sentinel_state(runner)
+        _assert_sentinel_state(runner, sentinel_states)
 
         system.run(("/bin/launchctl", "kickstart", "-k", LAUNCHD_LABEL))
         restarted = _wait_for_status(
@@ -432,7 +484,7 @@ def run_lifecycle() -> dict:
         _assert_anchor_active(runner)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("daemon restart changed the sentinel anchor")
-        _assert_sentinel_state(runner)
+        _assert_sentinel_state(runner, sentinel_states)
         sentinel.check("daemon-restart")
 
         system.run((str(INSTALLED_PYTHON), str(INSTALLED_DAEMON), "--uninstall"))
@@ -441,9 +493,10 @@ def run_lifecycle() -> dict:
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("uninstall changed the sentinel anchor")
         sentinel.check("uninstall")
-        _assert_sentinel_state(runner)
+        _assert_sentinel_state(runner, sentinel_states)
     except BaseException as exc:
-        failure = exc
+        log_tail = _daemon_pf_log_tail()
+        failure = LifecycleError(f"{exc}; daemon_pf_log={log_tail!r}")
     finally:
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
