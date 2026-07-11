@@ -302,6 +302,60 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
     assert not (dst / "fresh.txt").exists()
 
 
+def test_copy_script_runtime_includes_primes(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    (source / "tproxy.py").write_text("import primes\n")
+    (source / "primes.py").write_text("VALUE = 1\n")
+
+    tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert (install / "tproxy.py").read_text() == "import primes\n"
+    assert (install / "primes.py").read_text() == "VALUE = 1\n"
+
+
+def test_copy_script_runtime_fails_before_partial_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    (source / "tproxy.py").write_text("import primes\n")
+
+    with pytest.raises(FileNotFoundError, match="primes.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    status = tmp_path / "status"
+    tgws_link = tmp_path / "tgws.link"
+    strategy = tmp_path / "strategies.json"
+    for path in (plist, status, tgws_link, strategy):
+        path.write_text("state")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tgws_link))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(strategy))
+    monkeypatch.setattr(tproxy, "_run", lambda *_: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    tproxy.do_uninstall()
+
+    assert not install.exists()
+    assert not plist.exists()
+    assert not status.exists()
+    assert not tgws_link.exists()
+    assert not strategy.exists()
+
+
 def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     filt = tproxy._ScapyMacNoiseFilter()
     noisy = logging.LogRecord(
@@ -686,6 +740,35 @@ def test_legacy_pf_restore_ignores_unrelated_route_to_rule(monkeypatch):
     monkeypatch.setattr(tproxy, "_run", fake_run)
 
     assert not tproxy._restore_legacy_pf_rules(1080)
+
+
+def test_legacy_pf_restore_never_reloads_over_live_private_anchor(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        outputs = {
+            ("pfctl", "-sn"): (
+                'rdr-anchor "com.apple/*" all\n'
+                "rdr pass proto tcp to any port = 443 -> 127.0.0.1 port 1080\n"
+            ),
+            ("pfctl", "-sr"): (
+                'anchor "com.apple/*" all\n'
+                "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 443\n"
+            ),
+            ("pfctl", "-a", tproxy.PF_ANCHOR, "-sn"): (
+                "rdr pass proto tcp to any port = 443 -> 127.0.0.1 port 1080\n"
+            ),
+            ("pfctl", "-a", tproxy.PF_ANCHOR, "-sr"): (
+                "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 443\n"
+            ),
+        }
+        return SimpleNamespace(returncode=0, stdout=outputs.get(args, ""), stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+
+    assert not tproxy._restore_legacy_pf_rules(1080)
+    assert not any(args[:3] == ("pfctl", "-f", tproxy.PF_CONFIG_PATH) for args in calls)
 
 
 def test_cleanup_stale_never_uses_process_pattern_or_global_pf_disable(monkeypatch):

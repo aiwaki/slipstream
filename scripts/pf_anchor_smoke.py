@@ -57,7 +57,14 @@ def validate_pfctl_args(args: Sequence[str]) -> None:
     if Path(args[0]).name != "pfctl":
         raise SmokeError(f"unexpected executable: {args[0]}")
     tail = args[1:]
-    if tail in {("-s", "info"), ("-sn",), ("-sr",), ("-E",)}:
+    if tail in {
+        ("-s", "info"),
+        ("-s", "states"),
+        ("-s", "References"),
+        ("-sn",),
+        ("-sr",),
+        ("-E",),
+    }:
         return
     if len(tail) == 2 and tail[0] == "-X" and tail[1]:
         return

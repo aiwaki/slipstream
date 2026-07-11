@@ -90,11 +90,13 @@ jobs:
             spike/test_recovery.py \
             spike/test_tproxy_doh.py \
             scripts/pf_anchor_smoke.py \
+            scripts/pf_installed_lifecycle_smoke.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
             scripts/make_route_policy_bundle.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
+            scripts/test_pf_installed_lifecycle_smoke.py \
             scripts/test_make_appcast.py \
             scripts/test_make_route_policy_bundle.py \
             scripts/test_verify_release_artifacts.py
@@ -117,3 +119,8 @@ jobs:
       - name: Rust tray tests
         working-directory: app-tauri/src-tauri
         run: cargo test
+
+      - name: Installed daemon lifecycle sentinel smoke
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py

@@ -38,6 +38,10 @@ Gate: install, restart, update, and uninstall leave an external PF sentinel and
 `zapret` anchor unchanged; unknown processes are never signalled; secrets are
 not readable outside the owning user.
 
+CI covers the script-mode install/restart/uninstall lifecycle with a sibling
+anchor and a long-lived sentinel PF state. Packaged app install/update and the
+stable release artifact remain separate release gates.
+
 ## M1 - Autonomous Routing V1
 
 - Normalize runtime evidence as `ConnectionOutcome`: service group, route
