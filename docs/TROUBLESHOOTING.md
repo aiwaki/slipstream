@@ -70,14 +70,27 @@ sudo pfctl -a com.apple/slipstream -sn
 Emergency cleanup is scoped to that anchor:
 
 ```bash
-sudo pfctl -a com.apple/slipstream -F all
+sudo pfctl -a com.apple/slipstream -F rules
+sudo pfctl -a com.apple/slipstream -F nat
 ```
 
-Do not use `pfctl -d` or load a replacement global ruleset as Slipstream
-recovery. The daemon stores its own PF enable token under `/var/run` and releases
-only that reference during normal teardown. An upgrade from a legacy build may
-reload the canonical `/etc/pf.conf` once after detecting old global Slipstream
-redirect rules; it never writes that file.
+Do not use `pfctl -F all`, `pfctl -F states`, `pfctl -d`, or load a replacement
+global ruleset as Slipstream recovery. On macOS, `-F all` includes the shared PF
+state table even when `-a` is present. The daemon therefore flushes only its
+private filter and NAT rulesets. It stores its own PF enable token under
+`/var/run` and releases only that reference during normal teardown. An upgrade
+from a legacy build may reload the canonical `/etc/pf.conf` once after detecting
+old global Slipstream redirect rules; it never writes that file.
+
+Reviewed PF changes use the disposable privileged smoke in CI instead of an
+installed workstation. Its local no-root preflight is:
+
+```bash
+python3 scripts/pf_anchor_smoke.py --dry-run
+```
+
+Real mode refuses to start if Slipstream status, token, or private-anchor state
+already exists. It targets a high test port and never TCP/443.
 
 If the required `com.apple/*` parent anchor is absent from the host PF setup,
 Slipstream exits safely instead of taking ownership of global PF configuration.
@@ -147,7 +160,8 @@ Emergency cleanup remains scoped to Slipstream:
 
 ```bash
 sudo launchctl bootout system /Library/LaunchDaemons/dev.slipstream.tproxy.plist
-sudo pfctl -a com.apple/slipstream -F all
+sudo pfctl -a com.apple/slipstream -F rules
+sudo pfctl -a com.apple/slipstream -F nat
 ```
 
 Do not use a global `pfctl -F states`, `pfctl -d`, or replacement DNS as normal

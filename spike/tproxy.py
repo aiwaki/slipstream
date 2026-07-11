@@ -15,7 +15,8 @@ forward a tlsrec-split ClientHello to that real IP.
 Run:   sudo python3 tproxy.py [--verbose]
 Stop:  Ctrl-C  (flushes only Slipstream's private pf anchor)
 ESCAPE HATCH if connectivity breaks (other terminal):
-    sudo pfctl -a com.apple/slipstream -F all
+    sudo pfctl -a com.apple/slipstream -F rules
+    sudo pfctl -a com.apple/slipstream -F nat
 """
 import argparse
 import asyncio
@@ -3742,7 +3743,11 @@ def _pf_acquire_enable_token():
 
 
 def _pf_flush():
-    return _run("pfctl", "-a", PF_ANCHOR, "-F", "all")
+    # Even with -a, `pfctl -F all` includes the global state table on macOS.
+    # Flush only the two rulesets Slipstream loads into its private anchor.
+    rules = _run("pfctl", "-a", PF_ANCHOR, "-F", "rules")
+    nat = _run("pfctl", "-a", PF_ANCHOR, "-F", "nat")
+    return rules if rules.returncode != 0 else nat
 
 
 def geo_exit_backend_ready(now=None):

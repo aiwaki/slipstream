@@ -619,8 +619,10 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
 
     tproxy.pf_teardown()
 
-    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all") in calls
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "rules") in calls
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "nat") in calls
     assert ("pfctl", "-X", "123456") in calls
+    assert not any("states" in args or "all" in args for args in calls)
     assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
     assert not status_path.exists()
@@ -702,7 +704,9 @@ def test_cleanup_stale_never_uses_process_pattern_or_global_pf_disable(monkeypat
 
     tproxy.cleanup_stale()
 
-    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all") in calls
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "rules") in calls
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "nat") in calls
+    assert not any("states" in args or "all" in args for args in calls)
     assert not any(args[0] in {"pgrep", "pkill", "kill"} for args in calls)
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
     assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
@@ -977,12 +981,11 @@ def test_suspend_transparent_routing_flushes_only_private_anchor(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_pf_flush",
-        lambda: calls.append(("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all"))
-        or SimpleNamespace(returncode=0),
+        lambda: calls.append("private rulesets flushed") or SimpleNamespace(returncode=0),
     )
 
     assert tproxy.suspend_transparent_routing("geo-exit tunnel down", now=100.0)
-    assert calls == [("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "all")]
+    assert calls == ["private rulesets flushed"]
     assert tproxy._pf_applied is False
     assert tproxy._geph_up is False
     assert tproxy._pf_backend_hold_until == 100.0 + tproxy.PF_BACKEND_FAILURE_HOLD

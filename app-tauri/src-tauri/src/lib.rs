@@ -801,7 +801,8 @@ fn daemon_recovery_shell() -> String {
          if printf '%s\\n' \"$status\" \
             | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
          then write_recovery daemon_recovered; exit 0; fi; \
-         /sbin/pfctl -a {anchor} -F all >/dev/null 2>&1 || true; \
+         /sbin/pfctl -a {anchor} -F rules >/dev/null 2>&1 || true; \
+         /sbin/pfctl -a {anchor} -F nat >/dev/null 2>&1 || true; \
          if [ -f {pf_token_path} ]; then \
            pf_token=$(/bin/cat {pf_token_path} 2>/dev/null || true); \
            case \"$pf_token\" in \
@@ -2760,7 +2761,10 @@ mod tests {
         assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
         assert!(shell.contains("daemon_recovered"));
         assert!(shell.contains("anchor_cleared"));
-        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F all"));
+        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F rules"));
+        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F nat"));
+        assert!(!shell.contains("-F all"));
+        assert!(!shell.contains("-F states"));
         assert!(shell.contains(PF_TOKEN_PATH));
         assert!(!shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(!shell.contains("/sbin/pfctl -d"));

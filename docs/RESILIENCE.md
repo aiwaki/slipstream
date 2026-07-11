@@ -30,7 +30,7 @@ YouTube/googlevideo.
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
 | Crash restart | launchd `KeepAlive` | none |
-| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | privileged sentinel plus competing-interceptor and backend-loss coverage on every release |
+| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | privileged sentinel smoke plus competing-interceptor and backend-loss coverage run in CI |
 | Clean exit | flushes only the private anchor and releases Slipstream's PF enable token | none after the privileged gate passes |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |
@@ -47,6 +47,13 @@ YouTube/googlevideo.
 | Voice flows | TTL/LRU cleanup | long-run load audit |
 | Logs | rotating daemon log, tray snapshot, route-health failure summaries, stale external proxy exception reporting, and copied plus file-backed diagnostic summary | attachable diagnostic export polish |
 | App updates | signed Tauri updater | Apple notarization for first install trust |
+
+The privileged PF gate is `scripts/pf_anchor_smoke.py`. CI runs it on a
+disposable macOS runner. It uses the real private anchor with a high test port,
+never TCP/443, and verifies cold-start dormancy, runtime suspension, an unchanged
+sibling sentinel anchor, and an identical global PF snapshot after cleanup.
+Cleanup uses separate `-F rules` and `-F nat` operations; `-F all` is forbidden
+because macOS includes the shared state table in that modifier.
 
 ## Priority Order
 
