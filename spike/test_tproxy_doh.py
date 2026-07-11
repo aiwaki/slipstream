@@ -302,6 +302,60 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
     assert not (dst / "fresh.txt").exists()
 
 
+def test_copy_script_runtime_includes_primes(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    (source / "tproxy.py").write_text("import primes\n")
+    (source / "primes.py").write_text("VALUE = 1\n")
+
+    tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert (install / "tproxy.py").read_text() == "import primes\n"
+    assert (install / "primes.py").read_text() == "VALUE = 1\n"
+
+
+def test_copy_script_runtime_fails_before_partial_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    (source / "tproxy.py").write_text("import primes\n")
+
+    with pytest.raises(FileNotFoundError, match="primes.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    status = tmp_path / "status"
+    tgws_link = tmp_path / "tgws.link"
+    strategy = tmp_path / "strategies.json"
+    for path in (plist, status, tgws_link, strategy):
+        path.write_text("state")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tgws_link))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(strategy))
+    monkeypatch.setattr(tproxy, "_run", lambda *_: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    tproxy.do_uninstall()
+
+    assert not install.exists()
+    assert not plist.exists()
+    assert not status.exists()
+    assert not tgws_link.exists()
+    assert not strategy.exists()
+
+
 def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     filt = tproxy._ScapyMacNoiseFilter()
     noisy = logging.LogRecord(

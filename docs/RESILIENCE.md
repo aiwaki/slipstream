@@ -55,6 +55,14 @@ sibling sentinel anchor, and an identical global PF snapshot after cleanup.
 Cleanup uses separate `-F rules` and `-F nat` operations; `-F all` is forbidden
 because macOS includes the shared state table in that modifier.
 
+`scripts/pf_installed_lifecycle_smoke.py` is the second disposable gate. It
+installs the script-mode LaunchDaemon, proves a missing Geph backend leaves PF
+dormant, briefly activates the existing local-only mode, restarts the daemon,
+and uninstalls it. A non-root TCP connection and its PF state must survive the
+entire cycle, the sibling sentinel rules must remain byte-for-byte unchanged,
+and the global PF snapshot must match after cleanup. The script refuses to run
+unless GitHub Actions and `SLIPSTREAM_DISPOSABLE_CI=1` are both present.
+
 ## Priority Order
 
 ### M0 - Safe Base

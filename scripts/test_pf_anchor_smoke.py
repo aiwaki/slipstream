@@ -26,6 +26,7 @@ class PfAnchorSmokeTests(unittest.TestCase):
     def test_pfctl_guard_accepts_only_scoped_mutations(self) -> None:
         for command in (
             ("/sbin/pfctl", "-s", "info"),
+            ("/sbin/pfctl", "-s", "states"),
             ("pfctl", "-sn"),
             ("pfctl", "-sr"),
             ("pfctl", "-E"),

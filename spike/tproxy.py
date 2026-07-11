@@ -4006,6 +4006,27 @@ def _copy_file_resilient(src, dst, mode=None, attempts=3, delay=0.15):
     raise last
 
 
+def _script_runtime_payload(source_file):
+    source_file = os.path.abspath(source_file)
+    source_dir = os.path.dirname(source_file)
+    payload = (
+        (source_file, "tproxy.py"),
+        (os.path.join(source_dir, "primes.py"), "primes.py"),
+    )
+    missing = [src for src, _ in payload if not os.path.isfile(src)]
+    if missing:
+        raise FileNotFoundError("missing script runtime: " + ", ".join(missing))
+    return payload
+
+
+def _copy_script_runtime(source_file, install_dir):
+    """Copy every local Python module required by the script-mode daemon."""
+    payload = _script_runtime_payload(source_file)
+    os.makedirs(install_dir, exist_ok=True)
+    for src, name in payload:
+        _copy_file_resilient(src, os.path.join(install_dir, name), mode=0o644)
+
+
 def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
     parent = os.path.dirname(dst)
     os.makedirs(parent, exist_ok=True)
@@ -5626,23 +5647,26 @@ def do_install(port):
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
     #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
-    #  - script (dev): copy tproxy.py + build a venv with scapy
+    #  - script (dev): copy local runtime modules + build a venv with dependencies
+    frozen = getattr(sys, "frozen", False)
+    if not frozen:
+        # Validate before stopping a working installed daemon.
+        _script_runtime_payload(__file__)
     secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
     try:
         tgws_secret_backup = open(secret_path).read()
     except Exception:
         tgws_secret_backup = None
     _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # stop old daemon before replacing files
-    if getattr(sys, "frozen", False):
+    if frozen:
         src = os.path.dirname(os.path.abspath(sys.executable))
         _replace_tree_resilient(src, INSTALL_DIR)
         binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
         prog_args = [binary, "--port", str(port)]
         uninstall_hint = f"sudo {binary} --uninstall"
     else:
-        os.makedirs(INSTALL_DIR, exist_ok=True)
         script = os.path.join(INSTALL_DIR, "tproxy.py")
-        _copy_file_resilient(os.path.abspath(__file__), script, mode=0o644)
+        _copy_script_runtime(__file__, INSTALL_DIR)
         # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
         # it (otherwise Telegram falls back to plain MTProto passthrough).
         _here = os.path.dirname(os.path.abspath(__file__))
@@ -5724,10 +5748,11 @@ def do_uninstall():
     _pf_flush()
     _pf_release_enable_token()
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-    try:
-        os.remove(_STRAT_PATH)             # drop any stale strategy cache
-    except Exception:
-        pass
+    for path in (_STRAT_PATH, STATUS_PATH, TGWS_LINK_PATH):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
     print("uninstalled + Slipstream pf anchor cleared")
 
 
