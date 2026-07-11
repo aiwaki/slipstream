@@ -29,6 +29,7 @@ survive across sessions and agents.
 | 2026-07-11 | Geph exit locations are selectable only from a cached or live city catalog. When neither is available, the tray shows an explicit unavailable state and never invents country-level exits. | Active |
 | 2026-07-11 | A geo-exit connection that closes before delivering any payload is a backend failure even if SOCKS CONNECT succeeded. Slipstream pauses only `com.apple/slipstream` before the next client retry; it does not change DNS, proxies, VPNs, or local-bypass routing. | Active |
 | 2026-07-11 | Manual release builds publish only uniquely tagged GitHub prereleases. They are manual-download artifacts and must not replace the stable `releases/latest` updater feed. Stable releases require an exact `v<version>` tag. | Active |
+| 2026-07-11 | Preview releases omit remote policy trust keys and signed policy artifacts. Remote policy remains disabled; a stable release must supply and verify the signed policy channel. | Active |
 
 ## Notes
 

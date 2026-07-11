@@ -80,6 +80,13 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
 
+    def test_release_workflow_requires_remote_policy_only_for_stable(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("if: steps.ver.outputs.channel == 'stable'", workflow)
+        self.assertIn('--channel "${{ steps.ver.outputs.channel }}"', workflow)
+        self.assertIn("Preview releases omit the remote policy channel.", workflow)
+
     def test_geph_vendor_workflow_proposes_a_pr(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
             encoding="utf-8"

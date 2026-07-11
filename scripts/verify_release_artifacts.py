@@ -12,15 +12,18 @@ import make_appcast
 import make_route_policy_bundle
 
 
-REQUIRED_ASSETS = (
+APP_REQUIRED_ASSETS = (
     "Slipstream-macos-arm64.zip",
     "Slipstream.app.tar.gz",
     "Slipstream.app.tar.gz.sig",
     "latest.json",
+)
+ROUTE_POLICY_REQUIRED_ASSETS = (
     "route-policy.json",
     "route-policy-latest.json",
     "route-policy-keys.json",
 )
+RELEASE_CHANNELS = ("stable", "preview")
 
 
 def _read_json(path: Path) -> dict:
@@ -115,9 +118,15 @@ def verify_release_artifacts(
     repository: str,
     tag: str,
     version: str,
+    channel: str = "stable",
 ) -> dict:
     release_dir = release_dir.resolve()
-    for name in REQUIRED_ASSETS:
+    if channel not in RELEASE_CHANNELS:
+        raise ValueError(f"invalid release channel: {channel!r}")
+    tag_channel = make_appcast.release_channel_for_tag(version, tag)
+    if tag_channel != channel:
+        raise ValueError(f"release channel {channel!r} does not match tag {tag!r}")
+    for name in APP_REQUIRED_ASSETS:
         _require_nonempty_file(release_dir / name)
     make_appcast.validate_release_inputs(
         version,
@@ -131,22 +140,27 @@ def verify_release_artifacts(
         tag=tag,
         version=version,
     )
-    channel = _validate_route_policy_channel(
-        release_dir=release_dir,
-        repository=repository,
-        tag=tag,
-    )
-    return {
+    result = {
         "version": version,
         "tag": tag,
+        "channel": channel,
         "repository": repository,
         "appcast": appcast,
-        "route_policy": {
-            "key_id": channel["key_id"],
-            "sha256": channel["sha256"],
-        },
-        "route_policy_channel": channel,
     }
+    if channel == "stable":
+        for name in ROUTE_POLICY_REQUIRED_ASSETS:
+            _require_nonempty_file(release_dir / name)
+        policy_channel = _validate_route_policy_channel(
+            release_dir=release_dir,
+            repository=repository,
+            tag=tag,
+        )
+        result["route_policy"] = {
+            "key_id": policy_channel["key_id"],
+            "sha256": policy_channel["sha256"],
+        }
+        result["route_policy_channel"] = policy_channel
+    return result
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -155,6 +169,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--channel", choices=RELEASE_CHANNELS, required=True)
     return parser.parse_args(argv)
 
 
@@ -165,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         repository=args.repository,
         tag=args.tag,
         version=args.version,
+        channel=args.channel,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
