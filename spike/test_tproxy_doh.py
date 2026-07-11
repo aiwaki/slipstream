@@ -487,6 +487,43 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         assert private_value not in public_text
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        {"state": "active", "ts": 1000.0},
+        {
+            "schema_version": 2,
+            "daemon": {"state": "active", "updated_at": 1000.0},
+        },
+    ],
+)
+def test_status_command_accepts_fresh_v1_and_v2_status(monkeypatch, tmp_path, capsys, status):
+    status_path = tmp_path / "slipstream.status"
+    status_path.write_text(json.dumps(status))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    monkeypatch.setattr(tproxy.time, "time", lambda: 1010.0)
+    monkeypatch.setattr(sys, "argv", ["tproxy.py", "--status"])
+
+    tproxy.main()
+
+    assert json.loads(capsys.readouterr().out) == status
+
+
+def test_status_command_marks_stale_v2_status_off(monkeypatch, tmp_path, capsys):
+    status_path = tmp_path / "slipstream.status"
+    status_path.write_text(json.dumps({
+        "schema_version": 2,
+        "daemon": {"state": "active", "updated_at": 980.0},
+    }))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    monkeypatch.setattr(tproxy.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(sys, "argv", ["tproxy.py", "--status"])
+
+    tproxy.main()
+
+    assert json.loads(capsys.readouterr().out) == {"state": "off"}
+
+
 def test_strategy_score_snapshot_is_aggregated_without_hostnames():
     tproxy._record_strategy_result("discord.com", "split64+fake", True, now=100.0)
     tproxy._record_strategy_result("cdn.discordapp.com", "split64+fake", False, now=110.0)
