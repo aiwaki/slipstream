@@ -16,23 +16,26 @@ import pf_installed_lifecycle_smoke as lifecycle
 
 class PfInstalledLifecycleSmokeTests(unittest.TestCase):
     def test_command_guard_accepts_only_exact_lifecycle_commands(self) -> None:
+        target = lifecycle.script_target()
         accepted = (
-            (sys.executable, str(lifecycle.SOURCE_DAEMON), "--install"),
-            (
-                str(lifecycle.INSTALLED_PYTHON),
-                str(lifecycle.INSTALLED_DAEMON),
-                "--uninstall",
-            ),
+            target.install_command,
+            target.uninstall_command,
             (
                 "/bin/launchctl",
                 "bootout",
                 "system",
                 str(lifecycle.LAUNCHD_PLIST),
             ),
+            (
+                "/bin/launchctl",
+                "bootstrap",
+                "system",
+                str(lifecycle.LAUNCHD_PLIST),
+            ),
             ("/bin/launchctl", "kickstart", "-k", lifecycle.LAUNCHD_LABEL),
         )
         for command in accepted:
-            lifecycle.validate_system_command(command)
+            lifecycle.validate_system_command(command, target)
 
     def test_command_guard_rejects_shell_and_unowned_paths(self) -> None:
         rejected = (
@@ -45,6 +48,38 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with self.subTest(command=command):
                 with self.assertRaises(lifecycle.LifecycleError):
                     lifecycle.validate_system_command(command)
+
+    def test_packaged_target_accepts_only_its_embedded_and_installed_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "Slipstream.app"
+            daemon = app / "Contents" / "Resources" / "slipstreamd" / "slipstreamd"
+            daemon.parent.mkdir(parents=True)
+            daemon.write_bytes(b"packaged-daemon")
+            daemon.chmod(0o755)
+
+            target = lifecycle.packaged_app_target(app)
+
+            self.assertEqual(target.name, "packaged-app")
+            lifecycle.validate_system_command(target.install_command, target)
+            lifecycle.validate_system_command(target.uninstall_command, target)
+            with self.assertRaises(lifecycle.LifecycleError):
+                lifecycle.validate_system_command(
+                    lifecycle.script_target().install_command,
+                    target,
+                )
+
+    def test_packaged_target_rejects_missing_or_non_executable_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "Slipstream.app"
+            with self.assertRaises(lifecycle.LifecycleError):
+                lifecycle.packaged_app_target(app)
+
+            daemon = app / "Contents" / "Resources" / "slipstreamd" / "slipstreamd"
+            daemon.parent.mkdir(parents=True)
+            daemon.write_bytes(b"packaged-daemon")
+            daemon.chmod(0o644)
+            with self.assertRaises(lifecycle.LifecycleError):
+                lifecycle.packaged_app_target(app)
 
     def test_plist_patch_enables_local_only_mode_and_disables_voice(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,6 +130,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(result, 0)
         report = json.loads(output.getvalue())
         self.assertEqual(report["result"], "dry-run")
+        self.assertEqual(report["target"], "script")
         self.assertFalse(report["workstation_allowed"])
 
 

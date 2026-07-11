@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Disposable macOS install/restart/uninstall qualification for Slipstream.
+"""Disposable macOS install/reinstall/restart/uninstall qualification.
 
 This script performs real privileged lifecycle operations. It refuses to run
 outside GitHub Actions with an explicit opt-in environment variable, and it
-never runs on a workstation installation.
+never runs on a workstation installation. By default it tests the source
+installer; ``--app-bundle`` tests the frozen daemon embedded in a built app.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -32,6 +34,7 @@ INSTALL_DIR = Path("/usr/local/slipstream")
 INSTALLED_PYTHON = INSTALL_DIR / "venv" / "bin" / "python3"
 INSTALLED_DAEMON = INSTALL_DIR / "tproxy.py"
 INSTALLED_PRIMES = INSTALL_DIR / "primes.py"
+INSTALLED_FROZEN_DAEMON = INSTALL_DIR / "slipstreamd"
 LAUNCHD_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 LAUNCHD_LABEL = "system/dev.slipstream.tproxy"
 STATUS_PATH = Path("/var/run/slipstream.status")
@@ -48,11 +51,61 @@ class LifecycleError(RuntimeError):
     """A lifecycle safety condition or assertion failed."""
 
 
-def validate_system_command(command: Sequence[str]) -> None:
+@dataclass(frozen=True)
+class LifecycleTarget:
+    name: str
+    install_command: tuple[str, ...]
+    uninstall_command: tuple[str, ...]
+    installed_program_prefix: tuple[str, ...]
+    required_installed_paths: tuple[Path, ...]
+
+
+def script_target() -> LifecycleTarget:
+    return LifecycleTarget(
+        name="script",
+        install_command=(sys.executable, str(SOURCE_DAEMON), "--install"),
+        uninstall_command=(
+            str(INSTALLED_PYTHON),
+            str(INSTALLED_DAEMON),
+            "--uninstall",
+        ),
+        installed_program_prefix=(str(INSTALLED_PYTHON), str(INSTALLED_DAEMON)),
+        required_installed_paths=(INSTALLED_PYTHON, INSTALLED_DAEMON, INSTALLED_PRIMES),
+    )
+
+
+def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
+    try:
+        app_bundle = app_bundle.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise LifecycleError(f"packaged app does not exist: {app_bundle}") from exc
+    if not app_bundle.is_dir() or app_bundle.suffix != ".app":
+        raise LifecycleError(f"packaged lifecycle target must be a .app: {app_bundle}")
+    if app_bundle == INSTALL_DIR or INSTALL_DIR in app_bundle.parents:
+        raise LifecycleError("packaged lifecycle source cannot be inside the install dir")
+
+    daemon = app_bundle / "Contents" / "Resources" / "slipstreamd" / "slipstreamd"
+    if not daemon.is_file() or not os.access(daemon, os.X_OK):
+        raise LifecycleError(f"packaged app has no executable frozen daemon: {daemon}")
+
+    return LifecycleTarget(
+        name="packaged-app",
+        install_command=(str(daemon), "--install"),
+        uninstall_command=(str(INSTALLED_FROZEN_DAEMON), "--uninstall"),
+        installed_program_prefix=(str(INSTALLED_FROZEN_DAEMON),),
+        required_installed_paths=(INSTALLED_FROZEN_DAEMON,),
+    )
+
+
+def validate_system_command(
+    command: Sequence[str],
+    target: LifecycleTarget | None = None,
+) -> None:
+    target = target or script_target()
     command = tuple(map(str, command))
     allowed = {
-        (sys.executable, str(SOURCE_DAEMON), "--install"),
-        (str(INSTALLED_PYTHON), str(INSTALLED_DAEMON), "--uninstall"),
+        target.install_command,
+        target.uninstall_command,
         ("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)),
         ("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)),
         ("/bin/launchctl", "kickstart", "-k", LAUNCHD_LABEL),
@@ -62,7 +115,8 @@ def validate_system_command(command: Sequence[str]) -> None:
 
 
 class SystemRunner:
-    def __init__(self) -> None:
+    def __init__(self, target: LifecycleTarget | None = None) -> None:
+        self.target = target or script_target()
         self.commands: list[tuple[str, ...]] = []
 
     def run(
@@ -73,7 +127,7 @@ class SystemRunner:
         timeout: int = 180,
     ) -> subprocess.CompletedProcess[str]:
         command = tuple(map(str, command))
-        validate_system_command(command)
+        validate_system_command(command, self.target)
         self.commands.append(command)
         result = subprocess.run(
             command,
@@ -366,6 +420,30 @@ def _assert_anchor_active(runner: pf.PfctlRunner) -> None:
         )
 
 
+def _assert_installed_payload(target: LifecycleTarget) -> None:
+    for path in target.required_installed_paths:
+        if not path.is_file():
+            raise LifecycleError(f"{target.name} install omitted required payload: {path}")
+    if not os.access(target.required_installed_paths[0], os.X_OK):
+        raise LifecycleError(
+            f"{target.name} installed daemon is not executable: "
+            f"{target.required_installed_paths[0]}"
+        )
+
+    try:
+        with LAUNCHD_PLIST.open("rb") as handle:
+            data = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException) as exc:
+        raise LifecycleError(f"cannot read installed LaunchDaemon plist: {exc}") from exc
+    arguments = tuple(map(str, data.get("ProgramArguments") or ()))
+    expected = target.installed_program_prefix
+    if arguments[: len(expected)] != expected:
+        raise LifecycleError(
+            f"{target.name} LaunchDaemon does not use the installed payload: "
+            f"expected prefix={expected!r}, actual={arguments!r}"
+        )
+
+
 def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
     pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
     for path in (
@@ -375,6 +453,7 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
         TGWS_LINK_PATH,
         INSTALLED_DAEMON,
         INSTALLED_PRIMES,
+        INSTALLED_FROZEN_DAEMON,
     ):
         if path.exists():
             raise LifecycleError(f"installed lifecycle residue remains: {path}")
@@ -395,11 +474,15 @@ def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
     return pf._pf_snapshot(runner), uid, gid
 
 
-def _fallback_uninstall(system: SystemRunner, runner: pf.PfctlRunner) -> list[str]:
+def _fallback_uninstall(
+    system: SystemRunner,
+    runner: pf.PfctlRunner,
+    target: LifecycleTarget,
+) -> list[str]:
     errors = []
-    if INSTALLED_PYTHON.exists() and INSTALLED_DAEMON.exists():
+    if target.required_installed_paths[0].exists():
         try:
-            system.run((str(INSTALLED_PYTHON), str(INSTALLED_DAEMON), "--uninstall"))
+            system.run(target.uninstall_command)
         except Exception as exc:
             errors.append(f"product uninstall: {exc}")
     if LAUNCHD_PLIST.exists():
@@ -425,9 +508,10 @@ def _fallback_uninstall(system: SystemRunner, runner: pf.PfctlRunner) -> list[st
     return errors
 
 
-def run_lifecycle() -> dict:
+def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
+    target = target or script_target()
     runner = pf.PfctlRunner()
-    system = SystemRunner()
+    system = SystemRunner(target)
     before, uid, gid = _preflight(runner)
     test_token: str | None = None
     sentinel: PersistentSentinelConnection | None = None
@@ -459,21 +543,37 @@ def run_lifecycle() -> dict:
         sentinel.start()
         sentinel_states = _assert_sentinel_state(runner)
 
-        system.run((sys.executable, str(SOURCE_DAEMON), "--install"))
+        system.run(target.install_command)
         cold = _wait_for_status("dormant", timeout=90)
         pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
-        if not INSTALLED_PRIMES.is_file():
-            raise LifecycleError("script-mode install omitted primes.py")
+        _assert_installed_payload(target)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("cold install changed the sentinel anchor")
         sentinel.check("cold-install")
+        _assert_sentinel_state(runner, sentinel_states)
+
+        system.run(target.install_command)
+        reinstalled = _wait_for_status(
+            "dormant",
+            previous_pid=int(cold["pid"]),
+            timeout=90,
+        )
+        pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
+        _assert_installed_payload(target)
+        if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+            raise LifecycleError("reinstall changed the sentinel anchor")
+        sentinel.check("reinstall")
         _assert_sentinel_state(runner, sentinel_states)
 
         system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)))
         _wait_for_path(STATUS_PATH, present=False)
         _patch_launchd_for_local_only(LAUNCHD_PLIST)
         system.run(("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)))
-        active = _wait_for_status("active", previous_pid=int(cold["pid"]), timeout=60)
+        active = _wait_for_status(
+            "active",
+            previous_pid=int(reinstalled["pid"]),
+            timeout=60,
+        )
         _assert_anchor_active(runner)
         sentinel.check("active-start")
         _assert_sentinel_state(runner, sentinel_states)
@@ -490,7 +590,7 @@ def run_lifecycle() -> dict:
         _assert_sentinel_state(runner, sentinel_states)
         sentinel.check("daemon-restart")
 
-        system.run((str(INSTALLED_PYTHON), str(INSTALLED_DAEMON), "--uninstall"))
+        system.run(target.uninstall_command)
         _wait_for_path(LAUNCHD_PLIST, present=False)
         _assert_clean_install_state(runner)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
@@ -503,7 +603,7 @@ def run_lifecycle() -> dict:
     finally:
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
-        cleanup_errors.extend(_fallback_uninstall(system, runner))
+        cleanup_errors.extend(_fallback_uninstall(system, runner, target))
         if sentinel is not None:
             sentinel.close()
         try:
@@ -526,7 +626,9 @@ def run_lifecycle() -> dict:
         raise failure
     return {
         "result": "pass",
+        "target": target.name,
         "cold_install": "dormant",
+        "reinstall": "new_pid_and_payload_replaced",
         "active_start": "private_anchor_loaded",
         "restart": "new_pid_and_anchor_loaded",
         "uninstall": "clean",
@@ -538,13 +640,14 @@ def run_lifecycle() -> dict:
     }
 
 
-def dry_run() -> dict:
+def dry_run(target_name: str = "script") -> dict:
     return {
         "result": "dry-run",
+        "target": target_name,
         "restricted_to": "disposable GitHub Actions macOS runner",
         "cold_install": "Geph unavailable; PF must stay dormant",
         "active_phase": "SLIP_GEPH=0 in test-only installed plist",
-        "sentinel_connection": "must survive install, restart, and uninstall",
+        "sentinel_connection": "must survive install, reinstall, restart, and uninstall",
         "intercepts_tcp_443": "only briefly on the disposable runner",
         "workstation_allowed": False,
     }
@@ -553,9 +656,15 @@ def dry_run() -> dict:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--app-bundle",
+        type=Path,
+        help="test the frozen daemon embedded in this built Slipstream.app",
+    )
     args = parser.parse_args(argv)
     try:
-        report = dry_run() if args.dry_run else run_lifecycle()
+        target = packaged_app_target(args.app_bundle) if args.app_bundle else script_target()
+        report = dry_run(target.name) if args.dry_run else run_lifecycle(target)
     except (LifecycleError, pf.SmokeError, KeyboardInterrupt) as exc:
         print(json.dumps({"result": "fail", "error": str(exc)}, indent=2))
         return 1

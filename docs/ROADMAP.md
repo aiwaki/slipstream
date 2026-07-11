@@ -38,9 +38,10 @@ Gate: install, restart, update, and uninstall leave an external PF sentinel and
 `zapret` anchor unchanged; unknown processes are never signalled; secrets are
 not readable outside the owning user.
 
-CI covers the script-mode install/restart/uninstall lifecycle with a sibling
-anchor and a long-lived sentinel PF state. Packaged app install/update and the
-stable release artifact remain separate release gates.
+CI covers both script-mode and packaged-app cold install, same-artifact
+reinstall, restart, and uninstall with a sibling anchor and a long-lived
+sentinel PF state. Cross-version rollback starts only after a safety-qualified
+release exists; stable distribution remains a separate M3 gate.
 
 ## M1 - Autonomous Routing V1
 
