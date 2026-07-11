@@ -1,4 +1,5 @@
 import asyncio
+import ast
 import base64
 import hashlib
 import json
@@ -1089,6 +1090,19 @@ def test_suspend_transparent_routing_flushes_stale_anchor_when_flag_is_false(mon
     assert tproxy.suspend_transparent_routing("geo-exit tunnel down", now=100.0)
     assert calls == [tproxy.PF_ANCHOR]
     assert tproxy._pf_applied is False
+
+
+def test_pf_lifecycle_functions_are_not_shadowed_by_later_definitions():
+    module = ast.parse(Path(tproxy.__file__).read_text())
+    names = [node.name for node in module.body if isinstance(node, ast.FunctionDef)]
+
+    for name in (
+        "geo_exit_backend_ready",
+        "pause_private_pf",
+        "suspend_transparent_routing",
+        "pf_setup_if_ready",
+    ):
+        assert names.count(name) == 1, name
 
 
 def test_explicit_local_only_mode_does_not_fail_close_geo_hosts(monkeypatch):
@@ -3418,7 +3432,7 @@ def test_auto_geph_learns_exact_host_after_local_stalls_and_geph_payload(monkeyp
     saves = []
 
     monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_geph_payload_probe", lambda host: 128)
+    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 128)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(True))
 
     for idx in range(tproxy.AUTO_GEPH_STORM - 1):
@@ -3487,7 +3501,7 @@ def test_auto_geph_runtime_misses_keep_explicit_geo_hosts(monkeypatch, capsys):
 
 def test_auto_geph_requires_geph_payload_proof(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_geph_payload_probe", lambda host: 0)
+    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 0)
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
 
     for idx in range(tproxy.AUTO_GEPH_STORM):
