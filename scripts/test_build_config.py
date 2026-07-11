@@ -58,6 +58,19 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("scripts/verify_release_artifacts.py", workflow)
         self.assertIn("--release-dir dist-release", workflow)
 
+    def test_release_workflow_uses_the_recorded_verified_geph_artifact(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn('version="$(tr -d \'[:space:]\' < vendor/geph/VERSION)"', workflow)
+        self.assertIn('tag="geph-vendor-$version"', workflow)
+        self.assertIn("--pattern 'geph5-client.VERSION'", workflow)
+        self.assertIn("--pattern 'geph5-client.LICENSE'", workflow)
+        self.assertIn("--pattern 'SHA256SUMS'", workflow)
+        self.assertIn('asset_version="$(tr -d \'[:space:]\' < /tmp/geph/geph5-client.VERSION)"', workflow)
+        self.assertIn('"$asset_version" = "$version"', workflow)
+        self.assertIn("shasum -a 256 -c SHA256SUMS", workflow)
+        self.assertNotIn("select(startswith(\"geph-vendor-\"))", workflow)
+
     def test_geph_vendor_workflow_proposes_a_pr(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
             encoding="utf-8"
