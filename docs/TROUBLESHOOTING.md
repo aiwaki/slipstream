@@ -54,6 +54,22 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
 
+## Removing Slipstream
+
+`Quit Slipstream` closes the tray UI but intentionally leaves its background
+routing service and owned Geph LaunchAgent running. This preserves routing if
+the menu process exits or crashes.
+
+To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
+native dialog. It removes the Slipstream root daemon and private PF state first,
+then removes only Slipstream's verified Geph LaunchAgent, private runtime, and
+its Keychain account entry. The app bundle remains in `Applications` and can be
+moved to Trash afterwards.
+
+Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
+changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
+state are never changed by this action.
+
 ## Geph Exit Locations
 
 The Geph submenu normally lists city-level exits such as `CA / Montreal`. On a

@@ -104,6 +104,7 @@ fn tr(en: &str) -> String {
         "Open Log" => "Открыть лог",
         "Copy Diagnostics" => "Скопировать диагностику",
         "Check for Updates…" => "Проверить обновления…",
+        "Uninstall Slipstream…" => "Удалить Slipstream…",
         "Quit Slipstream" => "Выйти из Slipstream",
         other => other,
     }
@@ -117,6 +118,7 @@ const ID_RESTART: &str = "restart_proxy";
 const ID_LOG: &str = "open_log";
 const ID_DIAGNOSTICS: &str = "copy_diagnostics";
 const ID_UPDATE: &str = "check_updates";
+const ID_UNINSTALL: &str = "uninstall_slipstream";
 const ID_QUIT: &str = "quit";
 // Daemon publishes the tg://proxy?... link here (world-readable) once the bundled
 // tg-ws-proxy is up; the tray opens it so Telegram Desktop adds+enables the proxy
@@ -925,6 +927,10 @@ fn ensure_daemon_installed(app: &AppHandle) {
     }
 }
 
+fn uninstall_shell() -> String {
+    format!("{} --uninstall", shell_quote(INSTALLED_DAEMON))
+}
+
 fn osascript_dialog_args(script: &str) -> Vec<String> {
     vec![
         "-e".into(),
@@ -965,6 +971,41 @@ fn prompt_secret(current: &str) -> Option<String> {
     s.split("text returned:")
         .nth(1)
         .map(|t| t.trim().to_string())
+}
+
+fn uninstall_dialog_script_for(ru: bool) -> String {
+    let (msg, keep, remove) = if ru {
+        (
+            "Будут удалены фоновая служба Slipstream, встроенный Geph и его ключ аккаунта. Само приложение останется в Applications, после этого его можно переместить в Корзину.",
+            "Отмена",
+            "Удалить",
+        )
+    } else {
+        (
+            "This removes the Slipstream background service, bundled Geph, and its account key. The app remains in Applications and can then be moved to Trash.",
+            "Cancel",
+            "Uninstall",
+        )
+    };
+    format!(
+        "display dialog \"{msg}\" with title \"Slipstream\" buttons {{\"{keep}\", \"{remove}\"}} default button \"{keep}\" cancel button \"{keep}\" with icon caution"
+    )
+}
+
+fn prompt_uninstall() -> bool {
+    let script = uninstall_dialog_script_for(ui_ru());
+    let Ok(out) = osascript_dialog(&script).output() else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    let expected = if ui_ru() {
+        "Удалить"
+    } else {
+        "Uninstall"
+    };
+    String::from_utf8_lossy(&out.stdout).contains(&format!("button returned:{expected}"))
 }
 
 /// Persist a geph setting (secret / exit / launch) into the per-user config the
@@ -1403,6 +1444,22 @@ fn keychain_set(secret: &str) {
             "-w",
             secret,
         ])
+        .status();
+}
+
+fn keychain_delete_args() -> [&'static str; 5] {
+    [
+        "delete-generic-password",
+        "-s",
+        KC_SERVICE,
+        "-a",
+        KC_ACCOUNT,
+    ]
+}
+
+fn keychain_delete() {
+    let _ = Command::new("/usr/bin/security")
+        .args(keychain_delete_args())
         .status();
 }
 
@@ -2186,6 +2243,23 @@ fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn remove_owned_geph_runtime(config_dir: &Path) -> Result<(), String> {
+    if let Err(error) = fs::remove_dir_all(config_dir) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("geph runtime cleanup unavailable: {error}"));
+        }
+    }
+    Ok(())
+}
+
+fn geph_launch_agent_uninstall(app: &AppHandle) -> Result<(), String> {
+    let paths = geph_launch_agent_paths_for_app(app)?;
+    geph_launch_agent_disable(app)?;
+    remove_owned_geph_runtime(&paths.config_dir)?;
+    keychain_delete();
+    Ok(())
+}
+
 /// Install or refresh the user LaunchAgent that owns Geph independently of the
 /// tray process. Returns false when Geph is intentionally disabled or no account
 /// secret has been configured yet.
@@ -2342,6 +2416,11 @@ pub fn run() {
                         .enabled(false)
                         .build(app)?,
                 )
+                .separator()
+                .item(
+                    &MenuItemBuilder::with_id(ID_UNINSTALL, tr("Uninstall Slipstream…"))
+                        .build(app)?,
+                )
                 .item(
                     &MenuItemBuilder::with_id(ID_QUIT, tr("Quit Slipstream"))
                         .accelerator("CmdOrCtrl+Q")
@@ -2439,6 +2518,29 @@ pub fn run() {
                             tauri::async_runtime::spawn(
                                 async move { check_for_updates(app).await },
                             );
+                        }
+                        ID_UNINSTALL => {
+                            if !prompt_uninstall() {
+                                return;
+                            }
+                            if !run_admin_status(
+                                &uninstall_shell(),
+                                "Slipstream needs administrator access to remove its background daemon.",
+                            ) {
+                                notify(app, "Unable to remove Slipstream background service");
+                                return;
+                            }
+                            geph_config_set(app, "enabled", "0");
+                            match geph_launch_agent_uninstall(app) {
+                                Ok(()) => {
+                                    notify(app, "Slipstream system components removed");
+                                    app.exit(0);
+                                }
+                                Err(error) => {
+                                    eprintln!("geph uninstall cleanup unavailable: {error}");
+                                    notify(app, "Slipstream removed; Geph cleanup needs attention");
+                                }
+                            }
                         }
                         ID_QUIT => app.exit(0),
                         _ => {}
@@ -2586,13 +2688,15 @@ mod tests {
         diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
         exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_domain, geph_launch_target, geph_launcher_script, harden_geph_dir,
-        install_diagnostic_value, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, route_class_health, routing_health_summary,
-        shell_quote, should_recover_daemon, status_for_tray, status_updated_at,
-        sync_private_executable, system_proxy_active_from_scutil, system_proxy_from_status,
-        telegram_proxy_detail, valid_bundled_daemon, write_atomic_if_changed,
-        write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
+        install_diagnostic_value, keychain_delete_args, launchd_plist_uses_bundled_daemon,
+        log_snapshot_shell, osascript_dialog_args, redact_sensitive_text,
+        remove_owned_geph_runtime, route_class_health, routing_health_summary, shell_quote,
+        should_recover_daemon, status_for_tray, status_updated_at, sync_private_executable,
+        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
+        uninstall_dialog_script_for, uninstall_shell, valid_bundled_daemon,
+        write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
+        ExitCatalogAvailability, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
+        GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -2610,6 +2714,62 @@ mod tests {
         assert_eq!(
             shell_quote("/tmp/Bob's Apps/slipstreamd"),
             "'/tmp/Bob'\\''s Apps/slipstreamd'"
+        );
+    }
+
+    #[test]
+    fn uninstall_shell_uses_only_the_owned_daemon_uninstaller() {
+        let shell = uninstall_shell();
+
+        assert_eq!(shell, "'/usr/local/slipstream/slipstreamd' --uninstall");
+        assert!(!shell.contains("pfctl"));
+        assert!(!shell.contains("pkill"));
+        assert!(!shell.contains("launchctl disable"));
+    }
+
+    #[test]
+    fn uninstall_dialog_defaults_to_cancel_in_each_supported_language() {
+        let english = uninstall_dialog_script_for(false);
+        let russian = uninstall_dialog_script_for(true);
+
+        assert!(english.contains("default button \"Cancel\" cancel button \"Cancel\""));
+        assert!(english.contains("\"Uninstall\""));
+        assert!(russian.contains("default button \"Отмена\" cancel button \"Отмена\""));
+        assert!(russian.contains("\"Удалить\""));
+    }
+
+    #[test]
+    fn owned_geph_runtime_cleanup_stays_inside_the_app_config_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "slipstream-geph-uninstall-test-{}",
+            std::process::id()
+        ));
+        let config_dir = root.join("config");
+        let untouched = root.join("outside.txt");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(config_dir.join("runtime")).unwrap();
+        std::fs::write(config_dir.join("runtime/geph5-client"), b"binary").unwrap();
+        std::fs::write(config_dir.join("geph-active.yaml"), b"secret").unwrap();
+        std::fs::write(&untouched, b"keep").unwrap();
+
+        remove_owned_geph_runtime(&config_dir).unwrap();
+
+        assert!(!config_dir.exists());
+        assert!(untouched.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn keychain_cleanup_targets_only_slipstream_geph_account() {
+        assert_eq!(
+            keychain_delete_args(),
+            [
+                "delete-generic-password",
+                "-s",
+                "dev.slipstream.geph",
+                "-a",
+                "account-secret",
+            ]
         );
     }
 
