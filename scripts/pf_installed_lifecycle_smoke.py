@@ -123,7 +123,10 @@ class PersistentSentinelConnection:
                 with socket.create_connection(
                     (pf.TEST_DESTINATION, self.target_port), timeout=5
                 ) as client:
-                    client.settimeout(10)
+                    # launchd restart can legitimately take more than ten
+                    # seconds. Once connected, wait indefinitely so only a real
+                    # EOF/error (or the explicit STOP marker) ends the sentinel.
+                    client.settimeout(None)
                     while True:
                         data = client.recv(4096)
                         if not data or data == STOP_MARKER:
