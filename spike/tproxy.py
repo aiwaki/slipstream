@@ -104,7 +104,7 @@ _dead = {}                     # host -> expiry_monotonic
 
 # Status the menu-bar app polls (atomic write; ts lets the app detect a dead daemon).
 STATUS_PATH = "/var/run/slipstream.status"
-DAEMON_VERSION = "0.1.6"
+DAEMON_VERSION = "0.1.7"
 _conn_count = 0                # live proxied connections
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
