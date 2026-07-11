@@ -124,3 +124,116 @@ jobs:
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py
+
+  packaged-app-lifecycle:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app-tauri/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: spike/requirements.txt
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app-tauri/src-tauri/target
+          key: cargo-packaged-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app-tauri/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-packaged-${{ runner.os }}-${{ runner.arch }}-
+            cargo-${{ runner.os }}-
+
+      - name: Require the production architecture
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+
+      - name: Build the frozen daemon
+        run: |
+          set -euo pipefail
+          python3 -m venv spike/.buildvenv
+          spike/.buildvenv/bin/pip install --quiet --disable-pip-version-check \
+            -r spike/requirements.txt pyinstaller
+          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
+            --generate-keypair \
+            --key-id ci-packaged-lifecycle \
+            --private-key-output /tmp/slipstream-route-policy.key \
+            --public-keys-output spike/route-policy-keys.json
+          ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
+          rm -rf app-tauri/src-tauri/slipstreamd
+          cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
+          test -x app-tauri/src-tauri/slipstreamd/slipstreamd
+          /usr/bin/lipo -verify_arch arm64 app-tauri/src-tauri/slipstreamd/slipstreamd
+
+      - name: Fetch the recorded Geph build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
+          tag="geph-vendor-$version"
+          mkdir -p app-tauri/src-tauri/binaries /tmp/geph
+          gh release download "$tag" --repo "${{ github.repository }}" \
+            --pattern geph5-client --dir /tmp/geph
+          cp /tmp/geph/geph5-client \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          /usr/bin/lipo -verify_arch arm64 \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+
+      - name: Build the packaged app
+        working-directory: app-tauri
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build:local -- --bundles app
+
+      - name: Verify packaged resources
+        run: |
+          set -euo pipefail
+          app="app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app"
+          test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
+            = "$(tr -d '[:space:]' < VERSION)"
+          /usr/bin/lipo -verify_arch arm64 "$app/Contents/MacOS/slipstream"
+          /usr/bin/lipo -verify_arch arm64 \
+            "$app/Contents/Resources/slipstreamd/slipstreamd"
+          /usr/bin/lipo -verify_arch arm64 "$app/Contents/MacOS/geph5-client"
+          /usr/bin/codesign --verify --deep --strict "$app"
+
+      - name: Packaged app lifecycle sentinel smoke
+        env:
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py \
+            --app-bundle app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app
+
+      - name: Package the qualified app
+        run: |
+          set -euo pipefail
+          mkdir -p dist-ci
+          ditto -c -k --keepParent \
+            app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app \
+            dist-ci/Slipstream-packaged-lifecycle.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Slipstream-packaged-lifecycle-${{ github.sha }}
+          path: dist-ci/Slipstream-packaged-lifecycle.zip
+          if-no-files-found: error
+          retention-days: 7

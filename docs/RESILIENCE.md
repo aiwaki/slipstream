@@ -30,8 +30,8 @@ YouTube/googlevideo.
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
 | Crash restart | launchd `KeepAlive` | none |
-| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | keep the privileged sentinel smoke required in CI; retain installed lifecycle qualification before release |
-| Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token | installed restart/uninstall sentinel remains a release gate |
+| PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | keep both privileged sentinel jobs required in CI and add cross-version rollback after the first safety-qualified release |
+| Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
@@ -55,21 +55,23 @@ sibling sentinel anchor, and an identical global PF snapshot after cleanup.
 Cleanup uses separate `-F rules` and `-F nat` operations; `-F all` is forbidden
 because macOS includes the shared state table in that modifier.
 
-`scripts/pf_installed_lifecycle_smoke.py` is the second disposable gate. It
-installs the script-mode LaunchDaemon, proves a missing Geph backend leaves PF
-dormant, briefly activates the existing local-only mode, restarts the daemon,
-and uninstalls it. A non-root TCP connection and its PF state must survive the
-entire cycle, the sibling sentinel rules must remain byte-for-byte unchanged,
-and the global PF snapshot must match after cleanup. The script refuses to run
-unless GitHub Actions and `SLIPSTREAM_DISPOSABLE_CI=1` are both present.
-The qualified cycle passes with dormant cold install, a new PID after restart,
-clean uninstall, preserved sentinel connection/state, and unchanged global PF.
+`scripts/pf_installed_lifecycle_smoke.py` is the second disposable gate. Its
+fast job installs the script-mode LaunchDaemon; a separate job builds the real
+arm64 Tauri `.app` and installs the frozen daemon embedded in its resources.
+Both modes prove a missing Geph backend leaves PF dormant, repeat installation,
+briefly activate the existing local-only mode, restart the daemon, and uninstall
+it. A non-root TCP connection and its PF state must survive the entire cycle,
+the sibling sentinel rules must remain byte-for-byte unchanged, and the global
+PF snapshot must match after cleanup. The script refuses to run unless GitHub
+Actions and `SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job
+uploads only the exact `.app` that passed this qualification.
 
 ## Priority Order
 
 ### M0 - Safe Base
 
-- Prove an installed restart and uninstall preserve external PF anchors.
+- Establish the first safety-qualified release as the cross-version rollback
+  baseline; do not execute older global-PF releases as rollback fixtures.
 - Prove unknown listeners and PID reuse cannot cause unrelated process signals.
 - Keep secrets owner-only and remove direct-to-main automation.
 
