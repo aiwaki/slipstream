@@ -253,10 +253,15 @@ SleepService/DarkWake cycles. In daemon logs this appears as:
 After wake, a Geph process can keep its local SOCKS port open while the tunnel
 inside it returns `SOCKS connect failed` or closes payload probes without a
 response. Slipstream records this under `geph_detail`; repeated post-wake
-geo-exit failures across multiple hosts may set `restart_recommended` for
-diagnostics. The tray does not act on that hint: the Geph LaunchAgent recovers a
-dead process through `KeepAlive`, while restarting a live but stale process is
-deferred until the daemon can coordinate it without tearing down active streams.
+geo-exit failures across multiple hosts schedule owned recovery. The daemon
+pauses only its private PF anchor, waits for active Geph streams to drain, and
+kickstarts the exact verified user LaunchAgent. The tray is not required.
+LaunchAgent `KeepAlive` still handles a process that exits on its own.
+
+While a long-lived Geph stream is active, StatusV2 may briefly report
+`owned_geph_restart_waiting_for_idle`. This is a bounded safe wait, not a request
+for manual action. A mismatched ownership claim or unknown listener is never
+restarted; diagnostics retain that distinction.
 
 Wake canaries may briefly run before Geph/DNS recovery is complete. If a tray
 summary still says routing needs attention after the tunnel is back, check

@@ -62,9 +62,12 @@ release exists; stable distribution remains a separate M3 gate.
 
 Progress: runtime local-bypass misses, geo-exit failures, and repeated unknown
 host stalls now enter one normalized reducer. Cold-start and runtime backend
-failure also gate or pause the private PF anchor. The remaining M1 lifecycle
-step is moving owned Geph out of the tray and into a user LaunchAgent without
-reintroducing live-stream restarts.
+failure also gate or pause the private PF anchor. Owned Geph runs in a user
+LaunchAgent with `KeepAlive`; after repeated post-wake failures, the daemon can
+pause its private PF anchor, wait for active tunnel sessions to drain, verify
+the exact user job and listener identity, and kickstart that job without the
+tray. The remaining M1 gate is a sleep/wake and tray-crash soak of this complete
+lifecycle.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
