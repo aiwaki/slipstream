@@ -89,6 +89,7 @@ jobs:
             spike/tproxy.py \
             spike/xbox_dns.py \
             spike/test_recovery.py \
+            spike/test_traffic_contracts.py \
             spike/test_tproxy_doh.py \
             spike/test_xbox_dns.py \
             scripts/pf_anchor_smoke.py \
@@ -102,6 +103,9 @@ jobs:
             scripts/test_make_appcast.py \
             scripts/test_make_route_policy_bundle.py \
             scripts/test_verify_release_artifacts.py
+
+      - name: Core traffic contracts
+        run: python3 -m pytest -q spike/test_traffic_contracts.py
 
       - name: Daemon unit tests
         run: python3 -m pytest -q spike

@@ -36,6 +36,7 @@ survive across sessions and agents.
 | 2026-07-11 | A preview is offered for installation only after the release workflow runs the privileged PF lifecycle sentinel against that exact built `.app` on a disposable GitHub macOS runner. | Active |
 | 2026-07-12 | The tray watchdog does not kickstart a newly installed daemon until it has seen one fresh status snapshot or a bounded startup grace expires. This prevents a healthy daemon from being restarted while it is publishing its first StatusV2 snapshot. | Active |
 | 2026-07-12 | A missing durable PF enable token plus a definitively disabled PF state proves an in-memory-only token is stale after owned recovery. Slipstream may clear only that memory and acquire a new private token; persisted, enabled, or indeterminate token states remain fail-closed. | Active |
+| 2026-07-12 | Routing changes must pass deterministic data-plane traffic contracts through the real daemon handler. Each contract asserts the intended backend, prohibited backends, and first-plus-streamed payload delivery; it does not mutate PF, DNS, proxy, PAC, VPN, or the live network. | Active |
 
 ## Notes
 
