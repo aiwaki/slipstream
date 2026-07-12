@@ -2599,21 +2599,17 @@ def test_local_bypass_runtime_success_marks_route_ok():
         q.extend(original_window)
 
 
-def test_local_bypass_canary_requires_payload_success(monkeypatch):
+def test_local_bypass_canary_uses_modern_payload_probe_without_synthetic_preflight(monkeypatch):
     host = "updates.discord.com"
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
     payload_calls = []
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def ips(_host, _fallback_ip):
         return ["203.0.113.10"]
 
-    async def connected(ip, port, head, body, sni, strat):
-        return object(), DummyWriter(), b"\x16\x03\x03"
+    async def unexpected_synthetic_preflight(*_args, **_kwargs):
+        raise AssertionError("local canary must use the modern payload probe directly")
 
     async def payload(ip, sni, strat, spec):
         payload_calls.append((ip, sni, strat["name"], spec["name"]))
@@ -2628,7 +2624,7 @@ def test_local_bypass_canary_requires_payload_success(monkeypatch):
             "strategy_order",
             lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
         )
-        monkeypatch.setattr(tproxy, "dial_strategy", connected)
+        monkeypatch.setattr(tproxy, "dial_strategy", unexpected_synthetic_preflight)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", payload)
 
         spec = {"name": "discord_update", "group": tproxy.SERVICE_DISCORD, "host": host}
@@ -2653,15 +2649,8 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def ips(_host, _fallback_ip):
         return ["203.0.113.10"]
-
-    async def connected(ip, port, head, body, sni, strat):
-        return object(), DummyWriter(), b"\x16\x03\x03"
 
     async def no_payload(ip, sni, strat, spec):
         return 0
@@ -2684,7 +2673,6 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
             "strategy_order",
             lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
         )
-        monkeypatch.setattr(tproxy, "dial_strategy", connected)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
 
         spec = {"name": "discord_update", "group": tproxy.SERVICE_DISCORD, "host": host}
@@ -2717,15 +2705,8 @@ def test_local_bypass_canary_short_cdn_payload_warns_before_degraded(monkeypatch
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def ips(_host, _fallback_ip):
         return ["203.0.113.10"]
-
-    async def connected(ip, port, head, body, sni, strat):
-        return object(), DummyWriter(), b"\x16\x03\x03"
 
     async def short_payload(ip, sni, strat, probe_spec):
         assert probe_spec["payload_min_bytes"] == 512
@@ -2739,7 +2720,6 @@ def test_local_bypass_canary_short_cdn_payload_warns_before_degraded(monkeypatch
             "strategy_order",
             lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
         )
-        monkeypatch.setattr(tproxy, "dial_strategy", connected)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", short_payload)
 
         assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
@@ -2855,18 +2835,18 @@ def test_youtube_web_canary_failure_is_warning_only(monkeypatch):
     async def fake_resolve(host, fallback_ip):
         return ["203.0.113.10"]
 
-    async def fake_dial(ip, port, head, body, host, strat):
-        return None
+    async def no_payload(ip, host, strat, probe_spec):
+        return 0
 
     try:
         monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_resolve)
-        monkeypatch.setattr(tproxy, "dial_strategy", fake_dial)
+        monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
 
         assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
 
         check = tproxy.canary_health_snapshot()["youtube_web"]
         assert check["state"] == tproxy.HEALTH_UNKNOWN
-        assert check["last_warning"] == "strategy probe failed"
+        assert check["last_warning"] == "payload probe failed"
         assert check["failures_5m"] == 0
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
         assert health["state"] != tproxy.HEALTH_DEGRADED
