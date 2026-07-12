@@ -6241,14 +6241,61 @@ LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 5
 
 
-def active_console_gid(console_path="/dev/console"):
+def _harden_log_fd(fd, path):
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        raise OSError(f"refusing non-regular log path: {path}")
+    os.fchmod(fd, 0o600)
     try:
-        uid = os.stat(console_path).st_uid
-        if uid:
-            return pwd.getpwuid(uid).pw_gid
-    except (AttributeError, KeyError, OSError):
+        os.fchown(fd, 0, 0)
+    except (AttributeError, PermissionError, OSError):
+        # Source-mode development and unit tests may run without root. The
+        # installed LaunchDaemon runs as root and normalizes ownership too.
         pass
-    return 0
+
+
+def _open_private_log(path):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        _harden_log_fd(fd, path)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _harden_existing_log(path):
+    if not os.path.lexists(path):
+        return False
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        # The running daemon may rotate an archive between lexists() and open()
+        # during reinstall. A vanished archive is already safely absent.
+        return False
+    try:
+        _harden_log_fd(fd, path)
+    finally:
+        os.close(fd)
+    return True
+
+
+def ensure_private_log_files(path=LOG_PATH, backups=LOG_BACKUPS):
+    """Create or migrate the raw daemon log and retained archives."""
+    fd = _open_private_log(path)
+    os.close(fd)
+    for index in range(1, backups + 1):
+        _harden_existing_log(f"{path}.{index}")
 
 
 class RotatingLogWriter:
@@ -6270,19 +6317,15 @@ class RotatingLogWriter:
         self._line_start = True
         self._lock = threading.RLock()
         self._file = None
-        if os.path.exists(self.path) and os.path.getsize(self.path) >= self.max_bytes:
+        for index in range(1, self.backups + 1):
+            _harden_existing_log(self._archive_path(index))
+        self._open()
+        if os.fstat(self._file.fileno()).st_size >= self.max_bytes:
             self._rotate()
-        else:
-            self._open()
 
     def _open(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        self._file = open(self.path, "a", buffering=1)
-        try:
-            os.chown(self.path, 0, active_console_gid())
-        except (AttributeError, PermissionError, OSError):
-            pass
-        os.chmod(self.path, 0o640)
+        fd = _open_private_log(self.path)
+        self._file = os.fdopen(fd, "a", buffering=1)
         if self.redirect_fds:
             os.dup2(self._file.fileno(), 1)
             os.dup2(self._file.fileno(), 2)
@@ -6357,6 +6400,31 @@ def remove_obsolete_newsyslog_config():
         pass
 
 
+def launchd_plist_text(prog_args, workdir):
+    prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>\n'
+        f'  <key>Label</key><string>{LAUNCHD_LABEL}</string>\n'
+        f'  <key>ProgramArguments</key><array>{prog_xml}</array>\n'
+        '  <key>RunAtLoad</key><true/>\n'
+        '  <key>KeepAlive</key><true/>\n'
+        '  <key>EnvironmentVariables</key><dict>'
+        '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
+        '<key>PYTHONUNBUFFERED</key><string>1</string></dict>\n'
+        '  <key>SoftResourceLimits</key><dict>'
+        '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
+        '  <key>HardResourceLimits</key><dict>'
+        '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
+        f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
+        '  <key>StandardOutPath</key><string>/dev/null</string>\n'
+        '  <key>StandardErrorPath</key><string>/dev/null</string>\n'
+        '</dict></plist>\n'
+    )
+
+
 def do_install(port):
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
@@ -6366,6 +6434,10 @@ def do_install(port):
     if not frozen:
         # Validate before stopping a working installed daemon.
         _script_runtime_payload(__file__)
+    # The daemon owns log creation; launchd is pointed at /dev/null below so it
+    # can never recreate a deleted log with a process-default mode. Pre-create
+    # and migrate here so install/reinstall also fixes retained archives.
+    ensure_private_log_files()
     secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
     try:
         tgws_secret_backup = open(secret_path).read()
@@ -6415,28 +6487,7 @@ def do_install(port):
         except Exception:
             pass
     workdir = INSTALL_DIR
-    prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
-    plist = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-        '<plist version="1.0"><dict>\n'
-        f'  <key>Label</key><string>{LAUNCHD_LABEL}</string>\n'
-        f'  <key>ProgramArguments</key><array>{prog_xml}</array>\n'
-        '  <key>RunAtLoad</key><true/>\n'
-        '  <key>KeepAlive</key><true/>\n'
-        '  <key>EnvironmentVariables</key><dict>'
-        '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
-        '<key>PYTHONUNBUFFERED</key><string>1</string></dict>\n'
-        '  <key>SoftResourceLimits</key><dict>'
-        '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
-        '  <key>HardResourceLimits</key><dict>'
-        '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
-        f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
-        f'  <key>StandardOutPath</key><string>{LOG_PATH}</string>\n'
-        f'  <key>StandardErrorPath</key><string>{LOG_PATH}</string>\n'
-        '</dict></plist>\n'
-    )
+    plist = launchd_plist_text(prog_args, workdir)
     with open(LAUNCHD_PLIST, "w") as f:
         f.write(plist)
     os.chmod(LAUNCHD_PLIST, 0o644)

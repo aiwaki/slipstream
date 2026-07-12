@@ -17,6 +17,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -437,6 +438,23 @@ def _assert_anchor_active(runner: pf.PfctlRunner) -> None:
         )
 
 
+def _assert_private_raw_log(path: Path, expected_uid: int = 0) -> None:
+    try:
+        log_stat = path.lstat()
+    except OSError as exc:
+        raise LifecycleError(f"installed daemon log is unavailable: {exc}") from exc
+    if not stat.S_ISREG(log_stat.st_mode):
+        raise LifecycleError(f"installed daemon log is not a regular file: {path}")
+    if stat.S_IMODE(log_stat.st_mode) != 0o600:
+        raise LifecycleError(
+            f"installed daemon log mode is not 0600: {stat.S_IMODE(log_stat.st_mode):04o}"
+        )
+    if log_stat.st_uid != expected_uid:
+        raise LifecycleError(
+            f"installed daemon log has unexpected owner: uid={log_stat.st_uid}"
+        )
+
+
 def _assert_installed_payload(target: LifecycleTarget) -> None:
     for path in target.required_installed_paths:
         if not path.is_file():
@@ -446,6 +464,8 @@ def _assert_installed_payload(target: LifecycleTarget) -> None:
             f"{target.name} installed daemon is not executable: "
             f"{target.required_installed_paths[0]}"
         )
+
+    _assert_private_raw_log(LOG_PATH)
 
     try:
         with LAUNCHD_PLIST.open("rb") as handle:

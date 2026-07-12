@@ -133,6 +133,28 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(lifecycle._daemon_status(v2), v2["daemon"])
         self.assertIsNone(lifecycle._daemon_status({"schema_version": 2}))
 
+    def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "slipstream.log"
+            log.write_text("private\n")
+            log.chmod(0o600)
+
+            lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
+
+            log.chmod(0o640)
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "not 0600"):
+                lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
+
+    def test_private_raw_log_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_text("not the log\n")
+            log = Path(tmp) / "slipstream.log"
+            log.symlink_to(target)
+
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "not a regular file"):
+                lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
+
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
