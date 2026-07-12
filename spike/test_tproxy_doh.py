@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import logging
+import plistlib
 import re
 import ssl
 import sys
@@ -4312,7 +4313,9 @@ def test_rotating_log_writer_keeps_bounded_archives(tmp_path):
     assert (tmp_path / "slipstream.log.1").read_text() == "abcdefghi\n"
     assert (tmp_path / "slipstream.log.2").read_text() == "123456789\n"
     assert not (tmp_path / "slipstream.log.3").exists()
-    assert log.stat().st_mode & 0o777 == 0o640
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "slipstream.log.1").stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "slipstream.log.2").stat().st_mode & 0o777 == 0o600
 
 
 def test_rotating_log_writer_rotates_oversized_existing_log(tmp_path):
@@ -4325,6 +4328,35 @@ def test_rotating_log_writer_rotates_oversized_existing_log(tmp_path):
 
     assert log.read_text() == "fresh\n"
     assert (tmp_path / "slipstream.log.1").read_text() == "already too large\n"
+
+
+def test_rotating_log_writer_migrates_existing_log_and_archives_to_owner_only(tmp_path):
+    log = tmp_path / "slipstream.log"
+    archive = tmp_path / "slipstream.log.1"
+    log.write_text("current\n")
+    archive.write_text("previous\n")
+    log.chmod(0o644)
+    archive.chmod(0o640)
+
+    writer = tproxy.RotatingLogWriter(str(log), max_bytes=1024, backups=2)
+    writer.flush()
+
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert archive.stat().st_mode & 0o777 == 0o600
+
+
+def test_rotating_log_writer_refuses_symlink_log_path(tmp_path):
+    target = tmp_path / "target"
+    target.write_text("leave me alone\n")
+    target.chmod(0o644)
+    log = tmp_path / "slipstream.log"
+    log.symlink_to(target)
+
+    with pytest.raises(OSError):
+        tproxy.RotatingLogWriter(str(log), max_bytes=1024, backups=1)
+
+    assert target.read_text() == "leave me alone\n"
+    assert target.stat().st_mode & 0o777 == 0o644
 
 
 def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
@@ -4352,28 +4384,6 @@ def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
     )
 
 
-def test_active_console_gid_uses_console_user_group(monkeypatch):
-    class Stat:
-        st_uid = 501
-
-    class User:
-        pw_gid = 20
-
-    monkeypatch.setattr(tproxy.os, "stat", lambda path: Stat())
-    monkeypatch.setattr(tproxy.pwd, "getpwuid", lambda uid: User())
-
-    assert tproxy.active_console_gid() == 20
-
-
-def test_active_console_gid_falls_back_to_root_group(monkeypatch):
-    class Stat:
-        st_uid = 0
-
-    monkeypatch.setattr(tproxy.os, "stat", lambda path: Stat())
-
-    assert tproxy.active_console_gid() == 0
-
-
 def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
     conf = tmp_path / "dev.slipstream.tproxy.conf"
     conf.write_text("obsolete\n")
@@ -4383,3 +4393,19 @@ def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
     tproxy.remove_obsolete_newsyslog_config()
 
     assert not conf.exists()
+
+
+def test_launchd_delegates_raw_log_creation_to_private_writer():
+    raw = tproxy.launchd_plist_text(
+        ["/usr/local/slipstream/slipstreamd", "--port", "1080"],
+        "/usr/local/slipstream",
+    )
+    plist = plistlib.loads(raw.encode())
+
+    assert plist["StandardOutPath"] == "/dev/null"
+    assert plist["StandardErrorPath"] == "/dev/null"
+    assert plist["ProgramArguments"] == [
+        "/usr/local/slipstream/slipstreamd",
+        "--port",
+        "1080",
+    ]

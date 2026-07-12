@@ -83,7 +83,7 @@ PF lifecycle qualification.
 - Introduce privacy-bounded `StatusV2` sections for daemon, routes, backends,
   environment, and recovery state. Done in the transition release.
 - Keep hostname-level and detailed network events out of world-readable status.
-  Done for StatusV2; raw logs `0600` remains pending. Diagnostic exports stay
+  Done for StatusV2 and root-owned raw logs at `0600`. Diagnostic exports stay
   sanitized and user-owned.
 - Let the tray read V1 and V2 for one transition release. Done.
 - Split the Python daemon into policy, reducer, probes, Geph backend, macOS PF

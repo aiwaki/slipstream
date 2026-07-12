@@ -45,12 +45,18 @@ Tray diagnostics:
   visible in bug reports.
 - The snapshot includes `daemon_recovery` when the tray watchdog recently tried
   to recover the root daemon or clear Slipstream's private PF anchor.
+- Because the raw daemon log is root-only, `Copy Diagnostics` may show a named
+  administrator prompt to make a temporary owner-only copy. The exported tail
+  is redacted and the intermediate copy is removed.
 
 Daemon log:
 
 ```bash
-tail -f /var/log/slipstream.log
+sudo tail -f /var/log/slipstream.log
 ```
+
+The current log and retained rotations are root-owned regular files with mode
+`0600`. `Open Log` is the normal tray path when a Terminal tail is unnecessary.
 
 Administrator prompts:
 
@@ -58,7 +64,7 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 
 - installing or upgrading the background daemon;
 - restarting or repairing the background daemon;
-- copying the root-owned daemon log for `Open Log`.
+- copying the root-owned daemon log for `Open Log` or `Copy Diagnostics`.
 
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.

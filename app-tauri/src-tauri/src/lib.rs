@@ -420,8 +420,8 @@ fn redact_sensitive_text(input: &str) -> String {
     out
 }
 
-fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
-    match fs::read_to_string(log_path) {
+fn diagnostic_log_tail_from_path(display_path: &str, read_path: &Path, max_lines: usize) -> Value {
+    match fs::read_to_string(read_path) {
         Ok(raw) => {
             let all_lines: Vec<&str> = raw.lines().collect();
             let start = all_lines.len().saturating_sub(max_lines);
@@ -430,19 +430,60 @@ fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
                 .map(|line| redact_sensitive_text(line))
                 .collect();
             json!({
-                "path": log_path,
+                "path": display_path,
                 "available": true,
                 "truncated": start > 0,
                 "lines": lines,
             })
         }
         Err(err) => json!({
-            "path": log_path,
+            "path": display_path,
             "available": false,
             "error": format!("{:?}", err.kind()),
             "lines": [],
         }),
     }
+}
+
+fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
+    diagnostic_log_tail_from_path(log_path, Path::new(log_path), max_lines)
+}
+
+fn diagnostic_log_tail_with_admin_fallback(log_path: &str, max_lines: usize) -> Value {
+    let direct = diagnostic_log_tail(log_path, max_lines);
+    if direct.get("available").and_then(Value::as_bool) == Some(true)
+        || !Path::new(log_path).exists()
+    {
+        return direct;
+    }
+
+    let snapshot = std::env::temp_dir().join(format!(
+        "slipstream-diagnostic-log-{}.log",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&snapshot);
+    let copied = if copy_log_snapshot_direct(log_path, &snapshot) {
+        true
+    } else {
+        let Some(uid) = current_numeric_id("-u") else {
+            return direct;
+        };
+        let Some(gid) = current_numeric_id("-g") else {
+            return direct;
+        };
+        let shell = log_snapshot_shell(log_path, &snapshot, &uid, &gid);
+        run_admin_status(
+            &shell,
+            "Slipstream needs administrator access to include its daemon log in diagnostics.",
+        )
+    };
+    if !copied {
+        return direct;
+    }
+
+    let tail = diagnostic_log_tail_from_path(log_path, &snapshot, max_lines);
+    let _ = fs::remove_file(snapshot);
+    tail
 }
 
 fn daemon_recovery_status_value(path: &str) -> Value {
@@ -814,7 +855,10 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
             current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
         ),
         unix_now_secs(),
-        Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
+        Some(diagnostic_log_tail_with_admin_fallback(
+            LOG_PATH,
+            DIAGNOSTIC_LOG_TAIL_LINES,
+        )),
         Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
         bundled_daemon.as_deref(),
     );
@@ -2748,9 +2792,9 @@ mod tests {
     use super::{
         admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
         daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
-        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
-        exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
-        geph_launch_domain, geph_launch_target, geph_launcher_script,
+        diagnostic_log_tail, diagnostic_log_tail_from_path, diagnostic_snapshot_value,
+        diagnostic_summary_value, exit_catalog, exit_catalog_availability, geph_launch_agent_paths,
+        geph_launch_agent_plist, geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
         keychain_delete_args, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
         osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
@@ -3317,6 +3361,25 @@ mod tests {
         assert!(text.contains("<redacted>"));
         assert!(!text.contains("one"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diagnostic_log_tail_from_snapshot_preserves_raw_log_display_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-log-tail-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let snapshot = dir.join("snapshot.log");
+        std::fs::write(&snapshot, "safe line\n").unwrap();
+
+        let tail = diagnostic_log_tail_from_path("/var/log/slipstream.log", &snapshot, 10);
+
+        assert_eq!(tail["path"], "/var/log/slipstream.log");
+        assert_eq!(tail["available"], true);
+        assert_eq!(tail["lines"], json!(["safe line"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
