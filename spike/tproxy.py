@@ -2731,7 +2731,10 @@ CANARY_SPECS = (
         "name": "openai_billing",
         "group": SERVICE_OPENAI,
         "host": "billing.openai.com",
-        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
+        # The primary ChatGPT canary owns OpenAI route health. Billing remains
+        # observed, but an isolated endpoint/exit refusal must not mark the
+        # entire geo-exit route as requiring attention.
+        "soft": True,
     },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
     {

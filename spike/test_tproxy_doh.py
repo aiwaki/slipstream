@@ -3177,15 +3177,22 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         q.extend(original_window)
 
 
-def test_canary_health_secondary_geo_warning_grace_before_degraded():
+def test_secondary_geo_exit_canary_stays_warning_only_when_core_is_healthy(monkeypatch):
     original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
     core = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_core")
     billing = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_billing")
     now = tproxy.time.time()
 
+    async def socks_unavailable(*_args):
+        return None
+
     try:
+        assert billing["soft"] is True
         tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: False)
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+        monkeypatch.setattr(tproxy, "dial_via_geph", socks_unavailable)
         tproxy.canary_health_event(
             core,
             tproxy.ROUTE_GEO_EXIT,
@@ -3194,47 +3201,32 @@ def test_canary_health_secondary_geo_warning_grace_before_degraded():
             backend=tproxy.GEO_BACKEND_GEPH,
             now=now,
         )
-        tproxy.canary_health_event(
-            billing,
-            tproxy.ROUTE_GEO_EXIT,
-            "billing.openai.com",
-            ok=False,
-            reason="SOCKS connect failed",
-            degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-            now=now + 10.0,
-        )
+        assert asyncio.run(tproxy._run_geo_exit_canary(billing)) == "warning"
 
-        checks = tproxy.canary_health_snapshot(now=now + 10.0)
+        checks = tproxy.canary_health_snapshot()
         assert checks["openai_core"]["state"] == tproxy.HEALTH_OK
         assert checks["openai_billing"]["state"] == tproxy.HEALTH_UNKNOWN
         assert checks["openai_billing"]["last_warning"] == "SOCKS connect failed"
 
-        health = tproxy.route_health_snapshot(now=now + 10.0)[tproxy.SERVICE_OPENAI]
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
         assert health["state"] == tproxy.HEALTH_OK
         assert health["last_host"] == "chatgpt.com"
         assert health["last_failure"] == ""
         assert health["last_warning"] == "SOCKS connect failed"
         assert health["last_warning_host"] == "billing.openai.com"
 
-        for idx in range(1, tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER):
-            tproxy.canary_health_event(
-                billing,
-                tproxy.ROUTE_GEO_EXIT,
-                "billing.openai.com",
-                ok=False,
-                reason="SOCKS connect failed",
-                degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-                now=now + 10.0 + idx,
-            )
+        for _ in range(1, tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER):
+            assert asyncio.run(tproxy._run_geo_exit_canary(billing)) == "warning"
 
-        checks = tproxy.canary_health_snapshot(now=now + 20.0)
-        assert checks["openai_billing"]["state"] == tproxy.HEALTH_DEGRADED
-        assert checks["openai_billing"]["last_failure"] == "SOCKS connect failed"
+        checks = tproxy.canary_health_snapshot()
+        assert checks["openai_billing"]["state"] == tproxy.HEALTH_UNKNOWN
+        assert checks["openai_billing"]["last_warning"] == "SOCKS connect failed"
 
-        health = tproxy.route_health_snapshot(now=now + 20.0)[tproxy.SERVICE_OPENAI]
-        assert health["state"] == tproxy.HEALTH_DEGRADED
-        assert health["last_host"] == "billing.openai.com"
-        assert health["last_failure"] == "SOCKS connect failed"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_host"] == "chatgpt.com"
+        assert health["last_failure"] == ""
+        assert health["last_warning_host"] == "billing.openai.com"
     finally:
         tproxy._route_health[tproxy.SERVICE_OPENAI] = original
         q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
