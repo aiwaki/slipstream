@@ -450,6 +450,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["daemon"]["dead_hosts"] == 1
     assert status["routes"][tproxy.ROUTE_LOCAL_BYPASS]["state"] == tproxy.HEALTH_OK
     assert status["backends"]["geph"]["state"] == "up"
+    assert status["backends"]["geph"]["active_sessions"] == 0
     auto_geo_exit = status["backends"]["geph"]["auto_geo_exit"]
     assert auto_geo_exit["enabled"] is False
     assert auto_geo_exit["learned"] == 0
@@ -3562,6 +3563,193 @@ def test_geo_exit_failures_never_request_unowned_geph_restart(capsys):
         tproxy._geph_restart_failures.clear()
         tproxy._geph_restart_hint.clear()
         tproxy._geph_restart_hint.update(original_hint)
+
+
+def test_owned_geph_launch_target_requires_exact_user_claim():
+    state = {"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL}
+
+    assert tproxy._owned_geph_launch_target(state, 502) == (
+        "gui/502/dev.slipstream.geph"
+    )
+    assert tproxy._owned_geph_launch_target(state, 503) is None
+    assert tproxy._owned_geph_launch_target(
+        {"uid": 502, "launchd_label": "com.example.geph"},
+        502,
+    ) is None
+    assert tproxy._owned_geph_launch_target(
+        {"uid": 0, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        0,
+    ) is None
+    assert tproxy._owned_geph_launch_target(
+        {"uid": True, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        1,
+    ) is None
+
+
+def test_owned_geph_restart_rejects_symlinked_ownership_file(monkeypatch, tmp_path):
+    target = tmp_path / "claim-target.json"
+    target.write_text("{}")
+    claim = tmp_path / "geph-owned.json"
+    claim.symlink_to(target)
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=0,
+        ownership_path=str(claim),
+        ownership_state={
+            "uid": target.stat().st_uid,
+            "launchd_label": tproxy.GEPH_LAUNCHD_LABEL,
+        },
+        listener_owned=True,
+        runner=lambda *args: calls.append(args),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "unverified"
+    assert calls == []
+
+
+def test_owned_geph_restart_waits_for_active_tunnel(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=1,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=lambda *args: calls.append(args),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "busy"
+    assert calls == []
+    assert hint["recommended"] is True
+
+
+def test_owned_geph_restart_pauses_pf_and_kickstarts_exact_launchagent(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_restart_failures", deque([(99.0, "chatgpt.com", "stale")]))
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    events = []
+
+    def run(*args):
+        events.append(("run",) + args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        tproxy,
+        "note_runtime_rearm",
+        lambda reason, **_kwargs: events.append(("rearm", reason)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_transparent_routing",
+        lambda reason, now=None: events.append(("pause", reason, now)),
+    )
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=run,
+    )
+
+    assert result == "restarted"
+    assert events == [
+        ("pause", "owned Geph restart in progress", 100.0),
+        ("run", "/bin/launchctl", "kickstart", "-k", "gui/502/dev.slipstream.geph"),
+        ("rearm", "geph_restart"),
+    ]
+    assert hint["recommended"] is False
+    assert tproxy._geph_restart_draining is True
+    tproxy._finish_geph_restart_drain()
+    assert tproxy._geph_restart_draining is False
+
+
+def test_owned_geph_restart_never_touches_unverified_listener(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=False,
+        runner=lambda *args: calls.append(args),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "unverified"
+    assert calls == []
+    assert hint["recommended"] is True
+
+
+def test_owned_geph_restart_rate_limits_launchctl_retry(monkeypatch, capsys):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    def unavailable(*args):
+        calls.append(args)
+        return SimpleNamespace(returncode=1, stdout="", stderr="job unavailable")
+
+    kwargs = {
+        "active_sessions": 0,
+        "ownership_path": "/tmp/geph-owned.json",
+        "ownership_state": {"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        "owner_uid": 502,
+        "listener_owned": True,
+        "runner": unavailable,
+        "pauser": lambda: None,
+    }
+    assert tproxy.execute_owned_geph_restart(now=100.0, **kwargs) == "unavailable"
+    assert tproxy.execute_owned_geph_restart(now=101.0, **kwargs) == "cooldown"
+    assert len(calls) == 1
+    assert hint["recommended"] is True
+    capsys.readouterr()
+
+
+def test_geph_active_session_counter_never_underflows(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+
+    assert tproxy._geph_session_started()
+    assert tproxy._geph_session_started()
+    assert tproxy.geph_active_session_count() == 2
+    tproxy._geph_session_finished()
+    tproxy._geph_session_finished()
+    tproxy._geph_session_finished()
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_geph_restart_drain_blocks_new_sessions(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+
+    assert tproxy._begin_geph_restart_drain()
+    assert not tproxy._geph_session_started()
+    assert tproxy.geph_active_session_count() == 0
+    tproxy._finish_geph_restart_drain()
+    assert tproxy._geph_session_started()
+    tproxy._geph_session_finished()
 
 
 def test_stale_auto_geph_cache_never_overrides_explicit_policy():

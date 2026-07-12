@@ -2060,12 +2060,13 @@ fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
          executable={}\n\
          config={}\n\
          ownership={}\n\
+         uid=$(/usr/bin/id -u)\n\
          /bin/rm -f \"$ownership\"\n\
          while /usr/bin/nc -z -w 1 127.0.0.1 {GEPH_SOCKS_PORT} >/dev/null 2>&1; do\n\
          \x20 /bin/sleep 5\n\
          done\n\
          tmp=\"${{ownership}}.tmp.$$\"\n\
-         /usr/bin/printf '{{\"pid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" {} {} {} > \"$tmp\"\n\
+         /usr/bin/printf '{{\"pid\":%s,\"uid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" \"$uid\" {} {} {} > \"$tmp\"\n\
          /bin/chmod 600 \"$tmp\"\n\
          /bin/mv -f \"$tmp\" \"$ownership\"\n\
          exec \"$executable\" --config \"$config\"\n",
@@ -3503,12 +3504,15 @@ mod tests {
 
         assert!(script.contains("/usr/bin/nc -z -w 1 127.0.0.1 9954"));
         assert!(script.contains("\"pid\":%s"));
+        assert!(script.contains("\"uid\":%s"));
         assert!(script.contains("\"launchd_label\":%s"));
+        assert!(script.contains("uid=$(/usr/bin/id -u)"));
         let ownership_write = script
             .lines()
             .find(|line| line.contains("/usr/bin/printf"))
             .expect("launcher writes an ownership record");
         assert!(ownership_write.contains("\"$$\""));
+        assert!(ownership_write.contains("\"$uid\""));
         assert!(ownership_write.contains("> \"$tmp\""));
         assert!(!script.contains("\n+"));
         assert!(script.contains("exec \"$executable\" --config \"$config\""));

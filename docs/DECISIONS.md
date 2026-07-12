@@ -43,6 +43,7 @@ survive across sessions and agents.
 | 2026-07-12 | Raw Telegram MTProto DC traffic is an unmodified safety passthrough and failure signal, not a direct-connect guarantee. When raw MTProto is blocked, the supported user path is the bundled local `tg-ws-proxy`; Telegram never routes through Geph. | Active |
 | 2026-07-13 | `billing.openai.com` remains a geo-exit route, but it is not a health canary. A synthetic probe can be refused by an edge or exit without proving that the primary OpenAI flow or Slipstream is unavailable. | Active |
 | 2026-07-13 | Tray recovery copy names the affected access class (`local`, `external`, or both) and states that recovery is in progress. It does not surface generic `Needs attention`; raw failure detail remains only in sanitized diagnostics. | Active |
+| 2026-07-13 | A live but stale owned Geph may be restarted by the daemon only after the private PF anchor is paused and active Geph sessions reach zero. The daemon must verify the ownership file's user ID against its filesystem owner, the exact `dev.slipstream.geph` LaunchAgent label, and the listener PID/executable/config identity before calling `launchctl kickstart`; unknown listeners and external Geph are never touched. | Active |
 
 ## Notes
 

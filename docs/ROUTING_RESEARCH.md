@@ -105,6 +105,11 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 - The active Codex session appeared to keep a stale failed MCP transport and did
   not invoke the wrapper. Until a session reloads tools, use
   `codebase-memory-mcp cli` as the graph-backed discovery path.
+- Observed again on 2026-07-13: indexing the fresh daemon-recovery worktree
+  timed out after 300 seconds, and the following graph search also stalled.
+  The CLI `list_projects` path remained healthy. Discovery continued from the
+  current `main` graph plus narrow `rtk` source searches. Re-index after the MCP
+  process or Codex session is restarted.
 
 Indexed routing projects:
 
@@ -388,6 +393,24 @@ Fresh external snapshots checked on 2026-07-09:
   channel index. Channel indexes use `kind: slipstream.route_policy_channel`,
   `schema: 1`, `bundle_url`, and `sha256`; the bundle payload hash is checked
   before signature verification and health gates.
+
+## Daemon-Owned Geph Recovery
+
+- The recovery reducer already produced `restart_owned_geph` after repeated
+  post-wake failures across multiple geo-exit hosts, but the action previously
+  stopped at a status hint. A running tray was still required to perform any
+  live-process restart.
+- The Geph launcher now records its numeric user ID together with PID,
+  executable, config, and LaunchAgent label. The daemon accepts the claim only
+  when that ID also owns the claim file and the current listener still matches
+  the recorded process identity.
+- Recovery pauses only `com.apple/slipstream`, waits for the aggregate active
+  Geph-session count to reach zero, and calls `launchctl kickstart -k` for the
+  exact `gui/<uid>/dev.slipstream.geph` target. LaunchAgent `KeepAlive` continues
+  to handle ordinary process death.
+- A busy tunnel defers the action. A missing or mismatched claim, unknown
+  listener, external Geph, or unexpected label produces no signal and no PF,
+  DNS, proxy, PAC, or VPN mutation.
 
 ## Transfer Backlog
 

@@ -39,6 +39,7 @@ import signal
 import socket
 import ssl
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -127,11 +128,15 @@ GEPH_OWNED_PORT = 9954
 GEPH_EXTERNAL_PORT = 9909
 GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [GEPH_OWNED_PORT]
 GEPH_OWNERSHIP_FILE = "geph-owned.json"
+GEPH_LAUNCHD_LABEL = "dev.slipstream.geph"
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
 _geph_owned = False
 _geph_port_conflict = False
 _external_geph_detected = False
+_geph_active_sessions = 0
+_geph_restart_draining = False
+_geph_session_lock = threading.Lock()
 _pf_backend_hold_until = 0.0
 _pf_backend_hold_reason = ""
 _pf_state_lock = threading.Lock()
@@ -474,6 +479,7 @@ GEPH_RESTART_FAILURE_THRESHOLD = 3
 GEPH_RESTART_MIN_HOSTS = 2
 GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
+GEPH_RESTART_EXECUTION_RETRY = 30.0
 PF_BACKEND_FAILURE_HOLD = 30.0
 SMART_DNS_OK_TTL = 10 * 60.0
 SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
@@ -1445,6 +1451,7 @@ _geph_restart_hint = {
     "last_failure_at": 0.0,
     "last_wake_at": 0.0,
     "last_requested_at": 0.0,
+    "last_attempt_at": 0.0,
 }
 _rearm_state = {
     "last_at": 0.0,
@@ -2350,6 +2357,41 @@ def note_geph_restart_failure(host, reason, now=None):
     return evidence
 
 
+def geph_active_session_count():
+    with _geph_session_lock:
+        return _geph_active_sessions
+
+
+def _geph_session_started():
+    global _geph_active_sessions
+    with _geph_session_lock:
+        if _geph_restart_draining:
+            return False
+        _geph_active_sessions += 1
+        return True
+
+
+def _geph_session_finished():
+    global _geph_active_sessions
+    with _geph_session_lock:
+        _geph_active_sessions = max(0, _geph_active_sessions - 1)
+
+
+def _begin_geph_restart_drain():
+    global _geph_restart_draining
+    with _geph_session_lock:
+        if _geph_active_sessions > 0 or _geph_restart_draining:
+            return False
+        _geph_restart_draining = True
+        return True
+
+
+def _finish_geph_restart_drain():
+    global _geph_restart_draining
+    with _geph_session_lock:
+        _geph_restart_draining = False
+
+
 def request_owned_geph_restart(host, reason, now=None):
     if not _geph_owned:
         return False
@@ -2373,6 +2415,7 @@ def clear_geph_restart_hint():
         "last_failure_host": "",
         "last_failure_reason": "",
         "last_failure_at": 0.0,
+        "last_attempt_at": 0.0,
     })
 
 
@@ -2395,6 +2438,7 @@ def geph_restart_hint_snapshot(now=None):
         "last_failure_reason": _geph_restart_hint.get("last_failure_reason", ""),
         "last_failure_at": _geph_restart_hint.get("last_failure_at", 0.0),
         "last_wake_at": _geph_restart_hint.get("last_wake_at", 0.0),
+        "last_attempt_at": _geph_restart_hint.get("last_attempt_at", 0.0),
         "failures_5m": len(_geph_restart_failures),
         "hosts_5m": len(hosts),
         "cooldown_until": (
@@ -2403,6 +2447,105 @@ def geph_restart_hint_snapshot(now=None):
             else 0.0
         ),
     }
+
+
+def _owned_geph_launch_target(state, owner_uid):
+    if not isinstance(state, dict) or isinstance(owner_uid, bool):
+        return None
+    if state.get("launchd_label") != GEPH_LAUNCHD_LABEL:
+        return None
+    state_uid = state.get("uid")
+    if isinstance(state_uid, bool):
+        return None
+    try:
+        uid = int(state_uid)
+        owner_uid = int(owner_uid)
+    except (TypeError, ValueError):
+        return None
+    if uid <= 0 or uid != owner_uid:
+        return None
+    return f"gui/{uid}/{GEPH_LAUNCHD_LABEL}"
+
+
+def _ownership_file_uid(path):
+    try:
+        metadata = os.lstat(path)
+    except OSError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid <= 0:
+        return None
+    return metadata.st_uid
+
+
+def execute_owned_geph_restart(
+    now=None,
+    active_sessions=None,
+    ownership_path=None,
+    ownership_state=None,
+    owner_uid=None,
+    listener_owned=None,
+    runner=None,
+    pauser=None,
+):
+    """Kickstart only Slipstream's verified user LaunchAgent after routing is idle."""
+    now = time.time() if now is None else now
+    if not _geph_restart_hint.get("recommended"):
+        return "idle"
+    last_attempt = _geph_restart_hint.get("last_attempt_at", 0.0)
+    if last_attempt and now - last_attempt < GEPH_RESTART_EXECUTION_RETRY:
+        return "cooldown"
+    managed_drain = active_sessions is None
+    if active_sessions is not None and int(active_sessions) > 0:
+        return "busy"
+
+    ownership_path = ownership_path or geph_ownership_path()
+    if not ownership_path:
+        return "unverified"
+    ownership_state = (
+        _read_geph_ownership(ownership_path)
+        if ownership_state is None
+        else ownership_state
+    )
+    if owner_uid is None:
+        owner_uid = _ownership_file_uid(ownership_path)
+        if owner_uid is None:
+            return "unverified"
+    target = _owned_geph_launch_target(ownership_state, owner_uid)
+    if not target:
+        return "unverified"
+    if listener_owned is None:
+        listener_owned = geph_listener_owned(state=ownership_state)
+    if not listener_owned:
+        return "unverified"
+    if managed_drain and not _begin_geph_restart_drain():
+        return "busy"
+
+    _geph_restart_hint["last_attempt_at"] = now
+    if pauser is None:
+        pauser = lambda: suspend_transparent_routing(
+            "owned Geph restart in progress",
+            now=now,
+        )
+    runner = _run if runner is None else runner
+    try:
+        pauser()
+        result = runner("/bin/launchctl", "kickstart", "-k", target)
+    except Exception as error:
+        if managed_drain:
+            _finish_geph_restart_drain()
+        print(f">> owned Geph recovery unavailable: {error}", file=sys.stderr)
+        return "unavailable"
+    if result.returncode != 0:
+        if managed_drain:
+            _finish_geph_restart_drain()
+        detail = (result.stderr or result.stdout or "launchctl returned an error").strip()
+        print(f">> owned Geph recovery unavailable: {detail[:200]}", file=sys.stderr)
+        return "unavailable"
+
+    clear_geph_restart_hint()
+    note_runtime_rearm("geph_restart")
+    print(">> owned Geph LaunchAgent restarted after routing became idle", file=sys.stderr)
+    return "restarted"
 
 
 def prune_auto_geph(now=None):
@@ -3589,13 +3732,18 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     canaries = canary_status_snapshot()
     rearm = rearm_status_snapshot(now)
     geph_restart = geph_restart_hint_snapshot(now)
+    geph_sessions = geph_active_session_count()
     auto_geo_exit = auto_geo_exit_status_snapshot(now)
     telegram = tgws_status(now)
     geph_state = "up" if _geph_up else ("off" if not GEPH_ENABLED else "down")
 
     if geph_restart["recommended"]:
-        recovery_state = "attention"
-        recovery_reason = "owned_geph_restart_recommended"
+        recovery_state = "recovering"
+        recovery_reason = (
+            "owned_geph_restart_waiting_for_idle"
+            if geph_sessions
+            else "owned_geph_restart_pending"
+        )
     elif rearm["last_at"]:
         recovery_state = "rearmed"
         recovery_reason = ""
@@ -3631,6 +3779,7 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
                 "port_conflict": bool(_geph_port_conflict),
                 "external_detected": bool(_external_geph_detected),
                 "restart_recommended": bool(geph_restart["recommended"]),
+                "active_sessions": int(geph_sessions),
                 "auto_geo_exit": {
                     "enabled": bool(auto_geo_exit["enabled"]),
                     "learned": int(auto_geo_exit["learned"]),
@@ -3656,6 +3805,7 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
             "updated_at": max(
                 float(rearm["last_at"] or 0.0),
                 float(geph_restart["last_wake_at"] or 0.0),
+                float(geph_restart["last_failure_at"] or 0.0),
             ),
             "count": int(rearm["count"]),
         },
@@ -4844,6 +4994,11 @@ def network_monitor(port, voice=True):
                 note_runtime_rearm("network_change", iface=iface or "")
                 start_canaries_if_due("network_change", force=True)
             last_iface = iface
+        restart_state = execute_owned_geph_restart(now=now)
+        if restart_state == "restarted":
+            _geph_up = False
+            geph_strikes = 0
+            _finish_geph_restart_drain()
         # Hysteresis: a few missed probes (Geph busy under load, or briefly
         # re-establishing its tunnel) must not flap the route-health state.
         # Confirmed downtime pauses the private PF anchor so native networking
@@ -5892,24 +6047,30 @@ async def _handle_impl(reader, writer):
                 policy["service_group"],
             )
         if _geph_up:
-            g = await dial_via_geph(host, dst_port, head + body)
-            if g:
-                gr, gw = g
-                if VERBOSE:
-                    print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
-                t0 = time.monotonic()
-                res = await asyncio.gather(pump(reader, gw), splice(gr, writer))
-                down_b = res[1] or 0
-                if down_b == 0 and time.monotonic() - t0 < 10:
-                    log_geph_route_failure(host, "remote closed without response")
-                    # A successful SOCKS CONNECT is not enough to keep PF armed.
-                    # If the remote side closes before yielding any payload, leave
-                    # the next client retry on the native path instead of sending
-                    # it into the same broken geo-exit tunnel.
-                    suspend_transparent_routing("geo-exit remote close before payload")
-                else:
-                    clear_geph_route_failure()
+            if not _geph_session_started():
+                writer.close()
                 return
+            try:
+                g = await dial_via_geph(host, dst_port, head + body)
+                if g:
+                    gr, gw = g
+                    if VERBOSE:
+                        print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
+                    t0 = time.monotonic()
+                    res = await asyncio.gather(pump(reader, gw), splice(gr, writer))
+                    down_b = res[1] or 0
+                    if down_b == 0 and time.monotonic() - t0 < 10:
+                        log_geph_route_failure(host, "remote closed without response")
+                        # A successful SOCKS CONNECT is not enough to keep PF armed.
+                        # If the remote side closes before yielding any payload, leave
+                        # the next client retry on the native path instead of sending
+                        # it into the same broken geo-exit tunnel.
+                        suspend_transparent_routing("geo-exit remote close before payload")
+                    else:
+                        clear_geph_route_failure()
+                    return
+            finally:
+                _geph_session_finished()
             log_geph_route_failure(host, "SOCKS connect failed")
             suspend_transparent_routing("geo-exit SOCKS connect unavailable")
         else:

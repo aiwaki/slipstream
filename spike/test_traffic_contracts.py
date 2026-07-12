@@ -206,6 +206,8 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_strat_scores", {})
     monkeypatch.setattr(tproxy, "_xbox_dns_candidates", {})
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "remember_strategy", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -301,6 +303,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
     else:
         async def fake_geph(host, port, first_flight):
             assert first_flight == expected_first_flight
+            assert tproxy.geph_active_session_count() == 1
             calls.append(("geph", host, port, first_flight))
             return streaming_upstream_response(contract.response)
 
@@ -323,6 +326,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == contract.response
+    assert tproxy.geph_active_session_count() == 0
     assert suspensions == []
     if contract.backend == "local":
         assert calls[0] == ("dns", contract.tls_host, contract.destination_ip)
