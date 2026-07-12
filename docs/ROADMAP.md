@@ -69,6 +69,12 @@ reintroducing live-stream restarts.
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
 
+Every routing change also passes the deterministic data-plane traffic-contract
+matrix: local bypass, geo exit, direct Telegram, generic local traffic, and
+geo-backend fail-closed behavior. The matrix exercises the production handler
+with fake endpoints; it complements, rather than replaces, live canaries and
+PF lifecycle qualification.
+
 ## M2 - Contracts And Code
 
 - Introduce privacy-bounded `StatusV2` sections for daemon, routes, backends,
@@ -131,6 +137,8 @@ No global UDP/443 block, broad IP guessing, or manual strategy picker.
 ## Milestone Checks
 
 - Unit tests and cross-language golden vectors.
+- Deterministic data-plane traffic contracts through the production handler,
+  asserting both the required and prohibited route backends.
 - Fake DNS/SOCKS/TLS endpoints for stall, reset, empty response, and partial
   payload.
 - PF sentinel and process-ownership integration tests.

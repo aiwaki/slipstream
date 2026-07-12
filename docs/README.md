@@ -12,6 +12,7 @@ support notes here.
 | Active routing invariants and decisions | [DECISIONS.md](DECISIONS.md) |
 | Operational checks and repeated user symptoms | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | Resilience model and known limits | [RESILIENCE.md](RESILIENCE.md) |
+| Deterministic data-plane regression gate | [TRAFFIC_CONTRACTS.md](TRAFFIC_CONTRACTS.md) |
 | Routing research and external repo findings | [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) |
 | Icon and visual identity brief | [ICON_BRIEF.md](ICON_BRIEF.md) |
 | Bundled component licenses | [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) |
