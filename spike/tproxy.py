@@ -5211,20 +5211,13 @@ def _clear_clean_eof_stalls(host):
     _clean_eof_stalls.pop(normalize_host(host), None)
 
 
-def note_clean_eof_stream_stall(host, strategy_name, activity, now=None):
-    """Promote only repeated client-first clean EOF stalls to local recovery.
-
-    This is deliberately narrower than an abnormal transport failure: it needs
-    two exact-host observations in a bounded window and can only select the
-    app-owned Xbox DNS/plain-TLS retry for a generic unknown host.  It never
-    learns a Geph route.
-    """
+def _repeated_clean_eof_stream_stall(host, activity, now=None):
+    """Record a clean stall and return true only after the bounded threshold."""
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
     if (
         not h
         or route_policy(h)["route_class"] != ROUTE_UNKNOWN
-        or strategy_name not in STRAT_BY_NAME
         or not _clean_eof_stream_stalled(activity, now)
     ):
         return False
@@ -5235,6 +5228,40 @@ def note_clean_eof_stream_stall(host, strategy_name, activity, now=None):
     if len(events) < CLEAN_EOF_STALL_STORM:
         return False
     _clear_clean_eof_stalls(h)
+    return True
+
+
+def note_clean_eof_stream_stall(
+    host,
+    strategy_name,
+    activity,
+    *,
+    via_xbox_dns=False,
+    now=None,
+):
+    """Handle repeated client-first clean EOF stalls without a route escape.
+
+    This is deliberately narrower than an abnormal transport failure: it needs
+    two exact-host observations in a bounded window and can only select the
+    app-owned Xbox DNS/plain-TLS retry for a generic unknown host.  An Xbox
+    retry needs the same repeated signal before it is cleared, so one ordinary
+    keep-alive EOF cannot discard a recovery that may have worked.  This never
+    learns a Geph route.
+    """
+    h = normalize_host(host)
+    if (
+        not h
+        or strategy_name not in STRAT_BY_NAME
+    ):
+        return False
+    if not _repeated_clean_eof_stream_stall(h, activity, now):
+        return False
+    if via_xbox_dns:
+        _record_strategy_result(h, strategy_name, False)
+        if _strat_cache.get(h) == strategy_name:
+            _strat_cache.pop(h, None)
+        _clear_xbox_dns_candidate(h)
+        return True
     return note_local_stream_stall(h, strategy_name)
 
 
@@ -5958,19 +5985,13 @@ async def _handle_impl(reader, writer):
             else:
                 note_local_stream_stall(host, chosen_name)
         elif _clean_eof_stream_stalled(activity, now=t0 + duration):
-            if via_xbox_dns:
-                _record_strategy_result(host, chosen_name, False)
-                if _strat_cache.get(host) == chosen_name:
-                    _strat_cache.pop(host, None)
-                _clear_xbox_dns_candidate(host)
-                _clear_clean_eof_stalls(host)
-            else:
-                note_clean_eof_stream_stall(
-                    host,
-                    chosen_name,
-                    activity,
-                    now=t0 + duration,
-                )
+            note_clean_eof_stream_stall(
+                host,
+                chosen_name,
+                activity,
+                via_xbox_dns=via_xbox_dns,
+                now=t0 + duration,
+            )
         elif activity.server_end_at and activity.server_end_at < activity.client_end_at:
             _clear_clean_eof_stalls(host)
         note_local_result(

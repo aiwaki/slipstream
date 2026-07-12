@@ -3738,6 +3738,39 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
         tproxy._strat_scores.clear()
 
 
+def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
+    host = "crystalidea.example"
+    activity = tproxy._RelayActivity(
+        last_downstream_at=100.0,
+        client_end_at=130.0,
+        server_end_at=130.1,
+        client_eof=True,
+    )
+
+    try:
+        tproxy._mark_xbox_dns_candidate(host, now=130.0)
+        assert not tproxy.note_clean_eof_stream_stall(
+            host,
+            "plain",
+            activity,
+            via_xbox_dns=True,
+            now=130.1,
+        )
+        assert tproxy._xbox_dns_candidate_active(host, now=130.1)
+        assert tproxy.note_clean_eof_stream_stall(
+            host,
+            "plain",
+            activity,
+            via_xbox_dns=True,
+            now=130.2,
+        )
+        assert not tproxy._xbox_dns_candidate_active(host, now=130.2)
+        assert not tproxy.geph_route(host)
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+
+
 def test_xbox_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
     calls = []
 
