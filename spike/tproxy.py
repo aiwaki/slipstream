@@ -2727,12 +2727,6 @@ CANARY_SPECS = (
         "transport_probe": "quic_version_negotiation",
     },
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
-    {
-        "name": "openai_billing",
-        "group": SERVICE_OPENAI,
-        "host": "billing.openai.com",
-        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-    },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
     {
         "name": "steam_store",

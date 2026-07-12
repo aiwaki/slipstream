@@ -3177,69 +3177,9 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         q.extend(original_window)
 
 
-def test_canary_health_secondary_geo_warning_grace_before_degraded():
-    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
-    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
-    core = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_core")
-    billing = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_billing")
-    now = tproxy.time.time()
-
-    try:
-        tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
-        tproxy.canary_health_event(
-            core,
-            tproxy.ROUTE_GEO_EXIT,
-            "chatgpt.com",
-            ok=True,
-            backend=tproxy.GEO_BACKEND_GEPH,
-            now=now,
-        )
-        tproxy.canary_health_event(
-            billing,
-            tproxy.ROUTE_GEO_EXIT,
-            "billing.openai.com",
-            ok=False,
-            reason="SOCKS connect failed",
-            degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-            now=now + 10.0,
-        )
-
-        checks = tproxy.canary_health_snapshot(now=now + 10.0)
-        assert checks["openai_core"]["state"] == tproxy.HEALTH_OK
-        assert checks["openai_billing"]["state"] == tproxy.HEALTH_UNKNOWN
-        assert checks["openai_billing"]["last_warning"] == "SOCKS connect failed"
-
-        health = tproxy.route_health_snapshot(now=now + 10.0)[tproxy.SERVICE_OPENAI]
-        assert health["state"] == tproxy.HEALTH_OK
-        assert health["last_host"] == "chatgpt.com"
-        assert health["last_failure"] == ""
-        assert health["last_warning"] == "SOCKS connect failed"
-        assert health["last_warning_host"] == "billing.openai.com"
-
-        for idx in range(1, tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER):
-            tproxy.canary_health_event(
-                billing,
-                tproxy.ROUTE_GEO_EXIT,
-                "billing.openai.com",
-                ok=False,
-                reason="SOCKS connect failed",
-                degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-                now=now + 10.0 + idx,
-            )
-
-        checks = tproxy.canary_health_snapshot(now=now + 20.0)
-        assert checks["openai_billing"]["state"] == tproxy.HEALTH_DEGRADED
-        assert checks["openai_billing"]["last_failure"] == "SOCKS connect failed"
-
-        health = tproxy.route_health_snapshot(now=now + 20.0)[tproxy.SERVICE_OPENAI]
-        assert health["state"] == tproxy.HEALTH_DEGRADED
-        assert health["last_host"] == "billing.openai.com"
-        assert health["last_failure"] == "SOCKS connect failed"
-    finally:
-        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
-        q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
-        q.clear()
-        q.extend(original_window)
+def test_billing_stays_geo_exit_without_becoming_a_health_canary():
+    assert tproxy.route_policy("billing.openai.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
+    assert "openai_billing" not in {item["name"] for item in tproxy.CANARY_SPECS}
 
 
 def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
@@ -3261,9 +3201,9 @@ def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
         monkeypatch.setattr(tproxy, "dial_via_geph", no_connect)
         monkeypatch.setattr(tproxy, "CANARY_SPECS", (
             {
-                "name": "openai_billing",
+                "name": "openai_secondary",
                 "group": tproxy.SERVICE_OPENAI,
-                "host": "billing.openai.com",
+                "host": "chatgpt.com",
                 "degrade_after": tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
             },
         ))
@@ -3287,7 +3227,7 @@ def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
         assert health["state"] == tproxy.HEALTH_DEGRADED
         assert health["last_failure"] == "SOCKS connect failed"
-        assert health["last_host"] == "billing.openai.com"
+        assert health["last_host"] == "chatgpt.com"
     finally:
         tproxy._canary_state.clear()
         tproxy._canary_state.update(original_state)
