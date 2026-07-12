@@ -31,6 +31,9 @@ def reset_smart_dns_state():
     }
     xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
     xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
+    clean_eof_stalls = {
+        host: deque(values) for host, values in tproxy._clean_eof_stalls.items()
+    }
     auto_last_status = dict(tproxy._auto_geph_last_status)
     local_resweep_active = dict(tproxy._local_bypass_resweep_active)
     local_resweep_last = dict(tproxy._local_bypass_resweep_last)
@@ -62,6 +65,7 @@ def reset_smart_dns_state():
         tproxy._auto_geph_runtime_failures.clear()
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
+        tproxy._clean_eof_stalls.clear()
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
@@ -117,6 +121,8 @@ def reset_smart_dns_state():
         tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
         tproxy._xbox_dns_attempts.clear()
         tproxy._xbox_dns_attempts.update(xbox_dns_attempts)
+        tproxy._clean_eof_stalls.clear()
+        tproxy._clean_eof_stalls.update(clean_eof_stalls)
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_active.update(local_resweep_active)
         tproxy._local_bypass_resweep_last.clear()
@@ -3619,6 +3625,28 @@ def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle
     assert not tproxy._local_stream_stalled(activity, now=130.1)
 
 
+def test_clean_eof_stream_stall_requires_client_first_idle_close():
+    activity = tproxy._RelayActivity(
+        last_downstream_at=100.0,
+        client_end_at=130.0,
+        server_end_at=130.1,
+        client_eof=True,
+    )
+
+    assert tproxy._clean_eof_stream_stalled(activity, now=130.1)
+
+    activity.server_end_at = 129.9
+    assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
+
+    activity.server_end_at = 130.1
+    activity.client_eof = False
+    assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
+
+    activity.client_eof = True
+    activity.last_downstream_at = 120.0
+    assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
+
+
 def test_pump_records_transport_error_but_not_orderly_eof():
     class EofReader:
         async def read(self, _size):
@@ -3635,11 +3663,13 @@ def test_pump_records_transport_error_but_not_orderly_eof():
     orderly = tproxy._RelayActivity(last_downstream_at=100.0)
     assert asyncio.run(tproxy.pump(EofReader(), Writer(), orderly)) == 0
     assert orderly.client_end_at
+    assert orderly.client_eof
     assert not orderly.client_read_failed
 
     aborted = tproxy._RelayActivity(last_downstream_at=100.0)
     assert asyncio.run(tproxy.pump(ResetReader(), Writer(), aborted)) == 0
     assert aborted.client_end_at
+    assert not aborted.client_eof
     assert aborted.client_read_failed
 
 
@@ -3658,6 +3688,84 @@ def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
         assert not tproxy.note_local_stream_stall("updates.discord.com", "split64+fake")
         assert tproxy._strat_cache["updates.discord.com"] == "split64+fake"
         assert not tproxy._xbox_dns_candidate_active("updates.discord.com")
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+
+
+def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
+    host = "crystalidea.example"
+    activity = tproxy._RelayActivity(
+        last_downstream_at=100.0,
+        client_end_at=130.0,
+        server_end_at=130.1,
+        client_eof=True,
+    )
+    tproxy._strat_cache[host] = "split64+fake"
+
+    try:
+        assert not tproxy.note_clean_eof_stream_stall(
+            host,
+            "split64+fake",
+            activity,
+            now=130.1,
+        )
+        assert not tproxy._xbox_dns_candidate_active(host, now=130.1)
+        assert tproxy.note_clean_eof_stream_stall(
+            host,
+            "split64+fake",
+            activity,
+            now=130.2,
+        )
+        assert host not in tproxy._strat_cache
+        assert not tproxy._clean_eof_stalls
+        assert tproxy._xbox_dns_candidate_active(host, now=130.2)
+        assert not tproxy.geph_route(host)
+
+        for protected in (
+            "updates.discord.com",
+            "rr2---sn-ntq7yner.googlevideo.com",
+        ):
+            assert not tproxy.note_clean_eof_stream_stall(
+                protected,
+                "split64+fake",
+                activity,
+                now=130.3,
+            )
+            assert not tproxy._xbox_dns_candidate_active(protected, now=130.3)
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._strat_scores.clear()
+
+
+def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
+    host = "crystalidea.example"
+    activity = tproxy._RelayActivity(
+        last_downstream_at=100.0,
+        client_end_at=130.0,
+        server_end_at=130.1,
+        client_eof=True,
+    )
+
+    try:
+        tproxy._mark_xbox_dns_candidate(host, now=130.0)
+        assert not tproxy.note_clean_eof_stream_stall(
+            host,
+            "plain",
+            activity,
+            via_xbox_dns=True,
+            now=130.1,
+        )
+        assert tproxy._xbox_dns_candidate_active(host, now=130.1)
+        assert tproxy.note_clean_eof_stream_stall(
+            host,
+            "plain",
+            activity,
+            via_xbox_dns=True,
+            now=130.2,
+        )
+        assert not tproxy._xbox_dns_candidate_active(host, now=130.2)
+        assert not tproxy.geph_route(host)
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
