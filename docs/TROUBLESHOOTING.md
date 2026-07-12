@@ -346,24 +346,24 @@ GitHub developer endpoints use `direct_passthrough`. If `gh api` works but
 `github` direct policy and plain-only strategy. They should not use Geph or the
 generic desync ladder.
 
-## Auto Geo-Exit Learning
+## Unknown-Host Recovery
 
-Slipstream can learn an unknown HTTPS host as temporary `geo_exit` only after
-both conditions are true:
+Slipstream does not turn an unknown host into `geo_exit` from a local failure
+plus a successful Geph probe. That result cannot prove that a foreign exit is
+needed.
 
-- local desync repeatedly returns little or no application data for that exact
-  host;
-- a separate HTTPS payload probe through Slipstream's Geph tunnel succeeds.
+For a repeated exact-host local stall, Slipstream may make one local retry via a
+Slipstream-issued Xbox DNS query. It neither changes the system resolver nor routes
+the host through Geph. Existing legacy auto-Geph cache entries are cleared when
+the daemon starts.
 
-The learned entry is exact-host only and TTL-based. It does not apply to
-Discord, YouTube/googlevideo, Telegram, Russian services, Geph infrastructure,
-or external DNS/proxy/PAC/VPN settings.
+If a browser-only page still stalls, collect diagnostics and the exact hostname.
+The appropriate next step is an evidence-backed direct, local-bypass, or
+geo-exit policy change, not automatic foreign-exit promotion.
 
-If a page shell loads but a payment form, video, image CDN, or static resource
-keeps stalling, check daemon logs for repeated Geph route retries on the same
-learned host. Slipstream resets only auto-learned exact hosts after repeated
-runtime retries, then lets the normal local route and proof-based learning run
-again. Explicit geo-exit hosts are not reset this way.
+Google and Spotify use `direct_first`: the next connection always starts with
+plain TLS, then can use bounded local desync only if direct did not work. They
+never fall through to Geph.
 
 ## Installed Daemon
 

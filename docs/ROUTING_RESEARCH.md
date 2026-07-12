@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-12
+Updated: 2026-07-13
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,8 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-13 | False generic auto-Geph promotion | Fixed in this PR | `www.google.com` was recorded as a seven-day `geo_exit` after repeated local stalls and a successful Geph payload probe. That observation cannot distinguish IP geo-restriction from an incorrect local strategy, transient edge issue, or normal browser behavior. Generic stalls retain only the bounded exact-host Xbox DNS local retry; they never select or persist Geph. Legacy learned entries are discarded on daemon start. | Keep foreign-exit routes explicit and reviewed; treat a successful Geph payload only as tunnel health evidence. |
+| 2026-07-13 | Google and Spotify direct-first local fallback | Fixed in this PR | Runtime strategy cache showed Spotify endpoints using cached `split64+fake` even though the service works natively. `google.com`, `spotify.com`, `spotifycdn.com`, and `scdn.co` now always try direct/plain TLS first, then may use only bounded local desync; Geph is excluded and a signed policy cannot silently omit those protected suffixes. YouTube/googlevideo remains independently local-bypass/fake-only. | Add another direct-first family only from observed native-success evidence; do not turn this into a broad allowlist. |
 | 2026-07-13 | OpenAI billing synthetic canary | Fixed in this PR | `billing.openai.com` repeatedly closed a Geph SOCKS connection while `chatgpt.com`, `claude.ai`, and Steam Store passed through the same owned tunnel. The billing probe exercised an edge-specific anti-abuse/exit behavior rather than a dependable primary user flow, so it could falsely turn the whole geo-exit route into `Needs attention`. Billing stays geo-exit when a browser actually uses it, but is removed from canonical health canaries. | Keep health transitions tied to primary end-to-end flows; add a new secondary endpoint only with evidence that its synthetic probe predicts a real user-visible failure. |
 | 2026-07-12 | Smart DNS capability path and Telegram proxy semantics | Captured in traffic contracts | A user-managed Xbox DNS route is eligible only after a fresh local payload proof, then may be the first geo backend with Geph fallback when owned Geph is ready; otherwise the private PF anchor pauses for a native retry. Raw Telegram DC passthrough is only non-interference; a network that blocks direct MTProto needs the bundled local proxy. | Keep Smart DNS proof and runtime fallback scoped to OpenAI/Anthropic; do not promote Telegram raw DC to a user-facing success state. |
 | 2026-07-12 | Deterministic data-plane traffic contracts | Implemented | Routing regressions must cross the real `_handle_impl` with deterministic TLS, DNS, and upstream fixtures. Each named journey asserts its required backend, forbidden backend, and delivered response payload, so a passing isolated canary cannot hide a wrong decision or relay branch. | Add a contract before changing routing for any new incident class; keep PF/lifecycle and live endpoint qualification separate. |
@@ -83,7 +85,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-09 | Lid-close wake recovery | Revised 2026-07-11 | Adrafinil keeps idle sleep away but does not prevent macOS lid-close SleepService/DarkWake cycles. Repeated post-wake failures remain diagnostic evidence; tray polling must not restart a live Geph process because it can tear down streaming sessions. | Move lifecycle ownership into the daemon before adding coordinated restart of a live backend. |
 | 2026-07-09 | Stale proxy exceptions | Implemented | External proxy tools can leave disabled `ExceptionsList` entries after proxy autoconfigure is turned off; Slipstream reports them in status without treating the proxy as active or mutating settings. | Use diagnostics to explain stale browser/network behavior; do not auto-delete user-owned proxy state. |
 | 2026-07-09 | Runtime re-arm visibility | Implemented | Daemon status now records the last wake/network re-arm reason, interface, gap, count, and age so sleep-related recovery is visible without reading logs first. | Keep using logs for full `pmset` correlation; status is a compact runtime snapshot. |
-| 2026-07-10 | Auto geo-exit stale learned hosts | Implemented | Repeated Geph runtime retries now reset only exact hosts that were learned by auto geo-exit; explicit geo-exit and local-bypass routes are preserved. | Watch logs for new retry reasons before widening the reset trigger. |
+| 2026-07-10 | Auto geo-exit stale learned hosts | Superseded 2026-07-13 | The old runtime reset avoided some bad learned routes, but the learning premise was still unsound: a working Geph payload does not prove geo-restriction. | Unknown hosts no longer learn Geo-exit; retain only exact local recovery. |
 | 2026-07-10 | Wake canary recovery rerun | Implemented | Forced canary triggers that arrive during an in-flight wake check are queued for a short rerun instead of being dropped by the force cooldown. | Keep wake recovery event-driven; do not lengthen normal canary cadence. |
 | 2026-07-10 | Exact-host local-bypass re-sweep | Implemented | A real Discord/YouTube runtime miss starts a deduplicated background strategy sweep for that exact host and clears its negative cache only after a fake/desync strategy succeeds. | Tune cooldowns only from observed runtime evidence. |
 | 2026-07-10 | Geph-down log semantics | Superseded 2026-07-11 | A proxied geo-exit attempt still never falls through local desync, but persistent fail-close under an active global redirect was unsafe. Backend loss now pauses only the private PF anchor and leaves native networking in control. | Keep runtime messages aligned with dormant/active PF state. |
@@ -165,11 +167,9 @@ Fresh external snapshots checked on 2026-07-09:
   a minimum payload so "page shell starts, then stalls" is visible to autonomous
   health instead of requiring manual browser testing.
 - 2026-07-10: Browser symptoms where the main page loads but some subresources
-  stall can come from a stale exact-host entry in auto geo-exit. Logs showed
-  repeated Geph route retries such as `remote closed without response` for
-  learned generic/static hosts. Slipstream now resets only those auto-learned
-  exact hosts after repeated runtime retries, so the next request can return to
-  the local route and re-learn only if a fresh Geph payload proof succeeds.
+  stall exposed that an exact host can be incorrectly learned as geo-exit.
+  This remediation was superseded on 2026-07-13: generic hosts no longer learn
+  Geph at all, so the failure class cannot recur from a stale auto-Geph entry.
 - 2026-07-10: After wake, route canaries can run before Geph/DNS are fully back.
   If `geph_up` arrives while that wake check is still running, the force cooldown
   used to drop the recovery recheck and leave the tray in `needs attention` until
@@ -326,23 +326,26 @@ Fresh external snapshots checked on 2026-07-09:
 - Do not route `steamserver.net`, Steam CM, game traffic, or broad Akamai/Fastly
   hostnames through Geph without endpoint-level evidence.
 
-## Auto Geo-Exit Learning
+## Unknown-Host Local Recovery
 
-- The old adaptive `AUTO_GEPH` path is now proof-gated and enabled by default.
-  Local low-content hangs only make an unknown HTTPS host a candidate; promotion
-  requires a separate HTTPS payload probe through Slipstream's Geph tunnel.
-- Learned entries are exact-host, TTL-bound, and persisted in
-  `/var/run/slipstream-autogeph.json`. Runtime status exposes a compact
-  `auto_geo_exit` snapshot with enabled/learned/pending and last proof state.
-- Exclusions remain hard-coded: Discord and YouTube/googlevideo stay
-  `local_bypass`; Telegram and Russian services stay out of Geph; Geph
-  infrastructure is never auto-routed through itself.
+- Generic local stalls never learn `geo_exit`: a foreign tunnel working for a
+  host is not evidence that the host rejects Russian IPs.
+- An unknown host may receive one exact, local retry through a Slipstream-issued
+  Xbox DNS query. This does not inspect or alter the system resolver and does not
+  select Geph.
+- Legacy `/var/run/slipstream-autogeph.json` entries are discarded on daemon
+  start. The compatibility status field remains disabled for one transition
+  release so older tray clients can read it safely.
+- Google and Spotify families that are known to work natively use explicit
+  `direct_first` policy: plain TLS is always first, bounded local desync is the
+  only fallback, and Geph is excluded. Discord and YouTube/googlevideo remain
+  independent `local_bypass` routes.
 - YouTube web-shell probing is warning-only; the hard YouTube health signal is
   the `youtube_video`/googlevideo path because browsers can reach the web shell
   through IPv6/QUIC while daemon-side IPv4/TCP probes are noisy.
-- This is intended to cover Steam-like future cases without adding a manual
-  service rule first. Static policy is still preferred when a service class is
-  well understood and has multiple endpoint families.
+- New foreign-exit routes require explicit, reviewed policy evidence. Static
+  policy is preferred when a service class is well understood and has multiple
+  endpoint families.
 
 ## Runtime Local-Bypass Recheck
 

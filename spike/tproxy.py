@@ -147,6 +147,7 @@ SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
 ROUTE_LOCAL_BYPASS = "local_bypass"
 ROUTE_GEO_EXIT = "geo_exit"
 ROUTE_DIRECT = "direct_passthrough"
+ROUTE_DIRECT_FIRST = "direct_first"
 ROUTE_UNKNOWN = "unknown"
 
 SERVICE_DISCORD = "discord"
@@ -156,11 +157,14 @@ SERVICE_ANTHROPIC = "anthropic"
 SERVICE_TELEGRAM = "telegram"
 SERVICE_STEAM_STORE = "steam_store"
 SERVICE_GITHUB = "github"
+SERVICE_GOOGLE = "google"
+SERVICE_SPOTIFY = "spotify"
 SERVICE_GENERIC = "generic"
 
 STRATEGY_FAKE_ONLY = "fake_only"
 STRATEGY_GEPH = "geph"
 STRATEGY_DIRECT = "direct"
+STRATEGY_DIRECT_FIRST = "direct_first"
 STRATEGY_GENERAL = "general"
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
@@ -168,7 +172,7 @@ LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
 IP_ATTEMPT_LIMIT_BY_ROUTE = {
     ROUTE_LOCAL_BYPASS: LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
 }
-ROUTE_POLICY_VERSION = 1
+ROUTE_POLICY_VERSION = 2
 ROUTE_POLICY_SOURCE = "bundled"
 ROUTE_POLICY_SCHEMA_VERSION = 1
 ROUTE_POLICY_CHANNEL_KIND = "slipstream.route_policy_channel"
@@ -208,6 +212,9 @@ GOOGLE_VIDEO = (
 )
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
+GOOGLE_DIRECT_FIRST_HOSTS = ("google.com",)
+SPOTIFY_DIRECT_FIRST_HOSTS = ("spotify.com", "spotifycdn.com", "scdn.co")
+DIRECT_FIRST_HOSTS = GOOGLE_DIRECT_FIRST_HOSTS + SPOTIFY_DIRECT_FIRST_HOSTS
 GITHUB_HOSTS = (
     "github.com",
     "githubassets.com",
@@ -242,6 +249,18 @@ ROUTE_POLICY_TABLE = (
         "strategy_set": STRATEGY_DIRECT,
     },
     {
+        "domains": GOOGLE_DIRECT_FIRST_HOSTS,
+        "route_class": ROUTE_DIRECT_FIRST,
+        "service_group": SERVICE_GOOGLE,
+        "strategy_set": STRATEGY_DIRECT_FIRST,
+    },
+    {
+        "domains": SPOTIFY_DIRECT_FIRST_HOSTS,
+        "route_class": ROUTE_DIRECT_FIRST,
+        "service_group": SERVICE_SPOTIFY,
+        "strategy_set": STRATEGY_DIRECT_FIRST,
+    },
+    {
         "domains": DISCORD_HOSTS,
         "route_class": ROUTE_LOCAL_BYPASS,
         "service_group": SERVICE_DISCORD,
@@ -265,6 +284,7 @@ GEPH_HOSTS = tuple(
     domain for policy in GEO_EXIT_POLICY_TABLE for domain in policy["domains"]
 )
 POLICY_PROTECTED_LOCAL_BYPASS_GROUPS = frozenset((SERVICE_DISCORD, SERVICE_YOUTUBE))
+POLICY_PROTECTED_DIRECT_FIRST_DOMAINS = frozenset(DIRECT_FIRST_HOSTS)
 POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
     SERVICE_DISCORD,
     SERVICE_YOUTUBE,
@@ -273,10 +293,13 @@ POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
     SERVICE_TELEGRAM,
     SERVICE_STEAM_STORE,
     SERVICE_GITHUB,
+    SERVICE_GOOGLE,
+    SERVICE_SPOTIFY,
     SERVICE_GENERIC,
 ))
 POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
     ROUTE_DIRECT: frozenset((STRATEGY_DIRECT,)),
+    ROUTE_DIRECT_FIRST: frozenset((STRATEGY_DIRECT_FIRST,)),
     ROUTE_LOCAL_BYPASS: frozenset((STRATEGY_FAKE_ONLY,)),
     ROUTE_GEO_EXIT: frozenset((STRATEGY_GEPH,)),
 }
@@ -658,14 +681,28 @@ def validate_route_policy_manifest(manifest):
         raise ValueError("geo_exit_routes must be a list")
 
     protected_seen = set()
+    protected_direct_first_seen = set()
     for index, entry in enumerate(static_routes):
         item = _normalize_policy_entry(entry, f"static_routes[{index}]")
         normalized["static_routes"].append(item)
         if item["service_group"] in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS:
             protected_seen.add(item["service_group"])
+        if (
+            item["route_class"] == ROUTE_DIRECT_FIRST
+            and item["strategy_set"] == STRATEGY_DIRECT_FIRST
+        ):
+            protected_direct_first_seen.update(item["domains"])
     missing = POLICY_PROTECTED_LOCAL_BYPASS_GROUPS - protected_seen
     if missing:
         raise ValueError(f"protected local-bypass groups missing: {', '.join(sorted(missing))}")
+    missing_direct = (
+        POLICY_PROTECTED_DIRECT_FIRST_DOMAINS - protected_direct_first_seen
+    )
+    if missing_direct:
+        raise ValueError(
+            "protected direct-first domains missing: "
+            + ", ".join(sorted(missing_direct))
+        )
 
     for index, entry in enumerate(geo_exit_routes):
         item = _normalize_policy_entry(
@@ -1298,7 +1335,12 @@ def reset_route_policy_manifest():
 
 def route_policy_status_snapshot():
     manifest = route_policy_manifest()
-    domains = {ROUTE_DIRECT: 0, ROUTE_LOCAL_BYPASS: 0, ROUTE_GEO_EXIT: 0}
+    domains = {
+        ROUTE_DIRECT: 0,
+        ROUTE_DIRECT_FIRST: 0,
+        ROUTE_LOCAL_BYPASS: 0,
+        ROUTE_GEO_EXIT: 0,
+    }
     groups = {}
     for policy in manifest["static_routes"]:
         route_class = policy["route_class"]
@@ -1341,10 +1383,9 @@ def route_policy(host, now=None):
         )
     if is_russian(h):
         return _policy_result(h, ROUTE_DIRECT, SERVICE_GENERIC, STRATEGY_DIRECT)
-    wall_now = time.time() if now is None else now
     geo_policy = _match_policy(h, geo_exit_routes)
-    if geo_policy or _auto_geph.get(h, 0) > wall_now:
-        group = (geo_policy or {}).get("service_group", SERVICE_GENERIC)
+    if geo_policy:
+        group = geo_policy.get("service_group", SERVICE_GENERIC)
         return _policy_result(h, ROUTE_GEO_EXIT, group, STRATEGY_GEPH)
     return _policy_result(h, ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
 
@@ -1619,8 +1660,7 @@ def _is_geph_infra(host):
 
 
 def geph_route(host):
-    """Should this host go through geph's tunnel? Geo-blocked (listed OR learned)
-    AND not Russian."""
+    """Only an explicit geo-exit policy may select Geph."""
     return GEPH_ENABLED and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
@@ -2366,27 +2406,24 @@ def geph_restart_hint_snapshot(now=None):
 
 
 def prune_auto_geph(now=None):
-    now = time.time() if now is None else now
-    expired = [
-        host for host, expiry in list(_auto_geph.items())
-        if not isinstance(expiry, (int, float)) or expiry <= now
-    ]
-    for host in expired:
-        _auto_geph.pop(host, None)
-    if expired:
+    del now
+    if _auto_geph:
+        _auto_geph.clear()
         save_auto_geph()
 
 
 def load_auto_geph():
     global _auto_geph
+    had_legacy_entries = False
     try:
         with open(_AUTO_GEPH_PATH) as f:
             data = json.load(f)
-        now = time.time()
-        _auto_geph = {h: e for h, e in data.items()
-                      if isinstance(e, (int, float)) and e > now}
+        had_legacy_entries = isinstance(data, dict) and bool(data)
     except Exception:
-        _auto_geph = {}
+        pass
+    _auto_geph = {}
+    if had_legacy_entries:
+        save_auto_geph()
 
 
 def save_auto_geph():
@@ -2397,20 +2434,22 @@ def save_auto_geph():
         pass
 
 
-# Adaptive auto-routing is on by default, but promotion is proof-gated: local
-# low-content hangs only schedule a candidate, and Geph must return HTTPS payload
-# before the exact host is learned. SLIP_AUTOGEPH=0 disables this learning layer.
-AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "1") != "0"
+# A successful payload through a foreign exit does not prove that a service
+# requires one. Generic local failures therefore never promote a host to Geph.
+# Keep the status surface for one transition release while legacy state is pruned.
+AUTO_GEPH_ENABLED = False
 
 
 def _auto_geph_candidate_allowed(host):
+    del host
+    return False
+
+
+def _unknown_local_recovery_candidate_allowed(host):
     h = normalize_host(host)
-    if not h:
-        return False
-    if is_russian(h) or _is_geph_infra(h):
-        return False
-    policy = route_policy(h)
-    return policy["route_class"] == ROUTE_UNKNOWN
+    return bool(h) and not _is_geph_infra(h) and (
+        route_policy(h)["route_class"] == ROUTE_UNKNOWN
+    )
 
 
 def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
@@ -2627,17 +2666,11 @@ def auto_geo_exit_status_snapshot(now=None):
 
 
 def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=None):
-    """Called after a NON-geph local-desync close. A "stuck" close — the
-    connection was held a long time but returned no real content (the
-    "reconnecting…" hang) — is the candidate signal. A storm of them for one host
-    schedules a Geph payload proof; only that proof learns the host. Fast
-    low-content closes (redirects / 204 / beacons, e.g. google) are normal and
-    must not count. Real content resets the host's failure noise."""
-    if not AUTO_GEPH_ENABLED:
-        return
+    """Record a local stall and schedule only an exact local recovery attempt."""
+    del confirmation_runner
     h = normalize_host(host)
-    if not _auto_geph_candidate_allowed(h):
-        return                                  # RU, already tunnelled, or geph's own
+    if not _unknown_local_recovery_candidate_allowed(h):
+        return
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
         _auto_fail.pop(h, None)                 # got real content -> not blocked
         return
@@ -2662,31 +2695,11 @@ def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=
                   if sum(1 for t in v if t >= cutoff) >= 2)
     if failing >= AUTO_GEPH_NET_BAD:
         return
-    # A low-content local storm is still ambiguous. Before the existing
-    # proof-gated geo-exit check, give this exact unknown host one chance to
-    # resolve through the app-owned Xbox DNS endpoint and connect locally.
-    # That candidate is consumed by _try_xbox_dns_local_connect on the next
-    # client retry; no system resolver setting is consulted or changed here.
+    # A low-content local storm is ambiguous. Give this exact unknown host one
+    # local retry through app-owned Xbox DNS; it never changes system DNS and
+    # never implies that the host needs a foreign exit.
     if not _xbox_dns_attempted_recently(h, now):
         _mark_xbox_dns_candidate(h, now)
-        return
-    if not _geph_up:
-        return
-    outcome = connection_outcome_for_host(
-        h,
-        False,
-        BACKEND_LOCAL_ENGINE,
-        failure_phase=FAILURE_PHASE_STREAM,
-        bytes_received=down_bytes,
-        duration=duration,
-        reason="repeated local stalls",
-    )
-    actions = reduce_connection_outcome(
-        outcome,
-        RecoveryContext(recheck_recommended=True),
-    )
-    if any(action.kind == RECOVERY_RECHECK for action in actions):
-        _schedule_auto_geph_confirmation(h, now=now, runner=confirmation_runner)
 
 
 CANARY_SPECS = (
@@ -4478,24 +4491,36 @@ GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16",
 
 def strategy_order(host):
     policy = route_policy(host)
-    if policy["route_class"] == ROUTE_DIRECT:
+    strategy_set = policy["strategy_set"]
+    if strategy_set == STRATEGY_DIRECT:
         return [STRAT_BY_NAME["plain"]]
-    # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
-    # so it uses the fake-only set and ignores any stale non-fake cache entry.
-    if policy["service_group"] == SERVICE_DISCORD:
-        names = _rank_strategy_names(host, DISCORD_STRATS)
+    h = normalize_host(host)
+    if strategy_set == STRATEGY_DIRECT_FIRST:
+        cached = _strat_cache.get(h)
+        fallback_names = [name for name in GENERAL_STRATS if name != "plain"]
+        if cached in fallback_names:
+            fallback_names = [cached] + [
+                name for name in fallback_names if name != cached
+            ]
+        return [STRAT_BY_NAME["plain"]] + [
+            STRAT_BY_NAME[name] for name in fallback_names
+        ]
+    if strategy_set == STRATEGY_FAKE_ONLY:
+        # Protected local-bypass routes never fall through to a non-fake TLS
+        # strategy, regardless of any stale cached winner.
+        names = (
+            DISCORD_STRATS
+            if policy["service_group"] == SERVICE_DISCORD
+            else GOOGLE_VIDEO_STRATS
+        )
+        names = _rank_strategy_names(h, names)
         return [STRAT_BY_NAME[n] for n in names]
-    # YouTube/googlevideo: same fake-only discipline (see GOOGLE_VIDEO note above).
-    if policy["service_group"] == SERVICE_YOUTUBE:
-        names = _rank_strategy_names(host, GOOGLE_VIDEO_STRATS)
-        return [STRAT_BY_NAME[n] for n in names]
-    host = normalize_host(host)
-    win = _strat_cache.get(host)
+    win = _strat_cache.get(h)
     if win in STRAT_BY_NAME:
         names = [win] + [n for n in GENERAL_STRATS if n != win]
     else:
         names = GENERAL_STRATS
-    return [STRAT_BY_NAME[n] for n in _rank_strategy_names(host, names)]
+    return [STRAT_BY_NAME[n] for n in _rank_strategy_names(h, names)]
 
 
 # --------------------------------------------------- fake ClientHello (decoy)
