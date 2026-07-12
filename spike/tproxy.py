@@ -436,7 +436,7 @@ CANARY_JITTER = 90.0
 CANARY_FORCE_MIN_GAP = 60.0
 CANARY_FORCE_RETRY_DELAY = 15.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
-LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
+LOCAL_PAYLOAD_CANARY_TIMEOUT = 8.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
 LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
@@ -3140,7 +3140,6 @@ async def _run_local_bypass_canary(spec):
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
-    head, body = _canary_client_hello(host)
     payload_failed = False
     payload_short = False
     min_payload_bytes = _local_payload_min_bytes(spec)
@@ -3149,21 +3148,23 @@ async def _run_local_bypass_canary(spec):
         if not strat.get("fake"):
             continue
         for ip in ips[:ip_attempt_limit(host)]:
-            result = await dial_strategy(ip, 443, head, body, host, strat)
-            if result:
-                _close_probe_result(result)
-                payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
-                if payload_bytes < min_payload_bytes:
-                    payload_failed = True
-                    if payload_bytes > 0:
-                        payload_short = True
-                    continue
-                strat_ok = True
-                _record_strategy_result(host, strat["name"], True)
-                if _strat_cache.get(host) != strat["name"]:
-                    remember_strategy(host, strat["name"])
-                canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
-                return True
+            # Do not preflight with build_fake_clienthello(): its TLS 1.2
+            # AES128-SHA-only offer is rejected by modern Discord endpoints
+            # even while real clients work. The payload probe below performs a
+            # modern TLS handshake and applies this same local fake/desync
+            # strategy to its actual first flight.
+            payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
+            if payload_bytes < min_payload_bytes:
+                payload_failed = True
+                if payload_bytes > 0:
+                    payload_short = True
+                continue
+            strat_ok = True
+            _record_strategy_result(host, strat["name"], True)
+            if _strat_cache.get(host) != strat["name"]:
+                remember_strategy(host, strat["name"])
+            canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
+            return True
         if not strat_ok:
             _record_strategy_result(host, strat["name"], False)
     clear_route_strategy_cache(group=spec["group"])
