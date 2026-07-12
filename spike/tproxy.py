@@ -1566,6 +1566,9 @@ AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = ST
 AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 LOCAL_STREAM_IDLE = 15.0      # client-visible downstream silence after payload
+CLEAN_EOF_STALL_WINDOW = 5 * 60.0
+CLEAN_EOF_STALL_STORM = 2     # repeated client-first clean EOFs before recovery
+CLEAN_EOF_STALL_STATE_MAX = 4096
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
@@ -1597,6 +1600,7 @@ _xbox_dns_candidates = {}     # host -> monotonic expiry
 XBOX_DNS_ATTEMPT_TTL = 10 * 60.0
 _xbox_dns_attempts = {}       # host -> monotonic expiry after one direct lookup
 XBOX_DNS_STATE_MAX = 4096
+_clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
 
 # Runtime local-bypass failures start a private exact-host re-sweep. The state is
 # deliberately process-local and aggregate-free: status must not become browsing
@@ -5148,6 +5152,7 @@ class _RelayActivity:
     last_downstream_at: float
     client_end_at: float = 0.0
     server_end_at: float = 0.0
+    client_eof: bool = False
     client_read_failed: bool = False
     downstream_write_failed: bool = False
 
@@ -5167,6 +5172,70 @@ def _local_stream_stalled(activity, now=None):
         (activity.client_read_failed or activity.downstream_write_failed)
         and now - activity.last_downstream_at >= LOCAL_STREAM_IDLE
     )
+
+
+def _clean_eof_stream_stalled(activity, now=None):
+    """Return true for a client-first orderly EOF after downstream silence.
+
+    A single orderly EOF can be an ordinary keep-alive close, so callers must
+    require a repeated exact-host signal before changing the next retry.  The
+    upstream must still be open when the client leaves; a server-first EOF is a
+    normal completion signal and must not be learned as a stall.
+    """
+    now = time.monotonic() if now is None else now
+    if not (
+        activity.client_eof
+        and activity.client_end_at
+        and activity.server_end_at
+    ):
+        return False
+    if activity.client_read_failed or activity.downstream_write_failed:
+        return False
+    if activity.server_end_at < activity.client_end_at:
+        return False
+    return now - activity.last_downstream_at >= LOCAL_STREAM_IDLE
+
+
+def _prune_clean_eof_stalls(now):
+    cutoff = now - CLEAN_EOF_STALL_WINDOW
+    for stale, events in list(_clean_eof_stalls.items()):
+        while events and events[0] <= cutoff:
+            events.popleft()
+        if not events:
+            _clean_eof_stalls.pop(stale, None)
+    while len(_clean_eof_stalls) > CLEAN_EOF_STALL_STATE_MAX:
+        _clean_eof_stalls.pop(next(iter(_clean_eof_stalls)))
+
+
+def _clear_clean_eof_stalls(host):
+    _clean_eof_stalls.pop(normalize_host(host), None)
+
+
+def note_clean_eof_stream_stall(host, strategy_name, activity, now=None):
+    """Promote only repeated client-first clean EOF stalls to local recovery.
+
+    This is deliberately narrower than an abnormal transport failure: it needs
+    two exact-host observations in a bounded window and can only select the
+    app-owned Xbox DNS/plain-TLS retry for a generic unknown host.  It never
+    learns a Geph route.
+    """
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if (
+        not h
+        or route_policy(h)["route_class"] != ROUTE_UNKNOWN
+        or strategy_name not in STRAT_BY_NAME
+        or not _clean_eof_stream_stalled(activity, now)
+    ):
+        return False
+    _prune_clean_eof_stalls(now)
+    events = _clean_eof_stalls.setdefault(h, deque())
+    events.append(now)
+    _prune_clean_eof_stalls(now)
+    if len(events) < CLEAN_EOF_STALL_STORM:
+        return False
+    _clear_clean_eof_stalls(h)
+    return note_local_stream_stall(h, strategy_name)
 
 
 def _mark_xbox_dns_candidate(host, now=None):
@@ -5282,6 +5351,8 @@ async def pump(reader, up_w, activity=None):
                     activity.client_read_failed = True
                 break
             if not data:
+                if activity is not None:
+                    activity.client_eof = True
                 break
             total += len(data)
             try:
@@ -5886,6 +5957,22 @@ async def _handle_impl(reader, writer):
                 _clear_xbox_dns_candidate(host)
             else:
                 note_local_stream_stall(host, chosen_name)
+        elif _clean_eof_stream_stalled(activity, now=t0 + duration):
+            if via_xbox_dns:
+                _record_strategy_result(host, chosen_name, False)
+                if _strat_cache.get(host) == chosen_name:
+                    _strat_cache.pop(host, None)
+                _clear_xbox_dns_candidate(host)
+                _clear_clean_eof_stalls(host)
+            else:
+                note_clean_eof_stream_stall(
+                    host,
+                    chosen_name,
+                    activity,
+                    now=t0 + duration,
+                )
+        elif activity.server_end_at and activity.server_end_at < activity.client_end_at:
+            _clear_clean_eof_stalls(host)
         note_local_result(
             host,
             len(server_first) + (res[1] or 0),
