@@ -4359,6 +4359,17 @@ def test_rotating_log_writer_refuses_symlink_log_path(tmp_path):
     assert target.stat().st_mode & 0o777 == 0o644
 
 
+def test_harden_existing_log_tolerates_archive_rotation_race(monkeypatch):
+    monkeypatch.setattr(tproxy.os.path, "lexists", lambda _path: True)
+
+    def vanished(_path, _flags):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(tproxy.os, "open", vanished)
+
+    assert not tproxy._harden_existing_log("/var/log/slipstream.log.1")
+
+
 def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
     log = tmp_path / "slipstream.log"
     writer = tproxy.RotatingLogWriter(

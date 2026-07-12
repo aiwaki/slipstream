@@ -6277,7 +6277,12 @@ def _harden_existing_log(path):
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
-    fd = os.open(path, flags)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        # The running daemon may rotate an archive between lexists() and open()
+        # during reinstall. A vanished archive is already safely absent.
+        return False
     try:
         _harden_log_fd(fd, path)
     finally:
