@@ -39,6 +39,8 @@ survive across sessions and agents.
 | 2026-07-12 | Routing changes must pass deterministic data-plane traffic contracts through the real daemon handler. Each contract asserts the intended backend, prohibited backends, and first-plus-streamed payload delivery; it does not mutate PF, DNS, proxy, PAC, VPN, or the live network. | Active |
 | 2026-07-12 | A fresh, user-managed Xbox DNS payload proof may be the first geo-exit backend for OpenAI or Anthropic. A runtime Smart DNS miss falls back to owned Geph only when it is verified ready; otherwise only the private PF anchor pauses for a native retry. It never falls into local desync, and Slipstream does not change the system DNS configuration. | Active |
 | 2026-07-12 | Raw Telegram MTProto DC traffic is an unmodified safety passthrough and failure signal, not a direct-connect guarantee. When raw MTProto is blocked, the supported user path is the bundled local `tg-ws-proxy`; Telegram never routes through Geph. | Active |
+| 2026-07-13 | `billing.openai.com` remains a geo-exit route, but it is not a health canary. A synthetic probe can be refused by an edge or exit without proving that the primary OpenAI flow or Slipstream is unavailable. | Active |
+| 2026-07-13 | Tray recovery copy names the affected access class (`local`, `external`, or both) and states that recovery is in progress. It does not surface generic `Needs attention`; raw failure detail remains only in sanitized diagnostics. | Active |
 
 ## Notes
 

@@ -1174,14 +1174,23 @@ fn routing_health_summary(st: Option<&Value>, geph: &str, ru: bool) -> Option<St
         .is_some_and(|s| matches!(s, "blocked" | "degraded"))
         || geph == "down";
 
-    if local_failed || geph_failed {
-        Some(if ru {
-            "Требует внимания".to_string()
+    match (local_failed, geph_failed) {
+        (true, true) => Some(if ru {
+            "Восстанавливается доступ к сервисам".to_string()
         } else {
-            "Needs attention".to_string()
-        })
-    } else {
-        None
+            "Restoring service access".to_string()
+        }),
+        (true, false) => Some(if ru {
+            "Восстанавливается локальный доступ".to_string()
+        } else {
+            "Restoring local access".to_string()
+        }),
+        (false, true) => Some(if ru {
+            "Восстанавливается доступ к внешним сервисам".to_string()
+        } else {
+            "Restoring access to external services".to_string()
+        }),
+        (false, false) => None,
     }
 }
 
@@ -3741,7 +3750,7 @@ mod tests {
         );
         assert_eq!(
             routing_health_summary(Some(&status), "up", false),
-            Some("Needs attention".to_string())
+            Some("Restoring access to external services".to_string())
         );
         assert!(!serde_json::to_string(&status)
             .unwrap()
@@ -3779,7 +3788,32 @@ mod tests {
         );
         assert_eq!(
             routing_health_summary(Some(&status), "up", false),
-            Some("Needs attention".to_string())
+            Some("Restoring local access".to_string())
+        );
+    }
+
+    #[test]
+    fn routing_health_summary_names_combined_recovery() {
+        let status = json!({
+            "route_health": {
+                "discord": {
+                    "state": "degraded",
+                    "last_route_class": "local_bypass"
+                },
+                "openai": {
+                    "state": "blocked",
+                    "last_route_class": "geo_exit"
+                }
+            }
+        });
+
+        assert_eq!(
+            routing_health_summary(Some(&status), "up", false),
+            Some("Restoring service access".to_string())
+        );
+        assert_eq!(
+            routing_health_summary(Some(&status), "up", true),
+            Some("Восстанавливается доступ к сервисам".to_string())
         );
     }
 
@@ -3802,7 +3836,7 @@ mod tests {
 
         assert_eq!(
             routing_health_summary(Some(&status), "up", false),
-            Some("Needs attention".to_string())
+            Some("Restoring access to external services".to_string())
         );
         assert_eq!(routing_health_summary(Some(&status), "off", false), None);
     }
