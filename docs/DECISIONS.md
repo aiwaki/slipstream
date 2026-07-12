@@ -37,6 +37,8 @@ survive across sessions and agents.
 | 2026-07-12 | The tray watchdog does not kickstart a newly installed daemon until it has seen one fresh status snapshot or a bounded startup grace expires. This prevents a healthy daemon from being restarted while it is publishing its first StatusV2 snapshot. | Active |
 | 2026-07-12 | A missing durable PF enable token plus a definitively disabled PF state proves an in-memory-only token is stale after owned recovery. Slipstream may clear only that memory and acquire a new private token; persisted, enabled, or indeterminate token states remain fail-closed. | Active |
 | 2026-07-12 | Routing changes must pass deterministic data-plane traffic contracts through the real daemon handler. Each contract asserts the intended backend, prohibited backends, and first-plus-streamed payload delivery; it does not mutate PF, DNS, proxy, PAC, VPN, or the live network. | Active |
+| 2026-07-12 | A fresh, user-managed Xbox DNS payload proof may be the first geo-exit backend for OpenAI or Anthropic. A runtime Smart DNS miss falls back to owned Geph only when it is verified ready; otherwise only the private PF anchor pauses for a native retry. It never falls into local desync, and Slipstream does not change the system DNS configuration. | Active |
+| 2026-07-12 | Raw Telegram MTProto DC traffic is an unmodified safety passthrough and failure signal, not a direct-connect guarantee. When raw MTProto is blocked, the supported user path is the bundled local `tg-ws-proxy`; Telegram never routes through Geph. | Active |
 
 ## Notes
 
