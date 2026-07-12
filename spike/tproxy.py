@@ -5155,6 +5155,8 @@ class _RelayActivity:
     client_eof: bool = False
     client_read_failed: bool = False
     downstream_write_failed: bool = False
+    client_ended_first: bool = False
+    server_ended_first: bool = False
 
 
 def _local_stream_stalled(activity, now=None):
@@ -5179,19 +5181,22 @@ def _clean_eof_stream_stalled(activity, now=None):
 
     A single orderly EOF can be an ordinary keep-alive close, so callers must
     require a repeated exact-host signal before changing the next retry.  The
-    upstream must still be open when the client leaves; a server-first EOF is a
-    normal completion signal and must not be learned as a stall.
+    The relay records which direction completed first. A server-first EOF is a
+    normal completion signal and must not be learned as a stall; cancellation
+    of the still-pending direction must not look like an upstream EOF.
     """
     now = time.monotonic() if now is None else now
     if not (
         activity.client_eof
         and activity.client_end_at
-        and activity.server_end_at
+        and activity.client_ended_first
     ):
         return False
-    if activity.client_read_failed or activity.downstream_write_failed:
-        return False
-    if activity.server_end_at < activity.client_end_at:
+    if (
+        activity.server_ended_first
+        or activity.client_read_failed
+        or activity.downstream_write_failed
+    ):
         return False
     return now - activity.last_downstream_at >= LOCAL_STREAM_IDLE
 
@@ -5395,6 +5400,50 @@ async def pump(reader, up_w, activity=None):
         except Exception:
             pass
     return total
+
+
+async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
+    """Relay one generic local stream until either direction finishes.
+
+    When the client closes first, no later upstream payload can reach it.  Do
+    not wait indefinitely for that upstream read: cancel it, preserve the
+    client-first outcome, and let the exact-host recovery reducer run.  This is
+    deliberately used only for the generic local-desync path; geo-exit and
+    protected-service relays retain their existing lifecycle behavior.
+    """
+    client_task = asyncio.create_task(pump(reader, up_w, activity))
+    server_task = asyncio.create_task(splice(up_r, writer, activity))
+    tasks = (client_task, server_task)
+    try:
+        done, pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if activity is not None:
+            activity.client_ended_first = (
+                client_task in done and server_task not in done
+            )
+            activity.server_ended_first = (
+                server_task in done and client_task not in done
+            )
+        for task in pending:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        totals = []
+        for result in results:
+            if isinstance(result, BaseException):
+                if not isinstance(result, asyncio.CancelledError):
+                    raise result
+                totals.append(0)
+            else:
+                totals.append(result)
+        return tuple(totals)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 # Control-RPC port paired with each SOCKS port. The external mapping is used only
@@ -5967,10 +6016,7 @@ async def _handle_impl(reader, writer):
         return
     t0 = time.monotonic()
     activity = _RelayActivity(last_downstream_at=t0)
-    res = await asyncio.gather(
-        pump(reader, up_w, activity),
-        splice(up_r, writer, activity),
-    )
+    res = await relay_local_stream(reader, up_w, up_r, writer, activity)
     duration = time.monotonic() - t0
     # A partial local stream stall demotes only the exact generic strategy. It
     # teaches the next client retry to use app-owned Xbox DNS locally; protected
@@ -5992,7 +6038,7 @@ async def _handle_impl(reader, writer):
                 via_xbox_dns=via_xbox_dns,
                 now=t0 + duration,
             )
-        elif activity.server_end_at and activity.server_end_at < activity.client_end_at:
+        elif activity.server_ended_first:
             _clear_clean_eof_stalls(host)
         note_local_result(
             host,

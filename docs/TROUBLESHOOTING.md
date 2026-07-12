@@ -228,10 +228,13 @@ query and try the returned address locally. It never changes the system resolver
 configuration.
 
 For a partial page that becomes blank after a long wait, one orderly browser
-close is intentionally treated as ambiguous. Two client-first closes after a
-long downstream silence for the same generic host schedule that exact local DNS
-retry. This is process-local, expires automatically, and does not route the host
-through Geph.
+close is intentionally treated as ambiguous. The generic local relay records
+that the client closed first before stopping its now-undeliverable upstream read.
+Two client-first closes after a long downstream silence for the same generic host
+schedule that exact local DNS retry. This is process-local, expires automatically,
+and does not route the host through Geph. The retry can use the same IP if Xbox
+DNS and the normal resolver agree, so it is evidence-gated recovery rather than a
+guaranteed alternate route.
 
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale

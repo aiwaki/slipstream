@@ -3631,18 +3631,19 @@ def test_clean_eof_stream_stall_requires_client_first_idle_close():
         client_end_at=130.0,
         server_end_at=130.1,
         client_eof=True,
+        client_ended_first=True,
     )
 
     assert tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
-    activity.server_end_at = 129.9
+    activity.client_ended_first = False
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
-    activity.server_end_at = 130.1
-    activity.client_eof = False
+    activity.client_ended_first = True
+    activity.server_ended_first = True
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
-    activity.client_eof = True
+    activity.server_ended_first = False
     activity.last_downstream_at = 120.0
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
@@ -3673,6 +3674,71 @@ def test_pump_records_transport_error_but_not_orderly_eof():
     assert aborted.client_read_failed
 
 
+def test_relay_local_stream_stops_waiting_when_client_ends_first():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class Writer:
+        def close(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=100.0)
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            EofReader(),
+            Writer(),
+            BlockingReader(),
+            Writer(),
+            activity,
+        ),
+        timeout=0.2,
+    ))
+
+    assert result == (0, 0)
+    assert activity.client_eof
+    assert activity.client_ended_first
+    assert not activity.server_ended_first
+    assert activity.client_end_at
+    assert activity.server_end_at
+
+
+def test_relay_local_stream_server_first_does_not_become_clean_eof_stall():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class Writer:
+        def close(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=100.0)
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            BlockingReader(),
+            Writer(),
+            EofReader(),
+            Writer(),
+            activity,
+        ),
+        timeout=0.2,
+    ))
+
+    assert result == (0, 0)
+    assert activity.server_ended_first
+    assert not activity.client_ended_first
+    assert not activity.client_eof
+    assert not tproxy._clean_eof_stream_stalled(activity, now=130.0)
+
+
 def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
     host = "crystalidea.example"
     tproxy._strat_cache[host] = "split64+fake"
@@ -3700,6 +3766,7 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
         client_end_at=130.0,
         server_end_at=130.1,
         client_eof=True,
+        client_ended_first=True,
     )
     tproxy._strat_cache[host] = "split64+fake"
 
@@ -3745,6 +3812,7 @@ def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
         client_end_at=130.0,
         server_end_at=130.1,
         client_eof=True,
+        client_ended_first=True,
     )
 
     try:
