@@ -25,9 +25,10 @@ changes PF, or reads or writes system DNS/proxy/VPN state.
 |---|---|---|---|
 | Discord updater | Local bypass | Local fake/desync | Geph |
 | YouTube web/video entry | Local bypass | Local fake/desync | Geph |
-| ChatGPT WebSocket | Geo exit | Owned Geph | Local desync/direct |
+| ChatGPT WebSocket | Geo exit | Fresh Smart DNS proof, otherwise owned Geph | Local desync/direct |
 | Steam Store | Geo exit | Owned Geph | Local desync/direct |
-| Telegram MTProto DC | Direct | Plain direct TCP | Local desync/Geph |
+| Telegram raw MTProto DC | Safety passthrough | Plain direct TCP | Local desync/Geph |
+| Telegram Desktop in a blocked network | Local proxy | Bundled `tg-ws-proxy` | A direct-connect guarantee |
 | Generic HTTPS host | Unknown | Local adaptive ladder | Geph |
 | Geo backend unavailable | Geo exit | Pause only Slipstream's PF anchor | Local fallback |
 
@@ -35,6 +36,18 @@ These are representatives of routing **classes and service groups**, not a
 manual list of every website. A new host normally belongs to an existing
 contract. Add a new contract only when it introduces a distinct route class,
 backend, payload shape, or safety rule.
+
+Smart DNS is a read-only, user-managed resolver path. For OpenAI and Anthropic,
+Slipstream may use it first only after the resolver has passed a fresh payload
+canary. A runtime miss falls back to owned Geph only when that backend is
+verified ready; otherwise the existing geo fail-closed path pauses only
+Slipstream's private PF anchor for the native retry. It never falls into local
+desync, and Slipstream never changes the system DNS configuration.
+
+Raw Telegram MTProto passthrough is defensive: the transparent handler does not
+corrupt a protocol it cannot classify. It is not a claim that Telegram can
+connect directly from every Russian network; the bundled local `tg-ws-proxy` is
+the supported connection path when direct MTProto is blocked.
 
 ## Incident Rule
 

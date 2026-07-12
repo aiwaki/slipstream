@@ -67,6 +67,20 @@ CORE_TRAFFIC_CONTRACTS = (
         ),
     ),
     TrafficContract(
+        name="chatgpt-websocket-smart-dns",
+        policy_host="ws.chatgpt.com",
+        tls_host="ws.chatgpt.com",
+        destination_ip="203.0.113.16",
+        resolved_ip=None,
+        route_class=tproxy.ROUTE_GEO_EXIT,
+        service_group=tproxy.SERVICE_OPENAI,
+        backend="smart_dns",
+        response=(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+        ),
+    ),
+    TrafficContract(
         name="steam-store-geo",
         policy_host="store.steampowered.com",
         tls_host="store.steampowered.com",
@@ -207,6 +221,7 @@ def isolate_runtime_state(monkeypatch):
     )
     monkeypatch.setattr(tproxy, "note_local_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "_clear_clean_eof_stalls", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tproxy, "route_health_event", lambda *_args, **_kwargs: None)
 
 
 @pytest.mark.parametrize("contract", CORE_TRAFFIC_CONTRACTS, ids=lambda item: item.name)
@@ -231,7 +246,6 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         lambda _sock: (contract.destination_ip, 443),
     )
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
-    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspensions.append)
     monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: calls.append("clear-geph"))
@@ -259,6 +273,31 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
         monkeypatch.setattr(tproxy, "dial_plain", no_direct)
         monkeypatch.setattr(tproxy, "_geph_up", False)
+    elif contract.backend == "smart_dns":
+        async def fake_smart_dns(host, port, first_flight):
+            assert first_flight == expected_first_flight
+            calls.append(("smart_dns", host, port, first_flight))
+            return "198.51.100.16", probed_upstream_response(contract.response)
+
+        async def no_geph(*args, **kwargs):
+            await forbidden_backend("Geph", *args, **kwargs)
+
+        async def no_local(*args, **kwargs):
+            await forbidden_backend("local desync", *args, **kwargs)
+
+        async def no_direct(*args, **kwargs):
+            await forbidden_backend("direct dial", *args, **kwargs)
+
+        async def no_dns(*args, **kwargs):
+            await forbidden_backend("generic DNS resolution", *args, **kwargs)
+
+        monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
+        monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", fake_smart_dns)
+        monkeypatch.setattr(tproxy, "_geph_up", True)
+        monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+        monkeypatch.setattr(tproxy, "dial_strategy", no_local)
+        monkeypatch.setattr(tproxy, "dial_plain", no_direct)
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", no_dns)
     else:
         async def fake_geph(host, port, first_flight):
             assert first_flight == expected_first_flight
@@ -274,6 +313,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         async def no_dns(*args, **kwargs):
             await forbidden_backend("DNS resolution", *args, **kwargs)
 
+        monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
         monkeypatch.setattr(tproxy, "_geph_up", True)
         monkeypatch.setattr(tproxy, "dial_via_geph", fake_geph)
         monkeypatch.setattr(tproxy, "dial_strategy", no_local)
@@ -296,14 +336,18 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         )
         if contract.route_class == tproxy.ROUTE_LOCAL_BYPASS:
             assert backend_calls[0][5] is True
+    elif contract.backend == "smart_dns":
+        assert [call[:3] for call in calls if call[0] == "smart_dns"] == [
+            ("smart_dns", contract.tls_host, 443)
+        ]
     else:
         assert [call[:3] for call in calls if call[0] == "geph"] == [
             ("geph", contract.tls_host, 443)
         ]
 
 
-def test_telegram_direct_contract_bypasses_all_tls_backends(monkeypatch):
-    """MTProto DC traffic has no SNI and must remain untouched/direct."""
+def test_telegram_raw_dc_contract_is_safety_passthrough(monkeypatch):
+    """Bare MTProto stays untouched; the user-facing blocked-network path is tg-ws-proxy."""
     isolate_runtime_state(monkeypatch)
     policy = tproxy.route_policy("telegram.org")
     assert policy["route_class"] == tproxy.ROUTE_DIRECT
@@ -346,22 +390,115 @@ def test_telegram_direct_contract_bypasses_all_tls_backends(monkeypatch):
     assert bytes(writer.payload) == response
 
 
-def test_geo_exit_unavailable_never_falls_back_to_local(monkeypatch):
-    """A broken geo backend pauses only Slipstream's PF anchor for the retry."""
+def test_smart_dns_runtime_miss_falls_back_to_geph_without_local_desync(monkeypatch):
+    """A proven Smart DNS route may fail at runtime, but never escapes to local bypass."""
     isolate_runtime_state(monkeypatch)
     host = "ws.chatgpt.com"
-    assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_GEO_EXIT
-    client, _ = tls_client(host, block_after_hello=False)
+    client, expected_first_flight = tls_client(host, block_after_hello=False)
     writer = CaptureWriter()
-    suspensions = []
+    calls = []
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
+
+    async def smart_dns_miss(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
+        calls.append(("smart_dns", actual_host))
+        return None
+
+    async def fake_geph(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
+        calls.append(("geph", actual_host))
+        return streaming_upstream_response(response)
 
     async def no_backend(name, *args, **kwargs):
         await forbidden_backend(name, *args, **kwargs)
 
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.17", 443))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
+    monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
+    monkeypatch.setattr(
+        tproxy,
+        "_smart_dns_mark_failure",
+        lambda actual_host, reason, group: calls.append(("smart_dns_miss", actual_host, reason, group)),
+    )
+    monkeypatch.setattr(tproxy, "dial_via_geph", fake_geph)
+    monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "dial_plain", lambda *args, **kwargs: no_backend("direct dial", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: calls.append(("clear_geph",)))
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert calls == [
+        ("smart_dns", host),
+        ("smart_dns_miss", host, "smart dns runtime probe failed", tproxy.SERVICE_OPENAI),
+        ("geph", host),
+        ("clear_geph",),
+    ]
+
+
+def test_geo_exit_early_close_pauses_private_pf_without_local_fallback(monkeypatch):
+    """A SOCKS connect without downstream bytes must leave the retry on native routing."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    client, expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    failures = []
+    suspensions = []
+
+    async def empty_geph(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
+        return streaming_upstream_response(b"")
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.18", 443))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "dial_via_geph", empty_geph)
+    monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "dial_plain", lambda *args, **kwargs: no_backend("direct dial", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda actual_host, reason: failures.append((actual_host, reason)))
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: pytest.fail("empty payload must not clear failure"))
+    monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspensions.append)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == b""
+    assert failures == [(host, "remote closed without response")]
+    assert suspensions == ["geo-exit remote close before payload"]
+
+
+@pytest.mark.parametrize("smart_dns_ready", [False, True], ids=["no-smart-dns", "smart-dns-miss"])
+def test_geo_exit_unavailable_never_falls_back_to_local(monkeypatch, smart_dns_ready):
+    """A broken geo backend pauses only Slipstream's PF anchor for the retry."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_GEO_EXIT
+    client, expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    suspensions = []
+    smart_dns_misses = []
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    async def smart_dns_miss(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
+        smart_dns_misses.append(actual_host)
+        return None
+
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.15", 443))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
-    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: smart_dns_ready)
+    monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
+    monkeypatch.setattr(tproxy, "_smart_dns_mark_failure", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "dial_via_geph", lambda *args, **kwargs: no_backend("Geph", *args, **kwargs))
     monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
     monkeypatch.setattr(tproxy, "dial_plain", lambda *args, **kwargs: no_backend("direct dial", *args, **kwargs))
@@ -374,3 +511,4 @@ def test_geo_exit_unavailable_never_falls_back_to_local(monkeypatch):
     assert bytes(writer.payload) == b""
     assert writer.closed is True
     assert suspensions == ["geo-exit tunnel down"]
+    assert smart_dns_misses == ([host] if smart_dns_ready else [])
