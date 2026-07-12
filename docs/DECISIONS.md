@@ -9,6 +9,8 @@ survive across sessions and agents.
 | 2026-07-07 | YouTube/googlevideo video delivery stays on local bypass. Geph is not the fallback for video playback. | Active |
 | 2026-07-07 | QUIC/UDP must not be blocked globally. Any future QUIC handling must be scoped to verified host/IP evidence and a concrete failure mode. | Active |
 | 2026-07-08 | Geph is reserved for geo-exit cases where the service rejects the user's Russian IP address. | Active |
+| 2026-07-13 | Unknown hosts must never auto-promote to Geph from local stalls plus a successful tunnel payload: that only proves that Geph works, not that a foreign exit is required. Geo-exit is selected only by explicit, reviewed policy. | Active |
+| 2026-07-13 | `google.com` and the Spotify delivery families (`spotify.com`, `spotifycdn.com`, `scdn.co`) use a local-only `direct_first` ladder: plain TLS is always tried first, then bounded local desync if necessary; Geph is never an edge. A cached local fallback cannot displace the next direct attempt. | Active |
 | 2026-07-08 | Slipstream must not mutate external DNS, VPN, PAC, or proxy settings. It may detect and warn about them. | Active |
 | 2026-07-08 | Repo docs are the primary source of project knowledge. Codex memory stores durable agent/user preferences and pointers, not long investigations. | Active |
 | 2026-07-09 | GitHub developer/download endpoints use direct passthrough and plain TLS; they should not route through Geph or the generic desync ladder. | Active |

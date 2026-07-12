@@ -451,8 +451,8 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["routes"][tproxy.ROUTE_LOCAL_BYPASS]["state"] == tproxy.HEALTH_OK
     assert status["backends"]["geph"]["state"] == "up"
     auto_geo_exit = status["backends"]["geph"]["auto_geo_exit"]
-    assert auto_geo_exit["enabled"] is True
-    assert auto_geo_exit["learned"] >= 0
+    assert auto_geo_exit["enabled"] is False
+    assert auto_geo_exit["learned"] == 0
     assert auto_geo_exit["pending"] >= 0
     assert "last_host" not in auto_geo_exit
     assert "last_reason" not in auto_geo_exit
@@ -1367,6 +1367,16 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("objects.githubusercontent.com")["service_group"] == (
         tproxy.SERVICE_GITHUB
     )
+    assert tproxy.route_policy("www.google.com") == {
+        "host": "www.google.com",
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
+        "service_group": tproxy.SERVICE_GOOGLE,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
+    }
+    assert tproxy.route_policy("gue1-spclient.spotify.com")["service_group"] == (
+        tproxy.SERVICE_SPOTIFY
+    )
+    assert tproxy.route_policy("i.scdn.co")["route_class"] == tproxy.ROUTE_DIRECT_FIRST
 
 
 def test_route_policy_tables_are_explicit_and_keep_boundaries():
@@ -1399,6 +1409,16 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
         tproxy.ROUTE_DIRECT,
         tproxy.STRATEGY_DIRECT,
     ) in static
+    assert (
+        tproxy.SERVICE_GOOGLE,
+        tproxy.ROUTE_DIRECT_FIRST,
+        tproxy.STRATEGY_DIRECT_FIRST,
+    ) in static
+    assert (
+        tproxy.SERVICE_SPOTIFY,
+        tproxy.ROUTE_DIRECT_FIRST,
+        tproxy.STRATEGY_DIRECT_FIRST,
+    ) in static
     assert tproxy.SERVICE_DISCORD not in geo
     assert tproxy.SERVICE_YOUTUBE not in geo
     assert tproxy.SERVICE_OPENAI in geo
@@ -1408,9 +1428,24 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
 
 
 def test_direct_passthrough_hosts_use_plain_strategy_only():
-    assert [s["name"] for s in tproxy.strategy_order("github.com")] == ["plain"]
-    assert [s["name"] for s in tproxy.strategy_order("t.me")] == ["plain"]
-    assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
+    tproxy._strat_cache["www.google.com"] = "split64+fake"
+    tproxy._strat_cache["api.spotify.com"] = "split64+fake"
+    try:
+        assert [s["name"] for s in tproxy.strategy_order("github.com")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order("t.me")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order("www.google.com")][:2] == [
+            "plain", "split64+fake",
+        ]
+        assert [s["name"] for s in tproxy.strategy_order("api.spotify.com")][:2] == [
+            "plain", "split64+fake",
+        ]
+        assert [s["name"] for s in tproxy.strategy_order("i.scdn.co")][0] == "plain"
+        assert not tproxy.geph_route("www.google.com")
+        assert not tproxy.geph_route("api.spotify.com")
+        assert not tproxy.geph_route("i.scdn.co")
+    finally:
+        tproxy._strat_cache.clear()
 
 
 def test_route_policy_manifest_has_stable_diagnostic_shape():
@@ -1434,6 +1469,8 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
     assert tproxy.SERVICE_YOUTUBE in static_groups
     assert tproxy.SERVICE_TELEGRAM in static_groups
     assert tproxy.SERVICE_GITHUB in static_groups
+    assert tproxy.SERVICE_GOOGLE in static_groups
+    assert tproxy.SERVICE_SPOTIFY in static_groups
     assert tproxy.SERVICE_OPENAI in geo_groups
     assert tproxy.SERVICE_ANTHROPIC in geo_groups
     assert tproxy.SERVICE_STEAM_STORE in geo_groups
@@ -1442,6 +1479,9 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
 
     assert status["domains"][tproxy.ROUTE_DIRECT] == (
         len(tproxy.TELEGRAM_HOSTS) + len(tproxy.GITHUB_HOSTS)
+    )
+    assert status["domains"][tproxy.ROUTE_DIRECT_FIRST] == (
+        len(tproxy.DIRECT_FIRST_HOSTS)
     )
     assert status["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
         len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
@@ -1456,6 +1496,16 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
         "route_class": tproxy.ROUTE_DIRECT,
         "strategy_set": tproxy.STRATEGY_DIRECT,
         "domains": len(tproxy.GITHUB_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_GOOGLE] == {
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
+        "domains": len(tproxy.GOOGLE_DIRECT_FIRST_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_SPOTIFY] == {
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
+        "domains": len(tproxy.SPOTIFY_DIRECT_FIRST_HOSTS),
     }
     assert status["groups"][tproxy.SERVICE_OPENAI] == {
         "route_class": tproxy.ROUTE_GEO_EXIT,
@@ -1486,6 +1536,19 @@ def test_route_policy_manifest_rejects_protected_group_geph_route():
     })
 
     with pytest.raises(ValueError, match="discord.*local_bypass"):
+        tproxy.validate_route_policy_manifest(manifest)
+
+
+def test_route_policy_manifest_requires_direct_first_for_google_and_spotify():
+    manifest = tproxy.route_policy_manifest()
+    google = next(
+        entry for entry in manifest["static_routes"]
+        if entry["service_group"] == tproxy.SERVICE_GOOGLE
+    )
+    google["route_class"] = tproxy.ROUTE_DIRECT
+    google["strategy_set"] = tproxy.STRATEGY_DIRECT
+
+    with pytest.raises(ValueError, match="protected direct-first domains missing"):
         tproxy.validate_route_policy_manifest(manifest)
 
 
@@ -3501,27 +3564,36 @@ def test_geo_exit_failures_never_request_unowned_geph_restart(capsys):
         tproxy._geph_restart_hint.update(original_hint)
 
 
-def test_local_bypass_hosts_ignore_stale_auto_geph_cache():
+def test_stale_auto_geph_cache_never_overrides_explicit_policy():
     tproxy._auto_geph.clear()
     tproxy._auto_geph["updates.discord.com"] = tproxy.time.time() + 3600
     tproxy._auto_geph["rr2---sn-ntq7yner.googlevideo.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["www.google.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["api.spotify.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["payments.example.com"] = tproxy.time.time() + 3600
 
     try:
         assert not tproxy.geph_route("updates.discord.com")
         assert not tproxy.geph_route("rr2---sn-ntq7yner.googlevideo.com")
+        assert not tproxy.geph_route("www.google.com")
+        assert not tproxy.geph_route("api.spotify.com")
+        assert not tproxy.geph_route("payments.example.com")
+        assert tproxy.geph_route("chatgpt.com")
     finally:
         tproxy._auto_geph.clear()
 
 
-def test_auto_geph_candidate_allows_only_unknown_hosts():
-    assert tproxy._auto_geph_candidate_allowed("payments.example.com")
-
-    assert not tproxy._auto_geph_candidate_allowed("updates.discord.com")
-    assert not tproxy._auto_geph_candidate_allowed("rr2---sn-ntq7yner.googlevideo.com")
-    assert not tproxy._auto_geph_candidate_allowed("t.me")
-    assert not tproxy._auto_geph_candidate_allowed("vk.com")
-    assert not tproxy._auto_geph_candidate_allowed("chatgpt.com")
-    assert not tproxy._auto_geph_candidate_allowed("kubernetes.io")
+def test_auto_geph_candidate_is_disabled_for_every_host():
+    for host in (
+        "payments.example.com",
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "t.me",
+        "www.google.com",
+        "api.spotify.com",
+        "chatgpt.com",
+    ):
+        assert not tproxy._auto_geph_candidate_allowed(host)
 
 
 def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle():
@@ -3807,11 +3879,10 @@ def test_xbox_dns_fallback_excludes_discord_and_youtube(monkeypatch):
     assert calls == []
 
 
-def test_auto_geph_waits_for_xbox_dns_attempt(monkeypatch):
+def test_unknown_stalls_use_xbox_dns_without_foreign_exit():
     host = "payments.example.com"
     confirmations = []
 
-    monkeypatch.setattr(tproxy, "_geph_up", True)
     for index in range(tproxy.AUTO_GEPH_STORM):
         tproxy.note_local_result(
             host,
@@ -3833,7 +3904,8 @@ def test_auto_geph_waits_for_xbox_dns_attempt(monkeypatch):
         confirmation_runner=lambda value: confirmations.append(value),
     )
 
-    assert confirmations == [host]
+    assert confirmations == []
+    assert not tproxy.geph_route(host)
 
 
 def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
@@ -3852,100 +3924,58 @@ def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
     assert not tproxy.geph_route(host)
 
 
-def test_auto_geph_learns_exact_host_after_local_stalls_and_geph_payload(monkeypatch):
-    saves = []
-
-    monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 128)
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(True))
-    tproxy._xbox_dns_attempts["payments.example.com"] = 1_000.0
-
-    for idx in range(tproxy.AUTO_GEPH_STORM - 1):
-        tproxy.note_local_result(
-            "payments.example.com",
-            down_bytes=100,
-            duration=tproxy.AUTO_GEPH_HANG + 1,
-            now=100.0 + idx,
-            confirmation_runner=tproxy._confirm_auto_geph,
-        )
-        assert not tproxy.geph_route("payments.example.com")
-
-    tproxy.note_local_result(
-        "payments.example.com",
-        down_bytes=100,
-        duration=tproxy.AUTO_GEPH_HANG + 1,
-        now=120.0,
-        confirmation_runner=tproxy._confirm_auto_geph,
-    )
-
-    assert tproxy.geph_route("payments.example.com")
-    assert not tproxy.geph_route("example.com")
-    assert saves
-    snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "learned"
-    assert snap["last_host"] == "payments.example.com"
-    assert snap["last_bytes"] == 128
-
-
-def test_auto_geph_forgets_learned_host_after_repeated_geph_runtime_misses(monkeypatch, capsys):
-    saves = []
+def test_unknown_stalls_never_promote_to_geph_after_xbox_dns_attempt(monkeypatch):
+    confirmations = []
     host = "payments.example.com"
-    tproxy._auto_geph[host] = tproxy.time.time() + 3600
-    monkeypatch.setattr(tproxy, "_geph_owned", True)
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
-
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)
-    assert tproxy.geph_route(host)
-
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1001.0)
-
-    assert not tproxy.geph_route(host)
-    assert saves and host not in saves[-1]
-    snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "reset"
-    assert snap["last_host"] == host
-    assert snap["last_reason"] == "geph runtime retries"
-    capsys.readouterr()
-
-
-def test_auto_geph_runtime_misses_keep_explicit_geo_hosts(monkeypatch, capsys):
-    saves = []
-    host = "chatgpt.com"
-    expiry = tproxy.time.time() + 3600
-    tproxy._auto_geph[host] = expiry
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
-
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1001.0)
-
-    assert tproxy.geph_route(host)
-    assert tproxy._auto_geph[host] == expiry
-    assert not saves
-    capsys.readouterr()
-
-
-def test_auto_geph_requires_geph_payload_proof(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 0)
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
-    tproxy._xbox_dns_attempts["payments.example.com"] = 1_000.0
+    tproxy._xbox_dns_attempts[host] = 1_000.0
 
     for idx in range(tproxy.AUTO_GEPH_STORM):
         tproxy.note_local_result(
-            "payments.example.com",
+            host,
             down_bytes=100,
             duration=tproxy.AUTO_GEPH_HANG + 1,
             now=100.0 + idx,
-            confirmation_runner=tproxy._confirm_auto_geph,
+            confirmation_runner=lambda value: confirmations.append(value),
         )
 
-    assert not tproxy.geph_route("payments.example.com")
+    assert confirmations == []
+    assert not tproxy.geph_route(host)
+    assert not tproxy._auto_geph
     snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "rejected"
-    assert snap["last_reason"] == "geph payload probe failed"
+    assert snap["enabled"] is False
+    assert snap["learned"] == 0
 
 
-def test_auto_geph_network_wide_guard_blocks_learning(monkeypatch):
+def test_auto_geph_confirmation_never_dials_unknown_host(monkeypatch):
+    probes = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_payload_probe",
+        lambda host: probes.append(host) or 128,
+    )
+
+    assert not tproxy._confirm_auto_geph("payments.example.com")
+    assert probes == []
+    snap = tproxy.auto_geo_exit_status_snapshot()
+    assert snap["last_state"] == "skipped"
+    assert snap["last_reason"] == "not eligible"
+
+
+def test_load_auto_geph_discards_legacy_learned_routes(tmp_path, monkeypatch):
+    path = tmp_path / "autogeph.json"
+    path.write_text(json.dumps({"www.google.com": tproxy.time.time() + 3600}))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(path))
+
+    tproxy.load_auto_geph()
+
+    assert tproxy._auto_geph == {}
+    assert json.loads(path.read_text()) == {}
+    assert not tproxy.geph_route("www.google.com")
+
+
+def test_network_wide_unknown_stalls_do_not_schedule_foreign_exit(monkeypatch):
     calls = []
     monkeypatch.setattr(tproxy, "_geph_up", True)
 
@@ -3966,7 +3996,7 @@ def test_auto_geph_network_wide_guard_blocks_learning(monkeypatch):
     assert not tproxy.geph_route("payments.example.com")
 
 
-def test_auto_geph_prunes_expired_learned_hosts(monkeypatch):
+def test_prune_auto_geph_discards_legacy_learned_hosts(monkeypatch):
     saves = []
     tproxy._auto_geph["old.example.com"] = 100.0
     tproxy._auto_geph["fresh.example.com"] = 300.0
@@ -3974,9 +4004,8 @@ def test_auto_geph_prunes_expired_learned_hosts(monkeypatch):
 
     snap = tproxy.auto_geo_exit_status_snapshot(now=200.0)
 
-    assert "old.example.com" not in tproxy._auto_geph
-    assert "fresh.example.com" in tproxy._auto_geph
-    assert snap["learned"] == 1
+    assert tproxy._auto_geph == {}
+    assert snap["learned"] == 0
     assert saves
 
 
