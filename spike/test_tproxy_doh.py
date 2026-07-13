@@ -323,26 +323,28 @@ def test_copy_script_runtime_includes_local_modules(tmp_path):
     install = tmp_path / "install"
     source.mkdir()
     (source / "tproxy.py").write_text(
-        "import pf_adapter\nimport primes\nimport routing_policy\n"
+        "import geph_backend\nimport pf_adapter\nimport primes\nimport routing_policy\n"
         "import routing_recovery\nimport xbox_dns\n"
     )
-    (source / "pf_adapter.py").write_text("VALUE = 1\n")
-    (source / "primes.py").write_text("VALUE = 2\n")
-    (source / "routing_policy.py").write_text("VALUE = 3\n")
-    (source / "routing_recovery.py").write_text("VALUE = 4\n")
-    (source / "xbox_dns.py").write_text("VALUE = 5\n")
+    (source / "geph_backend.py").write_text("VALUE = 1\n")
+    (source / "pf_adapter.py").write_text("VALUE = 2\n")
+    (source / "primes.py").write_text("VALUE = 3\n")
+    (source / "routing_policy.py").write_text("VALUE = 4\n")
+    (source / "routing_recovery.py").write_text("VALUE = 5\n")
+    (source / "xbox_dns.py").write_text("VALUE = 6\n")
 
     tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert (install / "tproxy.py").read_text() == (
-        "import pf_adapter\nimport primes\nimport routing_policy\n"
+        "import geph_backend\nimport pf_adapter\nimport primes\nimport routing_policy\n"
         "import routing_recovery\nimport xbox_dns\n"
     )
-    assert (install / "pf_adapter.py").read_text() == "VALUE = 1\n"
-    assert (install / "primes.py").read_text() == "VALUE = 2\n"
-    assert (install / "routing_policy.py").read_text() == "VALUE = 3\n"
-    assert (install / "routing_recovery.py").read_text() == "VALUE = 4\n"
-    assert (install / "xbox_dns.py").read_text() == "VALUE = 5\n"
+    assert (install / "geph_backend.py").read_text() == "VALUE = 1\n"
+    assert (install / "pf_adapter.py").read_text() == "VALUE = 2\n"
+    assert (install / "primes.py").read_text() == "VALUE = 3\n"
+    assert (install / "routing_policy.py").read_text() == "VALUE = 4\n"
+    assert (install / "routing_recovery.py").read_text() == "VALUE = 5\n"
+    assert (install / "xbox_dns.py").read_text() == "VALUE = 6\n"
 
 
 def test_copy_script_runtime_fails_before_partial_install(tmp_path):
@@ -397,6 +399,23 @@ def test_copy_script_runtime_requires_pf_adapter_before_install(tmp_path):
     (source / "xbox_dns.py").write_text("VALUE = 4\n")
 
     with pytest.raises(FileNotFoundError, match="pf_adapter.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_geph_backend_before_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    (source / "tproxy.py").write_text("import geph_backend\n")
+    (source / "pf_adapter.py").write_text("VALUE = 1\n")
+    (source / "primes.py").write_text("VALUE = 2\n")
+    (source / "routing_policy.py").write_text("VALUE = 3\n")
+    (source / "routing_recovery.py").write_text("VALUE = 4\n")
+    (source / "xbox_dns.py").write_text("VALUE = 5\n")
+
+    with pytest.raises(FileNotFoundError, match="geph_backend.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()

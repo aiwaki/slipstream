@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
 
+import geph_backend
 import pf_adapter
 from primes import build_fake_stun, classify as classify_voice_payload
 from routing_recovery import (
@@ -2312,31 +2313,11 @@ def geph_restart_hint_snapshot(now=None):
 
 
 def _owned_geph_launch_target(state, owner_uid):
-    if not isinstance(state, dict) or isinstance(owner_uid, bool):
-        return None
-    if state.get("launchd_label") != GEPH_LAUNCHD_LABEL:
-        return None
-    state_uid = state.get("uid")
-    if isinstance(state_uid, bool):
-        return None
-    try:
-        uid = int(state_uid)
-        owner_uid = int(owner_uid)
-    except (TypeError, ValueError):
-        return None
-    if uid <= 0 or uid != owner_uid:
-        return None
-    return f"gui/{uid}/{GEPH_LAUNCHD_LABEL}"
+    return geph_backend.owned_launch_target(state, owner_uid, GEPH_LAUNCHD_LABEL)
 
 
 def _ownership_file_uid(path):
-    try:
-        metadata = os.lstat(path)
-    except OSError:
-        return None
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid <= 0:
-        return None
-    return metadata.st_uid
+    return geph_backend.ownership_file_uid(path)
 
 
 def execute_owned_geph_restart(
@@ -4089,6 +4070,7 @@ def _script_runtime_payload(source_file):
     source_dir = os.path.dirname(source_file)
     payload = (
         (source_file, "tproxy.py"),
+        (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
@@ -5386,73 +5368,35 @@ def _console_user_home():
 
 def geph_ownership_path(home=None):
     home = _console_user_home() if home is None else home
-    if not home:
-        return None
-    return os.path.join(
-        home,
-        "Library",
-        "Application Support",
-        "dev.slipstream.tray",
-        GEPH_OWNERSHIP_FILE,
-    )
+    return geph_backend.ownership_path(home, GEPH_OWNERSHIP_FILE)
 
 
 def _read_geph_ownership(path=None):
     path = geph_ownership_path() if path is None else path
-    if not path:
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            value = json.load(f)
-    except (OSError, ValueError):
-        return None
-    return value if isinstance(value, dict) else None
+    return geph_backend.read_ownership(path)
 
 
 def _geph_listener_pid(port):
-    result = _run(
-        "/usr/sbin/lsof",
-        "-nP",
-        f"-iTCP:{port}",
-        "-sTCP:LISTEN",
-        "-t",
-    )
-    if result.returncode != 0:
-        return None
-    try:
-        return int(result.stdout.splitlines()[0].strip())
-    except (IndexError, ValueError):
-        return None
+    return geph_backend.listener_pid(_run, port)
 
 
 def _geph_process_command(pid):
-    result = _run("/bin/ps", "-p", str(pid), "-o", "command=")
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
+    return geph_backend.process_command(_run, pid)
 
 
 def _geph_state_matches(state, listener_pid, command):
-    if not isinstance(state, dict) or not isinstance(listener_pid, int):
-        return False
-    try:
-        state_pid = int(state.get("pid"))
-    except (TypeError, ValueError):
-        return False
-    executable = state.get("executable")
-    config = state.get("config")
-    if state_pid != listener_pid or not isinstance(executable, str) or not executable:
-        return False
-    if not isinstance(config, str) or not config:
-        return False
-    return command.strip() == f"{executable} --config {config}"
+    return geph_backend.state_matches(state, listener_pid, command)
 
 
 def geph_listener_owned(port=GEPH_OWNED_PORT, state=None, listener_pid=None, command=None):
     state = _read_geph_ownership() if state is None else state
-    listener_pid = _geph_listener_pid(port) if listener_pid is None else listener_pid
-    command = _geph_process_command(listener_pid) if command is None and listener_pid else command
-    return _geph_state_matches(state, listener_pid, command or "")
+    return geph_backend.listener_owned(
+        _run,
+        port,
+        state,
+        listener_process_id=listener_pid,
+        command=command,
+    )
 
 
 def _tcp_listener_present(port, timeout=0.25):
