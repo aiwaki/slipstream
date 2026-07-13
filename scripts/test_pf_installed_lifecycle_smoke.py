@@ -96,6 +96,10 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with path.open("rb") as handle:
                 updated = plistlib.load(handle)
             self.assertEqual(updated["EnvironmentVariables"]["SLIP_GEPH"], "0")
+            self.assertEqual(
+                updated["EnvironmentVariables"]["SLIP_RUNTIME_WAKE_GAP_SECONDS"],
+                "6",
+            )
             self.assertIn("--no-voice", updated["ProgramArguments"])
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
 
@@ -132,6 +136,55 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(lifecycle._daemon_status(v1), v1)
         self.assertEqual(lifecycle._daemon_status(v2), v2["daemon"])
         self.assertIsNone(lifecycle._daemon_status({"schema_version": 2}))
+
+    def test_recovery_view_and_wait_require_same_fresh_daemon(self) -> None:
+        status = {
+            "schema_version": 2,
+            "daemon": {
+                "state": "active",
+                "pid": 42,
+                "updated_at": 500.0,
+            },
+            "recovery": {
+                "last_action": "network_change",
+                "count": 3,
+            },
+        }
+        with mock.patch.object(lifecycle, "_read_status", return_value=status), mock.patch(
+            "time.time", return_value=501.0
+        ):
+            observed = lifecycle._wait_for_rearm(
+                "network_change",
+                expected_pid=42,
+                previous_count=2,
+                timeout=1,
+            )
+
+        self.assertIs(observed, status)
+        self.assertEqual(lifecycle._recovery_count(status), 3)
+        self.assertIsNone(lifecycle._recovery_status({"state": "active"}))
+
+    def test_daemon_signal_guard_accepts_only_exact_installed_command(self) -> None:
+        target = lifecycle.script_target()
+        command = " ".join((*target.installed_program_prefix, "--no-voice"))
+        with mock.patch.object(
+            lifecycle, "_process_command_for_pid", return_value=command
+        ), mock.patch("os.kill") as kill:
+            lifecycle._signal_owned_daemon(target, 42, lifecycle.RUNTIME_REARM_SIGNAL)
+        kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
+
+        with mock.patch.object(
+            lifecycle,
+            "_process_command_for_pid",
+            return_value="/tmp/not-slipstream --no-voice",
+        ), mock.patch("os.kill") as kill:
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "unowned pid"):
+                lifecycle._signal_owned_daemon(
+                    target,
+                    42,
+                    lifecycle.RUNTIME_REARM_SIGNAL,
+                )
+        kill.assert_not_called()
 
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
