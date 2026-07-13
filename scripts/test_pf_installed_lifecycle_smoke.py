@@ -383,6 +383,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertIn("--disable-quic", command)
         self.assertIn("--no-proxy-server", command)
         self.assertIn(f"--user-data-dir={profile}", command)
+        self.assertIn(f"--timeout={lifecycle.CHROME_PAGE_TIMEOUT_MS}", command)
         self.assertEqual(
             command[-1],
             "https://github.com/robots.txt?slipstream-chrome=after-tray-crash",

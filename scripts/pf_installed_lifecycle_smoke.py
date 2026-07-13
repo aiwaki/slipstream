@@ -66,6 +66,7 @@ CHROME_EXECUTABLE = Path(
 )
 CHROME_PROBE_MIN_BYTES = 32
 CHROME_PROBE_MARKER = b"User-agent:"
+CHROME_PAGE_TIMEOUT_MS = 15_000
 CHROME_PROBE_TIMEOUT = 45
 TRAY_START_TIMEOUT = 15.0
 
@@ -656,6 +657,7 @@ def _chrome_probe_command(
         "--no-proxy-server",
         "--password-store=basic",
         f"--user-data-dir={profile_dir}",
+        f"--timeout={CHROME_PAGE_TIMEOUT_MS}",
         "--dump-dom",
         f"{HTTPS_PROBE_URL}?slipstream-chrome={suffix}",
     )
