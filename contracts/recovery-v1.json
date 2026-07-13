@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.recovery",
+  "contract_version": 1,
+  "invariants": {
+    "protected_local_bypass_groups": [
+      "discord",
+      "youtube_video"
+    ],
+    "forbidden_protected_action": "restart_owned_geph"
+  },
+  "outcome_defaults": {
+    "host": "payments.example.com",
+    "service_group": "generic",
+    "route_class": "unknown",
+    "backend": "local_engine",
+    "failure_phase": "first_payload",
+    "bytes_received": 0,
+    "duration": 3.5,
+    "reason": "probe timed out",
+    "ok": false
+  },
+  "context_defaults": {
+    "backend_owned": false,
+    "restart_recommended": false,
+    "restart_rate_limited": false,
+    "strategy_invalidation_recommended": false,
+    "recheck_recommended": false,
+    "external_state": false
+  },
+  "vectors": [
+    {
+      "name": "success-requires-no-recovery",
+      "outcome": {
+        "ok": true
+      },
+      "expected": [
+        {
+          "kind": "none",
+          "target": "",
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "name": "discord-never-restarts-geph-even-if-misclassified",
+      "outcome": {
+        "host": "gateway.discord.gg",
+        "service_group": "discord",
+        "route_class": "geo_exit",
+        "backend": "geph"
+      },
+      "context": {
+        "backend_owned": true,
+        "restart_recommended": true,
+        "strategy_invalidation_recommended": true
+      },
+      "expected": [
+        {
+          "kind": "invalidate_strategy",
+          "target": "discord",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "resweep_exact_host",
+          "target": "gateway.discord.gg",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "recheck",
+          "target": "discord",
+          "reason": "probe timed out"
+        }
+      ],
+      "prohibited_actions": [
+        "restart_owned_geph"
+      ]
+    },
+    {
+      "name": "youtube-never-restarts-geph-even-if-misclassified",
+      "outcome": {
+        "host": "rr2---sn-ntq7yner.googlevideo.com",
+        "service_group": "youtube_video",
+        "route_class": "geo_exit",
+        "backend": "geph"
+      },
+      "context": {
+        "backend_owned": true,
+        "restart_recommended": true,
+        "strategy_invalidation_recommended": true
+      },
+      "expected": [
+        {
+          "kind": "invalidate_strategy",
+          "target": "youtube_video",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "resweep_exact_host",
+          "target": "rr2---sn-ntq7yner.googlevideo.com",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "recheck",
+          "target": "youtube_video",
+          "reason": "probe timed out"
+        }
+      ],
+      "prohibited_actions": [
+        "restart_owned_geph"
+      ]
+    },
+    {
+      "name": "generic-local-bypass-stays-local",
+      "outcome": {
+        "route_class": "local_bypass"
+      },
+      "expected": [
+        {
+          "kind": "invalidate_strategy",
+          "target": "generic",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "resweep_exact_host",
+          "target": "payments.example.com",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "recheck",
+          "target": "generic",
+          "reason": "probe timed out"
+        }
+      ],
+      "prohibited_actions": [
+        "restart_owned_geph"
+      ]
+    },
+    {
+      "name": "external-backend-is-warning-only",
+      "outcome": {
+        "host": "chatgpt.com",
+        "service_group": "openai",
+        "route_class": "geo_exit",
+        "backend": "external"
+      },
+      "context": {
+        "backend_owned": false,
+        "restart_recommended": true,
+        "strategy_invalidation_recommended": true,
+        "external_state": true
+      },
+      "expected": [
+        {
+          "kind": "warn_external",
+          "target": "external",
+          "reason": "probe timed out"
+        }
+      ]
+    },
+    {
+      "name": "owned-geo-backend-may-restart",
+      "outcome": {
+        "host": "chatgpt.com",
+        "service_group": "openai",
+        "route_class": "geo_exit",
+        "backend": "geph"
+      },
+      "context": {
+        "backend_owned": true,
+        "restart_recommended": true
+      },
+      "expected": [
+        {
+          "kind": "restart_owned_geph",
+          "target": "geph",
+          "reason": "probe timed out"
+        }
+      ]
+    },
+    {
+      "name": "geo-strategy-invalidation-precedes-owned-restart",
+      "outcome": {
+        "host": "chatgpt.com",
+        "service_group": "openai",
+        "route_class": "geo_exit",
+        "backend": "geph"
+      },
+      "context": {
+        "backend_owned": true,
+        "restart_recommended": true,
+        "strategy_invalidation_recommended": true
+      },
+      "expected": [
+        {
+          "kind": "invalidate_strategy",
+          "target": "chatgpt.com",
+          "reason": "probe timed out"
+        },
+        {
+          "kind": "restart_owned_geph",
+          "target": "geph",
+          "reason": "probe timed out"
+        }
+      ]
+    },
+    {
+      "name": "restart-cooldown-falls-back-to-recheck",
+      "outcome": {
+        "host": "chatgpt.com",
+        "service_group": "openai",
+        "route_class": "geo_exit",
+        "backend": "geph"
+      },
+      "context": {
+        "backend_owned": true,
+        "restart_recommended": true,
+        "restart_rate_limited": true
+      },
+      "expected": [
+        {
+          "kind": "recheck",
+          "target": "openai",
+          "reason": "probe timed out"
+        }
+      ]
+    },
+    {
+      "name": "unowned-geo-backend-is-rechecked-not-restarted",
+      "outcome": {
+        "host": "chatgpt.com",
+        "service_group": "openai",
+        "route_class": "geo_exit",
+        "backend": "geph"
+      },
+      "context": {
+        "restart_recommended": true
+      },
+      "expected": [
+        {
+          "kind": "recheck",
+          "target": "openai",
+          "reason": "probe timed out"
+        }
+      ],
+      "prohibited_actions": [
+        "restart_owned_geph"
+      ]
+    },
+    {
+      "name": "first-unknown-miss-does-nothing",
+      "expected": [
+        {
+          "kind": "none",
+          "target": "",
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "name": "repeated-unknown-miss-schedules-local-recheck",
+      "context": {
+        "recheck_recommended": true
+      },
+      "expected": [
+        {
+          "kind": "recheck",
+          "target": "payments.example.com",
+          "reason": "probe timed out"
+        }
+      ],
+      "prohibited_actions": [
+        "restart_owned_geph"
+      ]
+    },
+    {
+      "name": "direct-passthrough-failure-does-not-mutate-routing",
+      "outcome": {
+        "host": "github.com",
+        "service_group": "github",
+        "route_class": "direct_passthrough",
+        "backend": "direct"
+      },
+      "expected": [
+        {
+          "kind": "none",
+          "target": "",
+          "reason": ""
+        }
+      ],
+      "prohibited_actions": [
+        "restart_owned_geph",
+        "resweep_exact_host"
+      ]
+    }
+  ]
+}

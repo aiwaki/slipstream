@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.routing_policy",
+  "contract_version": 1,
+  "vectors": [
+    {
+      "name": "empty-host-is-unknown",
+      "host": "",
+      "expected": {
+        "host": "",
+        "route_class": "unknown",
+        "service_group": "generic",
+        "strategy_set": "general"
+      }
+    },
+    {
+      "name": "host-normalization-precedes-classification",
+      "host": "Updates.Discord.Com.",
+      "expected": {
+        "host": "updates.discord.com",
+        "route_class": "local_bypass",
+        "service_group": "discord",
+        "strategy_set": "fake_only"
+      }
+    },
+    {
+      "name": "discord-gateway-stays-local",
+      "host": "gateway.discord.gg",
+      "expected": {
+        "host": "gateway.discord.gg",
+        "route_class": "local_bypass",
+        "service_group": "discord",
+        "strategy_set": "fake_only"
+      }
+    },
+    {
+      "name": "youtube-video-stays-local",
+      "host": "rr2---sn-ntq7yner.googlevideo.com",
+      "expected": {
+        "host": "rr2---sn-ntq7yner.googlevideo.com",
+        "route_class": "local_bypass",
+        "service_group": "youtube_video",
+        "strategy_set": "fake_only"
+      }
+    },
+    {
+      "name": "youtube-web-stays-local",
+      "host": "www.youtube.com",
+      "expected": {
+        "host": "www.youtube.com",
+        "route_class": "local_bypass",
+        "service_group": "youtube_video",
+        "strategy_set": "fake_only"
+      }
+    },
+    {
+      "name": "openai-core-requires-geo-exit",
+      "host": "chatgpt.com",
+      "expected": {
+        "host": "chatgpt.com",
+        "route_class": "geo_exit",
+        "service_group": "openai",
+        "strategy_set": "geph"
+      }
+    },
+    {
+      "name": "openai-billing-is-policy-not-health",
+      "host": "billing.openai.com",
+      "expected": {
+        "host": "billing.openai.com",
+        "route_class": "geo_exit",
+        "service_group": "openai",
+        "strategy_set": "geph"
+      }
+    },
+    {
+      "name": "anthropic-requires-geo-exit",
+      "host": "claude.ai",
+      "expected": {
+        "host": "claude.ai",
+        "route_class": "geo_exit",
+        "service_group": "anthropic",
+        "strategy_set": "geph"
+      }
+    },
+    {
+      "name": "telegram-domain-is-direct-passthrough",
+      "host": "t.me",
+      "expected": {
+        "host": "t.me",
+        "route_class": "direct_passthrough",
+        "service_group": "telegram",
+        "strategy_set": "direct"
+      }
+    },
+    {
+      "name": "steam-store-requires-geo-exit",
+      "host": "store.steampowered.com",
+      "expected": {
+        "host": "store.steampowered.com",
+        "route_class": "geo_exit",
+        "service_group": "steam_store",
+        "strategy_set": "geph"
+      }
+    },
+    {
+      "name": "steam-game-traffic-is-not-widened",
+      "host": "cmp1-fra1.steamserver.net",
+      "expected": {
+        "host": "cmp1-fra1.steamserver.net",
+        "route_class": "unknown",
+        "service_group": "generic",
+        "strategy_set": "general"
+      }
+    },
+    {
+      "name": "github-is-direct-passthrough",
+      "host": "objects.githubusercontent.com",
+      "expected": {
+        "host": "objects.githubusercontent.com",
+        "route_class": "direct_passthrough",
+        "service_group": "github",
+        "strategy_set": "direct"
+      }
+    },
+    {
+      "name": "google-is-direct-first-local-only",
+      "host": "www.google.com",
+      "expected": {
+        "host": "www.google.com",
+        "route_class": "direct_first",
+        "service_group": "google",
+        "strategy_set": "direct_first"
+      }
+    },
+    {
+      "name": "spotify-is-direct-first-local-only",
+      "host": "gue1-spclient.spotify.com",
+      "expected": {
+        "host": "gue1-spclient.spotify.com",
+        "route_class": "direct_first",
+        "service_group": "spotify",
+        "strategy_set": "direct_first"
+      }
+    },
+    {
+      "name": "russian-domain-is-direct-passthrough",
+      "host": "example.ru",
+      "expected": {
+        "host": "example.ru",
+        "route_class": "direct_passthrough",
+        "service_group": "generic",
+        "strategy_set": "direct"
+      }
+    },
+    {
+      "name": "unclassified-host-enters-local-adaptive-ladder",
+      "host": "crystalidea.com",
+      "expected": {
+        "host": "crystalidea.com",
+        "route_class": "unknown",
+        "service_group": "generic",
+        "strategy_set": "general"
+      }
+    }
+  ]
+}
