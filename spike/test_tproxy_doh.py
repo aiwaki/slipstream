@@ -632,6 +632,30 @@ def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
     ) in commands
 
 
+def test_installed_daemon_command_accepts_real_venv_interpreter(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "runtime" / "slipstream"
+    venv_bin = install / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    base_python = tmp_path / "Python.app" / "Contents" / "MacOS" / "Python"
+    base_python.parent.mkdir(parents=True)
+    base_python.write_text("binary")
+    venv_python = venv_bin / "python3"
+    venv_python.symlink_to(base_python)
+    script = install / "tproxy.py"
+    script.write_text("pass")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+
+    assert tproxy._installed_daemon_command_owned(
+        f"{base_python} {script} run --port 1080"
+    )
+    assert not tproxy._installed_daemon_command_owned(
+        f"{tmp_path / 'unknown-python'} {script} run --port 1080"
+    )
+
+
 def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
     filt = tproxy._ScapyMacNoiseFilter()
     noisy = logging.LogRecord(

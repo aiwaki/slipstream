@@ -6172,7 +6172,9 @@ def _installed_daemon_command_owned(command):
     if executable == frozen:
         return True
     script = os.path.join(install_dir, "tproxy.py")
-    python = os.path.join(install_dir, "venv", "bin", "python3")
+    python = os.path.realpath(
+        os.path.join(install_dir, "venv", "bin", "python3")
+    )
     return executable == python and any(
         os.path.realpath(arg) == script for arg in parts[1:3]
     )
