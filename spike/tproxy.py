@@ -43,13 +43,13 @@ import stat
 import struct
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
 
+import pf_adapter
 from primes import build_fake_stun, classify as classify_voice_payload
 from routing_recovery import (
     ConnectionOutcome,
@@ -3730,88 +3730,37 @@ def _run(*args):
 
 
 def _pf_parent_declarations(text):
-    rdr = re.search(
-        rf'^\s*rdr-anchor\s+"{re.escape(PF_PARENT_ANCHOR)}"(?:\s+.*)?$',
-        text,
-        re.MULTILINE,
-    )
-    rules = re.search(
-        rf'^\s*anchor\s+"{re.escape(PF_PARENT_ANCHOR)}"(?:\s+.*)?$',
-        text,
-        re.MULTILINE,
-    )
-    return bool(rdr and rules)
+    return pf_adapter.parent_declarations(text, PF_PARENT_ANCHOR)
 
 
 def pf_parent_anchor_available(config_path=PF_CONFIG_PATH):
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            return _pf_parent_declarations(f.read())
-    except OSError:
-        return False
+    return pf_adapter.parent_anchor_available(config_path, PF_PARENT_ANCHOR)
 
 
 def pf_parent_anchor_loaded():
-    nat = _run("pfctl", "-sn")
-    rules = _run("pfctl", "-sr")
-    if nat.returncode != 0 or rules.returncode != 0:
-        return False
-    return _pf_parent_declarations(nat.stdout + "\n" + rules.stdout)
+    return pf_adapter.parent_anchor_loaded(_run, PF_PARENT_ANCHOR)
 
 
 def _pf_anchor_calls(text, directive):
-    pattern = re.compile(
-        rf'^\s*{re.escape(directive)}\s+"([^"]+)"', re.MULTILINE
-    )
-    return pattern.findall(text)
+    return pf_adapter.anchor_calls(text, directive)
 
 
 def _pf_anchor_child(parent, child):
-    if child.startswith("/"):
-        return child.lstrip("/")
-    if not parent:
-        return child
-    return f"{parent}/{child}"
+    return pf_adapter.anchor_child(parent, child)
 
 
 def _pf_rule_targets_https(line, action):
-    action_match = (
-        re.search(r"^\s*rdr\b", line)
-        if action == "rdr"
-        else re.search(r"\broute-to\b", line)
-    )
-    return bool(
-        action_match and re.search(r"\bport\b[^\n]*\b443\b", line)
-    )
+    return pf_adapter.rule_targets_https(line, action)
 
 
 def _pf_anchor_has_https_action(anchor, action, directive, visited=None):
-    visited = set() if visited is None else visited
-    anchor = anchor.lstrip("/")
-    if not anchor or anchor in visited:
-        return False
-    visited.add(anchor)
-    flag = "-sn" if action == "rdr" else "-sr"
-    result = _run("pfctl", "-a", anchor, flag)
-    if result.returncode != 0:
-        return False
-    if any(_pf_rule_targets_https(line, action) for line in result.stdout.splitlines()):
-        return True
-    return any(
-        _pf_anchor_has_https_action(
-            _pf_anchor_child(anchor, child), action, directive, visited
-        )
-        for child in _pf_anchor_calls(result.stdout, directive)
+    return pf_adapter.anchor_has_https_action(
+        _run, anchor, action, directive, visited
     )
 
 
 def _pf_anchors_before_parent(text, directive):
-    anchors = []
-    for anchor in _pf_anchor_calls(text, directive):
-        if anchor == PF_PARENT_ANCHOR:
-            break
-        anchors.append(anchor.lstrip("/"))
-    return anchors
+    return pf_adapter.anchors_before_parent(text, directive, PF_PARENT_ANCHOR)
 
 
 def pf_preceding_https_interceptors():
@@ -3823,59 +3772,26 @@ def pf_preceding_https_interceptors():
     that ordering, so treating this as an explicit runtime conflict prevents a
     false "Active / OK" state without mutating the other product's rules.
     """
-    nat = _run("pfctl", "-sn")
-    rules = _run("pfctl", "-sr")
-    if nat.returncode != 0 or rules.returncode != 0:
-        return []
-    redirects = {
-        anchor
-        for anchor in _pf_anchors_before_parent(nat.stdout, "rdr-anchor")
-        if _pf_anchor_has_https_action(anchor, "rdr", "rdr-anchor")
-    }
-    routes = {
-        anchor
-        for anchor in _pf_anchors_before_parent(rules.stdout, "anchor")
-        if _pf_anchor_has_https_action(anchor, "route-to", "anchor")
-    }
-    return sorted(redirects & routes)
+    return pf_adapter.preceding_https_interceptors(_run, PF_PARENT_ANCHOR)
 
 
 def _pf_token_from_result(result):
-    output = f"{result.stdout}\n{result.stderr}"
-    match = re.search(r"Token\s*:\s*([0-9]+)", output, re.IGNORECASE)
-    return match.group(1) if match else None
+    return pf_adapter.token_from_result(result)
 
 
 def _write_pf_token(token, path=None):
     path = PF_TOKEN_PATH if path is None else path
-    tmp = f"{path}.tmp.{os.getpid()}"
-    try:
-        with open(tmp, "w", encoding="ascii") as f:
-            f.write(token + "\n")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    finally:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
+    pf_adapter.write_token(token, path)
 
 
 def _read_pf_token(path=None):
     path = PF_TOKEN_PATH if path is None else path
-    try:
-        token = open(path, encoding="ascii").read().strip()
-    except OSError:
-        return None
-    return token if token.isdigit() else None
+    return pf_adapter.read_token(path)
 
 
 def _remove_pf_token(path=None):
     path = PF_TOKEN_PATH if path is None else path
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
+    pf_adapter.remove_token(path)
 
 
 def _pf_release_enable_token():
@@ -3897,11 +3813,7 @@ def _pf_release_enable_token():
 
 
 def _pf_enabled_state():
-    """Return PF's enabled state, or None when it cannot be inspected."""
-    info = _run("pfctl", "-s", "info")
-    if info.returncode != 0:
-        return None
-    return "Status: Enabled" in info.stdout
+    return pf_adapter.enabled_state(_run)
 
 
 def _pf_acquire_enable_token():
@@ -3932,11 +3844,7 @@ def _pf_acquire_enable_token():
 
 
 def _pf_flush():
-    # Even with -a, `pfctl -F all` includes the global state table on macOS.
-    # Flush only the two rulesets Slipstream loads into its private anchor.
-    rules = _run("pfctl", "-a", PF_ANCHOR, "-F", "rules")
-    nat = _run("pfctl", "-a", PF_ANCHOR, "-F", "nat")
-    return rules if rules.returncode != 0 else nat
+    return pf_adapter.flush_private_anchor(_run, PF_ANCHOR)
 
 
 def geo_exit_backend_ready(now=None):
@@ -4055,15 +3963,7 @@ def _restore_legacy_pf_rules(port):
 
 
 def _pf_load(port):
-    f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
-    f.write(PF_RULES.format(port=port))
-    f.close()
-    r = _run("pfctl", "-a", PF_ANCHOR, "-f", f.name)
-    try:
-        os.unlink(f.name)
-    except Exception:
-        pass
-    return r
+    return pf_adapter.load_private_anchor(_run, PF_ANCHOR, PF_RULES, port)
 
 
 def pf_setup(port):
@@ -4103,37 +4003,20 @@ def pf_setup(port):
 
 def pf_has_rules(port):
     """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
-    if not pf_parent_anchor_loaded():
-        return False
-    nat = _run("pfctl", "-a", PF_ANCHOR, "-sn")
-    rules = _run("pfctl", "-a", PF_ANCHOR, "-sr")
-    return (
-        nat.returncode == 0
-        and rules.returncode == 0
-        and f"port {port}" in nat.stdout
-        and "route-to (lo0 127.0.0.1)" in rules.stdout
+    return pf_adapter.private_rules_loaded(
+        _run, PF_ANCHOR, port, pf_parent_anchor_loaded
     )
 
 
 def pf_state_snapshot(port=PROXY_PORT):
-    info = _run("pfctl", "-s", "info")
-    anchor_nat = _run("pfctl", "-a", PF_ANCHOR, "-sn")
-    anchor_rules = _run("pfctl", "-a", PF_ANCHOR, "-sr")
-    parent_loaded = pf_parent_anchor_loaded()
-    return {
-        "applied": bool(_pf_applied),
-        "enabled": info.returncode == 0 and "Status: Enabled" in info.stdout,
-        "anchor": PF_ANCHOR,
-        "parent_loaded": parent_loaded,
-        "interceptor_conflicts": list(_pf_interceptor_conflicts),
-        "rules_loaded": (
-            parent_loaded
-            and anchor_nat.returncode == 0
-            and anchor_rules.returncode == 0
-            and f"port {port}" in anchor_nat.stdout
-            and "route-to (lo0 127.0.0.1)" in anchor_rules.stdout
-        ),
-    }
+    return pf_adapter.state_snapshot(
+        _run,
+        PF_ANCHOR,
+        port,
+        _pf_applied,
+        _pf_interceptor_conflicts,
+        pf_parent_anchor_loaded,
+    )
 
 
 def pf_teardown():
@@ -4206,6 +4089,7 @@ def _script_runtime_payload(source_file):
     source_dir = os.path.dirname(source_file)
     payload = (
         (source_file, "tproxy.py"),
+        (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),

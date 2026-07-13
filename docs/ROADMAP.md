@@ -87,8 +87,9 @@ PF lifecycle qualification.
   sanitized and user-owned.
 - Let the tray read V1 and V2 for one transition release. Done.
 - Split the Python daemon into policy, reducer, probes, Geph backend, macOS PF
-  adapter, and lifecycle modules. The pure policy classifier and recovery
-  model/reducer are now isolated; the remaining runtime adapters are pending.
+  adapter, and lifecycle modules. The pure policy classifier, recovery
+  model/reducer, and low-level macOS PF adapter are now isolated; PF runtime
+  orchestration and the remaining adapters are pending.
 - Split the Rust tray into status client, diagnostics, installer, Geph config,
   and menu orchestration.
 - Keep Python transport; avoid a big-bang rewrite.
