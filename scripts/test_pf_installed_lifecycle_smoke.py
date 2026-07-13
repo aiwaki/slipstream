@@ -420,6 +420,14 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 lifecycle,
                 "_user_environment",
                 return_value=({"HOME": tmp}, Path(tmp)),
+            ), mock.patch.object(
+                lifecycle.pwd,
+                "getpwuid",
+                return_value=mock.Mock(pw_name="runner"),
+            ), mock.patch.object(
+                lifecycle.os,
+                "getgrouplist",
+                return_value=[20, 12, 61],
             ), mock.patch.object(lifecycle.os, "chown") as chown, mock.patch.object(
                 lifecycle.subprocess,
                 "run",
@@ -443,7 +451,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertFalse(profile.exists())
         self.assertEqual(run.call_args.kwargs["user"], 501)
         self.assertEqual(run.call_args.kwargs["group"], 20)
-        self.assertEqual(run.call_args.kwargs["extra_groups"], ())
+        self.assertEqual(run.call_args.kwargs["extra_groups"], (12, 61))
 
     def test_run_chrome_probe_rejects_an_unavailable_executable(self) -> None:
         with self.assertRaisesRegex(lifecycle.LifecycleError, "unavailable"):
@@ -468,6 +476,14 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 lifecycle,
                 "_user_environment",
                 return_value=({"HOME": tmp}, Path(tmp)),
+            ), mock.patch.object(
+                lifecycle.pwd,
+                "getpwuid",
+                return_value=mock.Mock(pw_name="runner"),
+            ), mock.patch.object(
+                lifecycle.os,
+                "getgrouplist",
+                return_value=[20, 12, 61],
             ), mock.patch.object(lifecycle.os, "chown"), mock.patch.object(
                 lifecycle.subprocess,
                 "run",

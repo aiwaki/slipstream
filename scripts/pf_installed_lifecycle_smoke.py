@@ -498,6 +498,15 @@ def _user_environment(uid: int) -> tuple[dict[str, str], Path]:
     return environment, Path(account.pw_dir)
 
 
+def _user_supplementary_groups(uid: int, gid: int) -> tuple[int, ...]:
+    try:
+        account = pwd.getpwuid(uid)
+        groups = os.getgrouplist(account.pw_name, gid)
+    except (KeyError, OSError) as exc:
+        raise LifecycleError(f"cannot resolve original user groups for {uid}") from exc
+    return tuple(sorted(group for group in set(groups) if group != gid))
+
+
 class PackagedTrayProcess:
     def __init__(self, executable: Path, uid: int, gid: int) -> None:
         self.executable = executable.resolve(strict=True)
@@ -679,6 +688,7 @@ def _run_chrome_probe(
         raise LifecycleError(f"Chrome executable is not runnable: {executable}")
 
     environment, home = _user_environment(uid)
+    supplementary_groups = _user_supplementary_groups(uid, gid)
     profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-chrome-"))
     try:
         os.chown(profile_dir, uid, gid)
@@ -692,10 +702,17 @@ def _run_chrome_probe(
             timeout=CHROME_PROBE_TIMEOUT,
             user=uid,
             group=gid,
-            extra_groups=(),
+            extra_groups=supplementary_groups,
         )
     except subprocess.TimeoutExpired as exc:
-        raise LifecycleError(f"Chrome probe {label} timed out") from exc
+        chunks = []
+        for value in (exc.stdout, exc.stderr):
+            if isinstance(value, str):
+                chunks.append(value.encode("utf-8", errors="replace"))
+            elif value:
+                chunks.append(value)
+        detail = b"\n".join(chunks).decode("utf-8", errors="replace")[-2000:]
+        raise LifecycleError(f"Chrome probe {label} timed out: {detail}") from exc
     finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
 
