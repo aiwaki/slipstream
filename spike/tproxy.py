@@ -118,6 +118,13 @@ PF_PARENT_ANCHOR = "com.apple/*"
 PF_CONFIG_PATH = "/etc/pf.conf"
 PF_TOKEN_PATH = "/var/run/slipstream-pf.token"
 PF_CONFLICT_CHECK_INTERVAL = 15.0
+try:
+    RUNTIME_WAKE_GAP_SECONDS = max(
+        5.0,
+        float(os.environ.get("SLIP_RUNTIME_WAKE_GAP_SECONDS", "30")),
+    )
+except (TypeError, ValueError):
+    RUNTIME_WAKE_GAP_SECONDS = 30.0
 PF_RULES = """\
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
@@ -1350,6 +1357,9 @@ _rearm_state = {
     "last_iface": "",
     "count": 0,
 }
+_RUNTIME_REARM_REASONS = frozenset(("wake", "network_change"))
+_RUNTIME_REARM_SIGNAL = signal.SIGUSR1
+_runtime_rearm_requests = deque(maxlen=8)
 _canary_health = {}
 _canary_failure_windows = {}
 _canary_state = {
@@ -3494,6 +3504,40 @@ def note_runtime_rearm(reason, gap=0.0, iface="", now=None):
     })
 
 
+def _queue_runtime_rearm(reason):
+    """Queue a bounded monitor-thread rearm request from a signal handler."""
+    if reason not in _RUNTIME_REARM_REASONS:
+        raise ValueError(f"unsupported runtime rearm reason: {reason}")
+    _runtime_rearm_requests.append(reason)
+
+
+def _drain_runtime_rearms():
+    """Return each queued reason once, preserving first-seen order."""
+    pending = []
+    seen = set()
+    while _runtime_rearm_requests:
+        reason = _runtime_rearm_requests.popleft()
+        if reason not in seen:
+            pending.append(reason)
+            seen.add(reason)
+    return pending
+
+
+def _runtime_rearm_signal_handler(signum, _frame):
+    if signum == _RUNTIME_REARM_SIGNAL:
+        _queue_runtime_rearm("network_change")
+
+
+def _apply_runtime_rearm(reason, *, now, iface="", gap=0.0):
+    """Apply real and qualification lifecycle events through one path."""
+    if reason not in _RUNTIME_REARM_REASONS:
+        raise ValueError(f"unsupported runtime rearm reason: {reason}")
+    note_runtime_rearm(reason, gap=gap, iface=iface, now=now)
+    if reason == "wake":
+        note_geph_wake(now)
+    start_canaries_if_due(reason, force=True)
+
+
 def rearm_status_snapshot(now=None):
     now = time.time() if now is None else now
     last_at = float(_rearm_state.get("last_at", 0.0) or 0.0)
@@ -4707,7 +4751,8 @@ def network_monitor(port, voice=True):
     last_conflict_check = time.time()
     while True:
         now = time.time()
-        if now - last_tick > 30:
+        handled_rearms = set()
+        if now - last_tick > RUNTIME_WAKE_GAP_SECONDS:
             # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
             # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
             # _l3send self-heals, and the pf/geph checks below re-arm the rest.
@@ -4715,16 +4760,27 @@ def network_monitor(port, voice=True):
             print(f">> woke from sleep (gap {gap:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
-            note_runtime_rearm("wake", gap=gap, iface=last_iface or "")
-            note_geph_wake(now)
-            start_canaries_if_due("wake", force=True)
+            _apply_runtime_rearm(
+                "wake", now=now, gap=gap, iface=last_iface or "")
+            handled_rearms.add("wake")
         last_tick = now
         iface = default_iface()
         if iface != last_iface:
             if last_iface is not None:
-                note_runtime_rearm("network_change", iface=iface or "")
-                start_canaries_if_due("network_change", force=True)
+                _apply_runtime_rearm(
+                    "network_change", now=now, iface=iface or "")
+                handled_rearms.add("network_change")
             last_iface = iface
+        for reason in _drain_runtime_rearms():
+            if reason in handled_rearms:
+                continue
+            print(
+                f">> lifecycle qualification requested ({reason}) -> re-arming",
+                file=sys.stderr,
+            )
+            cur_iface = None
+            _apply_runtime_rearm(
+                reason, now=now, iface=iface or last_iface or "")
         restart_state = execute_owned_geph_restart(now=now)
         if restart_state == "restarted":
             _geph_up = False
@@ -6679,6 +6735,10 @@ def main():
     # network tool holding pf must never be left half-alive in the background.
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGTSTP):
         signal.signal(s, lambda *_: (pf_teardown(), os._exit(0)))
+    # Disposable lifecycle qualification may request the same network-change
+    # rearm path without mutating the runner's real interfaces. The handler only
+    # queues work; the monitor thread performs every PF/backend operation.
+    signal.signal(_RUNTIME_REARM_SIGNAL, _runtime_rearm_signal_handler)
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
     try:

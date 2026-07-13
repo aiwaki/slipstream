@@ -33,11 +33,11 @@ YouTube/googlevideo.
 | PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | keep both privileged sentinel jobs required in CI and add cross-version rollback after the first safety-qualified release |
 | Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
-| Network transitions | detects default interface, re-arms pf/voice capture/canaries, and exposes last re-arm in status | broader endpoint-safe payload canaries |
+| Network transitions | detects wake gaps and default-interface changes, re-arms PF/voice capture/canaries, and exposes last re-arm in status; installed script and packaged-daemon CI repeat suspend/resume and the shared network-change path without replacing real network state | physical default-route and lid-close soak on a disposable Mac plus broader endpoint-safe payload canaries |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
-| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path | move Geph to a user LaunchAgent, then design daemon-coordinated idle restart for a live but stale backend |
-| Recovery decisions | normalized `ConnectionOutcome` evidence and a pure reducer keep local re-sweep, learned-route reset, owned-Geph restart evidence, unknown-host recheck, and external warnings separate; tray polling does not execute live-process restart hints | expose the bounded action summary through `StatusV2` |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path; owned Geph runs as a user LaunchAgent and live restart is daemon-coordinated after the private anchor is paused and sessions drain | account-backed sleep/wake soak on a disposable Mac |
+| Recovery decisions | normalized `ConnectionOutcome` evidence and a pure reducer keep local re-sweep, learned-route reset, owned-Geph restart evidence, unknown-host recheck, and external warnings separate; the bounded aggregate action is exposed through `StatusV2` | retain language-neutral vectors while splitting runtime adapters |
 | Geph coexistence | owned `:9954` listener requires PID/executable/config/listener proof; external `:9909` is diagnostics-only | explicit user opt-in contract for any external backend |
 | Secret storage | Geph directory `0700`; config/cache/ownership files `0600` and atomic | move the account secret to Keychain |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
@@ -60,11 +60,16 @@ fast job installs the script-mode LaunchDaemon; a separate job builds the real
 arm64 Tauri `.app` and installs the frozen daemon embedded in its resources.
 Both modes prove a missing Geph backend leaves PF dormant, repeat installation,
 briefly activate the existing local-only mode, restart the daemon, and uninstall
-it. A non-root TCP connection and its PF state must survive the entire cycle,
-the sibling sentinel rules must remain byte-for-byte unchanged, and the global
-PF snapshot must match after cleanup. The script refuses to run unless GitHub
-Actions and `SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job
-uploads only the exact `.app` that passed this qualification.
+it. They then run two bounded lifecycle cycles: `SIGSTOP`/`SIGCONT` crosses a
+CI-only shortened wake threshold through the production cadence detector, while
+a root-only diagnostic signal queues the same network-change handler used by
+default-interface detection. Production keeps its 30-second wake threshold.
+Before any signal, the harness verifies the exact installed daemon command. A non-root TCP
+connection and its PF state must survive the entire cycle, the sibling sentinel
+rules must remain byte-for-byte unchanged, and the global PF snapshot must match
+after cleanup. The script refuses to run unless GitHub Actions and
+`SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job uploads only the
+exact `.app` that passed this qualification.
 
 ## Priority Order
 
@@ -81,7 +86,8 @@ uploads only the exact `.app` that passed this qualification.
   for local runtime misses, geo-exit failures, and unknown-host payload rechecks.
 - Keep local bypass and geo-exit recovery strictly separated. Enforced by
   reducer tests for Discord, YouTube, owned Geph, and external state.
-- Move owned Geph lifecycle into a user LaunchAgent so the tray is optional.
+- Keep owned Geph in its user LaunchAgent so the tray is optional. Qualify a
+  real tray crash and account-backed Geph recovery on a disposable user session.
 
 ### M2+ - Contracts And Platforms
 

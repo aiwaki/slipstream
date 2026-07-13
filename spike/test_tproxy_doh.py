@@ -6,6 +6,7 @@ import json
 import logging
 import plistlib
 import re
+import signal
 import ssl
 import sys
 from pathlib import Path
@@ -49,6 +50,7 @@ def reset_smart_dns_state():
     }
     canary_state = dict(tproxy._canary_state)
     rearm_state = dict(tproxy._rearm_state)
+    runtime_rearm_requests = list(tproxy._runtime_rearm_requests)
     try:
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
@@ -99,6 +101,7 @@ def reset_smart_dns_state():
             "last_iface": "",
             "count": 0,
         })
+        tproxy._runtime_rearm_requests.clear()
         yield
     finally:
         tproxy.reset_route_policy_manifest()
@@ -142,6 +145,8 @@ def reset_smart_dns_state():
         tproxy._canary_state.update(canary_state)
         tproxy._rearm_state.clear()
         tproxy._rearm_state.update(rearm_state)
+        tproxy._runtime_rearm_requests.clear()
+        tproxy._runtime_rearm_requests.extend(runtime_rearm_requests)
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -1396,6 +1401,7 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
 
     pauses = []
     states = []
+    rearms = []
 
     def pause():
         pauses.append(True)
@@ -1423,16 +1429,23 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
     monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         tproxy,
+        "note_runtime_rearm",
+        lambda reason, **kwargs: rearms.append((reason, kwargs.get("iface"))),
+    )
+    monkeypatch.setattr(
+        tproxy,
         "start_route_policy_remote_update_if_due",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(tproxy.time, "sleep", stop_sleep)
+    tproxy._queue_runtime_rearm("network_change")
 
     with pytest.raises(StopMonitor):
         tproxy.network_monitor(1080, voice=False)
 
     assert pauses == [True]
     assert states == [("dormant", "en0", None)]
+    assert rearms == [("network_change", "en0")]
 
 
 def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
@@ -2572,6 +2585,55 @@ def test_rearm_status_tracks_wake_and_network_rearms():
     finally:
         tproxy._rearm_state.clear()
         tproxy._rearm_state.update(original)
+
+
+def test_runtime_rearm_queue_is_bounded_validated_and_deduplicated():
+    for index in range(12):
+        reason = "wake" if index % 2 else "network_change"
+        tproxy._queue_runtime_rearm(reason)
+
+    assert len(tproxy._runtime_rearm_requests) == 8
+    assert tproxy._drain_runtime_rearms() == ["network_change", "wake"]
+    assert tproxy._drain_runtime_rearms() == []
+    with pytest.raises(ValueError, match="unsupported runtime rearm reason"):
+        tproxy._queue_runtime_rearm("restart_everything")
+
+
+def test_runtime_rearm_signal_only_queues_network_change():
+    tproxy._runtime_rearm_signal_handler(tproxy._RUNTIME_REARM_SIGNAL, None)
+    tproxy._runtime_rearm_signal_handler(signal.SIGTERM, None)
+
+    assert tproxy._drain_runtime_rearms() == ["network_change"]
+
+
+def test_runtime_rearm_helper_keeps_wake_and_network_side_effects_scoped(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        tproxy,
+        "note_runtime_rearm",
+        lambda reason, **kwargs: events.append(("status", reason, kwargs)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "note_geph_wake",
+        lambda now: events.append(("geph_wake", now)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "start_canaries_if_due",
+        lambda reason, **kwargs: events.append(("canary", reason, kwargs)),
+    )
+
+    tproxy._apply_runtime_rearm("wake", now=100.0, iface="en0", gap=31.0)
+    tproxy._apply_runtime_rearm("network_change", now=110.0, iface="en1")
+
+    assert events == [
+        ("status", "wake", {"gap": 31.0, "iface": "en0", "now": 100.0}),
+        ("geph_wake", 100.0),
+        ("canary", "wake", {"force": True}),
+        ("status", "network_change", {"gap": 0.0, "iface": "en1", "now": 110.0}),
+        ("canary", "network_change", {"force": True}),
+    ]
 
 
 def test_system_dns_status_detects_xbox_dns_without_mutating():

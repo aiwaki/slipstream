@@ -14,6 +14,7 @@ import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -51,6 +52,10 @@ SENTINEL_TARGET_PORT = 18444
 SENTINEL_PROXY_PORT = 19444
 STOP_MARKER = b"__stop__"
 TOKEN_RE = re.compile(r"Token\s*:\s*(\d+)", re.IGNORECASE)
+RUNTIME_REARM_SIGNAL = signal.SIGUSR1
+QUALIFICATION_WAKE_GAP_SECONDS = 6.0
+WAKE_SUSPEND_SECONDS = 8.0
+LIFECYCLE_SOAK_CYCLES = 2
 
 
 class LifecycleError(RuntimeError):
@@ -320,6 +325,13 @@ def _daemon_status(status: dict | None) -> dict | None:
     return status
 
 
+def _recovery_status(status: dict | None) -> dict | None:
+    if not isinstance(status, dict) or status.get("schema_version") != 2:
+        return None
+    recovery = status.get("recovery")
+    return recovery if isinstance(recovery, dict) else None
+
+
 def _wait_for_status(
     expected: str,
     *,
@@ -342,6 +354,110 @@ def _wait_for_status(
     raise LifecycleError(f"daemon did not reach {expected}; last status={last!r}")
 
 
+def _wait_for_rearm(
+    expected_reason: str,
+    *,
+    expected_pid: int,
+    previous_count: int,
+    timeout: float = 20,
+) -> dict:
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        last = _read_status()
+        daemon = _daemon_status(last)
+        recovery = _recovery_status(last)
+        if daemon and recovery:
+            pid = int(daemon.get("pid") or 0)
+            updated_at = float(daemon.get("updated_at", daemon.get("ts", 0)) or 0)
+            count = int(recovery.get("count") or 0)
+            if (
+                daemon.get("state") == "active"
+                and pid == expected_pid
+                and time.time() - updated_at < 15
+                and count > previous_count
+                and recovery.get("last_action") == expected_reason
+            ):
+                return last
+        time.sleep(0.2)
+    raise LifecycleError(
+        f"daemon did not record {expected_reason} rearm; last status={last!r}"
+    )
+
+
+def _process_command_for_pid(pid: int) -> str:
+    result = subprocess.run(
+        ("/bin/ps", "-p", str(pid), "-o", "command="),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _process_arguments_for_pid(pid: int) -> tuple[str, ...]:
+    try:
+        return tuple(shlex.split(_process_command_for_pid(pid)))
+    except ValueError:
+        return ()
+
+
+def _same_executable(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def _assert_owned_daemon_pid(target: LifecycleTarget, pid: int) -> None:
+    command = _process_command_for_pid(pid)
+    try:
+        arguments = tuple(shlex.split(command))
+    except ValueError:
+        arguments = ()
+    expected = target.installed_program_prefix
+    executable_matches = False
+    if arguments and expected:
+        executable_matches = _same_executable(arguments[0], expected[0])
+        source_install = (
+            len(expected) >= 2 and expected[1] == str(INSTALLED_DAEMON)
+        )
+        if source_install and not executable_matches:
+            harness_arguments = _process_arguments_for_pid(os.getpid())
+            executable_matches = bool(harness_arguments) and _same_executable(
+                arguments[0], harness_arguments[0]
+            )
+    owned = (
+        executable_matches
+        and len(arguments) >= len(expected)
+        and arguments[1:len(expected)] == expected[1:]
+    )
+    if not owned:
+        raise LifecycleError(
+            f"refusing to signal unowned pid {pid}: command={command!r}"
+        )
+
+
+def _signal_owned_daemon(
+    target: LifecycleTarget,
+    pid: int,
+    signum: int,
+) -> None:
+    _assert_owned_daemon_pid(target, pid)
+    try:
+        os.kill(pid, signum)
+    except ProcessLookupError as exc:
+        raise LifecycleError(f"owned daemon pid {pid} disappeared") from exc
+
+
+def _recovery_count(status: dict | None) -> int:
+    recovery = _recovery_status(status)
+    return int(recovery.get("count") or 0) if recovery else 0
+
+
 def _wait_for_path(path: Path, *, present: bool, timeout: float = 20) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -357,6 +473,9 @@ def _patch_launchd_for_local_only(plist_path: Path) -> None:
         data = plistlib.load(handle)
     environment = dict(data.get("EnvironmentVariables") or {})
     environment["SLIP_GEPH"] = "0"
+    environment["SLIP_RUNTIME_WAKE_GAP_SECONDS"] = str(
+        int(QUALIFICATION_WAKE_GAP_SECONDS)
+    )
     data["EnvironmentVariables"] = environment
     arguments = list(data.get("ProgramArguments") or [])
     if "--no-voice" not in arguments:
@@ -635,6 +754,46 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         _assert_sentinel_state(runner, sentinel_states)
         sentinel.check("daemon-restart")
 
+        lifecycle_rearms = []
+        daemon_pid = int(restarted["pid"])
+        current_status = _read_status()
+        previous_rearm_count = _recovery_count(current_status)
+        for cycle in range(1, LIFECYCLE_SOAK_CYCLES + 1):
+            _signal_owned_daemon(target, daemon_pid, signal.SIGSTOP)
+            try:
+                time.sleep(WAKE_SUSPEND_SECONDS)
+            finally:
+                _signal_owned_daemon(target, daemon_pid, signal.SIGCONT)
+            current_status = _wait_for_rearm(
+                "wake",
+                expected_pid=daemon_pid,
+                previous_count=previous_rearm_count,
+                timeout=30,
+            )
+            previous_rearm_count = _recovery_count(current_status)
+            lifecycle_rearms.append(f"wake:{cycle}")
+            _assert_anchor_active(runner)
+            if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+                raise LifecycleError("wake recovery changed the sentinel anchor")
+            sentinel.check(f"wake-{cycle}")
+            _assert_sentinel_state(runner, sentinel_states)
+
+            _signal_owned_daemon(target, daemon_pid, RUNTIME_REARM_SIGNAL)
+            current_status = _wait_for_rearm(
+                "network_change",
+                expected_pid=daemon_pid,
+                previous_count=previous_rearm_count,
+            )
+            previous_rearm_count = _recovery_count(current_status)
+            lifecycle_rearms.append(f"network_change:{cycle}")
+            _assert_anchor_active(runner)
+            if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+                raise LifecycleError(
+                    "network-change recovery changed the sentinel anchor"
+                )
+            sentinel.check(f"network-change-{cycle}")
+            _assert_sentinel_state(runner, sentinel_states)
+
         system.run(target.uninstall_command)
         _wait_for_path(LAUNCHD_PLIST, present=False)
         _assert_clean_install_state(runner)
@@ -676,6 +835,7 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         "reinstall": "new_pid_and_payload_replaced",
         "active_start": "private_anchor_loaded",
         "restart": "new_pid_and_anchor_loaded",
+        "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
         "sentinel_state": "preserved",
@@ -692,6 +852,9 @@ def dry_run(target_name: str = "script") -> dict:
         "restricted_to": "disposable GitHub Actions macOS runner",
         "cold_install": "Geph unavailable; PF must stay dormant",
         "active_phase": "SLIP_GEPH=0 in test-only installed plist",
+        "lifecycle_rearms": (
+            f"{LIFECYCLE_SOAK_CYCLES} suspend/wake and network-change cycles"
+        ),
         "sentinel_connection": "must survive install, reinstall, restart, and uninstall",
         "intercepts_tcp_443": "only briefly on the disposable runner",
         "workstation_allowed": False,
