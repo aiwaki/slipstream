@@ -1607,14 +1607,37 @@ fn geph_secret(app: &AppHandle) -> Option<String> {
     Some(legacy)
 }
 
-/// Whether OUR bundled geph should run. Missing configuration is treated as no
-/// opt-in so deleting the app runtime cannot resurrect the LaunchAgent.
+fn resolve_geph_enabled_state(
+    explicit: Option<&str>,
+    legacy_config_present: bool,
+    secret_present: bool,
+) -> (bool, bool) {
+    if let Some(value) = explicit {
+        return (value != "0", false);
+    }
+    let migrate_legacy_opt_in = legacy_config_present && secret_present;
+    (migrate_legacy_opt_in, migrate_legacy_opt_in)
+}
+
+/// Whether OUR bundled geph should run. A valid legacy config plus credentials
+/// is migrated once; an orphaned Keychain secret cannot recreate deleted state.
 fn geph_enabled(app: &AppHandle) -> bool {
-    // Missing config means no user opt-in. This prevents a deleted runtime from
-    // being recreated solely because an old Keychain secret still exists.
-    geph_field(app, "enabled")
-        .map(|s| s != "0")
-        .unwrap_or(false)
+    let explicit = geph_field(app, "enabled");
+    let legacy_config_present = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("geph.json"))
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .is_some_and(|value| value.is_object());
+    let secret_present = explicit.is_none() && legacy_config_present && geph_secret(app).is_some();
+    let (enabled, migrate) =
+        resolve_geph_enabled_state(explicit.as_deref(), legacy_config_present, secret_present);
+    if migrate {
+        geph_config_set(app, "enabled", "1");
+    }
+    enabled
 }
 
 /// geph exit_constraint for a menu exit value. Three shapes:
@@ -2863,9 +2886,9 @@ mod tests {
         geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
         keychain_delete_args, launchd_label_disabled_from_output,
         launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, remove_owned_geph_runtime, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon, should_request_daemon_install,
-        status_for_tray, status_updated_at, sync_private_executable,
+        redact_sensitive_text, remove_owned_geph_runtime, resolve_geph_enabled_state,
+        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
+        should_request_daemon_install, status_for_tray, status_updated_at, sync_private_executable,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
         uninstall_dialog_script_for, uninstall_shell_for_paths, valid_bundled_daemon,
         write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
@@ -2922,6 +2945,27 @@ mod tests {
 
         assert!(should_request_daemon_install(true, None, true));
         assert!(should_request_daemon_install(false, Some(true), true));
+    }
+
+    #[test]
+    fn legacy_geph_opt_in_migrates_without_reviving_orphaned_secrets() {
+        assert_eq!(
+            resolve_geph_enabled_state(Some("0"), true, true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(Some("1"), true, true),
+            (true, false)
+        );
+        assert_eq!(resolve_geph_enabled_state(None, true, true), (true, true));
+        assert_eq!(
+            resolve_geph_enabled_state(None, false, true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(None, true, false),
+            (false, false)
+        );
     }
 
     #[test]
