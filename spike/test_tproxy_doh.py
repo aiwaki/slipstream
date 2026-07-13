@@ -436,18 +436,230 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tgws_link))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(strategy))
-    monkeypatch.setattr(tproxy, "_run", lambda *_: SimpleNamespace(returncode=0))
+    commands = []
+
+    def fake_run(*args):
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
     monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
 
-    tproxy.do_uninstall()
+    assert tproxy.do_uninstall()
 
     assert not install.exists()
     assert not plist.exists()
     assert not status.exists()
     assert not tgws_link.exists()
     assert not strategy.exists()
+    assert (
+        "/bin/launchctl",
+        "disable",
+        "system/dev.slipstream.tproxy",
+    ) in commands
+
+
+def test_owned_listener_pids_reject_unrelated_process(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    owned = install / "slipstreamd"
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy.sys, "executable", "/bundle/slipstreamd")
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _port: [101, 202])
+    monkeypatch.setattr(
+        tproxy,
+        "_process_command_for_pid",
+        lambda pid: (
+            f"{owned} --port 1080"
+            if pid == 101
+            else "/usr/bin/python3 /tmp/unrelated.py"
+        ),
+    )
+
+    assert tproxy._owned_listener_pids(1080) == [101]
+
+
+def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    stopped = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "missing-status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda pid: stopped.append(pid) or True,
+    )
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert tproxy.do_uninstall()
+    assert stopped == [4242]
+
+
+def test_uninstall_reports_incomplete_pf_token_release(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [])
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: SimpleNamespace(returncode=1),
+    )
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert not tproxy.do_uninstall()
+
+
+def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_text("binary")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    plist = tmp_path / "daemon.plist"
+    status = tmp_path / "status.json"
+    commands = []
+
+    def fake_run(*args):
+        commands.append(args)
+        if args[:3] == ("/bin/launchctl", "bootstrap", "system"):
+            return SimpleNamespace(returncode=5, stdout="", stderr="bootstrap refused")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+
+    assert not tproxy.do_install(1080)
+
+    assert not install.exists()
+    assert not plist.exists()
+    assert (
+        "/bin/launchctl",
+        "disable",
+        "system/dev.slipstream.tproxy",
+    ) in commands
+    assert not any(command[1:3] == ("load", "-w") for command in commands)
+
+
+def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_text("binary")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    plist = tmp_path / "daemon.plist"
+    commands = []
+
+    def fake_run(*args):
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda *_args, **_kwargs: True)
+
+    assert tproxy.do_install(1080)
+
+    assert install.exists()
+    assert plist.exists()
+    assert (
+        "/bin/launchctl",
+        "enable",
+        "system/dev.slipstream.tproxy",
+    ) in commands
+    assert (
+        "/bin/launchctl",
+        "bootstrap",
+        "system",
+        str(plist),
+    ) in commands
+
+
+def test_installed_daemon_command_accepts_real_venv_interpreter(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "runtime" / "slipstream"
+    venv_bin = install / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    framework = tmp_path / "Python.framework" / "Versions" / "3.13"
+    launcher = framework / "bin" / "python3.13"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("binary")
+    process_python = (
+        framework / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    )
+    process_python.parent.mkdir(parents=True)
+    process_python.write_text("binary")
+    venv_python = venv_bin / "python3"
+    venv_python.symlink_to(launcher)
+    script = install / "tproxy.py"
+    script.write_text("pass")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+
+    assert tproxy._installed_daemon_command_owned(
+        f"{process_python} {script} run --port 1080"
+    )
+    assert not tproxy._installed_daemon_command_owned(
+        f"{tmp_path / 'unknown-python'} {script} run --port 1080"
+    )
 
 
 def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
@@ -1140,6 +1352,16 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
+    monkeypatch.setattr(
+        tproxy,
+        "write_status",
+        lambda state, iface, voice_iface: calls.append(
+            ("status", state, iface, voice_iface)
+        ),
+    )
     monkeypatch.setattr(
         tproxy,
         "pf_setup_if_ready",
@@ -1150,6 +1372,7 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
         asyncio.run(tproxy.amain(1080, voice=False))
 
     assert calls[0] == ("pf_gate", 1080)
+    assert calls[1] == ("status", "dormant", "en0", None)
     assert ("thread_start",) in calls
 
 

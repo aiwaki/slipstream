@@ -35,6 +35,7 @@ import os
 import pwd
 import re
 import resource
+import shlex
 import signal
 import socket
 import ssl
@@ -6117,100 +6118,344 @@ def launchd_plist_text(prog_args, workdir):
     )
 
 
+def _launchd_target():
+    return f"system/{LAUNCHD_LABEL}"
+
+
+def _command_failure(action, result):
+    detail = (result.stderr or result.stdout or "command returned an error").strip()
+    raise RuntimeError(f"{action}: {detail[:400]}")
+
+
+def _require_command(action, *args):
+    result = _run(*args)
+    if result.returncode != 0:
+        _command_failure(action, result)
+    return result
+
+
+def _daemon_status_record():
+    try:
+        with open(STATUS_PATH) as handle:
+            status = json.load(handle)
+    except Exception:
+        return None
+    if not isinstance(status, dict):
+        return None
+    if status.get("schema_version") == STATUS_SCHEMA_VERSION:
+        status = status.get("daemon")
+    return status if isinstance(status, dict) else None
+
+
+def _process_command_for_pid(pid):
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    result = _run("/bin/ps", "-ww", "-p", str(pid), "-o", "command=")
+    if result.returncode != 0:
+        return None
+    command = result.stdout.strip()
+    return command or None
+
+
+def _installed_daemon_command_owned(command):
+    if not command:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    install_dir = os.path.realpath(INSTALL_DIR)
+    executable = os.path.realpath(parts[0])
+    frozen = os.path.join(install_dir, os.path.basename(sys.executable))
+    if executable == frozen:
+        return True
+    script = os.path.join(install_dir, "tproxy.py")
+    python = os.path.realpath(
+        os.path.join(install_dir, "venv", "bin", "python3")
+    )
+    python_app = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.dirname(python)),
+        "Resources", "Python.app", "Contents", "MacOS", "Python",
+    ))
+    return executable in {python, python_app} and any(
+        os.path.realpath(arg) == script for arg in parts[1:3]
+    )
+
+
+def _listener_pids(port):
+    result = _run(
+        "/usr/sbin/lsof",
+        "-nP",
+        "-a",
+        f"-iTCP:{port}",
+        "-sTCP:LISTEN",
+        "-t",
+    )
+    if result.returncode not in {0, 1}:
+        return []
+    return sorted({
+        int(line)
+        for line in result.stdout.splitlines()
+        if line.strip().isdigit() and int(line) > 0
+    })
+
+
+def _owned_listener_pids(port):
+    return [
+        pid for pid in _listener_pids(port)
+        if _installed_daemon_command_owned(_process_command_for_pid(pid))
+    ]
+
+
+def _stop_owned_daemon_pid(pid, timeout=3.0):
+    command = _process_command_for_pid(pid)
+    if not _installed_daemon_command_owned(command):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _process_command_for_pid(pid) is None:
+            return True
+        time.sleep(0.1)
+    # Revalidate immediately before SIGKILL so a recycled PID is never touched.
+    if _installed_daemon_command_owned(_process_command_for_pid(pid)):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            return False
+    return _process_command_for_pid(pid) is None
+
+
+def _wait_for_listener_state(port, present, timeout=8.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _tcp_listener_present(port) == present:
+            return True
+        time.sleep(0.1)
+    return _tcp_listener_present(port) == present
+
+
+def _installed_daemon_readiness(port):
+    status = _daemon_status_record()
+    if not status:
+        return False, "status missing"
+    updated_at = status.get("updated_at", status.get("ts", 0))
+    if not isinstance(updated_at, (int, float)) or time.time() - updated_at > 15:
+        return False, "status stale"
+    if status.get("state") not in {"active", "dormant"}:
+        return False, f"unexpected state {status.get('state')!r}"
+    pid = status.get("pid")
+    if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
+        return False, "status pid is not the installed daemon"
+    if not _tcp_listener_present(port):
+        return False, f"listener 127.0.0.1:{port} missing"
+    rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
+    if rules_loaded != (status.get("state") == "active"):
+        return False, "PF state does not match daemon state"
+    return True, "ready"
+
+
+def _installed_daemon_ready(port):
+    return _installed_daemon_readiness(port)[0]
+
+
+def _wait_for_installed_daemon(port, timeout=30.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _installed_daemon_ready(port):
+            return True
+        time.sleep(0.25)
+    return _installed_daemon_ready(port)
+
+
+def _write_launchd_plist_atomic(text):
+    tmp = f"{LAUNCHD_PLIST}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, LAUNCHD_PLIST)
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _remove_install_runtime_artifacts():
+    shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+    for path in (_STRAT_PATH, STATUS_PATH, TGWS_LINK_PATH):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+def _disable_and_cleanup_install(port=PROXY_PORT):
+    status = _daemon_status_record() or {}
+    pid = status.get("pid")
+    _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+    disable_result = _run("/bin/launchctl", "disable", _launchd_target())
+    owned_pids = set(_owned_listener_pids(port))
+    if isinstance(pid, int) and not isinstance(pid, bool):
+        owned_pids.add(pid)
+    for owned_pid in sorted(owned_pids):
+        _stop_owned_daemon_pid(owned_pid)
+    try:
+        os.remove(LAUNCHD_PLIST)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+    remove_obsolete_newsyslog_config()
+    pf_flush_result = _pf_flush()
+    pf_release_result = _pf_release_enable_token()
+    _remove_install_runtime_artifacts()
+    listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
+    runtime_clean = not any(os.path.lexists(path) for path in (
+        INSTALL_DIR,
+        LAUNCHD_PLIST,
+        _STRAT_PATH,
+        STATUS_PATH,
+        TGWS_LINK_PATH,
+    ))
+    return all((
+        disable_result.returncode == 0,
+        pf_flush_result.returncode == 0,
+        pf_release_result is None or pf_release_result.returncode == 0,
+        listener_clean,
+        runtime_clean,
+    ))
+
+
 def do_install(port):
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
     #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
     #  - script (dev): copy local runtime modules + build a venv with dependencies
     frozen = getattr(sys, "frozen", False)
-    if not frozen:
-        # Validate before stopping a working installed daemon.
-        _script_runtime_payload(__file__)
+    try:
+        if not frozen:
+            # Validate before stopping a working installed daemon.
+            _script_runtime_payload(__file__)
+        elif not os.path.isfile(sys.executable) or not os.access(sys.executable, os.X_OK):
+            raise RuntimeError("frozen daemon payload is not executable")
+    except Exception as error:
+        print(f"install preflight failed: {error}", file=sys.stderr)
+        return False
     # The daemon owns log creation; launchd is pointed at /dev/null below so it
     # can never recreate a deleted log with a process-default mode. Pre-create
     # and migrate here so install/reinstall also fixes retained archives.
-    ensure_private_log_files()
-    secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
+    mutated = False
     try:
-        tgws_secret_backup = open(secret_path).read()
-    except Exception:
-        tgws_secret_backup = None
-    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # stop old daemon before replacing files
-    if frozen:
-        src = os.path.dirname(os.path.abspath(sys.executable))
-        _replace_tree_resilient(src, INSTALL_DIR)
-        binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
-        prog_args = [binary, "--port", str(port)]
-        uninstall_hint = f"sudo {binary} --uninstall"
-    else:
-        script = os.path.join(INSTALL_DIR, "tproxy.py")
-        _copy_script_runtime(__file__, INSTALL_DIR)
+        ensure_private_log_files()
+        secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
+        try:
+            with open(secret_path) as handle:
+                tgws_secret_backup = handle.read()
+        except Exception:
+            tgws_secret_backup = None
+        old_status = _daemon_status_record() or {}
+        old_pid = old_status.get("pid")
+        _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+        mutated = True
+        owned_pids = set(_owned_listener_pids(port))
+        if isinstance(old_pid, int) and not isinstance(old_pid, bool):
+            owned_pids.add(old_pid)
+        for owned_pid in sorted(owned_pids):
+            _stop_owned_daemon_pid(owned_pid)
+        if not _wait_for_listener_state(port, False):
+            raise RuntimeError(f"listener 127.0.0.1:{port} is still occupied")
+        if frozen:
+            src = os.path.dirname(os.path.abspath(sys.executable))
+            _replace_tree_resilient(src, INSTALL_DIR)
+            binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
+            prog_args = [binary, "--port", str(port)]
+            uninstall_hint = f"sudo {binary} --uninstall"
+        else:
+            script = os.path.join(INSTALL_DIR, "tproxy.py")
+            _copy_script_runtime(__file__, INSTALL_DIR)
         # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
         # it (otherwise Telegram falls back to plain MTProto passthrough).
-        _here = os.path.dirname(os.path.abspath(__file__))
-        _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
-        if os.path.isdir(_src_proxy):
-            _replace_tree_resilient(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
-        venv = os.path.join(INSTALL_DIR, "venv")
-        py = os.path.join(venv, "bin", "python3")
-        if not os.path.exists(py):
-            base = getattr(sys, "_base_executable", None) or sys.executable
-            print(">> building self-contained venv + scapy (needs network, ~20s)...")
-            if _run(base, "-m", "venv", venv).returncode != 0:
-                print("venv create failed", file=sys.stderr)
-                return
+            _here = os.path.dirname(os.path.abspath(__file__))
+            _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
+            if os.path.isdir(_src_proxy):
+                _replace_tree_resilient(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
+            venv = os.path.join(INSTALL_DIR, "venv")
+            py = os.path.join(venv, "bin", "python3")
+            if not os.path.exists(py):
+                base = getattr(sys, "_base_executable", None) or sys.executable
+                print(">> building self-contained venv + scapy (needs network, ~20s)...")
+                _require_command("venv create failed", base, "-m", "venv", venv)
             # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
             # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
             # libcrypto in an unsafe way") -> the daemon crash-loops. certifi gives
             # the GitHub CF-domain refresh a CA bundle in frozen/script installs.
-            r = _run(py, "-m", "pip", "install", "--quiet",
-                     "--disable-pip-version-check", "scapy", "cryptography", "certifi")
-            if r.returncode != 0:
-                print("scapy/cryptography/certifi install failed (pypi reachable?):\n"
-                      + r.stderr[-400:], file=sys.stderr)
-                return
-        prog_args = [py, script, "--port", str(port)]
-        uninstall_hint = f"sudo {py} {script} --uninstall"
-    if tgws_secret_backup:
-        try:
-            with open(secret_path, "w") as f:
-                f.write(tgws_secret_backup.strip())
+                _require_command(
+                    "scapy/cryptography/certifi install failed",
+                    py, "-m", "pip", "install", "--quiet",
+                    "--disable-pip-version-check", "scapy", "cryptography", "certifi",
+                )
+            prog_args = [py, script, "--port", str(port)]
+            uninstall_hint = f"sudo {py} {script} --uninstall"
+        if tgws_secret_backup:
+            with open(secret_path, "w") as handle:
+                handle.write(tgws_secret_backup.strip())
             os.chmod(secret_path, 0o600)
-        except Exception:
-            pass
-    workdir = INSTALL_DIR
-    plist = launchd_plist_text(prog_args, workdir)
-    with open(LAUNCHD_PLIST, "w") as f:
-        f.write(plist)
-    os.chmod(LAUNCHD_PLIST, 0o644)
-    remove_obsolete_newsyslog_config()
-    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # if already loaded
-    r = _run("launchctl", "bootstrap", "system", LAUNCHD_PLIST)
-    if r.returncode != 0:
-        _run("launchctl", "load", "-w", LAUNCHD_PLIST)         # older macOS fallback
+        plist = launchd_plist_text(prog_args, INSTALL_DIR)
+        _write_launchd_plist_atomic(plist)
+        remove_obsolete_newsyslog_config()
+        _require_command(
+            "launchd label enable failed",
+            "/bin/launchctl", "enable", _launchd_target(),
+        )
+        _require_command(
+            "launchd bootstrap failed",
+            "/bin/launchctl", "bootstrap", "system", LAUNCHD_PLIST,
+        )
+        if not _wait_for_installed_daemon(port):
+            _, reason = _installed_daemon_readiness(port)
+            raise RuntimeError(
+                "daemon did not publish a healthy active/dormant state: "
+                f"{reason}"
+            )
+    except Exception as error:
+        rollback_clean = True
+        if mutated:
+            rollback_clean = _disable_and_cleanup_install(port)
+        if rollback_clean:
+            print(f"install failed safely: {error}", file=sys.stderr)
+        else:
+            print(f"install failed; rollback incomplete: {error}", file=sys.stderr)
+        return False
     print(f"installed -> {LAUNCHD_PLIST}")
     print(f"runs now + at every boot as root, auto-restarts on crash.")
     print(f"logs:      tail -f {LOG_PATH}")
     print(f"uninstall: {uninstall_hint}")
+    return True
 
 
 def do_uninstall():
-    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
-    _run("launchctl", "unload", "-w", LAUNCHD_PLIST)
-    try:
-        os.remove(LAUNCHD_PLIST)
-    except Exception:
-        pass
-    remove_obsolete_newsyslog_config()
-    _pf_flush()
-    _pf_release_enable_token()
-    shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-    for path in (_STRAT_PATH, STATUS_PATH, TGWS_LINK_PATH):
-        try:
-            os.remove(path)
-        except Exception:
-            pass
-    print("uninstalled + Slipstream pf anchor cleared")
+    clean = _disable_and_cleanup_install(PROXY_PORT)
+    if clean:
+        print("uninstalled + Slipstream pf anchor cleared")
+    else:
+        print("warning: Slipstream cleanup incomplete; inspect launchd, PF token, and TCP/1080",
+              file=sys.stderr)
+    return clean
 
 
 async def amain(port, voice=True):
@@ -6235,6 +6480,13 @@ async def amain(port, voice=True):
         conflict=_geph_port_conflict,
     )
     pf_setup_if_ready(port)
+    startup_state = (
+        "conflict" if _pf_interceptor_conflicts
+        else "active" if _pf_applied
+        else "dormant"
+    )
+    startup_iface = default_iface()
+    write_status(startup_state, startup_iface, None)
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
     threading.Thread(
         target=network_monitor,
@@ -6388,11 +6640,9 @@ def main():
         sys.exit(1)
 
     if args.install:
-        do_install(args.port)
-        return
+        sys.exit(0 if do_install(args.port) else 1)
     if args.uninstall:
-        do_uninstall()
-        return
+        sys.exit(0 if do_uninstall() else 1)
 
     # A transparent proxy carries ALL system TCP/443 — hundreds of concurrent FDs.
     # The default 256-fd soft limit is far too low ("Too many open files"); raise it.

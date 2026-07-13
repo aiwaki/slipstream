@@ -895,6 +895,32 @@ fn daemon_needs_install(bundled: &Path) -> bool {
     !same_file_bytes(bundled, Path::new(INSTALLED_DAEMON))
 }
 
+fn launchd_label_disabled_from_output(raw: &str, label: &str) -> Option<bool> {
+    raw.lines().find_map(|line| {
+        if !line.contains(&format!("\"{label}\"")) {
+            return None;
+        }
+        let (_, value) = line.split_once("=>")?;
+        match value.trim().trim_end_matches(',') {
+            "true" | "disabled" => Some(true),
+            "false" | "enabled" => Some(false),
+            _ => None,
+        }
+    })
+}
+
+fn daemon_label_disabled() -> Option<bool> {
+    let output = Command::new("/bin/launchctl")
+        .args(["print-disabled", "system"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    launchd_label_disabled_from_output(&raw, LAUNCHD_LABEL)
+}
+
 fn bundled_daemon_path(app: &AppHandle) -> Option<PathBuf> {
     Some(
         app.path()
@@ -909,7 +935,9 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
     let Some(bin) = bundled_daemon_path(app) else {
         return false;
     };
-    valid_bundled_daemon(&bin) && !daemon_needs_install(&bin)
+    valid_bundled_daemon(&bin)
+        && !daemon_needs_install(&bin)
+        && matches!(daemon_label_disabled(), Some(false))
 }
 
 fn should_recover_daemon(
@@ -961,37 +989,65 @@ fn daemon_recovery_shell() -> String {
     )
 }
 
-/// First launch: if the root daemon isn't installed yet, install it from the
-/// bundled self-contained `slipstreamd` (a PyInstaller onedir — scapy, crypto and
-/// the Telegram proxy all inside, no system Python needed) with a single admin
-/// prompt. Also upgrades older script/venv installs and stale bundled daemons.
-/// No-op in dev builds that don't ship the frozen daemon (there you install it via
-/// `sudo python3 spike/tproxy.py --install`).
-fn ensure_daemon_installed(app: &AppHandle) {
+/// Install or upgrade the bundled root daemon only when launchd has an explicit
+/// enabled state, or after a direct user action such as Restart Proxy. Missing or
+/// disabled launchd state is never treated as startup permission.
+fn request_daemon_install(app: &AppHandle, allow_disabled: bool) -> bool {
     let Some(bin) = bundled_daemon_path(app) else {
-        return;
+        return false;
     };
     if !bin.exists() {
-        return; // dev build without the bundled daemon
+        return false; // dev build without the bundled daemon
     }
     if !valid_bundled_daemon(&bin) {
         eprintln!(
             "Slipstream bundled daemon is not a valid executable: {}",
             bin.display()
         );
-        return;
+        return false;
     }
-    if daemon_needs_install(&bin) {
+    let disabled = daemon_label_disabled();
+    if should_request_daemon_install(daemon_needs_install(&bin), disabled, allow_disabled) {
         let bin = bin.to_string_lossy();
         run_admin(
             &format!("{} --install", shell_quote(bin.as_ref())),
             "Slipstream needs administrator access to install its background daemon.",
         );
+        return true;
     }
+    false
 }
 
-fn uninstall_shell() -> String {
-    format!("{} --uninstall", shell_quote(INSTALLED_DAEMON))
+fn should_request_daemon_install(
+    needs_install: bool,
+    disabled: Option<bool>,
+    user_initiated: bool,
+) -> bool {
+    // Missing and disabled state are durable stop intent for automatic paths.
+    // A direct user action may restore either state.
+    (user_initiated || disabled == Some(false)) && (needs_install || disabled != Some(false))
+}
+
+fn ensure_daemon_installed(app: &AppHandle) {
+    let _ = request_daemon_install(app, false);
+}
+
+fn uninstall_shell_for_paths(installed: &Path, bundled: &Path) -> String {
+    let installed = shell_quote(&installed.to_string_lossy());
+    let bundled = shell_quote(&bundled.to_string_lossy());
+    format!(
+        "if [ -x {installed} ] && {installed} --uninstall; then exit 0; fi; \
+         if [ -x {bundled} ]; then {bundled} --uninstall; \
+         else exit 1; fi"
+    )
+}
+
+fn uninstall_shell(app: &AppHandle) -> Option<String> {
+    let bundled = bundled_daemon_path(app)?;
+    Some(uninstall_shell_for_paths(
+        Path::new(INSTALLED_DAEMON),
+        &bundled,
+    ))
 }
 
 fn osascript_dialog_args(script: &str) -> Vec<String> {
@@ -1551,11 +1607,37 @@ fn geph_secret(app: &AppHandle) -> Option<String> {
     Some(legacy)
 }
 
-/// Whether OUR bundled geph should run. Default true; the user can turn it off
-/// (e.g. to use their own VPN — geph allows ONE session per account, so ours must
-/// stop or the user's own Geph can't connect).
+fn resolve_geph_enabled_state(
+    explicit: Option<&str>,
+    legacy_config_present: bool,
+    secret_present: bool,
+) -> (bool, bool) {
+    if let Some(value) = explicit {
+        return (value != "0", false);
+    }
+    let migrate_legacy_opt_in = legacy_config_present && secret_present;
+    (migrate_legacy_opt_in, migrate_legacy_opt_in)
+}
+
+/// Whether OUR bundled geph should run. A valid legacy config plus credentials
+/// is migrated once; an orphaned Keychain secret cannot recreate deleted state.
 fn geph_enabled(app: &AppHandle) -> bool {
-    geph_field(app, "enabled").map(|s| s != "0").unwrap_or(true)
+    let explicit = geph_field(app, "enabled");
+    let legacy_config_present = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("geph.json"))
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .is_some_and(|value| value.is_object());
+    let secret_present = explicit.is_none() && legacy_config_present && geph_secret(app).is_some();
+    let (enabled, migrate) =
+        resolve_geph_enabled_state(explicit.as_deref(), legacy_config_present, secret_present);
+    if migrate {
+        geph_config_set(app, "enabled", "1");
+    }
+    enabled
 }
 
 /// geph exit_constraint for a menu exit value. Three shapes:
@@ -2597,10 +2679,12 @@ pub fn run() {
                         }
                         ID_RESTART => {
                             tg_offer_reset_menu.fetch_add(1, Ordering::Relaxed);
-                            run_admin(
-                                &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
-                                "Slipstream needs administrator access to restart its background daemon.",
-                            );
+                            if !request_daemon_install(app, true) {
+                                run_admin(
+                                    &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
+                                    "Slipstream needs administrator access to restart its background daemon.",
+                                );
+                            }
                         }
                         ID_LOG => {
                             if !open_log_snapshot() {
@@ -2624,8 +2708,12 @@ pub fn run() {
                             if !prompt_uninstall() {
                                 return;
                             }
+                            let Some(uninstall) = uninstall_shell(app) else {
+                                notify(app, "Unable to locate Slipstream uninstaller");
+                                return;
+                            };
                             if !run_admin_status(
-                                &uninstall_shell(),
+                                &uninstall,
                                 "Slipstream needs administrator access to remove its background daemon.",
                             ) {
                                 notify(app, "Unable to remove Slipstream background service");
@@ -2796,18 +2884,20 @@ mod tests {
         diagnostic_summary_value, exit_catalog, exit_catalog_availability, geph_launch_agent_paths,
         geph_launch_agent_plist, geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
-        keychain_delete_args, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
+        keychain_delete_args, launchd_label_disabled_from_output,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, remove_owned_geph_runtime, resolve_geph_enabled_state,
         route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
-        status_for_tray, status_updated_at, sync_private_executable,
+        should_request_daemon_install, status_for_tray, status_updated_at, sync_private_executable,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        uninstall_dialog_script_for, uninstall_shell, valid_bundled_daemon,
+        uninstall_dialog_script_for, uninstall_shell_for_paths, valid_bundled_daemon,
         write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
         ExitCatalogAvailability, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
         GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -2826,10 +2916,70 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_shell_uses_only_the_owned_daemon_uninstaller() {
-        let shell = uninstall_shell();
+    fn launchd_disabled_parser_requires_an_explicit_label_state() {
+        let label = "dev.slipstream.tproxy";
 
-        assert_eq!(shell, "'/usr/local/slipstream/slipstreamd' --uninstall");
+        assert_eq!(
+            launchd_label_disabled_from_output(
+                "{\n  \"dev.slipstream.tproxy\" => disabled\n}",
+                label,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            launchd_label_disabled_from_output("{\n  \"dev.slipstream.tproxy\" => false\n}", label,),
+            Some(false)
+        );
+        assert_eq!(
+            launchd_label_disabled_from_output("{\n  \"other.service\" => false\n}", label),
+            None
+        );
+    }
+
+    #[test]
+    fn automatic_install_requires_explicit_enabled_state() {
+        assert!(!should_request_daemon_install(true, None, false));
+        assert!(!should_request_daemon_install(true, Some(true), false));
+        assert!(should_request_daemon_install(true, Some(false), false));
+        assert!(!should_request_daemon_install(false, Some(false), false));
+
+        assert!(should_request_daemon_install(true, None, true));
+        assert!(should_request_daemon_install(false, Some(true), true));
+    }
+
+    #[test]
+    fn legacy_geph_opt_in_migrates_without_reviving_orphaned_secrets() {
+        assert_eq!(
+            resolve_geph_enabled_state(Some("0"), true, true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(Some("1"), true, true),
+            (true, false)
+        );
+        assert_eq!(resolve_geph_enabled_state(None, true, true), (true, true));
+        assert_eq!(
+            resolve_geph_enabled_state(None, false, true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(None, true, false),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn uninstall_shell_falls_back_to_the_bundled_owned_uninstaller() {
+        let shell = uninstall_shell_for_paths(
+            Path::new("/usr/local/slipstream/slipstreamd"),
+            Path::new("/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd"),
+        );
+
+        assert!(shell.contains("'/usr/local/slipstream/slipstreamd' --uninstall"));
+        assert!(shell.contains(
+            "'/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd' --uninstall"
+        ));
+        assert!(shell.contains("--uninstall; then exit 0; fi"));
         assert!(!shell.contains("pfctl"));
         assert!(!shell.contains("pkill"));
         assert!(!shell.contains("launchctl disable"));
