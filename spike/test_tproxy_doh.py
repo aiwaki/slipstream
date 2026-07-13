@@ -1346,6 +1346,16 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
+    monkeypatch.setattr(
+        tproxy,
+        "write_status",
+        lambda state, iface, voice_iface: calls.append(
+            ("status", state, iface, voice_iface)
+        ),
+    )
     monkeypatch.setattr(
         tproxy,
         "pf_setup_if_ready",
@@ -1356,6 +1366,7 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
         asyncio.run(tproxy.amain(1080, voice=False))
 
     assert calls[0] == ("pf_gate", 1080)
+    assert calls[1] == ("status", "dormant", "en0", None)
     assert ("thread_start",) in calls
 
 

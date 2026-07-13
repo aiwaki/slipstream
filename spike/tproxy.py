@@ -6240,22 +6240,28 @@ def _wait_for_listener_state(port, present, timeout=8.0):
     return _tcp_listener_present(port) == present
 
 
-def _installed_daemon_ready(port):
+def _installed_daemon_readiness(port):
     status = _daemon_status_record()
     if not status:
-        return False
+        return False, "status missing"
     updated_at = status.get("updated_at", status.get("ts", 0))
     if not isinstance(updated_at, (int, float)) or time.time() - updated_at > 15:
-        return False
+        return False, "status stale"
     if status.get("state") not in {"active", "dormant"}:
-        return False
+        return False, f"unexpected state {status.get('state')!r}"
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
-        return False
+        return False, "status pid is not the installed daemon"
     if not _tcp_listener_present(port):
-        return False
+        return False, f"listener 127.0.0.1:{port} missing"
     rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
-    return rules_loaded == (status.get("state") == "active")
+    if rules_loaded != (status.get("state") == "active"):
+        return False, "PF state does not match daemon state"
+    return True, "ready"
+
+
+def _installed_daemon_ready(port):
+    return _installed_daemon_readiness(port)[0]
 
 
 def _wait_for_installed_daemon(port, timeout=30.0):
@@ -6417,7 +6423,11 @@ def do_install(port):
             "/bin/launchctl", "bootstrap", "system", LAUNCHD_PLIST,
         )
         if not _wait_for_installed_daemon(port):
-            raise RuntimeError("daemon did not publish a healthy active/dormant state")
+            _, reason = _installed_daemon_readiness(port)
+            raise RuntimeError(
+                "daemon did not publish a healthy active/dormant state: "
+                f"{reason}"
+            )
     except Exception as error:
         rollback_clean = True
         if mutated:
@@ -6466,6 +6476,13 @@ async def amain(port, voice=True):
         conflict=_geph_port_conflict,
     )
     pf_setup_if_ready(port)
+    startup_state = (
+        "conflict" if _pf_interceptor_conflicts
+        else "active" if _pf_applied
+        else "dormant"
+    )
+    startup_iface = default_iface()
+    write_status(startup_state, startup_iface, None)
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
     threading.Thread(
         target=network_monitor,
