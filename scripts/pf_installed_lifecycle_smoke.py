@@ -14,6 +14,7 @@ import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -397,8 +398,26 @@ def _process_command_for_pid(pid: int) -> str:
 
 def _assert_owned_daemon_pid(target: LifecycleTarget, pid: int) -> None:
     command = _process_command_for_pid(pid)
-    expected = " ".join(target.installed_program_prefix)
-    if not command or not (command == expected or command.startswith(expected + " ")):
+    try:
+        arguments = tuple(shlex.split(command))
+    except ValueError:
+        arguments = ()
+    expected = target.installed_program_prefix
+    executable_matches = False
+    if arguments and expected:
+        if arguments[0] == expected[0]:
+            executable_matches = True
+        else:
+            try:
+                executable_matches = os.path.samefile(arguments[0], expected[0])
+            except OSError:
+                executable_matches = False
+    owned = (
+        executable_matches
+        and len(arguments) >= len(expected)
+        and arguments[1:len(expected)] == expected[1:]
+    )
+    if not owned:
         raise LifecycleError(
             f"refusing to signal unowned pid {pid}: command={command!r}"
         )

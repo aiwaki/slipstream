@@ -186,6 +186,36 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 )
         kill.assert_not_called()
 
+    def test_daemon_signal_guard_accepts_resolved_interpreter_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            real_python = Path(tmp) / "Python"
+            venv_python = Path(tmp) / "python3"
+            script = Path(tmp) / "tproxy.py"
+            real_python.write_text("python")
+            venv_python.symlink_to(real_python)
+            script.write_text("daemon")
+            target = lifecycle.LifecycleTarget(
+                name="alias-test",
+                install_command=(),
+                uninstall_command=(),
+                installed_program_prefix=(str(venv_python), str(script)),
+                required_installed_paths=(),
+            )
+            command = f"{real_python} {script} --no-voice"
+
+            with mock.patch.object(
+                lifecycle,
+                "_process_command_for_pid",
+                return_value=command,
+            ), mock.patch("os.kill") as kill:
+                lifecycle._signal_owned_daemon(
+                    target,
+                    42,
+                    lifecycle.RUNTIME_REARM_SIGNAL,
+                )
+
+        kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
+
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "slipstream.log"
