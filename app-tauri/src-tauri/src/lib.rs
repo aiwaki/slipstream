@@ -7,6 +7,7 @@
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -1032,21 +1033,61 @@ fn ensure_daemon_installed(app: &AppHandle) {
     let _ = request_daemon_install(app, false);
 }
 
-fn uninstall_shell_for_paths(installed: &Path, bundled: &Path) -> String {
+fn app_bundle_for_bundled_daemon(bundled: &Path) -> Option<PathBuf> {
+    let resources = bundled.parent()?.parent()?;
+    if resources.file_name() != Some(OsStr::new("Resources")) {
+        return None;
+    }
+    let contents = resources.parent()?;
+    if contents.file_name() != Some(OsStr::new("Contents")) {
+        return None;
+    }
+    let bundle = contents.parent()?;
+    (bundle.extension() == Some(OsStr::new("app"))).then(|| bundle.to_path_buf())
+}
+
+fn uninstall_shell_for_paths(
+    installed: &Path,
+    bundled: &Path,
+    app_bundle: &Path,
+    tray_pid: u32,
+) -> String {
     let installed = shell_quote(&installed.to_string_lossy());
     let bundled = shell_quote(&bundled.to_string_lossy());
+    let app_bundle = shell_quote(&app_bundle.to_string_lossy());
+    let remove_app = format!(
+        "pid={tray_pid}; app={app_bundle}; i=0; \
+         process_is_owned() {{ command=$(/bin/ps -p \"$pid\" -o command= 2>/dev/null || true); \
+         case \"$command\" in \"$app\"/Contents/MacOS/*) return 0;; *) return 1;; esac; }}; \
+         while process_is_owned && [ \"$i\" -lt 50 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
+         if process_is_owned; then /bin/kill -TERM \"$pid\" 2>/dev/null || true; fi; \
+         i=0; while process_is_owned && [ \"$i\" -lt 20 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
+         if process_is_owned; then /bin/kill -KILL \"$pid\" 2>/dev/null || true; fi; \
+         bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+         \"$app/Contents/Info.plist\" 2>/dev/null || true); \
+         if [ \"$bundle_id\" = 'dev.slipstream.tray' ]; then /bin/rm -rf -- \"$app\"; fi"
+    );
+    let remove_app = shell_quote(&remove_app);
     format!(
-        "if [ -x {installed} ] && {installed} --uninstall; then exit 0; fi; \
-         if [ -x {bundled} ]; then {bundled} --uninstall; \
-         else exit 1; fi"
+        "if [ -x {installed} ] && {installed} --uninstall; then cleaned=1; \
+         elif [ -x {bundled} ] && {bundled} --uninstall; then cleaned=1; \
+         else exit 1; fi; \
+         [ \"$cleaned\" = 1 ] || exit 1; \
+         /usr/bin/nohup /bin/sh -c {remove_app} </dev/null >/dev/null 2>&1 &"
     )
 }
 
 fn uninstall_shell(app: &AppHandle) -> Option<String> {
     let bundled = bundled_daemon_path(app)?;
+    if !valid_bundled_daemon(&bundled) {
+        return None;
+    }
+    let app_bundle = app_bundle_for_bundled_daemon(&bundled)?;
     Some(uninstall_shell_for_paths(
         Path::new(INSTALLED_DAEMON),
         &bundled,
+        &app_bundle,
+        std::process::id(),
     ))
 }
 
@@ -1095,13 +1136,13 @@ fn prompt_secret(current: &str) -> Option<String> {
 fn uninstall_dialog_script_for(ru: bool) -> String {
     let (msg, keep, remove) = if ru {
         (
-            "Будут удалены фоновая служба Slipstream, встроенный Geph и его ключ аккаунта. Само приложение останется в Applications, после этого его можно переместить в Корзину.",
+            "Будут удалены Slipstream, его фоновая служба, встроенный Geph и ключ аккаунта.",
             "Отмена",
             "Удалить",
         )
     } else {
         (
-            "This removes the Slipstream background service, bundled Geph, and its account key. The app remains in Applications and can then be moved to Trash.",
+            "This removes Slipstream, its background service, bundled Geph, and account key.",
             "Cancel",
             "Uninstall",
         )
@@ -2269,12 +2310,24 @@ fn geph_lifecycle_diagnostic_value(
     })
 }
 
-fn geph_launch_agent_bootout(uid: &str) -> bool {
-    Command::new("/bin/launchctl")
+fn geph_launch_agent_bootout(uid: &str, plist: &Path) -> bool {
+    let _ = Command::new("/bin/launchctl")
         .args(["bootout", &geph_launch_target(uid)])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .output();
+    if geph_launch_agent_loaded(uid) {
+        let _ = Command::new("/bin/launchctl")
+            .arg("bootout")
+            .arg(geph_launch_domain(uid))
+            .arg(plist)
+            .output();
+    }
+    for _ in 0..20 {
+        if !geph_launch_agent_loaded(uid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
 }
 
 fn geph_launch_agent_bootstrap(uid: &str, plist: &Path) -> bool {
@@ -2415,7 +2468,7 @@ fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPat
 fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
     let paths = geph_launch_agent_paths_for_app(app)?;
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
-    if geph_launch_agent_loaded(&uid) && !geph_launch_agent_bootout(&uid) {
+    if !geph_launch_agent_bootout(&uid, &paths.plist) {
         return Err("geph LaunchAgent bootout unavailable".into());
     }
     // One-time migration can leave the old detached process outside launchd.
@@ -2480,7 +2533,7 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
     let mut loaded = geph_launch_agent_loaded(&uid);
     if loaded && plist_changed {
-        if !geph_launch_agent_bootout(&uid) {
+        if !geph_launch_agent_bootout(&uid, &paths.plist) {
             return Err("geph LaunchAgent reload unavailable".into());
         }
         loaded = false;
@@ -2712,24 +2765,29 @@ pub fn run() {
                                 notify(app, "Unable to locate Slipstream uninstaller");
                                 return;
                             };
-                            if !run_admin_status(
-                                &uninstall,
-                                "Slipstream needs administrator access to remove its background daemon.",
-                            ) {
-                                notify(app, "Unable to remove Slipstream background service");
+                            if let Err(error) = app.autolaunch().disable() {
+                                eprintln!("autostart uninstall cleanup unavailable: {error}");
+                                notify(app, "Unable to disable Slipstream launch at login");
                                 return;
                             }
                             geph_config_set(app, "enabled", "0");
-                            match geph_launch_agent_uninstall(app) {
-                                Ok(()) => {
-                                    notify(app, "Slipstream system components removed");
-                                    app.exit(0);
-                                }
-                                Err(error) => {
-                                    eprintln!("geph uninstall cleanup unavailable: {error}");
-                                    notify(app, "Slipstream removed; Geph cleanup needs attention");
-                                }
+                            if let Err(error) = geph_launch_agent_uninstall(app) {
+                                eprintln!("geph uninstall cleanup unavailable: {error}");
+                                notify(app, "Unable to stop bundled Geph; uninstall halted");
+                                return;
                             }
+                            if !run_admin_status(
+                                &uninstall,
+                                "Slipstream needs administrator access to remove its background service and application.",
+                            ) {
+                                notify(
+                                    app,
+                                    "Bundled Geph stopped; unable to remove Slipstream background service",
+                                );
+                                return;
+                            }
+                            notify(app, "Slipstream uninstalled");
+                            app.exit(0);
                         }
                         ID_QUIT => app.exit(0),
                         _ => {}
@@ -2878,11 +2936,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
-        daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
-        diagnostic_log_tail, diagnostic_log_tail_from_path, diagnostic_snapshot_value,
-        diagnostic_summary_value, exit_catalog, exit_catalog_availability, geph_launch_agent_paths,
-        geph_launch_agent_plist, geph_launch_domain, geph_launch_target, geph_launcher_script,
+        admin_shell_script, app_bundle_for_bundled_daemon, command_matches_geph,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
+        daemon_recovery_status_value, daemon_state_text, diagnostic_log_tail,
+        diagnostic_log_tail_from_path, diagnostic_snapshot_value, diagnostic_summary_value,
+        exit_catalog, exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
+        geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
         keychain_delete_args, launchd_label_disabled_from_output,
         launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
@@ -2973,16 +3032,104 @@ mod tests {
         let shell = uninstall_shell_for_paths(
             Path::new("/usr/local/slipstream/slipstreamd"),
             Path::new("/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd"),
+            Path::new("/Applications/Slipstream.app"),
+            4242,
         );
 
         assert!(shell.contains("'/usr/local/slipstream/slipstreamd' --uninstall"));
         assert!(shell.contains(
             "'/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd' --uninstall"
         ));
-        assert!(shell.contains("--uninstall; then exit 0; fi"));
+        assert!(shell.contains("/usr/bin/nohup /bin/sh -c"));
+        assert!(shell.contains("/bin/ps -p \"$pid\" -o command="));
+        assert!(shell.contains("pid=4242"));
+        assert!(shell.contains("/bin/kill -TERM"));
+        assert!(shell.contains("/bin/kill -KILL"));
+        assert!(shell.contains("/usr/libexec/PlistBuddy"));
+        assert!(shell.contains("dev.slipstream.tray"));
+        assert!(shell.contains("/bin/rm -rf --"));
         assert!(!shell.contains("pfctl"));
         assert!(!shell.contains("pkill"));
         assert!(!shell.contains("launchctl disable"));
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-n", "-c", &shell])
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    #[test]
+    fn app_bundle_is_derived_only_from_the_expected_tauri_resource_layout() {
+        assert_eq!(
+            app_bundle_for_bundled_daemon(Path::new(
+                "/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd"
+            )),
+            Some(Path::new("/Applications/Slipstream.app").to_path_buf())
+        );
+        assert_eq!(
+            app_bundle_for_bundled_daemon(Path::new(
+                "/tmp/Slipstream.app/Resources/slipstreamd/slipstreamd"
+            )),
+            None
+        );
+        assert_eq!(
+            app_bundle_for_bundled_daemon(Path::new(
+                "/tmp/Slipstream/Contents/Resources/slipstreamd/slipstreamd"
+            )),
+            None
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn uninstall_shell_removes_the_validated_app_after_bundled_cleanup() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slipstream uninstall test-{}-{unique}",
+            std::process::id()
+        ));
+        let app = root.join("Slipstream.app");
+        let contents = app.join("Contents");
+        let bundled = contents.join("Resources/slipstreamd/slipstreamd");
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+        std::fs::write(
+            contents.join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.slipstream.tray</string>
+</dict></plist>
+"#,
+        )
+        .unwrap();
+        std::fs::write(&bundled, b"#!/bin/sh\n[ \"$1\" = \"--uninstall\" ]\n").unwrap();
+        let mut permissions = std::fs::metadata(&bundled).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&bundled, permissions).unwrap();
+
+        let shell = uninstall_shell_for_paths(
+            &root.join("missing-installed-daemon"),
+            &bundled,
+            &app,
+            u32::MAX,
+        );
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-c", &shell])
+            .status()
+            .unwrap()
+            .success());
+        for _ in 0..40 {
+            if !app.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        assert!(!app.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2992,8 +3139,10 @@ mod tests {
 
         assert!(english.contains("default button \"Cancel\" cancel button \"Cancel\""));
         assert!(english.contains("\"Uninstall\""));
+        assert!(!english.contains("remains in Applications"));
         assert!(russian.contains("default button \"Отмена\" cancel button \"Отмена\""));
         assert!(russian.contains("\"Удалить\""));
+        assert!(!russian.contains("останется в Applications"));
     }
 
     #[test]

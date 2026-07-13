@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import atexit
 import base64
+import errno
 import filecmp
 import fcntl
 import hashlib
@@ -189,6 +190,11 @@ _geph_session_lock = threading.Lock()
 _pf_backend_hold_until = 0.0
 _pf_backend_hold_reason = ""
 _pf_state_lock = threading.Lock()
+_fd_pressure = False
+_fd_pressure_reason = ""
+_fd_pressure_at = 0.0
+_fd_pressure_lock = threading.Lock()
+_fd_reserve = []
 _system_dns_cache = {
     "ts": 0.0,
     "status": None,
@@ -422,6 +428,9 @@ GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
 GEPH_RESTART_EXECUTION_RETRY = 30.0
 PF_BACKEND_FAILURE_HOLD = 30.0
+FD_PRESSURE_HIGH_CAP = 2048
+FD_PRESSURE_LOW_CAP = 1024
+FD_PRESSURE_RESERVE = 8
 SMART_DNS_OK_TTL = 10 * 60.0
 SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
 _smart_dns_ok_until = {}
@@ -3625,7 +3634,10 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     telegram = tgws_status(now)
     geph_state = "up" if _geph_up else ("off" if not GEPH_ENABLED else "down")
 
-    if geph_restart["recommended"]:
+    if _fd_pressure:
+        recovery_state = "recovering"
+        recovery_reason = "resource_pressure"
+    elif geph_restart["recommended"]:
         recovery_state = "recovering"
         recovery_reason = (
             "owned_geph_restart_waiting_for_idle"
@@ -3688,12 +3700,17 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
         },
         "recovery": {
             "state": recovery_state,
-            "last_action": rearm["last_reason"] or "none",
+            "last_action": (
+                "pause_private_pf"
+                if _fd_pressure
+                else rearm["last_reason"] or "none"
+            ),
             "reason": recovery_reason,
             "updated_at": max(
                 float(rearm["last_at"] or 0.0),
                 float(geph_restart["last_wake_at"] or 0.0),
                 float(geph_restart["last_failure_at"] or 0.0),
+                float(_fd_pressure_at or 0.0),
             ),
             "count": int(rearm["count"]),
         },
@@ -3873,6 +3890,110 @@ def _pf_flush():
     return pf_adapter.flush_private_anchor(_run, PF_ANCHOR)
 
 
+def fd_pressure_watermarks(soft_limit):
+    """Return hysteresis bounds that preserve enough FDs for safe teardown."""
+    try:
+        limit = int(soft_limit)
+    except (TypeError, ValueError, OverflowError):
+        limit = 65536
+    if limit <= 0 or soft_limit == resource.RLIM_INFINITY:
+        limit = 65536
+    if limit < 128:
+        high = max(1, limit - 8)
+        return high, max(1, high // 2)
+    high = min(FD_PRESSURE_HIGH_CAP, int(limit * 0.8), limit - 64)
+    low = min(FD_PRESSURE_LOW_CAP, int(limit * 0.5), high - 1)
+    return max(64, high), max(32, low)
+
+
+def reduce_fd_pressure(active, open_fds, soft_limit):
+    if open_fds is None:
+        return bool(active)
+    high, low = fd_pressure_watermarks(soft_limit)
+    return open_fds > low if active else open_fds >= high
+
+
+def open_fd_count():
+    for path in ("/dev/fd", "/proc/self/fd"):
+        try:
+            return len(os.listdir(path))
+        except OSError:
+            continue
+    return None
+
+
+def _release_fd_reserve():
+    global _fd_reserve
+    reserve, _fd_reserve = _fd_reserve, []
+    for fd in reserve:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _open_fd_reserve():
+    if _fd_reserve:
+        return
+    for _ in range(FD_PRESSURE_RESERVE):
+        try:
+            _fd_reserve.append(os.open("/dev/null", os.O_RDONLY))
+        except OSError:
+            break
+
+
+def mark_fd_pressure(reason):
+    """Fail open for native traffic when this process cannot accept safely."""
+    global _fd_pressure, _fd_pressure_reason, _fd_pressure_at
+    with _fd_pressure_lock:
+        first = not _fd_pressure
+        _fd_pressure = True
+        _fd_pressure_reason = str(reason)[:200]
+        _fd_pressure_at = time.time()
+    if not first:
+        return False
+    # Keep enough descriptors in reserve to run the private-anchor cleanup even
+    # when accept() has already reported EMFILE.
+    _release_fd_reserve()
+    print(
+        f">> file descriptor pressure -> transparent routing dormant ({_fd_pressure_reason})",
+        file=sys.stderr,
+    )
+    if not pause_private_pf():
+        print(
+            ">> unable to pause Slipstream's private pf anchor during fd pressure",
+            file=sys.stderr,
+        )
+    return True
+
+
+def refresh_fd_pressure():
+    global _fd_pressure, _fd_pressure_reason
+    try:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (ValueError, OSError):
+        soft_limit = 65536
+    count = open_fd_count()
+    next_state = reduce_fd_pressure(_fd_pressure, count, soft_limit)
+    if next_state and not _fd_pressure:
+        mark_fd_pressure(f"{count} open files")
+    elif _fd_pressure and not next_state:
+        with _fd_pressure_lock:
+            _fd_pressure = False
+            _fd_pressure_reason = ""
+        _open_fd_reserve()
+        print(">> file descriptor pressure cleared -> routing may recover", file=sys.stderr)
+    return _fd_pressure
+
+
+def asyncio_exception_handler(loop, context):
+    exc = context.get("exception")
+    if isinstance(exc, OSError) and exc.errno in (errno.EMFILE, errno.ENFILE):
+        mark_fd_pressure(os.strerror(exc.errno))
+        return
+    loop.default_exception_handler(context)
+
+
 def geo_exit_backend_ready(now=None):
     """Whether transparent interception can safely serve every route class.
 
@@ -3881,6 +4002,8 @@ def geo_exit_backend_ready(now=None):
     runtime-failure hold has elapsed.
     """
     global _pf_backend_hold_until, _pf_backend_hold_reason
+    if _fd_pressure:
+        return False
     if not GEPH_ENABLED:
         return True
     now = time.time() if now is None else now
@@ -4826,6 +4949,7 @@ def network_monitor(port, voice=True):
             elif _pf_interceptor_conflicts:
                 print(">> transparent HTTPS filter conflict cleared -> re-arming")
             _pf_interceptor_conflicts = conflicts
+        refresh_fd_pressure()
         backend_ready = geo_exit_backend_ready(now)
         if vpn:
             if _pf_applied:
@@ -5304,6 +5428,20 @@ def note_local_stream_stall(host, strategy_name):
     return True
 
 
+async def _close_stream_writer(writer):
+    try:
+        writer.close()
+    except Exception:
+        return
+    wait_closed = getattr(writer, "wait_closed", None)
+    if not callable(wait_closed):
+        return
+    try:
+        await asyncio.wait_for(wait_closed(), timeout=1.0)
+    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError, TypeError):
+        pass
+
+
 async def splice(src, dst, activity=None):
     total = 0
     try:
@@ -5327,10 +5465,7 @@ async def splice(src, dst, activity=None):
     finally:
         if activity is not None:
             activity.server_end_at = time.monotonic()
-        try:
-            dst.close()
-        except Exception:
-            pass
+        await _close_stream_writer(dst)
     return total
 
 
@@ -5357,21 +5492,18 @@ async def pump(reader, up_w, activity=None):
     finally:
         if activity is not None:
             activity.client_end_at = time.monotonic()
-        try:
-            up_w.close()
-        except Exception:
-            pass
+        await _close_stream_writer(up_w)
     return total
 
 
 async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
-    """Relay one generic local stream until either direction finishes.
+    """Relay a stream until either direction finishes, then close both sides.
 
     When the client closes first, no later upstream payload can reach it.  Do
-    not wait indefinitely for that upstream read: cancel it, preserve the
-    client-first outcome, and let the exact-host recovery reducer run.  This is
-    deliberately used only for the generic local-desync path; geo-exit and
-    protected-service relays retain their existing lifecycle behavior.
+    not wait indefinitely for that upstream read. The same rule applies when
+    the upstream closes first: a half-open client task must not retain two FDs
+    forever. This lifecycle is shared by direct, local, Smart DNS, and Geph
+    backends; route selection remains unchanged.
     """
     client_task = asyncio.create_task(pump(reader, up_w, activity))
     server_task = asyncio.create_task(splice(up_r, writer, activity))
@@ -5574,6 +5706,7 @@ async def dial_via_geph(host, port, first_flight):
             asyncio.open_connection("127.0.0.1", port_socks), timeout=3)
     except Exception:
         return None
+    connected = False
     try:
         gw.write(b"\x05\x01\x00")                      # VER5, 1 method, no-auth
         await gw.drain()
@@ -5597,26 +5730,36 @@ async def dial_via_geph(host, port, first_flight):
         await gr.readexactly(2)                        # bound port
         gw.write(first_flight)                         # original ClientHello, plain
         await gw.drain()
+        connected = True
         return gr, gw
+    except asyncio.CancelledError:
+        raise
     except Exception:
-        try:
-            gw.close()
-        except Exception:
-            pass
         return None
+    finally:
+        if not connected:
+            await _close_stream_writer(gw)
 
 
 async def dial_plain(ip, port, first_flight):
     """Plain direct dial (no desync, no tunnel) for traffic we must not tamper
     with — Telegram MTProto. Sends the buffered first flight verbatim; returns
     (reader, writer) or None."""
+    w = None
+    connected = False
     try:
         r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=6)
         w.write(first_flight)
         await w.drain()
+        connected = True
         return r, w
+    except asyncio.CancelledError:
+        raise
     except Exception:
         return None
+    finally:
+        if w is not None and not connected:
+            await _close_stream_writer(w)
 
 
 async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
@@ -5627,24 +5770,26 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
             asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
     except Exception:
         return None
+    connected = False
     try:
         up_w.write(first_blob)
         await up_w.drain()
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
+            connected = True
             return up_r, up_w, data
     except (asyncio.TimeoutError, OSError):
         pass
-    try:
-        up_w.close()
-    except Exception:
-        pass
+    finally:
+        if not connected:
+            await _close_stream_writer(up_w)
     return None
 
 
 async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0):
     """Like dial_and_probe but injects a low-TTL decoy ClientHello on the real
     4-tuple BEFORE the real flight (zapret 'fake' — for deep-reassembly SNIs)."""
+    connected = False
     try:
         up_r, up_w = await asyncio.wait_for(
             asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
@@ -5661,13 +5806,13 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         await up_w.drain()
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
+            connected = True
             return up_r, up_w, data
     except (asyncio.TimeoutError, OSError):
         pass
-    try:
-        up_w.close()
-    except Exception:
-        pass
+    finally:
+        if not connected:
+            await _close_stream_writer(up_w)
     return None
 
 
@@ -5698,6 +5843,7 @@ async def handle(reader, writer):
     try:
         await _handle_impl(reader, writer)
     finally:
+        await _close_stream_writer(writer)
         _conn_count -= 1
 
 
@@ -5743,7 +5889,7 @@ async def _handle_impl(reader, writer):
             return
         ur, uw = up
         t0 = time.monotonic()
-        res = await asyncio.gather(pump(reader, uw), splice(ur, writer))
+        res = await relay_local_stream(reader, uw, ur, writer)
         down_b = res[1] or 0
         dur = time.monotonic() - t0
         if down_b > 0:
@@ -5782,13 +5928,10 @@ async def _handle_impl(reader, writer):
                     writer.write(server_first)
                     await writer.drain()
                 except OSError:
-                    try:
-                        up_w.close()
-                    except Exception:
-                        pass
+                    await _close_stream_writer(up_w)
                     writer.close()
                     return
-                await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
+                await relay_local_stream(reader, up_w, up_r, writer)
                 return
             _smart_dns_mark_failure(
                 host,
@@ -5806,7 +5949,7 @@ async def _handle_impl(reader, writer):
                     if VERBOSE:
                         print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                     t0 = time.monotonic()
-                    res = await asyncio.gather(pump(reader, gw), splice(gr, writer))
+                    res = await relay_local_stream(reader, gw, gr, writer)
                     down_b = res[1] or 0
                     if down_b == 0 and time.monotonic() - t0 < 10:
                         log_geph_route_failure(host, "remote closed without response")
@@ -5938,10 +6081,7 @@ async def _handle_impl(reader, writer):
         writer.write(server_first)
         await writer.drain()
     except OSError:
-        try:
-            up_w.close()
-        except Exception:
-            pass
+        await _close_stream_writer(up_w)
         writer.close()
         return
     t0 = time.monotonic()
@@ -6516,6 +6656,7 @@ def do_uninstall():
 
 async def amain(port, voice=True):
     global _geph_up
+    asyncio.get_running_loop().set_exception_handler(asyncio_exception_handler)
     try:
         server = await asyncio.start_server(
             handle, "127.0.0.1", port, reuse_address=True)
@@ -6595,6 +6736,23 @@ def _tgws_secret():
     return s
 
 
+def _close_asyncio_loop(loop):
+    """Cancel loop-owned tasks and release its selector descriptor."""
+    if loop is None or loop.is_closed():
+        return
+    try:
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+    except Exception:
+        pass
+    finally:
+        loop.close()
+
+
 def start_tgws_proxy():
     """Run the vendored tg-ws-proxy — a local MTProto proxy on 127.0.0.1:1443 — in
     a daemon thread. Telegram Desktop points at it (tg://proxy?...) and its MTProto
@@ -6632,6 +6790,8 @@ def start_tgws_proxy():
     def _loop():
         warned_inuse = False
         while True:
+            loop = None
+            delay = 1
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -6646,17 +6806,20 @@ def start_tgws_proxy():
                               "quit it (same secret, no Telegram reconfigure)",
                               file=sys.stderr)
                         warned_inuse = True
-                    time.sleep(15)
-                    continue
-                set_tgws_state("error", repr(e))
-                print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
-                      file=sys.stderr)
-                time.sleep(5)
+                    delay = 15
+                else:
+                    set_tgws_state("error", repr(e))
+                    print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
+                          file=sys.stderr)
+                    delay = 5
             except Exception as e:
                 set_tgws_state("error", repr(e))
                 print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
                       file=sys.stderr)
-                time.sleep(5)
+                delay = 5
+            finally:
+                _close_asyncio_loop(loop)
+            time.sleep(delay)
 
     threading.Thread(target=_loop, daemon=True, name="tg-ws-proxy").start()
     print(f">> tg-ws-proxy ready on 127.0.0.1:{TGWS_PORT}", file=sys.stderr)
@@ -6713,6 +6876,7 @@ def main():
                 continue
     except Exception:
         pass
+    _open_fd_reserve()
 
     cleanup_stale()        # release only state owned by the previous daemon
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
@@ -6746,6 +6910,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        _release_fd_reserve()
         pf_teardown()
 
 

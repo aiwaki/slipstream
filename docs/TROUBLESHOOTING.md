@@ -89,10 +89,11 @@ not claim an active PF redirect; it identifies the remaining user-side job so it
 is not mistaken for an external VPN or proxy.
 
 To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
-native dialog. It removes the Slipstream root daemon and private PF state first,
-then removes only Slipstream's verified Geph LaunchAgent, private runtime, and
-its Keychain account entry. The app bundle remains in `Applications` and can be
-moved to Trash afterwards.
+native dialog. It first disables tray autostart and removes only Slipstream's
+verified Geph LaunchAgent, private runtime, and Keychain account entry. It then
+removes the root daemon and private PF state. After the tray exits, a detached
+helper revalidates the exact tray PID and bundle identifier before removing the
+Slipstream app bundle from `Applications`.
 
 The root uninstaller disables the launchd label before stopping any detached
 listener, and signals a PID only after verifying the installed daemon command.
@@ -104,6 +105,21 @@ copy inside the application bundle. A partial install follows the same rollback.
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
 state are never changed by this action.
+
+The 2026-07-14 incident combined two failures: half-open transparent relays
+exhausted the daemon's file descriptors, leaving its listener and PF redirect in
+place, while root-first uninstall could stop before the independent user Geph
+LaunchAgent was reached. The log contained 2,115 `Too many open files` entries
+and pending relay tasks. The tray then appeared stuck, the app remained in
+`Applications`, and `geph5-client` continued under LaunchAgent `KeepAlive`.
+
+Current required behavior is fail-open for native traffic: every backend relay
+has a bounded shared lifecycle and awaits both stream closures. The daemon keeps
+an emergency descriptor reserve and, at a bounded high watermark or
+`EMFILE`/`ENFILE`, immediately pauses only `com.apple/slipstream`. It may re-arm
+only after descriptor use falls below the low watermark and normal backend
+readiness succeeds. Uninstall performs the owned user cleanup before the root
+prompt, so cancelling or failing root cleanup cannot leave bundled Geph running.
 
 ## Geph Exit Locations
 
@@ -225,6 +241,8 @@ Required behavior:
   by an early zero-byte remote close, clear only `com.apple/slipstream` and
   enter dormant mode for a bounded hold;
 - do not let tray polling restart a live Geph process from endpoint failures;
+- on file-descriptor pressure, pause only `com.apple/slipstream` before accept
+  failures can strand the machine behind a non-serving listener;
 - do not modify DNS, proxy, PAC, VPN, certificates, Keychain, or network plist
   files as a workaround.
 
