@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::HashSet;
 
 const POLICY_V1: &str = include_str!("../../../contracts/routing-policy-v1.json");
 const RECOVERY_V1: &str = include_str!("../../../contracts/recovery-v1.json");
@@ -17,7 +18,19 @@ fn rust_reads_versioned_language_neutral_contracts() {
         assert_eq!(contract["schema_version"], 1);
         assert_eq!(contract["contract"], name);
         assert_eq!(contract["contract_version"], 1);
-        assert!(!contract["vectors"].as_array().unwrap().is_empty());
+        let vectors = contract["vectors"]
+            .as_array()
+            .expect("vectors must be an array");
+        assert!(!vectors.is_empty());
+        let names: HashSet<&str> = vectors
+            .iter()
+            .map(|vector| {
+                vector["name"]
+                    .as_str()
+                    .expect("vector name must be a string")
+            })
+            .collect();
+        assert_eq!(names.len(), vectors.len(), "vector names must be unique");
     }
 }
 

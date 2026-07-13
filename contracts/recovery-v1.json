@@ -142,7 +142,7 @@
         "host": "chatgpt.com",
         "service_group": "openai",
         "route_class": "geo_exit",
-        "backend": "external_proxy"
+        "backend": "external"
       },
       "context": {
         "backend_owned": false,
@@ -153,7 +153,7 @@
       "expected": [
         {
           "kind": "warn_external",
-          "target": "external_proxy",
+          "target": "external",
           "reason": "probe timed out"
         }
       ]
