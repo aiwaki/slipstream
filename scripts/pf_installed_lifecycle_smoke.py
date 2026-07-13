@@ -643,7 +643,7 @@ def _chrome_probe_command(
     suffix = _probe_suffix(label)
     return (
         str(executable),
-        "--headless=new",
+        "--headless",
         "--disable-background-networking",
         "--disable-component-update",
         "--disable-default-apps",

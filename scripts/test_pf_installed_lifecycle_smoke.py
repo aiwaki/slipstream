@@ -379,7 +379,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(command[0], str(executable))
-        self.assertIn("--headless=new", command)
+        self.assertIn("--headless", command)
         self.assertIn("--disable-quic", command)
         self.assertIn("--no-proxy-server", command)
         self.assertIn(f"--user-data-dir={profile}", command)
