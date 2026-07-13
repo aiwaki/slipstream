@@ -139,13 +139,30 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         with self.assertRaises(smoke.QualificationError):
             smoke._socks_connect_request("x" * 256, 443)
 
-    def test_launchd_disabled_parser_requires_the_exact_label(self) -> None:
+    def test_launchd_disabled_parser_accepts_current_and_legacy_states(self) -> None:
         completed = mock.Mock(
             returncode=0,
-            stdout='disabled services = {\n  "dev.slipstream.tproxy" => disabled\n}\n',
+            stdout='disabled services = {\n  "dev.slipstream.tproxy" => true\n}\n',
         )
         with mock.patch.object(smoke, "_run", return_value=completed):
             self.assertTrue(smoke._daemon_is_disabled())
+
+        completed.stdout = '"dev.slipstream.tproxy" => disabled\n'
+        with mock.patch.object(smoke, "_run", return_value=completed):
+            self.assertTrue(smoke._daemon_is_disabled())
+
+    def test_launchd_disabled_parser_rejects_enabled_or_other_labels(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout='"dev.slipstream.tproxy" => false\n',
+        )
+        with mock.patch.object(smoke, "_run", return_value=completed):
+            self.assertFalse(smoke._daemon_is_disabled())
+
+        completed.stdout = '"dev.slipstream.tproxy" => enabled\n'
+        with mock.patch.object(smoke, "_run", return_value=completed):
+            self.assertFalse(smoke._daemon_is_disabled())
+
         completed.stdout = '"dev.slipstream.other" => disabled\n'
         with mock.patch.object(smoke, "_run", return_value=completed):
             self.assertFalse(smoke._daemon_is_disabled())

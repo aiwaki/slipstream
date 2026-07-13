@@ -126,12 +126,24 @@ def _run(
     return result
 
 
+def _launchd_label_disabled_from_output(raw: str, label: str) -> bool | None:
+    pattern = rf'^\s*"{re.escape(label)}"\s*=>\s*([^,\s]+),?\s*$'
+    match = re.search(pattern, raw, re.MULTILINE)
+    if match is None:
+        return None
+    state = match.group(1)
+    if state in {"true", "disabled"}:
+        return True
+    if state in {"false", "enabled"}:
+        return False
+    return None
+
+
 def _daemon_is_disabled() -> bool:
     result = _run(("/bin/launchctl", "print-disabled", "system"), check=False)
     if result.returncode != 0:
         return False
-    pattern = rf'"{re.escape(DAEMON_LABEL)}"\s*=>\s*disabled'
-    return re.search(pattern, result.stdout) is not None
+    return _launchd_label_disabled_from_output(result.stdout, DAEMON_LABEL) is True
 
 
 def _launchd_target(uid: int) -> str:
