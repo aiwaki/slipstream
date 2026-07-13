@@ -555,6 +555,253 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertTrue(result.timed_out)
         self.assertIn(b"capture diagnostic", result.stderr)
 
+    def test_safaridriver_url_accepts_only_explicit_ipv4_loopback(self) -> None:
+        self.assertEqual(
+            lifecycle._validated_safaridriver_url("http://127.0.0.1:19445"),
+            "http://127.0.0.1:19445",
+        )
+        for value in (
+            "https://127.0.0.1:19445",
+            "http://localhost:19445",
+            "http://127.0.0.1:19445/status",
+            "http://user@127.0.0.1:19445",
+            "http://192.0.2.1:19445",
+            "http://127.0.0.1",
+            "http://127.0.0.1:0",
+        ):
+            with self.subTest(value=value), self.assertRaises(
+                lifecycle.LifecycleError
+            ):
+                lifecycle._validated_safaridriver_url(value)
+
+    def test_webdriver_request_sends_bounded_json(self) -> None:
+        response = mock.Mock(status=200)
+        response.read.return_value = b'{"value":{"ready":true}}'
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        with mock.patch.object(
+            lifecycle.http.client,
+            "HTTPConnection",
+            return_value=connection,
+        ) as http_connection:
+            result = lifecycle._webdriver_request(
+                "http://127.0.0.1:19445",
+                "POST",
+                "/session",
+                {"capabilities": {"alwaysMatch": {"browserName": "safari"}}},
+            )
+
+        self.assertTrue(result["value"]["ready"])
+        http_connection.assert_called_once_with(
+            "127.0.0.1",
+            19445,
+            timeout=lifecycle.SAFARI_COMMAND_TIMEOUT,
+        )
+        request = connection.request.call_args
+        self.assertEqual(request.args[:2], ("POST", "/session"))
+        self.assertEqual(
+            json.loads(request.kwargs["body"]),
+            {"capabilities": {"alwaysMatch": {"browserName": "safari"}}},
+        )
+        connection.close.assert_called_once()
+
+    def test_safari_probe_uses_and_deletes_an_isolated_session(self) -> None:
+        calls = []
+
+        def webdriver(base_url, method, path, payload=None, **_kwargs):
+            calls.append((base_url, method, path, payload))
+            if (method, path) == ("POST", "/session"):
+                return {"value": {"sessionId": "session/one"}}
+            if method == "GET" and path.endswith("/source"):
+                return {
+                    "value": lifecycle.SAFARI_PROBE_MARKER
+                    + "x" * lifecycle.SAFARI_PROBE_MIN_BYTES
+                }
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": "h2"}
+            return {"value": None}
+
+        with mock.patch.object(
+            lifecycle,
+            "_webdriver_request",
+            side_effect=webdriver,
+        ), mock.patch.object(
+            lifecycle,
+            "_assert_no_safari_process",
+        ) as assert_fresh, mock.patch.object(
+            lifecycle,
+            "_wait_for_safari_process",
+            return_value=4242,
+        ) as wait_for_process, mock.patch.object(
+            lifecycle,
+            "_stop_owned_safari_process",
+        ) as stop_process:
+            size = lifecycle._run_safari_probe(
+                "http://127.0.0.1:19445",
+                "After Tray Crash",
+                501,
+            )
+
+        self.assertGreaterEqual(size, lifecycle.SAFARI_PROBE_MIN_BYTES)
+        self.assertEqual(
+            assert_fresh.call_args_list,
+            [
+                mock.call(501, "After Tray Crash"),
+                mock.call(501, "After Tray Crash cleanup"),
+            ],
+        )
+        wait_for_process.assert_called_once_with(501, "After Tray Crash")
+        stop_process.assert_called_once_with(4242, 501, "After Tray Crash")
+        self.assertEqual(calls[0][1:3], ("POST", "/session"))
+        self.assertIn(
+            (
+                "http://127.0.0.1:19445",
+                "POST",
+                "/session/session%2Fone/url",
+                {
+                    "url": "https://github.com/robots.txt?slipstream-safari=after-tray-crash"
+                },
+            ),
+            calls,
+        )
+        self.assertEqual(
+            calls[-1][1:3],
+            ("DELETE", "/session/session%2Fone"),
+        )
+        self.assertTrue(
+            any(
+                method == "POST" and path.endswith("/execute/sync")
+                for _base_url, method, path, _payload in calls
+            )
+        )
+
+    def test_safari_probe_deletes_session_after_navigation_failure(self) -> None:
+        calls = []
+
+        def webdriver(_base_url, method, path, _payload=None, **_kwargs):
+            calls.append((method, path))
+            if (method, path) == ("POST", "/session"):
+                return {"value": {"sessionId": "session-one"}}
+            if method == "POST" and path.endswith("/url"):
+                raise lifecycle.LifecycleError("navigation failed")
+            return {"value": None}
+
+        with mock.patch.object(
+            lifecycle,
+            "_webdriver_request",
+            side_effect=webdriver,
+        ), mock.patch.object(
+            lifecycle,
+            "_assert_no_safari_process",
+        ), mock.patch.object(
+            lifecycle,
+            "_wait_for_safari_process",
+            return_value=4242,
+        ), mock.patch.object(
+            lifecycle,
+            "_stop_owned_safari_process",
+        ) as stop_process, self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "navigation failed",
+        ):
+            lifecycle._run_safari_probe(
+                "http://127.0.0.1:19445",
+                "failure",
+                501,
+            )
+
+        self.assertEqual(calls[-1], ("DELETE", "/session/session-one"))
+        stop_process.assert_called_once_with(4242, 501, "failure")
+
+    def test_safari_probe_rejects_non_tcp_navigation(self) -> None:
+        def webdriver(_base_url, method, path, _payload=None, **_kwargs):
+            if (method, path) == ("POST", "/session"):
+                return {"value": {"sessionId": "session-one"}}
+            if method == "GET" and path.endswith("/source"):
+                return {
+                    "value": lifecycle.SAFARI_PROBE_MARKER
+                    + "x" * lifecycle.SAFARI_PROBE_MIN_BYTES
+                }
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": "h3"}
+            return {"value": None}
+
+        with mock.patch.object(
+            lifecycle,
+            "_webdriver_request",
+            side_effect=webdriver,
+        ), mock.patch.object(
+            lifecycle,
+            "_assert_no_safari_process",
+        ), mock.patch.object(
+            lifecycle,
+            "_wait_for_safari_process",
+            return_value=4242,
+        ), mock.patch.object(
+            lifecycle,
+            "_stop_owned_safari_process",
+        ), self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "did not prove a TCP route",
+        ):
+            lifecycle._run_safari_probe(
+                "http://127.0.0.1:19445",
+                "h3",
+                501,
+            )
+
+    def test_safari_process_identity_requires_exact_uid_and_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Safari"
+            executable.write_text("#!/bin/sh\n")
+            executable.chmod(0o755)
+            with mock.patch.object(
+                lifecycle,
+                "SAFARI_EXECUTABLE",
+                executable,
+            ), mock.patch.object(
+                lifecycle,
+                "_safari_pid_candidates",
+                return_value=(4242,),
+            ), mock.patch.object(
+                lifecycle,
+                "_process_identity_for_pid",
+                return_value=(501, str(executable)),
+            ):
+                self.assertEqual(lifecycle._owned_safari_pids(501), (4242,))
+
+            with mock.patch.object(
+                lifecycle,
+                "SAFARI_EXECUTABLE",
+                executable,
+            ), mock.patch.object(
+                lifecycle,
+                "_safari_pid_candidates",
+                return_value=(4242,),
+            ), mock.patch.object(
+                lifecycle,
+                "_process_identity_for_pid",
+                return_value=(502, str(executable)),
+            ), self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "unexpected identities",
+            ):
+                lifecycle._owned_safari_pids(501)
+
+    def test_safari_process_stop_signals_only_verified_pid(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "SAFARI_PROCESS_STOP_TIMEOUT",
+            0,
+        ), mock.patch.object(
+            lifecycle,
+            "_safari_pid_is_owned",
+            side_effect=(True, False),
+        ), mock.patch.object(lifecycle.os, "kill") as kill:
+            lifecycle._stop_owned_safari_process(4242, 501, "after-tray-crash")
+
+        kill.assert_called_once_with(4242, lifecycle.signal.SIGTERM)
+
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "slipstream.log"
@@ -592,6 +839,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertIn("crash", packaged["packaged_tray"])
         self.assertIn("HTTPS client", packaged["https_client_probes"])
         self.assertIn("Chrome", packaged["chrome_probes"])
+        self.assertIn("Safari", packaged["safari_probes"])
 
 
 if __name__ == "__main__":

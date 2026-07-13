@@ -34,7 +34,7 @@ YouTube/googlevideo.
 | Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects wake gaps and default-interface changes, re-arms PF/voice capture/canaries, and exposes last re-arm in status; installed script and packaged-daemon CI repeat suspend/resume and the shared network-change path without replacing real network state | physical default-route and lid-close soak on a disposable Mac plus broader endpoint-safe payload canaries |
-| Tray independence | packaged CI launches the exact tray as the original user, verifies fresh non-root HTTPS clients and clean-profile Chrome processes, crashes and restarts only the UID/path-verified process, and requires the same daemon PID, private PF anchor, sibling anchor, and live sentinel connection to survive | repeat with Safari and account-backed owned Geph on a disposable user session |
+| Tray independence | packaged CI launches the exact tray as the original user, verifies fresh non-root HTTPS clients, clean-profile Chrome processes, and fresh UID/path-verified Safari processes with isolated WebDriver sessions, crashes and restarts only verified processes, and requires the same daemon PID, private PF anchor, sibling anchor, and live sentinel connection to survive | repeat with account-backed owned Geph on a disposable user session |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
 | Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path; owned Geph runs as a user LaunchAgent and live restart is daemon-coordinated after the private anchor is paused and sessions drain | account-backed sleep/wake soak on a disposable Mac |
@@ -69,12 +69,19 @@ Before any signal, the harness verifies the exact installed daemon command. A
 non-root TCP connection and its PF state must survive the entire cycle, the
 sibling sentinel rules must remain byte-for-byte unchanged, and the global PF
 snapshot must match after cleanup. In packaged mode it also starts a fresh
-headless Google Chrome
-process with a new owner-only profile before tray start and after tray crash and
-restart. Chrome runs as the original user with process-local proxy and QUIC
-disabled so its request uses TCP/443 without changing system DNS, proxy, PAC,
-VPN, or a real browser profile. The script refuses to run unless GitHub Actions
-and `SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job uploads only the
+headless Google Chrome process with a new owner-only profile and a fresh Safari
+process with an isolated WebDriver session before tray start and after tray crash
+and restart.
+Chrome runs as the original user with process-local proxy and QUIC disabled so
+its request uses TCP/443. SafariDriver is enabled and started only by the
+disposable wrapper, listens on an explicit IPv4 loopback port, and uses Safari's
+isolated automation window instead of the user's profile. The harness refuses a
+pre-existing Safari process, verifies the process created for the session by UID
+and executable path, requires the loaded page to report `h2` or `http/1.1`, and
+may signal only that PID before the next stage. HTTP/3 is rejected as insufficient
+evidence rather than blocked. Neither probe changes system DNS, proxy, PAC, or
+VPN configuration. The script refuses to run unless GitHub Actions and
+`SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job uploads only the
 exact `.app` that passed this qualification.
 
 ## Priority Order

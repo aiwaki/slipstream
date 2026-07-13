@@ -224,12 +224,12 @@ jobs:
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
 
-      - name: Packaged lifecycle, tray-crash, and Chrome-restart sentinel smoke
+      - name: Packaged lifecycle, tray-crash, Chrome, and Safari sentinel smoke
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
-          sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py \
-            --app-bundle app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app
+          bash scripts/run_packaged_lifecycle_smoke.sh \
+            app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app
 
       - name: Package the qualified app
         run: |
