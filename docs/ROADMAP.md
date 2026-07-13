@@ -76,11 +76,12 @@ tray. Disposable CI runs two installed-daemon suspend/resume and network-change
 re-arm cycles for both the source installer and the frozen daemon from the
 packaged app. It also launches the exact packaged tray as the original user,
 crashes and restarts only that verified process, and opens fresh non-root HTTPS
-clients plus clean-profile Google Chrome processes before and after the crash.
+clients, clean-profile Google Chrome processes, and fresh UID/path-verified
+Safari processes with isolated WebDriver sessions before and after the crash.
 The same daemon PID and private anchor must survive while an unrelated PF
 anchor, state entry, and live connection remain unchanged. A physical
-default-route/lid-close transition, real Safari restart, and account-backed
-owned Geph recovery on a disposable Mac remain before the M1 gate is complete.
+default-route/lid-close transition and account-backed owned Geph recovery on a
+disposable Mac remain before the M1 gate is complete.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.

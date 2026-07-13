@@ -5,13 +5,14 @@ This script performs real privileged lifecycle operations. It refuses to run
 outside GitHub Actions with an explicit opt-in environment variable, and it
 never runs on a workstation installation. By default it tests the source
 installer; ``--app-bundle`` also crashes and restarts the built tray while the
-same installed daemon, fresh non-root HTTPS clients, and clean-profile Chrome
-processes remain healthy.
+same installed daemon, fresh non-root HTTPS clients, clean-profile Chrome
+processes, and fresh Safari automation processes remain healthy.
 """
 
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import plistlib
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -70,6 +72,15 @@ CHROME_PAGE_TIMEOUT_MS = 15_000
 CHROME_PROBE_TIMEOUT = 45
 CHROME_CAPTURE_LIMIT = 1_048_576
 CHROME_PROCESS_STOP_TIMEOUT = 2
+SAFARI_PROBE_MIN_BYTES = 32
+SAFARI_PROBE_MARKER = "User-agent:"
+SAFARI_TCP_PROTOCOLS = frozenset(("h2", "http/1.1"))
+SAFARI_COMMAND_TIMEOUT = 30
+SAFARI_EXECUTABLE = Path("/Applications/Safari.app/Contents/MacOS/Safari")
+SAFARI_PROCESS_NAME = "Safari"
+SAFARI_PROCESS_START_TIMEOUT = 10.0
+SAFARI_PROCESS_STOP_TIMEOUT = 3.0
+WEBDRIVER_RESPONSE_LIMIT = 1_048_576
 TRAY_START_TIMEOUT = 15.0
 
 
@@ -860,6 +871,324 @@ def _run_chrome_probe(
     return len(result.stdout)
 
 
+def _validated_safaridriver_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    parsed = urllib.parse.urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise LifecycleError("SafariDriver URL has an invalid port") from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port is None
+        or not 1 <= port <= 65535
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise LifecycleError(
+            "SafariDriver URL must be an uncredentialed http://127.0.0.1:<port> endpoint"
+        )
+    return f"http://127.0.0.1:{port}"
+
+
+def _webdriver_request(
+    base_url: str,
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    *,
+    timeout: float = SAFARI_COMMAND_TIMEOUT,
+) -> dict:
+    base_url = _validated_safaridriver_url(base_url)
+    if base_url is None:
+        raise LifecycleError("SafariDriver URL is required")
+    port = urllib.parse.urlsplit(base_url).port
+    if port is None:
+        raise LifecycleError("SafariDriver URL has no port")
+    if not path.startswith("/") or ".." in path:
+        raise LifecycleError(f"invalid WebDriver path: {path!r}")
+    data = None
+    headers = {"Accept": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        connection.request(method, path, body=data, headers=headers)
+        response = connection.getresponse()
+        body = response.read(WEBDRIVER_RESPONSE_LIMIT + 1)
+    except (OSError, TimeoutError, http.client.HTTPException) as exc:
+        raise LifecycleError(
+            f"SafariDriver {method} {path} failed: {exc}"
+        ) from exc
+    finally:
+        connection.close()
+    if len(body) > WEBDRIVER_RESPONSE_LIMIT:
+        raise LifecycleError(f"SafariDriver {method} {path} response is too large")
+    if response.status >= 400:
+        detail = body[:4000].decode("utf-8", errors="replace")
+        raise LifecycleError(
+            f"SafariDriver {method} {path} returned HTTP {response.status}: {detail}"
+        )
+    try:
+        result = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        detail = body[:1000].decode("utf-8", errors="replace")
+        raise LifecycleError(
+            f"SafariDriver {method} {path} returned invalid JSON: {detail}"
+        ) from exc
+    if not isinstance(result, dict):
+        raise LifecycleError(f"SafariDriver {method} {path} returned a non-object")
+    value = result.get("value")
+    if isinstance(value, dict) and value.get("error"):
+        raise LifecycleError(
+            f"SafariDriver {method} {path} failed: "
+            f"{value.get('error')}: {value.get('message', '')}"
+        )
+    return result
+
+
+def _assert_safaridriver_ready(base_url: str) -> None:
+    result = _webdriver_request(base_url, "GET", "/status", timeout=5)
+    value = result.get("value")
+    if not isinstance(value, dict) or value.get("ready") is not True:
+        raise LifecycleError(f"SafariDriver is not ready: {result!r}")
+
+
+def _safari_pid_candidates() -> tuple[int, ...]:
+    result = subprocess.run(
+        ("/usr/bin/pgrep", "-x", SAFARI_PROCESS_NAME),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    if result.returncode == 1:
+        return ()
+    if result.returncode != 0:
+        detail = result.stderr.strip()[-1000:]
+        raise LifecycleError(f"cannot inspect Safari processes: {detail}")
+    pids = []
+    for line in result.stdout.splitlines():
+        try:
+            pid = int(line.strip())
+        except ValueError as exc:
+            raise LifecycleError(f"invalid Safari pid from pgrep: {line!r}") from exc
+        if pid > 0:
+            pids.append(pid)
+    return tuple(sorted(set(pids)))
+
+
+def _safari_identity_matches(
+    identity: tuple[int, str] | None,
+    uid: int,
+) -> bool:
+    if identity is None:
+        return False
+    actual_uid, command = identity
+    try:
+        arguments = tuple(shlex.split(command))
+    except ValueError:
+        arguments = ()
+    return bool(
+        actual_uid == uid
+        and arguments
+        and _same_executable(arguments[0], str(SAFARI_EXECUTABLE))
+    )
+
+
+def _owned_safari_pids(uid: int) -> tuple[int, ...]:
+    if not SAFARI_EXECUTABLE.is_file() or not os.access(SAFARI_EXECUTABLE, os.X_OK):
+        raise LifecycleError(f"Safari executable is unavailable: {SAFARI_EXECUTABLE}")
+    owned = []
+    conflicts = []
+    for pid in _safari_pid_candidates():
+        identity = _process_identity_for_pid(pid)
+        if identity is None:
+            continue
+        if _safari_identity_matches(identity, uid):
+            owned.append(pid)
+        else:
+            conflicts.append((pid, *identity))
+    if conflicts:
+        raise LifecycleError(
+            f"refusing Safari process control with unexpected identities: {conflicts!r}"
+        )
+    return tuple(owned)
+
+
+def _assert_no_safari_process(uid: int, label: str) -> None:
+    pids = _owned_safari_pids(uid)
+    if pids:
+        raise LifecycleError(
+            f"Safari probe {label} requires a fresh process; already running: {pids}"
+        )
+
+
+def _wait_for_safari_process(uid: int, label: str) -> int:
+    deadline = time.monotonic() + SAFARI_PROCESS_START_TIMEOUT
+    while time.monotonic() < deadline:
+        pids = _owned_safari_pids(uid)
+        if len(pids) == 1:
+            return pids[0]
+        if len(pids) > 1:
+            raise LifecycleError(
+                f"Safari probe {label} started multiple browser processes: {pids}"
+            )
+        time.sleep(0.1)
+    raise LifecycleError(f"Safari probe {label} did not start Safari")
+
+
+def _safari_pid_is_owned(pid: int, uid: int) -> bool:
+    identity = _process_identity_for_pid(pid)
+    if identity is None:
+        return False
+    if not _safari_identity_matches(identity, uid):
+        raise LifecycleError(
+            f"refusing to signal unowned Safari pid {pid}: identity={identity!r}"
+        )
+    return True
+
+
+def _stop_owned_safari_process(pid: int, uid: int, label: str) -> None:
+    deadline = time.monotonic() + SAFARI_PROCESS_STOP_TIMEOUT
+    while time.monotonic() < deadline:
+        if not _safari_pid_is_owned(pid, uid):
+            return
+        time.sleep(0.1)
+
+    for stop_signal in (signal.SIGTERM, signal.SIGKILL):
+        if not _safari_pid_is_owned(pid, uid):
+            return
+        try:
+            os.kill(pid, stop_signal)
+        except ProcessLookupError:
+            return
+        deadline = time.monotonic() + SAFARI_PROCESS_STOP_TIMEOUT
+        while time.monotonic() < deadline:
+            if not _safari_pid_is_owned(pid, uid):
+                return
+            time.sleep(0.1)
+    raise LifecycleError(f"Safari probe {label} could not stop owned pid {pid}")
+
+
+def _run_safari_probe(base_url: str, label: str, uid: int) -> int:
+    session_id = None
+    safari_pid = None
+    failure = None
+    size = 0
+    try:
+        _assert_no_safari_process(uid, label)
+        created = _webdriver_request(
+            base_url,
+            "POST",
+            "/session",
+            {
+                "capabilities": {
+                    "alwaysMatch": {
+                        "browserName": "safari",
+                        "pageLoadStrategy": "normal",
+                    }
+                }
+            },
+        )
+        value = created.get("value")
+        if isinstance(value, dict):
+            session_id = value.get("sessionId")
+        session_id = session_id or created.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            raise LifecycleError(
+                f"SafariDriver did not return a session id: {created!r}"
+            )
+        safari_pid = _wait_for_safari_process(uid, label)
+        encoded_session = urllib.parse.quote(session_id, safe="")
+        _webdriver_request(
+            base_url,
+            "POST",
+            f"/session/{encoded_session}/timeouts",
+            {"pageLoad": 20_000, "script": 10_000},
+        )
+        suffix = _probe_suffix(label)
+        _webdriver_request(
+            base_url,
+            "POST",
+            f"/session/{encoded_session}/url",
+            {"url": f"{HTTPS_PROBE_URL}?slipstream-safari={suffix}"},
+        )
+        source = _webdriver_request(
+            base_url,
+            "GET",
+            f"/session/{encoded_session}/source",
+        ).get("value")
+        if not isinstance(source, str):
+            raise LifecycleError("SafariDriver page source is not text")
+        size = len(source.encode("utf-8"))
+        if size < SAFARI_PROBE_MIN_BYTES:
+            raise LifecycleError(
+                f"Safari probe {label} returned only {size} bytes"
+            )
+        if SAFARI_PROBE_MARKER not in source:
+            raise LifecycleError(
+                f"Safari probe {label} did not load the expected page: {source[-1000:]}"
+            )
+        protocol = _webdriver_request(
+            base_url,
+            "POST",
+            f"/session/{encoded_session}/execute/sync",
+            {
+                "script": (
+                    "const entry = performance.getEntriesByType('navigation')[0]; "
+                    "return entry ? entry.nextHopProtocol : '';"
+                ),
+                "args": [],
+            },
+        ).get("value")
+        if protocol not in SAFARI_TCP_PROTOCOLS:
+            raise LifecycleError(
+                f"Safari probe {label} did not prove a TCP route: "
+                f"nextHopProtocol={protocol!r}"
+            )
+    except BaseException as exc:
+        failure = exc
+    finally:
+        cleanup_errors = []
+        if session_id:
+            encoded_session = urllib.parse.quote(session_id, safe="")
+            try:
+                _webdriver_request(
+                    base_url,
+                    "DELETE",
+                    f"/session/{encoded_session}",
+                    timeout=10,
+                )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if safari_pid is not None:
+            try:
+                _stop_owned_safari_process(safari_pid, uid, label)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            _assert_no_safari_process(uid, f"{label} cleanup")
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_detail = "; ".join(str(error) for error in cleanup_errors)
+            if failure is not None:
+                raise LifecycleError(
+                    f"{failure}; Safari cleanup failed: {cleanup_detail}"
+                ) from failure
+            raise LifecycleError(f"Safari cleanup failed: {cleanup_detail}")
+    if failure is not None:
+        raise failure
+    return size
+
+
 def _process_arguments_for_pid(pid: int) -> tuple[str, ...]:
     try:
         return tuple(shlex.split(_process_command_for_pid(pid)))
@@ -1143,11 +1472,23 @@ def _fallback_uninstall(
     return errors
 
 
-def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
+def run_lifecycle(
+    target: LifecycleTarget | None = None,
+    safaridriver_url: str | None = None,
+) -> dict:
     target = target or script_target()
+    safaridriver_url = _validated_safaridriver_url(safaridriver_url)
     runner = pf.PfctlRunner()
     system = SystemRunner(target)
     before, uid, gid = _preflight(runner)
+    if target.tray_executable is not None:
+        if safaridriver_url is None:
+            raise LifecycleError(
+                "packaged lifecycle requires a disposable SafariDriver endpoint"
+            )
+        _assert_safaridriver_ready(safaridriver_url)
+    elif safaridriver_url is not None:
+        raise LifecycleError("SafariDriver is only valid for packaged lifecycle")
     test_token: str | None = None
     sentinel: PersistentSentinelConnection | None = None
     sentinel_snapshot: tuple[str, str] | None = None
@@ -1156,12 +1497,17 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
     tray_events: list[str] = []
     https_client_probes: list[str] = []
     chrome_probes: list[str] = []
+    safari_probes: list[str] = []
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
 
     def record_client_probes(label: str) -> None:
         https_client_probes.append(f"{label}:{_run_https_probe(uid, gid, label)}")
         chrome_probes.append(f"{label}:{_run_chrome_probe(uid, gid, label)}")
+        if safaridriver_url is not None:
+            safari_probes.append(
+                f"{label}:{_run_safari_probe(safaridriver_url, label, uid)}"
+            )
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
@@ -1384,6 +1730,7 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         "packaged_tray": tray_events or ["not_applicable"],
         "https_client_probes": https_client_probes or ["not_applicable"],
         "chrome_probes": chrome_probes or ["not_applicable"],
+        "safari_probes": safari_probes or ["not_applicable"],
         "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
@@ -1416,6 +1763,12 @@ def dry_run(target_name: str = "script") -> dict:
             if target_name == "packaged-app"
             else "not applicable"
         ),
+        "safari_probes": (
+            "fresh Safari process with an isolated WebDriver session before and "
+            "after tray crash"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
         "lifecycle_rearms": (
             f"{LIFECYCLE_SOAK_CYCLES} suspend/wake and network-change cycles"
         ),
@@ -1433,10 +1786,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="test the frozen daemon embedded in this built Slipstream.app",
     )
+    parser.add_argument(
+        "--safaridriver-url",
+        help="localhost SafariDriver endpoint prepared by disposable CI",
+    )
     args = parser.parse_args(argv)
     try:
         target = packaged_app_target(args.app_bundle) if args.app_bundle else script_target()
-        report = dry_run(target.name) if args.dry_run else run_lifecycle(target)
+        report = (
+            dry_run(target.name)
+            if args.dry_run
+            else run_lifecycle(target, args.safaridriver_url)
+        )
     except (LifecycleError, pf.SmokeError, KeyboardInterrupt) as exc:
         print(json.dumps({"result": "fail", "error": str(exc)}, indent=2))
         return 1

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -89,11 +91,37 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_release_workflow_qualifies_the_built_app_before_publish(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        wrapper = (ROOT / "scripts/run_packaged_lifecycle_smoke.sh").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("Qualify the release app lifecycle", workflow)
         self.assertIn('SLIPSTREAM_DISPOSABLE_CI: "1"', workflow)
-        self.assertIn("scripts/pf_installed_lifecycle_smoke.py", workflow)
-        self.assertIn('--app-bundle "$app"', workflow)
+        self.assertIn("scripts/run_packaged_lifecycle_smoke.sh", workflow)
+        self.assertIn("scripts/pf_installed_lifecycle_smoke.py", wrapper)
+        self.assertIn('--app-bundle "$app_bundle"', wrapper)
+        self.assertIn("GITHUB_ACTIONS", wrapper)
+        self.assertIn("--safaridriver-url", wrapper)
+
+    def test_packaged_lifecycle_wrapper_refuses_non_ci_execution(self) -> None:
+        environment = os.environ.copy()
+        environment.pop("GITHUB_ACTIONS", None)
+        environment.pop("SLIPSTREAM_DISPOSABLE_CI", None)
+        result = subprocess.run(
+            (
+                "/bin/bash",
+                str(ROOT / "scripts/run_packaged_lifecycle_smoke.sh"),
+                "/tmp/not-a-slipstream-app",
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            env=environment,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("refusing Safari lifecycle smoke", result.stderr)
 
     def test_geph_vendor_workflow_proposes_a_pr(self) -> None:
         workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
