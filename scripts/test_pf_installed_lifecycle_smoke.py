@@ -6,6 +6,7 @@ import os
 import plistlib
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -355,8 +356,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(environment["HOME"], "/Users/runner")
         self.assertEqual(environment["TMPDIR"], "/tmp/runner/")
 
-    def test_browser_probe_is_fresh_non_proxy_ipv4_https(self) -> None:
-        command = lifecycle._browser_probe_command("After Tray Crash")
+    def test_https_probe_is_fresh_non_proxy_ipv4_client(self) -> None:
+        command = lifecycle._https_probe_command("After Tray Crash")
 
         self.assertEqual(command[0], "/usr/bin/curl")
         self.assertIn("--ipv4", command)
@@ -366,6 +367,193 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             command[-1],
             "https://github.com/robots.txt?slipstream-lifecycle=after-tray-crash",
         )
+
+    def test_chrome_probe_uses_a_clean_profile_and_tcp_without_proxy(self) -> None:
+        executable = Path(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        )
+        profile = Path("/tmp/slipstream-chrome-test")
+        command = lifecycle._chrome_probe_command(
+            executable,
+            profile,
+            "After Tray Crash",
+        )
+
+        self.assertEqual(command[0], str(executable))
+        self.assertIn("--headless", command)
+        self.assertIn("--disable-quic", command)
+        self.assertIn("--no-proxy-server", command)
+        self.assertIn(f"--user-data-dir={profile}", command)
+        self.assertIn(f"--timeout={lifecycle.CHROME_PAGE_TIMEOUT_MS}", command)
+        self.assertEqual(
+            command[-1],
+            "https://github.com/robots.txt?slipstream-chrome=after-tray-crash",
+        )
+
+    def test_run_chrome_probe_drops_privileges_and_removes_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Google Chrome"
+            executable.write_bytes(b"chrome")
+            executable.chmod(0o755)
+            completed = lifecycle.ChromeCapture(
+                loaded=True,
+                timed_out=False,
+                returncode=0,
+                stdout=(
+                    lifecycle.CHROME_PROBE_MARKER
+                    + b"x" * lifecycle.CHROME_PROBE_MIN_BYTES
+                ),
+                stderr=b"",
+            )
+
+            observed_profile_mode = None
+
+            def run_probe(command, **_kwargs):
+                nonlocal observed_profile_mode
+                profile_argument = next(
+                    argument
+                    for argument in command
+                    if argument.startswith("--user-data-dir=")
+                )
+                profile = Path(profile_argument.split("=", 1)[1])
+                observed_profile_mode = profile.stat().st_mode & 0o777
+                return completed
+
+            with mock.patch.object(
+                lifecycle,
+                "_user_environment",
+                return_value=({"HOME": tmp}, Path(tmp)),
+            ), mock.patch.object(
+                lifecycle.pwd,
+                "getpwuid",
+                return_value=mock.Mock(pw_name="runner"),
+            ), mock.patch.object(
+                lifecycle.os,
+                "getgrouplist",
+                return_value=[20, 12, 61],
+            ), mock.patch.object(lifecycle.os, "chown") as chown, mock.patch.object(
+                lifecycle,
+                "_capture_chrome_output",
+                side_effect=run_probe,
+            ) as run:
+                size = lifecycle._run_chrome_probe(
+                    501,
+                    20,
+                    "After Tray Crash",
+                    executable,
+                )
+
+        self.assertEqual(size, len(completed.stdout))
+        self.assertEqual(observed_profile_mode, 0o700)
+        chown.assert_called_once()
+        command = run.call_args.args[0]
+        profile_argument = next(
+            argument for argument in command if argument.startswith("--user-data-dir=")
+        )
+        profile = Path(profile_argument.split("=", 1)[1])
+        self.assertFalse(profile.exists())
+        self.assertEqual(run.call_args.kwargs["uid"], 501)
+        self.assertEqual(run.call_args.kwargs["gid"], 20)
+        self.assertEqual(
+            run.call_args.kwargs["supplementary_groups"],
+            (12, 61),
+        )
+
+    def test_run_chrome_probe_rejects_an_unavailable_executable(self) -> None:
+        with self.assertRaisesRegex(lifecycle.LifecycleError, "unavailable"):
+            lifecycle._run_chrome_probe(
+                501,
+                20,
+                "missing",
+                Path("/definitely/not/chrome"),
+            )
+
+    def test_run_chrome_probe_rejects_a_browser_error_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Google Chrome"
+            executable.write_bytes(b"chrome")
+            executable.chmod(0o755)
+            completed = lifecycle.ChromeCapture(
+                loaded=False,
+                timed_out=False,
+                returncode=0,
+                stdout=b"<html>ERR_CONNECTION_CLOSED</html>",
+                stderr=b"",
+            )
+            with mock.patch.object(
+                lifecycle,
+                "_user_environment",
+                return_value=({"HOME": tmp}, Path(tmp)),
+            ), mock.patch.object(
+                lifecycle.pwd,
+                "getpwuid",
+                return_value=mock.Mock(pw_name="runner"),
+            ), mock.patch.object(
+                lifecycle.os,
+                "getgrouplist",
+                return_value=[20, 12, 61],
+            ), mock.patch.object(lifecycle.os, "chown"), mock.patch.object(
+                lifecycle,
+                "_capture_chrome_output",
+                return_value=completed,
+            ):
+                with self.assertRaisesRegex(
+                    lifecycle.LifecycleError,
+                    "expected page",
+                ):
+                    lifecycle._run_chrome_probe(
+                        501,
+                        20,
+                        "error-page",
+                        executable,
+                    )
+
+    def test_chrome_capture_stops_after_expected_dom_without_waiting_for_exit(
+        self,
+    ) -> None:
+        payload = lifecycle.CHROME_PROBE_MARKER.decode("ascii") + "x" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            started = time.monotonic()
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    f"import time; print({payload!r}, flush=True); time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=3,
+            )
+
+        self.assertTrue(result.loaded)
+        self.assertFalse(result.timed_out)
+        self.assertIn(lifecycle.CHROME_PROBE_MARKER, result.stdout)
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_chrome_capture_timeout_keeps_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    "import sys, time; "
+                    "print('capture diagnostic', file=sys.stderr, flush=True); "
+                    "time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=0.2,
+            )
+
+        self.assertFalse(result.loaded)
+        self.assertTrue(result.timed_out)
+        self.assertIn(b"capture diagnostic", result.stderr)
 
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -402,7 +590,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
 
         packaged = lifecycle.dry_run("packaged-app")
         self.assertIn("crash", packaged["packaged_tray"])
-        self.assertIn("HTTPS client", packaged["browser_probes"])
+        self.assertIn("HTTPS client", packaged["https_client_probes"])
+        self.assertIn("Chrome", packaged["chrome_probes"])
 
 
 if __name__ == "__main__":

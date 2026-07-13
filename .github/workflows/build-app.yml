@@ -136,7 +136,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Qualify the release app lifecycle and tray crash
+      - name: Qualify the release app lifecycle, tray crash, and Chrome restart
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |

@@ -5,7 +5,8 @@ This script performs real privileged lifecycle operations. It refuses to run
 outside GitHub Actions with an explicit opt-in environment variable, and it
 never runs on a workstation installation. By default it tests the source
 installer; ``--app-bundle`` also crashes and restarts the built tray while the
-same installed daemon and fresh non-root HTTPS clients remain healthy.
+same installed daemon, fresh non-root HTTPS clients, and clean-profile Chrome
+processes remain healthy.
 """
 
 from __future__ import annotations
@@ -58,13 +59,31 @@ RUNTIME_REARM_SIGNAL = signal.SIGUSR1
 QUALIFICATION_WAKE_GAP_SECONDS = 6.0
 WAKE_SUSPEND_SECONDS = 8.0
 LIFECYCLE_SOAK_CYCLES = 2
-BROWSER_PROBE_URL = "https://github.com/robots.txt"
-BROWSER_PROBE_MIN_BYTES = 32
+HTTPS_PROBE_URL = "https://github.com/robots.txt"
+HTTPS_PROBE_MIN_BYTES = 32
+CHROME_EXECUTABLE = Path(
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+)
+CHROME_PROBE_MIN_BYTES = 32
+CHROME_PROBE_MARKER = b"User-agent:"
+CHROME_PAGE_TIMEOUT_MS = 15_000
+CHROME_PROBE_TIMEOUT = 45
+CHROME_CAPTURE_LIMIT = 1_048_576
+CHROME_PROCESS_STOP_TIMEOUT = 2
 TRAY_START_TIMEOUT = 15.0
 
 
 class LifecycleError(RuntimeError):
     """A lifecycle safety condition or assertion failed."""
+
+
+@dataclass(frozen=True)
+class ChromeCapture:
+    loaded: bool
+    timed_out: bool
+    returncode: int
+    stdout: bytes
+    stderr: bytes
 
 
 @dataclass(frozen=True)
@@ -490,6 +509,15 @@ def _user_environment(uid: int) -> tuple[dict[str, str], Path]:
     return environment, Path(account.pw_dir)
 
 
+def _user_supplementary_groups(uid: int, gid: int) -> tuple[int, ...]:
+    try:
+        account = pwd.getpwuid(uid)
+        groups = os.getgrouplist(account.pw_name, gid)
+    except (KeyError, OSError) as exc:
+        raise LifecycleError(f"cannot resolve original user groups for {uid}") from exc
+    return tuple(sorted(group for group in set(groups) if group != gid))
+
+
 class PackagedTrayProcess:
     def __init__(self, executable: Path, uid: int, gid: int) -> None:
         self.executable = executable.resolve(strict=True)
@@ -578,8 +606,12 @@ class PackagedTrayProcess:
             self.log = None
 
 
-def _browser_probe_command(label: str) -> tuple[str, ...]:
-    suffix = re.sub(r"[^a-z0-9-]", "-", label.lower()).strip("-") or "probe"
+def _probe_suffix(label: str) -> str:
+    return re.sub(r"[^a-z0-9-]", "-", label.lower()).strip("-") or "probe"
+
+
+def _https_probe_command(label: str) -> tuple[str, ...]:
+    suffix = _probe_suffix(label)
     return (
         "/usr/bin/curl",
         "--silent",
@@ -596,14 +628,14 @@ def _browser_probe_command(label: str) -> tuple[str, ...]:
         "30",
         "--header",
         "Cache-Control: no-cache",
-        f"{BROWSER_PROBE_URL}?slipstream-lifecycle={suffix}",
+        f"{HTTPS_PROBE_URL}?slipstream-lifecycle={suffix}",
     )
 
 
-def _run_browser_probe(uid: int, gid: int, label: str) -> int:
+def _run_https_probe(uid: int, gid: int, label: str) -> int:
     environment, home = _user_environment(uid)
     result = subprocess.run(
-        _browser_probe_command(label),
+        _https_probe_command(label),
         cwd=home,
         env=environment,
         capture_output=True,
@@ -615,10 +647,215 @@ def _run_browser_probe(uid: int, gid: int, label: str) -> int:
     )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace")[-1000:]
-        raise LifecycleError(f"browser probe {label} failed: {detail}")
-    if len(result.stdout) < BROWSER_PROBE_MIN_BYTES:
+        raise LifecycleError(f"HTTPS client probe {label} failed: {detail}")
+    if len(result.stdout) < HTTPS_PROBE_MIN_BYTES:
         raise LifecycleError(
-            f"browser probe {label} returned only {len(result.stdout)} bytes"
+            f"HTTPS client probe {label} returned only {len(result.stdout)} bytes"
+        )
+    return len(result.stdout)
+
+
+def _chrome_probe_command(
+    executable: Path,
+    profile_dir: Path,
+    label: str,
+) -> tuple[str, ...]:
+    suffix = _probe_suffix(label)
+    return (
+        str(executable),
+        "--headless",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-features=MediaRouter,OptimizationHints,Translate",
+        "--disable-quic",
+        "--disable-sync",
+        "--metrics-recording-only",
+        "--no-default-browser-check",
+        "--no-first-run",
+        "--no-proxy-server",
+        "--password-store=basic",
+        f"--user-data-dir={profile_dir}",
+        f"--timeout={CHROME_PAGE_TIMEOUT_MS}",
+        "--dump-dom",
+        f"{HTTPS_PROBE_URL}?slipstream-chrome={suffix}",
+    )
+
+
+def _read_capture(capture, *, tail: bool = False) -> bytes:
+    size = os.fstat(capture.fileno()).st_size
+    length = min(size, CHROME_CAPTURE_LIMIT)
+    offset = max(0, size - length) if tail else 0
+    return os.pread(capture.fileno(), length, offset)
+
+
+def _stop_owned_chrome_process_group(
+    process: subprocess.Popen,
+    process_group: int,
+) -> None:
+    if process_group != process.pid:
+        process.kill()
+        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+        raise LifecycleError(
+            f"Chrome process group mismatch: pid={process.pid} pgid={process_group}"
+        )
+
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+    else:
+        # Chrome helpers inherit the dedicated process group. The browser can
+        # exit before a helper that still owns a capture descriptor does.
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _capture_chrome_output(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    uid: int | None,
+    gid: int | None,
+    supplementary_groups: tuple[int, ...],
+    timeout: float = CHROME_PROBE_TIMEOUT,
+) -> ChromeCapture:
+    stdout_capture = tempfile.TemporaryFile()
+    stderr_capture = tempfile.TemporaryFile()
+    process = None
+    process_group = None
+    loaded = False
+    timed_out = False
+    try:
+        identity = {}
+        if uid is not None:
+            identity = {
+                "user": uid,
+                "group": gid,
+                "extra_groups": supplementary_groups,
+            }
+        process = subprocess.Popen(
+            tuple(command),
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_capture,
+            stderr=stderr_capture,
+            start_new_session=True,
+            **identity,
+        )
+        process_group = process.pid
+        try:
+            actual_process_group = os.getpgid(process.pid)
+        except ProcessLookupError:
+            process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+        else:
+            if actual_process_group != process_group:
+                _stop_owned_chrome_process_group(process, actual_process_group)
+        deadline = time.monotonic() + timeout
+        while True:
+            stdout = _read_capture(stdout_capture)
+            loaded = (
+                len(stdout) >= CHROME_PROBE_MIN_BYTES
+                and CHROME_PROBE_MARKER in stdout
+            )
+            if loaded:
+                break
+            if process.poll() is not None:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            time.sleep(min(0.1, remaining))
+    finally:
+        try:
+            if process is not None and process_group is not None:
+                _stop_owned_chrome_process_group(process, process_group)
+        finally:
+            stdout = _read_capture(stdout_capture)
+            stderr = _read_capture(stderr_capture, tail=True)
+            stdout_capture.close()
+            stderr_capture.close()
+
+    if process is None:
+        raise LifecycleError("Chrome process did not start")
+    loaded = (
+        len(stdout) >= CHROME_PROBE_MIN_BYTES
+        and CHROME_PROBE_MARKER in stdout
+    )
+    return ChromeCapture(
+        loaded=loaded,
+        timed_out=timed_out,
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+def _run_chrome_probe(
+    uid: int,
+    gid: int,
+    label: str,
+    executable: Path = CHROME_EXECUTABLE,
+) -> int:
+    try:
+        executable = executable.resolve(strict=True)
+    except OSError as exc:
+        raise LifecycleError(
+            f"Chrome executable is unavailable: {executable}"
+        ) from exc
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise LifecycleError(f"Chrome executable is not runnable: {executable}")
+
+    environment, home = _user_environment(uid)
+    supplementary_groups = _user_supplementary_groups(uid, gid)
+    profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-chrome-"))
+    try:
+        os.chown(profile_dir, uid, gid)
+        profile_dir.chmod(0o700)
+        result = _capture_chrome_output(
+            _chrome_probe_command(executable, profile_dir, label),
+            cwd=home,
+            environment=environment,
+            timeout=CHROME_PROBE_TIMEOUT,
+            uid=uid,
+            gid=gid,
+            supplementary_groups=supplementary_groups,
+        )
+    finally:
+        shutil.rmtree(profile_dir, ignore_errors=True)
+
+    if result.loaded:
+        return len(result.stdout)
+    detail = (result.stdout + b"\n" + result.stderr).decode(
+        "utf-8", errors="replace"
+    )[-2000:]
+    if result.timed_out:
+        raise LifecycleError(f"Chrome probe {label} timed out: {detail}")
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace")[-2000:]
+        raise LifecycleError(f"Chrome probe {label} failed: {detail}")
+    if len(result.stdout) < CHROME_PROBE_MIN_BYTES:
+        raise LifecycleError(
+            f"Chrome probe {label} returned only {len(result.stdout)} bytes"
+        )
+    if CHROME_PROBE_MARKER not in result.stdout:
+        detail = result.stdout.decode("utf-8", errors="replace")[-1000:]
+        raise LifecycleError(
+            f"Chrome probe {label} did not load the expected page: {detail}"
         )
     return len(result.stdout)
 
@@ -917,9 +1154,14 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
     sentinel_states: tuple[str, ...] | None = None
     tray: PackagedTrayProcess | None = None
     tray_events: list[str] = []
-    browser_probes: list[str] = []
+    https_client_probes: list[str] = []
+    chrome_probes: list[str] = []
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
+
+    def record_client_probes(label: str) -> None:
+        https_client_probes.append(f"{label}:{_run_https_probe(uid, gid, label)}")
+        chrome_probes.append(f"{label}:{_run_chrome_probe(uid, gid, label)}")
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
@@ -992,9 +1234,7 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         sentinel.check("daemon-restart")
 
         if target.tray_executable is not None:
-            browser_probes.append(
-                f"before_tray_start:{_run_browser_probe(uid, gid, 'before-tray-start')}"
-            )
+            record_client_probes("before-tray-start")
 
             baseline = _daemon_updated_at(_read_status())
             tray = PackagedTrayProcess(target.tray_executable, uid, gid)
@@ -1010,9 +1250,7 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
                 raise LifecycleError("tray start changed the sentinel anchor")
             sentinel.check("tray-start")
             _assert_sentinel_state(runner, sentinel_states)
-            browser_probes.append(
-                f"tray_running:{_run_browser_probe(uid, gid, 'tray-running')}"
-            )
+            record_client_probes("tray-running")
 
             baseline = _daemon_updated_at(_read_status())
             tray.crash()
@@ -1027,9 +1265,7 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
                 raise LifecycleError("tray crash changed the sentinel anchor")
             sentinel.check("tray-crash")
             _assert_sentinel_state(runner, sentinel_states)
-            browser_probes.append(
-                f"after_tray_crash:{_run_browser_probe(uid, gid, 'after-tray-crash')}"
-            )
+            record_client_probes("after-tray-crash")
 
             baseline = _daemon_updated_at(_read_status())
             tray.start()
@@ -1044,9 +1280,7 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
                 raise LifecycleError("tray restart changed the sentinel anchor")
             sentinel.check("tray-restart")
             _assert_sentinel_state(runner, sentinel_states)
-            browser_probes.append(
-                f"after_tray_restart:{_run_browser_probe(uid, gid, 'after-tray-restart')}"
-            )
+            record_client_probes("after-tray-restart")
             baseline = _daemon_updated_at(_read_status())
             tray.stop()
             _wait_for_same_daemon(
@@ -1148,7 +1382,8 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         "active_start": "private_anchor_loaded",
         "restart": "new_pid_and_anchor_loaded",
         "packaged_tray": tray_events or ["not_applicable"],
-        "browser_probes": browser_probes or ["not_applicable"],
+        "https_client_probes": https_client_probes or ["not_applicable"],
+        "chrome_probes": chrome_probes or ["not_applicable"],
         "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
@@ -1171,8 +1406,13 @@ def dry_run(target_name: str = "script") -> dict:
             if target_name == "packaged-app"
             else "not applicable"
         ),
-        "browser_probes": (
+        "https_client_probes": (
             "fresh non-root HTTPS client before and after tray crash"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
+        "chrome_probes": (
+            "fresh-profile Chrome process before and after tray crash"
             if target_name == "packaged-app"
             else "not applicable"
         ),
