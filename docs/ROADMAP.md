@@ -24,6 +24,11 @@ Target: before `v0.1.5`.
 - Pair `pfctl -E` with its owned token and `pfctl -X`.
 - Manage daemon and Geph by launchd label plus verified PID/executable identity;
   never use broad process-pattern kills.
+- Treat daemon install and upgrade as a transaction: a fresh owned status,
+  exact listener, and matching private-PF state are required before success.
+  Failure disables the label and removes only owned plist/runtime/PF state.
+- Treat an absent or disabled daemon label as durable stop intent. Startup and
+  watchdog recovery do nothing until the user explicitly requests restart.
 - Require ownership proof for bundled Geph on `:9954`; treat external `:9909` as
   read-only diagnostics unless explicitly selected.
 - Keep Geph config owner-only and secret-bearing files at `0600`.
@@ -34,9 +39,10 @@ Target: before `v0.1.5`.
 - Make scheduled vendor updates open PRs; require a passing `checks` job before
   merging to `main`.
 
-Gate: install, restart, update, and uninstall leave an external PF sentinel and
-`zapret` anchor unchanged; unknown processes are never signalled; secrets are
-not readable outside the owning user.
+Gate: install, restart, update, failed install, and uninstall leave an external
+PF sentinel and `zapret` anchor unchanged; no detached owned listener remains;
+unknown processes are never signalled; secrets are not readable outside the
+owning user.
 
 CI covers both script-mode and packaged-app cold install, same-artifact
 reinstall, restart, and uninstall with a sibling anchor and a long-lived

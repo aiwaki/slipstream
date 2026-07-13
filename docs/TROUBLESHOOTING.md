@@ -30,6 +30,10 @@ After install or upgrade, the tray gives the daemon a short startup grace before
 watchdog recovery. Repeated missing snapshots after that grace still trigger the
 normal daemon repair path.
 
+The watchdog runs only when launchd reports the Slipstream label explicitly
+enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
+is the explicit action that may reinstall or re-enable it.
+
 `strategy_scores` in daemon status and copied diagnostics summary is
 aggregate-only: it reports host counts and ok/fail totals by service group and
 strategy, but does not expose hostnames.
@@ -69,6 +73,10 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
 
+Tray startup must not request administrator access when the daemon label is
+missing or disabled. An automatic upgrade prompt is valid only for an existing,
+explicitly enabled installation whose bundled daemon changed.
+
 ## Removing Slipstream
 
 `Quit Slipstream` closes the tray UI but intentionally leaves its background
@@ -86,6 +94,13 @@ then removes only Slipstream's verified Geph LaunchAgent, private runtime, and
 its Keychain account entry. The app bundle remains in `Applications` and can be
 moved to Trash afterwards.
 
+The root uninstaller disables the launchd label before stopping any detached
+listener, and signals a PID only after verifying the installed daemon command.
+It then removes the plist, owned runtime, status, and private PF rules, and
+releases the owned PF token. The token record is removed only after a successful
+release. If the installed uninstaller was already deleted, the tray uses the
+copy inside the application bundle. A partial install follows the same rollback.
+
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
 state are never changed by this action.
@@ -93,9 +108,9 @@ state are never changed by this action.
 ## Geph Exit Locations
 
 The Geph submenu normally lists city-level exits such as `CA / Montreal`. On a
-fresh launch, Geph may not have answered its local control RPC yet; Slipstream
-temporarily shows country-level fallback entries and replaces them in the open
-tray menu as soon as the live catalog is available. A restart is not required.
+fresh launch, Geph may not have answered its local control RPC yet. Until a live
+or cached verified catalog exists, Slipstream shows an unavailable state rather
+than a fabricated country-level fallback list. A restart is not required.
 
 If the menu stays country-only after Geph is connected, use `Copy Diagnostics`.
 The app caches the last verified city catalog locally, so later launches should
@@ -193,6 +208,15 @@ failed probes even though no previously verified SOCKS port existed, while PF
 was already active. OpenAI hosts then reached the geo-exit fail-close branch in
 `_handle_impl` and the client retried into the same redirect.
 
+A recurrence on 2026-07-13 stopped only after the root launchd label was
+disabled, `com.apple/slipstream` was empty, the owned PF token and all
+Slipstream/Geph processes were absent, and the application retried natively.
+The user-managed `111.88.96.50/111.88.96.51` DNS configuration was unchanged.
+This confirms a stale transparent lifecycle path, not DNS replacement, as the
+incident boundary. The source already contained the zero-byte close guard, but
+the installed lifecycle did not guarantee that the fixed daemon was loaded or
+that a partial install rolled back.
+
 Required behavior:
 
 - do not arm PF until the proxy listener and enabled geo-exit backend are ready;
@@ -204,12 +228,13 @@ Required behavior:
 - do not modify DNS, proxy, PAC, VPN, certificates, Keychain, or network plist
   files as a workaround.
 
-Emergency cleanup remains scoped to Slipstream:
+Emergency cleanup remains scoped to Slipstream. Prefer the transactional
+uninstaller; the second command is the fallback when the installed copy was
+already removed:
 
 ```bash
-sudo launchctl bootout system /Library/LaunchDaemons/dev.slipstream.tproxy.plist
-sudo pfctl -a com.apple/slipstream -F rules
-sudo pfctl -a com.apple/slipstream -F nat
+sudo /usr/local/slipstream/slipstreamd --uninstall
+sudo "/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd" --uninstall
 ```
 
 Do not use a global `pfctl -F states`, `pfctl -d`, or replacement DNS as normal
