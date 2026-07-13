@@ -34,13 +34,13 @@ YouTube/googlevideo.
 | Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
 | Stale PF recovery | tray kickstarts the daemon, then clears only the private anchor and owned enable token | non-tray watchdog if both app and daemon are gone |
 | Network transitions | detects wake gaps and default-interface changes, re-arms PF/voice capture/canaries, and exposes last re-arm in status; installed script and packaged-daemon CI repeat suspend/resume and the shared network-change path without replacing real network state | physical default-route and lid-close soak on a disposable Mac plus broader endpoint-safe payload canaries |
-| Tray independence | packaged CI launches the exact tray as the original user, verifies fresh non-root HTTPS clients, clean-profile Chrome processes, and fresh UID/path-verified Safari processes with isolated WebDriver sessions, crashes and restarts only verified processes, and requires the same daemon PID, private PF anchor, sibling anchor, and live sentinel connection to survive | repeat with account-backed owned Geph on a disposable user session |
+| Tray independence | packaged CI launches the exact tray as the original user, verifies fresh non-root HTTPS clients, clean-profile Chrome processes, and fresh UID/path-verified Safari processes with isolated WebDriver sessions, crashes and restarts only verified processes, and requires the same daemon PID, private PF anchor, sibling anchor, and live sentinel connection to survive; a protected main-only workflow adds account-backed owned-Geph payload and `KeepAlive` recovery | complete the first protected account-backed run and the physical transition soak |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
-| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path; owned Geph runs as a user LaunchAgent and live restart is daemon-coordinated after the private anchor is paused and sessions drain | account-backed sleep/wake soak on a disposable Mac |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path; owned Geph runs as a user LaunchAgent and live restart is daemon-coordinated after the private anchor is paused and sessions drain; the protected qualification gate repeats a real Steam payload after tray crash and owned PID replacement | first protected run plus account-backed physical sleep/wake soak on a disposable Mac |
 | Recovery decisions | normalized `ConnectionOutcome` evidence and a pure reducer keep local re-sweep, learned-route reset, owned-Geph restart evidence, unknown-host recheck, and external warnings separate; the bounded aggregate action is exposed through `StatusV2` | retain language-neutral vectors while splitting runtime adapters |
 | Geph coexistence | owned `:9954` listener requires PID/executable/config/listener proof; external `:9909` is diagnostics-only | explicit user opt-in contract for any external backend |
-| Secret storage | Geph directory `0700`; config/cache/ownership files `0600` and atomic | move the account secret to Keychain |
+| Secret storage | account secret in Keychain; Geph directory `0700`; config/cache/ownership files `0600` and atomic | verify the same contract in the protected disposable account-backed gate |
 | CDN edge failure | local-bypass hosts can try more A records | rolling success metrics |
 | DoH cache | bounded TTL cache | resolver rotation metrics |
 | Endpoint gates | repeated failure of important secondary geo-exit endpoints can degrade their group after a grace threshold | expand only from evidence-backed user workflows |
@@ -84,6 +84,22 @@ VPN configuration. The script refuses to run unless GitHub Actions and
 `SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job uploads only the
 exact `.app` that passed this qualification.
 
+`scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
+It is invoked only by the protected, main-only `owned-geph-qualification`
+manual workflow, so account credentials are never available to pull-request
+code. The repository environment must allow deployments only from `main` and
+provide the `SLIPSTREAM_GEPH_ACCOUNT_SECRET` secret; the workflow fails closed
+when it is absent. The root daemon must be absent and durably disabled before
+the packaged tray starts. The harness writes a disposable Keychain item and private config,
+verifies the exact LaunchAgent label, UID, PID, executable, config, listener,
+and file modes, then requires a real Steam HTTPS payload through SOCKS `:9954`.
+It crashes the tray and repeats the payload, signals only the revalidated owned
+Geph PID, and requires `KeepAlive` to replace that PID and carry another
+payload. A test-owned listener on external port `:9909` must remain alive
+throughout. Cleanup removes only the disposable user-level state; the workflow
+verifies that no daemon, private PF rule, token, status file, listener,
+LaunchAgent, or Keychain item remains.
+
 ## Priority Order
 
 ### M0 - Safe Base
@@ -100,8 +116,9 @@ exact `.app` that passed this qualification.
 - Keep local bypass and geo-exit recovery strictly separated. Enforced by
   reducer tests for Discord, YouTube, owned Geph, and external state.
 - Keep owned Geph in its user LaunchAgent so the tray is optional. Packaged CI
-  qualifies the real tray executable crash against a local-only daemon; repeat
-  with account-backed Geph on a disposable user session.
+  qualifies the real tray executable crash against a local-only daemon. The
+  protected account-backed gate is implemented; complete its first passing run
+  and the physical default-route/lid-close soak on a disposable Mac.
 
 ### M2+ - Contracts And Platforms
 

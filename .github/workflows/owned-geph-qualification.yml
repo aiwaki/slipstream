@@ -1,0 +1,142 @@
+name: owned-geph-qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: owned-geph-qualification
+  cancel-in-progress: false
+
+jobs:
+  account-backed-owned-geph:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    timeout-minutes: 35
+    environment: geph-qualification
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app-tauri/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: spike/requirements.txt
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app-tauri/src-tauri/target
+          key: cargo-owned-geph-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app-tauri/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-owned-geph-${{ runner.os }}-${{ runner.arch }}-
+            cargo-${{ runner.os }}-
+
+      - name: Require protected main and production architecture
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(uname -m)" = arm64
+
+      - name: Build the frozen daemon
+        run: |
+          set -euo pipefail
+          python3 -m venv spike/.buildvenv
+          spike/.buildvenv/bin/pip install --quiet --disable-pip-version-check \
+            -r spike/requirements.txt pyinstaller
+          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
+            --generate-keypair \
+            --key-id ci-owned-geph \
+            --private-key-output /tmp/slipstream-route-policy.key \
+            --public-keys-output spike/route-policy-keys.json
+          ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
+          rm -rf app-tauri/src-tauri/slipstreamd
+          cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
+          test -x app-tauri/src-tauri/slipstreamd/slipstreamd
+          /usr/bin/lipo app-tauri/src-tauri/slipstreamd/slipstreamd \
+            -verify_arch arm64
+
+      - name: Fetch the recorded Geph build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
+          tag="geph-vendor-$version"
+          mkdir -p app-tauri/src-tauri/binaries /tmp/geph
+          gh release download "$tag" --repo "${{ github.repository }}" \
+            --pattern geph5-client --dir /tmp/geph
+          cp /tmp/geph/geph5-client \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
+          /usr/bin/lipo \
+            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin \
+            -verify_arch arm64
+
+      - name: Build the packaged app
+        working-directory: app-tauri
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build:local -- --bundles app
+
+      - name: Verify packaged resources
+        run: |
+          set -euo pipefail
+          app="app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app"
+          test -d "$app"
+          /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
+          /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
+          /usr/bin/codesign --verify --deep --strict "$app"
+
+      - name: Establish a daemon-free qualification boundary
+        run: |
+          set -euo pipefail
+          test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+          sudo launchctl disable system/dev.slipstream.tproxy
+          ! sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1
+          test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
+          test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
+
+      - name: Account-backed owned Geph recovery qualification
+        env:
+          CI: "true"
+          GITHUB_ACTIONS: "true"
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+          SLIPSTREAM_GEPH_ACCOUNT_SECRET: ${{ secrets.SLIPSTREAM_GEPH_ACCOUNT_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$SLIPSTREAM_GEPH_ACCOUNT_SECRET"
+          python3 scripts/geph_owned_lifecycle_smoke.py \
+            --app-bundle app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app
+
+      - name: Verify the user-level gate left no system path
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+          ! sudo launchctl print system/dev.slipstream.tproxy >/dev/null 2>&1
+          test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
+          test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
+          test ! -e /var/run/slipstream-pf.token
+          test ! -e /var/run/slipstream.status
+          test -z "$(/usr/sbin/lsof -nP -t -iTCP@127.0.0.1:9954 -sTCP:LISTEN || true)"
+          ! launchctl print "gui/$(id -u)/dev.slipstream.geph" >/dev/null 2>&1
+          test ! -e "$HOME/Library/LaunchAgents/dev.slipstream.geph.plist"
+          test ! -e "$HOME/Library/Application Support/dev.slipstream.tray"
+          ! security find-generic-password \
+            -s dev.slipstream.geph -a account-secret >/dev/null 2>&1
