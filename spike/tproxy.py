@@ -6150,7 +6150,7 @@ def _daemon_status_record():
 def _process_command_for_pid(pid):
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return None
-    result = _run("/bin/ps", "-p", str(pid), "-o", "command=")
+    result = _run("/bin/ps", "-ww", "-p", str(pid), "-o", "command=")
     if result.returncode != 0:
         return None
     command = result.stdout.strip()
@@ -6175,7 +6175,11 @@ def _installed_daemon_command_owned(command):
     python = os.path.realpath(
         os.path.join(install_dir, "venv", "bin", "python3")
     )
-    return executable == python and any(
+    python_app = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.dirname(python)),
+        "Resources", "Python.app", "Contents", "MacOS", "Python",
+    ))
+    return executable in {python, python_app} and any(
         os.path.realpath(arg) == script for arg in parts[1:3]
     )
 
