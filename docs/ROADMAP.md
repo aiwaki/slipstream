@@ -79,9 +79,12 @@ crashes and restarts only that verified process, and opens fresh non-root HTTPS
 clients, clean-profile Google Chrome processes, and fresh UID/path-verified
 Safari processes with isolated WebDriver sessions before and after the crash.
 The same daemon PID and private anchor must survive while an unrelated PF
-anchor, state entry, and live connection remain unchanged. A physical
-default-route/lid-close transition and account-backed owned Geph recovery on a
-disposable Mac remain before the M1 gate is complete.
+anchor, state entry, and live connection remain unchanged. A protected,
+main-only account-backed gate now exercises the packaged tray, exact owned
+Geph listener, a real Steam HTTPS payload, tray-independent operation, and
+LaunchAgent `KeepAlive` PID replacement while preserving an unrelated `:9909`
+listener. The first protected passing run and a physical default-route/lid-close
+transition on a disposable Mac remain before the M1 gate is complete.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
