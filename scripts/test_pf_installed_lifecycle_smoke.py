@@ -216,6 +216,31 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
 
         kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
 
+    def test_daemon_signal_guard_accepts_harness_base_interpreter(self) -> None:
+        target = lifecycle.script_target()
+        daemon_command = (
+            "/Library/Frameworks/Python.framework/Versions/3.13/Resources/"
+            "Python.app/Contents/MacOS/Python "
+            f"{lifecycle.INSTALLED_DAEMON} --port 1080 --no-voice"
+        )
+        harness_command = (
+            "/Library/Frameworks/Python.framework/Versions/3.13/Resources/"
+            "Python.app/Contents/MacOS/Python "
+            f"{Path(__file__)}"
+        )
+        with mock.patch.object(
+            lifecycle,
+            "_process_command_for_pid",
+            side_effect=[daemon_command, harness_command],
+        ), mock.patch("os.kill") as kill:
+            lifecycle._signal_owned_daemon(
+                target,
+                42,
+                lifecycle.RUNTIME_REARM_SIGNAL,
+            )
+
+        kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
+
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "slipstream.log"

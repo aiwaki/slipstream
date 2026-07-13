@@ -396,6 +396,22 @@ def _process_command_for_pid(pid: int) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _process_arguments_for_pid(pid: int) -> tuple[str, ...]:
+    try:
+        return tuple(shlex.split(_process_command_for_pid(pid)))
+    except ValueError:
+        return ()
+
+
+def _same_executable(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
 def _assert_owned_daemon_pid(target: LifecycleTarget, pid: int) -> None:
     command = _process_command_for_pid(pid)
     try:
@@ -405,13 +421,15 @@ def _assert_owned_daemon_pid(target: LifecycleTarget, pid: int) -> None:
     expected = target.installed_program_prefix
     executable_matches = False
     if arguments and expected:
-        if arguments[0] == expected[0]:
-            executable_matches = True
-        else:
-            try:
-                executable_matches = os.path.samefile(arguments[0], expected[0])
-            except OSError:
-                executable_matches = False
+        executable_matches = _same_executable(arguments[0], expected[0])
+        source_install = (
+            len(expected) >= 2 and expected[1] == str(INSTALLED_DAEMON)
+        )
+        if source_install and not executable_matches:
+            harness_arguments = _process_arguments_for_pid(os.getpid())
+            executable_matches = bool(harness_arguments) and _same_executable(
+                arguments[0], harness_arguments[0]
+            )
     owned = (
         executable_matches
         and len(arguments) >= len(expected)
