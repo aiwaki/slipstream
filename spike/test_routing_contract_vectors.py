@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import routing_recovery
 import tproxy
 
 
@@ -51,14 +52,14 @@ def test_routing_policy_contract(case):
     ids=[item["name"] for item in RECOVERY["vectors"]],
 )
 def test_recovery_contract(case):
-    outcome = tproxy.ConnectionOutcome(
+    outcome = routing_recovery.ConnectionOutcome(
         **merge(RECOVERY["outcome_defaults"], case.get("outcome"))
     )
-    context = tproxy.RecoveryContext(
+    context = routing_recovery.RecoveryContext(
         **merge(RECOVERY["context_defaults"], case.get("context"))
     )
 
-    actions = tproxy.reduce_connection_outcome(outcome, context)
+    actions = routing_recovery.reduce_connection_outcome(outcome, context)
     actual = [asdict(action) for action in actions]
 
     assert actual == case["expected"]

@@ -1,5 +1,9 @@
+import ast
+from pathlib import Path
+
 import pytest
 
+import routing_recovery
 import tproxy
 
 
@@ -27,6 +31,26 @@ def outcome(
 
 def kinds(actions):
     return [action.kind for action in actions]
+
+
+def test_tproxy_reexports_the_pure_recovery_contract():
+    assert tproxy.ConnectionOutcome is routing_recovery.ConnectionOutcome
+    assert tproxy.RecoveryContext is routing_recovery.RecoveryContext
+    assert tproxy.RecoveryAction is routing_recovery.RecoveryAction
+    assert tproxy.reduce_connection_outcome is routing_recovery.reduce_connection_outcome
+
+
+def test_recovery_module_has_no_runtime_adapter_dependencies():
+    tree = ast.parse(Path(routing_recovery.__file__).read_text(encoding="utf-8"))
+    forbidden = {"asyncio", "os", "pathlib", "socket", "subprocess", "urllib"}
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".", 1)[0])
+
+    assert imported.isdisjoint(forbidden)
 
 
 def test_successful_outcome_requires_no_recovery():

@@ -8,8 +8,9 @@ Slipstream policy classification and safe recovery reduction.
 - `recovery-v1.json` maps normalized connection outcomes and reducer context to
   ordered recovery actions.
 
-Python and Rust tests consume the same files. Version 1 is append-only: correct
-an objectively invalid vector in place, but introduce behavior changes as a new
+Python's pure implementation lives in `spike/routing_recovery.py`; Python and
+Rust tests consume the same files. Version 1 is append-only: correct an
+objectively invalid vector in place, but introduce behavior changes as a new
 contract version so platform adapters can migrate deliberately.
 
 The contracts describe pure decisions only. They do not perform DNS queries,
