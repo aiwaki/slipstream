@@ -35,6 +35,7 @@ INSTALL_DIR = Path("/usr/local/slipstream")
 INSTALLED_PYTHON = INSTALL_DIR / "venv" / "bin" / "python3"
 INSTALLED_DAEMON = INSTALL_DIR / "tproxy.py"
 INSTALLED_PRIMES = INSTALL_DIR / "primes.py"
+INSTALLED_ROUTING_POLICY = INSTALL_DIR / "routing_policy.py"
 INSTALLED_ROUTING_RECOVERY = INSTALL_DIR / "routing_recovery.py"
 INSTALLED_XBOX_DNS = INSTALL_DIR / "xbox_dns.py"
 INSTALLED_FROZEN_DAEMON = INSTALL_DIR / "slipstreamd"
@@ -77,6 +78,7 @@ def script_target() -> LifecycleTarget:
             INSTALLED_PYTHON,
             INSTALLED_DAEMON,
             INSTALLED_PRIMES,
+            INSTALLED_ROUTING_POLICY,
             INSTALLED_ROUTING_RECOVERY,
             INSTALLED_XBOX_DNS,
         ),

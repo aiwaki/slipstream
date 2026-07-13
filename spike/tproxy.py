@@ -60,14 +60,36 @@ from routing_recovery import (
     RECOVERY_RESTART_OWNED_GEPH,
     RECOVERY_RESWEEP_EXACT_HOST,
     RECOVERY_WARN_EXTERNAL,
+    RecoveryAction,
+    RecoveryContext,
+    reduce_connection_outcome,
+)
+from routing_policy import (
+    ROUTE_DIRECT,
+    ROUTE_DIRECT_FIRST,
     ROUTE_GEO_EXIT,
     ROUTE_LOCAL_BYPASS,
     ROUTE_UNKNOWN,
-    RecoveryAction,
-    RecoveryContext,
+    SERVICE_ANTHROPIC,
     SERVICE_DISCORD,
+    SERVICE_GENERIC,
+    SERVICE_GITHUB,
+    SERVICE_GOOGLE,
+    SERVICE_OPENAI,
+    SERVICE_SPOTIFY,
+    SERVICE_STEAM_STORE,
+    SERVICE_TELEGRAM,
     SERVICE_YOUTUBE,
-    reduce_connection_outcome,
+    STRATEGY_DIRECT,
+    STRATEGY_DIRECT_FIRST,
+    STRATEGY_FAKE_ONLY,
+    STRATEGY_GENERAL,
+    STRATEGY_GEPH,
+    classify_route_policy,
+    host_matches as _host_matches,
+    is_russian,
+    match_policy as _match_policy,
+    normalize_host,
 )
 from xbox_dns import resolve as xbox_dns_resolve
 
@@ -166,24 +188,6 @@ _system_dns_cache = {
 }
 SYSTEM_DNS_STATUS_TTL = 30.0
 SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
-
-ROUTE_DIRECT = "direct_passthrough"
-ROUTE_DIRECT_FIRST = "direct_first"
-
-SERVICE_OPENAI = "openai"
-SERVICE_ANTHROPIC = "anthropic"
-SERVICE_TELEGRAM = "telegram"
-SERVICE_STEAM_STORE = "steam_store"
-SERVICE_GITHUB = "github"
-SERVICE_GOOGLE = "google"
-SERVICE_SPOTIFY = "spotify"
-SERVICE_GENERIC = "generic"
-
-STRATEGY_FAKE_ONLY = "fake_only"
-STRATEGY_GEPH = "geph"
-STRATEGY_DIRECT = "direct"
-STRATEGY_DIRECT_FIRST = "direct_first"
-STRATEGY_GENERAL = "general"
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
@@ -415,39 +419,12 @@ _smart_dns_ok_until = {}
 _smart_dns_last_failure = {"host": "", "reason": "", "ts": 0.0}
 
 
-def _host_matches(host, domains):
-    if not host:
-        return False
-    h = host.lower().rstrip(".")
-    return any(h == d or h.endswith("." + d) for d in domains)
-
-
 def is_discord_host(host):
     return _host_matches(host, DISCORD_HOSTS)
 
 
 def is_google_video_host(host):
     return _host_matches(host, GOOGLE_VIDEO)
-
-
-def normalize_host(host):
-    return host.lower().rstrip(".") if host else ""
-
-
-def _policy_result(host, route_class, service_group, strategy_set):
-    return {
-        "host": host,
-        "route_class": route_class,
-        "service_group": service_group,
-        "strategy_set": strategy_set,
-    }
-
-
-def _match_policy(host, policies):
-    for policy in policies:
-        if _host_matches(host, policy["domains"]):
-            return policy
-    return None
 
 
 def bundled_route_policy_manifest():
@@ -1303,25 +1280,8 @@ def route_policy_status_snapshot():
 
 
 def route_policy(host, now=None):
-    h = normalize_host(host)
-    if not h:
-        return _policy_result("", ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
     static_routes, geo_exit_routes = route_policy_tables()
-    policy = _match_policy(h, static_routes)
-    if policy:
-        return _policy_result(
-            h,
-            policy["route_class"],
-            policy["service_group"],
-            policy["strategy_set"],
-        )
-    if is_russian(h):
-        return _policy_result(h, ROUTE_DIRECT, SERVICE_GENERIC, STRATEGY_DIRECT)
-    geo_policy = _match_policy(h, geo_exit_routes)
-    if geo_policy:
-        group = geo_policy.get("service_group", SERVICE_GENERIC)
-        return _policy_result(h, ROUTE_GEO_EXIT, group, STRATEGY_GEPH)
-    return _policy_result(h, ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
+    return classify_route_policy(host, static_routes, geo_exit_routes)
 
 
 def connection_outcome_for_host(
@@ -1503,32 +1463,6 @@ def prune_telegram_direct_failures(now=None):
     now = time.time() if now is None else now
     while _tg_direct_failures and now - _tg_direct_failures[0] > TG_DIRECT_FAIL_WINDOW:
         _tg_direct_failures.popleft()
-
-# Russian services — NEVER tunnelled (split-tunnel exclusion "for the VPN").
-# Primary rule is the national TLDs; the set covers big RU services on .com/.net.
-RU_TLDS = (".ru", ".su", ".xn--p1ai", ".moscow", ".tatar", ".xn--80adxhks")
-RU_HOSTS = (
-    "vk.com", "vk.cc", "vkvideo.ru", "userapi.com", "vk-cdn.net", "vkuser.net",
-    "yandex.com", "yandex.net", "yastatic.net", "yandexcloud.net", "ya.ru",
-    "mail.ru", "mycdn.me", "imgsmail.ru",
-    "sberbank.com", "sber.ru", "sberdevices.ru",
-    "ozon.com", "ozon.ru", "wildberries.ru", "wb.ru", "avito.ru",
-    "gosuslugi.ru", "nalog.ru", "gov.ru",
-    "tinkoff.ru", "tbank.ru", "gazprombank.ru", "vtb.ru", "alfabank.ru",
-    "rutube.ru", "ok.ru", "dzen.ru", "kinopoisk.ru", "2gis.com", "2gis.ru",
-    "kaspersky.com", "kaspersky.ru", "aliexpress.ru",
-)
-
-
-def is_russian(host):
-    """True for any Russian service — excluded from the geph tunnel."""
-    if not host:
-        return False
-    h = host.lower().rstrip(".")
-    if h.endswith(RU_TLDS):
-        return True
-    return _host_matches(h, RU_HOSTS)
-
 
 # Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
 # strategies, but only after proof. A host the app keeps reconnecting to that
@@ -4273,6 +4207,7 @@ def _script_runtime_payload(source_file):
     payload = (
         (source_file, "tproxy.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
+        (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
         (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
     )
