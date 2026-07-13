@@ -224,7 +224,7 @@ jobs:
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
 
-      - name: Packaged app lifecycle sentinel smoke
+      - name: Packaged app lifecycle and tray-crash sentinel smoke
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |

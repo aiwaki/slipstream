@@ -4,7 +4,8 @@
 This script performs real privileged lifecycle operations. It refuses to run
 outside GitHub Actions with an explicit opt-in environment variable, and it
 never runs on a workstation installation. By default it tests the source
-installer; ``--app-bundle`` tests the frozen daemon embedded in a built app.
+installer; ``--app-bundle`` also crashes and restarts the built tray while the
+same installed daemon and fresh non-root HTTPS clients remain healthy.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import argparse
 import json
 import os
 import plistlib
+import pwd
 import re
 import shlex
 import shutil
@@ -56,6 +58,9 @@ RUNTIME_REARM_SIGNAL = signal.SIGUSR1
 QUALIFICATION_WAKE_GAP_SECONDS = 6.0
 WAKE_SUSPEND_SECONDS = 8.0
 LIFECYCLE_SOAK_CYCLES = 2
+BROWSER_PROBE_URL = "https://github.com/robots.txt"
+BROWSER_PROBE_MIN_BYTES = 32
+TRAY_START_TIMEOUT = 15.0
 
 
 class LifecycleError(RuntimeError):
@@ -69,6 +74,7 @@ class LifecycleTarget:
     uninstall_command: tuple[str, ...]
     installed_program_prefix: tuple[str, ...]
     required_installed_paths: tuple[Path, ...]
+    tray_executable: Path | None = None
 
 
 def script_target() -> LifecycleTarget:
@@ -107,6 +113,9 @@ def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
     daemon = app_bundle / "Contents" / "Resources" / "slipstreamd" / "slipstreamd"
     if not daemon.is_file() or not os.access(daemon, os.X_OK):
         raise LifecycleError(f"packaged app has no executable frozen daemon: {daemon}")
+    tray = app_bundle / "Contents" / "MacOS" / "slipstream"
+    if not tray.is_file() or not os.access(tray, os.X_OK):
+        raise LifecycleError(f"packaged app has no executable tray: {tray}")
 
     return LifecycleTarget(
         name="packaged-app",
@@ -114,6 +123,7 @@ def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
         uninstall_command=(str(INSTALLED_FROZEN_DAEMON), "--uninstall"),
         installed_program_prefix=(str(INSTALLED_FROZEN_DAEMON),),
         required_installed_paths=(INSTALLED_FROZEN_DAEMON,),
+        tray_executable=tray,
     )
 
 
@@ -354,6 +364,34 @@ def _wait_for_status(
     raise LifecycleError(f"daemon did not reach {expected}; last status={last!r}")
 
 
+def _wait_for_same_daemon(
+    expected: str,
+    *,
+    expected_pid: int,
+    updated_after: float,
+    timeout: float = 20,
+) -> dict:
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        last = _read_status()
+        daemon = _daemon_status(last)
+        if daemon:
+            pid = int(daemon.get("pid") or 0)
+            updated_at = float(daemon.get("updated_at", daemon.get("ts", 0)) or 0)
+            if (
+                daemon.get("state") == expected
+                and pid == expected_pid
+                and updated_at > updated_after
+                and time.time() - updated_at < 15
+            ):
+                return daemon
+        time.sleep(0.2)
+    raise LifecycleError(
+        f"daemon {expected_pid} stopped publishing {expected}; last status={last!r}"
+    )
+
+
 def _wait_for_rearm(
     expected_reason: str,
     *,
@@ -394,6 +432,195 @@ def _process_command_for_pid(pid: int) -> str:
         timeout=5,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _process_identity_for_pid(pid: int) -> tuple[int, str] | None:
+    result = subprocess.run(
+        ("/bin/ps", "-p", str(pid), "-o", "uid=", "-o", "command="),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    line = result.stdout.strip() if result.returncode == 0 else ""
+    parts = line.split(None, 1)
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), parts[1]
+    except ValueError:
+        return None
+
+
+def _assert_owned_tray_pid(executable: Path, pid: int, uid: int) -> None:
+    identity = _process_identity_for_pid(pid)
+    try:
+        expected = str(executable.resolve(strict=True))
+    except OSError as exc:
+        raise LifecycleError(f"packaged tray executable disappeared: {executable}") from exc
+    owned = False
+    if identity is not None:
+        actual_uid, command = identity
+        owned = actual_uid == uid and (
+            command == expected or command.startswith(expected + " ")
+        )
+    if not owned:
+        raise LifecycleError(
+            f"refusing to signal unowned tray pid {pid}: identity={identity!r}"
+        )
+
+
+def _user_environment(uid: int) -> tuple[dict[str, str], Path]:
+    try:
+        account = pwd.getpwuid(uid)
+    except KeyError as exc:
+        raise LifecycleError(f"cannot resolve original user id {uid}") from exc
+    environment = {
+        "HOME": account.pw_dir,
+        "USER": account.pw_name,
+        "LOGNAME": account.pw_name,
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+    }
+    if os.environ.get("TMPDIR"):
+        environment["TMPDIR"] = os.environ["TMPDIR"]
+    return environment, Path(account.pw_dir)
+
+
+class PackagedTrayProcess:
+    def __init__(self, executable: Path, uid: int, gid: int) -> None:
+        self.executable = executable.resolve(strict=True)
+        self.uid = uid
+        self.gid = gid
+        self.process: subprocess.Popen | None = None
+        self.log = None
+
+    def _log_tail(self) -> str:
+        if self.log is None:
+            return ""
+        self.log.flush()
+        self.log.seek(0)
+        return self.log.read().decode("utf-8", errors="replace")[-2000:]
+
+    def start(self) -> int:
+        if self.process is not None:
+            raise LifecycleError("packaged tray is already running")
+        environment, home = _user_environment(self.uid)
+        self.log = tempfile.TemporaryFile()
+        self.process = subprocess.Popen(
+            (str(self.executable),),
+            cwd=home,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=self.log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            user=self.uid,
+            group=self.gid,
+            extra_groups=(),
+        )
+        deadline = time.monotonic() + TRAY_START_TIMEOUT
+        owned_since = None
+        last_error = ""
+        while time.monotonic() < deadline:
+            returncode = self.process.poll()
+            if returncode is not None:
+                detail = self._log_tail()
+                self._close_handles()
+                raise LifecycleError(
+                    f"packaged tray exited during startup ({returncode}): {detail}"
+                )
+            try:
+                _assert_owned_tray_pid(self.executable, self.process.pid, self.uid)
+                owned_since = owned_since or time.monotonic()
+                if time.monotonic() - owned_since >= 2:
+                    return self.process.pid
+            except LifecycleError as exc:
+                last_error = str(exc)
+                owned_since = None
+            time.sleep(0.2)
+        detail = self._log_tail()
+        self.stop()
+        raise LifecycleError(
+            f"packaged tray did not remain active: {last_error}; log={detail}"
+        )
+
+    def crash(self) -> None:
+        if self.process is None:
+            raise LifecycleError("packaged tray is not running")
+        _assert_owned_tray_pid(self.executable, self.process.pid, self.uid)
+        os.kill(self.process.pid, signal.SIGKILL)
+        self.process.wait(timeout=5)
+        self._close_handles()
+
+    def stop(self) -> None:
+        if self.process is None:
+            self._close_handles()
+            return
+        if self.process.poll() is None:
+            _assert_owned_tray_pid(self.executable, self.process.pid, self.uid)
+            os.kill(self.process.pid, signal.SIGTERM)
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                _assert_owned_tray_pid(self.executable, self.process.pid, self.uid)
+                os.kill(self.process.pid, signal.SIGKILL)
+                self.process.wait(timeout=5)
+        self._close_handles()
+
+    def _close_handles(self) -> None:
+        self.process = None
+        if self.log is not None:
+            self.log.close()
+            self.log = None
+
+
+def _browser_probe_command(label: str) -> tuple[str, ...]:
+    suffix = re.sub(r"[^a-z0-9-]", "-", label.lower()).strip("-") or "probe"
+    return (
+        "/usr/bin/curl",
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--location",
+        "--ipv4",
+        "--http1.1",
+        "--noproxy",
+        "*",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "30",
+        "--header",
+        "Cache-Control: no-cache",
+        f"{BROWSER_PROBE_URL}?slipstream-lifecycle={suffix}",
+    )
+
+
+def _run_browser_probe(uid: int, gid: int, label: str) -> int:
+    environment, home = _user_environment(uid)
+    result = subprocess.run(
+        _browser_probe_command(label),
+        cwd=home,
+        env=environment,
+        capture_output=True,
+        check=False,
+        timeout=35,
+        user=uid,
+        group=gid,
+        extra_groups=(),
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace")[-1000:]
+        raise LifecycleError(f"browser probe {label} failed: {detail}")
+    if len(result.stdout) < BROWSER_PROBE_MIN_BYTES:
+        raise LifecycleError(
+            f"browser probe {label} returned only {len(result.stdout)} bytes"
+        )
+    return len(result.stdout)
 
 
 def _process_arguments_for_pid(pid: int) -> tuple[str, ...]:
@@ -456,6 +683,13 @@ def _signal_owned_daemon(
 def _recovery_count(status: dict | None) -> int:
     recovery = _recovery_status(status)
     return int(recovery.get("count") or 0) if recovery else 0
+
+
+def _daemon_updated_at(status: dict | None) -> float:
+    daemon = _daemon_status(status)
+    if not daemon:
+        return 0.0
+    return float(daemon.get("updated_at", daemon.get("ts", 0)) or 0)
 
 
 def _wait_for_path(path: Path, *, present: bool, timeout: float = 20) -> None:
@@ -681,6 +915,9 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
     sentinel: PersistentSentinelConnection | None = None
     sentinel_snapshot: tuple[str, str] | None = None
     sentinel_states: tuple[str, ...] | None = None
+    tray: PackagedTrayProcess | None = None
+    tray_events: list[str] = []
+    browser_probes: list[str] = []
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
 
@@ -754,6 +991,76 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         _assert_sentinel_state(runner, sentinel_states)
         sentinel.check("daemon-restart")
 
+        if target.tray_executable is not None:
+            browser_probes.append(
+                f"before_tray_start:{_run_browser_probe(uid, gid, 'before-tray-start')}"
+            )
+
+            baseline = _daemon_updated_at(_read_status())
+            tray = PackagedTrayProcess(target.tray_executable, uid, gid)
+            tray.start()
+            _wait_for_same_daemon(
+                "active",
+                expected_pid=int(restarted["pid"]),
+                updated_after=baseline,
+            )
+            tray_events.append("started")
+            _assert_anchor_active(runner)
+            if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+                raise LifecycleError("tray start changed the sentinel anchor")
+            sentinel.check("tray-start")
+            _assert_sentinel_state(runner, sentinel_states)
+            browser_probes.append(
+                f"tray_running:{_run_browser_probe(uid, gid, 'tray-running')}"
+            )
+
+            baseline = _daemon_updated_at(_read_status())
+            tray.crash()
+            tray_events.append("crashed")
+            _wait_for_same_daemon(
+                "active",
+                expected_pid=int(restarted["pid"]),
+                updated_after=baseline,
+            )
+            _assert_anchor_active(runner)
+            if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+                raise LifecycleError("tray crash changed the sentinel anchor")
+            sentinel.check("tray-crash")
+            _assert_sentinel_state(runner, sentinel_states)
+            browser_probes.append(
+                f"after_tray_crash:{_run_browser_probe(uid, gid, 'after-tray-crash')}"
+            )
+
+            baseline = _daemon_updated_at(_read_status())
+            tray.start()
+            _wait_for_same_daemon(
+                "active",
+                expected_pid=int(restarted["pid"]),
+                updated_after=baseline,
+            )
+            tray_events.append("restarted")
+            _assert_anchor_active(runner)
+            if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+                raise LifecycleError("tray restart changed the sentinel anchor")
+            sentinel.check("tray-restart")
+            _assert_sentinel_state(runner, sentinel_states)
+            browser_probes.append(
+                f"after_tray_restart:{_run_browser_probe(uid, gid, 'after-tray-restart')}"
+            )
+            baseline = _daemon_updated_at(_read_status())
+            tray.stop()
+            _wait_for_same_daemon(
+                "active",
+                expected_pid=int(restarted["pid"]),
+                updated_after=baseline,
+            )
+            tray_events.append("stopped")
+            _assert_anchor_active(runner)
+            if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
+                raise LifecycleError("tray stop changed the sentinel anchor")
+            sentinel.check("tray-stop")
+            _assert_sentinel_state(runner, sentinel_states)
+
         lifecycle_rearms = []
         daemon_pid = int(restarted["pid"])
         current_status = _read_status()
@@ -807,6 +1114,11 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
     finally:
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
+        if tray is not None:
+            try:
+                tray.stop()
+            except Exception as exc:
+                cleanup_errors.append(f"packaged tray cleanup: {exc}")
         cleanup_errors.extend(_fallback_uninstall(system, runner, target))
         if sentinel is not None:
             sentinel.close()
@@ -835,6 +1147,8 @@ def run_lifecycle(target: LifecycleTarget | None = None) -> dict:
         "reinstall": "new_pid_and_payload_replaced",
         "active_start": "private_anchor_loaded",
         "restart": "new_pid_and_anchor_loaded",
+        "packaged_tray": tray_events or ["not_applicable"],
+        "browser_probes": browser_probes or ["not_applicable"],
         "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
@@ -852,6 +1166,16 @@ def dry_run(target_name: str = "script") -> dict:
         "restricted_to": "disposable GitHub Actions macOS runner",
         "cold_install": "Geph unavailable; PF must stay dormant",
         "active_phase": "SLIP_GEPH=0 in test-only installed plist",
+        "packaged_tray": (
+            "start, crash, restart, and stop exact user-owned process"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
+        "browser_probes": (
+            "fresh non-root HTTPS client before and after tray crash"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
         "lifecycle_rearms": (
             f"{LIFECYCLE_SOAK_CYCLES} suspend/wake and network-change cycles"
         ),

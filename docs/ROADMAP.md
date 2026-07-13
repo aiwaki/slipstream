@@ -72,14 +72,15 @@ failure also gate or pause the private PF anchor. Owned Geph runs in a user
 LaunchAgent with `KeepAlive`; after repeated post-wake failures, the daemon can
 pause its private PF anchor, wait for active tunnel sessions to drain, verify
 the exact user job and listener identity, and kickstart that job without the
-tray. The remaining M1 gate is a sleep/wake and tray-crash soak of this complete
-lifecycle. Disposable CI now runs two installed-daemon suspend/resume and
-network-change re-arm cycles for both the source installer and the frozen daemon
-from the packaged app. It requires the same daemon PID and private anchor to
+tray. Disposable CI runs two installed-daemon suspend/resume and network-change
+re-arm cycles for both the source installer and the frozen daemon from the
+packaged app. It also launches the exact packaged tray as the original user,
+crashes and restarts only that verified process, and opens fresh non-root HTTPS
+clients before and after the crash. The same daemon PID and private anchor must
 survive while an unrelated PF anchor, state entry, and live connection remain
-unchanged. A physical default-route transition, browser restart, and an actual
-packaged-tray crash with an account-backed owned Geph job remain before the M1
-gate is complete.
+unchanged. A physical default-route/lid-close transition, real Safari/Chrome
+restart, and account-backed owned Geph recovery on a disposable Mac remain
+before the M1 gate is complete.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.

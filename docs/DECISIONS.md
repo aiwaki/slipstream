@@ -48,6 +48,7 @@ survive across sessions and agents.
 | 2026-07-13 | Raw daemon logs and every retained rotation are root-owned regular files with mode `0600`; creation must not follow symlinks. `Open Log` and `Copy Diagnostics` may make a temporary owner-only copy only after an explicit administrator prompt, and diagnostics redact that copy before export. | Active |
 | 2026-07-13 | Routing policy and recovery behavior shared across implementations is specified by versioned language-neutral JSON vectors under `contracts/`. Contract v1 is append-only; incompatible behavior changes require a new version so adapters can migrate deliberately. | Active |
 | 2026-07-13 | Installed lifecycle qualification may suspend and signal only a PID whose command exactly matches the installed daemon. Suspend/resume must exercise the daemon's real wake-gap detection. The diagnostic network-change signal only queues a bounded event; all PF, backend, canary, and status work stays in the normal monitor thread. These stimuli are disposable-CI diagnostics, not user recovery commands, and never mutate DNS, interfaces, proxy, PAC, VPN, or external PF anchors. | Active |
+| 2026-07-13 | Packaged tray-crash qualification runs only on disposable CI. It starts the embedded tray as the original non-root user and signals it only when UID and exact executable path match. Fresh HTTPS probes inherit no external proxy environment; the daemon PID, private PF anchor, unrelated PF anchor/state, and persistent connection must survive tray start, crash, restart, and stop. | Active |
 
 ## Notes
 
