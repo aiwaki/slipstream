@@ -1,7 +1,9 @@
 import asyncio
 import ast
 import base64
+import errno
 import hashlib
+import inspect
 import json
 import logging
 import plistlib
@@ -51,6 +53,11 @@ def reset_smart_dns_state():
     canary_state = dict(tproxy._canary_state)
     rearm_state = dict(tproxy._rearm_state)
     runtime_rearm_requests = list(tproxy._runtime_rearm_requests)
+    fd_pressure = (
+        tproxy._fd_pressure,
+        tproxy._fd_pressure_reason,
+        tproxy._fd_pressure_at,
+    )
     try:
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
@@ -102,6 +109,9 @@ def reset_smart_dns_state():
             "count": 0,
         })
         tproxy._runtime_rearm_requests.clear()
+        tproxy._fd_pressure = False
+        tproxy._fd_pressure_reason = ""
+        tproxy._fd_pressure_at = 0.0
         yield
     finally:
         tproxy.reset_route_policy_manifest()
@@ -147,6 +157,11 @@ def reset_smart_dns_state():
         tproxy._rearm_state.update(rearm_state)
         tproxy._runtime_rearm_requests.clear()
         tproxy._runtime_rearm_requests.extend(runtime_rearm_requests)
+        (
+            tproxy._fd_pressure,
+            tproxy._fd_pressure_reason,
+            tproxy._fd_pressure_at,
+        ) = fd_pressure
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -254,6 +269,16 @@ def test_tgws_status_reports_error_without_ready_duration():
         "telegram_proxy_error": "boom",
         "telegram_proxy_ready_for": 0,
     }
+
+
+def test_tgws_restart_closes_cancelled_event_loop_tasks():
+    loop = asyncio.new_event_loop()
+    task = loop.create_task(asyncio.sleep(60))
+
+    tproxy._close_asyncio_loop(loop)
+
+    assert loop.is_closed()
+    assert task.cancelled()
 
 
 def test_frozen_daemon_running_from_install_dir():
@@ -1317,6 +1342,61 @@ def test_geph_probe_hysteresis_preserves_only_a_verified_sticky_port():
     )
     assert up is False
     assert strikes == 3
+
+
+def test_fd_pressure_reducer_uses_hysteresis_and_a_bounded_high_watermark():
+    assert tproxy.fd_pressure_watermarks(65536) == (2048, 1024)
+    assert not tproxy.reduce_fd_pressure(False, 2047, 65536)
+    assert tproxy.reduce_fd_pressure(False, 2048, 65536)
+    assert tproxy.reduce_fd_pressure(True, 1025, 65536)
+    assert not tproxy.reduce_fd_pressure(True, 1024, 65536)
+
+
+def test_asyncio_emfile_pauses_only_private_routing_once(monkeypatch):
+    pauses = []
+
+    class Loop:
+        def __init__(self):
+            self.default_contexts = []
+
+        def default_exception_handler(self, context):
+            self.default_contexts.append(context)
+
+    loop = Loop()
+    monkeypatch.setattr(tproxy, "_fd_pressure", False)
+    monkeypatch.setattr(tproxy, "_fd_reserve", [])
+    monkeypatch.setattr(tproxy, "pause_private_pf", lambda: pauses.append(True) or True)
+
+    context = {"exception": OSError(errno.EMFILE, "Too many open files")}
+    tproxy.asyncio_exception_handler(loop, context)
+    tproxy.asyncio_exception_handler(loop, context)
+
+    assert pauses == [True]
+    assert loop.default_contexts == []
+    assert tproxy._fd_pressure
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    assert not tproxy.geo_exit_backend_ready(now=100.0)
+
+
+def test_fd_pressure_stays_dormant_until_usage_falls_below_low_watermark(monkeypatch):
+    counts = iter((2200, 1024))
+    pauses = []
+    reserve_reopens = []
+    monkeypatch.setattr(tproxy, "_fd_pressure", False)
+    monkeypatch.setattr(tproxy, "_fd_reserve", [])
+    monkeypatch.setattr(tproxy, "open_fd_count", lambda: next(counts))
+    monkeypatch.setattr(
+        tproxy.resource,
+        "getrlimit",
+        lambda _kind: (65536, 65536),
+    )
+    monkeypatch.setattr(tproxy, "pause_private_pf", lambda: pauses.append(True) or True)
+    monkeypatch.setattr(tproxy, "_open_fd_reserve", lambda: reserve_reopens.append(True))
+
+    assert tproxy.refresh_fd_pressure()
+    assert not tproxy.refresh_fd_pressure()
+    assert pauses == [True]
+    assert reserve_reopens == [True]
 
 
 def test_pf_startup_waits_for_enabled_geo_exit_backend(monkeypatch):
@@ -4214,6 +4294,146 @@ def test_pump_records_transport_error_but_not_orderly_eof():
     assert aborted.client_end_at
     assert not aborted.client_eof
     assert aborted.client_read_failed
+
+
+def test_handle_always_closes_client_writer_after_handler_failure(monkeypatch):
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    async def fail(_reader, _writer):
+        raise RuntimeError("relay failed")
+
+    writer = Writer()
+    monkeypatch.setattr(tproxy, "_handle_impl", fail)
+    monkeypatch.setattr(tproxy, "_conn_count", 0)
+
+    with pytest.raises(RuntimeError, match="relay failed"):
+        asyncio.run(tproxy.handle(object(), writer))
+
+    assert writer.closed == 1
+    assert writer.waited == 1
+    assert tproxy._conn_count == 0
+
+
+def test_every_transparent_backend_uses_the_bounded_relay_lifecycle():
+    source = inspect.getsource(tproxy._handle_impl)
+
+    assert "asyncio.gather(pump" not in source
+    assert source.count("relay_local_stream(") == 4
+
+
+def test_relay_closes_and_waits_for_both_stream_writers():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    upstream = Writer()
+    downstream = Writer()
+
+    assert asyncio.run(
+        tproxy.relay_local_stream(
+            EofReader(), upstream, EofReader(), downstream
+        )
+    ) == (0, 0)
+    assert (upstream.closed, upstream.waited) == (1, 1)
+    assert (downstream.closed, downstream.waited) == (1, 1)
+
+
+def test_failed_async_dials_close_and_wait_for_the_open_writer(monkeypatch):
+    class Reader:
+        async def read(self, _size):
+            return b""
+
+    class Socket:
+        def getsockname(self):
+            return "127.0.0.1", 50000
+
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def get_extra_info(self, _name):
+            return Socket()
+
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            raise OSError("write failed")
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    writers = []
+
+    async def open_connection(*_args, **_kwargs):
+        writer = Writer()
+        writers.append(writer)
+        return Reader(), writer
+
+    monkeypatch.setattr(tproxy.asyncio, "open_connection", open_connection)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "inject_fake_for_host", lambda *_args: None)
+
+    async def exercise():
+        assert await tproxy.dial_via_geph("example.com", 443, b"hello") is None
+        assert await tproxy.dial_plain("127.0.0.1", 443, b"hello") is None
+        assert await tproxy.dial_and_probe("127.0.0.1", 443, b"hello") is None
+        assert await tproxy.dial_and_probe_fake(
+            "127.0.0.1", 443, b"hello", host="example.com"
+        ) is None
+
+    asyncio.run(exercise())
+
+    assert len(writers) == 4
+    assert all((writer.closed, writer.waited) == (1, 1) for writer in writers)
+
+
+def test_relay_soak_leaves_no_half_open_tasks():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class Writer:
+        def close(self):
+            pass
+
+    async def exercise():
+        current = asyncio.current_task()
+        for _ in range(200):
+            assert await tproxy.relay_local_stream(
+                EofReader(), Writer(), BlockingReader(), Writer()
+            ) == (0, 0)
+        assert asyncio.all_tasks() == {current}
+
+    asyncio.run(exercise())
 
 
 def test_relay_local_stream_stops_waiting_when_client_ends_first():
