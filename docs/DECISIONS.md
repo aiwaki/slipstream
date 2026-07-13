@@ -45,6 +45,7 @@ survive across sessions and agents.
 | 2026-07-13 | Tray recovery copy names the affected access class (`local`, `external`, or both) and states that recovery is in progress. It does not surface generic `Needs attention`; raw failure detail remains only in sanitized diagnostics. | Active |
 | 2026-07-13 | A live but stale owned Geph may be restarted by the daemon only after the private PF anchor is paused and active Geph sessions reach zero. The daemon must verify the ownership file's user ID against its filesystem owner, the exact `dev.slipstream.geph` LaunchAgent label, and the listener PID/executable/config identity before calling `launchctl kickstart`; unknown listeners and external Geph are never touched. | Active |
 | 2026-07-13 | Raw daemon logs and every retained rotation are root-owned regular files with mode `0600`; creation must not follow symlinks. `Open Log` and `Copy Diagnostics` may make a temporary owner-only copy only after an explicit administrator prompt, and diagnostics redact that copy before export. | Active |
+| 2026-07-13 | Routing policy and recovery behavior shared across implementations is specified by versioned language-neutral JSON vectors under `contracts/`. Contract v1 is append-only; incompatible behavior changes require a new version so adapters can migrate deliberately. | Active |
 
 ## Notes
 

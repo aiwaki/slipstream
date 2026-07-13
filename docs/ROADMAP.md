@@ -91,7 +91,8 @@ PF lifecycle qualification.
 - Split the Rust tray into status client, diagnostics, installer, Geph config,
   and menu orchestration.
 - Keep Python transport; avoid a big-bang rewrite.
-- Add language-neutral policy fixtures and recovery vectors.
+- Add language-neutral policy fixtures and recovery vectors. Done for contract
+  v1; Python and Rust tests consume the same versioned JSON files.
 
 ## M3 - Release-Grade macOS
 
