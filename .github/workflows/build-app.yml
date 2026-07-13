@@ -136,7 +136,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Qualify the release app lifecycle
+      - name: Qualify the release app lifecycle and tray crash
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |

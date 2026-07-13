@@ -56,10 +56,15 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             daemon.parent.mkdir(parents=True)
             daemon.write_bytes(b"packaged-daemon")
             daemon.chmod(0o755)
+            tray = app / "Contents" / "MacOS" / "slipstream"
+            tray.parent.mkdir(parents=True)
+            tray.write_bytes(b"packaged-tray")
+            tray.chmod(0o755)
 
             target = lifecycle.packaged_app_target(app)
 
             self.assertEqual(target.name, "packaged-app")
+            self.assertEqual(target.tray_executable, tray.resolve())
             lifecycle.validate_system_command(target.install_command, target)
             lifecycle.validate_system_command(target.uninstall_command, target)
             with self.assertRaises(lifecycle.LifecycleError):
@@ -79,6 +84,24 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             daemon.write_bytes(b"packaged-daemon")
             daemon.chmod(0o644)
             with self.assertRaises(lifecycle.LifecycleError):
+                lifecycle.packaged_app_target(app)
+
+    def test_packaged_target_requires_an_executable_tray(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "Slipstream.app"
+            daemon = app / "Contents" / "Resources" / "slipstreamd" / "slipstreamd"
+            daemon.parent.mkdir(parents=True)
+            daemon.write_bytes(b"packaged-daemon")
+            daemon.chmod(0o755)
+
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "executable tray"):
+                lifecycle.packaged_app_target(app)
+
+            tray = app / "Contents" / "MacOS" / "slipstream"
+            tray.parent.mkdir(parents=True)
+            tray.write_bytes(b"packaged-tray")
+            tray.chmod(0o644)
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "executable tray"):
                 lifecycle.packaged_app_target(app)
 
     def test_plist_patch_enables_local_only_mode_and_disables_voice(self) -> None:
@@ -164,6 +187,30 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(lifecycle._recovery_count(status), 3)
         self.assertIsNone(lifecycle._recovery_status({"state": "active"}))
 
+    def test_wait_for_same_daemon_requires_a_new_status_update(self) -> None:
+        stale = {
+            "schema_version": 2,
+            "daemon": {"state": "active", "pid": 42, "updated_at": 500.0},
+        }
+        fresh = {
+            "schema_version": 2,
+            "daemon": {"state": "active", "pid": 42, "updated_at": 502.0},
+        }
+        with mock.patch.object(
+            lifecycle,
+            "_read_status",
+            side_effect=[stale, fresh],
+        ), mock.patch("time.time", return_value=503.0), mock.patch("time.sleep"):
+            observed = lifecycle._wait_for_same_daemon(
+                "active",
+                expected_pid=42,
+                updated_after=500.0,
+                timeout=1,
+            )
+
+        self.assertEqual(observed["pid"], 42)
+        self.assertEqual(lifecycle._daemon_updated_at(fresh), 502.0)
+
     def test_daemon_signal_guard_accepts_only_exact_installed_command(self) -> None:
         target = lifecycle.script_target()
         command = " ".join((*target.installed_program_prefix, "--no-voice"))
@@ -241,6 +288,85 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
 
         kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
 
+    def test_tray_signal_guard_requires_exact_uid_and_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"tray")
+            executable.chmod(0o755)
+            expected = str(executable.resolve())
+
+            with mock.patch.object(
+                lifecycle,
+                "_process_identity_for_pid",
+                return_value=(501, expected),
+            ):
+                lifecycle._assert_owned_tray_pid(executable, 42, 501)
+
+            for identity in ((502, expected), (501, "/tmp/not-slipstream"), None):
+                with self.subTest(identity=identity), mock.patch.object(
+                    lifecycle,
+                    "_process_identity_for_pid",
+                    return_value=identity,
+                ):
+                    with self.assertRaisesRegex(lifecycle.LifecycleError, "unowned tray"):
+                        lifecycle._assert_owned_tray_pid(executable, 42, 501)
+
+    def test_packaged_tray_crash_signals_only_the_verified_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"tray")
+            executable.chmod(0o755)
+            tray = lifecycle.PackagedTrayProcess(executable, 501, 20)
+            process = mock.Mock(pid=42)
+            tray.process = process
+            tray.log = tempfile.TemporaryFile()
+
+            with mock.patch.object(
+                lifecycle,
+                "_process_identity_for_pid",
+                return_value=(501, str(executable.resolve())),
+            ), mock.patch("os.kill") as kill:
+                tray.crash()
+
+        kill.assert_called_once_with(42, lifecycle.signal.SIGKILL)
+        process.wait.assert_called_once_with(timeout=5)
+        self.assertIsNone(tray.process)
+
+    def test_user_environment_does_not_forward_proxy_or_ci_secrets(self) -> None:
+        account = mock.Mock(pw_dir="/Users/runner", pw_name="runner")
+        inherited = {
+            "HTTPS_PROXY": "http://external-proxy.invalid",
+            "GH_TOKEN": "secret",
+            "TMPDIR": "/tmp/runner/",
+            "LANG": "en_US.UTF-8",
+        }
+        with mock.patch.dict(os.environ, inherited, clear=True), mock.patch.object(
+            lifecycle.pwd,
+            "getpwuid",
+            return_value=account,
+        ):
+            environment, home = lifecycle._user_environment(501)
+
+        self.assertEqual(home, Path("/Users/runner"))
+        self.assertNotIn("HTTPS_PROXY", environment)
+        self.assertNotIn("GH_TOKEN", environment)
+        self.assertEqual(environment["HOME"], "/Users/runner")
+        self.assertEqual(environment["TMPDIR"], "/tmp/runner/")
+
+    def test_browser_probe_is_fresh_non_proxy_ipv4_https(self) -> None:
+        command = lifecycle._browser_probe_command("After Tray Crash")
+
+        self.assertEqual(command[0], "/usr/bin/curl")
+        self.assertIn("--ipv4", command)
+        self.assertIn("--http1.1", command)
+        self.assertEqual(command[command.index("--noproxy") + 1], "*")
+        self.assertEqual(
+            command[-1],
+            "https://github.com/robots.txt?slipstream-lifecycle=after-tray-crash",
+        )
+
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "slipstream.log"
@@ -273,6 +399,10 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(report["result"], "dry-run")
         self.assertEqual(report["target"], "script")
         self.assertFalse(report["workstation_allowed"])
+
+        packaged = lifecycle.dry_run("packaged-app")
+        self.assertIn("crash", packaged["packaged_tray"])
+        self.assertIn("HTTPS client", packaged["browser_probes"])
 
 
 if __name__ == "__main__":
