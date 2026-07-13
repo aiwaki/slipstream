@@ -6,6 +6,7 @@ import os
 import plistlib
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -394,7 +395,9 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             executable = Path(tmp) / "Google Chrome"
             executable.write_bytes(b"chrome")
             executable.chmod(0o755)
-            completed = mock.Mock(
+            completed = lifecycle.ChromeCapture(
+                loaded=True,
+                timed_out=False,
                 returncode=0,
                 stdout=(
                     lifecycle.CHROME_PROBE_MARKER
@@ -429,8 +432,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 "getgrouplist",
                 return_value=[20, 12, 61],
             ), mock.patch.object(lifecycle.os, "chown") as chown, mock.patch.object(
-                lifecycle.subprocess,
-                "run",
+                lifecycle,
+                "_capture_chrome_output",
                 side_effect=run_probe,
             ) as run:
                 size = lifecycle._run_chrome_probe(
@@ -449,9 +452,12 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         )
         profile = Path(profile_argument.split("=", 1)[1])
         self.assertFalse(profile.exists())
-        self.assertEqual(run.call_args.kwargs["user"], 501)
-        self.assertEqual(run.call_args.kwargs["group"], 20)
-        self.assertEqual(run.call_args.kwargs["extra_groups"], (12, 61))
+        self.assertEqual(run.call_args.kwargs["uid"], 501)
+        self.assertEqual(run.call_args.kwargs["gid"], 20)
+        self.assertEqual(
+            run.call_args.kwargs["supplementary_groups"],
+            (12, 61),
+        )
 
     def test_run_chrome_probe_rejects_an_unavailable_executable(self) -> None:
         with self.assertRaisesRegex(lifecycle.LifecycleError, "unavailable"):
@@ -467,7 +473,9 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             executable = Path(tmp) / "Google Chrome"
             executable.write_bytes(b"chrome")
             executable.chmod(0o755)
-            completed = mock.Mock(
+            completed = lifecycle.ChromeCapture(
+                loaded=False,
+                timed_out=False,
                 returncode=0,
                 stdout=b"<html>ERR_CONNECTION_CLOSED</html>",
                 stderr=b"",
@@ -485,8 +493,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 "getgrouplist",
                 return_value=[20, 12, 61],
             ), mock.patch.object(lifecycle.os, "chown"), mock.patch.object(
-                lifecycle.subprocess,
-                "run",
+                lifecycle,
+                "_capture_chrome_output",
                 return_value=completed,
             ):
                 with self.assertRaisesRegex(
@@ -499,6 +507,53 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                         "error-page",
                         executable,
                     )
+
+    def test_chrome_capture_stops_after_expected_dom_without_waiting_for_exit(
+        self,
+    ) -> None:
+        payload = lifecycle.CHROME_PROBE_MARKER.decode("ascii") + "x" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            started = time.monotonic()
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    f"import time; print({payload!r}, flush=True); time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=3,
+            )
+
+        self.assertTrue(result.loaded)
+        self.assertFalse(result.timed_out)
+        self.assertIn(lifecycle.CHROME_PROBE_MARKER, result.stdout)
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_chrome_capture_timeout_keeps_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    "import sys, time; "
+                    "print('capture diagnostic', file=sys.stderr, flush=True); "
+                    "time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=0.2,
+            )
+
+        self.assertFalse(result.loaded)
+        self.assertTrue(result.timed_out)
+        self.assertIn(b"capture diagnostic", result.stderr)
 
     def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

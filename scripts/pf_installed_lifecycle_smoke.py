@@ -68,11 +68,22 @@ CHROME_PROBE_MIN_BYTES = 32
 CHROME_PROBE_MARKER = b"User-agent:"
 CHROME_PAGE_TIMEOUT_MS = 15_000
 CHROME_PROBE_TIMEOUT = 45
+CHROME_CAPTURE_LIMIT = 1_048_576
+CHROME_PROCESS_STOP_TIMEOUT = 2
 TRAY_START_TIMEOUT = 15.0
 
 
 class LifecycleError(RuntimeError):
     """A lifecycle safety condition or assertion failed."""
+
+
+@dataclass(frozen=True)
+class ChromeCapture:
+    loaded: bool
+    timed_out: bool
+    returncode: int
+    stdout: bytes
+    stderr: bytes
 
 
 @dataclass(frozen=True)
@@ -672,6 +683,128 @@ def _chrome_probe_command(
     )
 
 
+def _read_capture(capture, *, tail: bool = False) -> bytes:
+    size = os.fstat(capture.fileno()).st_size
+    length = min(size, CHROME_CAPTURE_LIMIT)
+    offset = max(0, size - length) if tail else 0
+    return os.pread(capture.fileno(), length, offset)
+
+
+def _stop_owned_chrome_process_group(
+    process: subprocess.Popen,
+    process_group: int,
+) -> None:
+    if process_group != process.pid:
+        process.kill()
+        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+        raise LifecycleError(
+            f"Chrome process group mismatch: pid={process.pid} pgid={process_group}"
+        )
+
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+    else:
+        # Chrome helpers inherit the dedicated process group. The browser can
+        # exit before a helper that still owns a capture descriptor does.
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _capture_chrome_output(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    uid: int | None,
+    gid: int | None,
+    supplementary_groups: tuple[int, ...],
+    timeout: float = CHROME_PROBE_TIMEOUT,
+) -> ChromeCapture:
+    stdout_capture = tempfile.TemporaryFile()
+    stderr_capture = tempfile.TemporaryFile()
+    process = None
+    process_group = None
+    loaded = False
+    timed_out = False
+    try:
+        identity = {}
+        if uid is not None:
+            identity = {
+                "user": uid,
+                "group": gid,
+                "extra_groups": supplementary_groups,
+            }
+        process = subprocess.Popen(
+            tuple(command),
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_capture,
+            stderr=stderr_capture,
+            start_new_session=True,
+            **identity,
+        )
+        process_group = process.pid
+        try:
+            actual_process_group = os.getpgid(process.pid)
+        except ProcessLookupError:
+            process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+        else:
+            if actual_process_group != process_group:
+                _stop_owned_chrome_process_group(process, actual_process_group)
+        deadline = time.monotonic() + timeout
+        while True:
+            stdout = _read_capture(stdout_capture)
+            loaded = (
+                len(stdout) >= CHROME_PROBE_MIN_BYTES
+                and CHROME_PROBE_MARKER in stdout
+            )
+            if loaded:
+                break
+            if process.poll() is not None:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            time.sleep(min(0.1, remaining))
+    finally:
+        try:
+            if process is not None and process_group is not None:
+                _stop_owned_chrome_process_group(process, process_group)
+        finally:
+            stdout = _read_capture(stdout_capture)
+            stderr = _read_capture(stderr_capture, tail=True)
+            stdout_capture.close()
+            stderr_capture.close()
+
+    if process is None:
+        raise LifecycleError("Chrome process did not start")
+    loaded = (
+        len(stdout) >= CHROME_PROBE_MIN_BYTES
+        and CHROME_PROBE_MARKER in stdout
+    )
+    return ChromeCapture(
+        loaded=loaded,
+        timed_out=timed_out,
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
 def _run_chrome_probe(
     uid: int,
     gid: int,
@@ -693,29 +826,25 @@ def _run_chrome_probe(
     try:
         os.chown(profile_dir, uid, gid)
         profile_dir.chmod(0o700)
-        result = subprocess.run(
+        result = _capture_chrome_output(
             _chrome_probe_command(executable, profile_dir, label),
             cwd=home,
-            env=environment,
-            capture_output=True,
-            check=False,
+            environment=environment,
             timeout=CHROME_PROBE_TIMEOUT,
-            user=uid,
-            group=gid,
-            extra_groups=supplementary_groups,
+            uid=uid,
+            gid=gid,
+            supplementary_groups=supplementary_groups,
         )
-    except subprocess.TimeoutExpired as exc:
-        chunks = []
-        for value in (exc.stdout, exc.stderr):
-            if isinstance(value, str):
-                chunks.append(value.encode("utf-8", errors="replace"))
-            elif value:
-                chunks.append(value)
-        detail = b"\n".join(chunks).decode("utf-8", errors="replace")[-2000:]
-        raise LifecycleError(f"Chrome probe {label} timed out: {detail}") from exc
     finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
 
+    if result.loaded:
+        return len(result.stdout)
+    detail = (result.stdout + b"\n" + result.stderr).decode(
+        "utf-8", errors="replace"
+    )[-2000:]
+    if result.timed_out:
+        raise LifecycleError(f"Chrome probe {label} timed out: {detail}")
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace")[-2000:]
         raise LifecycleError(f"Chrome probe {label} failed: {detail}")
