@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import routing_policy
 import routing_recovery
 import tproxy
 
@@ -43,7 +44,11 @@ def test_contract_metadata_and_vector_names_are_stable():
     ids=[item["name"] for item in POLICY["vectors"]],
 )
 def test_routing_policy_contract(case):
-    assert tproxy.route_policy(case["host"]) == case["expected"]
+    policy_tables = tproxy.route_policy_tables()
+    actual = routing_policy.classify_route_policy(case["host"], *policy_tables)
+
+    assert actual == case["expected"]
+    assert tproxy.route_policy(case["host"]) == actual
 
 
 @pytest.mark.parametrize(

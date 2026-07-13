@@ -323,20 +323,22 @@ def test_copy_script_runtime_includes_local_modules(tmp_path):
     install = tmp_path / "install"
     source.mkdir()
     (source / "tproxy.py").write_text(
-        "import primes\nimport routing_recovery\nimport xbox_dns\n"
+        "import primes\nimport routing_policy\nimport routing_recovery\nimport xbox_dns\n"
     )
     (source / "primes.py").write_text("VALUE = 1\n")
-    (source / "routing_recovery.py").write_text("VALUE = 2\n")
-    (source / "xbox_dns.py").write_text("VALUE = 3\n")
+    (source / "routing_policy.py").write_text("VALUE = 2\n")
+    (source / "routing_recovery.py").write_text("VALUE = 3\n")
+    (source / "xbox_dns.py").write_text("VALUE = 4\n")
 
     tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert (install / "tproxy.py").read_text() == (
-        "import primes\nimport routing_recovery\nimport xbox_dns\n"
+        "import primes\nimport routing_policy\nimport routing_recovery\nimport xbox_dns\n"
     )
     assert (install / "primes.py").read_text() == "VALUE = 1\n"
-    assert (install / "routing_recovery.py").read_text() == "VALUE = 2\n"
-    assert (install / "xbox_dns.py").read_text() == "VALUE = 3\n"
+    assert (install / "routing_policy.py").read_text() == "VALUE = 2\n"
+    assert (install / "routing_recovery.py").read_text() == "VALUE = 3\n"
+    assert (install / "xbox_dns.py").read_text() == "VALUE = 4\n"
 
 
 def test_copy_script_runtime_fails_before_partial_install(tmp_path):
@@ -360,6 +362,21 @@ def test_copy_script_runtime_requires_recovery_module_before_install(tmp_path):
     (source / "xbox_dns.py").write_text("VALUE = 2\n")
 
     with pytest.raises(FileNotFoundError, match="routing_recovery.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_policy_module_before_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    (source / "tproxy.py").write_text("import routing_policy\n")
+    (source / "primes.py").write_text("VALUE = 1\n")
+    (source / "routing_recovery.py").write_text("VALUE = 2\n")
+    (source / "xbox_dns.py").write_text("VALUE = 3\n")
+
+    with pytest.raises(FileNotFoundError, match="routing_policy.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()
