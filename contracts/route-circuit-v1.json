@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.route_circuit",
+  "contract_version": 1,
+  "invariants": {
+    "scope_key": ["service_group", "route_class", "backend_id"],
+    "protected_local_bypass_groups": ["discord", "youtube_video"],
+    "forbidden_protected_backend": "geph",
+    "side_effects": false
+  },
+  "config": {
+    "failure_threshold": 2,
+    "open_duration_ms": 1000,
+    "half_open_max_in_flight": 1,
+    "success_threshold": 1
+  },
+  "vectors": [
+    {
+      "name": "opens-after-consecutive-failure-threshold",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 10},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 20}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "reject", "reason": "open", "phase": "open"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "state": {"phase": "open", "consecutive_failures": 2, "opened_at_ms": 10, "half_open_in_flight": 0, "half_open_successes": 0}}
+      ]
+    },
+    {
+      "name": "different-key-components-remain-closed",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
+        {"kind": "before_request", "key": {"service_group": "steam_store", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 2},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "xbox_dns"}, "now_ms": 2},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "direct_passthrough", "backend_id": "direct"}, "now_ms": 2}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "allow", "reason": "closed", "phase": "closed"},
+        {"kind": "allow", "reason": "closed", "phase": "closed"},
+        {"kind": "allow", "reason": "closed", "phase": "closed"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "state": {"phase": "open", "consecutive_failures": 2, "opened_at_ms": 1, "half_open_in_flight": 0, "half_open_successes": 0}}
+      ]
+    },
+    {
+      "name": "half-open-permit-is-bounded",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1001},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1001}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "allow", "reason": "half_open_probe", "phase": "half_open"},
+        {"kind": "reject", "reason": "half_open_limit", "phase": "half_open"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "state": {"phase": "half_open", "consecutive_failures": 0, "opened_at_ms": null, "half_open_in_flight": 1, "half_open_successes": 0}}
+      ]
+    },
+    {
+      "name": "successful-half-open-probe-closes-circuit",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1001},
+        {"kind": "record_success", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1002},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1003}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "allow", "reason": "half_open_probe", "phase": "half_open"},
+        {"kind": "record", "reason": "half_open_recovered", "phase": "closed"},
+        {"kind": "allow", "reason": "closed", "phase": "closed"}
+      ],
+      "expected_states": []
+    },
+    {
+      "name": "failed-half-open-probe-reopens-circuit",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1001},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1002},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1003}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "allow", "reason": "half_open_probe", "phase": "half_open"},
+        {"kind": "record", "reason": "half_open_failure", "phase": "open"},
+        {"kind": "reject", "reason": "open", "phase": "open"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "state": {"phase": "open", "consecutive_failures": 2, "opened_at_ms": 1002, "half_open_in_flight": 0, "half_open_successes": 0}}
+      ]
+    },
+    {
+      "name": "late-success-does-not-close-open-circuit",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
+        {"kind": "record_success", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 500},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 500}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "ignore", "reason": "stale_completion", "phase": "open"},
+        {"kind": "reject", "reason": "open", "phase": "open"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "state": {"phase": "open", "consecutive_failures": 2, "opened_at_ms": 1, "half_open_in_flight": 0, "half_open_successes": 0}}
+      ]
+    },
+    {
+      "name": "protected-local-circuit-does-not-affect-geo-exit-key",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "discord", "route_class": "local_bypass", "backend_id": "local_engine"}, "now_ms": 0},
+        {"kind": "record_failure", "key": {"service_group": "discord", "route_class": "local_bypass", "backend_id": "local_engine"}, "now_ms": 1},
+        {"kind": "before_request", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 2}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "threshold_reached", "phase": "open"},
+        {"kind": "allow", "reason": "closed", "phase": "closed"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "discord", "route_class": "local_bypass", "backend_id": "local_engine"}, "state": {"phase": "open", "consecutive_failures": 2, "opened_at_ms": 1, "half_open_in_flight": 0, "half_open_successes": 0}}
+      ]
+    },
+    {
+      "name": "protected-group-geph-key-is-rejected",
+      "events": [
+        {"kind": "before_request", "key": {"service_group": "discord", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0}
+      ],
+      "expected_decisions": [
+        {"kind": "reject", "reason": "protected_route_mismatch", "phase": "invalid"}
+      ],
+      "expected_states": []
+    },
+    {
+      "name": "closed-success-resets-consecutive-failures",
+      "events": [
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},
+        {"kind": "record_success", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 1},
+        {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 2}
+      ],
+      "expected_decisions": [
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "success_recorded", "phase": "closed"},
+        {"kind": "record", "reason": "failure_recorded", "phase": "closed"}
+      ],
+      "expected_states": [
+        {"key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "state": {"phase": "closed", "consecutive_failures": 1, "opened_at_ms": null, "half_open_in_flight": 0, "half_open_successes": 0}}
+      ]
+    }
+  ]
+}

@@ -112,7 +112,9 @@ PF lifecycle qualification.
   and menu orchestration.
 - Keep Python transport; avoid a big-bang rewrite.
 - Add language-neutral policy fixtures and recovery vectors. Done for contract
-  v1; Python and Rust tests consume the same versioned JSON files.
+  v1. Deterministic address-attempt planning and route-scoped circuit breaking
+  now have isolated v1 contracts executed by both Python and Rust; runtime
+  socket adapters remain pending.
 
 ## M3 - Release-Grade macOS
 

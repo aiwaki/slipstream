@@ -7,6 +7,9 @@
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
 
+pub mod address_attempts;
+pub mod route_circuit;
+
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{Read, Write};

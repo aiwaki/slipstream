@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.address_attempts",
+  "contract_version": 1,
+  "invariants": {
+    "candidate_order": "stable_family_interleave",
+    "winner_selection": "earliest_completion_then_candidate_order",
+    "max_starts_per_reduction": 1,
+    "network_io": false
+  },
+  "vectors": [
+    {
+      "name": "mixed-families-interleave-from-preferred",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v6-b", "family": "ipv6", "address": "2001:db8::11", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-b", "family": "ipv4", "address": "192.0.2.11", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [],
+        "context": {"now_ms": 0, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a", "v6-b", "v4-b"],
+        "decision": {"kind": "start", "candidate_id": "v6-a", "cancel": [], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "alternate-family-waits-for-stagger",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "running", "started_at_ms": 0, "completed_at_ms": null}
+        ],
+        "context": {"now_ms": 100, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "wait", "candidate_id": "", "cancel": [], "wake_at_ms": 250}
+      }
+    },
+    {
+      "name": "alternate-family-starts-after-stagger",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "running", "started_at_ms": 0, "completed_at_ms": null}
+        ],
+        "context": {"now_ms": 250, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "start", "candidate_id": "v4-a", "cancel": [], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "failed-preferred-family-releases-next-attempt-immediately",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "failed", "started_at_ms": 0, "completed_at_ms": 50}
+        ],
+        "context": {"now_ms": 50, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "start", "candidate_id": "v4-a", "cancel": [], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "concurrency-cap-prevents-third-start",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null},
+          {"id": "v6-b", "family": "ipv6", "address": "2001:db8::11", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "running", "started_at_ms": 0, "completed_at_ms": null},
+          {"candidate_id": "v4-a", "state": "running", "started_at_ms": 250, "completed_at_ms": null}
+        ],
+        "context": {"now_ms": 500, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a", "v6-b"],
+        "decision": {"kind": "wait", "candidate_id": "", "cancel": [], "wake_at_ms": 2000}
+      }
+    },
+    {
+      "name": "winner-cancels-running-loser",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "running", "started_at_ms": 0, "completed_at_ms": null},
+          {"candidate_id": "v4-a", "state": "succeeded", "started_at_ms": 250, "completed_at_ms": 400}
+        ],
+        "context": {"now_ms": 400, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "select", "candidate_id": "v4-a", "cancel": ["v6-a"], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "deadline-cancels-running-attempts",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "running", "started_at_ms": 0, "completed_at_ms": null}
+        ],
+        "context": {"now_ms": 2000, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "timeout", "candidate_id": "", "cancel": ["v6-a"], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "late-loser-cannot-replace-earlier-winner",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "succeeded", "started_at_ms": 0, "completed_at_ms": 450},
+          {"candidate_id": "v4-a", "state": "succeeded", "started_at_ms": 250, "completed_at_ms": 400}
+        ],
+        "context": {"now_ms": 450, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "select", "candidate_id": "v4-a", "cancel": [], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "all-attempts-exhausted",
+      "input": {
+        "candidates": [
+          {"id": "v6-a", "family": "ipv6", "address": "2001:db8::10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null}
+        ],
+        "attempts": [
+          {"candidate_id": "v6-a", "state": "failed", "started_at_ms": 0, "completed_at_ms": 100},
+          {"candidate_id": "v4-a", "state": "failed", "started_at_ms": 100, "completed_at_ms": 200}
+        ],
+        "context": {"now_ms": 200, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v6-a", "v4-a"],
+        "decision": {"kind": "exhausted", "candidate_id": "", "cancel": [], "wake_at_ms": null}
+      }
+    },
+    {
+      "name": "expired-and-duplicate-pending-candidates-are-skipped",
+      "input": {
+        "candidates": [
+          {"id": "v6-expired", "family": "ipv6", "address": "2001:db8::10", "source": "cache", "expires_at_ms": 100},
+          {"id": "v4-a", "family": "ipv4", "address": "192.0.2.10", "source": "system", "expires_at_ms": null},
+          {"id": "v4-duplicate", "family": "ipv4", "address": "192.0.2.10", "source": "cache", "expires_at_ms": 1000}
+        ],
+        "attempts": [],
+        "context": {"now_ms": 200, "started_at_ms": 0, "deadline_at_ms": 2000, "stagger_ms": 250, "max_concurrent": 2, "preferred_family": "ipv6"}
+      },
+      "expected": {
+        "ordered_candidates": ["v4-a"],
+        "decision": {"kind": "start", "candidate_id": "v4-a", "cancel": [], "wake_at_ms": null}
+      }
+    }
+  ]
+}
