@@ -86,9 +86,14 @@ jobs:
       - name: Python compile check
         run: |
           python3 -m py_compile \
+            spike/address_attempts.py \
+            spike/route_circuit.py \
+            spike/routing_policy.py \
+            spike/routing_recovery.py \
             spike/tproxy.py \
             spike/xbox_dns.py \
             spike/test_recovery.py \
+            spike/test_routing_contract_vectors.py \
             spike/test_traffic_contracts.py \
             spike/test_tproxy_doh.py \
             spike/test_xbox_dns.py \
