@@ -597,24 +597,71 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
     def test_chrome_group_signal_permission_error_names_the_signal(self) -> None:
         process = mock.Mock(pid=4242)
         with mock.patch.object(
-            lifecycle.os,
-            "killpg",
-            side_effect=PermissionError(1, "Operation not permitted"),
+            lifecycle,
+            "_chrome_process_group_members",
+            return_value=(
+                lifecycle.ChromeProcessGroupMember(
+                    pid=4242,
+                    uid=501,
+                    state="S",
+                    executable="/Applications/Google Chrome",
+                ),
+            ),
+        ), mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                (),
+                lifecycle.CHROME_SIGNAL_PERMISSION_EXIT,
+                b"",
+                b"Operation not permitted",
+            ),
         ):
             with self.assertRaisesRegex(
                 lifecycle.LifecycleError,
                 "Chrome operation process-group-term failed: PermissionError",
             ):
-                lifecycle._stop_owned_chrome_process_group(process, 4242)
+                lifecycle._stop_owned_chrome_process_group(
+                    process,
+                    4242,
+                    uid=501,
+                    gid=20,
+                )
+
+    def test_chrome_group_members_are_filtered_by_exact_pgid(self) -> None:
+        output = b"""\
+  4242  4242  501 S /Applications/Google Chrome
+  4243  4242  501 S /Applications/Google Chrome Helper
+  4244  4242    0 S /System/Library/XPCServices/protected
+  5000  5000  501 S /usr/bin/unrelated
+"""
+        with mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess((), 0, output, b""),
+        ):
+            members = lifecycle._chrome_process_group_members(4242)
+
+        self.assertEqual(tuple(member.pid for member in members), (4242, 4243, 4244))
+        self.assertEqual(tuple(member.uid for member in members), (501, 501, 0))
 
     def test_chrome_group_signal_runs_as_the_browser_user(self) -> None:
         completed = subprocess.CompletedProcess((), 0, b"", b"")
+        members = (
+            lifecycle.ChromeProcessGroupMember(4242, 501, "S", "Chrome"),
+            lifecycle.ChromeProcessGroupMember(4243, 501, "S", "Chrome Helper"),
+            lifecycle.ChromeProcessGroupMember(4244, 0, "S", "system XPC"),
+        )
         with mock.patch.object(
+            lifecycle,
+            "_chrome_process_group_members",
+            return_value=members,
+        ), mock.patch.object(
             lifecycle.subprocess,
             "run",
             return_value=completed,
         ) as run:
-            signalled = lifecycle._signal_owned_chrome_process_group(
+            signalled = lifecycle._signal_owned_chrome_processes(
                 4242,
                 signal.SIGTERM,
                 uid=501,
@@ -628,22 +675,22 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["extra_groups"], (12, 61))
         command = run.call_args.args[0]
         self.assertEqual(command[0:2], (sys.executable, "-I"))
-        self.assertEqual(command[-2:], ("4242", str(signal.SIGTERM)))
-
-    def test_chrome_group_signal_treats_missing_group_as_stopped(self) -> None:
-        completed = subprocess.CompletedProcess(
-            (),
-            lifecycle.CHROME_SIGNAL_NOT_FOUND_EXIT,
-            b"",
-            b"",
+        self.assertEqual(
+            command[-4:],
+            ("4242", str(signal.SIGTERM), "4242", "4243"),
         )
+        self.assertNotIn("4244", command[4:])
+
+    def test_chrome_group_signal_treats_no_owned_members_as_stopped(self) -> None:
         with mock.patch.object(
-            lifecycle.subprocess,
-            "run",
-            return_value=completed,
-        ):
+            lifecycle,
+            "_chrome_process_group_members",
+            return_value=(
+                lifecycle.ChromeProcessGroupMember(4244, 0, "S", "system XPC"),
+            ),
+        ), mock.patch.object(lifecycle.subprocess, "run") as run:
             self.assertFalse(
-                lifecycle._signal_owned_chrome_process_group(
+                lifecycle._signal_owned_chrome_processes(
                     4242,
                     signal.SIGKILL,
                     uid=501,
@@ -651,6 +698,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                     supplementary_groups=(),
                 )
             )
+        run.assert_not_called()
 
     def test_safaridriver_url_accepts_only_explicit_ipv4_loopback(self) -> None:
         self.assertEqual(
