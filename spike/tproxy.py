@@ -4253,9 +4253,14 @@ def _script_runtime_payload(source_file):
     source_dir = os.path.dirname(source_file)
     payload = (
         (source_file, "tproxy.py"),
+        (os.path.join(source_dir, "address_attempts.py"), "address_attempts.py"),
+        (os.path.join(source_dir, "connection_probe.py"), "connection_probe.py"),
+        (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
+        (os.path.join(source_dir, "connection_race_io.py"), "connection_race_io.py"),
         (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
+        (os.path.join(source_dir, "route_circuit.py"), "route_circuit.py"),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
         (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),

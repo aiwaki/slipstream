@@ -348,40 +348,72 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
     assert not (dst / "fresh.txt").exists()
 
 
+_SCRIPT_RUNTIME_FIXTURE = {
+    "tproxy.py": "import connection_probe\nimport geph_backend\n",
+    "address_attempts.py": "VALUE = 1\n",
+    "connection_probe.py": "VALUE = 2\n",
+    "connection_race.py": "VALUE = 3\n",
+    "connection_race_io.py": "VALUE = 4\n",
+    "geph_backend.py": "VALUE = 5\n",
+    "pf_adapter.py": "VALUE = 6\n",
+    "primes.py": "VALUE = 7\n",
+    "route_circuit.py": "VALUE = 8\n",
+    "routing_policy.py": "VALUE = 9\n",
+    "routing_recovery.py": "VALUE = 10\n",
+    "xbox_dns.py": "VALUE = 11\n",
+}
+
+
+def _write_script_runtime_fixture(source, *, missing=()):
+    for name, content in _SCRIPT_RUNTIME_FIXTURE.items():
+        if name not in missing:
+            (source / name).write_text(content)
+
+
 def test_copy_script_runtime_includes_local_modules(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text(
-        "import geph_backend\nimport pf_adapter\nimport primes\nimport routing_policy\n"
-        "import routing_recovery\nimport xbox_dns\n"
-    )
-    (source / "geph_backend.py").write_text("VALUE = 1\n")
-    (source / "pf_adapter.py").write_text("VALUE = 2\n")
-    (source / "primes.py").write_text("VALUE = 3\n")
-    (source / "routing_policy.py").write_text("VALUE = 4\n")
-    (source / "routing_recovery.py").write_text("VALUE = 5\n")
-    (source / "xbox_dns.py").write_text("VALUE = 6\n")
+    _write_script_runtime_fixture(source)
 
     tproxy._copy_script_runtime(source / "tproxy.py", install)
 
-    assert (install / "tproxy.py").read_text() == (
-        "import geph_backend\nimport pf_adapter\nimport primes\nimport routing_policy\n"
-        "import routing_recovery\nimport xbox_dns\n"
-    )
-    assert (install / "geph_backend.py").read_text() == "VALUE = 1\n"
-    assert (install / "pf_adapter.py").read_text() == "VALUE = 2\n"
-    assert (install / "primes.py").read_text() == "VALUE = 3\n"
-    assert (install / "routing_policy.py").read_text() == "VALUE = 4\n"
-    assert (install / "routing_recovery.py").read_text() == "VALUE = 5\n"
-    assert (install / "xbox_dns.py").read_text() == "VALUE = 6\n"
+    for name, content in _SCRIPT_RUNTIME_FIXTURE.items():
+        assert (install / name).read_text() == content
+
+
+def test_script_runtime_payload_covers_transitive_local_imports():
+    source_dir = Path(tproxy.__file__).parent
+    payload = tproxy._script_runtime_payload(tproxy.__file__)
+    payload_names = {name for _source, name in payload}
+
+    for source, _name in payload:
+        tree = ast.parse(Path(source).read_text())
+        imported_roots = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_roots.update(
+                    alias.name.partition(".")[0] for alias in node.names
+                )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module
+            ):
+                imported_roots.add(node.module.partition(".")[0])
+        local_dependencies = {
+            f"{module}.py"
+            for module in imported_roots
+            if (source_dir / f"{module}.py").is_file()
+        }
+        assert local_dependencies <= payload_names
 
 
 def test_copy_script_runtime_fails_before_partial_install(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import primes\n")
+    _write_script_runtime_fixture(source, missing={"primes.py"})
 
     with pytest.raises(FileNotFoundError, match="primes.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
@@ -393,9 +425,7 @@ def test_copy_script_runtime_requires_recovery_module_before_install(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import routing_recovery\n")
-    (source / "primes.py").write_text("VALUE = 1\n")
-    (source / "xbox_dns.py").write_text("VALUE = 2\n")
+    _write_script_runtime_fixture(source, missing={"routing_recovery.py"})
 
     with pytest.raises(FileNotFoundError, match="routing_recovery.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
@@ -407,10 +437,7 @@ def test_copy_script_runtime_requires_policy_module_before_install(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import routing_policy\n")
-    (source / "primes.py").write_text("VALUE = 1\n")
-    (source / "routing_recovery.py").write_text("VALUE = 2\n")
-    (source / "xbox_dns.py").write_text("VALUE = 3\n")
+    _write_script_runtime_fixture(source, missing={"routing_policy.py"})
 
     with pytest.raises(FileNotFoundError, match="routing_policy.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
@@ -422,11 +449,7 @@ def test_copy_script_runtime_requires_pf_adapter_before_install(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import pf_adapter\n")
-    (source / "primes.py").write_text("VALUE = 1\n")
-    (source / "routing_policy.py").write_text("VALUE = 2\n")
-    (source / "routing_recovery.py").write_text("VALUE = 3\n")
-    (source / "xbox_dns.py").write_text("VALUE = 4\n")
+    _write_script_runtime_fixture(source, missing={"pf_adapter.py"})
 
     with pytest.raises(FileNotFoundError, match="pf_adapter.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
@@ -438,14 +461,31 @@ def test_copy_script_runtime_requires_geph_backend_before_install(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import geph_backend\n")
-    (source / "pf_adapter.py").write_text("VALUE = 1\n")
-    (source / "primes.py").write_text("VALUE = 2\n")
-    (source / "routing_policy.py").write_text("VALUE = 3\n")
-    (source / "routing_recovery.py").write_text("VALUE = 4\n")
-    (source / "xbox_dns.py").write_text("VALUE = 5\n")
+    _write_script_runtime_fixture(source, missing={"geph_backend.py"})
 
     with pytest.raises(FileNotFoundError, match="geph_backend.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        "address_attempts.py",
+        "connection_probe.py",
+        "connection_race.py",
+        "connection_race_io.py",
+        "route_circuit.py",
+    ),
+)
+def test_copy_script_runtime_requires_connection_race_closure(tmp_path, missing):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(source, missing={missing})
+
+    with pytest.raises(FileNotFoundError, match=missing):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()

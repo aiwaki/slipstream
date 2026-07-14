@@ -1,4 +1,5 @@
 import asyncio
+import ast
 from pathlib import Path
 import socket
 
@@ -25,8 +26,15 @@ def _race_config(**overrides):
 
 
 def test_adapter_is_wired_through_probe_contract_not_raw_socket_adapter():
-    assert "import connection_probe" in TPROXY_PATH.read_text(encoding="utf-8")
-    assert "connection_race_io" not in TPROXY_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(TPROXY_PATH.read_text(encoding="utf-8"))
+    imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert "connection_probe" in imports
+    assert "connection_race_io" not in imports
 
 
 def _circuit_config(**overrides):
