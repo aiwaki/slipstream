@@ -60,8 +60,9 @@ release exists; stable distribution remains a separate M3 gate.
   required backend is unavailable, pause the private PF anchor and enter dormant
   mode so Slipstream no longer owns system HTTPS. Restarting a live Geph process
   must be daemon-coordinated after routing is idle.
-- Let unknown hosts try the local adaptive ladder first. Temporary geo-exit
-  requires repeated local misses plus a successful Geph payload proof.
+- Let unknown hosts try only the local adaptive ladder. A successful Geph
+  payload proves tunnel health, not that a host requires a foreign exit;
+  geo-exit remains explicit reviewed policy.
 - Move Geph to a user LaunchAgent with `KeepAlive`; the tray becomes a settings
   client rather than a lifecycle dependency.
 - Keep external DNS, VPN, PAC, and proxy state read-only.
@@ -114,7 +115,11 @@ PF lifecycle qualification.
 - Add language-neutral policy fixtures and recovery vectors. Done for contract
   v1. Deterministic address-attempt planning and route-scoped circuit breaking
   now have isolated v1 contracts executed by both Python and Rust; runtime
-  socket adapters remain pending.
+  socket adapters remain pending. A pure connection-race state machine now
+  circuit-gates before resolution and drives the address planner through
+  language-neutral commands/events. Scripted resolver and connector adapters
+  cover stalls, resets, family fallback, deadlines, circuit isolation, and
+  late completion without network I/O.
 
 ## M3 - Release-Grade macOS
 

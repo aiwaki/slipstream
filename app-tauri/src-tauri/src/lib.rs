@@ -8,6 +8,7 @@
 // later; main.rs is a thin desktop shim.
 
 pub mod address_attempts;
+pub mod connection_race;
 pub mod route_circuit;
 
 use std::ffi::OsStr;

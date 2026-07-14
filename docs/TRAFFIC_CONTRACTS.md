@@ -62,3 +62,16 @@ A passing contract proves Slipstream's deterministic decision and relay path;
 it does not prove a remote provider is currently available or that a particular
 browser version has no independent issue. PF ownership, installer lifecycle,
 and live endpoint health remain separate CI and release gates.
+
+## Resolver And Connector Contract
+
+`contracts/connection-race-v1.json` covers the layer below route selection and
+above platform sockets. Python and Rust execute the same scripted resolver and
+connector scenarios: IPv6 stall with IPv4 fallback, immediate failure release,
+shared deadlines, circuit isolation, half-open recovery, and protected-route
+rejection before DNS. They also deliver the deadline wake before an
+exact-deadline success to prove that queue order cannot turn that success into a
+timeout, while rejecting a success timestamped after the deadline. These
+adapters perform no network I/O. A later runtime adapter must translate the same
+commands and events without changing their ordering or circuit-accounting
+semantics.
