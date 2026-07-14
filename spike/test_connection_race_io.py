@@ -24,7 +24,8 @@ def _race_config(**overrides):
     return connection_race.ConnectionRaceConfig(**values)
 
 
-def test_adapter_is_not_wired_into_transparent_runtime():
+def test_adapter_is_wired_through_probe_contract_not_raw_socket_adapter():
+    assert "import connection_probe" in TPROXY_PATH.read_text(encoding="utf-8")
     assert "connection_race_io" not in TPROXY_PATH.read_text(encoding="utf-8")
 
 

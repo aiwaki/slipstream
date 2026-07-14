@@ -350,6 +350,121 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         ]
 
 
+def test_local_handler_races_addresses_inside_one_strategy_without_geph(
+    monkeypatch,
+):
+    """A stalled CDN edge must not delay a healthy edge or change route class."""
+    isolate_runtime_state(monkeypatch)
+    host = "updates.discord.com"
+    first_ip = "198.51.100.20"
+    second_ip = "198.51.100.21"
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\ndiscord"
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    first_started = asyncio.Event()
+    first_cancelled = asyncio.Event()
+    calls = []
+
+    async def fake_dns(actual_host, fallback_ip):
+        assert (actual_host, fallback_ip) == (host, "203.0.113.20")
+        return [first_ip, second_ip]
+
+    async def fake_local(ip, port, head, body, actual_host, strategy):
+        assert (port, head + body, actual_host) == (
+            443,
+            expected_first_flight,
+            host,
+        )
+        calls.append((ip, strategy["name"]))
+        if ip == first_ip:
+            first_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                first_cancelled.set()
+        await first_started.wait()
+        return probed_upstream_response(response)
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.20", 443))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_dns)
+    monkeypatch.setattr(tproxy, "dial_strategy", fake_local)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "ADDRESS_RACE_STAGGER_MS", 0)
+    monkeypatch.setattr(tproxy, "ADDRESS_RACE_TIMEOUT_MS", 500)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert calls == [
+        (first_ip, calls[0][1]),
+        (second_ip, calls[0][1]),
+    ]
+    assert first_cancelled.is_set()
+    policy = tproxy.route_policy(host)
+    assert policy["service_group"] == tproxy.SERVICE_DISCORD
+    assert policy["route_class"] == tproxy.ROUTE_LOCAL_BYPASS
+    assert policy["strategy_set"] == tproxy.STRATEGY_FAKE_ONLY
+
+
+def test_smart_dns_handler_races_proven_addresses_without_reaching_geph(
+    monkeypatch,
+):
+    """Smart DNS may vary its edge, but the route remains the proven backend."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    first_ip = "198.51.100.30"
+    second_ip = "198.51.100.31"
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
+    client, expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    first_started = asyncio.Event()
+    first_cancelled = asyncio.Event()
+    calls = []
+
+    async def fake_system_dns(actual_host):
+        assert actual_host == host
+        return [first_ip, second_ip]
+
+    async def fake_probe(ip, port, first_flight, probe_timeout=3.0):
+        assert (port, first_flight, probe_timeout) == (
+            443,
+            expected_first_flight,
+            3.0,
+        )
+        calls.append(ip)
+        if ip == first_ip:
+            first_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                first_cancelled.set()
+        await first_started.wait()
+        return probed_upstream_response(response)
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.30", 443))
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
+    monkeypatch.setattr(tproxy, "smart_dns_available", lambda: True)
+    monkeypatch.setattr(tproxy, "system_resolve_async", fake_system_dns)
+    monkeypatch.setattr(tproxy, "dial_and_probe", fake_probe)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "ADDRESS_RACE_STAGGER_MS", 0)
+    monkeypatch.setattr(tproxy, "ADDRESS_RACE_TIMEOUT_MS", 500)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert calls == [first_ip, second_ip]
+    assert first_cancelled.is_set()
+
+
 def test_telegram_raw_dc_contract_is_safety_passthrough(monkeypatch):
     """Bare MTProto stays untouched; the user-facing blocked-network path is tg-ws-proxy."""
     isolate_runtime_state(monkeypatch)
