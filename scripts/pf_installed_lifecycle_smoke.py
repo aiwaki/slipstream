@@ -74,18 +74,26 @@ CHROME_PAGE_TIMEOUT_MS = 15_000
 CHROME_PROBE_TIMEOUT = 45
 CHROME_CAPTURE_LIMIT = 1_048_576
 CHROME_PROCESS_STOP_TIMEOUT = 2
-CHROME_SIGNAL_NOT_FOUND_EXIT = 3
 CHROME_SIGNAL_PERMISSION_EXIT = 4
-CHROME_GROUP_SIGNAL_HELPER = """\
+CHROME_PID_SIGNAL_HELPER = """\
 import os
 import sys
 
-try:
-    os.killpg(int(sys.argv[1]), int(sys.argv[2]))
-except ProcessLookupError:
-    raise SystemExit(3)
-except PermissionError as exc:
-    print(exc, file=sys.stderr)
+expected_pgid = int(sys.argv[1])
+signal_number = int(sys.argv[2])
+denied = []
+for raw_pid in sys.argv[3:]:
+    pid = int(raw_pid)
+    try:
+        if os.getpgid(pid) != expected_pgid:
+            continue
+        os.kill(pid, signal_number)
+    except ProcessLookupError:
+        continue
+    except PermissionError as exc:
+        denied.append(f"pid={pid}: {exc}")
+if denied:
+    print("; ".join(denied), file=sys.stderr)
     raise SystemExit(4)
 """
 SAFARI_PROBE_MIN_BYTES = 32
@@ -102,6 +110,14 @@ TRAY_START_TIMEOUT = 15.0
 
 class LifecycleError(RuntimeError):
     """A lifecycle safety condition or assertion failed."""
+
+
+@dataclass(frozen=True)
+class ChromeProcessGroupMember:
+    pid: int
+    uid: int
+    state: str
+    executable: str
 
 
 @dataclass(frozen=True)
@@ -733,7 +749,52 @@ def _read_capture(capture, *, tail: bool = False) -> bytes:
         return os.pread(capture.fileno(), length, offset)
 
 
-def _signal_owned_chrome_process_group(
+def _chrome_process_group_members(
+    process_group: int,
+) -> tuple[ChromeProcessGroupMember, ...]:
+    result = subprocess.run(
+        ("/bin/ps", "-axo", "pid=,pgid=,uid=,stat=,comm="),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=CHROME_PROCESS_STOP_TIMEOUT,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace")[-1000:].strip()
+        raise LifecycleError(
+            f"Chrome process-group inspection failed ({result.returncode}): {detail}"
+        )
+
+    members = []
+    for raw_line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        fields = raw_line.strip().split(None, 4)
+        if len(fields) != 5:
+            if raw_line.strip():
+                raise LifecycleError(
+                    f"invalid Chrome process-group row: {raw_line!r}"
+                )
+            continue
+        try:
+            pid = int(fields[0])
+            observed_group = int(fields[1])
+            uid = int(fields[2])
+        except ValueError as exc:
+            raise LifecycleError(
+                f"invalid Chrome process-group row: {raw_line!r}"
+            ) from exc
+        if observed_group == process_group:
+            members.append(
+                ChromeProcessGroupMember(
+                    pid=pid,
+                    uid=uid,
+                    state=fields[3],
+                    executable=fields[4],
+                )
+            )
+    return tuple(sorted(members, key=lambda member: member.pid))
+
+
+def _signal_owned_chrome_processes(
     process_group: int,
     signal_number: int,
     *,
@@ -741,41 +802,46 @@ def _signal_owned_chrome_process_group(
     gid: int | None,
     supplementary_groups: tuple[int, ...],
 ) -> bool:
+    identity = {}
     if uid is None:
-        try:
-            os.killpg(process_group, signal_number)
-        except ProcessLookupError:
-            return False
-        return True
-    if gid is None:
-        raise LifecycleError("Chrome signal helper requires a group ID")
+        uid = os.geteuid()
+    else:
+        if gid is None:
+            raise LifecycleError("Chrome signal helper requires a group ID")
+        identity = {
+            "user": uid,
+            "group": gid,
+            "extra_groups": supplementary_groups,
+        }
+
+    members = _chrome_process_group_members(process_group)
+    owned_pids = tuple(member.pid for member in members if member.uid == uid)
+    if not owned_pids:
+        return False
 
     result = subprocess.run(
         (
             sys.executable,
             "-I",
             "-c",
-            CHROME_GROUP_SIGNAL_HELPER,
+            CHROME_PID_SIGNAL_HELPER,
             str(process_group),
             str(signal_number),
+            *(str(pid) for pid in owned_pids),
         ),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=False,
         timeout=CHROME_PROCESS_STOP_TIMEOUT,
-        user=uid,
-        group=gid,
-        extra_groups=supplementary_groups,
+        **identity,
     )
     if result.returncode == 0:
         return True
-    if result.returncode == CHROME_SIGNAL_NOT_FOUND_EXIT:
-        return False
 
     detail = result.stderr.decode("utf-8", errors="replace")[-1000:].strip()
     message = (
-        f"same-user signal helper exited {result.returncode}"
-        f" for pgid={process_group} signal={signal_number}"
+        f"owned-PID signal helper exited {result.returncode}"
+        f" for pgid={process_group} signal={signal_number} pids={owned_pids}"
     )
     if detail:
         message = f"{message}: {detail}"
@@ -803,7 +869,7 @@ def _stop_owned_chrome_process_group(
         )
 
     with _chrome_operation("process-group-term"):
-        _signal_owned_chrome_process_group(
+        _signal_owned_chrome_processes(
             process_group,
             signal.SIGTERM,
             uid=uid,
@@ -815,7 +881,7 @@ def _stop_owned_chrome_process_group(
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
     except subprocess.TimeoutExpired:
         with _chrome_operation("process-group-kill-after-timeout"):
-            _signal_owned_chrome_process_group(
+            _signal_owned_chrome_processes(
                 process_group,
                 signal.SIGKILL,
                 uid=uid,
@@ -828,7 +894,7 @@ def _stop_owned_chrome_process_group(
         # Chrome helpers inherit the dedicated process group. The browser can
         # exit before a helper that still owns a capture descriptor.
         with _chrome_operation("process-group-kill-after-leader-exit"):
-            _signal_owned_chrome_process_group(
+            _signal_owned_chrome_processes(
                 process_group,
                 signal.SIGKILL,
                 uid=uid,
