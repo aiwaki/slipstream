@@ -28,9 +28,10 @@ import sys
 import tempfile
 import time
 import urllib.parse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 import pf_anchor_smoke as pf
 
@@ -694,43 +695,61 @@ def _chrome_probe_command(
     )
 
 
+@contextmanager
+def _chrome_operation(operation: str) -> Iterator[None]:
+    try:
+        yield
+    except ProcessLookupError:
+        raise
+    except LifecycleError:
+        raise
+    except OSError as exc:
+        raise LifecycleError(
+            f"Chrome operation {operation} failed: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def _read_capture(capture, *, tail: bool = False) -> bytes:
-    size = os.fstat(capture.fileno()).st_size
-    length = min(size, CHROME_CAPTURE_LIMIT)
-    offset = max(0, size - length) if tail else 0
-    return os.pread(capture.fileno(), length, offset)
+    operation = "capture-read-tail" if tail else "capture-read"
+    with _chrome_operation(operation):
+        size = os.fstat(capture.fileno()).st_size
+        length = min(size, CHROME_CAPTURE_LIMIT)
+        offset = max(0, size - length) if tail else 0
+        return os.pread(capture.fileno(), length, offset)
 
 
 def _stop_owned_chrome_process_group(
     process: subprocess.Popen,
     process_group: int,
 ) -> None:
-    if process_group != process.pid:
-        process.kill()
-        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
-        raise LifecycleError(
-            f"Chrome process group mismatch: pid={process.pid} pgid={process_group}"
-        )
+    with _chrome_operation("process-group-stop"):
+        if process_group != process.pid:
+            process.kill()
+            process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+            raise LifecycleError(
+                "Chrome process group mismatch: "
+                f"pid={process.pid} pgid={process_group}"
+            )
 
-    try:
-        os.killpg(process_group, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    try:
-        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
-    except subprocess.TimeoutExpired:
         try:
-            os.killpg(process_group, signal.SIGKILL)
+            os.killpg(process_group, signal.SIGTERM)
         except ProcessLookupError:
             pass
-        process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
-    else:
-        # Chrome helpers inherit the dedicated process group. The browser can
-        # exit before a helper that still owns a capture descriptor does.
         try:
-            os.killpg(process_group, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+            process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
+        else:
+            # Chrome helpers inherit the dedicated process group. The browser
+            # can exit before a helper that still owns a capture descriptor.
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def _capture_chrome_output(
@@ -743,8 +762,9 @@ def _capture_chrome_output(
     supplementary_groups: tuple[int, ...],
     timeout: float = CHROME_PROBE_TIMEOUT,
 ) -> ChromeCapture:
-    stdout_capture = tempfile.TemporaryFile()
-    stderr_capture = tempfile.TemporaryFile()
+    with _chrome_operation("capture-files-create"):
+        stdout_capture = tempfile.TemporaryFile()
+        stderr_capture = tempfile.TemporaryFile()
     process = None
     process_group = None
     loaded = False
@@ -757,19 +777,21 @@ def _capture_chrome_output(
                 "group": gid,
                 "extra_groups": supplementary_groups,
             }
-        process = subprocess.Popen(
-            tuple(command),
-            cwd=cwd,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_capture,
-            stderr=stderr_capture,
-            start_new_session=True,
-            **identity,
-        )
+        with _chrome_operation("spawn"):
+            process = subprocess.Popen(
+                tuple(command),
+                cwd=cwd,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_capture,
+                stderr=stderr_capture,
+                start_new_session=True,
+                **identity,
+            )
         process_group = process.pid
         try:
-            actual_process_group = os.getpgid(process.pid)
+            with _chrome_operation("process-group-verify"):
+                actual_process_group = os.getpgid(process.pid)
         except ProcessLookupError:
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
         else:
@@ -798,8 +820,9 @@ def _capture_chrome_output(
         finally:
             stdout = _read_capture(stdout_capture)
             stderr = _read_capture(stderr_capture, tail=True)
-            stdout_capture.close()
-            stderr_capture.close()
+            with _chrome_operation("capture-files-close"):
+                stdout_capture.close()
+                stderr_capture.close()
 
     if process is None:
         raise LifecycleError("Chrome process did not start")
@@ -822,21 +845,25 @@ def _run_chrome_probe(
     label: str,
     executable: Path = CHROME_EXECUTABLE,
 ) -> int:
-    try:
-        executable = executable.resolve(strict=True)
-    except OSError as exc:
-        raise LifecycleError(
-            f"Chrome executable is unavailable: {executable}"
-        ) from exc
+    with _chrome_operation("executable-preflight"):
+        try:
+            executable = executable.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise LifecycleError(
+                f"Chrome executable is unavailable: {executable}"
+            ) from exc
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise LifecycleError(f"Chrome executable is not runnable: {executable}")
 
-    environment, home = _user_environment(uid)
-    supplementary_groups = _user_supplementary_groups(uid, gid)
-    profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-chrome-"))
+    with _chrome_operation("user-identity"):
+        environment, home = _user_environment(uid)
+        supplementary_groups = _user_supplementary_groups(uid, gid)
+    with _chrome_operation("profile-create"):
+        profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-chrome-"))
     try:
-        os.chown(profile_dir, uid, gid)
-        profile_dir.chmod(0o700)
+        with _chrome_operation("profile-ownership"):
+            os.chown(profile_dir, uid, gid)
+            profile_dir.chmod(0o700)
         result = _capture_chrome_output(
             _chrome_probe_command(executable, profile_dir, label),
             cwd=home,

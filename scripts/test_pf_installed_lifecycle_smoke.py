@@ -573,6 +573,25 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertTrue(result.timed_out)
         self.assertIn(b"capture diagnostic", result.stderr)
 
+    def test_chrome_spawn_permission_error_names_the_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            lifecycle.subprocess,
+            "Popen",
+            side_effect=PermissionError(1, "Operation not permitted"),
+        ):
+            with self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "Chrome operation spawn failed: PermissionError",
+            ):
+                lifecycle._capture_chrome_output(
+                    ("/usr/bin/false",),
+                    cwd=Path(tmp),
+                    environment=os.environ.copy(),
+                    uid=None,
+                    gid=None,
+                    supplementary_groups=(),
+                )
+
     def test_safaridriver_url_accepts_only_explicit_ipv4_loopback(self) -> None:
         self.assertEqual(
             lifecycle._validated_safaridriver_url("http://127.0.0.1:19445"),
