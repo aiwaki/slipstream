@@ -72,6 +72,10 @@ shared deadlines, circuit isolation, half-open recovery, and protected-route
 rejection before DNS. They also deliver the deadline wake before an
 exact-deadline success to prove that queue order cannot turn that success into a
 timeout, while rejecting a success timestamped after the deadline. These
-adapters perform no network I/O. A later runtime adapter must translate the same
-commands and events without changing their ordering or circuit-accounting
-semantics.
+scripted adapters perform no network I/O. The isolated Python adapter in
+`spike/connection_race_io.py` now translates the same commands into real async
+tasks and is tested with loopback sockets for usable winner transfer, address
+fallback, loser cleanup, deadline cancellation, caller cancellation, and
+pre-I/O circuit rejection. It is not connected to the production transparent
+handler. Any later runtime call site must preserve the same ordering,
+ownership, and circuit-accounting semantics.

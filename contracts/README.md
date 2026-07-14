@@ -27,4 +27,6 @@ The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
 The connection-race contract gates the circuit before emitting `resolve`,
 records one circuit result for the whole logical request rather than one per IP,
-and ignores adapter completions after a terminal result.
+and ignores adapter completions after a terminal result. The separate Python
+I/O adapter executes those commands against loopback-qualified sockets without
+changing contract v1 or wiring itself into the transparent daemon.

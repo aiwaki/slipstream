@@ -114,12 +114,17 @@ PF lifecycle qualification.
 - Keep Python transport; avoid a big-bang rewrite.
 - Add language-neutral policy fixtures and recovery vectors. Done for contract
   v1. Deterministic address-attempt planning and route-scoped circuit breaking
-  now have isolated v1 contracts executed by both Python and Rust; runtime
-  socket adapters remain pending. A pure connection-race state machine now
+  now have isolated v1 contracts executed by both Python and Rust. A pure
+  connection-race state machine now
   circuit-gates before resolution and drives the address planner through
   language-neutral commands/events. Scripted resolver and connector adapters
   cover stalls, resets, family fallback, deadlines, circuit isolation, and
-  late completion without network I/O.
+  late completion without network I/O. The first Python non-transparent socket
+  adapter now executes those commands against system resolution and numeric
+  TCP candidates, transfers only the winning stream, and closes every loser or
+  cancelled task. It is qualified only with loopback/fake endpoints and is not
+  wired into `tproxy.py`; live daemon integration and other platform adapters
+  remain pending.
 
 ## M3 - Release-Grade macOS
 
