@@ -150,6 +150,24 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertTrue(lifecycle._rule_has_port("port 1080", 1080))
         self.assertFalse(lifecycle._rule_has_port("port = 4430", 443))
 
+    def test_lifecycle_failure_preserves_stage_and_exception_type(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "_daemon_pf_log_tail",
+            return_value=("anchor active",),
+        ):
+            failure = lifecycle._lifecycle_failure(
+                "before-tray-start:chrome",
+                PermissionError(1, "Operation not permitted"),
+        )
+
+        self.assertIn("stage=before-tray-start:chrome", str(failure))
+        self.assertIn(
+            "PermissionError: [Errno 1] Operation not permitted",
+            str(failure),
+        )
+        self.assertIn("daemon_pf_log=('anchor active',)", str(failure))
+
     def test_status_daemon_view_accepts_v1_and_v2(self) -> None:
         v1 = {"state": "active", "pid": 11, "ts": 100.0}
         v2 = {

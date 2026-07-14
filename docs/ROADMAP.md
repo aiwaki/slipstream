@@ -119,12 +119,15 @@ PF lifecycle qualification.
   circuit-gates before resolution and drives the address planner through
   language-neutral commands/events. Scripted resolver and connector adapters
   cover stalls, resets, family fallback, deadlines, circuit isolation, and
-  late completion without network I/O. The first Python non-transparent socket
-  adapter now executes those commands against system resolution and numeric
-  TCP candidates, transfers only the winning stream, and closes every loser or
-  cancelled task. It is qualified only with loopback/fake endpoints and is not
-  wired into `tproxy.py`; live daemon integration and other platform adapters
-  remain pending.
+  late completion without network I/O. The Python socket adapter executes those
+  commands against numeric candidates, transfers only the winning stream, and
+  closes every loser or cancelled task. A policy-preserving runtime wrapper now
+  races the existing first-payload probes inside already-selected local, Xbox
+  DNS, and proven Smart DNS backends. It does not race routes, touch the Geph
+  branch, or persist circuit state across requests. Fake handler endpoints cover
+  stalled-first/healthy-second local and Smart DNS edges while forbidding Geph.
+  Persistent route circuits, IPv6 use in the current daemon dialers, and other
+  platform adapters remain pending and require separate evidence.
 
 ## M3 - Release-Grade macOS
 

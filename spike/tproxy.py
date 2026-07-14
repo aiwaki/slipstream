@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
 
+import connection_probe
 import geph_backend
 import pf_adapter
 from primes import build_fake_stun, classify as classify_voice_payload
@@ -404,6 +405,10 @@ FAILURE_PHASE_STREAM = "stream"
 BACKEND_LOCAL_ENGINE = "local_engine"
 BACKEND_DIRECT = "direct"
 BACKEND_EXTERNAL = "external"
+
+ADDRESS_RACE_TIMEOUT_MS = 9_000
+ADDRESS_RACE_STAGGER_MS = 250
+ADDRESS_RACE_MAX_CONCURRENT = 2
 
 
 CANARY_INTERVAL = 10 * 60.0
@@ -3054,11 +3059,21 @@ async def _try_smart_dns_geo_connect(host, port, first_flight, probe_timeout=3.0
     if not host or not smart_dns_available():
         return None
     ips = _dedupe_ips(await system_resolve_async(host))
-    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
-        result = await dial_and_probe(ip, port, first_flight, probe_timeout=probe_timeout)
-        if result:
-            return ip, result
-    return None
+    policy = route_policy(host)
+    raced, _attempted = await _race_probe_addresses(
+        host,
+        port,
+        ips[:DEFAULT_IP_ATTEMPT_LIMIT],
+        lambda ip: dial_and_probe(
+            ip,
+            port,
+            first_flight,
+            probe_timeout=probe_timeout,
+        ),
+        policy=policy,
+        backend=GEO_BACKEND_SMART_DNS,
+    )
+    return raced
 
 
 async def _run_smart_dns_geo_canary(spec):
@@ -4238,9 +4253,14 @@ def _script_runtime_payload(source_file):
     source_dir = os.path.dirname(source_file)
     payload = (
         (source_file, "tproxy.py"),
+        (os.path.join(source_dir, "address_attempts.py"), "address_attempts.py"),
+        (os.path.join(source_dir, "connection_probe.py"), "connection_probe.py"),
+        (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
+        (os.path.join(source_dir, "connection_race_io.py"), "connection_race_io.py"),
         (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
+        (os.path.join(source_dir, "route_circuit.py"), "route_circuit.py"),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
         (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
@@ -5823,6 +5843,44 @@ async def dial_strategy(ip, port, head, body, host, strat):
     return await dial_and_probe(ip, port, blob)
 
 
+async def _race_probe_addresses(
+    host,
+    port,
+    addresses,
+    dial_candidate,
+    *,
+    policy,
+    backend,
+):
+    """Race complete first-payload probes within one preselected route."""
+    candidates = tuple(addresses)
+    if not candidates:
+        return None, 0
+    raced = await connection_probe.race_probe_dials(
+        host or candidates[0],
+        port,
+        candidates,
+        dial_candidate,
+        service_group=policy.get("service_group") or SERVICE_GENERIC,
+        route_class=policy.get("route_class") or ROUTE_UNKNOWN,
+        backend_id=backend,
+        timeout_ms=ADDRESS_RACE_TIMEOUT_MS,
+        stagger_ms=ADDRESS_RACE_STAGGER_MS,
+        max_concurrent=ADDRESS_RACE_MAX_CONCURRENT,
+    )
+    attempted = raced.attempted_count
+    if raced.connection is None:
+        return None, attempted
+    return (
+        raced.address,
+        (
+            raced.connection.reader,
+            raced.connection.writer,
+            raced.server_first,
+        ),
+    ), attempted
+
+
 async def _try_xbox_dns_local_connect(host, port, head, body):
     """Try the app-owned Xbox DNS answer locally, never through Geph."""
     if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
@@ -5830,11 +5888,15 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
     _note_xbox_dns_attempt(host)
     ips = await xbox_dns_resolve_async(host)
     plain = STRAT_BY_NAME["plain"]
-    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
-        result = await dial_strategy(ip, port, head, body, host, plain)
-        if result:
-            return ip, result
-    return None
+    raced, _attempted = await _race_probe_addresses(
+        host,
+        port,
+        ips[:DEFAULT_IP_ATTEMPT_LIMIT],
+        lambda ip: dial_strategy(ip, port, head, body, host, plain),
+        policy=route_policy(host),
+        backend=BACKEND_LOCAL_ENGINE,
+    )
+    return raced
 
 
 async def handle(reader, writer):
@@ -5999,11 +6061,16 @@ async def _handle_impl(reader, writer):
             _clear_xbox_dns_candidate(host)
 
     if result is None and not is_tls:
-        for ip in real_ips[:ip_limit]:
-            result = await dial_and_probe(ip, dst_port, head + body)
-            if result:
-                chosen = ip
-                break
+        raced, _attempted = await _race_probe_addresses(
+            host,
+            dst_port,
+            real_ips[:ip_limit],
+            lambda ip: dial_and_probe(ip, dst_port, head + body),
+            policy=policy,
+            backend=BACKEND_LOCAL_ENGINE,
+        )
+        if raced:
+            chosen, result = raced
     elif result is None:
         now = time.monotonic()
         # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
@@ -6011,16 +6078,29 @@ async def _handle_impl(reader, writer):
         attempts = 0
         for strat in strategy_order(host):
             strat_ok = False
-            for ip in real_ips[:ip_limit]:
-                attempts += 1
-                result = await dial_strategy(ip, dst_port, head, body, host, strat)
-                if result:
-                    chosen, chosen_name = ip, strat["name"]
-                    strat_ok = True
-                    _record_strategy_result(host, strat["name"], True)
-                    break
-                if attempts >= max_attempts:
-                    break
+            remaining = max_attempts - attempts
+            candidates = real_ips[:min(ip_limit, remaining)]
+            raced, attempted = await _race_probe_addresses(
+                host,
+                dst_port,
+                candidates,
+                lambda ip: dial_strategy(
+                    ip,
+                    dst_port,
+                    head,
+                    body,
+                    host,
+                    strat,
+                ),
+                policy=policy,
+                backend=BACKEND_LOCAL_ENGINE,
+            )
+            attempts += max(1, attempted) if candidates else 0
+            if raced:
+                chosen, result = raced
+                chosen_name = strat["name"]
+                strat_ok = True
+                _record_strategy_result(host, strat["name"], True)
             if not strat_ok:
                 _record_strategy_result(host, strat["name"], False)
             if result or attempts >= max_attempts:

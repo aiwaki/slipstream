@@ -87,6 +87,7 @@ jobs:
         run: |
           python3 -m py_compile \
             spike/address_attempts.py \
+            spike/connection_probe.py \
             spike/connection_race.py \
             spike/connection_race_io.py \
             spike/route_circuit.py \
@@ -97,6 +98,7 @@ jobs:
             spike/test_recovery.py \
             spike/test_connection_race_contract.py \
             spike/test_connection_race_io.py \
+            spike/test_connection_probe.py \
             spike/test_routing_contract_vectors.py \
             spike/test_traffic_contracts.py \
             spike/test_tproxy_doh.py \

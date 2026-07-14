@@ -72,10 +72,18 @@ shared deadlines, circuit isolation, half-open recovery, and protected-route
 rejection before DNS. They also deliver the deadline wake before an
 exact-deadline success to prove that queue order cannot turn that success into a
 timeout, while rejecting a success timestamped after the deadline. These
-scripted adapters perform no network I/O. The isolated Python adapter in
-`spike/connection_race_io.py` now translates the same commands into real async
+scripted adapters perform no network I/O. The Python adapter in
+`spike/connection_race_io.py` translates the same commands into owned async
 tasks and is tested with loopback sockets for usable winner transfer, address
 fallback, loser cleanup, deadline cancellation, caller cancellation, and
-pre-I/O circuit rejection. It is not connected to the production transparent
-handler. Any later runtime call site must preserve the same ordering,
-ownership, and circuit-accounting semantics.
+pre-I/O circuit rejection.
+
+`spike/connection_probe.py` is the only production boundary from the
+transparent handler into that adapter. It receives numeric addresses and an
+already-selected service group, route class, backend, and complete
+first-payload dialer. The race therefore chooses only an address inside one
+route; it cannot choose Geph or a different strategy. A TCP connect alone is
+not success: the candidate must return first server bytes. Handler contracts
+cover stalled-first/healthy-second Discord and Smart DNS edges and forbid Geph
+in the local case. This first integration uses fresh circuit state per request,
+so a transient miss cannot suppress the next user connection.
