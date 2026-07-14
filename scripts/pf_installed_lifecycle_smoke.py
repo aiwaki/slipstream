@@ -12,6 +12,7 @@ processes, and fresh Safari automation processes remain healthy.
 from __future__ import annotations
 
 import argparse
+import errno
 import http.client
 import json
 import os
@@ -73,6 +74,20 @@ CHROME_PAGE_TIMEOUT_MS = 15_000
 CHROME_PROBE_TIMEOUT = 45
 CHROME_CAPTURE_LIMIT = 1_048_576
 CHROME_PROCESS_STOP_TIMEOUT = 2
+CHROME_SIGNAL_NOT_FOUND_EXIT = 3
+CHROME_SIGNAL_PERMISSION_EXIT = 4
+CHROME_GROUP_SIGNAL_HELPER = """\
+import os
+import sys
+
+try:
+    os.killpg(int(sys.argv[1]), int(sys.argv[2]))
+except ProcessLookupError:
+    raise SystemExit(3)
+except PermissionError as exc:
+    print(exc, file=sys.stderr)
+    raise SystemExit(4)
+"""
 SAFARI_PROBE_MIN_BYTES = 32
 SAFARI_PROBE_MARKER = "User-agent:"
 SAFARI_TCP_PROTOCOLS = frozenset(("h2", "http/1.1"))
@@ -718,9 +733,64 @@ def _read_capture(capture, *, tail: bool = False) -> bytes:
         return os.pread(capture.fileno(), length, offset)
 
 
+def _signal_owned_chrome_process_group(
+    process_group: int,
+    signal_number: int,
+    *,
+    uid: int | None,
+    gid: int | None,
+    supplementary_groups: tuple[int, ...],
+) -> bool:
+    if uid is None:
+        try:
+            os.killpg(process_group, signal_number)
+        except ProcessLookupError:
+            return False
+        return True
+    if gid is None:
+        raise LifecycleError("Chrome signal helper requires a group ID")
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            "-c",
+            CHROME_GROUP_SIGNAL_HELPER,
+            str(process_group),
+            str(signal_number),
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=CHROME_PROCESS_STOP_TIMEOUT,
+        user=uid,
+        group=gid,
+        extra_groups=supplementary_groups,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == CHROME_SIGNAL_NOT_FOUND_EXIT:
+        return False
+
+    detail = result.stderr.decode("utf-8", errors="replace")[-1000:].strip()
+    message = (
+        f"same-user signal helper exited {result.returncode}"
+        f" for pgid={process_group} signal={signal_number}"
+    )
+    if detail:
+        message = f"{message}: {detail}"
+    if result.returncode == CHROME_SIGNAL_PERMISSION_EXIT:
+        raise PermissionError(errno.EPERM, message)
+    raise OSError(errno.EIO, message)
+
+
 def _stop_owned_chrome_process_group(
     process: subprocess.Popen,
     process_group: int,
+    *,
+    uid: int | None = None,
+    gid: int | None = None,
+    supplementary_groups: tuple[int, ...] = (),
 ) -> None:
     if process_group != process.pid:
         with _chrome_operation("process-leader-kill-after-group-mismatch"):
@@ -733,29 +803,38 @@ def _stop_owned_chrome_process_group(
         )
 
     with _chrome_operation("process-group-term"):
-        try:
-            os.killpg(process_group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        _signal_owned_chrome_process_group(
+            process_group,
+            signal.SIGTERM,
+            uid=uid,
+            gid=gid,
+            supplementary_groups=supplementary_groups,
+        )
     try:
         with _chrome_operation("process-leader-wait-after-term"):
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
     except subprocess.TimeoutExpired:
         with _chrome_operation("process-group-kill-after-timeout"):
-            try:
-                os.killpg(process_group, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _signal_owned_chrome_process_group(
+                process_group,
+                signal.SIGKILL,
+                uid=uid,
+                gid=gid,
+                supplementary_groups=supplementary_groups,
+            )
         with _chrome_operation("process-leader-wait-after-kill"):
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
     else:
         # Chrome helpers inherit the dedicated process group. The browser can
         # exit before a helper that still owns a capture descriptor.
         with _chrome_operation("process-group-kill-after-leader-exit"):
-            try:
-                os.killpg(process_group, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _signal_owned_chrome_process_group(
+                process_group,
+                signal.SIGKILL,
+                uid=uid,
+                gid=gid,
+                supplementary_groups=supplementary_groups,
+            )
 
 
 def _capture_chrome_output(
@@ -802,7 +881,13 @@ def _capture_chrome_output(
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
         else:
             if actual_process_group != process_group:
-                _stop_owned_chrome_process_group(process, actual_process_group)
+                _stop_owned_chrome_process_group(
+                    process,
+                    actual_process_group,
+                    uid=uid,
+                    gid=gid,
+                    supplementary_groups=supplementary_groups,
+                )
         deadline = time.monotonic() + timeout
         while True:
             stdout = _read_capture(stdout_capture)
@@ -822,7 +907,13 @@ def _capture_chrome_output(
     finally:
         try:
             if process is not None and process_group is not None:
-                _stop_owned_chrome_process_group(process, process_group)
+                _stop_owned_chrome_process_group(
+                    process,
+                    process_group,
+                    uid=uid,
+                    gid=gid,
+                    supplementary_groups=supplementary_groups,
+                )
         finally:
             stdout = _read_capture(stdout_capture)
             stderr = _read_capture(stderr_capture, tail=True)

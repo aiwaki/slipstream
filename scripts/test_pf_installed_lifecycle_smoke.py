@@ -4,6 +4,8 @@ import io
 import json
 import os
 import plistlib
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -604,6 +606,51 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 "Chrome operation process-group-term failed: PermissionError",
             ):
                 lifecycle._stop_owned_chrome_process_group(process, 4242)
+
+    def test_chrome_group_signal_runs_as_the_browser_user(self) -> None:
+        completed = subprocess.CompletedProcess((), 0, b"", b"")
+        with mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=completed,
+        ) as run:
+            signalled = lifecycle._signal_owned_chrome_process_group(
+                4242,
+                signal.SIGTERM,
+                uid=501,
+                gid=20,
+                supplementary_groups=(12, 61),
+            )
+
+        self.assertTrue(signalled)
+        self.assertEqual(run.call_args.kwargs["user"], 501)
+        self.assertEqual(run.call_args.kwargs["group"], 20)
+        self.assertEqual(run.call_args.kwargs["extra_groups"], (12, 61))
+        command = run.call_args.args[0]
+        self.assertEqual(command[0:2], (sys.executable, "-I"))
+        self.assertEqual(command[-2:], ("4242", str(signal.SIGTERM)))
+
+    def test_chrome_group_signal_treats_missing_group_as_stopped(self) -> None:
+        completed = subprocess.CompletedProcess(
+            (),
+            lifecycle.CHROME_SIGNAL_NOT_FOUND_EXIT,
+            b"",
+            b"",
+        )
+        with mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=completed,
+        ):
+            self.assertFalse(
+                lifecycle._signal_owned_chrome_process_group(
+                    4242,
+                    signal.SIGKILL,
+                    uid=501,
+                    gid=20,
+                    supplementary_groups=(),
+                )
+            )
 
     def test_safaridriver_url_accepts_only_explicit_ipv4_loopback(self) -> None:
         self.assertEqual(
