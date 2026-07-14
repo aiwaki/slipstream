@@ -22,6 +22,7 @@ POLICY = load_contract("routing-policy-v1.json")
 RECOVERY = load_contract("recovery-v1.json")
 ADDRESS_ATTEMPTS = load_contract("address-attempts-v1.json")
 ROUTE_CIRCUIT = load_contract("route-circuit-v1.json")
+CONNECTION_RACE = load_contract("connection-race-v1.json")
 
 
 def merge(defaults, override):
@@ -45,8 +46,17 @@ def test_contract_metadata_and_vector_names_are_stable():
     assert ROUTE_CIRCUIT["schema_version"] == 1
     assert ROUTE_CIRCUIT["contract"] == "slipstream.route_circuit"
     assert ROUTE_CIRCUIT["contract_version"] == 1
+    assert CONNECTION_RACE["schema_version"] == 1
+    assert CONNECTION_RACE["contract"] == "slipstream.connection_race"
+    assert CONNECTION_RACE["contract_version"] == 1
 
-    for contract in (POLICY, RECOVERY, ADDRESS_ATTEMPTS, ROUTE_CIRCUIT):
+    for contract in (
+        POLICY,
+        RECOVERY,
+        ADDRESS_ATTEMPTS,
+        ROUTE_CIRCUIT,
+        CONNECTION_RACE,
+    ):
         names = [item["name"] for item in contract["vectors"]]
         assert names
         assert len(names) == len(set(names))

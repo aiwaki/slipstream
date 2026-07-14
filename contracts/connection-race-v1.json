@@ -1,0 +1,640 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.connection_race",
+  "contract_version": 1,
+  "invariants": {
+    "circuit_gate_before_resolver": true,
+    "circuit_accounting": "one_result_per_logical_request",
+    "connector_completion_at_deadline_precedes_timer": true,
+    "adapters": "scripted_only",
+    "network_io": false
+  },
+  "race_config": {
+    "timeout_ms": 1000,
+    "stagger_ms": 250,
+    "max_concurrent": 2,
+    "preferred_family": "ipv6"
+  },
+  "circuit_config": {
+    "failure_threshold": 2,
+    "open_duration_ms": 1000,
+    "half_open_max_in_flight": 1,
+    "success_threshold": 1
+  },
+  "vectors": [
+    {
+      "name": "ipv6-stall-falls-back-to-ipv4-after-stagger",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "generic",
+            "route_class": "direct_passthrough",
+            "backend_id": "direct"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 10,
+            "candidates": [
+              {
+                "id": "v6-a",
+                "family": "ipv6",
+                "address": "2001:db8::10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              },
+              {
+                "id": "v4-a",
+                "family": "ipv4",
+                "address": "192.0.2.10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "v6-a": {"outcome": "stall", "delay_ms": 0},
+            "v4-a": {"outcome": "success", "delay_ms": 50}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "v4-a",
+          "completed_at_ms": 310,
+          "resolver_calls": 1,
+          "starts": ["v6-a@10", "v4-a@260"],
+          "cancelled": ["v6-a"],
+          "attempts": [
+            "v6-a:cancelled:10:310",
+            "v4-a:succeeded:260:310"
+          ],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:success_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    },
+    {
+      "name": "fast-preferred-address-avoids-alternate-start",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "generic",
+            "route_class": "direct_passthrough",
+            "backend_id": "direct"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "v6-a",
+                "family": "ipv6",
+                "address": "2001:db8::10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              },
+              {
+                "id": "v4-a",
+                "family": "ipv4",
+                "address": "192.0.2.10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "v6-a": {"outcome": "success", "delay_ms": 100},
+            "v4-a": {"outcome": "success", "delay_ms": 10}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "v6-a",
+          "completed_at_ms": 100,
+          "resolver_calls": 1,
+          "starts": ["v6-a@0"],
+          "cancelled": [],
+          "attempts": ["v6-a:succeeded:0:100"],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:success_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    },
+    {
+      "name": "failed-preferred-address-releases-ipv4-immediately",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "generic",
+            "route_class": "direct_passthrough",
+            "backend_id": "direct"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "v6-a",
+                "family": "ipv6",
+                "address": "2001:db8::10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              },
+              {
+                "id": "v4-a",
+                "family": "ipv4",
+                "address": "192.0.2.10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "v6-a": {"outcome": "reset", "delay_ms": 50},
+            "v4-a": {"outcome": "success", "delay_ms": 50}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "v4-a",
+          "completed_at_ms": 100,
+          "resolver_calls": 1,
+          "starts": ["v6-a@0", "v4-a@50"],
+          "cancelled": [],
+          "attempts": [
+            "v6-a:failed:0:50",
+            "v4-a:succeeded:50:100"
+          ],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:success_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    },
+    {
+      "name": "connector-success-at-shared-deadline-wins-before-timer",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "generic",
+            "route_class": "direct_passthrough",
+            "backend_id": "direct"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "v6-deadline",
+                "family": "ipv6",
+                "address": "2001:db8::12",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "v6-deadline": {"outcome": "success", "delay_ms": 1000}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "v6-deadline",
+          "completed_at_ms": 1000,
+          "resolver_calls": 1,
+          "starts": ["v6-deadline@0"],
+          "cancelled": [],
+          "attempts": ["v6-deadline:succeeded:0:1000"],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:success_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    },
+    {
+      "name": "resolver-stall-honors-shared-deadline",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "generic",
+            "route_class": "direct_passthrough",
+            "backend_id": "direct"
+          },
+          "resolver": {
+            "outcome": "stall",
+            "delay_ms": 0,
+            "candidates": []
+          },
+          "connector": {}
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "timed_out",
+          "reason": "resolver_deadline",
+          "winner_candidate_id": "",
+          "completed_at_ms": 1000,
+          "resolver_calls": 1,
+          "starts": [],
+          "cancelled": [],
+          "attempts": [],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:failure_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": [
+        {
+          "key": {
+            "service_group": "generic",
+            "route_class": "direct_passthrough",
+            "backend_id": "direct"
+          },
+          "state": {
+            "phase": "closed",
+            "consecutive_failures": 1,
+            "opened_at_ms": null,
+            "half_open_in_flight": 0,
+            "half_open_successes": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "all-address-failures-count-as-one-logical-failure",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "openai",
+            "route_class": "geo_exit",
+            "backend_id": "xbox_dns"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "v6-a",
+                "family": "ipv6",
+                "address": "2001:db8::10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              },
+              {
+                "id": "v4-a",
+                "family": "ipv4",
+                "address": "192.0.2.10",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "v6-a": {"outcome": "failure", "delay_ms": 40},
+            "v4-a": {"outcome": "failure", "delay_ms": 60}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "exhausted",
+          "reason": "all_attempts_failed",
+          "winner_candidate_id": "",
+          "completed_at_ms": 100,
+          "resolver_calls": 1,
+          "starts": ["v6-a@0", "v4-a@40"],
+          "cancelled": [],
+          "attempts": [
+            "v6-a:failed:0:40",
+            "v4-a:failed:40:100"
+          ],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:failure_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": [
+        {
+          "key": {
+            "service_group": "openai",
+            "route_class": "geo_exit",
+            "backend_id": "xbox_dns"
+          },
+          "state": {
+            "phase": "closed",
+            "consecutive_failures": 1,
+            "opened_at_ms": null,
+            "half_open_in_flight": 0,
+            "half_open_successes": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "open-circuit-skips-resolver-and-isolates-other-routes",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "openai",
+            "route_class": "geo_exit",
+            "backend_id": "geph"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "openai-1",
+                "family": "ipv6",
+                "address": "2001:db8::20",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "openai-1": {"outcome": "failure", "delay_ms": 20}
+          }
+        },
+        {
+          "started_at_ms": 100,
+          "key": {
+            "service_group": "openai",
+            "route_class": "geo_exit",
+            "backend_id": "geph"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "openai-2",
+                "family": "ipv6",
+                "address": "2001:db8::21",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "openai-2": {"outcome": "failure", "delay_ms": 20}
+          }
+        },
+        {
+          "started_at_ms": 200,
+          "key": {
+            "service_group": "openai",
+            "route_class": "geo_exit",
+            "backend_id": "geph"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": []
+          },
+          "connector": {}
+        },
+        {
+          "started_at_ms": 200,
+          "key": {
+            "service_group": "steam_store",
+            "route_class": "geo_exit",
+            "backend_id": "geph"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "steam-v4",
+                "family": "ipv4",
+                "address": "192.0.2.40",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "steam-v4": {"outcome": "success", "delay_ms": 30}
+          }
+        },
+        {
+          "started_at_ms": 1120,
+          "key": {
+            "service_group": "openai",
+            "route_class": "geo_exit",
+            "backend_id": "geph"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "openai-half-open",
+                "family": "ipv6",
+                "address": "2001:db8::22",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "openai-half-open": {"outcome": "success", "delay_ms": 20}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "exhausted",
+          "reason": "all_attempts_failed",
+          "winner_candidate_id": "",
+          "completed_at_ms": 20,
+          "resolver_calls": 1,
+          "starts": ["openai-1@0"],
+          "cancelled": [],
+          "attempts": ["openai-1:failed:0:20"],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:failure_recorded:closed"
+          ]
+        },
+        {
+          "phase": "exhausted",
+          "reason": "all_attempts_failed",
+          "winner_candidate_id": "",
+          "completed_at_ms": 120,
+          "resolver_calls": 1,
+          "starts": ["openai-2@100"],
+          "cancelled": [],
+          "attempts": ["openai-2:failed:100:120"],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:threshold_reached:open"
+          ]
+        },
+        {
+          "phase": "rejected",
+          "reason": "open",
+          "winner_candidate_id": "",
+          "completed_at_ms": 200,
+          "resolver_calls": 0,
+          "starts": [],
+          "cancelled": [],
+          "attempts": [],
+          "circuit_decisions": ["reject:open:open"]
+        },
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "steam-v4",
+          "completed_at_ms": 230,
+          "resolver_calls": 1,
+          "starts": ["steam-v4@200"],
+          "cancelled": [],
+          "attempts": ["steam-v4:succeeded:200:230"],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:success_recorded:closed"
+          ]
+        },
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "openai-half-open",
+          "completed_at_ms": 1140,
+          "resolver_calls": 1,
+          "starts": ["openai-half-open@1120"],
+          "cancelled": [],
+          "attempts": ["openai-half-open:succeeded:1120:1140"],
+          "circuit_decisions": [
+            "allow:half_open_probe:half_open",
+            "record:half_open_recovered:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    },
+    {
+      "name": "protected-discord-geph-route-is-rejected-before-dns",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "discord",
+            "route_class": "geo_exit",
+            "backend_id": "geph"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": []
+          },
+          "connector": {}
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "rejected",
+          "reason": "protected_route_mismatch",
+          "winner_candidate_id": "",
+          "completed_at_ms": 0,
+          "resolver_calls": 0,
+          "starts": [],
+          "cancelled": [],
+          "attempts": [],
+          "circuit_decisions": [
+            "reject:protected_route_mismatch:invalid"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    },
+    {
+      "name": "discord-local-race-never-needs-geph",
+      "requests": [
+        {
+          "started_at_ms": 0,
+          "key": {
+            "service_group": "discord",
+            "route_class": "local_bypass",
+            "backend_id": "local_engine"
+          },
+          "resolver": {
+            "outcome": "success",
+            "delay_ms": 0,
+            "candidates": [
+              {
+                "id": "discord-v6",
+                "family": "ipv6",
+                "address": "2001:db8::30",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              },
+              {
+                "id": "discord-v4",
+                "family": "ipv4",
+                "address": "192.0.2.30",
+                "source": "fake-resolver",
+                "expires_at_ms": null
+              }
+            ]
+          },
+          "connector": {
+            "discord-v6": {"outcome": "reset", "delay_ms": 30},
+            "discord-v4": {"outcome": "success", "delay_ms": 40}
+          }
+        }
+      ],
+      "expected_requests": [
+        {
+          "phase": "connected",
+          "reason": "connected",
+          "winner_candidate_id": "discord-v4",
+          "completed_at_ms": 70,
+          "resolver_calls": 1,
+          "starts": ["discord-v6@0", "discord-v4@30"],
+          "cancelled": [],
+          "attempts": [
+            "discord-v6:failed:0:30",
+            "discord-v4:succeeded:30:70"
+          ],
+          "circuit_decisions": [
+            "allow:closed:closed",
+            "record:success_recorded:closed"
+          ]
+        }
+      ],
+      "expected_circuit_states": []
+    }
+  ]
+}
