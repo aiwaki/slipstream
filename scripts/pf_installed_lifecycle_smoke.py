@@ -722,30 +722,36 @@ def _stop_owned_chrome_process_group(
     process: subprocess.Popen,
     process_group: int,
 ) -> None:
-    with _chrome_operation("process-group-stop"):
-        if process_group != process.pid:
+    if process_group != process.pid:
+        with _chrome_operation("process-leader-kill-after-group-mismatch"):
             process.kill()
+        with _chrome_operation("process-leader-wait-after-group-mismatch"):
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
-            raise LifecycleError(
-                "Chrome process group mismatch: "
-                f"pid={process.pid} pgid={process_group}"
-            )
+        raise LifecycleError(
+            "Chrome process group mismatch: "
+            f"pid={process.pid} pgid={process_group}"
+        )
 
+    with _chrome_operation("process-group-term"):
         try:
             os.killpg(process_group, signal.SIGTERM)
         except ProcessLookupError:
             pass
-        try:
+    try:
+        with _chrome_operation("process-leader-wait-after-term"):
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
-        except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired:
+        with _chrome_operation("process-group-kill-after-timeout"):
             try:
                 os.killpg(process_group, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+        with _chrome_operation("process-leader-wait-after-kill"):
             process.wait(timeout=CHROME_PROCESS_STOP_TIMEOUT)
-        else:
-            # Chrome helpers inherit the dedicated process group. The browser
-            # can exit before a helper that still owns a capture descriptor.
+    else:
+        # Chrome helpers inherit the dedicated process group. The browser can
+        # exit before a helper that still owns a capture descriptor.
+        with _chrome_operation("process-group-kill-after-leader-exit"):
             try:
                 os.killpg(process_group, signal.SIGKILL)
             except ProcessLookupError:

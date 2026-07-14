@@ -592,6 +592,19 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                     supplementary_groups=(),
                 )
 
+    def test_chrome_group_signal_permission_error_names_the_signal(self) -> None:
+        process = mock.Mock(pid=4242)
+        with mock.patch.object(
+            lifecycle.os,
+            "killpg",
+            side_effect=PermissionError(1, "Operation not permitted"),
+        ):
+            with self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "Chrome operation process-group-term failed: PermissionError",
+            ):
+                lifecycle._stop_owned_chrome_process_group(process, 4242)
+
     def test_safaridriver_url_accepts_only_explicit_ipv4_loopback(self) -> None:
         self.assertEqual(
             lifecycle._validated_safaridriver_url("http://127.0.0.1:19445"),
