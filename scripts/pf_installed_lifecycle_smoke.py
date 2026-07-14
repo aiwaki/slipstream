@@ -1352,6 +1352,13 @@ def _daemon_pf_log_tail() -> tuple[str, ...]:
     return tuple(selected[-20:])
 
 
+def _lifecycle_failure(stage: str, exc: BaseException) -> LifecycleError:
+    return LifecycleError(
+        f"stage={stage}; {type(exc).__name__}: {exc}; "
+        f"daemon_pf_log={_daemon_pf_log_tail()!r}"
+    )
+
+
 def _rule_has_port(rules: str, port: int) -> bool:
     return bool(re.search(rf"\bport\s*(?:=\s*)?{port}\b", rules))
 
@@ -1498,13 +1505,18 @@ def run_lifecycle(
     https_client_probes: list[str] = []
     chrome_probes: list[str] = []
     safari_probes: list[str] = []
+    stage = "acquire-pf-reference"
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
 
     def record_client_probes(label: str) -> None:
+        nonlocal stage
+        stage = f"{label}:https"
         https_client_probes.append(f"{label}:{_run_https_probe(uid, gid, label)}")
+        stage = f"{label}:chrome"
         chrome_probes.append(f"{label}:{_run_chrome_probe(uid, gid, label)}")
         if safaridriver_url is not None:
+            stage = f"{label}:safari"
             safari_probes.append(
                 f"{label}:{_run_safari_probe(safaridriver_url, label, uid)}"
             )
@@ -1517,12 +1529,14 @@ def run_lifecycle(
     }
     try:
         test_token = _acquire_test_pf_reference(runner)
+        stage = "sentinel-anchor"
         rules = pf.build_redirect_rules(
             target_port=SENTINEL_TARGET_PORT,
             proxy_port=SENTINEL_PROXY_PORT,
         ).replace("user != root\n", "user != root keep state\n")
         pf._load_anchor(runner, pf.SENTINEL_ANCHOR, rules)
         sentinel_snapshot = pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR)
+        stage = "sentinel-connection"
         sentinel = PersistentSentinelConnection(
             SENTINEL_TARGET_PORT,
             SENTINEL_PROXY_PORT,
@@ -1532,6 +1546,7 @@ def run_lifecycle(
         sentinel.start()
         sentinel_states = _assert_sentinel_state(runner)
 
+        stage = "cold-install"
         system.run(target.install_command)
         cold = _wait_for_status("dormant", timeout=90)
         pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
@@ -1541,6 +1556,7 @@ def run_lifecycle(
         sentinel.check("cold-install")
         _assert_sentinel_state(runner, sentinel_states)
 
+        stage = "reinstall"
         system.run(target.install_command)
         reinstalled = _wait_for_status(
             "dormant",
@@ -1554,6 +1570,7 @@ def run_lifecycle(
         sentinel.check("reinstall")
         _assert_sentinel_state(runner, sentinel_states)
 
+        stage = "activate-local-only"
         system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)))
         _wait_for_path(STATUS_PATH, present=False)
         _patch_launchd_for_local_only(LAUNCHD_PLIST)
@@ -1567,6 +1584,7 @@ def run_lifecycle(
         sentinel.check("active-start")
         _assert_sentinel_state(runner, sentinel_states)
 
+        stage = "daemon-restart"
         system.run(("/bin/launchctl", "kickstart", "-k", LAUNCHD_LABEL))
         restarted = _wait_for_status(
             "active",
@@ -1582,6 +1600,7 @@ def run_lifecycle(
         if target.tray_executable is not None:
             record_client_probes("before-tray-start")
 
+            stage = "tray-start"
             baseline = _daemon_updated_at(_read_status())
             tray = PackagedTrayProcess(target.tray_executable, uid, gid)
             tray.start()
@@ -1598,6 +1617,7 @@ def run_lifecycle(
             _assert_sentinel_state(runner, sentinel_states)
             record_client_probes("tray-running")
 
+            stage = "tray-crash"
             baseline = _daemon_updated_at(_read_status())
             tray.crash()
             tray_events.append("crashed")
@@ -1613,6 +1633,7 @@ def run_lifecycle(
             _assert_sentinel_state(runner, sentinel_states)
             record_client_probes("after-tray-crash")
 
+            stage = "tray-restart"
             baseline = _daemon_updated_at(_read_status())
             tray.start()
             _wait_for_same_daemon(
@@ -1627,6 +1648,7 @@ def run_lifecycle(
             sentinel.check("tray-restart")
             _assert_sentinel_state(runner, sentinel_states)
             record_client_probes("after-tray-restart")
+            stage = "tray-stop"
             baseline = _daemon_updated_at(_read_status())
             tray.stop()
             _wait_for_same_daemon(
@@ -1646,11 +1668,14 @@ def run_lifecycle(
         current_status = _read_status()
         previous_rearm_count = _recovery_count(current_status)
         for cycle in range(1, LIFECYCLE_SOAK_CYCLES + 1):
+            stage = f"wake:{cycle}:suspend"
             _signal_owned_daemon(target, daemon_pid, signal.SIGSTOP)
             try:
                 time.sleep(WAKE_SUSPEND_SECONDS)
             finally:
+                stage = f"wake:{cycle}:resume"
                 _signal_owned_daemon(target, daemon_pid, signal.SIGCONT)
+            stage = f"wake:{cycle}:verify"
             current_status = _wait_for_rearm(
                 "wake",
                 expected_pid=daemon_pid,
@@ -1665,6 +1690,7 @@ def run_lifecycle(
             sentinel.check(f"wake-{cycle}")
             _assert_sentinel_state(runner, sentinel_states)
 
+            stage = f"network-change:{cycle}"
             _signal_owned_daemon(target, daemon_pid, RUNTIME_REARM_SIGNAL)
             current_status = _wait_for_rearm(
                 "network_change",
@@ -1681,6 +1707,7 @@ def run_lifecycle(
             sentinel.check(f"network-change-{cycle}")
             _assert_sentinel_state(runner, sentinel_states)
 
+        stage = "uninstall"
         system.run(target.uninstall_command)
         _wait_for_path(LAUNCHD_PLIST, present=False)
         _assert_clean_install_state(runner)
@@ -1689,8 +1716,7 @@ def run_lifecycle(
         sentinel.check("uninstall")
         _assert_sentinel_state(runner, sentinel_states)
     except BaseException as exc:
-        log_tail = _daemon_pf_log_tail()
-        failure = LifecycleError(f"{exc}; daemon_pf_log={log_tail!r}")
+        failure = _lifecycle_failure(stage, exc)
     finally:
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
