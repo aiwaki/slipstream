@@ -50,6 +50,8 @@ struct ResolverScript {
 struct ConnectorScript {
     outcome: String,
     delay_ms: u64,
+    #[serde(default)]
+    priority: u8,
 }
 
 struct ScheduledEvent {
@@ -164,7 +166,7 @@ fn apply_commands(
                         candidate_id: command.candidate_id.clone(),
                         candidates: Vec::new(),
                     },
-                    0,
+                    script.priority,
                 );
             }
             ConnectionRaceCommandKind::Cancel => {

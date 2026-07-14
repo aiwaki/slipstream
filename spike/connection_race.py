@@ -309,6 +309,26 @@ def _replace_running_attempt(state, candidate_id, attempt_state, now_ms):
     return replace(state, attempts=tuple(attempts), updated_at_ms=now_ms)
 
 
+def _defer_deadline_tie(circuit_states, state, event):
+    has_running_attempt = any(
+        attempt.state == address_attempts.ATTEMPT_RUNNING
+        for attempt in state.attempts
+    )
+    if (
+        event.kind != EVENT_WAKE
+        or event.now_ms != state.deadline_at_ms
+        or not has_running_attempt
+    ):
+        return None
+    state = replace(state, updated_at_ms=event.now_ms)
+    return ConnectionRaceTransition(
+        state,
+        dict(circuit_states),
+        (ConnectionRaceCommand(COMMAND_WAKE, at_ms=event.now_ms + 1),),
+        (),
+    )
+
+
 def _advance_resolving(circuit_states, state, event, config, circuit_config):
     if event.kind == EVENT_WAKE:
         if event.now_ms < state.deadline_at_ms:
@@ -352,6 +372,11 @@ def _advance_resolving(circuit_states, state, event, config, circuit_config):
 
 
 def _advance_connecting(circuit_states, state, event, config, circuit_config):
+    deferred = _defer_deadline_tie(circuit_states, state, event)
+    if deferred is not None:
+        return deferred
+    if event.kind == EVENT_ATTEMPT_SUCCEEDED and event.now_ms > state.deadline_at_ms:
+        return _settle(circuit_states, state, config, circuit_config, event.now_ms)
     if event.kind == EVENT_WAKE:
         state = replace(state, updated_at_ms=event.now_ms)
     elif event.kind == EVENT_ATTEMPT_SUCCEEDED:

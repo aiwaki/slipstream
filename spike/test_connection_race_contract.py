@@ -72,7 +72,7 @@ class ScriptedConnector:
                 now_ms + script["delay_ms"],
                 candidate_id=candidate_id,
             ),
-            0,
+            script.get("priority", 0),
         )
 
     def cancel(self, candidate_id):

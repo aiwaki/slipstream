@@ -369,6 +369,35 @@ fn replace_running_attempt(
     Ok(state)
 }
 
+fn defer_deadline_tie(
+    circuit_states: &CircuitStates,
+    mut state: ConnectionRaceState,
+    event: &ConnectionRaceEvent,
+) -> Option<ConnectionRaceTransition> {
+    let has_running_attempt = state
+        .attempts
+        .iter()
+        .any(|attempt| attempt.state == AddressAttemptState::Running);
+    if event.kind != ConnectionRaceEventKind::Wake
+        || event.now_ms != state.deadline_at_ms
+        || !has_running_attempt
+    {
+        return None;
+    }
+    let wake_at_ms = event.now_ms.checked_add(1)?;
+    state.updated_at_ms = event.now_ms;
+    Some(ConnectionRaceTransition {
+        state,
+        circuit_states: circuit_states.clone(),
+        commands: vec![command(
+            ConnectionRaceCommandKind::Wake,
+            "",
+            Some(wake_at_ms),
+        )],
+        circuit_decisions: Vec::new(),
+    })
+}
+
 fn advance_resolving(
     circuit_states: &CircuitStates,
     mut state: ConnectionRaceState,
@@ -442,6 +471,14 @@ fn advance_connecting(
     config: &ConnectionRaceConfig,
     circuit_config: &CircuitConfig,
 ) -> Result<ConnectionRaceTransition, String> {
+    if let Some(transition) = defer_deadline_tie(circuit_states, state.clone(), event) {
+        return Ok(transition);
+    }
+    if event.kind == ConnectionRaceEventKind::AttemptSucceeded
+        && event.now_ms > state.deadline_at_ms
+    {
+        return settle(circuit_states, state, config, circuit_config, event.now_ms);
+    }
     let state = match event.kind {
         ConnectionRaceEventKind::Wake => {
             let mut state = state;
