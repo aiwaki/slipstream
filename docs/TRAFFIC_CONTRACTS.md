@@ -85,5 +85,13 @@ first-payload dialer. The race therefore chooses only an address inside one
 route; it cannot choose Geph or a different strategy. A TCP connect alone is
 not success: the candidate must return first server bytes. Handler contracts
 cover stalled-first/healthy-second Discord and Smart DNS edges and forbid Geph
-in the local case. This first integration uses fresh circuit state per request,
-so a transient miss cannot suppress the next user connection.
+in the local case.
+
+`contracts/route-circuit-registry-v1.json` covers the bounded state above those
+request-local races. Production records one result only after a complete
+protected local ladder, a proven Smart DNS attempt, or a verified owned Geph
+attempt. Tests prove that individual desync failures do not open the local
+circuit, Smart DNS suppression still permits the separately keyed owned-Geph
+candidate, an owned-Geph half-open permit is released on the first payload of a
+still-live WebSocket, and unknown hosts neither persist state nor acquire a Geph
+edge.

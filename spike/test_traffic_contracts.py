@@ -201,6 +201,7 @@ async def run_handler(reader, writer):
 
 
 def isolate_runtime_state(monkeypatch):
+    tproxy.reset_runtime_route_circuits()
     monkeypatch.setattr(tproxy, "_dead", {})
     monkeypatch.setattr(tproxy, "_strat_cache", {})
     monkeypatch.setattr(tproxy, "_strat_scores", {})
@@ -208,6 +209,7 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
     monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "remember_strategy", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -631,3 +633,321 @@ def test_geo_exit_unavailable_never_falls_back_to_local(monkeypatch, smart_dns_r
     assert writer.closed is True
     assert suspensions == ["geo-exit tunnel down"]
     assert smart_dns_misses == ([host] if smart_dns_ready else [])
+
+
+def test_local_circuit_counts_one_full_strategy_ladder_as_one_failure(monkeypatch):
+    """Individual desync misses must not open the protected backend circuit."""
+    isolate_runtime_state(monkeypatch)
+    host = "updates.discord.com"
+    calls = []
+    clock = iter((0, 1, 2, 3, 4))
+    strategies = (
+        {"name": "fake-a", "fake": b"a"},
+        {"name": "fake-b", "fake": b"b"},
+    )
+
+    async def fake_dns(actual_host, fallback_ip):
+        calls.append(("dns", actual_host, fallback_ip))
+        return ["198.51.100.40"]
+
+    async def failed_strategy(ip, port, head, body, actual_host, strategy):
+        calls.append(("local", actual_host, strategy["name"]))
+        return None
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.40", 443))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_dns)
+    monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
+    monkeypatch.setattr(tproxy, "dial_strategy", failed_strategy)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "DEAD_TTL", 0)
+    monkeypatch.setattr(
+        tproxy,
+        "_runtime_route_circuit_now_ms",
+        lambda: next(clock),
+    )
+
+    writers = []
+    for _ in range(3):
+        client, _first_flight = tls_client(host, block_after_hello=False)
+        writer = CaptureWriter()
+        writers.append(writer)
+        asyncio.run(run_handler(client, writer))
+
+    assert len([call for call in calls if call[0] == "dns"]) == 2
+    assert [call[2] for call in calls if call[0] == "local"] == [
+        "fake-a",
+        "fake-b",
+        "fake-a",
+        "fake-b",
+    ]
+    assert all(writer.closed for writer in writers)
+    snapshot = tproxy.runtime_route_circuit_snapshot()
+    assert len(snapshot) == 1
+    assert snapshot[0].key.service_group == tproxy.SERVICE_DISCORD
+    assert snapshot[0].key.route_class == tproxy.ROUTE_LOCAL_BYPASS
+    assert snapshot[0].key.backend_id == tproxy.BACKEND_LOCAL_ENGINE
+    assert snapshot[0].state.phase == tproxy.route_circuit.PHASE_OPEN
+    assert snapshot[0].state.consecutive_failures == 2
+
+
+def test_smart_dns_circuit_suppresses_only_smart_dns_then_uses_owned_geph(
+    monkeypatch,
+):
+    """A cooling Smart DNS backend must not change the reviewed geo route."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    calls = []
+    suspensions = []
+    clock = iter(range(11))
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
+
+    async def smart_dns_miss(actual_host, port, _first_flight):
+        calls.append(("smart_dns", actual_host, port))
+        return None
+
+    async def healthy_geph(actual_host, port, _first_flight):
+        calls.append(("geph", actual_host, port))
+        return streaming_upstream_response(response)
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.41", 443))
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
+    monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
+    monkeypatch.setattr(
+        tproxy,
+        "_smart_dns_mark_failure",
+        lambda actual_host, _reason, _group: calls.append(
+            ("smart_dns_failure", actual_host)
+        ),
+    )
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: None)
+    monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspensions.append)
+    monkeypatch.setattr(
+        tproxy,
+        "_runtime_route_circuit_now_ms",
+        lambda: next(clock),
+    )
+
+    for _ in range(3):
+        client, _first_flight = tls_client(host, block_after_hello=False)
+        writer = CaptureWriter()
+        asyncio.run(run_handler(client, writer))
+        assert bytes(writer.payload) == response
+
+    assert [call[0] for call in calls].count("smart_dns") == 2
+    assert [call[0] for call in calls].count("smart_dns_failure") == 2
+    assert [call[0] for call in calls].count("geph") == 3
+    assert suspensions == []
+    snapshot = tproxy.runtime_route_circuit_snapshot()
+    assert len(snapshot) == 1
+    assert snapshot[0].key.backend_id == tproxy.GEO_BACKEND_SMART_DNS
+    assert snapshot[0].state.phase == tproxy.route_circuit.PHASE_OPEN
+
+
+def test_geph_half_open_recovers_on_first_payload_before_long_relay_ends(
+    monkeypatch,
+):
+    """A healthy long-lived stream must release the single half-open permit."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    policy = tproxy.route_policy(host)
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
+    clears = []
+
+    tproxy.runtime_route_circuit_record_result(
+        policy,
+        tproxy.GEO_BACKEND_GEPH,
+        False,
+        owned=True,
+        now_ms=0,
+    )
+    tproxy.runtime_route_circuit_record_result(
+        policy,
+        tproxy.GEO_BACKEND_GEPH,
+        False,
+        owned=True,
+        now_ms=1,
+    )
+    assert tproxy.runtime_route_circuit_snapshot()[0].state.phase == (
+        tproxy.route_circuit.PHASE_OPEN
+    )
+
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    clock = iter((1001, 1002))
+
+    async def long_lived_geph(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (
+            host,
+            443,
+            expected_first_flight,
+        )
+        return (
+            ScriptedReader(stream=(response,), block_when_empty=True),
+            CaptureWriter(),
+        )
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.43", 443))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "dial_via_geph", long_lived_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "clear_geph_route_failure",
+        lambda: clears.append("clear"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "log_geph_route_failure",
+        lambda *_args, **_kwargs: pytest.fail("healthy payload is not a failure"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_transparent_routing",
+        lambda _reason: pytest.fail("healthy payload must not pause routing"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_runtime_route_circuit_now_ms",
+        lambda: next(clock),
+    )
+
+    async def scenario():
+        task = asyncio.create_task(tproxy._handle_impl(client, writer))
+        for _ in range(20):
+            if writer.payload:
+                break
+            await asyncio.sleep(0)
+        assert bytes(writer.payload) == response
+        assert tproxy.runtime_route_circuit_snapshot() == ()
+        assert tproxy.runtime_route_circuit_allows(
+            policy,
+            tproxy.GEO_BACKEND_GEPH,
+            owned=True,
+            now_ms=1003,
+        ) is True
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+    assert clears == ["clear"]
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
+    """Unclassified sites keep trying their local ladder independently."""
+    isolate_runtime_state(monkeypatch)
+    host = "unclassified.example"
+    calls = []
+
+    async def fake_dns(actual_host, _fallback_ip):
+        calls.append(("dns", actual_host))
+        return ["198.51.100.42"]
+
+    async def failed_strategy(_ip, _port, _head, _body, actual_host, _strategy):
+        calls.append(("local", actual_host))
+        return None
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.42", 443))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_dns)
+    monkeypatch.setattr(
+        tproxy,
+        "strategy_order",
+        lambda _host: ({"name": "plain", "fake": b""},),
+    )
+    monkeypatch.setattr(tproxy, "dial_strategy", failed_strategy)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(tproxy, "xbox_dns_resolve_async", lambda _host: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(tproxy, "DEAD_TTL", 0)
+
+    for _ in range(2):
+        client, _first_flight = tls_client(host, block_after_hello=False)
+        writer = CaptureWriter()
+        asyncio.run(run_handler(client, writer))
+
+    assert [call[0] for call in calls].count("dns") == 2
+    assert [call[0] for call in calls].count("local") == 2
+    assert tproxy.runtime_route_circuit_snapshot() == ()
+
+
+def test_external_geph_never_enters_owned_runtime_circuit_state():
+    tproxy.reset_runtime_route_circuits()
+    policy = tproxy.route_policy("ws.chatgpt.com")
+
+    assert tproxy.runtime_route_circuit_before_request(
+        policy,
+        tproxy.GEO_BACKEND_GEPH,
+        owned=False,
+        now_ms=0,
+    ) is None
+    assert tproxy.runtime_route_circuit_record_result(
+        policy,
+        tproxy.GEO_BACKEND_GEPH,
+        False,
+        owned=False,
+        now_ms=1,
+    ) is None
+    assert tproxy.runtime_route_circuit_snapshot() == ()
+
+
+def test_runtime_circuit_state_failure_cannot_block_the_selected_route(monkeypatch):
+    class BrokenRegistry:
+        def __init__(self):
+            self.cleared = False
+
+        def apply(self, _event):
+            raise ValueError("corrupt state")
+
+        def clear(self):
+            self.cleared = True
+
+    registry = BrokenRegistry()
+    monkeypatch.setattr(tproxy, "_runtime_route_circuits", registry)
+    policy = tproxy.route_policy("updates.discord.com")
+
+    assert tproxy.runtime_route_circuit_allows(
+        policy,
+        tproxy.BACKEND_LOCAL_ENGINE,
+        now_ms=0,
+    ) is True
+    assert registry.cleared is True

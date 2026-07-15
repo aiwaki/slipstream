@@ -358,9 +358,10 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "pf_adapter.py": "VALUE = 6\n",
     "primes.py": "VALUE = 7\n",
     "route_circuit.py": "VALUE = 8\n",
-    "routing_policy.py": "VALUE = 9\n",
-    "routing_recovery.py": "VALUE = 10\n",
-    "xbox_dns.py": "VALUE = 11\n",
+    "route_circuit_registry.py": "VALUE = 9\n",
+    "routing_policy.py": "VALUE = 10\n",
+    "routing_recovery.py": "VALUE = 11\n",
+    "xbox_dns.py": "VALUE = 12\n",
 }
 
 
@@ -477,6 +478,7 @@ def test_copy_script_runtime_requires_geph_backend_before_install(tmp_path):
         "connection_race.py",
         "connection_race_io.py",
         "route_circuit.py",
+        "route_circuit_registry.py",
     ),
 )
 def test_copy_script_runtime_requires_connection_race_closure(tmp_path, missing):

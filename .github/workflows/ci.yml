@@ -91,6 +91,7 @@ jobs:
             spike/connection_race.py \
             spike/connection_race_io.py \
             spike/route_circuit.py \
+            spike/route_circuit_registry.py \
             spike/routing_policy.py \
             spike/routing_recovery.py \
             spike/tproxy.py \

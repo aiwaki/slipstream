@@ -54,6 +54,8 @@ import urllib.request
 import connection_probe
 import geph_backend
 import pf_adapter
+import route_circuit
+import route_circuit_registry
 from primes import build_fake_stun, classify as classify_voice_payload
 from routing_recovery import (
     ConnectionOutcome,
@@ -405,6 +407,23 @@ FAILURE_PHASE_STREAM = "stream"
 BACKEND_LOCAL_ENGINE = "local_engine"
 BACKEND_DIRECT = "direct"
 BACKEND_EXTERNAL = "external"
+
+RUNTIME_ROUTE_CIRCUIT_CONFIG = route_circuit.CircuitConfig(
+    failure_threshold=2,
+    open_duration_ms=1000,
+    half_open_max_in_flight=1,
+    success_threshold=1,
+)
+RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG = (
+    route_circuit_registry.RouteCircuitRegistryConfig(
+        max_entries=256,
+        idle_ttl_ms=5 * 60 * 1000,
+    )
+)
+_runtime_route_circuits = route_circuit_registry.RouteCircuitRegistry(
+    RUNTIME_ROUTE_CIRCUIT_CONFIG,
+    RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG,
+)
 
 ADDRESS_RACE_TIMEOUT_MS = 9_000
 ADDRESS_RACE_STAGGER_MS = 250
@@ -1305,6 +1324,111 @@ def route_policy_status_snapshot():
 def route_policy(host, now=None):
     static_routes, geo_exit_routes = route_policy_tables()
     return classify_route_policy(host, static_routes, geo_exit_routes)
+
+
+def _runtime_route_circuit_now_ms():
+    return int(time.monotonic() * 1000)
+
+
+def _runtime_route_circuit_key(policy, backend, *, owned=True):
+    route_class = policy.get("route_class") or ROUTE_UNKNOWN
+    service_group = policy.get("service_group") or SERVICE_GENERIC
+    if route_class == ROUTE_LOCAL_BYPASS and backend == BACKEND_LOCAL_ENGINE:
+        pass
+    elif route_class == ROUTE_GEO_EXIT and backend == GEO_BACKEND_SMART_DNS:
+        pass
+    elif (
+        route_class == ROUTE_GEO_EXIT
+        and backend == GEO_BACKEND_GEPH
+        and owned
+    ):
+        pass
+    else:
+        return None
+    return route_circuit.RouteCircuitKey(
+        service_group=service_group,
+        route_class=route_class,
+        backend_id=backend,
+    )
+
+
+def _apply_runtime_route_circuit(event):
+    try:
+        return _runtime_route_circuits.apply(event)
+    except Exception as exc:
+        # Circuit memory is an optimization. If its clock/state is ever invalid,
+        # forget suppression and keep the fixed route usable.
+        _runtime_route_circuits.clear()
+        if VERBOSE:
+            print(f"  route circuit reset: {exc}", file=sys.stderr)
+        return None
+
+
+def runtime_route_circuit_before_request(
+    policy,
+    backend,
+    *,
+    owned=True,
+    now_ms=None,
+):
+    key = _runtime_route_circuit_key(policy, backend, owned=owned)
+    if key is None:
+        return None
+    event = route_circuit.CircuitEvent(
+        kind=route_circuit.EVENT_BEFORE_REQUEST,
+        key=key,
+        now_ms=(
+            _runtime_route_circuit_now_ms()
+            if now_ms is None
+            else int(now_ms)
+        ),
+    )
+    return _apply_runtime_route_circuit(event)
+
+
+def runtime_route_circuit_record_result(
+    policy,
+    backend,
+    ok,
+    *,
+    owned=True,
+    now_ms=None,
+):
+    key = _runtime_route_circuit_key(policy, backend, owned=owned)
+    if key is None:
+        return None
+    event = route_circuit.CircuitEvent(
+        kind=(
+            route_circuit.EVENT_RECORD_SUCCESS
+            if ok
+            else route_circuit.EVENT_RECORD_FAILURE
+        ),
+        key=key,
+        now_ms=(
+            _runtime_route_circuit_now_ms()
+            if now_ms is None
+            else int(now_ms)
+        ),
+    )
+    return _apply_runtime_route_circuit(event)
+
+
+def runtime_route_circuit_allows(policy, backend, *, owned=True, now_ms=None):
+    decision = runtime_route_circuit_before_request(
+        policy,
+        backend,
+        owned=owned,
+        now_ms=now_ms,
+    )
+    return decision is None or decision.kind == route_circuit.DECISION_ALLOW
+
+
+def reset_runtime_route_circuits():
+    _runtime_route_circuits.clear()
+
+
+def runtime_route_circuit_snapshot():
+    return _runtime_route_circuits.snapshot()
 
 
 def connection_outcome_for_host(
@@ -4261,6 +4385,10 @@ def _script_runtime_payload(source_file):
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
         (os.path.join(source_dir, "route_circuit.py"), "route_circuit.py"),
+        (
+            os.path.join(source_dir, "route_circuit_registry.py"),
+            "route_circuit_registry.py",
+        ),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
         (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
@@ -5263,6 +5391,8 @@ class _RelayActivity:
     downstream_write_failed: bool = False
     client_ended_first: bool = False
     server_ended_first: bool = False
+    first_downstream_seen: bool = False
+    on_first_downstream: object = None
 
 
 def _local_stream_stalled(activity, now=None):
@@ -5482,6 +5612,10 @@ async def splice(src, dst, activity=None):
                 break
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
+                if not activity.first_downstream_seen:
+                    activity.first_downstream_seen = True
+                    if activity.on_first_downstream is not None:
+                        activity.on_first_downstream()
     finally:
         if activity is not None:
             activity.server_end_at = time.monotonic()
@@ -5972,9 +6106,18 @@ async def _handle_impl(reader, writer):
     # that the DNS-provided path is live; any runtime miss falls back to Geph.
     if is_tls and geph_route(host):
         policy = route_policy(host)
-        if smart_dns_route_enabled(host):
+        geph_owned = bool(_geph_owned)
+        if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
+            policy,
+            GEO_BACKEND_SMART_DNS,
+        ):
             smart = await _try_smart_dns_geo_connect(host, dst_port, head + body)
             if smart:
+                runtime_route_circuit_record_result(
+                    policy,
+                    GEO_BACKEND_SMART_DNS,
+                    True,
+                )
                 smart_ip, smart_result = smart
                 up_r, up_w, server_first = smart_result
                 route_health_event(
@@ -5995,6 +6138,11 @@ async def _handle_impl(reader, writer):
                     return
                 await relay_local_stream(reader, up_w, up_r, writer)
                 return
+            runtime_route_circuit_record_result(
+                policy,
+                GEO_BACKEND_SMART_DNS,
+                False,
+            )
             _smart_dns_mark_failure(
                 host,
                 "smart dns runtime probe failed",
@@ -6005,29 +6153,91 @@ async def _handle_impl(reader, writer):
                 writer.close()
                 return
             try:
+                if not runtime_route_circuit_allows(
+                    policy,
+                    GEO_BACKEND_GEPH,
+                    owned=geph_owned,
+                ):
+                    suspend_transparent_routing("geo-exit backend cooling down")
+                    writer.close()
+                    return
                 g = await dial_via_geph(host, dst_port, head + body)
                 if g:
                     gr, gw = g
                     if VERBOSE:
                         print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                     t0 = time.monotonic()
-                    res = await relay_local_stream(reader, gw, gr, writer)
+                    geph_result_recorded = False
+
+                    def record_first_geph_payload():
+                        nonlocal geph_result_recorded
+                        if geph_result_recorded:
+                            return
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            True,
+                            owned=geph_owned,
+                        )
+                        clear_geph_route_failure()
+                        geph_result_recorded = True
+
+                    activity = _RelayActivity(
+                        last_downstream_at=t0,
+                        on_first_downstream=record_first_geph_payload,
+                    )
+                    res = await relay_local_stream(
+                        reader,
+                        gw,
+                        gr,
+                        writer,
+                        activity,
+                    )
                     down_b = res[1] or 0
                     if down_b == 0 and time.monotonic() - t0 < 10:
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            False,
+                            owned=geph_owned,
+                        )
                         log_geph_route_failure(host, "remote closed without response")
                         # A successful SOCKS CONNECT is not enough to keep PF armed.
                         # If the remote side closes before yielding any payload, leave
                         # the next client retry on the native path instead of sending
                         # it into the same broken geo-exit tunnel.
                         suspend_transparent_routing("geo-exit remote close before payload")
-                    else:
+                    elif not geph_result_recorded:
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            True,
+                            owned=geph_owned,
+                        )
                         clear_geph_route_failure()
                     return
             finally:
                 _geph_session_finished()
+            runtime_route_circuit_record_result(
+                policy,
+                GEO_BACKEND_GEPH,
+                False,
+                owned=geph_owned,
+            )
             log_geph_route_failure(host, "SOCKS connect failed")
             suspend_transparent_routing("geo-exit SOCKS connect unavailable")
         else:
+            if runtime_route_circuit_allows(
+                policy,
+                GEO_BACKEND_GEPH,
+                owned=geph_owned,
+            ):
+                runtime_route_circuit_record_result(
+                    policy,
+                    GEO_BACKEND_GEPH,
+                    False,
+                    owned=geph_owned,
+                )
             log_geph_route_failure(host, "tunnel down")
             suspend_transparent_routing("geo-exit tunnel down")
         if VERBOSE:
@@ -6039,6 +6249,14 @@ async def _handle_impl(reader, writer):
     # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
     # (fallback dst_ip). Some CDN edges are bad while neighbors work.
     policy = route_policy(host)
+    if not runtime_route_circuit_allows(policy, BACKEND_LOCAL_ENGINE):
+        if VERBOSE:
+            print(
+                f"  {host or dst_ip} local backend cooling down",
+                file=sys.stderr,
+            )
+        writer.close()
+        return
     real_ips = await resolve_connection_ips(host, dst_ip)
     ip_limit = ip_attempt_limit(host)
 
@@ -6136,6 +6354,11 @@ async def _handle_impl(reader, writer):
                 remember_strategy(host, chosen_name)
 
     if not result:
+        runtime_route_circuit_record_result(
+            policy,
+            BACKEND_LOCAL_ENGINE,
+            False,
+        )
         if policy["route_class"] == ROUTE_LOCAL_BYPASS:
             note_local_bypass_runtime_result(
                 host,
@@ -6148,6 +6371,11 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
+    runtime_route_circuit_record_result(
+        policy,
+        BACKEND_LOCAL_ENGINE,
+        True,
+    )
     if policy["route_class"] == ROUTE_LOCAL_BYPASS:
         note_local_bypass_runtime_result(host, True)
 
