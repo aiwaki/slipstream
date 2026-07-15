@@ -298,6 +298,16 @@ class BuildConfigTests(unittest.TestCase):
             packages: set[str] = set()
             versions: dict[str, str] = {}
             for requirement in logical_lines:
+                self.assertNotRegex(
+                    requirement,
+                    r"^(?:-e|--editable)\s",
+                    f"editable requirement in {path}: {requirement}",
+                )
+                self.assertNotRegex(
+                    requirement,
+                    r"(?:^|[\s@])(?:git\+|https?://)",
+                    f"URL or VCS requirement in {path}: {requirement}",
+                )
                 match = requirement_pattern.match(requirement)
                 self.assertIsNotNone(match, f"unlocked requirement in {path}: {requirement}")
                 assert match is not None
