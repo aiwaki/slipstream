@@ -143,7 +143,9 @@ PF lifecycle qualification.
   and fail-closed. Done.
 - Keep stable app, preview app, and internal Geph releases visibly distinct;
   only stable app releases may update GitHub's latest pointer. Done.
-- Pin Python/PyInstaller dependencies with hashes.
+- Pin Python/PyInstaller dependencies with hashes. Done for separate runtime,
+  test, and build graphs on Python 3.13.14; CI, release, and legacy source
+  installs require hashes and binary wheels.
 - Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
   the matching asset version, checksum, and arm64 architecture. Done for the
   release workflow; artifact manifest and broader provenance remain pending.

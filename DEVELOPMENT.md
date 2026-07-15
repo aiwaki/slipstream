@@ -29,13 +29,26 @@ otherwise.
 
 ```bash
 python3 -m venv spike/.venv
-spike/.venv/bin/python -m pip install --upgrade pip
-spike/.venv/bin/python -m pip install -r spike/requirements.txt
+spike/.venv/bin/python -m pip install \
+  --only-binary=:all: \
+  --require-hashes \
+  -r spike/requirements.txt
 
 cd app-tauri
 npm ci
 cd ..
 ```
+
+Python dependency locks target Python 3.13. Runtime, test, and build graphs are
+kept separate. To update them after editing the corresponding
+`requirements-*.in` files:
+
+```bash
+PYTHON=python3.13 scripts/update_python_locks.sh
+```
+
+The update command uses pinned `pip-tools`; all three generated lock files must
+be reviewed in the same change.
 
 ## Safe local checks
 

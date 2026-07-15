@@ -11,6 +11,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_DEPS = ROOT / "scripts/ensure_macos_build_deps.sh"
+PYTHON_LOCKS = {
+    "runtime": ROOT / "spike/requirements-runtime.txt",
+    "test": ROOT / "spike/requirements.txt",
+    "build": ROOT / "spike/requirements-build.txt",
+}
+RELEASE_PYTHON = "3.13.14"
 ACTION_PINS = {
     "actions/checkout": (
         "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
@@ -249,6 +255,116 @@ class BuildConfigTests(unittest.TestCase):
                 continue
             self.assertIn('node-version: "24"', text, str(workflow))
             self.assertNotRegex(text, r"node-version:\s*20\b")
+
+    def test_python_jobs_use_the_exact_release_patch(self) -> None:
+        setup_count = 0
+        version_count = 0
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            setup_count += text.count("uses: actions/setup-python@")
+            version_count += text.count(f'python-version: "{RELEASE_PYTHON}"')
+            self.assertNotIn('python-version: "3.13"', text, str(workflow))
+
+        self.assertGreater(setup_count, 0)
+        self.assertEqual(version_count, setup_count)
+
+    def test_python_locks_pin_and_hash_every_distribution(self) -> None:
+        expected_packages = {
+            "runtime": {"certifi", "cryptography", "scapy"},
+            "test": {"certifi", "cryptography", "pytest", "scapy"},
+            "build": {"certifi", "cryptography", "pyinstaller", "scapy"},
+        }
+        requirement_pattern = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s]+)")
+        hash_pattern = re.compile(r"--hash=sha256:([0-9a-f]{64})")
+        lock_versions: dict[str, dict[str, str]] = {}
+
+        for kind, path in PYTHON_LOCKS.items():
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("scripts/update_python_locks.sh", text)
+            logical_lines: list[str] = []
+            current = ""
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                current = f"{current} {line}".strip()
+                if current.endswith("\\"):
+                    current = current[:-1].rstrip()
+                    continue
+                logical_lines.append(current)
+                current = ""
+            self.assertFalse(current, f"unterminated requirement in {path}")
+
+            packages: set[str] = set()
+            versions: dict[str, str] = {}
+            for requirement in logical_lines:
+                match = requirement_pattern.match(requirement)
+                self.assertIsNotNone(match, f"unlocked requirement in {path}: {requirement}")
+                assert match is not None
+                package = match.group(1).lower()
+                packages.add(package)
+                versions[package] = match.group(2)
+                self.assertTrue(
+                    hash_pattern.search(requirement),
+                    f"unhashed requirement in {path}: {requirement}",
+                )
+                self.assertNotIn("@", match.group(2), requirement)
+
+            self.assertLessEqual(expected_packages[kind], packages)
+            if kind != "build":
+                self.assertNotIn("pyinstaller", packages)
+            if kind != "test":
+                self.assertNotIn("pytest", packages)
+            lock_versions[kind] = versions
+
+        for kind in ("test", "build"):
+            for package, version in lock_versions["runtime"].items():
+                self.assertEqual(lock_versions[kind].get(package), version)
+
+    def test_python_install_paths_are_hash_locked_and_binary_only(self) -> None:
+        build_sources = [
+            ROOT / ".github/workflows/build-app.yml",
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/owned-geph-qualification.yml",
+            ROOT / "spike/build_daemon.sh",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in build_sources)
+
+        self.assertGreaterEqual(combined.count("requirements-build.txt"), 4)
+        self.assertGreaterEqual(combined.count("--require-hashes"), 5)
+        self.assertGreaterEqual(combined.count("--only-binary=:all:"), 5)
+        self.assertNotIn("-r spike/requirements.txt pyinstaller", combined)
+        self.assertNotIn("scapy cryptography certifi pyinstaller", combined)
+        self.assertNotIn("pip install --quiet --upgrade pip", combined)
+
+        source_installer = (ROOT / "spike/tproxy.py").read_text(encoding="utf-8")
+        install_start = source_installer.index('if not os.path.exists(py):')
+        install_end = source_installer.index('prog_args = [py, script', install_start)
+        source_install = source_installer[install_start:install_end]
+        self.assertIn("requirements-runtime.txt", source_install)
+        self.assertIn('"--require-hashes"', source_install)
+        self.assertIn('"--only-binary=:all:"', source_install)
+        self.assertNotRegex(
+            source_install,
+            r'"scapy",\s*"cryptography",\s*"certifi"',
+        )
+
+    def test_python_lock_update_tool_is_pinned_and_syntax_checked(self) -> None:
+        updater = ROOT / "scripts/update_python_locks.sh"
+        text = updater.read_text(encoding="utf-8")
+        self.assertIn('pip_tools_version="7.5.3"', text)
+        self.assertIn('python_minor" != "3.13"', text)
+        self.assertIn("--generate-hashes", text)
+        self.assertIn("--allow-unsafe", text)
+
+        syntax = subprocess.run(
+            ("/bin/bash", "-n", str(updater)),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
     def test_release_workflows_use_checked_macos_build_dependencies(self) -> None:
         for name in ("build-app.yml", "build-geph.yml"):

@@ -350,6 +350,7 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
 
 _SCRIPT_RUNTIME_FIXTURE = {
     "tproxy.py": "import connection_probe\nimport geph_backend\n",
+    "requirements-runtime.txt": "certifi==2026.6.17 --hash=sha256:fixture\n",
     "address_attempts.py": "VALUE = 1\n",
     "connection_probe.py": "VALUE = 2\n",
     "connection_race.py": "VALUE = 3\n",
@@ -389,6 +390,8 @@ def test_script_runtime_payload_covers_transitive_local_imports():
     payload_names = {name for _source, name in payload}
 
     for source, _name in payload:
+        if Path(source).suffix != ".py":
+            continue
         tree = ast.parse(Path(source).read_text())
         imported_roots = set()
         for node in ast.walk(tree):
@@ -477,11 +480,12 @@ def test_copy_script_runtime_requires_geph_backend_before_install(tmp_path):
         "connection_probe.py",
         "connection_race.py",
         "connection_race_io.py",
+        "requirements-runtime.txt",
         "route_circuit.py",
         "route_circuit_registry.py",
     ),
 )
-def test_copy_script_runtime_requires_connection_race_closure(tmp_path, missing):
+def test_copy_script_runtime_requires_complete_payload_before_install(tmp_path, missing):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
