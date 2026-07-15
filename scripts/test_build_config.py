@@ -179,6 +179,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
 
+    def test_release_workflow_binds_tags_and_notes_to_the_built_commit(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("target_commitish: ${{ github.sha }}", workflow)
+        self.assertIn("select(.draft | not)", workflow)
+
     def test_release_workflow_requires_remote_policy_only_for_stable(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 

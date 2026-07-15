@@ -156,6 +156,30 @@ class MakeReleaseManifestTests(unittest.TestCase):
                     target=TARGET,
                 )
 
+    def test_validation_rejects_mismatched_build_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_release_dir(root)
+            self._write_manifest(root)
+            manifest_path = root / make_release_manifest.MANIFEST_NAME
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["build"]["architecture"] = "x86_64"
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "build target"):
+                make_release_manifest.validate_artifact_manifest(
+                    release_dir=root,
+                    repository=REPOSITORY,
+                    version=VERSION,
+                    tag=STABLE_TAG,
+                    channel="stable",
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
+
     def test_rejects_unexpected_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
