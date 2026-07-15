@@ -39,6 +39,10 @@ ACTION_PINS = {
         "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         "v7.0.1",
     ),
+    "actions/attest": (
+        "a1948c3f048ba23858d222213b7c278aabede763",
+        "v4.1.1",
+    ),
     "softprops/action-gh-release": (
         "3d0d9888cb7fd7b750713d6e236d1fcb99157228",
         "v3.0.2",
@@ -184,6 +188,41 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("target_commitish: ${{ github.sha }}", workflow)
         self.assertIn("select(.draft | not)", workflow)
+        self.assertIn('[ "$GITHUB_REF" = "refs/heads/main" ]', workflow)
+
+    def test_release_workflow_attests_only_verified_payloads(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("id-token: write", workflow)
+        self.assertIn("attestations: write", workflow)
+        self.assertIn("artifact-metadata: write", workflow)
+        self.assertEqual(
+            workflow.count(
+                "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763"
+            ),
+            2,
+        )
+        self.assertIn("Attest verified release provenance", workflow)
+        self.assertIn("subject-path: dist-release/*", workflow)
+        self.assertIn("Attest application SBOM", workflow)
+        self.assertIn("sbom-path: dist-release/Slipstream.spdx.json", workflow)
+        self.assertIn("Verify stored release attestations", workflow)
+        self.assertIn("gh attestation verify", workflow)
+        self.assertIn('--source-digest "$GITHUB_SHA"', workflow)
+        self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
+        self.assertIn("--deny-self-hosted-runners", workflow)
+        self.assertIn(
+            "gh attestation verify Slipstream-macos-arm64.zip --repo",
+            workflow,
+        )
+        self.assertLess(
+            workflow.index("Verify release artifacts"),
+            workflow.index("Attest verified release provenance"),
+        )
+        self.assertLess(
+            workflow.index("Attest application SBOM"),
+            workflow.index("Publish release"),
+        )
 
     def test_release_workflow_requires_remote_policy_only_for_stable(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
