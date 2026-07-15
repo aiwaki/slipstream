@@ -7,6 +7,12 @@
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
 
+pub mod address_attempts;
+pub mod connection_race;
+pub mod route_circuit;
+pub mod route_circuit_registry;
+
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -420,8 +426,8 @@ fn redact_sensitive_text(input: &str) -> String {
     out
 }
 
-fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
-    match fs::read_to_string(log_path) {
+fn diagnostic_log_tail_from_path(display_path: &str, read_path: &Path, max_lines: usize) -> Value {
+    match fs::read_to_string(read_path) {
         Ok(raw) => {
             let all_lines: Vec<&str> = raw.lines().collect();
             let start = all_lines.len().saturating_sub(max_lines);
@@ -430,19 +436,60 @@ fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
                 .map(|line| redact_sensitive_text(line))
                 .collect();
             json!({
-                "path": log_path,
+                "path": display_path,
                 "available": true,
                 "truncated": start > 0,
                 "lines": lines,
             })
         }
         Err(err) => json!({
-            "path": log_path,
+            "path": display_path,
             "available": false,
             "error": format!("{:?}", err.kind()),
             "lines": [],
         }),
     }
+}
+
+fn diagnostic_log_tail(log_path: &str, max_lines: usize) -> Value {
+    diagnostic_log_tail_from_path(log_path, Path::new(log_path), max_lines)
+}
+
+fn diagnostic_log_tail_with_admin_fallback(log_path: &str, max_lines: usize) -> Value {
+    let direct = diagnostic_log_tail(log_path, max_lines);
+    if direct.get("available").and_then(Value::as_bool) == Some(true)
+        || !Path::new(log_path).exists()
+    {
+        return direct;
+    }
+
+    let snapshot = std::env::temp_dir().join(format!(
+        "slipstream-diagnostic-log-{}.log",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&snapshot);
+    let copied = if copy_log_snapshot_direct(log_path, &snapshot) {
+        true
+    } else {
+        let Some(uid) = current_numeric_id("-u") else {
+            return direct;
+        };
+        let Some(gid) = current_numeric_id("-g") else {
+            return direct;
+        };
+        let shell = log_snapshot_shell(log_path, &snapshot, &uid, &gid);
+        run_admin_status(
+            &shell,
+            "Slipstream needs administrator access to include its daemon log in diagnostics.",
+        )
+    };
+    if !copied {
+        return direct;
+    }
+
+    let tail = diagnostic_log_tail_from_path(log_path, &snapshot, max_lines);
+    let _ = fs::remove_file(snapshot);
+    tail
 }
 
 fn daemon_recovery_status_value(path: &str) -> Value {
@@ -814,7 +861,10 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
             current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
         ),
         unix_now_secs(),
-        Some(diagnostic_log_tail(LOG_PATH, DIAGNOSTIC_LOG_TAIL_LINES)),
+        Some(diagnostic_log_tail_with_admin_fallback(
+            LOG_PATH,
+            DIAGNOSTIC_LOG_TAIL_LINES,
+        )),
         Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
         bundled_daemon.as_deref(),
     );
@@ -851,6 +901,32 @@ fn daemon_needs_install(bundled: &Path) -> bool {
     !same_file_bytes(bundled, Path::new(INSTALLED_DAEMON))
 }
 
+fn launchd_label_disabled_from_output(raw: &str, label: &str) -> Option<bool> {
+    raw.lines().find_map(|line| {
+        if !line.contains(&format!("\"{label}\"")) {
+            return None;
+        }
+        let (_, value) = line.split_once("=>")?;
+        match value.trim().trim_end_matches(',') {
+            "true" | "disabled" => Some(true),
+            "false" | "enabled" => Some(false),
+            _ => None,
+        }
+    })
+}
+
+fn daemon_label_disabled() -> Option<bool> {
+    let output = Command::new("/bin/launchctl")
+        .args(["print-disabled", "system"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    launchd_label_disabled_from_output(&raw, LAUNCHD_LABEL)
+}
+
 fn bundled_daemon_path(app: &AppHandle) -> Option<PathBuf> {
     Some(
         app.path()
@@ -865,7 +941,9 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
     let Some(bin) = bundled_daemon_path(app) else {
         return false;
     };
-    valid_bundled_daemon(&bin) && !daemon_needs_install(&bin)
+    valid_bundled_daemon(&bin)
+        && !daemon_needs_install(&bin)
+        && matches!(daemon_label_disabled(), Some(false))
 }
 
 fn should_recover_daemon(
@@ -917,37 +995,105 @@ fn daemon_recovery_shell() -> String {
     )
 }
 
-/// First launch: if the root daemon isn't installed yet, install it from the
-/// bundled self-contained `slipstreamd` (a PyInstaller onedir — scapy, crypto and
-/// the Telegram proxy all inside, no system Python needed) with a single admin
-/// prompt. Also upgrades older script/venv installs and stale bundled daemons.
-/// No-op in dev builds that don't ship the frozen daemon (there you install it via
-/// `sudo python3 spike/tproxy.py --install`).
-fn ensure_daemon_installed(app: &AppHandle) {
+/// Install or upgrade the bundled root daemon only when launchd has an explicit
+/// enabled state, or after a direct user action such as Restart Proxy. Missing or
+/// disabled launchd state is never treated as startup permission.
+fn request_daemon_install(app: &AppHandle, allow_disabled: bool) -> bool {
     let Some(bin) = bundled_daemon_path(app) else {
-        return;
+        return false;
     };
     if !bin.exists() {
-        return; // dev build without the bundled daemon
+        return false; // dev build without the bundled daemon
     }
     if !valid_bundled_daemon(&bin) {
         eprintln!(
             "Slipstream bundled daemon is not a valid executable: {}",
             bin.display()
         );
-        return;
+        return false;
     }
-    if daemon_needs_install(&bin) {
+    let disabled = daemon_label_disabled();
+    if should_request_daemon_install(daemon_needs_install(&bin), disabled, allow_disabled) {
         let bin = bin.to_string_lossy();
         run_admin(
             &format!("{} --install", shell_quote(bin.as_ref())),
             "Slipstream needs administrator access to install its background daemon.",
         );
+        return true;
     }
+    false
 }
 
-fn uninstall_shell() -> String {
-    format!("{} --uninstall", shell_quote(INSTALLED_DAEMON))
+fn should_request_daemon_install(
+    needs_install: bool,
+    disabled: Option<bool>,
+    user_initiated: bool,
+) -> bool {
+    // Missing and disabled state are durable stop intent for automatic paths.
+    // A direct user action may restore either state.
+    (user_initiated || disabled == Some(false)) && (needs_install || disabled != Some(false))
+}
+
+fn ensure_daemon_installed(app: &AppHandle) {
+    let _ = request_daemon_install(app, false);
+}
+
+fn app_bundle_for_bundled_daemon(bundled: &Path) -> Option<PathBuf> {
+    let resources = bundled.parent()?.parent()?;
+    if resources.file_name() != Some(OsStr::new("Resources")) {
+        return None;
+    }
+    let contents = resources.parent()?;
+    if contents.file_name() != Some(OsStr::new("Contents")) {
+        return None;
+    }
+    let bundle = contents.parent()?;
+    (bundle.extension() == Some(OsStr::new("app"))).then(|| bundle.to_path_buf())
+}
+
+fn uninstall_shell_for_paths(
+    installed: &Path,
+    bundled: &Path,
+    app_bundle: &Path,
+    tray_pid: u32,
+) -> String {
+    let installed = shell_quote(&installed.to_string_lossy());
+    let bundled = shell_quote(&bundled.to_string_lossy());
+    let app_bundle = shell_quote(&app_bundle.to_string_lossy());
+    let remove_app = format!(
+        "pid={tray_pid}; app={app_bundle}; i=0; \
+         process_is_owned() {{ command=$(/bin/ps -p \"$pid\" -o command= 2>/dev/null || true); \
+         case \"$command\" in \"$app\"/Contents/MacOS/*) return 0;; *) return 1;; esac; }}; \
+         while process_is_owned && [ \"$i\" -lt 50 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
+         if process_is_owned; then /bin/kill -TERM \"$pid\" 2>/dev/null || true; fi; \
+         i=0; while process_is_owned && [ \"$i\" -lt 20 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
+         if process_is_owned; then /bin/kill -KILL \"$pid\" 2>/dev/null || true; fi; \
+         bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+         \"$app/Contents/Info.plist\" 2>/dev/null || true); \
+         if [ \"$bundle_id\" = 'dev.slipstream.tray' ]; then /bin/rm -rf -- \"$app\"; fi"
+    );
+    let remove_app = shell_quote(&remove_app);
+    format!(
+        "if [ -x {installed} ] && {installed} --uninstall; then cleaned=1; \
+         elif [ -x {bundled} ] && {bundled} --uninstall; then cleaned=1; \
+         else exit 1; fi; \
+         [ \"$cleaned\" = 1 ] || exit 1; \
+         /usr/bin/nohup /bin/sh -c {remove_app} </dev/null >/dev/null 2>&1 &"
+    )
+}
+
+fn uninstall_shell(app: &AppHandle) -> Option<String> {
+    let bundled = bundled_daemon_path(app)?;
+    if !valid_bundled_daemon(&bundled) {
+        return None;
+    }
+    let app_bundle = app_bundle_for_bundled_daemon(&bundled)?;
+    Some(uninstall_shell_for_paths(
+        Path::new(INSTALLED_DAEMON),
+        &bundled,
+        &app_bundle,
+        std::process::id(),
+    ))
 }
 
 fn osascript_dialog_args(script: &str) -> Vec<String> {
@@ -995,13 +1141,13 @@ fn prompt_secret(current: &str) -> Option<String> {
 fn uninstall_dialog_script_for(ru: bool) -> String {
     let (msg, keep, remove) = if ru {
         (
-            "Будут удалены фоновая служба Slipstream, встроенный Geph и его ключ аккаунта. Само приложение останется в Applications, после этого его можно переместить в Корзину.",
+            "Будут удалены Slipstream, его фоновая служба, встроенный Geph и ключ аккаунта.",
             "Отмена",
             "Удалить",
         )
     } else {
         (
-            "This removes the Slipstream background service, bundled Geph, and its account key. The app remains in Applications and can then be moved to Trash.",
+            "This removes Slipstream, its background service, bundled Geph, and account key.",
             "Cancel",
             "Uninstall",
         )
@@ -1174,14 +1320,23 @@ fn routing_health_summary(st: Option<&Value>, geph: &str, ru: bool) -> Option<St
         .is_some_and(|s| matches!(s, "blocked" | "degraded"))
         || geph == "down";
 
-    if local_failed || geph_failed {
-        Some(if ru {
-            "Требует внимания".to_string()
+    match (local_failed, geph_failed) {
+        (true, true) => Some(if ru {
+            "Восстанавливается доступ к сервисам".to_string()
         } else {
-            "Needs attention".to_string()
-        })
-    } else {
-        None
+            "Restoring service access".to_string()
+        }),
+        (true, false) => Some(if ru {
+            "Восстанавливается локальный доступ".to_string()
+        } else {
+            "Restoring local access".to_string()
+        }),
+        (false, true) => Some(if ru {
+            "Восстанавливается доступ к внешним сервисам".to_string()
+        } else {
+            "Restoring access to external services".to_string()
+        }),
+        (false, false) => None,
     }
 }
 
@@ -1498,11 +1653,37 @@ fn geph_secret(app: &AppHandle) -> Option<String> {
     Some(legacy)
 }
 
-/// Whether OUR bundled geph should run. Default true; the user can turn it off
-/// (e.g. to use their own VPN — geph allows ONE session per account, so ours must
-/// stop or the user's own Geph can't connect).
+fn resolve_geph_enabled_state(
+    explicit: Option<&str>,
+    legacy_config_present: bool,
+    secret_present: bool,
+) -> (bool, bool) {
+    if let Some(value) = explicit {
+        return (value != "0", false);
+    }
+    let migrate_legacy_opt_in = legacy_config_present && secret_present;
+    (migrate_legacy_opt_in, migrate_legacy_opt_in)
+}
+
+/// Whether OUR bundled geph should run. A valid legacy config plus credentials
+/// is migrated once; an orphaned Keychain secret cannot recreate deleted state.
 fn geph_enabled(app: &AppHandle) -> bool {
-    geph_field(app, "enabled").map(|s| s != "0").unwrap_or(true)
+    let explicit = geph_field(app, "enabled");
+    let legacy_config_present = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("geph.json"))
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .is_some_and(|value| value.is_object());
+    let secret_present = explicit.is_none() && legacy_config_present && geph_secret(app).is_some();
+    let (enabled, migrate) =
+        resolve_geph_enabled_state(explicit.as_deref(), legacy_config_present, secret_present);
+    if migrate {
+        geph_config_set(app, "enabled", "1");
+    }
+    enabled
 }
 
 /// geph exit_constraint for a menu exit value. Three shapes:
@@ -2051,12 +2232,13 @@ fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
          executable={}\n\
          config={}\n\
          ownership={}\n\
+         uid=$(/usr/bin/id -u)\n\
          /bin/rm -f \"$ownership\"\n\
          while /usr/bin/nc -z -w 1 127.0.0.1 {GEPH_SOCKS_PORT} >/dev/null 2>&1; do\n\
          \x20 /bin/sleep 5\n\
          done\n\
          tmp=\"${{ownership}}.tmp.$$\"\n\
-         /usr/bin/printf '{{\"pid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" {} {} {} > \"$tmp\"\n\
+         /usr/bin/printf '{{\"pid\":%s,\"uid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" \"$uid\" {} {} {} > \"$tmp\"\n\
          /bin/chmod 600 \"$tmp\"\n\
          /bin/mv -f \"$tmp\" \"$ownership\"\n\
          exec \"$executable\" --config \"$config\"\n",
@@ -2133,12 +2315,24 @@ fn geph_lifecycle_diagnostic_value(
     })
 }
 
-fn geph_launch_agent_bootout(uid: &str) -> bool {
-    Command::new("/bin/launchctl")
+fn geph_launch_agent_bootout(uid: &str, plist: &Path) -> bool {
+    let _ = Command::new("/bin/launchctl")
         .args(["bootout", &geph_launch_target(uid)])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .output();
+    if geph_launch_agent_loaded(uid) {
+        let _ = Command::new("/bin/launchctl")
+            .arg("bootout")
+            .arg(geph_launch_domain(uid))
+            .arg(plist)
+            .output();
+    }
+    for _ in 0..20 {
+        if !geph_launch_agent_loaded(uid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
 }
 
 fn geph_launch_agent_bootstrap(uid: &str, plist: &Path) -> bool {
@@ -2279,7 +2473,7 @@ fn geph_launch_agent_paths_for_app(app: &AppHandle) -> Result<GephLaunchAgentPat
 fn geph_launch_agent_disable(app: &AppHandle) -> Result<(), String> {
     let paths = geph_launch_agent_paths_for_app(app)?;
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
-    if geph_launch_agent_loaded(&uid) && !geph_launch_agent_bootout(&uid) {
+    if !geph_launch_agent_bootout(&uid, &paths.plist) {
         return Err("geph LaunchAgent bootout unavailable".into());
     }
     // One-time migration can leave the old detached process outside launchd.
@@ -2344,7 +2538,7 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     let uid = current_numeric_id("-u").ok_or_else(|| "user id unavailable".to_string())?;
     let mut loaded = geph_launch_agent_loaded(&uid);
     if loaded && plist_changed {
-        if !geph_launch_agent_bootout(&uid) {
+        if !geph_launch_agent_bootout(&uid, &paths.plist) {
             return Err("geph LaunchAgent reload unavailable".into());
         }
         loaded = false;
@@ -2543,10 +2737,12 @@ pub fn run() {
                         }
                         ID_RESTART => {
                             tg_offer_reset_menu.fetch_add(1, Ordering::Relaxed);
-                            run_admin(
-                                &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
-                                "Slipstream needs administrator access to restart its background daemon.",
-                            );
+                            if !request_daemon_install(app, true) {
+                                run_admin(
+                                    &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
+                                    "Slipstream needs administrator access to restart its background daemon.",
+                                );
+                            }
                         }
                         ID_LOG => {
                             if !open_log_snapshot() {
@@ -2570,24 +2766,33 @@ pub fn run() {
                             if !prompt_uninstall() {
                                 return;
                             }
-                            if !run_admin_status(
-                                &uninstall_shell(),
-                                "Slipstream needs administrator access to remove its background daemon.",
-                            ) {
-                                notify(app, "Unable to remove Slipstream background service");
+                            let Some(uninstall) = uninstall_shell(app) else {
+                                notify(app, "Unable to locate Slipstream uninstaller");
+                                return;
+                            };
+                            if let Err(error) = app.autolaunch().disable() {
+                                eprintln!("autostart uninstall cleanup unavailable: {error}");
+                                notify(app, "Unable to disable Slipstream launch at login");
                                 return;
                             }
                             geph_config_set(app, "enabled", "0");
-                            match geph_launch_agent_uninstall(app) {
-                                Ok(()) => {
-                                    notify(app, "Slipstream system components removed");
-                                    app.exit(0);
-                                }
-                                Err(error) => {
-                                    eprintln!("geph uninstall cleanup unavailable: {error}");
-                                    notify(app, "Slipstream removed; Geph cleanup needs attention");
-                                }
+                            if let Err(error) = geph_launch_agent_uninstall(app) {
+                                eprintln!("geph uninstall cleanup unavailable: {error}");
+                                notify(app, "Unable to stop bundled Geph; uninstall halted");
+                                return;
                             }
+                            if !run_admin_status(
+                                &uninstall,
+                                "Slipstream needs administrator access to remove its background service and application.",
+                            ) {
+                                notify(
+                                    app,
+                                    "Bundled Geph stopped; unable to remove Slipstream background service",
+                                );
+                                return;
+                            }
+                            notify(app, "Slipstream uninstalled");
+                            app.exit(0);
                         }
                         ID_QUIT => app.exit(0),
                         _ => {}
@@ -2736,24 +2941,27 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_shell_script, command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
-        daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
-        diagnostic_log_tail, diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
-        exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
+        admin_shell_script, app_bundle_for_bundled_daemon, command_matches_geph,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
+        daemon_recovery_status_value, daemon_state_text, diagnostic_log_tail,
+        diagnostic_log_tail_from_path, diagnostic_snapshot_value, diagnostic_summary_value,
+        exit_catalog, exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
-        keychain_delete_args, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
+        keychain_delete_args, launchd_label_disabled_from_output,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, remove_owned_geph_runtime, resolve_geph_enabled_state,
         route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
-        status_for_tray, status_updated_at, sync_private_executable,
+        should_request_daemon_install, status_for_tray, status_updated_at, sync_private_executable,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        uninstall_dialog_script_for, uninstall_shell, valid_bundled_daemon,
+        uninstall_dialog_script_for, uninstall_shell_for_paths, valid_bundled_daemon,
         write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
         ExitCatalogAvailability, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
         GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -2772,13 +2980,161 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_shell_uses_only_the_owned_daemon_uninstaller() {
-        let shell = uninstall_shell();
+    fn launchd_disabled_parser_requires_an_explicit_label_state() {
+        let label = "dev.slipstream.tproxy";
 
-        assert_eq!(shell, "'/usr/local/slipstream/slipstreamd' --uninstall");
+        assert_eq!(
+            launchd_label_disabled_from_output(
+                "{\n  \"dev.slipstream.tproxy\" => disabled\n}",
+                label,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            launchd_label_disabled_from_output("{\n  \"dev.slipstream.tproxy\" => false\n}", label,),
+            Some(false)
+        );
+        assert_eq!(
+            launchd_label_disabled_from_output("{\n  \"other.service\" => false\n}", label),
+            None
+        );
+    }
+
+    #[test]
+    fn automatic_install_requires_explicit_enabled_state() {
+        assert!(!should_request_daemon_install(true, None, false));
+        assert!(!should_request_daemon_install(true, Some(true), false));
+        assert!(should_request_daemon_install(true, Some(false), false));
+        assert!(!should_request_daemon_install(false, Some(false), false));
+
+        assert!(should_request_daemon_install(true, None, true));
+        assert!(should_request_daemon_install(false, Some(true), true));
+    }
+
+    #[test]
+    fn legacy_geph_opt_in_migrates_without_reviving_orphaned_secrets() {
+        assert_eq!(
+            resolve_geph_enabled_state(Some("0"), true, true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(Some("1"), true, true),
+            (true, false)
+        );
+        assert_eq!(resolve_geph_enabled_state(None, true, true), (true, true));
+        assert_eq!(
+            resolve_geph_enabled_state(None, false, true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(None, true, false),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn uninstall_shell_falls_back_to_the_bundled_owned_uninstaller() {
+        let shell = uninstall_shell_for_paths(
+            Path::new("/usr/local/slipstream/slipstreamd"),
+            Path::new("/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd"),
+            Path::new("/Applications/Slipstream.app"),
+            4242,
+        );
+
+        assert!(shell.contains("'/usr/local/slipstream/slipstreamd' --uninstall"));
+        assert!(shell.contains(
+            "'/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd' --uninstall"
+        ));
+        assert!(shell.contains("/usr/bin/nohup /bin/sh -c"));
+        assert!(shell.contains("/bin/ps -p \"$pid\" -o command="));
+        assert!(shell.contains("pid=4242"));
+        assert!(shell.contains("/bin/kill -TERM"));
+        assert!(shell.contains("/bin/kill -KILL"));
+        assert!(shell.contains("/usr/libexec/PlistBuddy"));
+        assert!(shell.contains("dev.slipstream.tray"));
+        assert!(shell.contains("/bin/rm -rf --"));
         assert!(!shell.contains("pfctl"));
         assert!(!shell.contains("pkill"));
         assert!(!shell.contains("launchctl disable"));
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-n", "-c", &shell])
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    #[test]
+    fn app_bundle_is_derived_only_from_the_expected_tauri_resource_layout() {
+        assert_eq!(
+            app_bundle_for_bundled_daemon(Path::new(
+                "/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd"
+            )),
+            Some(Path::new("/Applications/Slipstream.app").to_path_buf())
+        );
+        assert_eq!(
+            app_bundle_for_bundled_daemon(Path::new(
+                "/tmp/Slipstream.app/Resources/slipstreamd/slipstreamd"
+            )),
+            None
+        );
+        assert_eq!(
+            app_bundle_for_bundled_daemon(Path::new(
+                "/tmp/Slipstream/Contents/Resources/slipstreamd/slipstreamd"
+            )),
+            None
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn uninstall_shell_removes_the_validated_app_after_bundled_cleanup() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "slipstream uninstall test-{}-{unique}",
+            std::process::id()
+        ));
+        let app = root.join("Slipstream.app");
+        let contents = app.join("Contents");
+        let bundled = contents.join("Resources/slipstreamd/slipstreamd");
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+        std::fs::write(
+            contents.join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.slipstream.tray</string>
+</dict></plist>
+"#,
+        )
+        .unwrap();
+        std::fs::write(&bundled, b"#!/bin/sh\n[ \"$1\" = \"--uninstall\" ]\n").unwrap();
+        let mut permissions = std::fs::metadata(&bundled).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&bundled, permissions).unwrap();
+
+        let shell = uninstall_shell_for_paths(
+            &root.join("missing-installed-daemon"),
+            &bundled,
+            &app,
+            u32::MAX,
+        );
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-c", &shell])
+            .status()
+            .unwrap()
+            .success());
+        for _ in 0..40 {
+            if !app.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        assert!(!app.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2788,8 +3144,10 @@ mod tests {
 
         assert!(english.contains("default button \"Cancel\" cancel button \"Cancel\""));
         assert!(english.contains("\"Uninstall\""));
+        assert!(!english.contains("remains in Applications"));
         assert!(russian.contains("default button \"Отмена\" cancel button \"Отмена\""));
         assert!(russian.contains("\"Удалить\""));
+        assert!(!russian.contains("останется в Applications"));
     }
 
     #[test]
@@ -3311,6 +3669,25 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_log_tail_from_snapshot_preserves_raw_log_display_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-log-tail-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let snapshot = dir.join("snapshot.log");
+        std::fs::write(&snapshot, "safe line\n").unwrap();
+
+        let tail = diagnostic_log_tail_from_path("/var/log/slipstream.log", &snapshot, 10);
+
+        assert_eq!(tail["path"], "/var/log/slipstream.log");
+        assert_eq!(tail["available"], true);
+        assert_eq!(tail["lines"], json!(["safe line"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn diagnostic_log_tail_reports_unavailable_log() {
         let tail = diagnostic_log_tail("/definitely/missing/slipstream.log", 10);
 
@@ -3494,12 +3871,15 @@ mod tests {
 
         assert!(script.contains("/usr/bin/nc -z -w 1 127.0.0.1 9954"));
         assert!(script.contains("\"pid\":%s"));
+        assert!(script.contains("\"uid\":%s"));
         assert!(script.contains("\"launchd_label\":%s"));
+        assert!(script.contains("uid=$(/usr/bin/id -u)"));
         let ownership_write = script
             .lines()
             .find(|line| line.contains("/usr/bin/printf"))
             .expect("launcher writes an ownership record");
         assert!(ownership_write.contains("\"$$\""));
+        assert!(ownership_write.contains("\"$uid\""));
         assert!(ownership_write.contains("> \"$tmp\""));
         assert!(!script.contains("\n+"));
         assert!(script.contains("exec \"$executable\" --config \"$config\""));
@@ -3741,7 +4121,7 @@ mod tests {
         );
         assert_eq!(
             routing_health_summary(Some(&status), "up", false),
-            Some("Needs attention".to_string())
+            Some("Restoring access to external services".to_string())
         );
         assert!(!serde_json::to_string(&status)
             .unwrap()
@@ -3779,7 +4159,32 @@ mod tests {
         );
         assert_eq!(
             routing_health_summary(Some(&status), "up", false),
-            Some("Needs attention".to_string())
+            Some("Restoring local access".to_string())
+        );
+    }
+
+    #[test]
+    fn routing_health_summary_names_combined_recovery() {
+        let status = json!({
+            "route_health": {
+                "discord": {
+                    "state": "degraded",
+                    "last_route_class": "local_bypass"
+                },
+                "openai": {
+                    "state": "blocked",
+                    "last_route_class": "geo_exit"
+                }
+            }
+        });
+
+        assert_eq!(
+            routing_health_summary(Some(&status), "up", false),
+            Some("Restoring service access".to_string())
+        );
+        assert_eq!(
+            routing_health_summary(Some(&status), "up", true),
+            Some("Восстанавливается доступ к сервисам".to_string())
         );
     }
 
@@ -3802,7 +4207,7 @@ mod tests {
 
         assert_eq!(
             routing_health_summary(Some(&status), "up", false),
-            Some("Needs attention".to_string())
+            Some("Restoring access to external services".to_string())
         );
         assert_eq!(routing_health_summary(Some(&status), "off", false), None);
     }

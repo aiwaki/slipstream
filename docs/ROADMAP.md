@@ -24,6 +24,11 @@ Target: before `v0.1.5`.
 - Pair `pfctl -E` with its owned token and `pfctl -X`.
 - Manage daemon and Geph by launchd label plus verified PID/executable identity;
   never use broad process-pattern kills.
+- Treat daemon install and upgrade as a transaction: a fresh owned status,
+  exact listener, and matching private-PF state are required before success.
+  Failure disables the label and removes only owned plist/runtime/PF state.
+- Treat an absent or disabled daemon label as durable stop intent. Startup and
+  watchdog recovery do nothing until the user explicitly requests restart.
 - Require ownership proof for bundled Geph on `:9954`; treat external `:9909` as
   read-only diagnostics unless explicitly selected.
 - Keep Geph config owner-only and secret-bearing files at `0600`.
@@ -34,9 +39,10 @@ Target: before `v0.1.5`.
 - Make scheduled vendor updates open PRs; require a passing `checks` job before
   merging to `main`.
 
-Gate: install, restart, update, and uninstall leave an external PF sentinel and
-`zapret` anchor unchanged; unknown processes are never signalled; secrets are
-not readable outside the owning user.
+Gate: install, restart, update, failed install, and uninstall leave an external
+PF sentinel and `zapret` anchor unchanged; no detached owned listener remains;
+unknown processes are never signalled; secrets are not readable outside the
+owning user.
 
 CI covers both script-mode and packaged-app cold install, same-artifact
 reinstall, restart, and uninstall with a sibling anchor and a long-lived
@@ -54,38 +60,89 @@ release exists; stable distribution remains a separate M3 gate.
   required backend is unavailable, pause the private PF anchor and enter dormant
   mode so Slipstream no longer owns system HTTPS. Restarting a live Geph process
   must be daemon-coordinated after routing is idle.
-- Let unknown hosts try the local adaptive ladder first. Temporary geo-exit
-  requires repeated local misses plus a successful Geph payload proof.
+- Let unknown hosts try only the local adaptive ladder. A successful Geph
+  payload proves tunnel health, not that a host requires a foreign exit;
+  geo-exit remains explicit reviewed policy.
 - Move Geph to a user LaunchAgent with `KeepAlive`; the tray becomes a settings
   client rather than a lifecycle dependency.
 - Keep external DNS, VPN, PAC, and proxy state read-only.
 
 Progress: runtime local-bypass misses, geo-exit failures, and repeated unknown
 host stalls now enter one normalized reducer. Cold-start and runtime backend
-failure also gate or pause the private PF anchor. The remaining M1 lifecycle
-step is moving owned Geph out of the tray and into a user LaunchAgent without
-reintroducing live-stream restarts.
+failure also gate or pause the private PF anchor. Owned Geph runs in a user
+LaunchAgent with `KeepAlive`; after repeated post-wake failures, the daemon can
+pause its private PF anchor, wait for active tunnel sessions to drain, verify
+the exact user job and listener identity, and kickstart that job without the
+tray. Disposable CI runs two installed-daemon suspend/resume and network-change
+re-arm cycles for both the source installer and the frozen daemon from the
+packaged app. It also launches the exact packaged tray as the original user,
+crashes and restarts only that verified process, and opens fresh non-root HTTPS
+clients, clean-profile Google Chrome processes, and fresh UID/path-verified
+Safari processes with isolated WebDriver sessions before and after the crash.
+The same daemon PID and private anchor must survive while an unrelated PF
+anchor, state entry, and live connection remain unchanged. A protected,
+main-only account-backed gate now exercises the packaged tray, exact owned
+Geph listener, a real Steam HTTPS payload, tray-independent operation, and
+LaunchAgent `KeepAlive` PID replacement while preserving an unrelated `:9909`
+listener. The first protected passing run and a physical default-route/lid-close
+transition on a disposable Mac remain before the M1 gate is complete.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
+
+Every routing change also passes the deterministic data-plane traffic-contract
+matrix: local bypass, geo exit, direct Telegram, generic local traffic, and
+geo-backend fail-closed behavior. The matrix exercises the production handler
+with fake endpoints; it complements, rather than replaces, live canaries and
+PF lifecycle qualification.
 
 ## M2 - Contracts And Code
 
 - Introduce privacy-bounded `StatusV2` sections for daemon, routes, backends,
   environment, and recovery state. Done in the transition release.
 - Keep hostname-level and detailed network events out of world-readable status.
-  Done for StatusV2; raw logs `0600` remains pending. Diagnostic exports stay
+  Done for StatusV2 and root-owned raw logs at `0600`. Diagnostic exports stay
   sanitized and user-owned.
 - Let the tray read V1 and V2 for one transition release. Done.
 - Split the Python daemon into policy, reducer, probes, Geph backend, macOS PF
-  adapter, and lifecycle modules.
+  adapter, and lifecycle modules. The pure policy classifier, recovery
+  model/reducer, low-level macOS PF adapter, and owned-Geph identity adapter are
+  now isolated; PF/Geph runtime orchestration and the remaining adapters are
+  pending.
 - Split the Rust tray into status client, diagnostics, installer, Geph config,
   and menu orchestration.
 - Keep Python transport; avoid a big-bang rewrite.
-- Add language-neutral policy fixtures and recovery vectors.
+- Add language-neutral policy fixtures and recovery vectors. Done for contract
+  v1. Deterministic address-attempt planning and route-scoped circuit breaking
+  now have isolated v1 contracts executed by both Python and Rust. A pure
+  connection-race state machine now
+  circuit-gates before resolution and drives the address planner through
+  language-neutral commands/events. Scripted resolver and connector adapters
+  cover stalls, resets, family fallback, deadlines, circuit isolation, and
+  late completion without network I/O. The Python socket adapter executes those
+  commands against numeric candidates, transfers only the winning stream, and
+  closes every loser or cancelled task. A policy-preserving runtime wrapper now
+  races the existing first-payload probes inside already-selected local, Xbox
+  DNS, and proven Smart DNS backends. It does not race routes or backend classes.
+  A separate v1 runtime-registry contract now persists only complete backend
+  outcomes across requests: one full protected local ladder is one local-engine
+  result, while proven Smart DNS and verified owned Geph have independent
+  geo-exit keys. The registry is bounded by idle TTL and deterministic LRU;
+  eviction only forgets suppression and cannot select a different route.
+  Unknown and direct traffic never enter persistent circuit state, and protected
+  local groups still have no Geph edge. Fake handler endpoints cover
+  stalled-first/healthy-second address races, per-ladder failure accounting,
+  backend isolation, and unknown-host non-promotion. IPv6 use in the current
+  daemon dialers and other platform adapters remain pending and require separate
+  evidence.
 
 ## M3 - Release-Grade macOS
 
+- Pin every external GitHub Action to a reviewed immutable commit, build
+  JavaScript with Node 24 LTS, and make macOS dependency installation explicit
+  and fail-closed. Done.
+- Keep stable app, preview app, and internal Geph releases visibly distinct;
+  only stable app releases may update GitHub's latest pointer. Done.
 - Pin Python/PyInstaller dependencies with hashes.
 - Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
   the matching asset version, checksum, and arm64 architecture. Done for the
@@ -131,6 +188,8 @@ No global UDP/443 block, broad IP guessing, or manual strategy picker.
 ## Milestone Checks
 
 - Unit tests and cross-language golden vectors.
+- Deterministic data-plane traffic contracts through the production handler,
+  asserting both the required and prohibited route backends.
 - Fake DNS/SOCKS/TLS endpoints for stall, reset, empty response, and partial
   payload.
 - PF sentinel and process-ownership integration tests.

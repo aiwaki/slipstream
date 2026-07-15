@@ -1,10 +1,14 @@
 import asyncio
 import ast
 import base64
+import errno
 import hashlib
+import inspect
 import json
 import logging
+import plistlib
 import re
+import signal
 import ssl
 import sys
 from pathlib import Path
@@ -48,6 +52,12 @@ def reset_smart_dns_state():
     }
     canary_state = dict(tproxy._canary_state)
     rearm_state = dict(tproxy._rearm_state)
+    runtime_rearm_requests = list(tproxy._runtime_rearm_requests)
+    fd_pressure = (
+        tproxy._fd_pressure,
+        tproxy._fd_pressure_reason,
+        tproxy._fd_pressure_at,
+    )
     try:
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
@@ -98,6 +108,10 @@ def reset_smart_dns_state():
             "last_iface": "",
             "count": 0,
         })
+        tproxy._runtime_rearm_requests.clear()
+        tproxy._fd_pressure = False
+        tproxy._fd_pressure_reason = ""
+        tproxy._fd_pressure_at = 0.0
         yield
     finally:
         tproxy.reset_route_policy_manifest()
@@ -141,6 +155,13 @@ def reset_smart_dns_state():
         tproxy._canary_state.update(canary_state)
         tproxy._rearm_state.clear()
         tproxy._rearm_state.update(rearm_state)
+        tproxy._runtime_rearm_requests.clear()
+        tproxy._runtime_rearm_requests.extend(runtime_rearm_requests)
+        (
+            tproxy._fd_pressure,
+            tproxy._fd_pressure_reason,
+            tproxy._fd_pressure_at,
+        ) = fd_pressure
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -250,6 +271,16 @@ def test_tgws_status_reports_error_without_ready_duration():
     }
 
 
+def test_tgws_restart_closes_cancelled_event_loop_tasks():
+    loop = asyncio.new_event_loop()
+    task = loop.create_task(asyncio.sleep(60))
+
+    tproxy._close_asyncio_loop(loop)
+
+    assert loop.is_closed()
+    assert task.cancelled()
+
+
 def test_frozen_daemon_running_from_install_dir():
     assert tproxy.running_from_install_dir(
         file_path="/usr/local/slipstream/_internal/tproxy.py",
@@ -317,28 +348,146 @@ def test_replace_tree_resilient_keeps_existing_tree_when_copy_fails(tmp_path, mo
     assert not (dst / "fresh.txt").exists()
 
 
+_SCRIPT_RUNTIME_FIXTURE = {
+    "tproxy.py": "import connection_probe\nimport geph_backend\n",
+    "address_attempts.py": "VALUE = 1\n",
+    "connection_probe.py": "VALUE = 2\n",
+    "connection_race.py": "VALUE = 3\n",
+    "connection_race_io.py": "VALUE = 4\n",
+    "geph_backend.py": "VALUE = 5\n",
+    "pf_adapter.py": "VALUE = 6\n",
+    "primes.py": "VALUE = 7\n",
+    "route_circuit.py": "VALUE = 8\n",
+    "route_circuit_registry.py": "VALUE = 9\n",
+    "routing_policy.py": "VALUE = 10\n",
+    "routing_recovery.py": "VALUE = 11\n",
+    "xbox_dns.py": "VALUE = 12\n",
+}
+
+
+def _write_script_runtime_fixture(source, *, missing=()):
+    for name, content in _SCRIPT_RUNTIME_FIXTURE.items():
+        if name not in missing:
+            (source / name).write_text(content)
+
+
 def test_copy_script_runtime_includes_local_modules(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import primes\nimport xbox_dns\n")
-    (source / "primes.py").write_text("VALUE = 1\n")
-    (source / "xbox_dns.py").write_text("VALUE = 2\n")
+    _write_script_runtime_fixture(source)
 
     tproxy._copy_script_runtime(source / "tproxy.py", install)
 
-    assert (install / "tproxy.py").read_text() == "import primes\nimport xbox_dns\n"
-    assert (install / "primes.py").read_text() == "VALUE = 1\n"
-    assert (install / "xbox_dns.py").read_text() == "VALUE = 2\n"
+    for name, content in _SCRIPT_RUNTIME_FIXTURE.items():
+        assert (install / name).read_text() == content
+
+
+def test_script_runtime_payload_covers_transitive_local_imports():
+    source_dir = Path(tproxy.__file__).parent
+    payload = tproxy._script_runtime_payload(tproxy.__file__)
+    payload_names = {name for _source, name in payload}
+
+    for source, _name in payload:
+        tree = ast.parse(Path(source).read_text())
+        imported_roots = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_roots.update(
+                    alias.name.partition(".")[0] for alias in node.names
+                )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module
+            ):
+                imported_roots.add(node.module.partition(".")[0])
+        local_dependencies = {
+            f"{module}.py"
+            for module in imported_roots
+            if (source_dir / f"{module}.py").is_file()
+        }
+        assert local_dependencies <= payload_names
 
 
 def test_copy_script_runtime_fails_before_partial_install(tmp_path):
     source = tmp_path / "source"
     install = tmp_path / "install"
     source.mkdir()
-    (source / "tproxy.py").write_text("import primes\n")
+    _write_script_runtime_fixture(source, missing={"primes.py"})
 
     with pytest.raises(FileNotFoundError, match="primes.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_recovery_module_before_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(source, missing={"routing_recovery.py"})
+
+    with pytest.raises(FileNotFoundError, match="routing_recovery.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_policy_module_before_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(source, missing={"routing_policy.py"})
+
+    with pytest.raises(FileNotFoundError, match="routing_policy.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_pf_adapter_before_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(source, missing={"pf_adapter.py"})
+
+    with pytest.raises(FileNotFoundError, match="pf_adapter.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_geph_backend_before_install(tmp_path):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(source, missing={"geph_backend.py"})
+
+    with pytest.raises(FileNotFoundError, match="geph_backend.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        "address_attempts.py",
+        "connection_probe.py",
+        "connection_race.py",
+        "connection_race_io.py",
+        "route_circuit.py",
+        "route_circuit_registry.py",
+    ),
+)
+def test_copy_script_runtime_requires_connection_race_closure(tmp_path, missing):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(source, missing={missing})
+
+    with pytest.raises(FileNotFoundError, match=missing):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()
@@ -359,18 +508,230 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tgws_link))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(strategy))
-    monkeypatch.setattr(tproxy, "_run", lambda *_: SimpleNamespace(returncode=0))
+    commands = []
+
+    def fake_run(*args):
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
     monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
 
-    tproxy.do_uninstall()
+    assert tproxy.do_uninstall()
 
     assert not install.exists()
     assert not plist.exists()
     assert not status.exists()
     assert not tgws_link.exists()
     assert not strategy.exists()
+    assert (
+        "/bin/launchctl",
+        "disable",
+        "system/dev.slipstream.tproxy",
+    ) in commands
+
+
+def test_owned_listener_pids_reject_unrelated_process(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    owned = install / "slipstreamd"
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy.sys, "executable", "/bundle/slipstreamd")
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _port: [101, 202])
+    monkeypatch.setattr(
+        tproxy,
+        "_process_command_for_pid",
+        lambda pid: (
+            f"{owned} --port 1080"
+            if pid == 101
+            else "/usr/bin/python3 /tmp/unrelated.py"
+        ),
+    )
+
+    assert tproxy._owned_listener_pids(1080) == [101]
+
+
+def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    stopped = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "missing-status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda pid: stopped.append(pid) or True,
+    )
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert tproxy.do_uninstall()
+    assert stopped == [4242]
+
+
+def test_uninstall_reports_incomplete_pf_token_release(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [])
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: SimpleNamespace(returncode=1),
+    )
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert not tproxy.do_uninstall()
+
+
+def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_text("binary")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    plist = tmp_path / "daemon.plist"
+    status = tmp_path / "status.json"
+    commands = []
+
+    def fake_run(*args):
+        commands.append(args)
+        if args[:3] == ("/bin/launchctl", "bootstrap", "system"):
+            return SimpleNamespace(returncode=5, stdout="", stderr="bootstrap refused")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+
+    assert not tproxy.do_install(1080)
+
+    assert not install.exists()
+    assert not plist.exists()
+    assert (
+        "/bin/launchctl",
+        "disable",
+        "system/dev.slipstream.tproxy",
+    ) in commands
+    assert not any(command[1:3] == ("load", "-w") for command in commands)
+
+
+def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_text("binary")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    plist = tmp_path / "daemon.plist"
+    commands = []
+
+    def fake_run(*args):
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda *_args, **_kwargs: True)
+
+    assert tproxy.do_install(1080)
+
+    assert install.exists()
+    assert plist.exists()
+    assert (
+        "/bin/launchctl",
+        "enable",
+        "system/dev.slipstream.tproxy",
+    ) in commands
+    assert (
+        "/bin/launchctl",
+        "bootstrap",
+        "system",
+        str(plist),
+    ) in commands
+
+
+def test_installed_daemon_command_accepts_real_venv_interpreter(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "runtime" / "slipstream"
+    venv_bin = install / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    framework = tmp_path / "Python.framework" / "Versions" / "3.13"
+    launcher = framework / "bin" / "python3.13"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("binary")
+    process_python = (
+        framework / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    )
+    process_python.parent.mkdir(parents=True)
+    process_python.write_text("binary")
+    venv_python = venv_bin / "python3"
+    venv_python.symlink_to(launcher)
+    script = install / "tproxy.py"
+    script.write_text("pass")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+
+    assert tproxy._installed_daemon_command_owned(
+        f"{process_python} {script} run --port 1080"
+    )
+    assert not tproxy._installed_daemon_command_owned(
+        f"{tmp_path / 'unknown-python'} {script} run --port 1080"
+    )
 
 
 def test_scapy_mac_noise_filter_only_drops_broadcast_warning():
@@ -450,9 +811,10 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["daemon"]["dead_hosts"] == 1
     assert status["routes"][tproxy.ROUTE_LOCAL_BYPASS]["state"] == tproxy.HEALTH_OK
     assert status["backends"]["geph"]["state"] == "up"
+    assert status["backends"]["geph"]["active_sessions"] == 0
     auto_geo_exit = status["backends"]["geph"]["auto_geo_exit"]
-    assert auto_geo_exit["enabled"] is True
-    assert auto_geo_exit["learned"] >= 0
+    assert auto_geo_exit["enabled"] is False
+    assert auto_geo_exit["learned"] == 0
     assert auto_geo_exit["pending"] >= 0
     assert "last_host" not in auto_geo_exit
     assert "last_reason" not in auto_geo_exit
@@ -1024,6 +1386,61 @@ def test_geph_probe_hysteresis_preserves_only_a_verified_sticky_port():
     assert strikes == 3
 
 
+def test_fd_pressure_reducer_uses_hysteresis_and_a_bounded_high_watermark():
+    assert tproxy.fd_pressure_watermarks(65536) == (2048, 1024)
+    assert not tproxy.reduce_fd_pressure(False, 2047, 65536)
+    assert tproxy.reduce_fd_pressure(False, 2048, 65536)
+    assert tproxy.reduce_fd_pressure(True, 1025, 65536)
+    assert not tproxy.reduce_fd_pressure(True, 1024, 65536)
+
+
+def test_asyncio_emfile_pauses_only_private_routing_once(monkeypatch):
+    pauses = []
+
+    class Loop:
+        def __init__(self):
+            self.default_contexts = []
+
+        def default_exception_handler(self, context):
+            self.default_contexts.append(context)
+
+    loop = Loop()
+    monkeypatch.setattr(tproxy, "_fd_pressure", False)
+    monkeypatch.setattr(tproxy, "_fd_reserve", [])
+    monkeypatch.setattr(tproxy, "pause_private_pf", lambda: pauses.append(True) or True)
+
+    context = {"exception": OSError(errno.EMFILE, "Too many open files")}
+    tproxy.asyncio_exception_handler(loop, context)
+    tproxy.asyncio_exception_handler(loop, context)
+
+    assert pauses == [True]
+    assert loop.default_contexts == []
+    assert tproxy._fd_pressure
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    assert not tproxy.geo_exit_backend_ready(now=100.0)
+
+
+def test_fd_pressure_stays_dormant_until_usage_falls_below_low_watermark(monkeypatch):
+    counts = iter((2200, 1024))
+    pauses = []
+    reserve_reopens = []
+    monkeypatch.setattr(tproxy, "_fd_pressure", False)
+    monkeypatch.setattr(tproxy, "_fd_reserve", [])
+    monkeypatch.setattr(tproxy, "open_fd_count", lambda: next(counts))
+    monkeypatch.setattr(
+        tproxy.resource,
+        "getrlimit",
+        lambda _kind: (65536, 65536),
+    )
+    monkeypatch.setattr(tproxy, "pause_private_pf", lambda: pauses.append(True) or True)
+    monkeypatch.setattr(tproxy, "_open_fd_reserve", lambda: reserve_reopens.append(True))
+
+    assert tproxy.refresh_fd_pressure()
+    assert not tproxy.refresh_fd_pressure()
+    assert pauses == [True]
+    assert reserve_reopens == [True]
+
+
 def test_pf_startup_waits_for_enabled_geo_exit_backend(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
@@ -1062,6 +1479,16 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
+    monkeypatch.setattr(
+        tproxy,
+        "write_status",
+        lambda state, iface, voice_iface: calls.append(
+            ("status", state, iface, voice_iface)
+        ),
+    )
     monkeypatch.setattr(
         tproxy,
         "pf_setup_if_ready",
@@ -1072,6 +1499,7 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
         asyncio.run(tproxy.amain(1080, voice=False))
 
     assert calls[0] == ("pf_gate", 1080)
+    assert calls[1] == ("status", "dormant", "en0", None)
     assert ("thread_start",) in calls
 
 
@@ -1095,6 +1523,7 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
 
     pauses = []
     states = []
+    rearms = []
 
     def pause():
         pauses.append(True)
@@ -1122,16 +1551,23 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
     monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         tproxy,
+        "note_runtime_rearm",
+        lambda reason, **kwargs: rearms.append((reason, kwargs.get("iface"))),
+    )
+    monkeypatch.setattr(
+        tproxy,
         "start_route_policy_remote_update_if_due",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(tproxy.time, "sleep", stop_sleep)
+    tproxy._queue_runtime_rearm("network_change")
 
     with pytest.raises(StopMonitor):
         tproxy.network_monitor(1080, voice=False)
 
     assert pauses == [True]
     assert states == [("dormant", "en0", None)]
+    assert rearms == [("network_change", "en0")]
 
 
 def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
@@ -1367,6 +1803,16 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("objects.githubusercontent.com")["service_group"] == (
         tproxy.SERVICE_GITHUB
     )
+    assert tproxy.route_policy("www.google.com") == {
+        "host": "www.google.com",
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
+        "service_group": tproxy.SERVICE_GOOGLE,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
+    }
+    assert tproxy.route_policy("gue1-spclient.spotify.com")["service_group"] == (
+        tproxy.SERVICE_SPOTIFY
+    )
+    assert tproxy.route_policy("i.scdn.co")["route_class"] == tproxy.ROUTE_DIRECT_FIRST
 
 
 def test_route_policy_tables_are_explicit_and_keep_boundaries():
@@ -1399,6 +1845,16 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
         tproxy.ROUTE_DIRECT,
         tproxy.STRATEGY_DIRECT,
     ) in static
+    assert (
+        tproxy.SERVICE_GOOGLE,
+        tproxy.ROUTE_DIRECT_FIRST,
+        tproxy.STRATEGY_DIRECT_FIRST,
+    ) in static
+    assert (
+        tproxy.SERVICE_SPOTIFY,
+        tproxy.ROUTE_DIRECT_FIRST,
+        tproxy.STRATEGY_DIRECT_FIRST,
+    ) in static
     assert tproxy.SERVICE_DISCORD not in geo
     assert tproxy.SERVICE_YOUTUBE not in geo
     assert tproxy.SERVICE_OPENAI in geo
@@ -1408,9 +1864,24 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
 
 
 def test_direct_passthrough_hosts_use_plain_strategy_only():
-    assert [s["name"] for s in tproxy.strategy_order("github.com")] == ["plain"]
-    assert [s["name"] for s in tproxy.strategy_order("t.me")] == ["plain"]
-    assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
+    tproxy._strat_cache["www.google.com"] = "split64+fake"
+    tproxy._strat_cache["api.spotify.com"] = "split64+fake"
+    try:
+        assert [s["name"] for s in tproxy.strategy_order("github.com")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order("t.me")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order("www.google.com")][:2] == [
+            "plain", "split64+fake",
+        ]
+        assert [s["name"] for s in tproxy.strategy_order("api.spotify.com")][:2] == [
+            "plain", "split64+fake",
+        ]
+        assert [s["name"] for s in tproxy.strategy_order("i.scdn.co")][0] == "plain"
+        assert not tproxy.geph_route("www.google.com")
+        assert not tproxy.geph_route("api.spotify.com")
+        assert not tproxy.geph_route("i.scdn.co")
+    finally:
+        tproxy._strat_cache.clear()
 
 
 def test_route_policy_manifest_has_stable_diagnostic_shape():
@@ -1434,6 +1905,8 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
     assert tproxy.SERVICE_YOUTUBE in static_groups
     assert tproxy.SERVICE_TELEGRAM in static_groups
     assert tproxy.SERVICE_GITHUB in static_groups
+    assert tproxy.SERVICE_GOOGLE in static_groups
+    assert tproxy.SERVICE_SPOTIFY in static_groups
     assert tproxy.SERVICE_OPENAI in geo_groups
     assert tproxy.SERVICE_ANTHROPIC in geo_groups
     assert tproxy.SERVICE_STEAM_STORE in geo_groups
@@ -1442,6 +1915,9 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
 
     assert status["domains"][tproxy.ROUTE_DIRECT] == (
         len(tproxy.TELEGRAM_HOSTS) + len(tproxy.GITHUB_HOSTS)
+    )
+    assert status["domains"][tproxy.ROUTE_DIRECT_FIRST] == (
+        len(tproxy.DIRECT_FIRST_HOSTS)
     )
     assert status["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
         len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
@@ -1456,6 +1932,16 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
         "route_class": tproxy.ROUTE_DIRECT,
         "strategy_set": tproxy.STRATEGY_DIRECT,
         "domains": len(tproxy.GITHUB_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_GOOGLE] == {
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
+        "domains": len(tproxy.GOOGLE_DIRECT_FIRST_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_SPOTIFY] == {
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
+        "domains": len(tproxy.SPOTIFY_DIRECT_FIRST_HOSTS),
     }
     assert status["groups"][tproxy.SERVICE_OPENAI] == {
         "route_class": tproxy.ROUTE_GEO_EXIT,
@@ -1486,6 +1972,19 @@ def test_route_policy_manifest_rejects_protected_group_geph_route():
     })
 
     with pytest.raises(ValueError, match="discord.*local_bypass"):
+        tproxy.validate_route_policy_manifest(manifest)
+
+
+def test_route_policy_manifest_requires_direct_first_for_google_and_spotify():
+    manifest = tproxy.route_policy_manifest()
+    google = next(
+        entry for entry in manifest["static_routes"]
+        if entry["service_group"] == tproxy.SERVICE_GOOGLE
+    )
+    google["route_class"] = tproxy.ROUTE_DIRECT
+    google["strategy_set"] = tproxy.STRATEGY_DIRECT
+
+    with pytest.raises(ValueError, match="protected direct-first domains missing"):
         tproxy.validate_route_policy_manifest(manifest)
 
 
@@ -2210,6 +2709,55 @@ def test_rearm_status_tracks_wake_and_network_rearms():
         tproxy._rearm_state.update(original)
 
 
+def test_runtime_rearm_queue_is_bounded_validated_and_deduplicated():
+    for index in range(12):
+        reason = "wake" if index % 2 else "network_change"
+        tproxy._queue_runtime_rearm(reason)
+
+    assert len(tproxy._runtime_rearm_requests) == 8
+    assert tproxy._drain_runtime_rearms() == ["network_change", "wake"]
+    assert tproxy._drain_runtime_rearms() == []
+    with pytest.raises(ValueError, match="unsupported runtime rearm reason"):
+        tproxy._queue_runtime_rearm("restart_everything")
+
+
+def test_runtime_rearm_signal_only_queues_network_change():
+    tproxy._runtime_rearm_signal_handler(tproxy._RUNTIME_REARM_SIGNAL, None)
+    tproxy._runtime_rearm_signal_handler(signal.SIGTERM, None)
+
+    assert tproxy._drain_runtime_rearms() == ["network_change"]
+
+
+def test_runtime_rearm_helper_keeps_wake_and_network_side_effects_scoped(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        tproxy,
+        "note_runtime_rearm",
+        lambda reason, **kwargs: events.append(("status", reason, kwargs)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "note_geph_wake",
+        lambda now: events.append(("geph_wake", now)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "start_canaries_if_due",
+        lambda reason, **kwargs: events.append(("canary", reason, kwargs)),
+    )
+
+    tproxy._apply_runtime_rearm("wake", now=100.0, iface="en0", gap=31.0)
+    tproxy._apply_runtime_rearm("network_change", now=110.0, iface="en1")
+
+    assert events == [
+        ("status", "wake", {"gap": 31.0, "iface": "en0", "now": 100.0}),
+        ("geph_wake", 100.0),
+        ("canary", "wake", {"force": True}),
+        ("status", "network_change", {"gap": 0.0, "iface": "en1", "now": 110.0}),
+        ("canary", "network_change", {"force": True}),
+    ]
+
+
 def test_system_dns_status_detects_xbox_dns_without_mutating():
     raw = """
 DNS configuration
@@ -2599,21 +3147,17 @@ def test_local_bypass_runtime_success_marks_route_ok():
         q.extend(original_window)
 
 
-def test_local_bypass_canary_requires_payload_success(monkeypatch):
+def test_local_bypass_canary_uses_modern_payload_probe_without_synthetic_preflight(monkeypatch):
     host = "updates.discord.com"
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
     payload_calls = []
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def ips(_host, _fallback_ip):
         return ["203.0.113.10"]
 
-    async def connected(ip, port, head, body, sni, strat):
-        return object(), DummyWriter(), b"\x16\x03\x03"
+    async def unexpected_synthetic_preflight(*_args, **_kwargs):
+        raise AssertionError("local canary must use the modern payload probe directly")
 
     async def payload(ip, sni, strat, spec):
         payload_calls.append((ip, sni, strat["name"], spec["name"]))
@@ -2628,7 +3172,7 @@ def test_local_bypass_canary_requires_payload_success(monkeypatch):
             "strategy_order",
             lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
         )
-        monkeypatch.setattr(tproxy, "dial_strategy", connected)
+        monkeypatch.setattr(tproxy, "dial_strategy", unexpected_synthetic_preflight)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", payload)
 
         spec = {"name": "discord_update", "group": tproxy.SERVICE_DISCORD, "host": host}
@@ -2653,15 +3197,8 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def ips(_host, _fallback_ip):
         return ["203.0.113.10"]
-
-    async def connected(ip, port, head, body, sni, strat):
-        return object(), DummyWriter(), b"\x16\x03\x03"
 
     async def no_payload(ip, sni, strat, spec):
         return 0
@@ -2684,7 +3221,6 @@ def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
             "strategy_order",
             lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
         )
-        monkeypatch.setattr(tproxy, "dial_strategy", connected)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
 
         spec = {"name": "discord_update", "group": tproxy.SERVICE_DISCORD, "host": host}
@@ -2717,15 +3253,8 @@ def test_local_bypass_canary_short_cdn_payload_warns_before_degraded(monkeypatch
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_DISCORD])
 
-    class DummyWriter:
-        def close(self):
-            pass
-
     async def ips(_host, _fallback_ip):
         return ["203.0.113.10"]
-
-    async def connected(ip, port, head, body, sni, strat):
-        return object(), DummyWriter(), b"\x16\x03\x03"
 
     async def short_payload(ip, sni, strat, probe_spec):
         assert probe_spec["payload_min_bytes"] == 512
@@ -2739,7 +3268,6 @@ def test_local_bypass_canary_short_cdn_payload_warns_before_degraded(monkeypatch
             "strategy_order",
             lambda _host: [tproxy.STRAT_BY_NAME["split64+fake"]],
         )
-        monkeypatch.setattr(tproxy, "dial_strategy", connected)
         monkeypatch.setattr(tproxy, "_run_local_payload_probe", short_payload)
 
         assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
@@ -2855,18 +3383,18 @@ def test_youtube_web_canary_failure_is_warning_only(monkeypatch):
     async def fake_resolve(host, fallback_ip):
         return ["203.0.113.10"]
 
-    async def fake_dial(ip, port, head, body, host, strat):
-        return None
+    async def no_payload(ip, host, strat, probe_spec):
+        return 0
 
     try:
         monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_resolve)
-        monkeypatch.setattr(tproxy, "dial_strategy", fake_dial)
+        monkeypatch.setattr(tproxy, "_run_local_payload_probe", no_payload)
 
         assert asyncio.run(tproxy._run_local_bypass_canary(spec)) == "warning"
 
         check = tproxy.canary_health_snapshot()["youtube_web"]
         assert check["state"] == tproxy.HEALTH_UNKNOWN
-        assert check["last_warning"] == "strategy probe failed"
+        assert check["last_warning"] == "payload probe failed"
         assert check["failures_5m"] == 0
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
         assert health["state"] != tproxy.HEALTH_DEGRADED
@@ -3197,69 +3725,9 @@ def test_secondary_geo_exit_canary_failure_does_not_override_core_ok():
         q.extend(original_window)
 
 
-def test_canary_health_secondary_geo_warning_grace_before_degraded():
-    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
-    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_OPENAI])
-    core = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_core")
-    billing = next(item for item in tproxy.CANARY_SPECS if item["name"] == "openai_billing")
-    now = tproxy.time.time()
-
-    try:
-        tproxy._route_failure_windows[tproxy.SERVICE_OPENAI].clear()
-        tproxy.canary_health_event(
-            core,
-            tproxy.ROUTE_GEO_EXIT,
-            "chatgpt.com",
-            ok=True,
-            backend=tproxy.GEO_BACKEND_GEPH,
-            now=now,
-        )
-        tproxy.canary_health_event(
-            billing,
-            tproxy.ROUTE_GEO_EXIT,
-            "billing.openai.com",
-            ok=False,
-            reason="SOCKS connect failed",
-            degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-            now=now + 10.0,
-        )
-
-        checks = tproxy.canary_health_snapshot(now=now + 10.0)
-        assert checks["openai_core"]["state"] == tproxy.HEALTH_OK
-        assert checks["openai_billing"]["state"] == tproxy.HEALTH_UNKNOWN
-        assert checks["openai_billing"]["last_warning"] == "SOCKS connect failed"
-
-        health = tproxy.route_health_snapshot(now=now + 10.0)[tproxy.SERVICE_OPENAI]
-        assert health["state"] == tproxy.HEALTH_OK
-        assert health["last_host"] == "chatgpt.com"
-        assert health["last_failure"] == ""
-        assert health["last_warning"] == "SOCKS connect failed"
-        assert health["last_warning_host"] == "billing.openai.com"
-
-        for idx in range(1, tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER):
-            tproxy.canary_health_event(
-                billing,
-                tproxy.ROUTE_GEO_EXIT,
-                "billing.openai.com",
-                ok=False,
-                reason="SOCKS connect failed",
-                degrade_after=tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-                now=now + 10.0 + idx,
-            )
-
-        checks = tproxy.canary_health_snapshot(now=now + 20.0)
-        assert checks["openai_billing"]["state"] == tproxy.HEALTH_DEGRADED
-        assert checks["openai_billing"]["last_failure"] == "SOCKS connect failed"
-
-        health = tproxy.route_health_snapshot(now=now + 20.0)[tproxy.SERVICE_OPENAI]
-        assert health["state"] == tproxy.HEALTH_DEGRADED
-        assert health["last_host"] == "billing.openai.com"
-        assert health["last_failure"] == "SOCKS connect failed"
-    finally:
-        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
-        q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
-        q.clear()
-        q.extend(original_window)
+def test_billing_stays_geo_exit_without_becoming_a_health_canary():
+    assert tproxy.route_policy("billing.openai.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
+    assert "openai_billing" not in {item["name"] for item in tproxy.CANARY_SPECS}
 
 
 def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
@@ -3281,9 +3749,9 @@ def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
         monkeypatch.setattr(tproxy, "dial_via_geph", no_connect)
         monkeypatch.setattr(tproxy, "CANARY_SPECS", (
             {
-                "name": "openai_billing",
+                "name": "openai_secondary",
                 "group": tproxy.SERVICE_OPENAI,
-                "host": "billing.openai.com",
+                "host": "chatgpt.com",
                 "degrade_after": tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER,
             },
         ))
@@ -3307,7 +3775,7 @@ def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
         assert health["state"] == tproxy.HEALTH_DEGRADED
         assert health["last_failure"] == "SOCKS connect failed"
-        assert health["last_host"] == "billing.openai.com"
+        assert health["last_host"] == "chatgpt.com"
     finally:
         tproxy._canary_state.clear()
         tproxy._canary_state.update(original_state)
@@ -3581,27 +4049,223 @@ def test_geo_exit_failures_never_request_unowned_geph_restart(capsys):
         tproxy._geph_restart_hint.update(original_hint)
 
 
-def test_local_bypass_hosts_ignore_stale_auto_geph_cache():
+def test_owned_geph_launch_target_requires_exact_user_claim():
+    state = {"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL}
+
+    assert tproxy._owned_geph_launch_target(state, 502) == (
+        "gui/502/dev.slipstream.geph"
+    )
+    assert tproxy._owned_geph_launch_target(state, 503) is None
+    assert tproxy._owned_geph_launch_target(
+        {"uid": 502, "launchd_label": "com.example.geph"},
+        502,
+    ) is None
+    assert tproxy._owned_geph_launch_target(
+        {"uid": 0, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        0,
+    ) is None
+    assert tproxy._owned_geph_launch_target(
+        {"uid": True, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        1,
+    ) is None
+
+
+def test_owned_geph_restart_rejects_symlinked_ownership_file(monkeypatch, tmp_path):
+    target = tmp_path / "claim-target.json"
+    target.write_text("{}")
+    claim = tmp_path / "geph-owned.json"
+    claim.symlink_to(target)
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=0,
+        ownership_path=str(claim),
+        ownership_state={
+            "uid": target.stat().st_uid,
+            "launchd_label": tproxy.GEPH_LAUNCHD_LABEL,
+        },
+        listener_owned=True,
+        runner=lambda *args: calls.append(args),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "unverified"
+    assert calls == []
+
+
+def test_owned_geph_restart_waits_for_active_tunnel(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=1,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=lambda *args: calls.append(args),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "busy"
+    assert calls == []
+    assert hint["recommended"] is True
+
+
+def test_owned_geph_restart_pauses_pf_and_kickstarts_exact_launchagent(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_restart_failures", deque([(99.0, "chatgpt.com", "stale")]))
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    events = []
+
+    def run(*args):
+        events.append(("run",) + args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        tproxy,
+        "note_runtime_rearm",
+        lambda reason, **_kwargs: events.append(("rearm", reason)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_transparent_routing",
+        lambda reason, now=None: events.append(("pause", reason, now)),
+    )
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=run,
+    )
+
+    assert result == "restarted"
+    assert events == [
+        ("pause", "owned Geph restart in progress", 100.0),
+        ("run", "/bin/launchctl", "kickstart", "-k", "gui/502/dev.slipstream.geph"),
+        ("rearm", "geph_restart"),
+    ]
+    assert hint["recommended"] is False
+    assert tproxy._geph_restart_draining is True
+    tproxy._finish_geph_restart_drain()
+    assert tproxy._geph_restart_draining is False
+
+
+def test_owned_geph_restart_never_touches_unverified_listener(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=False,
+        runner=lambda *args: calls.append(args),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "unverified"
+    assert calls == []
+    assert hint["recommended"] is True
+
+
+def test_owned_geph_restart_rate_limits_launchctl_retry(monkeypatch, capsys):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    def unavailable(*args):
+        calls.append(args)
+        return SimpleNamespace(returncode=1, stdout="", stderr="job unavailable")
+
+    kwargs = {
+        "active_sessions": 0,
+        "ownership_path": "/tmp/geph-owned.json",
+        "ownership_state": {"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        "owner_uid": 502,
+        "listener_owned": True,
+        "runner": unavailable,
+        "pauser": lambda: None,
+    }
+    assert tproxy.execute_owned_geph_restart(now=100.0, **kwargs) == "unavailable"
+    assert tproxy.execute_owned_geph_restart(now=101.0, **kwargs) == "cooldown"
+    assert len(calls) == 1
+    assert hint["recommended"] is True
+    capsys.readouterr()
+
+
+def test_geph_active_session_counter_never_underflows(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+
+    assert tproxy._geph_session_started()
+    assert tproxy._geph_session_started()
+    assert tproxy.geph_active_session_count() == 2
+    tproxy._geph_session_finished()
+    tproxy._geph_session_finished()
+    tproxy._geph_session_finished()
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_geph_restart_drain_blocks_new_sessions(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+
+    assert tproxy._begin_geph_restart_drain()
+    assert not tproxy._geph_session_started()
+    assert tproxy.geph_active_session_count() == 0
+    tproxy._finish_geph_restart_drain()
+    assert tproxy._geph_session_started()
+    tproxy._geph_session_finished()
+
+
+def test_stale_auto_geph_cache_never_overrides_explicit_policy():
     tproxy._auto_geph.clear()
     tproxy._auto_geph["updates.discord.com"] = tproxy.time.time() + 3600
     tproxy._auto_geph["rr2---sn-ntq7yner.googlevideo.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["www.google.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["api.spotify.com"] = tproxy.time.time() + 3600
+    tproxy._auto_geph["payments.example.com"] = tproxy.time.time() + 3600
 
     try:
         assert not tproxy.geph_route("updates.discord.com")
         assert not tproxy.geph_route("rr2---sn-ntq7yner.googlevideo.com")
+        assert not tproxy.geph_route("www.google.com")
+        assert not tproxy.geph_route("api.spotify.com")
+        assert not tproxy.geph_route("payments.example.com")
+        assert tproxy.geph_route("chatgpt.com")
     finally:
         tproxy._auto_geph.clear()
 
 
-def test_auto_geph_candidate_allows_only_unknown_hosts():
-    assert tproxy._auto_geph_candidate_allowed("payments.example.com")
-
-    assert not tproxy._auto_geph_candidate_allowed("updates.discord.com")
-    assert not tproxy._auto_geph_candidate_allowed("rr2---sn-ntq7yner.googlevideo.com")
-    assert not tproxy._auto_geph_candidate_allowed("t.me")
-    assert not tproxy._auto_geph_candidate_allowed("vk.com")
-    assert not tproxy._auto_geph_candidate_allowed("chatgpt.com")
-    assert not tproxy._auto_geph_candidate_allowed("kubernetes.io")
+def test_auto_geph_candidate_is_disabled_for_every_host():
+    for host in (
+        "payments.example.com",
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "t.me",
+        "www.google.com",
+        "api.spotify.com",
+        "chatgpt.com",
+    ):
+        assert not tproxy._auto_geph_candidate_allowed(host)
 
 
 def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle():
@@ -3631,18 +4295,19 @@ def test_clean_eof_stream_stall_requires_client_first_idle_close():
         client_end_at=130.0,
         server_end_at=130.1,
         client_eof=True,
+        client_ended_first=True,
     )
 
     assert tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
-    activity.server_end_at = 129.9
+    activity.client_ended_first = False
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
-    activity.server_end_at = 130.1
-    activity.client_eof = False
+    activity.client_ended_first = True
+    activity.server_ended_first = True
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
-    activity.client_eof = True
+    activity.server_ended_first = False
     activity.last_downstream_at = 120.0
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.1)
 
@@ -3673,6 +4338,211 @@ def test_pump_records_transport_error_but_not_orderly_eof():
     assert aborted.client_read_failed
 
 
+def test_handle_always_closes_client_writer_after_handler_failure(monkeypatch):
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    async def fail(_reader, _writer):
+        raise RuntimeError("relay failed")
+
+    writer = Writer()
+    monkeypatch.setattr(tproxy, "_handle_impl", fail)
+    monkeypatch.setattr(tproxy, "_conn_count", 0)
+
+    with pytest.raises(RuntimeError, match="relay failed"):
+        asyncio.run(tproxy.handle(object(), writer))
+
+    assert writer.closed == 1
+    assert writer.waited == 1
+    assert tproxy._conn_count == 0
+
+
+def test_every_transparent_backend_uses_the_bounded_relay_lifecycle():
+    source = inspect.getsource(tproxy._handle_impl)
+
+    assert "asyncio.gather(pump" not in source
+    assert source.count("relay_local_stream(") == 4
+
+
+def test_relay_closes_and_waits_for_both_stream_writers():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    upstream = Writer()
+    downstream = Writer()
+
+    assert asyncio.run(
+        tproxy.relay_local_stream(
+            EofReader(), upstream, EofReader(), downstream
+        )
+    ) == (0, 0)
+    assert (upstream.closed, upstream.waited) == (1, 1)
+    assert (downstream.closed, downstream.waited) == (1, 1)
+
+
+def test_failed_async_dials_close_and_wait_for_the_open_writer(monkeypatch):
+    class Reader:
+        async def read(self, _size):
+            return b""
+
+    class Socket:
+        def getsockname(self):
+            return "127.0.0.1", 50000
+
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def get_extra_info(self, _name):
+            return Socket()
+
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            raise OSError("write failed")
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    writers = []
+
+    async def open_connection(*_args, **_kwargs):
+        writer = Writer()
+        writers.append(writer)
+        return Reader(), writer
+
+    monkeypatch.setattr(tproxy.asyncio, "open_connection", open_connection)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "inject_fake_for_host", lambda *_args: None)
+
+    async def exercise():
+        assert await tproxy.dial_via_geph("example.com", 443, b"hello") is None
+        assert await tproxy.dial_plain("127.0.0.1", 443, b"hello") is None
+        assert await tproxy.dial_and_probe("127.0.0.1", 443, b"hello") is None
+        assert await tproxy.dial_and_probe_fake(
+            "127.0.0.1", 443, b"hello", host="example.com"
+        ) is None
+
+    asyncio.run(exercise())
+
+    assert len(writers) == 4
+    assert all((writer.closed, writer.waited) == (1, 1) for writer in writers)
+
+
+def test_relay_soak_leaves_no_half_open_tasks():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class Writer:
+        def close(self):
+            pass
+
+    async def exercise():
+        current = asyncio.current_task()
+        for _ in range(200):
+            assert await tproxy.relay_local_stream(
+                EofReader(), Writer(), BlockingReader(), Writer()
+            ) == (0, 0)
+        assert asyncio.all_tasks() == {current}
+
+    asyncio.run(exercise())
+
+
+def test_relay_local_stream_stops_waiting_when_client_ends_first():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class Writer:
+        def close(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=100.0)
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            EofReader(),
+            Writer(),
+            BlockingReader(),
+            Writer(),
+            activity,
+        ),
+        timeout=0.2,
+    ))
+
+    assert result == (0, 0)
+    assert activity.client_eof
+    assert activity.client_ended_first
+    assert not activity.server_ended_first
+    assert activity.client_end_at
+    assert activity.server_end_at
+
+
+def test_relay_local_stream_server_first_does_not_become_clean_eof_stall():
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class Writer:
+        def close(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=100.0)
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            BlockingReader(),
+            Writer(),
+            EofReader(),
+            Writer(),
+            activity,
+        ),
+        timeout=0.2,
+    ))
+
+    assert result == (0, 0)
+    assert activity.server_ended_first
+    assert not activity.client_ended_first
+    assert not activity.client_eof
+    assert not tproxy._clean_eof_stream_stalled(activity, now=130.0)
+
+
 def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
     host = "crystalidea.example"
     tproxy._strat_cache[host] = "split64+fake"
@@ -3700,6 +4570,7 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
         client_end_at=130.0,
         server_end_at=130.1,
         client_eof=True,
+        client_ended_first=True,
     )
     tproxy._strat_cache[host] = "split64+fake"
 
@@ -3745,6 +4616,7 @@ def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
         client_end_at=130.0,
         server_end_at=130.1,
         client_eof=True,
+        client_ended_first=True,
     )
 
     try:
@@ -3819,11 +4691,10 @@ def test_xbox_dns_fallback_excludes_discord_and_youtube(monkeypatch):
     assert calls == []
 
 
-def test_auto_geph_waits_for_xbox_dns_attempt(monkeypatch):
+def test_unknown_stalls_use_xbox_dns_without_foreign_exit():
     host = "payments.example.com"
     confirmations = []
 
-    monkeypatch.setattr(tproxy, "_geph_up", True)
     for index in range(tproxy.AUTO_GEPH_STORM):
         tproxy.note_local_result(
             host,
@@ -3845,7 +4716,8 @@ def test_auto_geph_waits_for_xbox_dns_attempt(monkeypatch):
         confirmation_runner=lambda value: confirmations.append(value),
     )
 
-    assert confirmations == [host]
+    assert confirmations == []
+    assert not tproxy.geph_route(host)
 
 
 def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
@@ -3864,100 +4736,58 @@ def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
     assert not tproxy.geph_route(host)
 
 
-def test_auto_geph_learns_exact_host_after_local_stalls_and_geph_payload(monkeypatch):
-    saves = []
-
-    monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 128)
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(True))
-    tproxy._xbox_dns_attempts["payments.example.com"] = 1_000.0
-
-    for idx in range(tproxy.AUTO_GEPH_STORM - 1):
-        tproxy.note_local_result(
-            "payments.example.com",
-            down_bytes=100,
-            duration=tproxy.AUTO_GEPH_HANG + 1,
-            now=100.0 + idx,
-            confirmation_runner=tproxy._confirm_auto_geph,
-        )
-        assert not tproxy.geph_route("payments.example.com")
-
-    tproxy.note_local_result(
-        "payments.example.com",
-        down_bytes=100,
-        duration=tproxy.AUTO_GEPH_HANG + 1,
-        now=120.0,
-        confirmation_runner=tproxy._confirm_auto_geph,
-    )
-
-    assert tproxy.geph_route("payments.example.com")
-    assert not tproxy.geph_route("example.com")
-    assert saves
-    snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "learned"
-    assert snap["last_host"] == "payments.example.com"
-    assert snap["last_bytes"] == 128
-
-
-def test_auto_geph_forgets_learned_host_after_repeated_geph_runtime_misses(monkeypatch, capsys):
-    saves = []
+def test_unknown_stalls_never_promote_to_geph_after_xbox_dns_attempt(monkeypatch):
+    confirmations = []
     host = "payments.example.com"
-    tproxy._auto_geph[host] = tproxy.time.time() + 3600
-    monkeypatch.setattr(tproxy, "_geph_owned", True)
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
-
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)
-    assert tproxy.geph_route(host)
-
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1001.0)
-
-    assert not tproxy.geph_route(host)
-    assert saves and host not in saves[-1]
-    snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "reset"
-    assert snap["last_host"] == host
-    assert snap["last_reason"] == "geph runtime retries"
-    capsys.readouterr()
-
-
-def test_auto_geph_runtime_misses_keep_explicit_geo_hosts(monkeypatch, capsys):
-    saves = []
-    host = "chatgpt.com"
-    expiry = tproxy.time.time() + 3600
-    tproxy._auto_geph[host] = expiry
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: saves.append(dict(tproxy._auto_geph)))
-
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1000.0)
-    tproxy.log_geph_route_failure(host, "remote closed without response", now=1001.0)
-
-    assert tproxy.geph_route(host)
-    assert tproxy._auto_geph[host] == expiry
-    assert not saves
-    capsys.readouterr()
-
-
-def test_auto_geph_requires_geph_payload_proof(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda host: 0)
-    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
-    tproxy._xbox_dns_attempts["payments.example.com"] = 1_000.0
+    tproxy._xbox_dns_attempts[host] = 1_000.0
 
     for idx in range(tproxy.AUTO_GEPH_STORM):
         tproxy.note_local_result(
-            "payments.example.com",
+            host,
             down_bytes=100,
             duration=tproxy.AUTO_GEPH_HANG + 1,
             now=100.0 + idx,
-            confirmation_runner=tproxy._confirm_auto_geph,
+            confirmation_runner=lambda value: confirmations.append(value),
         )
 
-    assert not tproxy.geph_route("payments.example.com")
+    assert confirmations == []
+    assert not tproxy.geph_route(host)
+    assert not tproxy._auto_geph
     snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "rejected"
-    assert snap["last_reason"] == "geph payload probe failed"
+    assert snap["enabled"] is False
+    assert snap["learned"] == 0
 
 
-def test_auto_geph_network_wide_guard_blocks_learning(monkeypatch):
+def test_auto_geph_confirmation_never_dials_unknown_host(monkeypatch):
+    probes = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_payload_probe",
+        lambda host: probes.append(host) or 128,
+    )
+
+    assert not tproxy._confirm_auto_geph("payments.example.com")
+    assert probes == []
+    snap = tproxy.auto_geo_exit_status_snapshot()
+    assert snap["last_state"] == "skipped"
+    assert snap["last_reason"] == "not eligible"
+
+
+def test_load_auto_geph_discards_legacy_learned_routes(tmp_path, monkeypatch):
+    path = tmp_path / "autogeph.json"
+    path.write_text(json.dumps({"www.google.com": tproxy.time.time() + 3600}))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(path))
+
+    tproxy.load_auto_geph()
+
+    assert tproxy._auto_geph == {}
+    assert json.loads(path.read_text()) == {}
+    assert not tproxy.geph_route("www.google.com")
+
+
+def test_network_wide_unknown_stalls_do_not_schedule_foreign_exit(monkeypatch):
     calls = []
     monkeypatch.setattr(tproxy, "_geph_up", True)
 
@@ -3978,7 +4808,7 @@ def test_auto_geph_network_wide_guard_blocks_learning(monkeypatch):
     assert not tproxy.geph_route("payments.example.com")
 
 
-def test_auto_geph_prunes_expired_learned_hosts(monkeypatch):
+def test_prune_auto_geph_discards_legacy_learned_hosts(monkeypatch):
     saves = []
     tproxy._auto_geph["old.example.com"] = 100.0
     tproxy._auto_geph["fresh.example.com"] = 300.0
@@ -3986,9 +4816,8 @@ def test_auto_geph_prunes_expired_learned_hosts(monkeypatch):
 
     snap = tproxy.auto_geo_exit_status_snapshot(now=200.0)
 
-    assert "old.example.com" not in tproxy._auto_geph
-    assert "fresh.example.com" in tproxy._auto_geph
-    assert snap["learned"] == 1
+    assert tproxy._auto_geph == {}
+    assert snap["learned"] == 0
     assert saves
 
 
@@ -4107,7 +4936,9 @@ def test_rotating_log_writer_keeps_bounded_archives(tmp_path):
     assert (tmp_path / "slipstream.log.1").read_text() == "abcdefghi\n"
     assert (tmp_path / "slipstream.log.2").read_text() == "123456789\n"
     assert not (tmp_path / "slipstream.log.3").exists()
-    assert log.stat().st_mode & 0o777 == 0o640
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "slipstream.log.1").stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "slipstream.log.2").stat().st_mode & 0o777 == 0o600
 
 
 def test_rotating_log_writer_rotates_oversized_existing_log(tmp_path):
@@ -4120,6 +4951,46 @@ def test_rotating_log_writer_rotates_oversized_existing_log(tmp_path):
 
     assert log.read_text() == "fresh\n"
     assert (tmp_path / "slipstream.log.1").read_text() == "already too large\n"
+
+
+def test_rotating_log_writer_migrates_existing_log_and_archives_to_owner_only(tmp_path):
+    log = tmp_path / "slipstream.log"
+    archive = tmp_path / "slipstream.log.1"
+    log.write_text("current\n")
+    archive.write_text("previous\n")
+    log.chmod(0o644)
+    archive.chmod(0o640)
+
+    writer = tproxy.RotatingLogWriter(str(log), max_bytes=1024, backups=2)
+    writer.flush()
+
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert archive.stat().st_mode & 0o777 == 0o600
+
+
+def test_rotating_log_writer_refuses_symlink_log_path(tmp_path):
+    target = tmp_path / "target"
+    target.write_text("leave me alone\n")
+    target.chmod(0o644)
+    log = tmp_path / "slipstream.log"
+    log.symlink_to(target)
+
+    with pytest.raises(OSError):
+        tproxy.RotatingLogWriter(str(log), max_bytes=1024, backups=1)
+
+    assert target.read_text() == "leave me alone\n"
+    assert target.stat().st_mode & 0o777 == 0o644
+
+
+def test_harden_existing_log_tolerates_archive_rotation_race(monkeypatch):
+    monkeypatch.setattr(tproxy.os.path, "lexists", lambda _path: True)
+
+    def vanished(_path, _flags):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(tproxy.os, "open", vanished)
+
+    assert not tproxy._harden_existing_log("/var/log/slipstream.log.1")
 
 
 def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
@@ -4147,28 +5018,6 @@ def test_rotating_log_writer_can_prefix_timestamps(tmp_path):
     )
 
 
-def test_active_console_gid_uses_console_user_group(monkeypatch):
-    class Stat:
-        st_uid = 501
-
-    class User:
-        pw_gid = 20
-
-    monkeypatch.setattr(tproxy.os, "stat", lambda path: Stat())
-    monkeypatch.setattr(tproxy.pwd, "getpwuid", lambda uid: User())
-
-    assert tproxy.active_console_gid() == 20
-
-
-def test_active_console_gid_falls_back_to_root_group(monkeypatch):
-    class Stat:
-        st_uid = 0
-
-    monkeypatch.setattr(tproxy.os, "stat", lambda path: Stat())
-
-    assert tproxy.active_console_gid() == 0
-
-
 def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
     conf = tmp_path / "dev.slipstream.tproxy.conf"
     conf.write_text("obsolete\n")
@@ -4178,3 +5027,19 @@ def test_remove_obsolete_newsyslog_config(monkeypatch, tmp_path):
     tproxy.remove_obsolete_newsyslog_config()
 
     assert not conf.exists()
+
+
+def test_launchd_delegates_raw_log_creation_to_private_writer():
+    raw = tproxy.launchd_plist_text(
+        ["/usr/local/slipstream/slipstreamd", "--port", "1080"],
+        "/usr/local/slipstream",
+    )
+    plist = plistlib.loads(raw.encode())
+
+    assert plist["StandardOutPath"] == "/dev/null"
+    assert plist["StandardErrorPath"] == "/dev/null"
+    assert plist["ProgramArguments"] == [
+        "/usr/local/slipstream/slipstreamd",
+        "--port",
+        "1080",
+    ]

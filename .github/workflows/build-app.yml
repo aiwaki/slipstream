@@ -32,7 +32,7 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Resolve version + tag
         id: ver
@@ -43,6 +43,8 @@ jobs:
             [ "$v" = "$repo_v" ] || { echo "tag $tag does not match VERSION ($repo_v)"; exit 1; }
             channel="stable"
             prerelease="false"
+            make_latest="true"
+            release_name="Slipstream $v"
           else
             input_v="${{ github.event.inputs.version }}"
             if [ -n "$input_v" ] && [ "$input_v" != "$repo_v" ]; then
@@ -53,23 +55,27 @@ jobs:
             tag="v${v}-preview.${GITHUB_RUN_NUMBER}"
             channel="preview"
             prerelease="true"
+            make_latest="false"
+            release_name="Slipstream $v (preview ${GITHUB_RUN_NUMBER})"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
           echo "Releasing $v ($tag, $channel)"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
         with:
           targets: aarch64-apple-darwin
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: "24"
 
       - name: System build deps
-        run: brew install protobuf cmake pkg-config || true
+        run: bash scripts/ensure_macos_build_deps.sh
 
       - name: Prepare route policy trust keys
         if: steps.ver.outputs.channel == 'stable'
@@ -136,15 +142,14 @@ jobs:
           npm ci
           npm run build
 
-      - name: Qualify the release app lifecycle
+      - name: Qualify the release app lifecycle, tray crash, Chrome, and Safari
         env:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
           set -euo pipefail
           app="app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app"
           test -d "$app"
-          sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py \
-            --app-bundle "$app"
+          bash scripts/run_packaged_lifecycle_smoke.sh "$app"
 
       - name: Package + build the update appcast (latest.json)
         id: pkg
@@ -210,17 +215,31 @@ jobs:
             --version "${{ steps.ver.outputs.version }}" \
             --channel "${{ steps.ver.outputs.channel }}"
 
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
+            printf '%s\n\n%s\n\n%s\n' \
+              "Slipstream ${{ steps.ver.outputs.version }} preview for macOS Apple Silicon." \
+              "Manual download only. This build does not replace the stable updater feed and omits remote policy channel assets." \
+              "The app is not notarized by Apple. If Gatekeeper blocks it, use Open from the context menu." \
+              > dist-release/release-notes.md
+          else
+            printf '%s\n\n%s\n\n%s\n' \
+              "Slipstream ${{ steps.ver.outputs.version }} for macOS Apple Silicon." \
+              "Published to the stable updater feed with signed remote policy channel assets." \
+              "The app is not notarized by Apple. If Gatekeeper blocks it, use Open from the context menu." \
+              > dist-release/release-notes.md
+          fi
+
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: "Slipstream ${{ steps.ver.outputs.version }} (${{ steps.ver.outputs.channel }})"
+          name: ${{ steps.ver.outputs.release_name }}
           prerelease: ${{ steps.ver.outputs.prerelease }}
-          body: |
-            Slipstream ${{ steps.ver.outputs.version }} (${{ steps.ver.outputs.channel }}, macOS, Apple Silicon).
-            Unsigned by Apple — on first download, right-click the app > Open.
-            Preview releases are manual-download builds and do not replace the stable updater feed.
-            Preview releases omit the remote policy channel.
+          make_latest: ${{ steps.ver.outputs.make_latest }}
+          body_path: dist-release/release-notes.md
           files: |
             dist-release/Slipstream-macos-arm64.zip
             dist-release/Slipstream.app.tar.gz

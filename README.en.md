@@ -4,112 +4,71 @@
 
 [Русский](README.md) · **English**
 
-[![preview](https://img.shields.io/badge/preview-macOS%20(Apple%20Silicon)-000000?logo=apple)](#install)
+[![preview](https://img.shields.io/badge/preview-macOS%20Apple%20Silicon-000000?logo=apple)](#install)
+[![ci](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![build-geph](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-geph.yml)
-[![build-app](https://github.com/aiwaki/slipstream/actions/workflows/build-app.yml/badge.svg)](https://github.com/aiwaki/slipstream/actions/workflows/build-app.yml)
 
 </div>
 
-Slipstream is a split-routing client for networks with blocking, DPI filtering,
-and services that require a foreign IP.
+Slipstream is a split-routing app for networks affected by blocking and DPI
+filtering. It selects a route for each service instead of enabling a system-wide
+VPN for all traffic.
 
-Routes:
+## For users
 
-- direct connection for local services;
-- local DPI bypass without changing the external IP;
-- Geph tunnel for services that require a foreign IP;
-- bundled Telegram Desktop proxy when direct connection does not work.
+### Routes
 
-No browser extensions. No per-app proxy setup.
-
-## Components
-
-- **Local DPI bypass**: TLS handshake splitting, low-TTL decoy packets, DoH
-  against DNS poisoning, and separate handling for Discord voice.
-- **Geph**: foreign exit through the bundled `geph5-client`.
-- **tg-ws-proxy**: local MTProto-over-WebSocket proxy for Telegram Desktop
-  ([Flowseal](https://github.com/Flowseal/tg-ws-proxy)).
-
-Desync and the Telegram proxy run on the device. Geph requires a Geph account.
-
-## Platforms
-
-| Platform | Status |
+| Route | Purpose |
 |---|---|
-| macOS Apple Silicon | early build |
-| Windows | not implemented |
-| Linux | not implemented |
-| iOS | not implemented |
-| Android | not implemented |
+| Direct | Services that do not need bypassing. |
+| Local bypass | DPI blocking without changing the external IP. |
+| Foreign exit | Explicitly reviewed services that reject Russian IPs; through the bundled Geph client. |
+| Telegram | A local proxy offered when a direct connection is unavailable. |
 
-Implementation order: [`docs/ROADMAP.md`](docs/ROADMAP.md).
-Troubleshooting: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+Discord and YouTube use local bypass and are never routed through Geph. Unknown
+hosts are not promoted to a foreign exit automatically. External DNS, proxy,
+PAC, and VPN settings are detected but never changed.
 
-## Install
+### Install
 
-1. Download `Slipstream.app` from [releases](https://github.com/aiwaki/slipstream/releases) and move it to Applications.
-2. Launch it. macOS asks for your password once to install the background service.
-3. In the menu (menu-bar icon):
-   - **Geph → Account…** — paste your Geph account key.
-   - **Geph → pick an exit** — a city, or **Automatic**.
+Available build: macOS Apple Silicon.
 
-If Telegram Desktop cannot connect directly, Slipstream offers to enable the
-bundled Telegram proxy automatically.
+1. In [Releases](https://github.com/aiwaki/slipstream/releases), select the newest `Slipstream` release marked **Pre-release** and download `Slipstream-macos-arm64.zip`.
+2. Extract the archive and move `Slipstream.app` to Applications.
+3. Launch Slipstream and approve installation of the background service.
 
-> [!TIP]
-> Builds are not Apple-notarized. If macOS blocks the app,
-> open it with right-click → **Open**.
+The Geph account and exit are configured from the menu only for foreign-exit
+routes. The Telegram proxy offer appears automatically.
 
-## Build it yourself
+> [!NOTE]
+> Preview builds are not notarized by Apple. If macOS blocks the app, it can be
+> opened from the **Open** item in the context menu.
 
-Needs Rust, Node, Python 3, and the Xcode command-line tools.
+The order for other platforms is tracked in
+[`docs/ROADMAP.md`](docs/ROADMAP.md). Repeated symptoms and checks are collected
+in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
-```bash
-# the background service bundled into the .app
-cd spike
-./build_daemon.sh
-cd ..
-rm -rf app-tauri/src-tauri/slipstreamd
-cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
+## For developers
 
-# the menu-bar app
-cd app-tauri
-npm ci
-# a clean local release build needs the geph sidecar at:
-# app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-npm run build:local
+Slipstream consists of a Tauri tray app, a Python background service, bundled
+sidecars, and shared JSON contracts. There is no public CLI or API yet; the
+testable cross-platform surface lives in `contracts/`.
 
-# the background service (desync + routing) — the app installs it for you,
-# but during development you can do it manually from the repo root:
-cd ..
-sudo python3 spike/tproxy.py --install
-```
+- [Setup and build](DEVELOPMENT.md#setup)
+- [Safe local checks without root](DEVELOPMENT.md#safe-local-checks)
+- [Privileged checks on disposable CI only](DEVELOPMENT.md#privileged-qualification)
+- [Engineering documentation map](docs/README.md)
+- [Routing and recovery contracts](contracts/README.md)
+- [Roadmap](docs/ROADMAP.md)
 
-The bundled `geph5-client` is built from source in CI
-([`build-geph.yml`](.github/workflows/build-geph.yml)) and placed in
-`app-tauri/src-tauri/binaries/`.
-The release app build (`npm run build`) also signs the updater artifact and
-requires `TAURI_SIGNING_PRIVATE_KEY`.
+## Privacy and licenses
 
-## What's where
-
-| Path | What it is |
-|------|-----------|
-| `app-tauri/` | Menu-bar app (Tauri + Rust). |
-| `spike/tproxy.py` | Desync and split-routing service for macOS (Python, root). |
-| `vendor/tg-ws-proxy/` | The bundled Telegram MTProto-over-WebSocket proxy. |
-| `vendor/geph/` | Build setup for the bundled `geph5-client`. |
-| [`docs/`](docs/README.md) | Documentation map, decisions, and engineering notes. |
-
-## Privacy
-
-- Slipstream's client-side routing logic runs locally on your device.
-- Russian services are not routed through Geph.
-- Geph is an account on the Geph network; Geph is responsible for that network's security.
-
-## Credits
+Routing decisions and diagnostics run locally. Only traffic explicitly assigned
+to foreign-exit routes passes through the Geph network; direct and local routes
+do not use Geph.
 
 - **Slipstream** — [MIT](LICENSE).
-- **geph5-client** — MPL-2.0, © [Geph](https://geph.io). Bundled as-is, built in CI.
-- **tg-ws-proxy** — MIT, © [Flowseal](https://github.com/Flowseal/tg-ws-proxy). Bundled as a module.
+- **geph5-client** — MPL-2.0, © [Geph](https://geph.io).
+- **tg-ws-proxy** — MIT, © [Flowseal](https://github.com/Flowseal/tg-ws-proxy).
+
+Details: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

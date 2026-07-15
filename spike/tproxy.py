@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import atexit
 import base64
+import errno
 import filecmp
 import fcntl
 import hashlib
@@ -35,21 +36,67 @@ import os
 import pwd
 import re
 import resource
+import shlex
 import signal
 import socket
 import ssl
 import shutil
+import stat
 import struct
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
 
+import connection_probe
+import geph_backend
+import pf_adapter
+import route_circuit
+import route_circuit_registry
 from primes import build_fake_stun, classify as classify_voice_payload
+from routing_recovery import (
+    ConnectionOutcome,
+    POLICY_PROTECTED_LOCAL_BYPASS_GROUPS,
+    RECOVERY_INVALIDATE_STRATEGY,
+    RECOVERY_NONE,
+    RECOVERY_RECHECK,
+    RECOVERY_RESTART_OWNED_GEPH,
+    RECOVERY_RESWEEP_EXACT_HOST,
+    RECOVERY_WARN_EXTERNAL,
+    RecoveryAction,
+    RecoveryContext,
+    reduce_connection_outcome,
+)
+from routing_policy import (
+    ROUTE_DIRECT,
+    ROUTE_DIRECT_FIRST,
+    ROUTE_GEO_EXIT,
+    ROUTE_LOCAL_BYPASS,
+    ROUTE_UNKNOWN,
+    SERVICE_ANTHROPIC,
+    SERVICE_DISCORD,
+    SERVICE_GENERIC,
+    SERVICE_GITHUB,
+    SERVICE_GOOGLE,
+    SERVICE_OPENAI,
+    SERVICE_SPOTIFY,
+    SERVICE_STEAM_STORE,
+    SERVICE_TELEGRAM,
+    SERVICE_YOUTUBE,
+    STRATEGY_DIRECT,
+    STRATEGY_DIRECT_FIRST,
+    STRATEGY_FAKE_ONLY,
+    STRATEGY_GENERAL,
+    STRATEGY_GEPH,
+    classify_route_policy,
+    host_matches as _host_matches,
+    is_russian,
+    match_policy as _match_policy,
+    normalize_host,
+)
 from xbox_dns import resolve as xbox_dns_resolve
 
 
@@ -75,6 +122,13 @@ PF_PARENT_ANCHOR = "com.apple/*"
 PF_CONFIG_PATH = "/etc/pf.conf"
 PF_TOKEN_PATH = "/var/run/slipstream-pf.token"
 PF_CONFLICT_CHECK_INTERVAL = 15.0
+try:
+    RUNTIME_WAKE_GAP_SECONDS = max(
+        5.0,
+        float(os.environ.get("SLIP_RUNTIME_WAKE_GAP_SECONDS", "30")),
+    )
+except (TypeError, ValueError):
+    RUNTIME_WAKE_GAP_SECONDS = 30.0
 PF_RULES = """\
 rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
 pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
@@ -127,14 +181,23 @@ GEPH_OWNED_PORT = 9954
 GEPH_EXTERNAL_PORT = 9909
 GEPH_PORTS = [int(_env_geph_port)] if _env_geph_port else [GEPH_OWNED_PORT]
 GEPH_OWNERSHIP_FILE = "geph-owned.json"
+GEPH_LAUNCHD_LABEL = "dev.slipstream.geph"
 _geph_up = False               # set by network_monitor's periodic probe
 _geph_port = None              # the live SOCKS port (set by probe_geph)
 _geph_owned = False
 _geph_port_conflict = False
 _external_geph_detected = False
+_geph_active_sessions = 0
+_geph_restart_draining = False
+_geph_session_lock = threading.Lock()
 _pf_backend_hold_until = 0.0
 _pf_backend_hold_reason = ""
 _pf_state_lock = threading.Lock()
+_fd_pressure = False
+_fd_pressure_reason = ""
+_fd_pressure_at = 0.0
+_fd_pressure_lock = threading.Lock()
+_fd_reserve = []
 _system_dns_cache = {
     "ts": 0.0,
     "status": None,
@@ -144,31 +207,12 @@ _system_dns_cache = {
 SYSTEM_DNS_STATUS_TTL = 30.0
 SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
 
-ROUTE_LOCAL_BYPASS = "local_bypass"
-ROUTE_GEO_EXIT = "geo_exit"
-ROUTE_DIRECT = "direct_passthrough"
-ROUTE_UNKNOWN = "unknown"
-
-SERVICE_DISCORD = "discord"
-SERVICE_YOUTUBE = "youtube_video"
-SERVICE_OPENAI = "openai"
-SERVICE_ANTHROPIC = "anthropic"
-SERVICE_TELEGRAM = "telegram"
-SERVICE_STEAM_STORE = "steam_store"
-SERVICE_GITHUB = "github"
-SERVICE_GENERIC = "generic"
-
-STRATEGY_FAKE_ONLY = "fake_only"
-STRATEGY_GEPH = "geph"
-STRATEGY_DIRECT = "direct"
-STRATEGY_GENERAL = "general"
-
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
 IP_ATTEMPT_LIMIT_BY_ROUTE = {
     ROUTE_LOCAL_BYPASS: LOCAL_BYPASS_IP_ATTEMPT_LIMIT,
 }
-ROUTE_POLICY_VERSION = 1
+ROUTE_POLICY_VERSION = 2
 ROUTE_POLICY_SOURCE = "bundled"
 ROUTE_POLICY_SCHEMA_VERSION = 1
 ROUTE_POLICY_CHANNEL_KIND = "slipstream.route_policy_channel"
@@ -208,6 +252,9 @@ GOOGLE_VIDEO = (
 )
 LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
+GOOGLE_DIRECT_FIRST_HOSTS = ("google.com",)
+SPOTIFY_DIRECT_FIRST_HOSTS = ("spotify.com", "spotifycdn.com", "scdn.co")
+DIRECT_FIRST_HOSTS = GOOGLE_DIRECT_FIRST_HOSTS + SPOTIFY_DIRECT_FIRST_HOSTS
 GITHUB_HOSTS = (
     "github.com",
     "githubassets.com",
@@ -242,6 +289,18 @@ ROUTE_POLICY_TABLE = (
         "strategy_set": STRATEGY_DIRECT,
     },
     {
+        "domains": GOOGLE_DIRECT_FIRST_HOSTS,
+        "route_class": ROUTE_DIRECT_FIRST,
+        "service_group": SERVICE_GOOGLE,
+        "strategy_set": STRATEGY_DIRECT_FIRST,
+    },
+    {
+        "domains": SPOTIFY_DIRECT_FIRST_HOSTS,
+        "route_class": ROUTE_DIRECT_FIRST,
+        "service_group": SERVICE_SPOTIFY,
+        "strategy_set": STRATEGY_DIRECT_FIRST,
+    },
+    {
         "domains": DISCORD_HOSTS,
         "route_class": ROUTE_LOCAL_BYPASS,
         "service_group": SERVICE_DISCORD,
@@ -264,7 +323,7 @@ GEO_EXIT_POLICY_TABLE = (
 GEPH_HOSTS = tuple(
     domain for policy in GEO_EXIT_POLICY_TABLE for domain in policy["domains"]
 )
-POLICY_PROTECTED_LOCAL_BYPASS_GROUPS = frozenset((SERVICE_DISCORD, SERVICE_YOUTUBE))
+POLICY_PROTECTED_DIRECT_FIRST_DOMAINS = frozenset(DIRECT_FIRST_HOSTS)
 POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
     SERVICE_DISCORD,
     SERVICE_YOUTUBE,
@@ -273,10 +332,13 @@ POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
     SERVICE_TELEGRAM,
     SERVICE_STEAM_STORE,
     SERVICE_GITHUB,
+    SERVICE_GOOGLE,
+    SERVICE_SPOTIFY,
     SERVICE_GENERIC,
 ))
 POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
     ROUTE_DIRECT: frozenset((STRATEGY_DIRECT,)),
+    ROUTE_DIRECT_FIRST: frozenset((STRATEGY_DIRECT_FIRST,)),
     ROUTE_LOCAL_BYPASS: frozenset((STRATEGY_FAKE_ONLY,)),
     ROUTE_GEO_EXIT: frozenset((STRATEGY_GEPH,)),
 }
@@ -337,13 +399,6 @@ HEALTH_DEGRADED = "degraded"
 HEALTH_BLOCKED = "blocked"
 HEALTH_UNKNOWN = "unknown"
 
-RECOVERY_NONE = "none"
-RECOVERY_INVALIDATE_STRATEGY = "invalidate_strategy"
-RECOVERY_RESWEEP_EXACT_HOST = "resweep_exact_host"
-RECOVERY_RESTART_OWNED_GEPH = "restart_owned_geph"
-RECOVERY_RECHECK = "recheck"
-RECOVERY_WARN_EXTERNAL = "warn_external"
-
 FAILURE_PHASE_BACKEND = "backend"
 FAILURE_PHASE_CONNECT = "connect"
 FAILURE_PHASE_FIRST_PAYLOAD = "first_payload"
@@ -353,90 +408,34 @@ BACKEND_LOCAL_ENGINE = "local_engine"
 BACKEND_DIRECT = "direct"
 BACKEND_EXTERNAL = "external"
 
+RUNTIME_ROUTE_CIRCUIT_CONFIG = route_circuit.CircuitConfig(
+    failure_threshold=2,
+    open_duration_ms=1000,
+    half_open_max_in_flight=1,
+    success_threshold=1,
+)
+RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG = (
+    route_circuit_registry.RouteCircuitRegistryConfig(
+        max_entries=256,
+        idle_ttl_ms=5 * 60 * 1000,
+    )
+)
+_runtime_route_circuits = route_circuit_registry.RouteCircuitRegistry(
+    RUNTIME_ROUTE_CIRCUIT_CONFIG,
+    RUNTIME_ROUTE_CIRCUIT_REGISTRY_CONFIG,
+)
 
-@dataclass(frozen=True)
-class ConnectionOutcome:
-    host: str
-    service_group: str
-    route_class: str
-    backend: str
-    failure_phase: str
-    bytes_received: int
-    duration: float
-    reason: str
-    ok: bool
+ADDRESS_RACE_TIMEOUT_MS = 9_000
+ADDRESS_RACE_STAGGER_MS = 250
+ADDRESS_RACE_MAX_CONCURRENT = 2
 
-
-@dataclass(frozen=True)
-class RecoveryContext:
-    backend_owned: bool = False
-    restart_recommended: bool = False
-    restart_rate_limited: bool = False
-    strategy_invalidation_recommended: bool = False
-    recheck_recommended: bool = False
-    external_state: bool = False
-
-
-@dataclass(frozen=True)
-class RecoveryAction:
-    kind: str
-    target: str = ""
-    reason: str = ""
-
-
-def reduce_connection_outcome(outcome, context=None):
-    """Choose safe recovery work without performing any side effects."""
-    context = context or RecoveryContext()
-    if outcome.ok:
-        return (RecoveryAction(RECOVERY_NONE),)
-
-    reason = outcome.reason[:200]
-    protected_local = outcome.service_group in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS
-    if protected_local or outcome.route_class == ROUTE_LOCAL_BYPASS:
-        return (
-            RecoveryAction(
-                RECOVERY_INVALIDATE_STRATEGY,
-                outcome.service_group,
-                reason,
-            ),
-            RecoveryAction(RECOVERY_RESWEEP_EXACT_HOST, outcome.host, reason),
-            RecoveryAction(RECOVERY_RECHECK, outcome.service_group, reason),
-        )
-
-    if context.external_state:
-        return (RecoveryAction(RECOVERY_WARN_EXTERNAL, outcome.backend, reason),)
-
-    if outcome.route_class == ROUTE_GEO_EXIT:
-        actions = []
-        if context.strategy_invalidation_recommended:
-            actions.append(
-                RecoveryAction(RECOVERY_INVALIDATE_STRATEGY, outcome.host, reason)
-            )
-        if (
-            context.backend_owned
-            and context.restart_recommended
-            and not context.restart_rate_limited
-        ):
-            actions.append(
-                RecoveryAction(RECOVERY_RESTART_OWNED_GEPH, outcome.backend, reason)
-            )
-        else:
-            actions.append(
-                RecoveryAction(RECOVERY_RECHECK, outcome.service_group, reason)
-            )
-        return tuple(actions)
-
-    if outcome.route_class == ROUTE_UNKNOWN and context.recheck_recommended:
-        return (RecoveryAction(RECOVERY_RECHECK, outcome.host, reason),)
-
-    return (RecoveryAction(RECOVERY_NONE),)
 
 CANARY_INTERVAL = 10 * 60.0
 CANARY_JITTER = 90.0
 CANARY_FORCE_MIN_GAP = 60.0
 CANARY_FORCE_RETRY_DELAY = 15.0
 CANARY_FAILURE_WINDOW = 5 * 60.0
-LOCAL_PAYLOAD_CANARY_TIMEOUT = 4.0
+LOCAL_PAYLOAD_CANARY_TIMEOUT = 8.0
 LOCAL_PAYLOAD_CANARY_MIN_BYTES = 64
 LOCAL_PAYLOAD_DEGRADE_AFTER = 3
 LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
@@ -451,18 +450,15 @@ GEPH_RESTART_FAILURE_THRESHOLD = 3
 GEPH_RESTART_MIN_HOSTS = 2
 GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
+GEPH_RESTART_EXECUTION_RETRY = 30.0
 PF_BACKEND_FAILURE_HOLD = 30.0
+FD_PRESSURE_HIGH_CAP = 2048
+FD_PRESSURE_LOW_CAP = 1024
+FD_PRESSURE_RESERVE = 8
 SMART_DNS_OK_TTL = 10 * 60.0
 SMART_DNS_GROUPS = (SERVICE_OPENAI, SERVICE_ANTHROPIC)
 _smart_dns_ok_until = {}
 _smart_dns_last_failure = {"host": "", "reason": "", "ts": 0.0}
-
-
-def _host_matches(host, domains):
-    if not host:
-        return False
-    h = host.lower().rstrip(".")
-    return any(h == d or h.endswith("." + d) for d in domains)
 
 
 def is_discord_host(host):
@@ -471,26 +467,6 @@ def is_discord_host(host):
 
 def is_google_video_host(host):
     return _host_matches(host, GOOGLE_VIDEO)
-
-
-def normalize_host(host):
-    return host.lower().rstrip(".") if host else ""
-
-
-def _policy_result(host, route_class, service_group, strategy_set):
-    return {
-        "host": host,
-        "route_class": route_class,
-        "service_group": service_group,
-        "strategy_set": strategy_set,
-    }
-
-
-def _match_policy(host, policies):
-    for policy in policies:
-        if _host_matches(host, policy["domains"]):
-            return policy
-    return None
 
 
 def bundled_route_policy_manifest():
@@ -658,14 +634,28 @@ def validate_route_policy_manifest(manifest):
         raise ValueError("geo_exit_routes must be a list")
 
     protected_seen = set()
+    protected_direct_first_seen = set()
     for index, entry in enumerate(static_routes):
         item = _normalize_policy_entry(entry, f"static_routes[{index}]")
         normalized["static_routes"].append(item)
         if item["service_group"] in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS:
             protected_seen.add(item["service_group"])
+        if (
+            item["route_class"] == ROUTE_DIRECT_FIRST
+            and item["strategy_set"] == STRATEGY_DIRECT_FIRST
+        ):
+            protected_direct_first_seen.update(item["domains"])
     missing = POLICY_PROTECTED_LOCAL_BYPASS_GROUPS - protected_seen
     if missing:
         raise ValueError(f"protected local-bypass groups missing: {', '.join(sorted(missing))}")
+    missing_direct = (
+        POLICY_PROTECTED_DIRECT_FIRST_DOMAINS - protected_direct_first_seen
+    )
+    if missing_direct:
+        raise ValueError(
+            "protected direct-first domains missing: "
+            + ", ".join(sorted(missing_direct))
+        )
 
     for index, entry in enumerate(geo_exit_routes):
         item = _normalize_policy_entry(
@@ -1298,7 +1288,12 @@ def reset_route_policy_manifest():
 
 def route_policy_status_snapshot():
     manifest = route_policy_manifest()
-    domains = {ROUTE_DIRECT: 0, ROUTE_LOCAL_BYPASS: 0, ROUTE_GEO_EXIT: 0}
+    domains = {
+        ROUTE_DIRECT: 0,
+        ROUTE_DIRECT_FIRST: 0,
+        ROUTE_LOCAL_BYPASS: 0,
+        ROUTE_GEO_EXIT: 0,
+    }
     groups = {}
     for policy in manifest["static_routes"]:
         route_class = policy["route_class"]
@@ -1327,26 +1322,113 @@ def route_policy_status_snapshot():
 
 
 def route_policy(host, now=None):
-    h = normalize_host(host)
-    if not h:
-        return _policy_result("", ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
     static_routes, geo_exit_routes = route_policy_tables()
-    policy = _match_policy(h, static_routes)
-    if policy:
-        return _policy_result(
-            h,
-            policy["route_class"],
-            policy["service_group"],
-            policy["strategy_set"],
-        )
-    if is_russian(h):
-        return _policy_result(h, ROUTE_DIRECT, SERVICE_GENERIC, STRATEGY_DIRECT)
-    wall_now = time.time() if now is None else now
-    geo_policy = _match_policy(h, geo_exit_routes)
-    if geo_policy or _auto_geph.get(h, 0) > wall_now:
-        group = (geo_policy or {}).get("service_group", SERVICE_GENERIC)
-        return _policy_result(h, ROUTE_GEO_EXIT, group, STRATEGY_GEPH)
-    return _policy_result(h, ROUTE_UNKNOWN, SERVICE_GENERIC, STRATEGY_GENERAL)
+    return classify_route_policy(host, static_routes, geo_exit_routes)
+
+
+def _runtime_route_circuit_now_ms():
+    return int(time.monotonic() * 1000)
+
+
+def _runtime_route_circuit_key(policy, backend, *, owned=True):
+    route_class = policy.get("route_class") or ROUTE_UNKNOWN
+    service_group = policy.get("service_group") or SERVICE_GENERIC
+    if route_class == ROUTE_LOCAL_BYPASS and backend == BACKEND_LOCAL_ENGINE:
+        pass
+    elif route_class == ROUTE_GEO_EXIT and backend == GEO_BACKEND_SMART_DNS:
+        pass
+    elif (
+        route_class == ROUTE_GEO_EXIT
+        and backend == GEO_BACKEND_GEPH
+        and owned
+    ):
+        pass
+    else:
+        return None
+    return route_circuit.RouteCircuitKey(
+        service_group=service_group,
+        route_class=route_class,
+        backend_id=backend,
+    )
+
+
+def _apply_runtime_route_circuit(event):
+    try:
+        return _runtime_route_circuits.apply(event)
+    except Exception as exc:
+        # Circuit memory is an optimization. If its clock/state is ever invalid,
+        # forget suppression and keep the fixed route usable.
+        _runtime_route_circuits.clear()
+        if VERBOSE:
+            print(f"  route circuit reset: {exc}", file=sys.stderr)
+        return None
+
+
+def runtime_route_circuit_before_request(
+    policy,
+    backend,
+    *,
+    owned=True,
+    now_ms=None,
+):
+    key = _runtime_route_circuit_key(policy, backend, owned=owned)
+    if key is None:
+        return None
+    event = route_circuit.CircuitEvent(
+        kind=route_circuit.EVENT_BEFORE_REQUEST,
+        key=key,
+        now_ms=(
+            _runtime_route_circuit_now_ms()
+            if now_ms is None
+            else int(now_ms)
+        ),
+    )
+    return _apply_runtime_route_circuit(event)
+
+
+def runtime_route_circuit_record_result(
+    policy,
+    backend,
+    ok,
+    *,
+    owned=True,
+    now_ms=None,
+):
+    key = _runtime_route_circuit_key(policy, backend, owned=owned)
+    if key is None:
+        return None
+    event = route_circuit.CircuitEvent(
+        kind=(
+            route_circuit.EVENT_RECORD_SUCCESS
+            if ok
+            else route_circuit.EVENT_RECORD_FAILURE
+        ),
+        key=key,
+        now_ms=(
+            _runtime_route_circuit_now_ms()
+            if now_ms is None
+            else int(now_ms)
+        ),
+    )
+    return _apply_runtime_route_circuit(event)
+
+
+def runtime_route_circuit_allows(policy, backend, *, owned=True, now_ms=None):
+    decision = runtime_route_circuit_before_request(
+        policy,
+        backend,
+        owned=owned,
+        now_ms=now_ms,
+    )
+    return decision is None or decision.kind == route_circuit.DECISION_ALLOW
+
+
+def reset_runtime_route_circuits():
+    _runtime_route_circuits.clear()
+
+
+def runtime_route_circuit_snapshot():
+    return _runtime_route_circuits.snapshot()
 
 
 def connection_outcome_for_host(
@@ -1404,6 +1486,7 @@ _geph_restart_hint = {
     "last_failure_at": 0.0,
     "last_wake_at": 0.0,
     "last_requested_at": 0.0,
+    "last_attempt_at": 0.0,
 }
 _rearm_state = {
     "last_at": 0.0,
@@ -1412,6 +1495,9 @@ _rearm_state = {
     "last_iface": "",
     "count": 0,
 }
+_RUNTIME_REARM_REASONS = frozenset(("wake", "network_change"))
+_RUNTIME_REARM_SIGNAL = signal.SIGUSR1
+_runtime_rearm_requests = deque(maxlen=8)
 _canary_health = {}
 _canary_failure_windows = {}
 _canary_state = {
@@ -1528,32 +1614,6 @@ def prune_telegram_direct_failures(now=None):
     while _tg_direct_failures and now - _tg_direct_failures[0] > TG_DIRECT_FAIL_WINDOW:
         _tg_direct_failures.popleft()
 
-# Russian services — NEVER tunnelled (split-tunnel exclusion "for the VPN").
-# Primary rule is the national TLDs; the set covers big RU services on .com/.net.
-RU_TLDS = (".ru", ".su", ".xn--p1ai", ".moscow", ".tatar", ".xn--80adxhks")
-RU_HOSTS = (
-    "vk.com", "vk.cc", "vkvideo.ru", "userapi.com", "vk-cdn.net", "vkuser.net",
-    "yandex.com", "yandex.net", "yastatic.net", "yandexcloud.net", "ya.ru",
-    "mail.ru", "mycdn.me", "imgsmail.ru",
-    "sberbank.com", "sber.ru", "sberdevices.ru",
-    "ozon.com", "ozon.ru", "wildberries.ru", "wb.ru", "avito.ru",
-    "gosuslugi.ru", "nalog.ru", "gov.ru",
-    "tinkoff.ru", "tbank.ru", "gazprombank.ru", "vtb.ru", "alfabank.ru",
-    "rutube.ru", "ok.ru", "dzen.ru", "kinopoisk.ru", "2gis.com", "2gis.ru",
-    "kaspersky.com", "kaspersky.ru", "aliexpress.ru",
-)
-
-
-def is_russian(host):
-    """True for any Russian service — excluded from the geph tunnel."""
-    if not host:
-        return False
-    h = host.lower().rstrip(".")
-    if h.endswith(RU_TLDS):
-        return True
-    return _host_matches(h, RU_HOSTS)
-
-
 # Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
 # strategies, but only after proof. A host the app keeps reconnecting to that
 # returns no real content over local desync becomes a candidate. It is promoted
@@ -1619,8 +1679,7 @@ def _is_geph_infra(host):
 
 
 def geph_route(host):
-    """Should this host go through geph's tunnel? Geo-blocked (listed OR learned)
-    AND not Russian."""
+    """Only an explicit geo-exit policy may select Geph."""
     return GEPH_ENABLED and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
@@ -2310,6 +2369,41 @@ def note_geph_restart_failure(host, reason, now=None):
     return evidence
 
 
+def geph_active_session_count():
+    with _geph_session_lock:
+        return _geph_active_sessions
+
+
+def _geph_session_started():
+    global _geph_active_sessions
+    with _geph_session_lock:
+        if _geph_restart_draining:
+            return False
+        _geph_active_sessions += 1
+        return True
+
+
+def _geph_session_finished():
+    global _geph_active_sessions
+    with _geph_session_lock:
+        _geph_active_sessions = max(0, _geph_active_sessions - 1)
+
+
+def _begin_geph_restart_drain():
+    global _geph_restart_draining
+    with _geph_session_lock:
+        if _geph_active_sessions > 0 or _geph_restart_draining:
+            return False
+        _geph_restart_draining = True
+        return True
+
+
+def _finish_geph_restart_drain():
+    global _geph_restart_draining
+    with _geph_session_lock:
+        _geph_restart_draining = False
+
+
 def request_owned_geph_restart(host, reason, now=None):
     if not _geph_owned:
         return False
@@ -2333,6 +2427,7 @@ def clear_geph_restart_hint():
         "last_failure_host": "",
         "last_failure_reason": "",
         "last_failure_at": 0.0,
+        "last_attempt_at": 0.0,
     })
 
 
@@ -2355,6 +2450,7 @@ def geph_restart_hint_snapshot(now=None):
         "last_failure_reason": _geph_restart_hint.get("last_failure_reason", ""),
         "last_failure_at": _geph_restart_hint.get("last_failure_at", 0.0),
         "last_wake_at": _geph_restart_hint.get("last_wake_at", 0.0),
+        "last_attempt_at": _geph_restart_hint.get("last_attempt_at", 0.0),
         "failures_5m": len(_geph_restart_failures),
         "hosts_5m": len(hosts),
         "cooldown_until": (
@@ -2365,28 +2461,104 @@ def geph_restart_hint_snapshot(now=None):
     }
 
 
-def prune_auto_geph(now=None):
+def _owned_geph_launch_target(state, owner_uid):
+    return geph_backend.owned_launch_target(state, owner_uid, GEPH_LAUNCHD_LABEL)
+
+
+def _ownership_file_uid(path):
+    return geph_backend.ownership_file_uid(path)
+
+
+def execute_owned_geph_restart(
+    now=None,
+    active_sessions=None,
+    ownership_path=None,
+    ownership_state=None,
+    owner_uid=None,
+    listener_owned=None,
+    runner=None,
+    pauser=None,
+):
+    """Kickstart only Slipstream's verified user LaunchAgent after routing is idle."""
     now = time.time() if now is None else now
-    expired = [
-        host for host, expiry in list(_auto_geph.items())
-        if not isinstance(expiry, (int, float)) or expiry <= now
-    ]
-    for host in expired:
-        _auto_geph.pop(host, None)
-    if expired:
+    if not _geph_restart_hint.get("recommended"):
+        return "idle"
+    last_attempt = _geph_restart_hint.get("last_attempt_at", 0.0)
+    if last_attempt and now - last_attempt < GEPH_RESTART_EXECUTION_RETRY:
+        return "cooldown"
+    managed_drain = active_sessions is None
+    if active_sessions is not None and int(active_sessions) > 0:
+        return "busy"
+
+    ownership_path = ownership_path or geph_ownership_path()
+    if not ownership_path:
+        return "unverified"
+    ownership_state = (
+        _read_geph_ownership(ownership_path)
+        if ownership_state is None
+        else ownership_state
+    )
+    if owner_uid is None:
+        owner_uid = _ownership_file_uid(ownership_path)
+        if owner_uid is None:
+            return "unverified"
+    target = _owned_geph_launch_target(ownership_state, owner_uid)
+    if not target:
+        return "unverified"
+    if listener_owned is None:
+        listener_owned = geph_listener_owned(state=ownership_state)
+    if not listener_owned:
+        return "unverified"
+    if managed_drain and not _begin_geph_restart_drain():
+        return "busy"
+
+    _geph_restart_hint["last_attempt_at"] = now
+    if pauser is None:
+        pauser = lambda: suspend_transparent_routing(
+            "owned Geph restart in progress",
+            now=now,
+        )
+    runner = _run if runner is None else runner
+    try:
+        pauser()
+        result = runner("/bin/launchctl", "kickstart", "-k", target)
+    except Exception as error:
+        if managed_drain:
+            _finish_geph_restart_drain()
+        print(f">> owned Geph recovery unavailable: {error}", file=sys.stderr)
+        return "unavailable"
+    if result.returncode != 0:
+        if managed_drain:
+            _finish_geph_restart_drain()
+        detail = (result.stderr or result.stdout or "launchctl returned an error").strip()
+        print(f">> owned Geph recovery unavailable: {detail[:200]}", file=sys.stderr)
+        return "unavailable"
+
+    clear_geph_restart_hint()
+    note_runtime_rearm("geph_restart")
+    print(">> owned Geph LaunchAgent restarted after routing became idle", file=sys.stderr)
+    return "restarted"
+
+
+def prune_auto_geph(now=None):
+    del now
+    if _auto_geph:
+        _auto_geph.clear()
         save_auto_geph()
 
 
 def load_auto_geph():
     global _auto_geph
+    had_legacy_entries = False
     try:
         with open(_AUTO_GEPH_PATH) as f:
             data = json.load(f)
-        now = time.time()
-        _auto_geph = {h: e for h, e in data.items()
-                      if isinstance(e, (int, float)) and e > now}
+        had_legacy_entries = isinstance(data, dict) and bool(data)
     except Exception:
-        _auto_geph = {}
+        pass
+    _auto_geph = {}
+    if had_legacy_entries:
+        save_auto_geph()
 
 
 def save_auto_geph():
@@ -2397,20 +2569,22 @@ def save_auto_geph():
         pass
 
 
-# Adaptive auto-routing is on by default, but promotion is proof-gated: local
-# low-content hangs only schedule a candidate, and Geph must return HTTPS payload
-# before the exact host is learned. SLIP_AUTOGEPH=0 disables this learning layer.
-AUTO_GEPH_ENABLED = os.environ.get("SLIP_AUTOGEPH", "1") != "0"
+# A successful payload through a foreign exit does not prove that a service
+# requires one. Generic local failures therefore never promote a host to Geph.
+# Keep the status surface for one transition release while legacy state is pruned.
+AUTO_GEPH_ENABLED = False
 
 
 def _auto_geph_candidate_allowed(host):
+    del host
+    return False
+
+
+def _unknown_local_recovery_candidate_allowed(host):
     h = normalize_host(host)
-    if not h:
-        return False
-    if is_russian(h) or _is_geph_infra(h):
-        return False
-    policy = route_policy(h)
-    return policy["route_class"] == ROUTE_UNKNOWN
+    return bool(h) and not _is_geph_infra(h) and (
+        route_policy(h)["route_class"] == ROUTE_UNKNOWN
+    )
 
 
 def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
@@ -2627,17 +2801,11 @@ def auto_geo_exit_status_snapshot(now=None):
 
 
 def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=None):
-    """Called after a NON-geph local-desync close. A "stuck" close — the
-    connection was held a long time but returned no real content (the
-    "reconnecting…" hang) — is the candidate signal. A storm of them for one host
-    schedules a Geph payload proof; only that proof learns the host. Fast
-    low-content closes (redirects / 204 / beacons, e.g. google) are normal and
-    must not count. Real content resets the host's failure noise."""
-    if not AUTO_GEPH_ENABLED:
-        return
+    """Record a local stall and schedule only an exact local recovery attempt."""
+    del confirmation_runner
     h = normalize_host(host)
-    if not _auto_geph_candidate_allowed(h):
-        return                                  # RU, already tunnelled, or geph's own
+    if not _unknown_local_recovery_candidate_allowed(h):
+        return
     if down_bytes >= AUTO_GEPH_FAIL_BYTES:
         _auto_fail.pop(h, None)                 # got real content -> not blocked
         return
@@ -2662,31 +2830,11 @@ def note_local_result(host, down_bytes, duration, now=None, confirmation_runner=
                   if sum(1 for t in v if t >= cutoff) >= 2)
     if failing >= AUTO_GEPH_NET_BAD:
         return
-    # A low-content local storm is still ambiguous. Before the existing
-    # proof-gated geo-exit check, give this exact unknown host one chance to
-    # resolve through the app-owned Xbox DNS endpoint and connect locally.
-    # That candidate is consumed by _try_xbox_dns_local_connect on the next
-    # client retry; no system resolver setting is consulted or changed here.
+    # A low-content local storm is ambiguous. Give this exact unknown host one
+    # local retry through app-owned Xbox DNS; it never changes system DNS and
+    # never implies that the host needs a foreign exit.
     if not _xbox_dns_attempted_recently(h, now):
         _mark_xbox_dns_candidate(h, now)
-        return
-    if not _geph_up:
-        return
-    outcome = connection_outcome_for_host(
-        h,
-        False,
-        BACKEND_LOCAL_ENGINE,
-        failure_phase=FAILURE_PHASE_STREAM,
-        bytes_received=down_bytes,
-        duration=duration,
-        reason="repeated local stalls",
-    )
-    actions = reduce_connection_outcome(
-        outcome,
-        RecoveryContext(recheck_recommended=True),
-    )
-    if any(action.kind == RECOVERY_RECHECK for action in actions):
-        _schedule_auto_geph_confirmation(h, now=now, runner=confirmation_runner)
 
 
 CANARY_SPECS = (
@@ -2727,12 +2875,6 @@ CANARY_SPECS = (
         "transport_probe": "quic_version_negotiation",
     },
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
-    {
-        "name": "openai_billing",
-        "group": SERVICE_OPENAI,
-        "host": "billing.openai.com",
-        "degrade_after": GEO_EXIT_RUNTIME_DEGRADE_AFTER,
-    },
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
     {
         "name": "steam_store",
@@ -3041,11 +3183,21 @@ async def _try_smart_dns_geo_connect(host, port, first_flight, probe_timeout=3.0
     if not host or not smart_dns_available():
         return None
     ips = _dedupe_ips(await system_resolve_async(host))
-    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
-        result = await dial_and_probe(ip, port, first_flight, probe_timeout=probe_timeout)
-        if result:
-            return ip, result
-    return None
+    policy = route_policy(host)
+    raced, _attempted = await _race_probe_addresses(
+        host,
+        port,
+        ips[:DEFAULT_IP_ATTEMPT_LIMIT],
+        lambda ip: dial_and_probe(
+            ip,
+            port,
+            first_flight,
+            probe_timeout=probe_timeout,
+        ),
+        policy=policy,
+        backend=GEO_BACKEND_SMART_DNS,
+    )
+    return raced
 
 
 async def _run_smart_dns_geo_canary(spec):
@@ -3140,7 +3292,6 @@ async def _run_local_bypass_canary(spec):
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
         return False
-    head, body = _canary_client_hello(host)
     payload_failed = False
     payload_short = False
     min_payload_bytes = _local_payload_min_bytes(spec)
@@ -3149,21 +3300,23 @@ async def _run_local_bypass_canary(spec):
         if not strat.get("fake"):
             continue
         for ip in ips[:ip_attempt_limit(host)]:
-            result = await dial_strategy(ip, 443, head, body, host, strat)
-            if result:
-                _close_probe_result(result)
-                payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
-                if payload_bytes < min_payload_bytes:
-                    payload_failed = True
-                    if payload_bytes > 0:
-                        payload_short = True
-                    continue
-                strat_ok = True
-                _record_strategy_result(host, strat["name"], True)
-                if _strat_cache.get(host) != strat["name"]:
-                    remember_strategy(host, strat["name"])
-                canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
-                return True
+            # Do not preflight with build_fake_clienthello(): its TLS 1.2
+            # AES128-SHA-only offer is rejected by modern Discord endpoints
+            # even while real clients work. The payload probe below performs a
+            # modern TLS handshake and applies this same local fake/desync
+            # strategy to its actual first flight.
+            payload_bytes = await _run_local_payload_probe(ip, host, strat, spec)
+            if payload_bytes < min_payload_bytes:
+                payload_failed = True
+                if payload_bytes > 0:
+                    payload_short = True
+                continue
+            strat_ok = True
+            _record_strategy_result(host, strat["name"], True)
+            if _strat_cache.get(host) != strat["name"]:
+                remember_strategy(host, strat["name"])
+            canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
+            return True
         if not strat_ok:
             _record_strategy_result(host, strat["name"], False)
     clear_route_strategy_cache(group=spec["group"])
@@ -3499,6 +3652,40 @@ def note_runtime_rearm(reason, gap=0.0, iface="", now=None):
     })
 
 
+def _queue_runtime_rearm(reason):
+    """Queue a bounded monitor-thread rearm request from a signal handler."""
+    if reason not in _RUNTIME_REARM_REASONS:
+        raise ValueError(f"unsupported runtime rearm reason: {reason}")
+    _runtime_rearm_requests.append(reason)
+
+
+def _drain_runtime_rearms():
+    """Return each queued reason once, preserving first-seen order."""
+    pending = []
+    seen = set()
+    while _runtime_rearm_requests:
+        reason = _runtime_rearm_requests.popleft()
+        if reason not in seen:
+            pending.append(reason)
+            seen.add(reason)
+    return pending
+
+
+def _runtime_rearm_signal_handler(signum, _frame):
+    if signum == _RUNTIME_REARM_SIGNAL:
+        _queue_runtime_rearm("network_change")
+
+
+def _apply_runtime_rearm(reason, *, now, iface="", gap=0.0):
+    """Apply real and qualification lifecycle events through one path."""
+    if reason not in _RUNTIME_REARM_REASONS:
+        raise ValueError(f"unsupported runtime rearm reason: {reason}")
+    note_runtime_rearm(reason, gap=gap, iface=iface, now=now)
+    if reason == "wake":
+        note_geph_wake(now)
+    start_canaries_if_due(reason, force=True)
+
+
 def rearm_status_snapshot(now=None):
     now = time.time() if now is None else now
     last_at = float(_rearm_state.get("last_at", 0.0) or 0.0)
@@ -3581,13 +3768,21 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     canaries = canary_status_snapshot()
     rearm = rearm_status_snapshot(now)
     geph_restart = geph_restart_hint_snapshot(now)
+    geph_sessions = geph_active_session_count()
     auto_geo_exit = auto_geo_exit_status_snapshot(now)
     telegram = tgws_status(now)
     geph_state = "up" if _geph_up else ("off" if not GEPH_ENABLED else "down")
 
-    if geph_restart["recommended"]:
-        recovery_state = "attention"
-        recovery_reason = "owned_geph_restart_recommended"
+    if _fd_pressure:
+        recovery_state = "recovering"
+        recovery_reason = "resource_pressure"
+    elif geph_restart["recommended"]:
+        recovery_state = "recovering"
+        recovery_reason = (
+            "owned_geph_restart_waiting_for_idle"
+            if geph_sessions
+            else "owned_geph_restart_pending"
+        )
     elif rearm["last_at"]:
         recovery_state = "rearmed"
         recovery_reason = ""
@@ -3623,6 +3818,7 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
                 "port_conflict": bool(_geph_port_conflict),
                 "external_detected": bool(_external_geph_detected),
                 "restart_recommended": bool(geph_restart["recommended"]),
+                "active_sessions": int(geph_sessions),
                 "auto_geo_exit": {
                     "enabled": bool(auto_geo_exit["enabled"]),
                     "learned": int(auto_geo_exit["learned"]),
@@ -3643,11 +3839,17 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
         },
         "recovery": {
             "state": recovery_state,
-            "last_action": rearm["last_reason"] or "none",
+            "last_action": (
+                "pause_private_pf"
+                if _fd_pressure
+                else rearm["last_reason"] or "none"
+            ),
             "reason": recovery_reason,
             "updated_at": max(
                 float(rearm["last_at"] or 0.0),
                 float(geph_restart["last_wake_at"] or 0.0),
+                float(geph_restart["last_failure_at"] or 0.0),
+                float(_fd_pressure_at or 0.0),
             ),
             "count": int(rearm["count"]),
         },
@@ -3710,88 +3912,37 @@ def _run(*args):
 
 
 def _pf_parent_declarations(text):
-    rdr = re.search(
-        rf'^\s*rdr-anchor\s+"{re.escape(PF_PARENT_ANCHOR)}"(?:\s+.*)?$',
-        text,
-        re.MULTILINE,
-    )
-    rules = re.search(
-        rf'^\s*anchor\s+"{re.escape(PF_PARENT_ANCHOR)}"(?:\s+.*)?$',
-        text,
-        re.MULTILINE,
-    )
-    return bool(rdr and rules)
+    return pf_adapter.parent_declarations(text, PF_PARENT_ANCHOR)
 
 
 def pf_parent_anchor_available(config_path=PF_CONFIG_PATH):
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            return _pf_parent_declarations(f.read())
-    except OSError:
-        return False
+    return pf_adapter.parent_anchor_available(config_path, PF_PARENT_ANCHOR)
 
 
 def pf_parent_anchor_loaded():
-    nat = _run("pfctl", "-sn")
-    rules = _run("pfctl", "-sr")
-    if nat.returncode != 0 or rules.returncode != 0:
-        return False
-    return _pf_parent_declarations(nat.stdout + "\n" + rules.stdout)
+    return pf_adapter.parent_anchor_loaded(_run, PF_PARENT_ANCHOR)
 
 
 def _pf_anchor_calls(text, directive):
-    pattern = re.compile(
-        rf'^\s*{re.escape(directive)}\s+"([^"]+)"', re.MULTILINE
-    )
-    return pattern.findall(text)
+    return pf_adapter.anchor_calls(text, directive)
 
 
 def _pf_anchor_child(parent, child):
-    if child.startswith("/"):
-        return child.lstrip("/")
-    if not parent:
-        return child
-    return f"{parent}/{child}"
+    return pf_adapter.anchor_child(parent, child)
 
 
 def _pf_rule_targets_https(line, action):
-    action_match = (
-        re.search(r"^\s*rdr\b", line)
-        if action == "rdr"
-        else re.search(r"\broute-to\b", line)
-    )
-    return bool(
-        action_match and re.search(r"\bport\b[^\n]*\b443\b", line)
-    )
+    return pf_adapter.rule_targets_https(line, action)
 
 
 def _pf_anchor_has_https_action(anchor, action, directive, visited=None):
-    visited = set() if visited is None else visited
-    anchor = anchor.lstrip("/")
-    if not anchor or anchor in visited:
-        return False
-    visited.add(anchor)
-    flag = "-sn" if action == "rdr" else "-sr"
-    result = _run("pfctl", "-a", anchor, flag)
-    if result.returncode != 0:
-        return False
-    if any(_pf_rule_targets_https(line, action) for line in result.stdout.splitlines()):
-        return True
-    return any(
-        _pf_anchor_has_https_action(
-            _pf_anchor_child(anchor, child), action, directive, visited
-        )
-        for child in _pf_anchor_calls(result.stdout, directive)
+    return pf_adapter.anchor_has_https_action(
+        _run, anchor, action, directive, visited
     )
 
 
 def _pf_anchors_before_parent(text, directive):
-    anchors = []
-    for anchor in _pf_anchor_calls(text, directive):
-        if anchor == PF_PARENT_ANCHOR:
-            break
-        anchors.append(anchor.lstrip("/"))
-    return anchors
+    return pf_adapter.anchors_before_parent(text, directive, PF_PARENT_ANCHOR)
 
 
 def pf_preceding_https_interceptors():
@@ -3803,59 +3954,26 @@ def pf_preceding_https_interceptors():
     that ordering, so treating this as an explicit runtime conflict prevents a
     false "Active / OK" state without mutating the other product's rules.
     """
-    nat = _run("pfctl", "-sn")
-    rules = _run("pfctl", "-sr")
-    if nat.returncode != 0 or rules.returncode != 0:
-        return []
-    redirects = {
-        anchor
-        for anchor in _pf_anchors_before_parent(nat.stdout, "rdr-anchor")
-        if _pf_anchor_has_https_action(anchor, "rdr", "rdr-anchor")
-    }
-    routes = {
-        anchor
-        for anchor in _pf_anchors_before_parent(rules.stdout, "anchor")
-        if _pf_anchor_has_https_action(anchor, "route-to", "anchor")
-    }
-    return sorted(redirects & routes)
+    return pf_adapter.preceding_https_interceptors(_run, PF_PARENT_ANCHOR)
 
 
 def _pf_token_from_result(result):
-    output = f"{result.stdout}\n{result.stderr}"
-    match = re.search(r"Token\s*:\s*([0-9]+)", output, re.IGNORECASE)
-    return match.group(1) if match else None
+    return pf_adapter.token_from_result(result)
 
 
 def _write_pf_token(token, path=None):
     path = PF_TOKEN_PATH if path is None else path
-    tmp = f"{path}.tmp.{os.getpid()}"
-    try:
-        with open(tmp, "w", encoding="ascii") as f:
-            f.write(token + "\n")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    finally:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
+    pf_adapter.write_token(token, path)
 
 
 def _read_pf_token(path=None):
     path = PF_TOKEN_PATH if path is None else path
-    try:
-        token = open(path, encoding="ascii").read().strip()
-    except OSError:
-        return None
-    return token if token.isdigit() else None
+    return pf_adapter.read_token(path)
 
 
 def _remove_pf_token(path=None):
     path = PF_TOKEN_PATH if path is None else path
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
+    pf_adapter.remove_token(path)
 
 
 def _pf_release_enable_token():
@@ -3877,11 +3995,7 @@ def _pf_release_enable_token():
 
 
 def _pf_enabled_state():
-    """Return PF's enabled state, or None when it cannot be inspected."""
-    info = _run("pfctl", "-s", "info")
-    if info.returncode != 0:
-        return None
-    return "Status: Enabled" in info.stdout
+    return pf_adapter.enabled_state(_run)
 
 
 def _pf_acquire_enable_token():
@@ -3912,11 +4026,111 @@ def _pf_acquire_enable_token():
 
 
 def _pf_flush():
-    # Even with -a, `pfctl -F all` includes the global state table on macOS.
-    # Flush only the two rulesets Slipstream loads into its private anchor.
-    rules = _run("pfctl", "-a", PF_ANCHOR, "-F", "rules")
-    nat = _run("pfctl", "-a", PF_ANCHOR, "-F", "nat")
-    return rules if rules.returncode != 0 else nat
+    return pf_adapter.flush_private_anchor(_run, PF_ANCHOR)
+
+
+def fd_pressure_watermarks(soft_limit):
+    """Return hysteresis bounds that preserve enough FDs for safe teardown."""
+    try:
+        limit = int(soft_limit)
+    except (TypeError, ValueError, OverflowError):
+        limit = 65536
+    if limit <= 0 or soft_limit == resource.RLIM_INFINITY:
+        limit = 65536
+    if limit < 128:
+        high = max(1, limit - 8)
+        return high, max(1, high // 2)
+    high = min(FD_PRESSURE_HIGH_CAP, int(limit * 0.8), limit - 64)
+    low = min(FD_PRESSURE_LOW_CAP, int(limit * 0.5), high - 1)
+    return max(64, high), max(32, low)
+
+
+def reduce_fd_pressure(active, open_fds, soft_limit):
+    if open_fds is None:
+        return bool(active)
+    high, low = fd_pressure_watermarks(soft_limit)
+    return open_fds > low if active else open_fds >= high
+
+
+def open_fd_count():
+    for path in ("/dev/fd", "/proc/self/fd"):
+        try:
+            return len(os.listdir(path))
+        except OSError:
+            continue
+    return None
+
+
+def _release_fd_reserve():
+    global _fd_reserve
+    reserve, _fd_reserve = _fd_reserve, []
+    for fd in reserve:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _open_fd_reserve():
+    if _fd_reserve:
+        return
+    for _ in range(FD_PRESSURE_RESERVE):
+        try:
+            _fd_reserve.append(os.open("/dev/null", os.O_RDONLY))
+        except OSError:
+            break
+
+
+def mark_fd_pressure(reason):
+    """Fail open for native traffic when this process cannot accept safely."""
+    global _fd_pressure, _fd_pressure_reason, _fd_pressure_at
+    with _fd_pressure_lock:
+        first = not _fd_pressure
+        _fd_pressure = True
+        _fd_pressure_reason = str(reason)[:200]
+        _fd_pressure_at = time.time()
+    if not first:
+        return False
+    # Keep enough descriptors in reserve to run the private-anchor cleanup even
+    # when accept() has already reported EMFILE.
+    _release_fd_reserve()
+    print(
+        f">> file descriptor pressure -> transparent routing dormant ({_fd_pressure_reason})",
+        file=sys.stderr,
+    )
+    if not pause_private_pf():
+        print(
+            ">> unable to pause Slipstream's private pf anchor during fd pressure",
+            file=sys.stderr,
+        )
+    return True
+
+
+def refresh_fd_pressure():
+    global _fd_pressure, _fd_pressure_reason
+    try:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (ValueError, OSError):
+        soft_limit = 65536
+    count = open_fd_count()
+    next_state = reduce_fd_pressure(_fd_pressure, count, soft_limit)
+    if next_state and not _fd_pressure:
+        mark_fd_pressure(f"{count} open files")
+    elif _fd_pressure and not next_state:
+        with _fd_pressure_lock:
+            _fd_pressure = False
+            _fd_pressure_reason = ""
+        _open_fd_reserve()
+        print(">> file descriptor pressure cleared -> routing may recover", file=sys.stderr)
+    return _fd_pressure
+
+
+def asyncio_exception_handler(loop, context):
+    exc = context.get("exception")
+    if isinstance(exc, OSError) and exc.errno in (errno.EMFILE, errno.ENFILE):
+        mark_fd_pressure(os.strerror(exc.errno))
+        return
+    loop.default_exception_handler(context)
 
 
 def geo_exit_backend_ready(now=None):
@@ -3927,6 +4141,8 @@ def geo_exit_backend_ready(now=None):
     runtime-failure hold has elapsed.
     """
     global _pf_backend_hold_until, _pf_backend_hold_reason
+    if _fd_pressure:
+        return False
     if not GEPH_ENABLED:
         return True
     now = time.time() if now is None else now
@@ -4035,15 +4251,7 @@ def _restore_legacy_pf_rules(port):
 
 
 def _pf_load(port):
-    f = tempfile.NamedTemporaryFile("w", suffix=".slipstream.pf.conf", delete=False)
-    f.write(PF_RULES.format(port=port))
-    f.close()
-    r = _run("pfctl", "-a", PF_ANCHOR, "-f", f.name)
-    try:
-        os.unlink(f.name)
-    except Exception:
-        pass
-    return r
+    return pf_adapter.load_private_anchor(_run, PF_ANCHOR, PF_RULES, port)
 
 
 def pf_setup(port):
@@ -4083,37 +4291,20 @@ def pf_setup(port):
 
 def pf_has_rules(port):
     """Are our rdr rules still loaded? (sleep/wake or another tool may flush pf)"""
-    if not pf_parent_anchor_loaded():
-        return False
-    nat = _run("pfctl", "-a", PF_ANCHOR, "-sn")
-    rules = _run("pfctl", "-a", PF_ANCHOR, "-sr")
-    return (
-        nat.returncode == 0
-        and rules.returncode == 0
-        and f"port {port}" in nat.stdout
-        and "route-to (lo0 127.0.0.1)" in rules.stdout
+    return pf_adapter.private_rules_loaded(
+        _run, PF_ANCHOR, port, pf_parent_anchor_loaded
     )
 
 
 def pf_state_snapshot(port=PROXY_PORT):
-    info = _run("pfctl", "-s", "info")
-    anchor_nat = _run("pfctl", "-a", PF_ANCHOR, "-sn")
-    anchor_rules = _run("pfctl", "-a", PF_ANCHOR, "-sr")
-    parent_loaded = pf_parent_anchor_loaded()
-    return {
-        "applied": bool(_pf_applied),
-        "enabled": info.returncode == 0 and "Status: Enabled" in info.stdout,
-        "anchor": PF_ANCHOR,
-        "parent_loaded": parent_loaded,
-        "interceptor_conflicts": list(_pf_interceptor_conflicts),
-        "rules_loaded": (
-            parent_loaded
-            and anchor_nat.returncode == 0
-            and anchor_rules.returncode == 0
-            and f"port {port}" in anchor_nat.stdout
-            and "route-to (lo0 127.0.0.1)" in anchor_rules.stdout
-        ),
-    }
+    return pf_adapter.state_snapshot(
+        _run,
+        PF_ANCHOR,
+        port,
+        _pf_applied,
+        _pf_interceptor_conflicts,
+        pf_parent_anchor_loaded,
+    )
 
 
 def pf_teardown():
@@ -4186,7 +4377,20 @@ def _script_runtime_payload(source_file):
     source_dir = os.path.dirname(source_file)
     payload = (
         (source_file, "tproxy.py"),
+        (os.path.join(source_dir, "address_attempts.py"), "address_attempts.py"),
+        (os.path.join(source_dir, "connection_probe.py"), "connection_probe.py"),
+        (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
+        (os.path.join(source_dir, "connection_race_io.py"), "connection_race_io.py"),
+        (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
+        (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
+        (os.path.join(source_dir, "route_circuit.py"), "route_circuit.py"),
+        (
+            os.path.join(source_dir, "route_circuit_registry.py"),
+            "route_circuit_registry.py",
+        ),
+        (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
+        (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
         (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
     )
     missing = [src for src, _ in payload if not os.path.isfile(src)]
@@ -4483,24 +4687,36 @@ GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16",
 
 def strategy_order(host):
     policy = route_policy(host)
-    if policy["route_class"] == ROUTE_DIRECT:
+    strategy_set = policy["strategy_set"]
+    if strategy_set == STRATEGY_DIRECT:
         return [STRAT_BY_NAME["plain"]]
-    # Discord must NEVER fall to a non-fake strategy (its throttle is relentless),
-    # so it uses the fake-only set and ignores any stale non-fake cache entry.
-    if policy["service_group"] == SERVICE_DISCORD:
-        names = _rank_strategy_names(host, DISCORD_STRATS)
+    h = normalize_host(host)
+    if strategy_set == STRATEGY_DIRECT_FIRST:
+        cached = _strat_cache.get(h)
+        fallback_names = [name for name in GENERAL_STRATS if name != "plain"]
+        if cached in fallback_names:
+            fallback_names = [cached] + [
+                name for name in fallback_names if name != cached
+            ]
+        return [STRAT_BY_NAME["plain"]] + [
+            STRAT_BY_NAME[name] for name in fallback_names
+        ]
+    if strategy_set == STRATEGY_FAKE_ONLY:
+        # Protected local-bypass routes never fall through to a non-fake TLS
+        # strategy, regardless of any stale cached winner.
+        names = (
+            DISCORD_STRATS
+            if policy["service_group"] == SERVICE_DISCORD
+            else GOOGLE_VIDEO_STRATS
+        )
+        names = _rank_strategy_names(h, names)
         return [STRAT_BY_NAME[n] for n in names]
-    # YouTube/googlevideo: same fake-only discipline (see GOOGLE_VIDEO note above).
-    if policy["service_group"] == SERVICE_YOUTUBE:
-        names = _rank_strategy_names(host, GOOGLE_VIDEO_STRATS)
-        return [STRAT_BY_NAME[n] for n in names]
-    host = normalize_host(host)
-    win = _strat_cache.get(host)
+    win = _strat_cache.get(h)
     if win in STRAT_BY_NAME:
         names = [win] + [n for n in GENERAL_STRATS if n != win]
     else:
         names = GENERAL_STRATS
-    return [STRAT_BY_NAME[n] for n in _rank_strategy_names(host, names)]
+    return [STRAT_BY_NAME[n] for n in _rank_strategy_names(h, names)]
 
 
 # --------------------------------------------------- fake ClientHello (decoy)
@@ -4806,7 +5022,8 @@ def network_monitor(port, voice=True):
     last_conflict_check = time.time()
     while True:
         now = time.time()
-        if now - last_tick > 30:
+        handled_rearms = set()
+        if now - last_tick > RUNTIME_WAKE_GAP_SECONDS:
             # macOS slept: our 5s cadence jumped, so the scapy sniffer/send socket
             # and possibly pf are stale. Force a sniffer rebuild (cur_iface=None);
             # _l3send self-heals, and the pf/geph checks below re-arm the rest.
@@ -4814,16 +5031,32 @@ def network_monitor(port, voice=True):
             print(f">> woke from sleep (gap {gap:.0f}s) -> re-arming",
                   file=sys.stderr)
             cur_iface = None
-            note_runtime_rearm("wake", gap=gap, iface=last_iface or "")
-            note_geph_wake(now)
-            start_canaries_if_due("wake", force=True)
+            _apply_runtime_rearm(
+                "wake", now=now, gap=gap, iface=last_iface or "")
+            handled_rearms.add("wake")
         last_tick = now
         iface = default_iface()
         if iface != last_iface:
             if last_iface is not None:
-                note_runtime_rearm("network_change", iface=iface or "")
-                start_canaries_if_due("network_change", force=True)
+                _apply_runtime_rearm(
+                    "network_change", now=now, iface=iface or "")
+                handled_rearms.add("network_change")
             last_iface = iface
+        for reason in _drain_runtime_rearms():
+            if reason in handled_rearms:
+                continue
+            print(
+                f">> lifecycle qualification requested ({reason}) -> re-arming",
+                file=sys.stderr,
+            )
+            cur_iface = None
+            _apply_runtime_rearm(
+                reason, now=now, iface=iface or last_iface or "")
+        restart_state = execute_owned_geph_restart(now=now)
+        if restart_state == "restarted":
+            _geph_up = False
+            geph_strikes = 0
+            _finish_geph_restart_drain()
         # Hysteresis: a few missed probes (Geph busy under load, or briefly
         # re-establishing its tunnel) must not flap the route-health state.
         # Confirmed downtime pauses the private PF anchor so native networking
@@ -4864,6 +5097,7 @@ def network_monitor(port, voice=True):
             elif _pf_interceptor_conflicts:
                 print(">> transparent HTTPS filter conflict cleared -> re-arming")
             _pf_interceptor_conflicts = conflicts
+        refresh_fd_pressure()
         backend_ready = geo_exit_backend_ready(now)
         if vpn:
             if _pf_applied:
@@ -5155,6 +5389,10 @@ class _RelayActivity:
     client_eof: bool = False
     client_read_failed: bool = False
     downstream_write_failed: bool = False
+    client_ended_first: bool = False
+    server_ended_first: bool = False
+    first_downstream_seen: bool = False
+    on_first_downstream: object = None
 
 
 def _local_stream_stalled(activity, now=None):
@@ -5179,19 +5417,22 @@ def _clean_eof_stream_stalled(activity, now=None):
 
     A single orderly EOF can be an ordinary keep-alive close, so callers must
     require a repeated exact-host signal before changing the next retry.  The
-    upstream must still be open when the client leaves; a server-first EOF is a
-    normal completion signal and must not be learned as a stall.
+    The relay records which direction completed first. A server-first EOF is a
+    normal completion signal and must not be learned as a stall; cancellation
+    of the still-pending direction must not look like an upstream EOF.
     """
     now = time.monotonic() if now is None else now
     if not (
         activity.client_eof
         and activity.client_end_at
-        and activity.server_end_at
+        and activity.client_ended_first
     ):
         return False
-    if activity.client_read_failed or activity.downstream_write_failed:
-        return False
-    if activity.server_end_at < activity.client_end_at:
+    if (
+        activity.server_ended_first
+        or activity.client_read_failed
+        or activity.downstream_write_failed
+    ):
         return False
     return now - activity.last_downstream_at >= LOCAL_STREAM_IDLE
 
@@ -5337,6 +5578,20 @@ def note_local_stream_stall(host, strategy_name):
     return True
 
 
+async def _close_stream_writer(writer):
+    try:
+        writer.close()
+    except Exception:
+        return
+    wait_closed = getattr(writer, "wait_closed", None)
+    if not callable(wait_closed):
+        return
+    try:
+        await asyncio.wait_for(wait_closed(), timeout=1.0)
+    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError, TypeError):
+        pass
+
+
 async def splice(src, dst, activity=None):
     total = 0
     try:
@@ -5357,13 +5612,14 @@ async def splice(src, dst, activity=None):
                 break
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
+                if not activity.first_downstream_seen:
+                    activity.first_downstream_seen = True
+                    if activity.on_first_downstream is not None:
+                        activity.on_first_downstream()
     finally:
         if activity is not None:
             activity.server_end_at = time.monotonic()
-        try:
-            dst.close()
-        except Exception:
-            pass
+        await _close_stream_writer(dst)
     return total
 
 
@@ -5390,11 +5646,52 @@ async def pump(reader, up_w, activity=None):
     finally:
         if activity is not None:
             activity.client_end_at = time.monotonic()
-        try:
-            up_w.close()
-        except Exception:
-            pass
+        await _close_stream_writer(up_w)
     return total
+
+
+async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
+    """Relay a stream until either direction finishes, then close both sides.
+
+    When the client closes first, no later upstream payload can reach it.  Do
+    not wait indefinitely for that upstream read. The same rule applies when
+    the upstream closes first: a half-open client task must not retain two FDs
+    forever. This lifecycle is shared by direct, local, Smart DNS, and Geph
+    backends; route selection remains unchanged.
+    """
+    client_task = asyncio.create_task(pump(reader, up_w, activity))
+    server_task = asyncio.create_task(splice(up_r, writer, activity))
+    tasks = (client_task, server_task)
+    try:
+        done, pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if activity is not None:
+            activity.client_ended_first = (
+                client_task in done and server_task not in done
+            )
+            activity.server_ended_first = (
+                server_task in done and client_task not in done
+            )
+        for task in pending:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        totals = []
+        for result in results:
+            if isinstance(result, BaseException):
+                if not isinstance(result, asyncio.CancelledError):
+                    raise result
+                totals.append(0)
+            else:
+                totals.append(result)
+        return tuple(totals)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 # Control-RPC port paired with each SOCKS port. The external mapping is used only
@@ -5414,73 +5711,35 @@ def _console_user_home():
 
 def geph_ownership_path(home=None):
     home = _console_user_home() if home is None else home
-    if not home:
-        return None
-    return os.path.join(
-        home,
-        "Library",
-        "Application Support",
-        "dev.slipstream.tray",
-        GEPH_OWNERSHIP_FILE,
-    )
+    return geph_backend.ownership_path(home, GEPH_OWNERSHIP_FILE)
 
 
 def _read_geph_ownership(path=None):
     path = geph_ownership_path() if path is None else path
-    if not path:
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            value = json.load(f)
-    except (OSError, ValueError):
-        return None
-    return value if isinstance(value, dict) else None
+    return geph_backend.read_ownership(path)
 
 
 def _geph_listener_pid(port):
-    result = _run(
-        "/usr/sbin/lsof",
-        "-nP",
-        f"-iTCP:{port}",
-        "-sTCP:LISTEN",
-        "-t",
-    )
-    if result.returncode != 0:
-        return None
-    try:
-        return int(result.stdout.splitlines()[0].strip())
-    except (IndexError, ValueError):
-        return None
+    return geph_backend.listener_pid(_run, port)
 
 
 def _geph_process_command(pid):
-    result = _run("/bin/ps", "-p", str(pid), "-o", "command=")
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
+    return geph_backend.process_command(_run, pid)
 
 
 def _geph_state_matches(state, listener_pid, command):
-    if not isinstance(state, dict) or not isinstance(listener_pid, int):
-        return False
-    try:
-        state_pid = int(state.get("pid"))
-    except (TypeError, ValueError):
-        return False
-    executable = state.get("executable")
-    config = state.get("config")
-    if state_pid != listener_pid or not isinstance(executable, str) or not executable:
-        return False
-    if not isinstance(config, str) or not config:
-        return False
-    return command.strip() == f"{executable} --config {config}"
+    return geph_backend.state_matches(state, listener_pid, command)
 
 
 def geph_listener_owned(port=GEPH_OWNED_PORT, state=None, listener_pid=None, command=None):
     state = _read_geph_ownership() if state is None else state
-    listener_pid = _geph_listener_pid(port) if listener_pid is None else listener_pid
-    command = _geph_process_command(listener_pid) if command is None and listener_pid else command
-    return _geph_state_matches(state, listener_pid, command or "")
+    return geph_backend.listener_owned(
+        _run,
+        port,
+        state,
+        listener_process_id=listener_pid,
+        command=command,
+    )
 
 
 def _tcp_listener_present(port, timeout=0.25):
@@ -5601,6 +5860,7 @@ async def dial_via_geph(host, port, first_flight):
             asyncio.open_connection("127.0.0.1", port_socks), timeout=3)
     except Exception:
         return None
+    connected = False
     try:
         gw.write(b"\x05\x01\x00")                      # VER5, 1 method, no-auth
         await gw.drain()
@@ -5624,26 +5884,36 @@ async def dial_via_geph(host, port, first_flight):
         await gr.readexactly(2)                        # bound port
         gw.write(first_flight)                         # original ClientHello, plain
         await gw.drain()
+        connected = True
         return gr, gw
+    except asyncio.CancelledError:
+        raise
     except Exception:
-        try:
-            gw.close()
-        except Exception:
-            pass
         return None
+    finally:
+        if not connected:
+            await _close_stream_writer(gw)
 
 
 async def dial_plain(ip, port, first_flight):
     """Plain direct dial (no desync, no tunnel) for traffic we must not tamper
     with — Telegram MTProto. Sends the buffered first flight verbatim; returns
     (reader, writer) or None."""
+    w = None
+    connected = False
     try:
         r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=6)
         w.write(first_flight)
         await w.drain()
+        connected = True
         return r, w
+    except asyncio.CancelledError:
+        raise
     except Exception:
         return None
+    finally:
+        if w is not None and not connected:
+            await _close_stream_writer(w)
 
 
 async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
@@ -5654,24 +5924,26 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
             asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
     except Exception:
         return None
+    connected = False
     try:
         up_w.write(first_blob)
         await up_w.drain()
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
+            connected = True
             return up_r, up_w, data
     except (asyncio.TimeoutError, OSError):
         pass
-    try:
-        up_w.close()
-    except Exception:
-        pass
+    finally:
+        if not connected:
+            await _close_stream_writer(up_w)
     return None
 
 
 async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeout=3.0):
     """Like dial_and_probe but injects a low-TTL decoy ClientHello on the real
     4-tuple BEFORE the real flight (zapret 'fake' — for deep-reassembly SNIs)."""
+    connected = False
     try:
         up_r, up_w = await asyncio.wait_for(
             asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
@@ -5688,13 +5960,13 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         await up_w.drain()
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
+            connected = True
             return up_r, up_w, data
     except (asyncio.TimeoutError, OSError):
         pass
-    try:
-        up_w.close()
-    except Exception:
-        pass
+    finally:
+        if not connected:
+            await _close_stream_writer(up_w)
     return None
 
 
@@ -5705,6 +5977,44 @@ async def dial_strategy(ip, port, head, body, host, strat):
     return await dial_and_probe(ip, port, blob)
 
 
+async def _race_probe_addresses(
+    host,
+    port,
+    addresses,
+    dial_candidate,
+    *,
+    policy,
+    backend,
+):
+    """Race complete first-payload probes within one preselected route."""
+    candidates = tuple(addresses)
+    if not candidates:
+        return None, 0
+    raced = await connection_probe.race_probe_dials(
+        host or candidates[0],
+        port,
+        candidates,
+        dial_candidate,
+        service_group=policy.get("service_group") or SERVICE_GENERIC,
+        route_class=policy.get("route_class") or ROUTE_UNKNOWN,
+        backend_id=backend,
+        timeout_ms=ADDRESS_RACE_TIMEOUT_MS,
+        stagger_ms=ADDRESS_RACE_STAGGER_MS,
+        max_concurrent=ADDRESS_RACE_MAX_CONCURRENT,
+    )
+    attempted = raced.attempted_count
+    if raced.connection is None:
+        return None, attempted
+    return (
+        raced.address,
+        (
+            raced.connection.reader,
+            raced.connection.writer,
+            raced.server_first,
+        ),
+    ), attempted
+
+
 async def _try_xbox_dns_local_connect(host, port, head, body):
     """Try the app-owned Xbox DNS answer locally, never through Geph."""
     if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
@@ -5712,11 +6022,15 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
     _note_xbox_dns_attempt(host)
     ips = await xbox_dns_resolve_async(host)
     plain = STRAT_BY_NAME["plain"]
-    for ip in ips[:DEFAULT_IP_ATTEMPT_LIMIT]:
-        result = await dial_strategy(ip, port, head, body, host, plain)
-        if result:
-            return ip, result
-    return None
+    raced, _attempted = await _race_probe_addresses(
+        host,
+        port,
+        ips[:DEFAULT_IP_ATTEMPT_LIMIT],
+        lambda ip: dial_strategy(ip, port, head, body, host, plain),
+        policy=route_policy(host),
+        backend=BACKEND_LOCAL_ENGINE,
+    )
+    return raced
 
 
 async def handle(reader, writer):
@@ -5725,6 +6039,7 @@ async def handle(reader, writer):
     try:
         await _handle_impl(reader, writer)
     finally:
+        await _close_stream_writer(writer)
         _conn_count -= 1
 
 
@@ -5770,7 +6085,7 @@ async def _handle_impl(reader, writer):
             return
         ur, uw = up
         t0 = time.monotonic()
-        res = await asyncio.gather(pump(reader, uw), splice(ur, writer))
+        res = await relay_local_stream(reader, uw, ur, writer)
         down_b = res[1] or 0
         dur = time.monotonic() - t0
         if down_b > 0:
@@ -5791,9 +6106,18 @@ async def _handle_impl(reader, writer):
     # that the DNS-provided path is live; any runtime miss falls back to Geph.
     if is_tls and geph_route(host):
         policy = route_policy(host)
-        if smart_dns_route_enabled(host):
+        geph_owned = bool(_geph_owned)
+        if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
+            policy,
+            GEO_BACKEND_SMART_DNS,
+        ):
             smart = await _try_smart_dns_geo_connect(host, dst_port, head + body)
             if smart:
+                runtime_route_circuit_record_result(
+                    policy,
+                    GEO_BACKEND_SMART_DNS,
+                    True,
+                )
                 smart_ip, smart_result = smart
                 up_r, up_w, server_first = smart_result
                 route_health_event(
@@ -5809,41 +6133,111 @@ async def _handle_impl(reader, writer):
                     writer.write(server_first)
                     await writer.drain()
                 except OSError:
-                    try:
-                        up_w.close()
-                    except Exception:
-                        pass
+                    await _close_stream_writer(up_w)
                     writer.close()
                     return
-                await asyncio.gather(pump(reader, up_w), splice(up_r, writer))
+                await relay_local_stream(reader, up_w, up_r, writer)
                 return
+            runtime_route_circuit_record_result(
+                policy,
+                GEO_BACKEND_SMART_DNS,
+                False,
+            )
             _smart_dns_mark_failure(
                 host,
                 "smart dns runtime probe failed",
                 policy["service_group"],
             )
         if _geph_up:
-            g = await dial_via_geph(host, dst_port, head + body)
-            if g:
-                gr, gw = g
-                if VERBOSE:
-                    print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
-                t0 = time.monotonic()
-                res = await asyncio.gather(pump(reader, gw), splice(gr, writer))
-                down_b = res[1] or 0
-                if down_b == 0 and time.monotonic() - t0 < 10:
-                    log_geph_route_failure(host, "remote closed without response")
-                    # A successful SOCKS CONNECT is not enough to keep PF armed.
-                    # If the remote side closes before yielding any payload, leave
-                    # the next client retry on the native path instead of sending
-                    # it into the same broken geo-exit tunnel.
-                    suspend_transparent_routing("geo-exit remote close before payload")
-                else:
-                    clear_geph_route_failure()
+            if not _geph_session_started():
+                writer.close()
                 return
+            try:
+                if not runtime_route_circuit_allows(
+                    policy,
+                    GEO_BACKEND_GEPH,
+                    owned=geph_owned,
+                ):
+                    suspend_transparent_routing("geo-exit backend cooling down")
+                    writer.close()
+                    return
+                g = await dial_via_geph(host, dst_port, head + body)
+                if g:
+                    gr, gw = g
+                    if VERBOSE:
+                        print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
+                    t0 = time.monotonic()
+                    geph_result_recorded = False
+
+                    def record_first_geph_payload():
+                        nonlocal geph_result_recorded
+                        if geph_result_recorded:
+                            return
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            True,
+                            owned=geph_owned,
+                        )
+                        clear_geph_route_failure()
+                        geph_result_recorded = True
+
+                    activity = _RelayActivity(
+                        last_downstream_at=t0,
+                        on_first_downstream=record_first_geph_payload,
+                    )
+                    res = await relay_local_stream(
+                        reader,
+                        gw,
+                        gr,
+                        writer,
+                        activity,
+                    )
+                    down_b = res[1] or 0
+                    if down_b == 0 and time.monotonic() - t0 < 10:
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            False,
+                            owned=geph_owned,
+                        )
+                        log_geph_route_failure(host, "remote closed without response")
+                        # A successful SOCKS CONNECT is not enough to keep PF armed.
+                        # If the remote side closes before yielding any payload, leave
+                        # the next client retry on the native path instead of sending
+                        # it into the same broken geo-exit tunnel.
+                        suspend_transparent_routing("geo-exit remote close before payload")
+                    elif not geph_result_recorded:
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            True,
+                            owned=geph_owned,
+                        )
+                        clear_geph_route_failure()
+                    return
+            finally:
+                _geph_session_finished()
+            runtime_route_circuit_record_result(
+                policy,
+                GEO_BACKEND_GEPH,
+                False,
+                owned=geph_owned,
+            )
             log_geph_route_failure(host, "SOCKS connect failed")
             suspend_transparent_routing("geo-exit SOCKS connect unavailable")
         else:
+            if runtime_route_circuit_allows(
+                policy,
+                GEO_BACKEND_GEPH,
+                owned=geph_owned,
+            ):
+                runtime_route_circuit_record_result(
+                    policy,
+                    GEO_BACKEND_GEPH,
+                    False,
+                    owned=geph_owned,
+                )
             log_geph_route_failure(host, "tunnel down")
             suspend_transparent_routing("geo-exit tunnel down")
         if VERBOSE:
@@ -5855,6 +6249,14 @@ async def _handle_impl(reader, writer):
     # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
     # (fallback dst_ip). Some CDN edges are bad while neighbors work.
     policy = route_policy(host)
+    if not runtime_route_circuit_allows(policy, BACKEND_LOCAL_ENGINE):
+        if VERBOSE:
+            print(
+                f"  {host or dst_ip} local backend cooling down",
+                file=sys.stderr,
+            )
+        writer.close()
+        return
     real_ips = await resolve_connection_ips(host, dst_ip)
     ip_limit = ip_attempt_limit(host)
 
@@ -5877,11 +6279,16 @@ async def _handle_impl(reader, writer):
             _clear_xbox_dns_candidate(host)
 
     if result is None and not is_tls:
-        for ip in real_ips[:ip_limit]:
-            result = await dial_and_probe(ip, dst_port, head + body)
-            if result:
-                chosen = ip
-                break
+        raced, _attempted = await _race_probe_addresses(
+            host,
+            dst_port,
+            real_ips[:ip_limit],
+            lambda ip: dial_and_probe(ip, dst_port, head + body),
+            policy=policy,
+            backend=BACKEND_LOCAL_ENGINE,
+        )
+        if raced:
+            chosen, result = raced
     elif result is None:
         now = time.monotonic()
         # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
@@ -5889,16 +6296,29 @@ async def _handle_impl(reader, writer):
         attempts = 0
         for strat in strategy_order(host):
             strat_ok = False
-            for ip in real_ips[:ip_limit]:
-                attempts += 1
-                result = await dial_strategy(ip, dst_port, head, body, host, strat)
-                if result:
-                    chosen, chosen_name = ip, strat["name"]
-                    strat_ok = True
-                    _record_strategy_result(host, strat["name"], True)
-                    break
-                if attempts >= max_attempts:
-                    break
+            remaining = max_attempts - attempts
+            candidates = real_ips[:min(ip_limit, remaining)]
+            raced, attempted = await _race_probe_addresses(
+                host,
+                dst_port,
+                candidates,
+                lambda ip: dial_strategy(
+                    ip,
+                    dst_port,
+                    head,
+                    body,
+                    host,
+                    strat,
+                ),
+                policy=policy,
+                backend=BACKEND_LOCAL_ENGINE,
+            )
+            attempts += max(1, attempted) if candidates else 0
+            if raced:
+                chosen, result = raced
+                chosen_name = strat["name"]
+                strat_ok = True
+                _record_strategy_result(host, strat["name"], True)
             if not strat_ok:
                 _record_strategy_result(host, strat["name"], False)
             if result or attempts >= max_attempts:
@@ -5934,6 +6354,11 @@ async def _handle_impl(reader, writer):
                 remember_strategy(host, chosen_name)
 
     if not result:
+        runtime_route_circuit_record_result(
+            policy,
+            BACKEND_LOCAL_ENGINE,
+            False,
+        )
         if policy["route_class"] == ROUTE_LOCAL_BYPASS:
             note_local_bypass_runtime_result(
                 host,
@@ -5946,6 +6371,11 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
+    runtime_route_circuit_record_result(
+        policy,
+        BACKEND_LOCAL_ENGINE,
+        True,
+    )
     if policy["route_class"] == ROUTE_LOCAL_BYPASS:
         note_local_bypass_runtime_result(host, True)
 
@@ -5959,18 +6389,12 @@ async def _handle_impl(reader, writer):
         writer.write(server_first)
         await writer.drain()
     except OSError:
-        try:
-            up_w.close()
-        except Exception:
-            pass
+        await _close_stream_writer(up_w)
         writer.close()
         return
     t0 = time.monotonic()
     activity = _RelayActivity(last_downstream_at=t0)
-    res = await asyncio.gather(
-        pump(reader, up_w, activity),
-        splice(up_r, writer, activity),
-    )
+    res = await relay_local_stream(reader, up_w, up_r, writer, activity)
     duration = time.monotonic() - t0
     # A partial local stream stall demotes only the exact generic strategy. It
     # teaches the next client retry to use app-owned Xbox DNS locally; protected
@@ -5992,7 +6416,7 @@ async def _handle_impl(reader, writer):
                 via_xbox_dns=via_xbox_dns,
                 now=t0 + duration,
             )
-        elif activity.server_end_at and activity.server_end_at < activity.client_end_at:
+        elif activity.server_ended_first:
             _clear_clean_eof_stalls(host)
         note_local_result(
             host,
@@ -6014,14 +6438,61 @@ LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 5
 
 
-def active_console_gid(console_path="/dev/console"):
+def _harden_log_fd(fd, path):
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        raise OSError(f"refusing non-regular log path: {path}")
+    os.fchmod(fd, 0o600)
     try:
-        uid = os.stat(console_path).st_uid
-        if uid:
-            return pwd.getpwuid(uid).pw_gid
-    except (AttributeError, KeyError, OSError):
+        os.fchown(fd, 0, 0)
+    except (AttributeError, PermissionError, OSError):
+        # Source-mode development and unit tests may run without root. The
+        # installed LaunchDaemon runs as root and normalizes ownership too.
         pass
-    return 0
+
+
+def _open_private_log(path):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        _harden_log_fd(fd, path)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _harden_existing_log(path):
+    if not os.path.lexists(path):
+        return False
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        # The running daemon may rotate an archive between lexists() and open()
+        # during reinstall. A vanished archive is already safely absent.
+        return False
+    try:
+        _harden_log_fd(fd, path)
+    finally:
+        os.close(fd)
+    return True
+
+
+def ensure_private_log_files(path=LOG_PATH, backups=LOG_BACKUPS):
+    """Create or migrate the raw daemon log and retained archives."""
+    fd = _open_private_log(path)
+    os.close(fd)
+    for index in range(1, backups + 1):
+        _harden_existing_log(f"{path}.{index}")
 
 
 class RotatingLogWriter:
@@ -6043,19 +6514,15 @@ class RotatingLogWriter:
         self._line_start = True
         self._lock = threading.RLock()
         self._file = None
-        if os.path.exists(self.path) and os.path.getsize(self.path) >= self.max_bytes:
+        for index in range(1, self.backups + 1):
+            _harden_existing_log(self._archive_path(index))
+        self._open()
+        if os.fstat(self._file.fileno()).st_size >= self.max_bytes:
             self._rotate()
-        else:
-            self._open()
 
     def _open(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        self._file = open(self.path, "a", buffering=1)
-        try:
-            os.chown(self.path, 0, active_console_gid())
-        except (AttributeError, PermissionError, OSError):
-            pass
-        os.chmod(self.path, 0o640)
+        fd = _open_private_log(self.path)
+        self._file = os.fdopen(fd, "a", buffering=1)
         if self.redirect_fds:
             os.dup2(self._file.fileno(), 1)
             os.dup2(self._file.fileno(), 2)
@@ -6130,66 +6597,9 @@ def remove_obsolete_newsyslog_config():
         pass
 
 
-def do_install(port):
-    # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
-    # TCC access to ~/Documents). Two modes:
-    #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
-    #  - script (dev): copy local runtime modules + build a venv with dependencies
-    frozen = getattr(sys, "frozen", False)
-    if not frozen:
-        # Validate before stopping a working installed daemon.
-        _script_runtime_payload(__file__)
-    secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
-    try:
-        tgws_secret_backup = open(secret_path).read()
-    except Exception:
-        tgws_secret_backup = None
-    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # stop old daemon before replacing files
-    if frozen:
-        src = os.path.dirname(os.path.abspath(sys.executable))
-        _replace_tree_resilient(src, INSTALL_DIR)
-        binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
-        prog_args = [binary, "--port", str(port)]
-        uninstall_hint = f"sudo {binary} --uninstall"
-    else:
-        script = os.path.join(INSTALL_DIR, "tproxy.py")
-        _copy_script_runtime(__file__, INSTALL_DIR)
-        # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
-        # it (otherwise Telegram falls back to plain MTProto passthrough).
-        _here = os.path.dirname(os.path.abspath(__file__))
-        _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
-        if os.path.isdir(_src_proxy):
-            _replace_tree_resilient(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
-        venv = os.path.join(INSTALL_DIR, "venv")
-        py = os.path.join(venv, "bin", "python3")
-        if not os.path.exists(py):
-            base = getattr(sys, "_base_executable", None) or sys.executable
-            print(">> building self-contained venv + scapy (needs network, ~20s)...")
-            if _run(base, "-m", "venv", venv).returncode != 0:
-                print("venv create failed", file=sys.stderr)
-                return
-            # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
-            # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
-            # libcrypto in an unsafe way") -> the daemon crash-loops. certifi gives
-            # the GitHub CF-domain refresh a CA bundle in frozen/script installs.
-            r = _run(py, "-m", "pip", "install", "--quiet",
-                     "--disable-pip-version-check", "scapy", "cryptography", "certifi")
-            if r.returncode != 0:
-                print("scapy/cryptography/certifi install failed (pypi reachable?):\n"
-                      + r.stderr[-400:], file=sys.stderr)
-                return
-        prog_args = [py, script, "--port", str(port)]
-        uninstall_hint = f"sudo {py} {script} --uninstall"
-    if tgws_secret_backup:
-        try:
-            with open(secret_path, "w") as f:
-                f.write(tgws_secret_backup.strip())
-            os.chmod(secret_path, 0o600)
-        except Exception:
-            pass
-    workdir = INSTALL_DIR
+def launchd_plist_text(prog_args, workdir):
     prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
-    plist = (
+    return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
         '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
@@ -6206,45 +6616,355 @@ def do_install(port):
         '  <key>HardResourceLimits</key><dict>'
         '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
         f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
-        f'  <key>StandardOutPath</key><string>{LOG_PATH}</string>\n'
-        f'  <key>StandardErrorPath</key><string>{LOG_PATH}</string>\n'
+        '  <key>StandardOutPath</key><string>/dev/null</string>\n'
+        '  <key>StandardErrorPath</key><string>/dev/null</string>\n'
         '</dict></plist>\n'
     )
-    with open(LAUNCHD_PLIST, "w") as f:
-        f.write(plist)
-    os.chmod(LAUNCHD_PLIST, 0o644)
-    remove_obsolete_newsyslog_config()
-    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)      # if already loaded
-    r = _run("launchctl", "bootstrap", "system", LAUNCHD_PLIST)
-    if r.returncode != 0:
-        _run("launchctl", "load", "-w", LAUNCHD_PLIST)         # older macOS fallback
-    print(f"installed -> {LAUNCHD_PLIST}")
-    print(f"runs now + at every boot as root, auto-restarts on crash.")
-    print(f"logs:      tail -f {LOG_PATH}")
-    print(f"uninstall: {uninstall_hint}")
 
 
-def do_uninstall():
-    _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
-    _run("launchctl", "unload", "-w", LAUNCHD_PLIST)
+def _launchd_target():
+    return f"system/{LAUNCHD_LABEL}"
+
+
+def _command_failure(action, result):
+    detail = (result.stderr or result.stdout or "command returned an error").strip()
+    raise RuntimeError(f"{action}: {detail[:400]}")
+
+
+def _require_command(action, *args):
+    result = _run(*args)
+    if result.returncode != 0:
+        _command_failure(action, result)
+    return result
+
+
+def _daemon_status_record():
     try:
-        os.remove(LAUNCHD_PLIST)
+        with open(STATUS_PATH) as handle:
+            status = json.load(handle)
     except Exception:
-        pass
-    remove_obsolete_newsyslog_config()
-    _pf_flush()
-    _pf_release_enable_token()
+        return None
+    if not isinstance(status, dict):
+        return None
+    if status.get("schema_version") == STATUS_SCHEMA_VERSION:
+        status = status.get("daemon")
+    return status if isinstance(status, dict) else None
+
+
+def _process_command_for_pid(pid):
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    result = _run("/bin/ps", "-ww", "-p", str(pid), "-o", "command=")
+    if result.returncode != 0:
+        return None
+    command = result.stdout.strip()
+    return command or None
+
+
+def _installed_daemon_command_owned(command):
+    if not command:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    install_dir = os.path.realpath(INSTALL_DIR)
+    executable = os.path.realpath(parts[0])
+    frozen = os.path.join(install_dir, os.path.basename(sys.executable))
+    if executable == frozen:
+        return True
+    script = os.path.join(install_dir, "tproxy.py")
+    python = os.path.realpath(
+        os.path.join(install_dir, "venv", "bin", "python3")
+    )
+    python_app = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.dirname(python)),
+        "Resources", "Python.app", "Contents", "MacOS", "Python",
+    ))
+    return executable in {python, python_app} and any(
+        os.path.realpath(arg) == script for arg in parts[1:3]
+    )
+
+
+def _listener_pids(port):
+    result = _run(
+        "/usr/sbin/lsof",
+        "-nP",
+        "-a",
+        f"-iTCP:{port}",
+        "-sTCP:LISTEN",
+        "-t",
+    )
+    if result.returncode not in {0, 1}:
+        return []
+    return sorted({
+        int(line)
+        for line in result.stdout.splitlines()
+        if line.strip().isdigit() and int(line) > 0
+    })
+
+
+def _owned_listener_pids(port):
+    return [
+        pid for pid in _listener_pids(port)
+        if _installed_daemon_command_owned(_process_command_for_pid(pid))
+    ]
+
+
+def _stop_owned_daemon_pid(pid, timeout=3.0):
+    command = _process_command_for_pid(pid)
+    if not _installed_daemon_command_owned(command):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _process_command_for_pid(pid) is None:
+            return True
+        time.sleep(0.1)
+    # Revalidate immediately before SIGKILL so a recycled PID is never touched.
+    if _installed_daemon_command_owned(_process_command_for_pid(pid)):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            return False
+    return _process_command_for_pid(pid) is None
+
+
+def _wait_for_listener_state(port, present, timeout=8.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _tcp_listener_present(port) == present:
+            return True
+        time.sleep(0.1)
+    return _tcp_listener_present(port) == present
+
+
+def _installed_daemon_readiness(port):
+    status = _daemon_status_record()
+    if not status:
+        return False, "status missing"
+    updated_at = status.get("updated_at", status.get("ts", 0))
+    if not isinstance(updated_at, (int, float)) or time.time() - updated_at > 15:
+        return False, "status stale"
+    if status.get("state") not in {"active", "dormant"}:
+        return False, f"unexpected state {status.get('state')!r}"
+    pid = status.get("pid")
+    if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
+        return False, "status pid is not the installed daemon"
+    if not _tcp_listener_present(port):
+        return False, f"listener 127.0.0.1:{port} missing"
+    rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
+    if rules_loaded != (status.get("state") == "active"):
+        return False, "PF state does not match daemon state"
+    return True, "ready"
+
+
+def _installed_daemon_ready(port):
+    return _installed_daemon_readiness(port)[0]
+
+
+def _wait_for_installed_daemon(port, timeout=30.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _installed_daemon_ready(port):
+            return True
+        time.sleep(0.25)
+    return _installed_daemon_ready(port)
+
+
+def _write_launchd_plist_atomic(text):
+    tmp = f"{LAUNCHD_PLIST}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, LAUNCHD_PLIST)
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _remove_install_runtime_artifacts():
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
     for path in (_STRAT_PATH, STATUS_PATH, TGWS_LINK_PATH):
         try:
             os.remove(path)
-        except Exception:
+        except FileNotFoundError:
             pass
-    print("uninstalled + Slipstream pf anchor cleared")
+        except OSError:
+            pass
+
+
+def _disable_and_cleanup_install(port=PROXY_PORT):
+    status = _daemon_status_record() or {}
+    pid = status.get("pid")
+    _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+    disable_result = _run("/bin/launchctl", "disable", _launchd_target())
+    owned_pids = set(_owned_listener_pids(port))
+    if isinstance(pid, int) and not isinstance(pid, bool):
+        owned_pids.add(pid)
+    for owned_pid in sorted(owned_pids):
+        _stop_owned_daemon_pid(owned_pid)
+    try:
+        os.remove(LAUNCHD_PLIST)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+    remove_obsolete_newsyslog_config()
+    pf_flush_result = _pf_flush()
+    pf_release_result = _pf_release_enable_token()
+    _remove_install_runtime_artifacts()
+    listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
+    runtime_clean = not any(os.path.lexists(path) for path in (
+        INSTALL_DIR,
+        LAUNCHD_PLIST,
+        _STRAT_PATH,
+        STATUS_PATH,
+        TGWS_LINK_PATH,
+    ))
+    return all((
+        disable_result.returncode == 0,
+        pf_flush_result.returncode == 0,
+        pf_release_result is None or pf_release_result.returncode == 0,
+        listener_clean,
+        runtime_clean,
+    ))
+
+
+def do_install(port):
+    # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
+    # TCC access to ~/Documents). Two modes:
+    #  - frozen (PyInstaller onedir): copy the self-contained bundle, run the binary
+    #  - script (dev): copy local runtime modules + build a venv with dependencies
+    frozen = getattr(sys, "frozen", False)
+    try:
+        if not frozen:
+            # Validate before stopping a working installed daemon.
+            _script_runtime_payload(__file__)
+        elif not os.path.isfile(sys.executable) or not os.access(sys.executable, os.X_OK):
+            raise RuntimeError("frozen daemon payload is not executable")
+    except Exception as error:
+        print(f"install preflight failed: {error}", file=sys.stderr)
+        return False
+    # The daemon owns log creation; launchd is pointed at /dev/null below so it
+    # can never recreate a deleted log with a process-default mode. Pre-create
+    # and migrate here so install/reinstall also fixes retained archives.
+    mutated = False
+    try:
+        ensure_private_log_files()
+        secret_path = os.path.join(INSTALL_DIR, "tgws-secret")
+        try:
+            with open(secret_path) as handle:
+                tgws_secret_backup = handle.read()
+        except Exception:
+            tgws_secret_backup = None
+        old_status = _daemon_status_record() or {}
+        old_pid = old_status.get("pid")
+        _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+        mutated = True
+        owned_pids = set(_owned_listener_pids(port))
+        if isinstance(old_pid, int) and not isinstance(old_pid, bool):
+            owned_pids.add(old_pid)
+        for owned_pid in sorted(owned_pids):
+            _stop_owned_daemon_pid(owned_pid)
+        if not _wait_for_listener_state(port, False):
+            raise RuntimeError(f"listener 127.0.0.1:{port} is still occupied")
+        if frozen:
+            src = os.path.dirname(os.path.abspath(sys.executable))
+            _replace_tree_resilient(src, INSTALL_DIR)
+            binary = os.path.join(INSTALL_DIR, os.path.basename(sys.executable))
+            prog_args = [binary, "--port", str(port)]
+            uninstall_hint = f"sudo {binary} --uninstall"
+        else:
+            script = os.path.join(INSTALL_DIR, "tproxy.py")
+            _copy_script_runtime(__file__, INSTALL_DIR)
+        # Copy the vendored tg-ws-proxy module next to it so start_tgws_proxy finds
+        # it (otherwise Telegram falls back to plain MTProto passthrough).
+            _here = os.path.dirname(os.path.abspath(__file__))
+            _src_proxy = os.path.join(_here, "..", "vendor", "tg-ws-proxy", "proxy")
+            if os.path.isdir(_src_proxy):
+                _replace_tree_resilient(_src_proxy, os.path.join(INSTALL_DIR, "proxy"))
+            venv = os.path.join(INSTALL_DIR, "venv")
+            py = os.path.join(venv, "bin", "python3")
+            if not os.path.exists(py):
+                base = getattr(sys, "_base_executable", None) or sys.executable
+                print(">> building self-contained venv + scapy (needs network, ~20s)...")
+                _require_command("venv create failed", base, "-m", "venv", venv)
+            # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
+            # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
+            # libcrypto in an unsafe way") -> the daemon crash-loops. certifi gives
+            # the GitHub CF-domain refresh a CA bundle in frozen/script installs.
+                _require_command(
+                    "scapy/cryptography/certifi install failed",
+                    py, "-m", "pip", "install", "--quiet",
+                    "--disable-pip-version-check", "scapy", "cryptography", "certifi",
+                )
+            prog_args = [py, script, "--port", str(port)]
+            uninstall_hint = f"sudo {py} {script} --uninstall"
+        if tgws_secret_backup:
+            with open(secret_path, "w") as handle:
+                handle.write(tgws_secret_backup.strip())
+            os.chmod(secret_path, 0o600)
+        plist = launchd_plist_text(prog_args, INSTALL_DIR)
+        _write_launchd_plist_atomic(plist)
+        remove_obsolete_newsyslog_config()
+        _require_command(
+            "launchd label enable failed",
+            "/bin/launchctl", "enable", _launchd_target(),
+        )
+        _require_command(
+            "launchd bootstrap failed",
+            "/bin/launchctl", "bootstrap", "system", LAUNCHD_PLIST,
+        )
+        if not _wait_for_installed_daemon(port):
+            _, reason = _installed_daemon_readiness(port)
+            raise RuntimeError(
+                "daemon did not publish a healthy active/dormant state: "
+                f"{reason}"
+            )
+    except Exception as error:
+        rollback_clean = True
+        if mutated:
+            rollback_clean = _disable_and_cleanup_install(port)
+        if rollback_clean:
+            print(f"install failed safely: {error}", file=sys.stderr)
+        else:
+            print(f"install failed; rollback incomplete: {error}", file=sys.stderr)
+        return False
+    print(f"installed -> {LAUNCHD_PLIST}")
+    print(f"runs now + at every boot as root, auto-restarts on crash.")
+    print(f"logs:      tail -f {LOG_PATH}")
+    print(f"uninstall: {uninstall_hint}")
+    return True
+
+
+def do_uninstall():
+    clean = _disable_and_cleanup_install(PROXY_PORT)
+    if clean:
+        print("uninstalled + Slipstream pf anchor cleared")
+    else:
+        print("warning: Slipstream cleanup incomplete; inspect launchd, PF token, and TCP/1080",
+              file=sys.stderr)
+    return clean
 
 
 async def amain(port, voice=True):
     global _geph_up
+    asyncio.get_running_loop().set_exception_handler(asyncio_exception_handler)
     try:
         server = await asyncio.start_server(
             handle, "127.0.0.1", port, reuse_address=True)
@@ -6265,6 +6985,13 @@ async def amain(port, voice=True):
         conflict=_geph_port_conflict,
     )
     pf_setup_if_ready(port)
+    startup_state = (
+        "conflict" if _pf_interceptor_conflicts
+        else "active" if _pf_applied
+        else "dormant"
+    )
+    startup_iface = default_iface()
+    write_status(startup_state, startup_iface, None)
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
     threading.Thread(
         target=network_monitor,
@@ -6317,6 +7044,23 @@ def _tgws_secret():
     return s
 
 
+def _close_asyncio_loop(loop):
+    """Cancel loop-owned tasks and release its selector descriptor."""
+    if loop is None or loop.is_closed():
+        return
+    try:
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+    except Exception:
+        pass
+    finally:
+        loop.close()
+
+
 def start_tgws_proxy():
     """Run the vendored tg-ws-proxy — a local MTProto proxy on 127.0.0.1:1443 — in
     a daemon thread. Telegram Desktop points at it (tg://proxy?...) and its MTProto
@@ -6354,6 +7098,8 @@ def start_tgws_proxy():
     def _loop():
         warned_inuse = False
         while True:
+            loop = None
+            delay = 1
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -6368,17 +7114,20 @@ def start_tgws_proxy():
                               "quit it (same secret, no Telegram reconfigure)",
                               file=sys.stderr)
                         warned_inuse = True
-                    time.sleep(15)
-                    continue
-                set_tgws_state("error", repr(e))
-                print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
-                      file=sys.stderr)
-                time.sleep(5)
+                    delay = 15
+                else:
+                    set_tgws_state("error", repr(e))
+                    print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
+                          file=sys.stderr)
+                    delay = 5
             except Exception as e:
                 set_tgws_state("error", repr(e))
                 print(f">> tg-ws-proxy crashed: {e!r} -> restart in 5s",
                       file=sys.stderr)
-                time.sleep(5)
+                delay = 5
+            finally:
+                _close_asyncio_loop(loop)
+            time.sleep(delay)
 
     threading.Thread(target=_loop, daemon=True, name="tg-ws-proxy").start()
     print(f">> tg-ws-proxy ready on 127.0.0.1:{TGWS_PORT}", file=sys.stderr)
@@ -6418,11 +7167,9 @@ def main():
         sys.exit(1)
 
     if args.install:
-        do_install(args.port)
-        return
+        sys.exit(0 if do_install(args.port) else 1)
     if args.uninstall:
-        do_uninstall()
-        return
+        sys.exit(0 if do_uninstall() else 1)
 
     # A transparent proxy carries ALL system TCP/443 — hundreds of concurrent FDs.
     # The default 256-fd soft limit is far too low ("Too many open files"); raise it.
@@ -6437,6 +7184,7 @@ def main():
                 continue
     except Exception:
         pass
+    _open_fd_reserve()
 
     cleanup_stale()        # release only state owned by the previous daemon
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
@@ -6459,6 +7207,10 @@ def main():
     # network tool holding pf must never be left half-alive in the background.
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGTSTP):
         signal.signal(s, lambda *_: (pf_teardown(), os._exit(0)))
+    # Disposable lifecycle qualification may request the same network-change
+    # rearm path without mutating the runner's real interfaces. The handler only
+    # queues work; the monitor thread performs every PF/backend operation.
+    signal.signal(_RUNTIME_REARM_SIGNAL, _runtime_rearm_signal_handler)
 
     _pf_fd = os.open("/dev/pf", os.O_RDWR)
     try:
@@ -6466,6 +7218,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        _release_fd_reserve()
         pf_teardown()
 
 

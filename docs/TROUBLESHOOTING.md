@@ -30,6 +30,10 @@ After install or upgrade, the tray gives the daemon a short startup grace before
 watchdog recovery. Repeated missing snapshots after that grace still trigger the
 normal daemon repair path.
 
+The watchdog runs only when launchd reports the Slipstream label explicitly
+enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
+is the explicit action that may reinstall or re-enable it.
+
 `strategy_scores` in daemon status and copied diagnostics summary is
 aggregate-only: it reports host counts and ok/fail totals by service group and
 strategy, but does not expose hostnames.
@@ -45,12 +49,18 @@ Tray diagnostics:
   visible in bug reports.
 - The snapshot includes `daemon_recovery` when the tray watchdog recently tried
   to recover the root daemon or clear Slipstream's private PF anchor.
+- Because the raw daemon log is root-only, `Copy Diagnostics` may show a named
+  administrator prompt to make a temporary owner-only copy. The exported tail
+  is redacted and the intermediate copy is removed.
 
 Daemon log:
 
 ```bash
-tail -f /var/log/slipstream.log
+sudo tail -f /var/log/slipstream.log
 ```
+
+The current log and retained rotations are root-owned regular files with mode
+`0600`. `Open Log` is the normal tray path when a Terminal tail is unnecessary.
 
 Administrator prompts:
 
@@ -58,10 +68,14 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 
 - installing or upgrading the background daemon;
 - restarting or repairing the background daemon;
-- copying the root-owned daemon log for `Open Log`.
+- copying the root-owned daemon log for `Open Log` or `Copy Diagnostics`.
 
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
+
+Tray startup must not request administrator access when the daemon label is
+missing or disabled. An automatic upgrade prompt is valid only for an existing,
+explicitly enabled installation whose bundled daemon changed.
 
 ## Removing Slipstream
 
@@ -75,21 +89,44 @@ not claim an active PF redirect; it identifies the remaining user-side job so it
 is not mistaken for an external VPN or proxy.
 
 To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
-native dialog. It removes the Slipstream root daemon and private PF state first,
-then removes only Slipstream's verified Geph LaunchAgent, private runtime, and
-its Keychain account entry. The app bundle remains in `Applications` and can be
-moved to Trash afterwards.
+native dialog. It first disables tray autostart and removes only Slipstream's
+verified Geph LaunchAgent, private runtime, and Keychain account entry. It then
+removes the root daemon and private PF state. After the tray exits, a detached
+helper revalidates the exact tray PID and bundle identifier before removing the
+Slipstream app bundle from `Applications`.
+
+The root uninstaller disables the launchd label before stopping any detached
+listener, and signals a PID only after verifying the installed daemon command.
+It then removes the plist, owned runtime, status, and private PF rules, and
+releases the owned PF token. The token record is removed only after a successful
+release. If the installed uninstaller was already deleted, the tray uses the
+copy inside the application bundle. A partial install follows the same rollback.
 
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
 state are never changed by this action.
 
+The 2026-07-14 incident combined two failures: half-open transparent relays
+exhausted the daemon's file descriptors, leaving its listener and PF redirect in
+place, while root-first uninstall could stop before the independent user Geph
+LaunchAgent was reached. The log contained 2,115 `Too many open files` entries
+and pending relay tasks. The tray then appeared stuck, the app remained in
+`Applications`, and `geph5-client` continued under LaunchAgent `KeepAlive`.
+
+Current required behavior is fail-open for native traffic: every backend relay
+has a bounded shared lifecycle and awaits both stream closures. The daemon keeps
+an emergency descriptor reserve and, at a bounded high watermark or
+`EMFILE`/`ENFILE`, immediately pauses only `com.apple/slipstream`. It may re-arm
+only after descriptor use falls below the low watermark and normal backend
+readiness succeeds. Uninstall performs the owned user cleanup before the root
+prompt, so cancelling or failing root cleanup cannot leave bundled Geph running.
+
 ## Geph Exit Locations
 
 The Geph submenu normally lists city-level exits such as `CA / Montreal`. On a
-fresh launch, Geph may not have answered its local control RPC yet; Slipstream
-temporarily shows country-level fallback entries and replaces them in the open
-tray menu as soon as the live catalog is available. A restart is not required.
+fresh launch, Geph may not have answered its local control RPC yet. Until a live
+or cached verified catalog exists, Slipstream shows an unavailable state rather
+than a fabricated country-level fallback list. A restart is not required.
 
 If the menu stays country-only after Geph is connected, use `Copy Diagnostics`.
 The app caches the last verified city catalog locally, so later launches should
@@ -187,6 +224,15 @@ failed probes even though no previously verified SOCKS port existed, while PF
 was already active. OpenAI hosts then reached the geo-exit fail-close branch in
 `_handle_impl` and the client retried into the same redirect.
 
+A recurrence on 2026-07-13 stopped only after the root launchd label was
+disabled, `com.apple/slipstream` was empty, the owned PF token and all
+Slipstream/Geph processes were absent, and the application retried natively.
+The user-managed `111.88.96.50/111.88.96.51` DNS configuration was unchanged.
+This confirms a stale transparent lifecycle path, not DNS replacement, as the
+incident boundary. The source already contained the zero-byte close guard, but
+the installed lifecycle did not guarantee that the fixed daemon was loaded or
+that a partial install rolled back.
+
 Required behavior:
 
 - do not arm PF until the proxy listener and enabled geo-exit backend are ready;
@@ -195,15 +241,18 @@ Required behavior:
   by an early zero-byte remote close, clear only `com.apple/slipstream` and
   enter dormant mode for a bounded hold;
 - do not let tray polling restart a live Geph process from endpoint failures;
+- on file-descriptor pressure, pause only `com.apple/slipstream` before accept
+  failures can strand the machine behind a non-serving listener;
 - do not modify DNS, proxy, PAC, VPN, certificates, Keychain, or network plist
   files as a workaround.
 
-Emergency cleanup remains scoped to Slipstream:
+Emergency cleanup remains scoped to Slipstream. Prefer the transactional
+uninstaller; the second command is the fallback when the installed copy was
+already removed:
 
 ```bash
-sudo launchctl bootout system /Library/LaunchDaemons/dev.slipstream.tproxy.plist
-sudo pfctl -a com.apple/slipstream -F rules
-sudo pfctl -a com.apple/slipstream -F nat
+sudo /usr/local/slipstream/slipstreamd --uninstall
+sudo "/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd" --uninstall
 ```
 
 Do not use a global `pfctl -F states`, `pfctl -d`, or replacement DNS as normal
@@ -228,10 +277,13 @@ query and try the returned address locally. It never changes the system resolver
 configuration.
 
 For a partial page that becomes blank after a long wait, one orderly browser
-close is intentionally treated as ambiguous. Two client-first closes after a
-long downstream silence for the same generic host schedule that exact local DNS
-retry. This is process-local, expires automatically, and does not route the host
-through Geph.
+close is intentionally treated as ambiguous. The generic local relay records
+that the client closed first before stopping its now-undeliverable upstream read.
+Two client-first closes after a long downstream silence for the same generic host
+schedule that exact local DNS retry. This is process-local, expires automatically,
+and does not route the host through Geph. The retry can use the same IP if Xbox
+DNS and the normal resolver agree, so it is evidence-gated recovery rather than a
+guaranteed alternate route.
 
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale
@@ -250,10 +302,15 @@ SleepService/DarkWake cycles. In daemon logs this appears as:
 After wake, a Geph process can keep its local SOCKS port open while the tunnel
 inside it returns `SOCKS connect failed` or closes payload probes without a
 response. Slipstream records this under `geph_detail`; repeated post-wake
-geo-exit failures across multiple hosts may set `restart_recommended` for
-diagnostics. The tray does not act on that hint: the Geph LaunchAgent recovers a
-dead process through `KeepAlive`, while restarting a live but stale process is
-deferred until the daemon can coordinate it without tearing down active streams.
+geo-exit failures across multiple hosts schedule owned recovery. The daemon
+pauses only its private PF anchor, waits for active Geph streams to drain, and
+kickstarts the exact verified user LaunchAgent. The tray is not required.
+LaunchAgent `KeepAlive` still handles a process that exits on its own.
+
+While a long-lived Geph stream is active, StatusV2 may briefly report
+`owned_geph_restart_waiting_for_idle`. This is a bounded safe wait, not a request
+for manual action. A mismatched ownership claim or unknown listener is never
+restarted; diagnostics retain that distinction.
 
 Wake canaries may briefly run before Geph/DNS recovery is complete. If a tray
 summary still says routing needs attention after the tunnel is back, check
@@ -343,24 +400,24 @@ GitHub developer endpoints use `direct_passthrough`. If `gh api` works but
 `github` direct policy and plain-only strategy. They should not use Geph or the
 generic desync ladder.
 
-## Auto Geo-Exit Learning
+## Unknown-Host Recovery
 
-Slipstream can learn an unknown HTTPS host as temporary `geo_exit` only after
-both conditions are true:
+Slipstream does not turn an unknown host into `geo_exit` from a local failure
+plus a successful Geph probe. That result cannot prove that a foreign exit is
+needed.
 
-- local desync repeatedly returns little or no application data for that exact
-  host;
-- a separate HTTPS payload probe through Slipstream's Geph tunnel succeeds.
+For a repeated exact-host local stall, Slipstream may make one local retry via a
+Slipstream-issued Xbox DNS query. It neither changes the system resolver nor routes
+the host through Geph. Existing legacy auto-Geph cache entries are cleared when
+the daemon starts.
 
-The learned entry is exact-host only and TTL-based. It does not apply to
-Discord, YouTube/googlevideo, Telegram, Russian services, Geph infrastructure,
-or external DNS/proxy/PAC/VPN settings.
+If a browser-only page still stalls, collect diagnostics and the exact hostname.
+The appropriate next step is an evidence-backed direct, local-bypass, or
+geo-exit policy change, not automatic foreign-exit promotion.
 
-If a page shell loads but a payment form, video, image CDN, or static resource
-keeps stalling, check daemon logs for repeated Geph route retries on the same
-learned host. Slipstream resets only auto-learned exact hosts after repeated
-runtime retries, then lets the normal local route and proof-based learning run
-again. Explicit geo-exit hosts are not reset this way.
+Google and Spotify use `direct_first`: the next connection always starts with
+plain TLS, then can use bounded local desync only if direct did not work. They
+never fall through to Geph.
 
 ## Installed Daemon
 

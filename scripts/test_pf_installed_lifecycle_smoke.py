@@ -4,8 +4,11 @@ import io
 import json
 import os
 import plistlib
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -56,10 +59,15 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             daemon.parent.mkdir(parents=True)
             daemon.write_bytes(b"packaged-daemon")
             daemon.chmod(0o755)
+            tray = app / "Contents" / "MacOS" / "slipstream"
+            tray.parent.mkdir(parents=True)
+            tray.write_bytes(b"packaged-tray")
+            tray.chmod(0o755)
 
             target = lifecycle.packaged_app_target(app)
 
             self.assertEqual(target.name, "packaged-app")
+            self.assertEqual(target.tray_executable, tray.resolve())
             lifecycle.validate_system_command(target.install_command, target)
             lifecycle.validate_system_command(target.uninstall_command, target)
             with self.assertRaises(lifecycle.LifecycleError):
@@ -81,6 +89,24 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with self.assertRaises(lifecycle.LifecycleError):
                 lifecycle.packaged_app_target(app)
 
+    def test_packaged_target_requires_an_executable_tray(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "Slipstream.app"
+            daemon = app / "Contents" / "Resources" / "slipstreamd" / "slipstreamd"
+            daemon.parent.mkdir(parents=True)
+            daemon.write_bytes(b"packaged-daemon")
+            daemon.chmod(0o755)
+
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "executable tray"):
+                lifecycle.packaged_app_target(app)
+
+            tray = app / "Contents" / "MacOS" / "slipstream"
+            tray.parent.mkdir(parents=True)
+            tray.write_bytes(b"packaged-tray")
+            tray.chmod(0o644)
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "executable tray"):
+                lifecycle.packaged_app_target(app)
+
     def test_plist_patch_enables_local_only_mode_and_disables_voice(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "daemon.plist"
@@ -96,6 +122,10 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with path.open("rb") as handle:
                 updated = plistlib.load(handle)
             self.assertEqual(updated["EnvironmentVariables"]["SLIP_GEPH"], "0")
+            self.assertEqual(
+                updated["EnvironmentVariables"]["SLIP_RUNTIME_WAKE_GAP_SECONDS"],
+                "6",
+            )
             self.assertIn("--no-voice", updated["ProgramArguments"])
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
 
@@ -122,6 +152,24 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertTrue(lifecycle._rule_has_port("port 1080", 1080))
         self.assertFalse(lifecycle._rule_has_port("port = 4430", 443))
 
+    def test_lifecycle_failure_preserves_stage_and_exception_type(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "_daemon_pf_log_tail",
+            return_value=("anchor active",),
+        ):
+            failure = lifecycle._lifecycle_failure(
+                "before-tray-start:chrome",
+                PermissionError(1, "Operation not permitted"),
+        )
+
+        self.assertIn("stage=before-tray-start:chrome", str(failure))
+        self.assertIn(
+            "PermissionError: [Errno 1] Operation not permitted",
+            str(failure),
+        )
+        self.assertIn("daemon_pf_log=('anchor active',)", str(failure))
+
     def test_status_daemon_view_accepts_v1_and_v2(self) -> None:
         v1 = {"state": "active", "pid": 11, "ts": 100.0}
         v2 = {
@@ -133,6 +181,818 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(lifecycle._daemon_status(v2), v2["daemon"])
         self.assertIsNone(lifecycle._daemon_status({"schema_version": 2}))
 
+    def test_recovery_view_and_wait_require_same_fresh_daemon(self) -> None:
+        status = {
+            "schema_version": 2,
+            "daemon": {
+                "state": "active",
+                "pid": 42,
+                "updated_at": 500.0,
+            },
+            "recovery": {
+                "last_action": "network_change",
+                "count": 3,
+            },
+        }
+        with mock.patch.object(lifecycle, "_read_status", return_value=status), mock.patch(
+            "time.time", return_value=501.0
+        ):
+            observed = lifecycle._wait_for_rearm(
+                "network_change",
+                expected_pid=42,
+                previous_count=2,
+                timeout=1,
+            )
+
+        self.assertIs(observed, status)
+        self.assertEqual(lifecycle._recovery_count(status), 3)
+        self.assertIsNone(lifecycle._recovery_status({"state": "active"}))
+
+    def test_wait_for_same_daemon_requires_a_new_status_update(self) -> None:
+        stale = {
+            "schema_version": 2,
+            "daemon": {"state": "active", "pid": 42, "updated_at": 500.0},
+        }
+        fresh = {
+            "schema_version": 2,
+            "daemon": {"state": "active", "pid": 42, "updated_at": 502.0},
+        }
+        with mock.patch.object(
+            lifecycle,
+            "_read_status",
+            side_effect=[stale, fresh],
+        ), mock.patch("time.time", return_value=503.0), mock.patch("time.sleep"):
+            observed = lifecycle._wait_for_same_daemon(
+                "active",
+                expected_pid=42,
+                updated_after=500.0,
+                timeout=1,
+            )
+
+        self.assertEqual(observed["pid"], 42)
+        self.assertEqual(lifecycle._daemon_updated_at(fresh), 502.0)
+
+    def test_daemon_signal_guard_accepts_only_exact_installed_command(self) -> None:
+        target = lifecycle.script_target()
+        command = " ".join((*target.installed_program_prefix, "--no-voice"))
+        with mock.patch.object(
+            lifecycle, "_process_command_for_pid", return_value=command
+        ), mock.patch("os.kill") as kill:
+            lifecycle._signal_owned_daemon(target, 42, lifecycle.RUNTIME_REARM_SIGNAL)
+        kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
+
+        with mock.patch.object(
+            lifecycle,
+            "_process_command_for_pid",
+            return_value="/tmp/not-slipstream --no-voice",
+        ), mock.patch("os.kill") as kill:
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "unowned pid"):
+                lifecycle._signal_owned_daemon(
+                    target,
+                    42,
+                    lifecycle.RUNTIME_REARM_SIGNAL,
+                )
+        kill.assert_not_called()
+
+    def test_daemon_signal_guard_accepts_resolved_interpreter_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            real_python = Path(tmp) / "Python"
+            venv_python = Path(tmp) / "python3"
+            script = Path(tmp) / "tproxy.py"
+            real_python.write_text("python")
+            venv_python.symlink_to(real_python)
+            script.write_text("daemon")
+            target = lifecycle.LifecycleTarget(
+                name="alias-test",
+                install_command=(),
+                uninstall_command=(),
+                installed_program_prefix=(str(venv_python), str(script)),
+                required_installed_paths=(),
+            )
+            command = f"{real_python} {script} --no-voice"
+
+            with mock.patch.object(
+                lifecycle,
+                "_process_command_for_pid",
+                return_value=command,
+            ), mock.patch("os.kill") as kill:
+                lifecycle._signal_owned_daemon(
+                    target,
+                    42,
+                    lifecycle.RUNTIME_REARM_SIGNAL,
+                )
+
+        kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
+
+    def test_daemon_signal_guard_accepts_harness_base_interpreter(self) -> None:
+        target = lifecycle.script_target()
+        daemon_command = (
+            "/Library/Frameworks/Python.framework/Versions/3.13/Resources/"
+            "Python.app/Contents/MacOS/Python "
+            f"{lifecycle.INSTALLED_DAEMON} --port 1080 --no-voice"
+        )
+        harness_command = (
+            "/Library/Frameworks/Python.framework/Versions/3.13/Resources/"
+            "Python.app/Contents/MacOS/Python "
+            f"{Path(__file__)}"
+        )
+        with mock.patch.object(
+            lifecycle,
+            "_process_command_for_pid",
+            side_effect=[daemon_command, harness_command],
+        ), mock.patch("os.kill") as kill:
+            lifecycle._signal_owned_daemon(
+                target,
+                42,
+                lifecycle.RUNTIME_REARM_SIGNAL,
+            )
+
+        kill.assert_called_once_with(42, lifecycle.RUNTIME_REARM_SIGNAL)
+
+    def test_tray_signal_guard_requires_exact_uid_and_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"tray")
+            executable.chmod(0o755)
+            expected = str(executable.resolve())
+
+            with mock.patch.object(
+                lifecycle,
+                "_process_identity_for_pid",
+                return_value=(501, expected),
+            ):
+                lifecycle._assert_owned_tray_pid(executable, 42, 501)
+
+            for identity in ((502, expected), (501, "/tmp/not-slipstream"), None):
+                with self.subTest(identity=identity), mock.patch.object(
+                    lifecycle,
+                    "_process_identity_for_pid",
+                    return_value=identity,
+                ):
+                    with self.assertRaisesRegex(lifecycle.LifecycleError, "unowned tray"):
+                        lifecycle._assert_owned_tray_pid(executable, 42, 501)
+
+    def test_packaged_tray_crash_signals_only_the_verified_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"tray")
+            executable.chmod(0o755)
+            tray = lifecycle.PackagedTrayProcess(executable, 501, 20)
+            process = mock.Mock(pid=42)
+            tray.process = process
+            tray.log = tempfile.TemporaryFile()
+
+            with mock.patch.object(
+                lifecycle,
+                "_process_identity_for_pid",
+                return_value=(501, str(executable.resolve())),
+            ), mock.patch("os.kill") as kill:
+                tray.crash()
+
+        kill.assert_called_once_with(42, lifecycle.signal.SIGKILL)
+        process.wait.assert_called_once_with(timeout=5)
+        self.assertIsNone(tray.process)
+
+    def test_user_environment_does_not_forward_proxy_or_ci_secrets(self) -> None:
+        account = mock.Mock(pw_dir="/Users/runner", pw_name="runner")
+        inherited = {
+            "HTTPS_PROXY": "http://external-proxy.invalid",
+            "GH_TOKEN": "secret",
+            "TMPDIR": "/tmp/runner/",
+            "LANG": "en_US.UTF-8",
+        }
+        with mock.patch.dict(os.environ, inherited, clear=True), mock.patch.object(
+            lifecycle.pwd,
+            "getpwuid",
+            return_value=account,
+        ):
+            environment, home = lifecycle._user_environment(501)
+
+        self.assertEqual(home, Path("/Users/runner"))
+        self.assertNotIn("HTTPS_PROXY", environment)
+        self.assertNotIn("GH_TOKEN", environment)
+        self.assertEqual(environment["HOME"], "/Users/runner")
+        self.assertEqual(environment["TMPDIR"], "/tmp/runner/")
+
+    def test_https_probe_is_fresh_non_proxy_ipv4_client(self) -> None:
+        command = lifecycle._https_probe_command("After Tray Crash")
+
+        self.assertEqual(command[0], "/usr/bin/curl")
+        self.assertIn("--ipv4", command)
+        self.assertIn("--http1.1", command)
+        self.assertEqual(command[command.index("--noproxy") + 1], "*")
+        self.assertEqual(
+            command[-1],
+            "https://github.com/robots.txt?slipstream-lifecycle=after-tray-crash",
+        )
+
+    def test_chrome_probe_uses_a_clean_profile_and_tcp_without_proxy(self) -> None:
+        executable = Path(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        )
+        profile = Path("/tmp/slipstream-chrome-test")
+        command = lifecycle._chrome_probe_command(
+            executable,
+            profile,
+            "After Tray Crash",
+        )
+
+        self.assertEqual(command[0], str(executable))
+        self.assertIn("--headless", command)
+        self.assertIn("--disable-quic", command)
+        self.assertIn("--no-proxy-server", command)
+        self.assertIn(f"--user-data-dir={profile}", command)
+        self.assertIn(f"--timeout={lifecycle.CHROME_PAGE_TIMEOUT_MS}", command)
+        self.assertEqual(
+            command[-1],
+            "https://github.com/robots.txt?slipstream-chrome=after-tray-crash",
+        )
+
+    def test_run_chrome_probe_drops_privileges_and_removes_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Google Chrome"
+            executable.write_bytes(b"chrome")
+            executable.chmod(0o755)
+            completed = lifecycle.ChromeCapture(
+                loaded=True,
+                timed_out=False,
+                returncode=0,
+                stdout=(
+                    lifecycle.CHROME_PROBE_MARKER
+                    + b"x" * lifecycle.CHROME_PROBE_MIN_BYTES
+                ),
+                stderr=b"",
+            )
+
+            observed_profile_mode = None
+
+            def run_probe(command, **_kwargs):
+                nonlocal observed_profile_mode
+                profile_argument = next(
+                    argument
+                    for argument in command
+                    if argument.startswith("--user-data-dir=")
+                )
+                profile = Path(profile_argument.split("=", 1)[1])
+                observed_profile_mode = profile.stat().st_mode & 0o777
+                return completed
+
+            with mock.patch.object(
+                lifecycle,
+                "_user_environment",
+                return_value=({"HOME": tmp}, Path(tmp)),
+            ), mock.patch.object(
+                lifecycle.pwd,
+                "getpwuid",
+                return_value=mock.Mock(pw_name="runner"),
+            ), mock.patch.object(
+                lifecycle.os,
+                "getgrouplist",
+                return_value=[20, 12, 61],
+            ), mock.patch.object(lifecycle.os, "chown") as chown, mock.patch.object(
+                lifecycle,
+                "_capture_chrome_output",
+                side_effect=run_probe,
+            ) as run:
+                size = lifecycle._run_chrome_probe(
+                    501,
+                    20,
+                    "After Tray Crash",
+                    executable,
+                )
+
+        self.assertEqual(size, len(completed.stdout))
+        self.assertEqual(observed_profile_mode, 0o700)
+        chown.assert_called_once()
+        command = run.call_args.args[0]
+        profile_argument = next(
+            argument for argument in command if argument.startswith("--user-data-dir=")
+        )
+        profile = Path(profile_argument.split("=", 1)[1])
+        self.assertFalse(profile.exists())
+        self.assertEqual(run.call_args.kwargs["uid"], 501)
+        self.assertEqual(run.call_args.kwargs["gid"], 20)
+        self.assertEqual(
+            run.call_args.kwargs["supplementary_groups"],
+            (12, 61),
+        )
+
+    def test_run_chrome_probe_rejects_an_unavailable_executable(self) -> None:
+        with self.assertRaisesRegex(lifecycle.LifecycleError, "unavailable"):
+            lifecycle._run_chrome_probe(
+                501,
+                20,
+                "missing",
+                Path("/definitely/not/chrome"),
+            )
+
+    def test_run_chrome_probe_rejects_a_browser_error_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Google Chrome"
+            executable.write_bytes(b"chrome")
+            executable.chmod(0o755)
+            completed = lifecycle.ChromeCapture(
+                loaded=False,
+                timed_out=False,
+                returncode=0,
+                stdout=b"<html>ERR_CONNECTION_CLOSED</html>",
+                stderr=b"",
+            )
+            with mock.patch.object(
+                lifecycle,
+                "_user_environment",
+                return_value=({"HOME": tmp}, Path(tmp)),
+            ), mock.patch.object(
+                lifecycle.pwd,
+                "getpwuid",
+                return_value=mock.Mock(pw_name="runner"),
+            ), mock.patch.object(
+                lifecycle.os,
+                "getgrouplist",
+                return_value=[20, 12, 61],
+            ), mock.patch.object(lifecycle.os, "chown"), mock.patch.object(
+                lifecycle,
+                "_capture_chrome_output",
+                return_value=completed,
+            ):
+                with self.assertRaisesRegex(
+                    lifecycle.LifecycleError,
+                    "expected page",
+                ):
+                    lifecycle._run_chrome_probe(
+                        501,
+                        20,
+                        "error-page",
+                        executable,
+                    )
+
+    def test_chrome_capture_stops_after_expected_dom_without_waiting_for_exit(
+        self,
+    ) -> None:
+        payload = lifecycle.CHROME_PROBE_MARKER.decode("ascii") + "x" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            started = time.monotonic()
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    f"import time; print({payload!r}, flush=True); time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=3,
+            )
+
+        self.assertTrue(result.loaded)
+        self.assertFalse(result.timed_out)
+        self.assertIn(lifecycle.CHROME_PROBE_MARKER, result.stdout)
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_chrome_capture_timeout_keeps_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    "import sys, time; "
+                    "print('capture diagnostic', file=sys.stderr, flush=True); "
+                    "time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=0.2,
+            )
+
+        self.assertFalse(result.loaded)
+        self.assertTrue(result.timed_out)
+        self.assertIn(b"capture diagnostic", result.stderr)
+
+    def test_chrome_spawn_permission_error_names_the_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            lifecycle.subprocess,
+            "Popen",
+            side_effect=PermissionError(1, "Operation not permitted"),
+        ):
+            with self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "Chrome operation spawn failed: PermissionError",
+            ):
+                lifecycle._capture_chrome_output(
+                    ("/usr/bin/false",),
+                    cwd=Path(tmp),
+                    environment=os.environ.copy(),
+                    uid=None,
+                    gid=None,
+                    supplementary_groups=(),
+                )
+
+    def test_chrome_group_signal_permission_error_names_the_signal(self) -> None:
+        process = mock.Mock(pid=4242)
+        with mock.patch.object(
+            lifecycle,
+            "_chrome_process_group_members",
+            return_value=(
+                lifecycle.ChromeProcessGroupMember(
+                    pid=4242,
+                    uid=501,
+                    state="S",
+                    executable="/Applications/Google Chrome",
+                ),
+            ),
+        ), mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                (),
+                lifecycle.CHROME_SIGNAL_PERMISSION_EXIT,
+                b"",
+                b"Operation not permitted",
+            ),
+        ):
+            with self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "Chrome operation process-group-term failed: PermissionError",
+            ):
+                lifecycle._stop_owned_chrome_process_group(
+                    process,
+                    4242,
+                    uid=501,
+                    gid=20,
+                )
+
+    def test_chrome_group_members_are_filtered_by_exact_pgid(self) -> None:
+        output = b"""\
+  4242  4242  501 S /Applications/Google Chrome
+  4243  4242  501 S /Applications/Google Chrome Helper
+  4244  4242    0 S /System/Library/XPCServices/protected
+  5000  5000  501 S /usr/bin/unrelated
+"""
+        with mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess((), 0, output, b""),
+        ):
+            members = lifecycle._chrome_process_group_members(4242)
+
+        self.assertEqual(tuple(member.pid for member in members), (4242, 4243, 4244))
+        self.assertEqual(tuple(member.uid for member in members), (501, 501, 0))
+
+    def test_chrome_group_signal_runs_as_the_browser_user(self) -> None:
+        completed = subprocess.CompletedProcess((), 0, b"", b"")
+        members = (
+            lifecycle.ChromeProcessGroupMember(4242, 501, "S", "Chrome"),
+            lifecycle.ChromeProcessGroupMember(4243, 501, "S", "Chrome Helper"),
+            lifecycle.ChromeProcessGroupMember(4244, 0, "S", "system XPC"),
+        )
+        with mock.patch.object(
+            lifecycle,
+            "_chrome_process_group_members",
+            return_value=members,
+        ), mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=completed,
+        ) as run:
+            signalled = lifecycle._signal_owned_chrome_processes(
+                4242,
+                signal.SIGTERM,
+                uid=501,
+                gid=20,
+                supplementary_groups=(12, 61),
+            )
+
+        self.assertTrue(signalled)
+        self.assertEqual(run.call_args.kwargs["user"], 501)
+        self.assertEqual(run.call_args.kwargs["group"], 20)
+        self.assertEqual(run.call_args.kwargs["extra_groups"], (12, 61))
+        command = run.call_args.args[0]
+        self.assertEqual(command[0:2], (sys.executable, "-I"))
+        self.assertEqual(
+            command[-4:],
+            ("4242", str(signal.SIGTERM), "4242", "4243"),
+        )
+        self.assertNotIn("4244", command[4:])
+
+    def test_chrome_group_signal_treats_no_owned_members_as_stopped(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "_chrome_process_group_members",
+            return_value=(
+                lifecycle.ChromeProcessGroupMember(4244, 0, "S", "system XPC"),
+            ),
+        ), mock.patch.object(lifecycle.subprocess, "run") as run:
+            self.assertFalse(
+                lifecycle._signal_owned_chrome_processes(
+                    4242,
+                    signal.SIGKILL,
+                    uid=501,
+                    gid=20,
+                    supplementary_groups=(),
+                )
+            )
+        run.assert_not_called()
+
+    def test_safaridriver_url_accepts_only_explicit_ipv4_loopback(self) -> None:
+        self.assertEqual(
+            lifecycle._validated_safaridriver_url("http://127.0.0.1:19445"),
+            "http://127.0.0.1:19445",
+        )
+        for value in (
+            "https://127.0.0.1:19445",
+            "http://localhost:19445",
+            "http://127.0.0.1:19445/status",
+            "http://user@127.0.0.1:19445",
+            "http://192.0.2.1:19445",
+            "http://127.0.0.1",
+            "http://127.0.0.1:0",
+        ):
+            with self.subTest(value=value), self.assertRaises(
+                lifecycle.LifecycleError
+            ):
+                lifecycle._validated_safaridriver_url(value)
+
+    def test_webdriver_request_sends_bounded_json(self) -> None:
+        response = mock.Mock(status=200)
+        response.read.return_value = b'{"value":{"ready":true}}'
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        with mock.patch.object(
+            lifecycle.http.client,
+            "HTTPConnection",
+            return_value=connection,
+        ) as http_connection:
+            result = lifecycle._webdriver_request(
+                "http://127.0.0.1:19445",
+                "POST",
+                "/session",
+                {"capabilities": {"alwaysMatch": {"browserName": "safari"}}},
+            )
+
+        self.assertTrue(result["value"]["ready"])
+        http_connection.assert_called_once_with(
+            "127.0.0.1",
+            19445,
+            timeout=lifecycle.SAFARI_COMMAND_TIMEOUT,
+        )
+        request = connection.request.call_args
+        self.assertEqual(request.args[:2], ("POST", "/session"))
+        self.assertEqual(
+            json.loads(request.kwargs["body"]),
+            {"capabilities": {"alwaysMatch": {"browserName": "safari"}}},
+        )
+        connection.close.assert_called_once()
+
+    def test_safari_probe_uses_and_deletes_an_isolated_session(self) -> None:
+        calls = []
+
+        def webdriver(base_url, method, path, payload=None, **_kwargs):
+            calls.append((base_url, method, path, payload))
+            if (method, path) == ("POST", "/session"):
+                return {"value": {"sessionId": "session/one"}}
+            if method == "GET" and path.endswith("/source"):
+                return {
+                    "value": lifecycle.SAFARI_PROBE_MARKER
+                    + "x" * lifecycle.SAFARI_PROBE_MIN_BYTES
+                }
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": "h2"}
+            return {"value": None}
+
+        with mock.patch.object(
+            lifecycle,
+            "_webdriver_request",
+            side_effect=webdriver,
+        ), mock.patch.object(
+            lifecycle,
+            "_assert_no_safari_process",
+        ) as assert_fresh, mock.patch.object(
+            lifecycle,
+            "_wait_for_safari_process",
+            return_value=4242,
+        ) as wait_for_process, mock.patch.object(
+            lifecycle,
+            "_stop_owned_safari_process",
+        ) as stop_process:
+            size = lifecycle._run_safari_probe(
+                "http://127.0.0.1:19445",
+                "After Tray Crash",
+                501,
+            )
+
+        self.assertGreaterEqual(size, lifecycle.SAFARI_PROBE_MIN_BYTES)
+        self.assertEqual(
+            assert_fresh.call_args_list,
+            [
+                mock.call(501, "After Tray Crash"),
+                mock.call(501, "After Tray Crash cleanup"),
+            ],
+        )
+        wait_for_process.assert_called_once_with(501, "After Tray Crash")
+        stop_process.assert_called_once_with(4242, 501, "After Tray Crash")
+        self.assertEqual(calls[0][1:3], ("POST", "/session"))
+        self.assertIn(
+            (
+                "http://127.0.0.1:19445",
+                "POST",
+                "/session/session%2Fone/url",
+                {
+                    "url": "https://github.com/robots.txt?slipstream-safari=after-tray-crash"
+                },
+            ),
+            calls,
+        )
+        self.assertEqual(
+            calls[-1][1:3],
+            ("DELETE", "/session/session%2Fone"),
+        )
+        self.assertTrue(
+            any(
+                method == "POST" and path.endswith("/execute/sync")
+                for _base_url, method, path, _payload in calls
+            )
+        )
+
+    def test_safari_probe_deletes_session_after_navigation_failure(self) -> None:
+        calls = []
+
+        def webdriver(_base_url, method, path, _payload=None, **_kwargs):
+            calls.append((method, path))
+            if (method, path) == ("POST", "/session"):
+                return {"value": {"sessionId": "session-one"}}
+            if method == "POST" and path.endswith("/url"):
+                raise lifecycle.LifecycleError("navigation failed")
+            return {"value": None}
+
+        with mock.patch.object(
+            lifecycle,
+            "_webdriver_request",
+            side_effect=webdriver,
+        ), mock.patch.object(
+            lifecycle,
+            "_assert_no_safari_process",
+        ), mock.patch.object(
+            lifecycle,
+            "_wait_for_safari_process",
+            return_value=4242,
+        ), mock.patch.object(
+            lifecycle,
+            "_stop_owned_safari_process",
+        ) as stop_process, self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "navigation failed",
+        ):
+            lifecycle._run_safari_probe(
+                "http://127.0.0.1:19445",
+                "failure",
+                501,
+            )
+
+        self.assertEqual(calls[-1], ("DELETE", "/session/session-one"))
+        stop_process.assert_called_once_with(4242, 501, "failure")
+
+    def test_safari_probe_rejects_non_tcp_navigation(self) -> None:
+        def webdriver(_base_url, method, path, _payload=None, **_kwargs):
+            if (method, path) == ("POST", "/session"):
+                return {"value": {"sessionId": "session-one"}}
+            if method == "GET" and path.endswith("/source"):
+                return {
+                    "value": lifecycle.SAFARI_PROBE_MARKER
+                    + "x" * lifecycle.SAFARI_PROBE_MIN_BYTES
+                }
+            if method == "POST" and path.endswith("/execute/sync"):
+                return {"value": "h3"}
+            return {"value": None}
+
+        with mock.patch.object(
+            lifecycle,
+            "_webdriver_request",
+            side_effect=webdriver,
+        ), mock.patch.object(
+            lifecycle,
+            "_assert_no_safari_process",
+        ), mock.patch.object(
+            lifecycle,
+            "_wait_for_safari_process",
+            return_value=4242,
+        ), mock.patch.object(
+            lifecycle,
+            "_stop_owned_safari_process",
+        ), self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "did not prove a TCP route",
+        ):
+            lifecycle._run_safari_probe(
+                "http://127.0.0.1:19445",
+                "h3",
+                501,
+            )
+
+    def test_safari_process_identity_requires_exact_uid_and_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Safari"
+            executable.write_text("#!/bin/sh\n")
+            executable.chmod(0o755)
+            with mock.patch.object(
+                lifecycle,
+                "SAFARI_EXECUTABLE",
+                executable,
+            ), mock.patch.object(
+                lifecycle,
+                "_safari_pid_candidates",
+                return_value=(4242,),
+            ), mock.patch.object(
+                lifecycle,
+                "_safari_process_identity_for_pid",
+                return_value=(501, "S", str(executable)),
+            ):
+                self.assertEqual(lifecycle._owned_safari_pids(501), (4242,))
+
+            with mock.patch.object(
+                lifecycle,
+                "SAFARI_EXECUTABLE",
+                executable,
+            ), mock.patch.object(
+                lifecycle,
+                "_safari_pid_candidates",
+                return_value=(4242,),
+            ), mock.patch.object(
+                lifecycle,
+                "_safari_process_identity_for_pid",
+                return_value=(502, "S", str(executable)),
+            ), self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "unexpected identities",
+            ):
+                lifecycle._owned_safari_pids(501)
+
+    def test_safari_zombie_is_already_stopped_without_signalling(self) -> None:
+        identity = (501, "Z+", "(Safari)")
+        with mock.patch.object(
+            lifecycle,
+            "_safari_process_identity_for_pid",
+            return_value=identity,
+        ), mock.patch.object(lifecycle.os, "kill") as kill:
+            self.assertFalse(lifecycle._safari_pid_is_owned(4242, 501))
+            lifecycle._stop_owned_safari_process(4242, 501, "cleanup")
+
+        kill.assert_not_called()
+
+    def test_safari_identity_parser_preserves_zombie_state(self) -> None:
+        completed = subprocess.CompletedProcess((), 0, " 501 Z+ (Safari)\n", "")
+        with mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=completed,
+        ):
+            self.assertEqual(
+                lifecycle._safari_process_identity_for_pid(4242),
+                (501, "Z+", "(Safari)"),
+            )
+
+    def test_safari_process_stop_signals_only_verified_pid(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "SAFARI_PROCESS_STOP_TIMEOUT",
+            0,
+        ), mock.patch.object(
+            lifecycle,
+            "_safari_pid_is_owned",
+            side_effect=(True, False),
+        ), mock.patch.object(lifecycle.os, "kill") as kill:
+            lifecycle._stop_owned_safari_process(4242, 501, "after-tray-crash")
+
+        kill.assert_called_once_with(4242, lifecycle.signal.SIGTERM)
+
+    def test_private_raw_log_requires_regular_owner_only_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "slipstream.log"
+            log.write_text("private\n")
+            log.chmod(0o600)
+
+            lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
+
+            log.chmod(0o640)
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "not 0600"):
+                lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
+
+    def test_private_raw_log_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_text("not the log\n")
+            log = Path(tmp) / "slipstream.log"
+            log.symlink_to(target)
+
+            with self.assertRaisesRegex(lifecycle.LifecycleError, "not a regular file"):
+                lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
+
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
@@ -143,6 +1003,12 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(report["result"], "dry-run")
         self.assertEqual(report["target"], "script")
         self.assertFalse(report["workstation_allowed"])
+
+        packaged = lifecycle.dry_run("packaged-app")
+        self.assertIn("crash", packaged["packaged_tray"])
+        self.assertIn("HTTPS client", packaged["https_client_probes"])
+        self.assertIn("Chrome", packaged["chrome_probes"])
+        self.assertIn("Safari", packaged["safari_probes"])
 
 
 if __name__ == "__main__":
