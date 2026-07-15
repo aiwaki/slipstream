@@ -5391,6 +5391,8 @@ class _RelayActivity:
     downstream_write_failed: bool = False
     client_ended_first: bool = False
     server_ended_first: bool = False
+    first_downstream_seen: bool = False
+    on_first_downstream: object = None
 
 
 def _local_stream_stalled(activity, now=None):
@@ -5610,6 +5612,10 @@ async def splice(src, dst, activity=None):
                 break
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
+                if not activity.first_downstream_seen:
+                    activity.first_downstream_seen = True
+                    if activity.on_first_downstream is not None:
+                        activity.on_first_downstream()
     finally:
         if activity is not None:
             activity.server_end_at = time.monotonic()
@@ -6161,7 +6167,32 @@ async def _handle_impl(reader, writer):
                     if VERBOSE:
                         print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                     t0 = time.monotonic()
-                    res = await relay_local_stream(reader, gw, gr, writer)
+                    geph_result_recorded = False
+
+                    def record_first_geph_payload():
+                        nonlocal geph_result_recorded
+                        if geph_result_recorded:
+                            return
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            True,
+                            owned=geph_owned,
+                        )
+                        clear_geph_route_failure()
+                        geph_result_recorded = True
+
+                    activity = _RelayActivity(
+                        last_downstream_at=t0,
+                        on_first_downstream=record_first_geph_payload,
+                    )
+                    res = await relay_local_stream(
+                        reader,
+                        gw,
+                        gr,
+                        writer,
+                        activity,
+                    )
                     down_b = res[1] or 0
                     if down_b == 0 and time.monotonic() - t0 < 10:
                         runtime_route_circuit_record_result(
@@ -6176,7 +6207,7 @@ async def _handle_impl(reader, writer):
                         # the next client retry on the native path instead of sending
                         # it into the same broken geo-exit tunnel.
                         suspend_transparent_routing("geo-exit remote close before payload")
-                    else:
+                    elif not geph_result_recorded:
                         runtime_route_circuit_record_result(
                             policy,
                             GEO_BACKEND_GEPH,

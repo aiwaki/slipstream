@@ -763,6 +763,114 @@ def test_smart_dns_circuit_suppresses_only_smart_dns_then_uses_owned_geph(
     assert snapshot[0].state.phase == tproxy.route_circuit.PHASE_OPEN
 
 
+def test_geph_half_open_recovers_on_first_payload_before_long_relay_ends(
+    monkeypatch,
+):
+    """A healthy long-lived stream must release the single half-open permit."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    policy = tproxy.route_policy(host)
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
+    clears = []
+
+    tproxy.runtime_route_circuit_record_result(
+        policy,
+        tproxy.GEO_BACKEND_GEPH,
+        False,
+        owned=True,
+        now_ms=0,
+    )
+    tproxy.runtime_route_circuit_record_result(
+        policy,
+        tproxy.GEO_BACKEND_GEPH,
+        False,
+        owned=True,
+        now_ms=1,
+    )
+    assert tproxy.runtime_route_circuit_snapshot()[0].state.phase == (
+        tproxy.route_circuit.PHASE_OPEN
+    )
+
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    clock = iter((1001, 1002))
+
+    async def long_lived_geph(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (
+            host,
+            443,
+            expected_first_flight,
+        )
+        return (
+            ScriptedReader(stream=(response,), block_when_empty=True),
+            CaptureWriter(),
+        )
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.43", 443))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "dial_via_geph", long_lived_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "clear_geph_route_failure",
+        lambda: clears.append("clear"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "log_geph_route_failure",
+        lambda *_args, **_kwargs: pytest.fail("healthy payload is not a failure"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_transparent_routing",
+        lambda _reason: pytest.fail("healthy payload must not pause routing"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_runtime_route_circuit_now_ms",
+        lambda: next(clock),
+    )
+
+    async def scenario():
+        task = asyncio.create_task(tproxy._handle_impl(client, writer))
+        for _ in range(20):
+            if writer.payload:
+                break
+            await asyncio.sleep(0)
+        assert bytes(writer.payload) == response
+        assert tproxy.runtime_route_circuit_snapshot() == ()
+        assert tproxy.runtime_route_circuit_allows(
+            policy,
+            tproxy.GEO_BACKEND_GEPH,
+            owned=True,
+            now_ms=1003,
+        ) is True
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+    assert clears == ["clear"]
+    assert tproxy.geph_active_session_count() == 0
+
+
 def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
     """Unclassified sites keep trying their local ladder independently."""
     isolate_runtime_state(monkeypatch)

@@ -92,4 +92,6 @@ request-local races. Production records one result only after a complete
 protected local ladder, a proven Smart DNS attempt, or a verified owned Geph
 attempt. Tests prove that individual desync failures do not open the local
 circuit, Smart DNS suppression still permits the separately keyed owned-Geph
-candidate, and unknown hosts neither persist state nor acquire a Geph edge.
+candidate, an owned-Geph half-open permit is released on the first payload of a
+still-live WebSocket, and unknown hosts neither persist state nor acquire a Geph
+edge.
