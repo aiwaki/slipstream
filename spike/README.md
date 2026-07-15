@@ -1,41 +1,23 @@
-# voiceprobe — Slipstream voice-plane de-risk spike (THROWAWAY)
+# Python daemon
 
-Validates: on macOS, entitlement-free, can we observe Discord voice UDP (libpcap)
-and inject low-TTL fake primes on the same 5-tuple (raw/L3 send) to unblock voice
-on a DPI-throttled network, without touching Discord's own socket?
+This directory contains the macOS routing daemon, its pure policy and recovery
+modules, packaging configuration, tests, and archived network experiments.
 
-NOT production. Becomes Rust `bypass-engine` + `bypassd` once validated.
+| Path | Purpose |
+|---|---|
+| `tproxy.py` | Packaged daemon entry point and connection orchestration. |
+| `routing_policy.py` | Route classification without system side effects. |
+| `routing_recovery.py` | Recovery reducer and safe action selection. |
+| `connection_*.py`, `route_circuit*.py` | Connection attempts, racing, and bounded circuit state. |
+| `geph_backend.py`, `pf_adapter.py` | Owned Geph and private PF-anchor adapters. |
+| `slipstreamd.spec`, `build_daemon.sh` | PyInstaller packaging. |
+| `test_*.py` | Unit, contract, and regression tests. |
 
-## Setup
-```bash
-cd slipstream/spike
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
+Setup, safe test commands, and build instructions are in
+[`../DEVELOPMENT.md`](../DEVELOPMENT.md). Privileged lifecycle checks belong on
+disposable CI runners, not on a primary workstation.
 
-## Unit tests (no root, no network)
-```bash
-pytest -v
-```
+## Archived research
 
-## Run (needs root; scapy uses libpcap)
-```bash
-sudo .venv/bin/python voiceprobe.py selftest --iface en0
-sudo .venv/bin/python voiceprobe.py capture  --iface en0   # join a Discord call
-sudo .venv/bin/python voiceprobe.py live     --iface en0   # join a call; voice must be blocked otherwise
-```
-Find your interface with `route get default | grep interface`.
-
-## Safety
-This tool ONLY sniffs and emits extra decoy UDP datagrams. It does NOT modify pf,
-routes, DNS, or Discord's sockets. Ctrl-C stops it instantly; nothing persists.
-Blast radius is minimal — that is why this is the first step.
-
-## Pass/Fail
-- selftest PASS: injected fake observed leaving the iface with ttl=4 and the exact
-  5-tuple we set.
-- capture PASS: we see and correctly classify (stun / ip-discovery / rtp) outbound
-  voice datagrams during a call.
-- live PASS: with voice otherwise blocked, running `live` lets a Discord call
-  connect and you hear other people.
-- live FAIL: voice still dead → pivot voice plane to the utun fallback (spec §3).
+[`VOICEPROBE.md`](VOICEPROBE.md) documents an earlier Discord voice-plane
+experiment. It is not part of the current runtime or supported routing policy.

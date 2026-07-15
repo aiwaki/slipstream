@@ -21,5 +21,5 @@ echo "built dist/slipstreamd/  (self-contained, no Python needed)"
 echo
 echo "1) validate the freeze (no root — checks scapy import + status path):"
 echo "     ./dist/slipstreamd/slipstreamd --status"
-echo "2) install from the frozen binary (replaces the venv daemon):"
-echo "     sudo ./dist/slipstreamd/slipstreamd --install"
+echo "2) qualify privileged lifecycle only on disposable CI/test machines:"
+echo "     see ../DEVELOPMENT.md"
