@@ -144,12 +144,27 @@ def _reachable_cargo_package_ids(metadata: dict, path: Path) -> set[str]:
         if not isinstance(node, dict):
             raise ValueError(f"invalid Cargo resolve node in {path}")
         package_id = node.get("id")
-        node_dependencies = node.get("dependencies")
+        node_dependencies = node.get("deps")
         if not isinstance(package_id, str) or not isinstance(node_dependencies, list):
             raise ValueError(f"invalid Cargo resolve node in {path}")
-        if not all(isinstance(value, str) and value for value in node_dependencies):
-            raise ValueError(f"invalid Cargo dependency list for {package_id}")
-        dependencies[package_id] = tuple(node_dependencies)
+        runtime_dependencies: list[str] = []
+        for dependency in node_dependencies:
+            if not isinstance(dependency, dict):
+                raise ValueError(f"invalid Cargo dependency for {package_id}")
+            dependency_id = dependency.get("pkg")
+            dependency_kinds = dependency.get("dep_kinds")
+            if not isinstance(dependency_id, str) or not isinstance(
+                dependency_kinds, list
+            ):
+                raise ValueError(f"invalid Cargo dependency for {package_id}")
+            if not dependency_kinds or not all(
+                isinstance(kind, dict) and kind.get("kind") in {None, "build", "dev"}
+                for kind in dependency_kinds
+            ):
+                raise ValueError(f"invalid Cargo dependency kind for {package_id}")
+            if any(kind.get("kind") != "dev" for kind in dependency_kinds):
+                runtime_dependencies.append(dependency_id)
+        dependencies[package_id] = tuple(runtime_dependencies)
     if root not in dependencies:
         raise ValueError(f"Cargo resolve root is missing from {path}")
 

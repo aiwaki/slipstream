@@ -65,23 +65,42 @@ checksum = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
                             "id": serde_id,
                             "name": "serde",
                             "version": "1.0.228",
-                            "source": "registry+https://github.com/rust-lang/crates.io-index",
+                            "source": (
+                                "registry+https://github.com/"
+                                "rust-lang/crates.io-index"
+                            ),
                             "license": "MIT OR Apache-2.0",
                         },
                         {
                             "id": gtk_id,
                             "name": "gtk",
                             "version": "0.18.2",
-                            "source": "registry+https://github.com/rust-lang/crates.io-index",
+                            "source": (
+                                "registry+https://github.com/"
+                                "rust-lang/crates.io-index"
+                            ),
                             "license": "MIT",
                         },
                     ],
                     "resolve": {
                         "root": root_id,
                         "nodes": [
-                            {"id": root_id, "dependencies": [serde_id]},
-                            {"id": serde_id, "dependencies": []},
-                            {"id": gtk_id, "dependencies": []},
+                            {
+                                "id": root_id,
+                                "dependencies": [serde_id, gtk_id],
+                                "deps": [
+                                    {
+                                        "pkg": serde_id,
+                                        "dep_kinds": [{"kind": None, "target": None}],
+                                    },
+                                    {
+                                        "pkg": gtk_id,
+                                        "dep_kinds": [{"kind": "dev", "target": None}],
+                                    },
+                                ],
+                            },
+                            {"id": serde_id, "dependencies": [], "deps": []},
+                            {"id": gtk_id, "dependencies": [], "deps": []},
                         ],
                     },
                 },

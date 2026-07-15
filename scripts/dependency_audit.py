@@ -79,6 +79,7 @@ def load_policy(path: Path) -> dict:
     if not isinstance(exceptions, list):
         raise ValueError("dependency audit exceptions must be a list")
     exception_ids: set[str] = set()
+    exception_keys: set[tuple[str, str, str, str]] = set()
     for exception in exceptions:
         if not isinstance(exception, dict):
             raise ValueError("dependency audit exception is invalid")
@@ -107,6 +108,19 @@ def load_policy(path: Path) -> dict:
             isinstance(value, str) and value for value in advisories
         ):
             raise ValueError(f"invalid advisories for exception {exception['id']}")
+        for advisory_id in advisories:
+            key = (
+                exception["ecosystem"],
+                exception["package"],
+                exception["version"],
+                advisory_id,
+            )
+            if key in exception_keys:
+                raise ValueError(
+                    "dependency audit exceptions overlap for "
+                    f"{exception['package']} {exception['version']} {advisory_id}"
+                )
+            exception_keys.add(key)
     return policy
 
 
@@ -195,6 +209,7 @@ def verify_scanner(*, scanner_path: Path, policy: dict, platform: str) -> dict:
         capture_output=True,
         text=True,
         check=False,
+        shell=False,
         timeout=15,
     )
     version_output = f"{completed.stdout}\n{completed.stderr}"
@@ -227,6 +242,7 @@ def run_osv_scan(*, scanner_path: Path, sbom_path: Path) -> dict:
             capture_output=True,
             text=True,
             check=False,
+            shell=False,
             timeout=300,
         )
         if completed.returncode not in {0, 1}:
@@ -394,6 +410,11 @@ def build_audit_report(
         policy=policy,
         evaluated_on=evaluated_on,
     )
+    sbom_package_count = _sbom_package_count(sbom_path)
+    if packages_scanned != sbom_package_count:
+        raise ValueError(
+            "dependency scanner package count does not match the release SBOM"
+        )
     counts = {
         classification: sum(
             finding["classification"] == classification for finding in findings
@@ -445,6 +466,14 @@ def write_json_atomic(path: Path, data: dict) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _sbom_package_count(path: Path) -> int:
+    sbom = _read_json_object(path, "release SBOM")
+    packages = sbom.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("release SBOM does not contain packages")
+    return len(packages)
 
 
 def validate_audit_report(
@@ -521,6 +550,10 @@ def validate_audit_report(
         or packages_scanned <= 0
     ):
         raise ValueError("dependency audit did not scan any packages")
+    if packages_scanned != _sbom_package_count(sbom_path):
+        raise ValueError(
+            "dependency audit package count does not match the release SBOM"
+        )
     exceptions = {item["id"]: item for item in policy["exceptions"]}
     for finding in findings:
         if not isinstance(finding, dict):

@@ -66,7 +66,28 @@ class DependencyAuditTests(unittest.TestCase):
     ) -> tuple[dict, Path]:
         policy = dependency_audit.load_policy(POLICY_PATH)
         sbom = root / "Slipstream.spdx.json"
-        sbom.write_text('{"spdxVersion":"SPDX-2.3"}\n', encoding="utf-8")
+        packages = {
+            (
+                entry["package"]["ecosystem"],
+                entry["package"]["name"],
+                entry["package"]["version"],
+            )
+            for source in result["results"]
+            for entry in source["packages"]
+        }
+        sbom.write_text(
+            json.dumps(
+                {
+                    "spdxVersion": "SPDX-2.3",
+                    "packages": [
+                        {"SPDXID": f"SPDXRef-Package-{index}"}
+                        for index, _ in enumerate(sorted(packages), start=1)
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         report = dependency_audit.build_audit_report(
             osv_result=result,
             policy=policy,
@@ -143,6 +164,19 @@ class DependencyAuditTests(unittest.TestCase):
             self.assertEqual(report["status"], "fail")
             self.assertEqual(report["summary"]["blocking"], 1)
 
+    def test_policy_rejects_overlapping_exceptions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy = dependency_audit.load_policy(POLICY_PATH)
+            duplicate = copy.deepcopy(policy["exceptions"][0])
+            duplicate["id"] = "overlapping-review"
+            policy["exceptions"].append(duplicate)
+            path = root / "policy.json"
+            path.write_text(json.dumps(policy), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "overlap"):
+                dependency_audit.load_policy(path)
+
     def test_expired_or_version_mismatched_exception_blocks(self) -> None:
         result = osv_result(
             (
@@ -192,6 +226,17 @@ class DependencyAuditTests(unittest.TestCase):
             tampered = copy.deepcopy(report)
             tampered["summary"]["advisories"] = 1
             with self.assertRaisesRegex(ValueError, "advisory count"):
+                dependency_audit.validate_audit_report(
+                    tampered,
+                    policy_path=POLICY_PATH,
+                    sbom_path=sbom,
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
+
+            tampered = copy.deepcopy(report)
+            tampered["summary"]["packages_scanned"] = 999
+            with self.assertRaisesRegex(ValueError, "package count"):
                 dependency_audit.validate_audit_report(
                     tampered,
                     policy_path=POLICY_PATH,
