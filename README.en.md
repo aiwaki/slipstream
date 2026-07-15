@@ -57,8 +57,11 @@ testable cross-platform surface lives in `contracts/`.
 - [Setup and build](DEVELOPMENT.md#setup)
 - [Safe local checks without root](DEVELOPMENT.md#safe-local-checks)
 - [Privileged checks on disposable CI only](DEVELOPMENT.md#privileged-qualification)
+- [Architecture and component boundaries](docs/ARCHITECTURE.md)
 - [Engineering documentation map](docs/README.md)
 - [Routing and recovery contracts](contracts/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Report a vulnerability](SECURITY.md)
 - [Roadmap](docs/ROADMAP.md)
 
 ## Privacy and licenses

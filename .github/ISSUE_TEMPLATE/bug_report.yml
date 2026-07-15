@@ -1,0 +1,55 @@
+name: Сообщить об ошибке
+description: Воспроизводимая проблема в Slipstream
+title: "[Ошибка] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Для уязвимостей используется приватная форма из SECURITY.md, а не публичный issue.
+  - type: input
+    id: version
+    attributes:
+      label: Версия Slipstream
+      placeholder: "0.1.8 or 0.1.8-preview.N"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Система
+      placeholder: "Версия macOS, устройство, браузер или затронутое приложение"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Проблема
+      description: Что произошло и какая минимальная последовательность это воспроизводит.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Диагностика без приватных данных
+      description: Вставить Copy Diagnostics после удаления секретов, токенов, хостов и других приватных данных.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Сетевая среда
+      description: Указать внешний DNS, proxy, PAC или VPN без публикации учётных данных.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Подтверждение
+      options:
+        - label: Из отчёта удалены секреты и приватные данные.
+          required: true
+        - label: Проверены существующие issues с тем же симптомом.
+          required: true

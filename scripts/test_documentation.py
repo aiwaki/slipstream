@@ -10,8 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = (
     ROOT / "README.md",
     ROOT / "README.en.md",
+    ROOT / "CONTRIBUTING.md",
+    ROOT / "SECURITY.md",
     ROOT / "DEVELOPMENT.md",
     ROOT / "docs" / "README.md",
+    ROOT / "docs" / "ARCHITECTURE.md",
+    ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md",
     ROOT / "spike" / "README.md",
     ROOT / "spike" / "VOICEPROBE.md",
 )
@@ -40,6 +44,9 @@ class DocumentationTests(unittest.TestCase):
     def test_root_readmes_are_safe_and_current(self) -> None:
         required_links = (
             "DEVELOPMENT.md",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "docs/ARCHITECTURE.md",
             "docs/README.md",
             "contracts/README.md",
             "docs/ROADMAP.md",
@@ -82,6 +89,18 @@ class DocumentationTests(unittest.TestCase):
     def test_build_script_does_not_recommend_installing_the_daemon(self) -> None:
         text = (ROOT / "spike" / "build_daemon.sh").read_text(encoding="utf-8")
         self.assertIsNone(re.search(r"sudo\s+.*--install", text))
+
+    def test_public_contribution_surface_preserves_safety_boundaries(self) -> None:
+        contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        issue_template = (
+            ROOT / ".github" / "ISSUE_TEMPLATE" / "bug_report.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("disposable CI", contributing)
+        self.assertIn("primary workstation", contributing)
+        self.assertIn("GitHub Security Advisories", security)
+        self.assertIn("удаления секретов", issue_template)
 
 
 if __name__ == "__main__":
