@@ -32,6 +32,10 @@ ACTION_PINS = {
         "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         "v7.0.1",
     ),
+    "softprops/action-gh-release": (
+        "3d0d9888cb7fd7b750713d6e236d1fcb99157228",
+        "v3.0.2",
+    ),
 }
 
 
@@ -136,7 +140,8 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("if: steps.ver.outputs.channel == 'stable'", workflow)
         self.assertIn('--channel "${{ steps.ver.outputs.channel }}"', workflow)
-        self.assertIn("Preview releases omit the remote policy channel.", workflow)
+        self.assertIn("omits remote policy channel assets", workflow)
+        self.assertIn("signed remote policy channel assets", workflow)
 
     def test_release_workflow_qualifies_the_built_app_before_publish(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
@@ -197,10 +202,14 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--base main", workflow)
         self.assertNotIn("git push origin HEAD:main", workflow)
         self.assertNotIn("git push ||", workflow)
+        self.assertNotIn("gh pr review", workflow)
+        self.assertNotIn("gh pr merge", workflow)
+        self.assertNotIn("--auto", workflow)
 
-    def test_official_actions_are_node24_release_pins(self) -> None:
+    def test_release_actions_use_reviewed_immutable_pins(self) -> None:
         pattern = re.compile(
-            r"uses:\s+(actions/(?:checkout|setup-python|setup-node|cache|upload-artifact))"
+            r"uses:\s+((?:actions/(?:checkout|setup-python|setup-node|cache|upload-artifact))"
+            r"|(?:softprops/action-gh-release))"
             r"@([0-9a-f]{40})\s+#\s+(v[^\s]+)"
         )
         seen: set[str] = set()
@@ -245,6 +254,21 @@ class BuildConfigTests(unittest.TestCase):
             timeout=5,
         )
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
+
+    def test_release_kinds_cannot_replace_each_others_latest_pointer(self) -> None:
+        app = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        geph = (ROOT / ".github/workflows/build-geph.yml").read_text(encoding="utf-8")
+
+        self.assertIn('make_latest="true"', app)
+        self.assertIn('make_latest="false"', app)
+        self.assertIn("make_latest: ${{ steps.ver.outputs.make_latest }}", app)
+        self.assertIn('release_name="Slipstream $v (preview ${GITHUB_RUN_NUMBER})"', app)
+        self.assertIn("body_path: dist-release/release-notes.md", app)
+
+        self.assertIn('branches: ["main"]', geph)
+        self.assertIn("prerelease: true", geph)
+        self.assertIn("make_latest: false", geph)
+        self.assertIn("This is not an app release", geph)
 
     def test_build_dependency_helper_skips_homebrew_when_tools_exist(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

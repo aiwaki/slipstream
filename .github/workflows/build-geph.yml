@@ -15,6 +15,7 @@ on:
   schedule:
     - cron: "17 6 * * *"        # daily: catch a new geph5-client release
   push:
+    branches: ["main"]
     paths:
       - ".github/workflows/build-geph.yml"
 
@@ -156,11 +157,15 @@ jobs:
           path: out/*
 
       - name: Publish vendored binary as a release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: geph-vendor-${{ needs.resolve.outputs.version }}
-          name: "geph5-client ${{ needs.resolve.outputs.version }} (vendored)"
+          name: "Internal dependency: geph5-client ${{ needs.resolve.outputs.version }}"
+          prerelease: true
+          make_latest: false
           body: |
+            Internal build dependency for Slipstream. This is not an app release.
+
             Headless geph5-client built from ${{ env.GEPH_REPO }}@${{ needs.resolve.outputs.version }}
             for embedding in Slipstream. MPL-2.0; source linked above.
             Consumed by the app-build workflow -> Slipstream.app/Contents/Resources.
