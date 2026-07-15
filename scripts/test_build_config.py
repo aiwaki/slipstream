@@ -102,6 +102,19 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('--app-bundle "$app_bundle"', wrapper)
         self.assertIn("GITHUB_ACTIONS", wrapper)
         self.assertIn("--safaridriver-url", wrapper)
+        self.assertNotIn("driver_port=19445", wrapper)
+        self.assertIn('sock.bind(("127.0.0.1", 0))', wrapper)
+        self.assertIn("for attempt in 1 2", wrapper)
+        self.assertIn("Unable to start the server:", wrapper)
+
+        syntax = subprocess.run(
+            ("/bin/bash", "-n", str(ROOT / "scripts/run_packaged_lifecycle_smoke.sh")),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
     def test_packaged_lifecycle_wrapper_refuses_non_ci_execution(self) -> None:
         environment = os.environ.copy()
