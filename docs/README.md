@@ -8,6 +8,7 @@ support notes here.
 
 | Need | Read |
 |---|---|
+| Local setup, safe tests, and build instructions | [../DEVELOPMENT.md](../DEVELOPMENT.md) |
 | Current implementation order | [ROADMAP.md](ROADMAP.md) |
 | Active routing invariants and decisions | [DECISIONS.md](DECISIONS.md) |
 | Operational checks and repeated user symptoms | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
@@ -29,6 +30,9 @@ support notes here.
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 - Put roadmap changes in [ROADMAP.md](ROADMAP.md), not in research notes.
 - Keep root README files short and user-facing.
+- Review `README.md` and `README.en.md` together for every tagged app release and
+  whenever installation, platform support, or user-visible routing behavior
+  changes. Avoid version-specific churn when a stable description is enough.
 
 ## Agent Memory Policy
 
