@@ -27,6 +27,9 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   build:
@@ -54,6 +57,10 @@ jobs:
             make_latest="true"
             release_name="Slipstream $v"
           else
+            [ "$GITHUB_REF" = "refs/heads/main" ] || {
+              echo "manual preview releases must run from refs/heads/main"
+              exit 1
+            }
             input_v="${{ github.event.inputs.version }}"
             if [ -n "$input_v" ] && [ "$input_v" != "$repo_v" ]; then
               echo "workflow version $input_v does not match VERSION ($repo_v)"
@@ -280,23 +287,68 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --target "$SLIPSTREAM_TAURI_TARGET"
 
+      - name: Attest verified release provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist-release/*
+
+      - name: Attest application SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: |
+            dist-release/Slipstream-macos-arm64.zip
+            dist-release/Slipstream.app.tar.gz
+            dist-release/Slipstream_*.dmg
+          sbom-path: dist-release/Slipstream.spdx.json
+
+      - name: Verify stored release attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          signer_workflow="${{ github.repository }}/.github/workflows/build-app.yml"
+          for artifact in dist-release/*; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners >/dev/null
+          done
+          app_artifacts=(
+            dist-release/Slipstream-macos-arm64.zip
+            dist-release/Slipstream.app.tar.gz
+          )
+          for dmg in dist-release/Slipstream_*.dmg; do
+            [ -e "$dmg" ] && app_artifacts+=("$dmg")
+          done
+          for artifact in "${app_artifacts[@]}"; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --deny-self-hosted-runners >/dev/null
+          done
+
       - name: Write release notes
         run: |
           set -euo pipefail
           if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
-            printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
+            printf '%s\n\n%s\n%s\n%s\n%s\n\n%s\n' \
               "Предварительная сборка Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." \
               "- \`Slipstream-macos-arm64.zip\` — приложение для первой установки." \
               "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
               "- \`Slipstream.spdx.json\` — состав зависимостей." \
+              "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
               "Сборка устанавливается вручную, не заменяет stable-канал и не содержит remote policy assets. Нотарификация Apple пока отсутствует." \
               > dist-release/release-notes.md
           else
-            printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
+            printf '%s\n\n%s\n%s\n%s\n%s\n\n%s\n' \
               "Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." \
               "- \`Slipstream-macos-arm64.zip\` — приложение для первой установки." \
               "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
               "- \`Slipstream.spdx.json\` — состав зависимостей." \
+              "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
               "Сборка опубликована в stable-канале вместе с подписанным каналом route policy. Нотарификация Apple пока отсутствует." \
               > dist-release/release-notes.md
           fi

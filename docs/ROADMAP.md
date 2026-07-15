@@ -148,7 +148,9 @@ PF lifecycle qualification.
   installs require hashes and binary wheels.
 - Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
   the matching asset version, checksum, and arm64 architecture. Done for the
-  release workflow; broader signed provenance and attestation remain pending.
+  release workflow. App payloads now receive GitHub OIDC/Sigstore SLSA
+  provenance and SPDX attestations after internal verification; broader
+  dependency auditing remains pending.
 - Set an explicit Tauri target and publish an artifact manifest plus SBOM. Done
   for `aarch64-apple-darwin`: app releases carry a deterministic SPDX 2.3
   inventory and a source-bound SHA-256 manifest for the complete payload set.
