@@ -149,11 +149,16 @@ PF lifecycle qualification.
 - Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
   the matching asset version, checksum, and arm64 architecture. Done for the
   release workflow. App payloads now receive GitHub OIDC/Sigstore SLSA
-  provenance and SPDX attestations after internal verification; broader
-  dependency auditing remains pending.
+  provenance and SPDX attestations after internal verification.
 - Set an explicit Tauri target and publish an artifact manifest plus SBOM. Done
-  for `aarch64-apple-darwin`: app releases carry a deterministic SPDX 2.3
-  inventory and a source-bound SHA-256 manifest for the complete payload set.
+  for `aarch64-apple-darwin`: app releases carry a deterministic, target-resolved
+  SPDX 2.3 inventory and a source-bound SHA-256 manifest for the complete
+  payload set.
+- Audit the exact application SBOM on pull requests, `main`, a weekly schedule,
+  and before every release. Done with a checksum-pinned OSV Scanner and an
+  expiring, fail-closed review policy; the published report is bound into the
+  artifact manifest. Transitive SBOM and vulnerability coverage for the
+  separately built Geph binary remains pending in its vendor workflow.
 - Run full tests and a privileged PF-anchor sentinel test in release CI. The
   release workflow now runs the sentinel against the exact signed `.app` before
   publishing; broader release test coverage remains pending.

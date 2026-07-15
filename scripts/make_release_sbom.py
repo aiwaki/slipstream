@@ -99,33 +99,124 @@ def _python_components(path: Path) -> list[Component]:
     return components
 
 
-def _cargo_components(path: Path) -> list[Component]:
+def _cargo_lock_checksums(path: Path) -> dict[tuple[str, str, str | None], str]:
     with path.open("rb") as handle:
         lock = tomllib.load(handle)
     packages = lock.get("package")
     if not isinstance(packages, list):
         raise ValueError(f"{path} does not contain Cargo packages")
 
-    components: list[Component] = []
+    checksums: dict[tuple[str, str, str | None], str] = {}
     for package in packages:
         if not isinstance(package, dict):
             raise ValueError(f"invalid Cargo package in {path}")
         name = package.get("name")
         version = package.get("version")
         source = package.get("source")
-        if name == "slipstream" and source is None:
-            continue
         if not all(isinstance(value, str) and value for value in (name, version)):
             raise ValueError(f"Cargo package is missing name/version in {path}")
+        if source is not None and not isinstance(source, str):
+            raise ValueError(f"invalid Cargo source for {name} {version}")
 
         checksum = package.get("checksum")
-        checksum_value = None
-        if checksum is not None:
-            if not isinstance(checksum, str) or not re.fullmatch(
-                r"[0-9a-f]{64}", checksum
+        if checksum is None:
+            continue
+        if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
+            raise ValueError(f"invalid Cargo checksum for {name} {version}")
+        key = (name, version, source)
+        if key in checksums and checksums[key] != checksum:
+            raise ValueError(f"ambiguous Cargo checksum for {name} {version}")
+        checksums[key] = checksum
+    return checksums
+
+
+def _reachable_cargo_package_ids(metadata: dict, path: Path) -> set[str]:
+    resolve = metadata.get("resolve")
+    if not isinstance(resolve, dict):
+        raise ValueError(f"{path} does not contain a resolved Cargo graph")
+    root = resolve.get("root")
+    nodes = resolve.get("nodes")
+    if not isinstance(root, str) or not root or not isinstance(nodes, list):
+        raise ValueError(f"{path} Cargo resolve graph is incomplete")
+
+    dependencies: dict[str, tuple[str, ...]] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError(f"invalid Cargo resolve node in {path}")
+        package_id = node.get("id")
+        node_dependencies = node.get("deps")
+        if not isinstance(package_id, str) or not isinstance(node_dependencies, list):
+            raise ValueError(f"invalid Cargo resolve node in {path}")
+        runtime_dependencies: list[str] = []
+        for dependency in node_dependencies:
+            if not isinstance(dependency, dict):
+                raise ValueError(f"invalid Cargo dependency for {package_id}")
+            dependency_id = dependency.get("pkg")
+            dependency_kinds = dependency.get("dep_kinds")
+            if not isinstance(dependency_id, str) or not isinstance(
+                dependency_kinds, list
             ):
-                raise ValueError(f"invalid Cargo checksum for {name} {version}")
-            checksum_value = checksum
+                raise ValueError(f"invalid Cargo dependency for {package_id}")
+            if not dependency_kinds or not all(
+                isinstance(kind, dict) and kind.get("kind") in {None, "build", "dev"}
+                for kind in dependency_kinds
+            ):
+                raise ValueError(f"invalid Cargo dependency kind for {package_id}")
+            if any(kind.get("kind") != "dev" for kind in dependency_kinds):
+                runtime_dependencies.append(dependency_id)
+        dependencies[package_id] = tuple(runtime_dependencies)
+    if root not in dependencies:
+        raise ValueError(f"Cargo resolve root is missing from {path}")
+
+    reachable: set[str] = set()
+    pending = [root]
+    while pending:
+        package_id = pending.pop()
+        if package_id in reachable:
+            continue
+        reachable.add(package_id)
+        try:
+            pending.extend(dependencies[package_id])
+        except KeyError as exc:
+            raise ValueError(
+                f"Cargo dependency {package_id} is missing from {path}"
+            ) from exc
+    reachable.remove(root)
+    return reachable
+
+
+def _cargo_components(metadata_path: Path, lock_path: Path) -> list[Component]:
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if not isinstance(metadata, dict):
+        raise ValueError(f"{metadata_path} must contain a Cargo metadata object")
+    packages = metadata.get("packages")
+    if not isinstance(packages, list):
+        raise ValueError(f"{metadata_path} does not contain Cargo packages")
+    reachable = _reachable_cargo_package_ids(metadata, metadata_path)
+    checksums = _cargo_lock_checksums(lock_path)
+
+    packages_by_id: dict[str, dict] = {}
+    for package in packages:
+        if not isinstance(package, dict) or not isinstance(package.get("id"), str):
+            raise ValueError(f"invalid Cargo package in {metadata_path}")
+        packages_by_id[package["id"]] = package
+    missing = sorted(reachable - packages_by_id.keys())
+    if missing:
+        raise ValueError(f"Cargo metadata is missing resolved package {missing[0]}")
+
+    components: list[Component] = []
+    for package_id in sorted(reachable):
+        package = packages_by_id[package_id]
+        name = package.get("name")
+        version = package.get("version")
+        source = package.get("source")
+        if not all(isinstance(value, str) and value for value in (name, version)):
+            raise ValueError(
+                f"Cargo package is missing name/version in {metadata_path}"
+            )
+        if source is not None and not isinstance(source, str):
+            raise ValueError(f"invalid Cargo source for {name} {version}")
+        checksum_value = checksums.get((name, version, source))
 
         if isinstance(source, str) and source.startswith("registry+"):
             download_location = (
@@ -144,6 +235,11 @@ def _cargo_components(path: Path) -> list[Component]:
                 version=version,
                 download_location=download_location,
                 purl=_purl("cargo", name, version),
+                license_declared=(
+                    package["license"]
+                    if isinstance(package.get("license"), str) and package["license"]
+                    else "NOASSERTION"
+                ),
                 checksum_algorithm="SHA256" if checksum_value else None,
                 checksum_value=checksum_value,
             )
@@ -207,6 +303,7 @@ def _npm_components(path: Path) -> list[Component]:
 def collect_components(
     *,
     cargo_lock: Path,
+    cargo_metadata: Path,
     npm_lock: Path,
     python_lock: Path,
     geph_version_file: Path,
@@ -217,7 +314,7 @@ def collect_components(
         tg_ws_proxy_version_file, "tg-ws-proxy"
     )
     components = [
-        *_cargo_components(cargo_lock),
+        *_cargo_components(cargo_metadata, cargo_lock),
         *_npm_components(npm_lock),
         *_python_components(python_lock),
         Component(
@@ -490,6 +587,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-date-epoch", required=True, type=int)
     parser.add_argument("--target", required=True)
     parser.add_argument("--cargo-lock", required=True, type=Path)
+    parser.add_argument("--cargo-metadata", required=True, type=Path)
     parser.add_argument("--npm-lock", required=True, type=Path)
     parser.add_argument("--python-lock", required=True, type=Path)
     parser.add_argument("--geph-version-file", required=True, type=Path)
@@ -502,6 +600,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     components = collect_components(
         cargo_lock=args.cargo_lock,
+        cargo_metadata=args.cargo_metadata,
         npm_lock=args.npm_lock,
         python_lock=args.python_lock,
         geph_version_file=args.geph_version_file,

@@ -152,14 +152,36 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("Verify release artifacts", workflow)
         self.assertIn("scripts/verify_release_artifacts.py", workflow)
         self.assertIn("--release-dir dist-release", workflow)
-        self.assertIn("Build deterministic SPDX SBOM", workflow)
+        self.assertIn("Build deterministic target SPDX SBOM", workflow)
         self.assertIn("scripts/make_release_sbom.py", workflow)
+        self.assertIn("Resolve target dependency graph", workflow)
+        self.assertIn("cargo metadata", workflow)
+        self.assertIn("--filter-platform \"$SLIPSTREAM_TAURI_TARGET\"", workflow)
+        self.assertIn("--cargo-metadata /tmp/slipstream-cargo-metadata.json", workflow)
+        self.assertIn("Audit release dependencies", workflow)
+        self.assertIn("scripts/dependency_audit.py scan", workflow)
+        self.assertIn("security/dependency-audit-policy.json", workflow)
+        self.assertIn("dist-release/dependency-audit.json", workflow)
         self.assertIn("Build release artifact manifest", workflow)
         self.assertIn("scripts/make_release_manifest.py", workflow)
         self.assertIn("dist-release/Slipstream.spdx.json", workflow)
         self.assertIn("dist-release/artifact-manifest.json", workflow)
         self.assertIn('--source-commit "$GITHUB_SHA"', workflow)
         self.assertIn('--target "$SLIPSTREAM_TAURI_TARGET"', workflow)
+
+    def test_dependency_audit_runs_on_changes_and_on_a_schedule(self) -> None:
+        workflow = (
+            ROOT / ".github/workflows/dependency-audit.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("schedule:", workflow)
+        self.assertIn('cron: "17 4 * * 1"', workflow)
+        self.assertIn("--platform linux-amd64", workflow)
+        self.assertIn("--filter-platform \"$SLIPSTREAM_TAURI_TARGET\"", workflow)
+        self.assertIn("scripts/dependency_audit.py scan", workflow)
+        self.assertIn("scripts/dependency_audit.py verify", workflow)
+        self.assertIn("dist-audit/dependency-audit.json", workflow)
 
     def test_release_workflow_uses_the_recorded_verified_geph_artifact(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")

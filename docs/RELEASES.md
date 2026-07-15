@@ -24,7 +24,8 @@ compatible app release.
 | `Slipstream.app.tar.gz.sig` | Tauri updater signature |
 | `latest.json` | Tauri updater index |
 | `artifact-manifest.json` | Target, source commit, byte size, and SHA-256 for every release payload asset |
-| `Slipstream.spdx.json` | Deterministic SPDX 2.3 inventory derived from pinned source locks and vendored versions |
+| `Slipstream.spdx.json` | Deterministic SPDX 2.3 inventory for the resolved `aarch64-apple-darwin` graph, pinned runtime locks, and top-level vendored components |
+| `dependency-audit.json` | Source-, target-, SBOM-, policy-, and scanner-bound vulnerability audit result |
 
 Stable releases additionally carry the signed route-policy bundle, channel
 index, and public trust keys. Preview releases must not contain those assets.
@@ -33,6 +34,21 @@ The manifest and SBOM use the source commit timestamp rather than workflow wall
 clock time. Release verification rejects missing, empty, unexpected, symlinked,
 or modified files before publication. The macOS build target is explicitly
 `aarch64-apple-darwin`.
+
+## Dependency Audit
+
+Pull requests, `main`, a weekly scheduled run, and every app release scan the
+target-specific SPDX inventory with a checksum-pinned OSV Scanner. The reviewed
+policy in [`../security/dependency-audit-policy.json`](../security/dependency-audit-policy.json)
+records informational advisories, blocks every unreviewed vulnerability, and
+allows only exact package/version/advisory exceptions with an expiry date.
+Scanner failures and empty inventories fail closed.
+
+The published report is part of `artifact-manifest.json`, and release
+verification recomputes its SBOM and policy hashes. The current inventory lists
+Geph and `tg-ws-proxy` as top-level vendored applications; their transitive
+dependency graphs require separate vendor-build SBOMs and are not yet claimed
+as covered by the app audit.
 
 ## Publication
 

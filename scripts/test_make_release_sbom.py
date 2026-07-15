@@ -35,7 +35,78 @@ name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[[package]]
+name = "gtk"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 """,
+            encoding="utf-8",
+        )
+        root_id = "path+file:///repo#slipstream@0.1.8"
+        serde_id = (
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"
+        )
+        gtk_id = "registry+https://github.com/rust-lang/crates.io-index#gtk@0.18.2"
+        cargo_metadata = root / "cargo-metadata.json"
+        cargo_metadata.write_text(
+            json.dumps(
+                {
+                    "packages": [
+                        {
+                            "id": root_id,
+                            "name": "slipstream",
+                            "version": VERSION,
+                            "source": None,
+                            "license": "MIT",
+                        },
+                        {
+                            "id": serde_id,
+                            "name": "serde",
+                            "version": "1.0.228",
+                            "source": (
+                                "registry+https://github.com/"
+                                "rust-lang/crates.io-index"
+                            ),
+                            "license": "MIT OR Apache-2.0",
+                        },
+                        {
+                            "id": gtk_id,
+                            "name": "gtk",
+                            "version": "0.18.2",
+                            "source": (
+                                "registry+https://github.com/"
+                                "rust-lang/crates.io-index"
+                            ),
+                            "license": "MIT",
+                        },
+                    ],
+                    "resolve": {
+                        "root": root_id,
+                        "nodes": [
+                            {
+                                "id": root_id,
+                                "dependencies": [serde_id, gtk_id],
+                                "deps": [
+                                    {
+                                        "pkg": serde_id,
+                                        "dep_kinds": [{"kind": None, "target": None}],
+                                    },
+                                    {
+                                        "pkg": gtk_id,
+                                        "dep_kinds": [{"kind": "dev", "target": None}],
+                                    },
+                                ],
+                            },
+                            {"id": serde_id, "dependencies": [], "deps": []},
+                            {"id": gtk_id, "dependencies": [], "deps": []},
+                        ],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
 
@@ -88,6 +159,7 @@ cryptography==46.0.5 \\
         tg_version.write_text("1.8.1\n", encoding="utf-8")
         return {
             "cargo_lock": cargo_lock,
+            "cargo_metadata": cargo_metadata,
             "npm_lock": npm_lock,
             "python_lock": python_lock,
             "geph_version_file": geph_version,
@@ -132,6 +204,7 @@ cryptography==46.0.5 \\
             self.assertIn(("github", "Flowseal/tg-ws-proxy"), identities)
             self.assertNotIn(("npm", "vite"), identities)
             self.assertNotIn(("cargo", "slipstream"), identities)
+            self.assertNotIn(("cargo", "gtk"), identities)
 
             tg_proxy = next(item for item in components if item.ecosystem == "github")
             self.assertEqual(
@@ -200,6 +273,8 @@ cryptography==46.0.5 \\
                 TARGET,
                 "--cargo-lock",
                 str(inputs["cargo_lock"]),
+                "--cargo-metadata",
+                str(inputs["cargo_metadata"]),
                 "--npm-lock",
                 str(inputs["npm_lock"]),
                 "--python-lock",

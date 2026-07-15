@@ -245,7 +245,17 @@ jobs:
           python3 -m json.tool "$OUT/route-policy-latest.json" >/dev/null
           python3 -m json.tool "$OUT/route-policy-keys.json" >/dev/null
 
-      - name: Build deterministic SPDX SBOM
+      - name: Resolve target dependency graph
+        run: |
+          set -euo pipefail
+          cargo metadata \
+            --manifest-path app-tauri/src-tauri/Cargo.toml \
+            --locked \
+            --filter-platform "$SLIPSTREAM_TAURI_TARGET" \
+            --format-version 1 \
+            > /tmp/slipstream-cargo-metadata.json
+
+      - name: Build deterministic target SPDX SBOM
         run: |
           set -euo pipefail
           spike/.buildvenv/bin/python scripts/make_release_sbom.py \
@@ -256,11 +266,37 @@ jobs:
             --source-date-epoch "${{ steps.ver.outputs.source_date_epoch }}" \
             --target "$SLIPSTREAM_TAURI_TARGET" \
             --cargo-lock app-tauri/src-tauri/Cargo.lock \
+            --cargo-metadata /tmp/slipstream-cargo-metadata.json \
             --npm-lock app-tauri/package-lock.json \
             --python-lock spike/requirements-runtime.txt \
             --geph-version-file vendor/geph/VERSION \
             --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
             --output dist-release/Slipstream.spdx.json
+
+      - name: Audit release dependencies
+        run: |
+          set -euo pipefail
+          audit_date="$(date -u +%F)"
+          scanner=/tmp/osv-scanner
+          spike/.buildvenv/bin/python scripts/dependency_audit.py fetch-scanner \
+            --policy security/dependency-audit-policy.json \
+            --platform darwin-arm64 \
+            --output "$scanner"
+          spike/.buildvenv/bin/python scripts/dependency_audit.py scan \
+            --scanner "$scanner" \
+            --platform darwin-arm64 \
+            --sbom dist-release/Slipstream.spdx.json \
+            --policy security/dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --evaluation-date "$audit_date" \
+            --output dist-release/dependency-audit.json
+          spike/.buildvenv/bin/python scripts/dependency_audit.py verify \
+            --report dist-release/dependency-audit.json \
+            --sbom dist-release/Slipstream.spdx.json \
+            --policy security/dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target "$SLIPSTREAM_TAURI_TARGET"
 
       - name: Build release artifact manifest
         run: |
@@ -334,20 +370,22 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
-            printf '%s\n\n%s\n%s\n%s\n%s\n\n%s\n' \
+            printf '%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s\n' \
               "Предварительная сборка Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." \
               "- \`Slipstream-macos-arm64.zip\` — приложение для первой установки." \
               "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
               "- \`Slipstream.spdx.json\` — состав зависимостей." \
+              "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
               "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
               "Сборка устанавливается вручную, не заменяет stable-канал и не содержит remote policy assets. Нотарификация Apple пока отсутствует." \
               > dist-release/release-notes.md
           else
-            printf '%s\n\n%s\n%s\n%s\n%s\n\n%s\n' \
+            printf '%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s\n' \
               "Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." \
               "- \`Slipstream-macos-arm64.zip\` — приложение для первой установки." \
               "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
               "- \`Slipstream.spdx.json\` — состав зависимостей." \
+              "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
               "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
               "Сборка опубликована в stable-канале вместе с подписанным каналом route policy. Нотарификация Apple пока отсутствует." \
               > dist-release/release-notes.md
@@ -371,6 +409,7 @@ jobs:
             dist-release/latest.json
             dist-release/artifact-manifest.json
             dist-release/Slipstream.spdx.json
+            dist-release/dependency-audit.json
             dist-release/route-policy.json
             dist-release/route-policy-latest.json
             dist-release/route-policy-keys.json
