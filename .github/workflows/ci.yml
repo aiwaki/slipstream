@@ -111,6 +111,7 @@ jobs:
             scripts/pf_installed_lifecycle_smoke.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
+            scripts/dependency_audit.py \
             scripts/make_release_manifest.py \
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
@@ -118,6 +119,7 @@ jobs:
             scripts/test_pf_anchor_smoke.py \
             scripts/test_pf_installed_lifecycle_smoke.py \
             scripts/test_make_appcast.py \
+            scripts/test_dependency_audit.py \
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \

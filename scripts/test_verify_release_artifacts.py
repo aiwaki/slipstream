@@ -5,8 +5,10 @@ import io
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import date
 from pathlib import Path
 
+import dependency_audit
 import make_appcast
 import make_release_manifest
 import make_release_sbom
@@ -87,6 +89,38 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
             root / make_release_manifest.SBOM_NAME,
             sbom,
         )
+        policy = dependency_audit.load_policy(dependency_audit.DEFAULT_POLICY)
+        audit = dependency_audit.build_audit_report(
+            osv_result={
+                "results": [
+                    {
+                        "packages": [
+                            {
+                                "package": {
+                                    "ecosystem": "crates.io",
+                                    "name": "serde",
+                                    "version": "1.0.228",
+                                },
+                                "vulnerabilities": [],
+                            }
+                        ]
+                    }
+                ]
+            },
+            policy=policy,
+            policy_path=dependency_audit.DEFAULT_POLICY,
+            sbom_path=root / make_release_manifest.SBOM_NAME,
+            scanner=dependency_audit.expected_scanner_metadata(
+                policy, "darwin-arm64"
+            ),
+            source_commit=SOURCE_COMMIT,
+            target=TARGET,
+            evaluated_on=date(2026, 7, 16),
+        )
+        dependency_audit.write_json_atomic(
+            root / make_release_manifest.DEPENDENCY_AUDIT_NAME,
+            audit,
+        )
         manifest = make_release_manifest.build_artifact_manifest(
             release_dir=root,
             repository=repository,
@@ -120,6 +154,10 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
             self.assertEqual(result["route_policy"]["key_id"], "release")
             self.assertEqual(result["route_policy_channel"]["source"], "bundled")
             self.assertEqual(result["artifact_manifest"]["target"], TARGET)
+            self.assertEqual(
+                result["artifact_manifest"]["dependency_audit"]["packages_scanned"],
+                1,
+            )
 
     def test_accepts_preview_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

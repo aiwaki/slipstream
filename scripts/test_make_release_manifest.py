@@ -6,8 +6,10 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import date
 from pathlib import Path
 
+import dependency_audit
 import make_release_manifest
 import make_release_sbom
 
@@ -58,6 +60,38 @@ class MakeReleaseManifestTests(unittest.TestCase):
         make_release_sbom.write_json_atomic(
             root / make_release_manifest.SBOM_NAME,
             sbom,
+        )
+        policy = dependency_audit.load_policy(dependency_audit.DEFAULT_POLICY)
+        audit = dependency_audit.build_audit_report(
+            osv_result={
+                "results": [
+                    {
+                        "packages": [
+                            {
+                                "package": {
+                                    "ecosystem": "crates.io",
+                                    "name": "serde",
+                                    "version": "1.0.228",
+                                },
+                                "vulnerabilities": [],
+                            }
+                        ]
+                    }
+                ]
+            },
+            policy=policy,
+            policy_path=dependency_audit.DEFAULT_POLICY,
+            sbom_path=root / make_release_manifest.SBOM_NAME,
+            scanner=dependency_audit.expected_scanner_metadata(
+                policy, "darwin-arm64"
+            ),
+            source_commit=SOURCE_COMMIT,
+            target=TARGET,
+            evaluated_on=date(2026, 7, 16),
+        )
+        dependency_audit.write_json_atomic(
+            root / make_release_manifest.DEPENDENCY_AUDIT_NAME,
+            audit,
         )
 
     def _write_manifest(
@@ -110,6 +144,7 @@ class MakeReleaseManifestTests(unittest.TestCase):
                     "Slipstream.app.tar.gz",
                     "Slipstream.app.tar.gz.sig",
                     "Slipstream.spdx.json",
+                    "dependency-audit.json",
                     "latest.json",
                     "route-policy-keys.json",
                     "route-policy-latest.json",
@@ -134,8 +169,9 @@ class MakeReleaseManifestTests(unittest.TestCase):
                 target=TARGET,
             )
 
-            self.assertEqual(result["artifact_count"], 8)
+            self.assertEqual(result["artifact_count"], 9)
             self.assertEqual(result["sbom"]["format"], "SPDX-2.3")
+            self.assertEqual(result["dependency_audit"]["packages_scanned"], 1)
             self.assertEqual(result["target"], TARGET)
 
     def test_validation_rejects_artifact_tampering(self) -> None:
@@ -268,7 +304,7 @@ class MakeReleaseManifestTests(unittest.TestCase):
                 )
 
             result = json.loads(stdout.getvalue())
-            self.assertEqual(result["artifact_count"], 5)
+            self.assertEqual(result["artifact_count"], 6)
             self.assertTrue((root / make_release_manifest.MANIFEST_NAME).is_file())
 
 

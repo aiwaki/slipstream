@@ -1,0 +1,83 @@
+name: dependency-audit
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    env:
+      SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - name: Build target dependency inventory
+        run: |
+          set -euo pipefail
+          mkdir -p dist-audit
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          version="$(tr -d '[:space:]' < VERSION)"
+          cargo metadata \
+            --manifest-path app-tauri/src-tauri/Cargo.toml \
+            --locked \
+            --filter-platform "$SLIPSTREAM_TAURI_TARGET" \
+            --format-version 1 \
+            > /tmp/slipstream-cargo-metadata.json
+          python3 scripts/make_release_sbom.py \
+            --version "$version" \
+            --tag "audit-$GITHUB_SHA" \
+            --repository "${{ github.repository }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$source_date_epoch" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --cargo-lock app-tauri/src-tauri/Cargo.lock \
+            --cargo-metadata /tmp/slipstream-cargo-metadata.json \
+            --npm-lock app-tauri/package-lock.json \
+            --python-lock spike/requirements-runtime.txt \
+            --geph-version-file vendor/geph/VERSION \
+            --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
+            --output dist-audit/Slipstream.spdx.json
+
+      - name: Enforce dependency audit policy
+        run: |
+          set -euo pipefail
+          python3 scripts/dependency_audit.py fetch-scanner \
+            --policy security/dependency-audit-policy.json \
+            --platform linux-amd64 \
+            --output /tmp/osv-scanner
+          python3 scripts/dependency_audit.py scan \
+            --scanner /tmp/osv-scanner \
+            --platform linux-amd64 \
+            --sbom dist-audit/Slipstream.spdx.json \
+            --policy security/dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --evaluation-date "$(date -u +%F)" \
+            --output dist-audit/dependency-audit.json
+          python3 scripts/dependency_audit.py verify \
+            --report dist-audit/dependency-audit.json \
+            --sbom dist-audit/Slipstream.spdx.json \
+            --policy security/dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target "$SLIPSTREAM_TAURI_TARGET"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-audit-${{ github.sha }}
+          path: dist-audit/
+          if-no-files-found: error
+          retention-days: 14

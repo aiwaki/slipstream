@@ -10,6 +10,7 @@ import os
 import stat
 from pathlib import Path
 
+import dependency_audit
 import make_release_sbom
 
 
@@ -17,6 +18,7 @@ MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_GENERATOR = "slipstream-release-manifest-1"
 MANIFEST_NAME = "artifact-manifest.json"
 SBOM_NAME = "Slipstream.spdx.json"
+DEPENDENCY_AUDIT_NAME = dependency_audit.REPORT_NAME
 IGNORED_RELEASE_FILES = {MANIFEST_NAME, "release-notes.md"}
 FIXED_ARTIFACT_TYPES = {
     "Slipstream-macos-arm64.zip": ("first-install", "application/zip"),
@@ -27,6 +29,7 @@ FIXED_ARTIFACT_TYPES = {
     "route-policy-latest.json": ("route-policy-index", "application/json"),
     "route-policy-keys.json": ("route-policy-keys", "application/json"),
     SBOM_NAME: ("sbom", "application/spdx+json"),
+    DEPENDENCY_AUDIT_NAME: ("dependency-audit", "application/json"),
 }
 APP_REQUIRED_ASSETS = {
     "Slipstream-macos-arm64.zip",
@@ -34,6 +37,7 @@ APP_REQUIRED_ASSETS = {
     "Slipstream.app.tar.gz.sig",
     "latest.json",
     SBOM_NAME,
+    DEPENDENCY_AUDIT_NAME,
 }
 ROUTE_POLICY_REQUIRED_ASSETS = {
     "route-policy.json",
@@ -246,12 +250,20 @@ def validate_artifact_manifest(
         source_date_epoch=source_date_epoch,
         target=target,
     )
+    dependency_audit_summary = dependency_audit.validate_audit_report_file(
+        report_path=release_dir / DEPENDENCY_AUDIT_NAME,
+        policy_path=dependency_audit.DEFAULT_POLICY,
+        sbom_path=sbom_path,
+        source_commit=source_commit,
+        target=target,
+    )
     manifest_sha256, manifest_size = hash_regular_file(path)
     return {
         "sha256": manifest_sha256,
         "size": manifest_size,
         "artifact_count": len(actual_artifacts),
         "sbom": sbom_summary,
+        "dependency_audit": dependency_audit_summary,
         "source_date_epoch": source_date_epoch,
         "target": target,
     }

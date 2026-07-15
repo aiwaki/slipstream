@@ -19,6 +19,7 @@ APP_REQUIRED_ASSETS = (
     "Slipstream.app.tar.gz.sig",
     "latest.json",
     make_release_manifest.SBOM_NAME,
+    make_release_manifest.DEPENDENCY_AUDIT_NAME,
     make_release_manifest.MANIFEST_NAME,
 )
 ROUTE_POLICY_REQUIRED_ASSETS = (
