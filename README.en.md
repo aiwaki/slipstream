@@ -33,7 +33,7 @@ PAC, and VPN settings are detected but never changed.
 
 Available build: macOS Apple Silicon.
 
-1. In [Releases](https://github.com/aiwaki/slipstream/releases), select the latest release named `Slipstream … (preview)` and download `Slipstream-macos-arm64.zip`.
+1. In [Releases](https://github.com/aiwaki/slipstream/releases), select the newest `Slipstream` release marked **Pre-release** and download `Slipstream-macos-arm64.zip`.
 2. Extract the archive and move `Slipstream.app` to Applications.
 3. Launch Slipstream and approve installation of the background service.
 
