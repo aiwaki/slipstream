@@ -106,6 +106,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('sock.bind(("127.0.0.1", 0))', wrapper)
         self.assertIn("for attempt in 1 2", wrapper)
         self.assertIn("Unable to start the server:", wrapper)
+        self.assertIn("retrying once on a fresh loopback port", wrapper)
 
         syntax = subprocess.run(
             ("/bin/bash", "-n", str(ROOT / "scripts/run_packaged_lifecycle_smoke.sh")),

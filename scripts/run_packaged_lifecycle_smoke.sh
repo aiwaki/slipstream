@@ -80,6 +80,7 @@ start_driver() {
         if [[ $attempt -eq 1 ]] && /usr/bin/grep -Eq \
           'Unable to start the server: (Operation not permitted|Address already in use)' \
           "$driver_log"; then
+          echo "SafariDriver server unavailable; retrying once on a fresh loopback port" >&2
           sleep 1
           break
         fi
