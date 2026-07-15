@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import make_appcast
+import make_release_manifest
 import make_route_policy_bundle
 
 
@@ -17,6 +18,8 @@ APP_REQUIRED_ASSETS = (
     "Slipstream.app.tar.gz",
     "Slipstream.app.tar.gz.sig",
     "latest.json",
+    make_release_manifest.SBOM_NAME,
+    make_release_manifest.MANIFEST_NAME,
 )
 ROUTE_POLICY_REQUIRED_ASSETS = (
     "route-policy.json",
@@ -119,6 +122,8 @@ def verify_release_artifacts(
     tag: str,
     version: str,
     channel: str = "stable",
+    source_commit: str,
+    target: str,
 ) -> dict:
     release_dir = release_dir.resolve()
     if channel not in RELEASE_CHANNELS:
@@ -160,6 +165,15 @@ def verify_release_artifacts(
             "sha256": policy_channel["sha256"],
         }
         result["route_policy_channel"] = policy_channel
+    result["artifact_manifest"] = make_release_manifest.validate_artifact_manifest(
+        release_dir=release_dir,
+        repository=repository,
+        version=version,
+        tag=tag,
+        channel=channel,
+        source_commit=source_commit,
+        target=target,
+    )
     return result
 
 
@@ -170,6 +184,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--channel", choices=RELEASE_CHANNELS, required=True)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument(
+        "--target",
+        choices=tuple(make_release_manifest.TARGETS),
+        required=True,
+    )
     return parser.parse_args(argv)
 
 
@@ -181,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         tag=args.tag,
         version=args.version,
         channel=args.channel,
+        source_commit=args.source_commit,
+        target=args.target,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

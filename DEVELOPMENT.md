@@ -95,7 +95,9 @@ npm run build:local
 
 Release builds use `npm run build:release` and require the updater signing
 environment. The bundled Geph client is built by
-[`build-geph.yml`](.github/workflows/build-geph.yml).
+[`build-geph.yml`](.github/workflows/build-geph.yml). Release tag namespaces,
+channels, and published artifact contracts are documented in
+[`docs/RELEASES.md`](docs/RELEASES.md).
 
 ## Privileged qualification
 

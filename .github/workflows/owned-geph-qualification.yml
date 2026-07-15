@@ -16,6 +16,8 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 35
     environment: geph-qualification
+    env:
+      SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -96,12 +98,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npm run build:local -- --bundles app
+          npm run build:local -- --target "$SLIPSTREAM_TAURI_TARGET" --bundles app
 
       - name: Verify packaged resources
         run: |
           set -euo pipefail
-          app="app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app"
+          app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
           test -d "$app"
           /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
@@ -126,7 +128,7 @@ jobs:
           set -euo pipefail
           test -n "$SLIPSTREAM_GEPH_ACCOUNT_SECRET"
           python3 scripts/geph_owned_lifecycle_smoke.py \
-            --app-bundle app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app
+            --app-bundle "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
 
       - name: Verify the user-level gate left no system path
         if: always()

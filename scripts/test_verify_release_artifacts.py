@@ -8,8 +8,15 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 import make_appcast
+import make_release_manifest
+import make_release_sbom
 import make_route_policy_bundle
 import verify_release_artifacts
+
+
+SOURCE_COMMIT = "a" * 40
+SOURCE_DATE_EPOCH = 1_783_600_000
+TARGET = "aarch64-apple-darwin"
 
 
 class VerifyReleaseArtifactsTests(unittest.TestCase):
@@ -67,6 +74,34 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+        sbom = make_release_sbom.build_spdx_document(
+            version=version,
+            tag=tag,
+            repository=repository,
+            source_commit=SOURCE_COMMIT,
+            source_date_epoch=SOURCE_DATE_EPOCH,
+            target=TARGET,
+            components=[],
+        )
+        make_release_sbom.write_json_atomic(
+            root / make_release_manifest.SBOM_NAME,
+            sbom,
+        )
+        manifest = make_release_manifest.build_artifact_manifest(
+            release_dir=root,
+            repository=repository,
+            version=version,
+            tag=tag,
+            channel="stable" if include_route_policy else "preview",
+            source_commit=SOURCE_COMMIT,
+            source_date_epoch=SOURCE_DATE_EPOCH,
+            target=TARGET,
+        )
+        make_release_sbom.write_json_atomic(
+            root / make_release_manifest.MANIFEST_NAME,
+            manifest,
+        )
+
     def test_accepts_complete_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -77,11 +112,14 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                 repository="aiwaki/slipstream",
                 tag="v0.1.5",
                 version="0.1.5",
+                source_commit=SOURCE_COMMIT,
+                target=TARGET,
             )
 
             self.assertEqual(result["version"], "0.1.5")
             self.assertEqual(result["route_policy"]["key_id"], "release")
             self.assertEqual(result["route_policy_channel"]["source"], "bundled")
+            self.assertEqual(result["artifact_manifest"]["target"], TARGET)
 
     def test_accepts_preview_release_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,6 +133,8 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                 tag=tag,
                 version="0.1.5",
                 channel="preview",
+                source_commit=SOURCE_COMMIT,
+                target=TARGET,
             )
 
             self.assertEqual(result["tag"], tag)
@@ -114,6 +154,8 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     tag=tag,
                     version="0.1.5",
                     channel="stable",
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
                 )
 
     def test_rejects_route_policy_channel_hash_mismatch(self) -> None:
@@ -131,6 +173,8 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     repository="aiwaki/slipstream",
                     tag="v0.1.5",
                     version="0.1.5",
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
                 )
 
     def test_rejects_appcast_url_for_wrong_release(self) -> None:
@@ -151,6 +195,65 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                     repository="aiwaki/slipstream",
                     tag="v0.1.5",
                     version="0.1.5",
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
+
+    def test_rejects_artifact_changed_after_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_release_dir(root)
+            (root / "Slipstream-macos-arm64.zip").write_bytes(b"changed")
+
+            with self.assertRaisesRegex(ValueError, "hashes, sizes, or files"):
+                verify_release_artifacts.verify_release_artifacts(
+                    release_dir=root,
+                    repository="aiwaki/slipstream",
+                    tag="v0.1.5",
+                    version="0.1.5",
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
+
+    def test_rejects_manifest_for_different_source_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_release_dir(root)
+
+            with self.assertRaisesRegex(ValueError, "source commit"):
+                verify_release_artifacts.verify_release_artifacts(
+                    release_dir=root,
+                    repository="aiwaki/slipstream",
+                    tag="v0.1.5",
+                    version="0.1.5",
+                    source_commit="b" * 40,
+                    target=TARGET,
+                )
+
+    def test_rejects_manifest_for_different_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_release_dir(root)
+            manifest_path = root / make_release_manifest.MANIFEST_NAME
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["build"] = {
+                "target": "x86_64-apple-darwin",
+                "platform": "macos",
+                "architecture": "x86_64",
+            }
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "build target"):
+                verify_release_artifacts.verify_release_artifacts(
+                    release_dir=root,
+                    repository="aiwaki/slipstream",
+                    tag="v0.1.5",
+                    version="0.1.5",
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
                 )
 
     def test_cli_verifies_release_dir(self) -> None:
@@ -173,6 +276,10 @@ class VerifyReleaseArtifactsTests(unittest.TestCase):
                             "0.1.5",
                             "--channel",
                             "stable",
+                            "--source-commit",
+                            SOURCE_COMMIT,
+                            "--target",
+                            TARGET,
                         ]
                     ),
                     0,

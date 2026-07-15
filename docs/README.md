@@ -13,6 +13,7 @@ support notes here.
 | Active routing invariants and decisions | [DECISIONS.md](DECISIONS.md) |
 | Operational checks and repeated user symptoms | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | Resilience model and known limits | [RESILIENCE.md](RESILIENCE.md) |
+| Release channels, tags, and artifacts | [RELEASES.md](RELEASES.md) |
 | Deterministic data-plane regression gate | [TRAFFIC_CONTRACTS.md](TRAFFIC_CONTRACTS.md) |
 | Language-neutral routing and recovery contracts | [../contracts/README.md](../contracts/README.md) |
 | Routing research and external repo findings | [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md) |

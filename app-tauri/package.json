@@ -9,7 +9,7 @@
     "dev": "npm run sync-version && tauri dev",
     "build": "npm run build:release",
     "build:local": "npm run sync-version && tauri build --config src-tauri/tauri.local.conf.json",
-    "build:release": "npm run sync-version && tauri build"
+    "build:release": "npm run sync-version && tauri build --target aarch64-apple-darwin"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

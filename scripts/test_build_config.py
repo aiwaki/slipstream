@@ -17,6 +17,7 @@ PYTHON_LOCKS = {
     "build": ROOT / "spike/requirements-build.txt",
 }
 RELEASE_PYTHON = "3.13.14"
+TAURI_RELEASE_TARGET = "aarch64-apple-darwin"
 ACTION_PINS = {
     "actions/checkout": (
         "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
@@ -90,7 +91,32 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("tauri.local.conf.json", scripts["build:local"])
         self.assertIn("tauri build", scripts["build:release"])
+        self.assertIn(f"--target {TAURI_RELEASE_TARGET}", scripts["build:release"])
         self.assertEqual(scripts["build"], "npm run build:release")
+
+    def test_packaged_workflows_use_the_explicit_tauri_target(self) -> None:
+        workflow_names = (
+            "build-app.yml",
+            "ci.yml",
+            "owned-geph-qualification.yml",
+        )
+        combined = ""
+        for name in workflow_names:
+            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            combined += workflow
+            self.assertIn(
+                f"SLIPSTREAM_TAURI_TARGET: {TAURI_RELEASE_TARGET}",
+                workflow,
+            )
+            self.assertIn(
+                "target/${SLIPSTREAM_TAURI_TARGET}/release/bundle",
+                workflow,
+            )
+        self.assertNotIn("target/release/bundle", combined)
+        self.assertGreaterEqual(
+            combined.count('--target "$SLIPSTREAM_TAURI_TARGET"'),
+            2,
+        )
 
     def test_daemon_version_tracks_root_version(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -122,6 +148,14 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("Verify release artifacts", workflow)
         self.assertIn("scripts/verify_release_artifacts.py", workflow)
         self.assertIn("--release-dir dist-release", workflow)
+        self.assertIn("Build deterministic SPDX SBOM", workflow)
+        self.assertIn("scripts/make_release_sbom.py", workflow)
+        self.assertIn("Build release artifact manifest", workflow)
+        self.assertIn("scripts/make_release_manifest.py", workflow)
+        self.assertIn("dist-release/Slipstream.spdx.json", workflow)
+        self.assertIn("dist-release/artifact-manifest.json", workflow)
+        self.assertIn('--source-commit "$GITHUB_SHA"', workflow)
+        self.assertIn('--target "$SLIPSTREAM_TAURI_TARGET"', workflow)
 
     def test_release_workflow_uses_the_recorded_verified_geph_artifact(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
@@ -145,13 +179,19 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
 
+    def test_release_workflow_binds_tags_and_notes_to_the_built_commit(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("target_commitish: ${{ github.sha }}", workflow)
+        self.assertIn("select(.draft | not)", workflow)
+
     def test_release_workflow_requires_remote_policy_only_for_stable(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
         self.assertIn("if: steps.ver.outputs.channel == 'stable'", workflow)
         self.assertIn('--channel "${{ steps.ver.outputs.channel }}"', workflow)
-        self.assertIn("omits remote policy channel assets", workflow)
-        self.assertIn("signed remote policy channel assets", workflow)
+        self.assertIn("не содержит remote policy assets", workflow)
+        self.assertIn("подписанным каналом route policy", workflow)
 
     def test_release_workflow_qualifies_the_built_app_before_publish(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
@@ -400,6 +440,13 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("make_latest: ${{ steps.ver.outputs.make_latest }}", app)
         self.assertIn('release_name="Slipstream $v (preview ${GITHUB_RUN_NUMBER})"', app)
         self.assertIn("body_path: dist-release/release-notes.md", app)
+        self.assertIn("generate_release_notes: true", app)
+        self.assertIn("Resolve previous app release tag", app)
+        self.assertIn('startswith(\\"v\\")', app)
+        self.assertIn("previous_tag: ${{ steps.previous.outputs.tag }}", app)
+        self.assertIn(".prerelease == $prerelease", app)
+        self.assertIn("gh api --paginate", app)
+        self.assertNotIn('cp "$B/dmg/"*.dmg "$OUT/" 2>/dev/null || true', app)
 
         self.assertIn('branches: ["main"]', geph)
         self.assertIn("prerelease: true", geph)
