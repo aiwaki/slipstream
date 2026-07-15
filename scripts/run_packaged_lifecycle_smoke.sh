@@ -13,13 +13,22 @@ if [[ $# -ne 1 || ! -d "$1" ]]; then
 fi
 
 app_bundle="$1"
-driver_port=19445
-driver_url="http://127.0.0.1:${driver_port}"
+driver_port=""
+driver_url=""
 driver_log="$(mktemp -t slipstream-safaridriver)"
 driver_pid=""
 
-cleanup() {
-  status=$?
+select_driver_port() {
+  python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+stop_driver() {
   if [[ -n "$driver_pid" ]] && kill -0 "$driver_pid" 2>/dev/null; then
     kill -TERM "$driver_pid" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -29,8 +38,16 @@ cleanup() {
     if kill -0 "$driver_pid" 2>/dev/null; then
       kill -KILL "$driver_pid" 2>/dev/null || true
     fi
+  fi
+  if [[ -n "$driver_pid" ]]; then
     wait "$driver_pid" 2>/dev/null || true
   fi
+  driver_pid=""
+}
+
+cleanup() {
+  status=$?
+  stop_driver
   if [[ $status -ne 0 ]]; then
     tail -n 100 "$driver_log" >&2 || true
   fi
@@ -39,30 +56,56 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sudo /usr/bin/safaridriver --enable
-/usr/bin/safaridriver --port "$driver_port" >"$driver_log" 2>&1 &
-driver_pid=$!
+start_driver() {
+  local attempt driver_status exit_code
+  for attempt in 1 2; do
+    driver_port="$(select_driver_port)"
+    driver_url="http://127.0.0.1:${driver_port}"
+    printf 'SafariDriver startup attempt %s on %s\n' \
+      "$attempt" "$driver_url" >>"$driver_log"
+    /usr/bin/safaridriver --diagnose --port "$driver_port" \
+      >>"$driver_log" 2>&1 &
+    driver_pid=$!
 
-ready=false
-for _ in $(seq 1 100); do
-  if ! kill -0 "$driver_pid" 2>/dev/null; then
-    echo "SafariDriver exited during startup" >&2
-    exit 1
-  fi
-  if driver_status="$(/usr/bin/curl --silent --show-error --noproxy '*' --max-time 2 "$driver_url/status" 2>/dev/null)"; then
-    if printf '%s' "$driver_status" | python3 -c \
-      'import json, sys; value = json.load(sys.stdin).get("value", {}); raise SystemExit(value.get("ready") is not True)'; then
-      ready=true
-      break
+    for _ in $(seq 1 100); do
+      if ! kill -0 "$driver_pid" 2>/dev/null; then
+        if wait "$driver_pid"; then
+          exit_code=0
+        else
+          exit_code=$?
+        fi
+        driver_pid=""
+        printf 'SafariDriver startup attempt %s exited %s\n' \
+          "$attempt" "$exit_code" >>"$driver_log"
+        if [[ $attempt -eq 1 ]] && /usr/bin/grep -Eq \
+          'Unable to start the server: (Operation not permitted|Address already in use)' \
+          "$driver_log"; then
+          echo "SafariDriver server unavailable; retrying once on a fresh loopback port" >&2
+          sleep 1
+          break
+        fi
+        echo "SafariDriver exited during startup (attempt $attempt)" >&2
+        return 1
+      fi
+      if driver_status="$(/usr/bin/curl --silent --show-error --noproxy '*' --max-time 2 "$driver_url/status" 2>/dev/null)"; then
+        if printf '%s' "$driver_status" | python3 -c \
+          'import json, sys; value = json.load(sys.stdin).get("value", {}); raise SystemExit(value.get("ready") is not True)'; then
+          return 0
+        fi
+      fi
+      sleep 0.2
+    done
+
+    if [[ -n "$driver_pid" ]]; then
+      echo "SafariDriver did not become ready (attempt $attempt)" >&2
+      return 1
     fi
-  fi
-  sleep 0.2
-done
+  done
+  return 1
+}
 
-if [[ "$ready" != "true" ]]; then
-  echo "SafariDriver did not become ready" >&2
-  exit 1
-fi
+sudo /usr/bin/safaridriver --enable
+start_driver
 
 sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py \
   --app-bundle "$app_bundle" \
