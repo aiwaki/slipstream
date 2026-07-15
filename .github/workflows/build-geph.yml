@@ -34,7 +34,7 @@ jobs:
       version: ${{ steps.up.outputs.version }}
       should_build: ${{ steps.cmp.outputs.should_build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - id: up
         name: Resolve latest geph5-client version (crates.io)
         run: |
@@ -82,7 +82,7 @@ jobs:
           #   rust_targets: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Rust (stable) + targets
         uses: dtolnay/rust-toolchain@stable
@@ -90,7 +90,7 @@ jobs:
           targets: ${{ matrix.rust_targets }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -99,7 +99,7 @@ jobs:
 
       - name: Build deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install protobuf cmake pkg-config || true
+        run: bash scripts/ensure_macos_build_deps.sh
 
       - name: Build geph5-client ${{ needs.resolve.outputs.version }} from crates.io
         run: |
@@ -150,7 +150,7 @@ jobs:
           ( cd out && shasum -a 256 geph5-client* > SHA256SUMS )
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: geph5-client-${{ matrix.name }}
           path: out/*
@@ -173,7 +173,7 @@ jobs:
     if: needs.resolve.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Open vendor version PR
         env:
           GH_TOKEN: ${{ github.token }}

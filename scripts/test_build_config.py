@@ -2,15 +2,64 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+BUILD_DEPS = ROOT / "scripts/ensure_macos_build_deps.sh"
+ACTION_PINS = {
+    "actions/checkout": (
+        "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+        "v7.0.0",
+    ),
+    "actions/setup-python": (
+        "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "v6.3.0",
+    ),
+    "actions/setup-node": (
+        "820762786026740c76f36085b0efc47a31fe5020",
+        "v7.0.0",
+    ),
+    "actions/cache": (
+        "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        "v6.1.0",
+    ),
+    "actions/upload-artifact": (
+        "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "v7.0.1",
+    ),
+}
+
+
+def write_executable(path: Path, body: str = "exit 0\n") -> None:
+    path.write_text(f"#!/bin/bash\nset -eu\n{body}", encoding="utf-8")
+    path.chmod(0o755)
 
 
 class BuildConfigTests(unittest.TestCase):
+    def run_build_deps(
+        self,
+        bin_dir: Path,
+        brew: Path,
+        **environment: str,
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update(environment)
+        env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+        env["SLIPSTREAM_HOMEBREW_BIN"] = str(brew)
+        return subprocess.run(
+            ("/bin/bash", str(BUILD_DEPS)),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            env=env,
+        )
+
     def test_local_build_disables_updater_artifacts(self) -> None:
         config = json.loads((ROOT / "app-tauri/src-tauri/tauri.local.conf.json").read_text())
 
@@ -148,6 +197,130 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--base main", workflow)
         self.assertNotIn("git push origin HEAD:main", workflow)
         self.assertNotIn("git push ||", workflow)
+
+    def test_official_actions_are_node24_release_pins(self) -> None:
+        pattern = re.compile(
+            r"uses:\s+(actions/(?:checkout|setup-python|setup-node|cache|upload-artifact))"
+            r"@([0-9a-f]{40})\s+#\s+(v[^\s]+)"
+        )
+        seen: set[str] = set()
+
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for action in ACTION_PINS:
+                for line in text.splitlines():
+                    if f"uses: {action}@" not in line:
+                        continue
+                    match = pattern.search(line)
+                    self.assertIsNotNone(match, f"mutable or unlabelled action in {workflow}: {line}")
+                    assert match is not None
+                    self.assertEqual(
+                        (match.group(2), match.group(3)),
+                        ACTION_PINS[action],
+                        f"unexpected release pin in {workflow}: {line}",
+                    )
+                    seen.add(action)
+
+        self.assertEqual(seen, set(ACTION_PINS))
+
+    def test_node_jobs_use_the_supported_lts(self) -> None:
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            if "actions/setup-node@" not in text:
+                continue
+            self.assertIn('node-version: "24"', text, str(workflow))
+            self.assertNotRegex(text, r"node-version:\s*20\b")
+
+    def test_release_workflows_use_checked_macos_build_dependencies(self) -> None:
+        for name in ("build-app.yml", "build-geph.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertIn("bash scripts/ensure_macos_build_deps.sh", workflow)
+            self.assertNotIn("brew install protobuf cmake pkg-config || true", workflow)
+
+        syntax = subprocess.run(
+            ("/bin/bash", "-n", str(BUILD_DEPS)),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
+
+    def test_build_dependency_helper_skips_homebrew_when_tools_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary)
+            for command in ("protoc", "cmake", "pkg-config"):
+                write_executable(bin_dir / command)
+            marker = bin_dir / "brew-called"
+            brew = bin_dir / "brew"
+            write_executable(brew, 'touch "$SLIPSTREAM_BREW_MARKER"\nexit 97\n')
+
+            result = self.run_build_deps(
+                bin_dir,
+                brew,
+                SLIPSTREAM_BREW_MARKER=str(marker),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_build_dependency_helper_installs_only_missing_formula(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary)
+            for command in ("cmake", "pkg-config"):
+                write_executable(bin_dir / command)
+            log = bin_dir / "brew.log"
+            auto_update_log = bin_dir / "brew-auto-update.log"
+            brew = bin_dir / "brew"
+            write_executable(
+                brew,
+                """printf '%s\\n' \"$*\" > \"$SLIPSTREAM_BREW_LOG\"
+printf '%s\\n' \"$HOMEBREW_NO_AUTO_UPDATE\" > \"$SLIPSTREAM_BREW_AUTO_UPDATE_LOG\"
+cat > \"$SLIPSTREAM_FAKE_BIN/protoc\" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x \"$SLIPSTREAM_FAKE_BIN/protoc\"
+""",
+            )
+
+            result = self.run_build_deps(
+                bin_dir,
+                brew,
+                SLIPSTREAM_BREW_LOG=str(log),
+                SLIPSTREAM_BREW_AUTO_UPDATE_LOG=str(auto_update_log),
+                SLIPSTREAM_FAKE_BIN=str(bin_dir),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(log.read_text(encoding="utf-8").strip(), "install protobuf")
+            self.assertEqual(auto_update_log.read_text(encoding="utf-8").strip(), "1")
+
+    def test_build_dependency_helper_propagates_homebrew_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary)
+            for command in ("cmake", "pkg-config"):
+                write_executable(bin_dir / command)
+            brew = bin_dir / "brew"
+            write_executable(brew, 'printf "brew failed\\n" >&2\nexit 42\n')
+
+            result = self.run_build_deps(bin_dir, brew)
+
+            self.assertEqual(result.returncode, 42)
+            self.assertIn("brew failed", result.stderr)
+
+    def test_build_dependency_helper_rejects_false_install_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary)
+            for command in ("cmake", "pkg-config"):
+                write_executable(bin_dir / command)
+            brew = bin_dir / "brew"
+            write_executable(brew)
+
+            result = self.run_build_deps(bin_dir, brew)
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("still unavailable: protoc", result.stderr)
 
 
 if __name__ == "__main__":

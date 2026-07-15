@@ -138,6 +138,9 @@ PF lifecycle qualification.
 
 ## M3 - Release-Grade macOS
 
+- Pin official GitHub Actions to reviewed immutable Node 24 release commits,
+  build with Node 24 LTS, and make macOS dependency installation explicit and
+  fail-closed. Done.
 - Pin Python/PyInstaller dependencies with hashes.
 - Fetch exactly the Geph version recorded in `vendor/geph/VERSION`; verify
   the matching asset version, checksum, and arm64 architecture. Done for the

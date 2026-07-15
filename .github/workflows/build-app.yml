@@ -32,7 +32,7 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Resolve version + tag
         id: ver
@@ -64,12 +64,12 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: "24"
 
       - name: System build deps
-        run: brew install protobuf cmake pkg-config || true
+        run: bash scripts/ensure_macos_build_deps.sh
 
       - name: Prepare route policy trust keys
         if: steps.ver.outputs.channel == 'stable'
