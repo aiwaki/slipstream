@@ -1174,13 +1174,41 @@ def _safari_pid_candidates() -> tuple[int, ...]:
     return tuple(sorted(set(pids)))
 
 
-def _safari_identity_matches(
-    identity: tuple[int, str] | None,
+def _safari_process_identity_for_pid(pid: int) -> tuple[int, str, str] | None:
+    result = subprocess.run(
+        ("/bin/ps", "-p", str(pid), "-o", "uid=", "-o", "stat=", "-o", "command="),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    line = result.stdout.strip() if result.returncode == 0 else ""
+    parts = line.split(None, 2)
+    if len(parts) != 3:
+        return None
+    try:
+        return int(parts[0]), parts[1], parts[2]
+    except ValueError:
+        return None
+
+
+def _safari_identity_is_stopped(
+    identity: tuple[int, str, str] | None,
     uid: int,
 ) -> bool:
     if identity is None:
         return False
-    actual_uid, command = identity
+    actual_uid, state, _command = identity
+    return actual_uid == uid and state.startswith("Z")
+
+
+def _safari_identity_matches(
+    identity: tuple[int, str, str] | None,
+    uid: int,
+) -> bool:
+    if identity is None:
+        return False
+    actual_uid, _state, command = identity
     try:
         arguments = tuple(shlex.split(command))
     except ValueError:
@@ -1198,8 +1226,10 @@ def _owned_safari_pids(uid: int) -> tuple[int, ...]:
     owned = []
     conflicts = []
     for pid in _safari_pid_candidates():
-        identity = _process_identity_for_pid(pid)
+        identity = _safari_process_identity_for_pid(pid)
         if identity is None:
+            continue
+        if _safari_identity_is_stopped(identity, uid):
             continue
         if _safari_identity_matches(identity, uid):
             owned.append(pid)
@@ -1235,8 +1265,10 @@ def _wait_for_safari_process(uid: int, label: str) -> int:
 
 
 def _safari_pid_is_owned(pid: int, uid: int) -> bool:
-    identity = _process_identity_for_pid(pid)
+    identity = _safari_process_identity_for_pid(pid)
     if identity is None:
+        return False
+    if _safari_identity_is_stopped(identity, uid):
         return False
     if not _safari_identity_matches(identity, uid):
         raise LifecycleError(

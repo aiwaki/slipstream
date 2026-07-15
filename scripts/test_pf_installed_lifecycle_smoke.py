@@ -910,8 +910,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 return_value=(4242,),
             ), mock.patch.object(
                 lifecycle,
-                "_process_identity_for_pid",
-                return_value=(501, str(executable)),
+                "_safari_process_identity_for_pid",
+                return_value=(501, "S", str(executable)),
             ):
                 self.assertEqual(lifecycle._owned_safari_pids(501), (4242,))
 
@@ -925,13 +925,37 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 return_value=(4242,),
             ), mock.patch.object(
                 lifecycle,
-                "_process_identity_for_pid",
-                return_value=(502, str(executable)),
+                "_safari_process_identity_for_pid",
+                return_value=(502, "S", str(executable)),
             ), self.assertRaisesRegex(
                 lifecycle.LifecycleError,
                 "unexpected identities",
             ):
                 lifecycle._owned_safari_pids(501)
+
+    def test_safari_zombie_is_already_stopped_without_signalling(self) -> None:
+        identity = (501, "Z+", "(Safari)")
+        with mock.patch.object(
+            lifecycle,
+            "_safari_process_identity_for_pid",
+            return_value=identity,
+        ), mock.patch.object(lifecycle.os, "kill") as kill:
+            self.assertFalse(lifecycle._safari_pid_is_owned(4242, 501))
+            lifecycle._stop_owned_safari_process(4242, 501, "cleanup")
+
+        kill.assert_not_called()
+
+    def test_safari_identity_parser_preserves_zombie_state(self) -> None:
+        completed = subprocess.CompletedProcess((), 0, " 501 Z+ (Safari)\n", "")
+        with mock.patch.object(
+            lifecycle.subprocess,
+            "run",
+            return_value=completed,
+        ):
+            self.assertEqual(
+                lifecycle._safari_process_identity_for_pid(4242),
+                (501, "Z+", "(Safari)"),
+            )
 
     def test_safari_process_stop_signals_only_verified_pid(self) -> None:
         with mock.patch.object(
