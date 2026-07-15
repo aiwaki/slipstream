@@ -111,11 +111,15 @@ jobs:
             scripts/pf_installed_lifecycle_smoke.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
+            scripts/make_release_manifest.py \
+            scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
             scripts/test_pf_installed_lifecycle_smoke.py \
             scripts/test_make_appcast.py \
+            scripts/test_make_release_manifest.py \
+            scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \
             scripts/test_verify_release_artifacts.py
 
@@ -149,6 +153,8 @@ jobs:
   packaged-app-lifecycle:
     runs-on: macos-14
     timeout-minutes: 45
+    env:
+      SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -228,12 +234,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npm run build:local -- --bundles app
+          npm run build:local -- --target "$SLIPSTREAM_TAURI_TARGET" --bundles app
 
       - name: Verify packaged resources
         run: |
           set -euo pipefail
-          app="app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app"
+          app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
           test -d "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
             = "$(tr -d '[:space:]' < VERSION)"
@@ -248,14 +254,14 @@ jobs:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
           bash scripts/run_packaged_lifecycle_smoke.sh \
-            app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app
+            "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
 
       - name: Package the qualified app
         run: |
           set -euo pipefail
           mkdir -p dist-ci
           ditto -c -k --keepParent \
-            app-tauri/src-tauri/target/release/bundle/macos/Slipstream.app \
+            "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app" \
             dist-ci/Slipstream-packaged-lifecycle.zip
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
