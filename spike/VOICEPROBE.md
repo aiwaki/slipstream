@@ -16,7 +16,7 @@ does not describe a current implementation commitment.
 ```bash
 cd slipstream/spike
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --only-binary=:all: --require-hashes -r requirements.txt
 ```
 
 ## Unit tests (no root, no network)

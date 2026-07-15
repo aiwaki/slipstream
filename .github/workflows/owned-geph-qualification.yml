@@ -31,9 +31,9 @@ jobs:
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.13"
+          python-version: "3.13.14"
           cache: pip
-          cache-dependency-path: spike/requirements.txt
+          cache-dependency-path: spike/requirements-build.txt
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -56,8 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m venv spike/.buildvenv
-          spike/.buildvenv/bin/pip install --quiet --disable-pip-version-check \
-            -r spike/requirements.txt pyinstaller
+          spike/.buildvenv/bin/python -m pip install \
+            --quiet \
+            --disable-pip-version-check \
+            --only-binary=:all: \
+            --require-hashes \
+            -r spike/requirements-build.txt
           spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
             --generate-keypair \
             --key-id ci-owned-geph \

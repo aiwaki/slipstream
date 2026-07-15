@@ -34,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+          cache: pip
+          cache-dependency-path: spike/requirements-build.txt
+
       - name: Resolve version + tag
         id: ver
         run: |
@@ -91,8 +97,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m venv spike/.buildvenv
-          spike/.buildvenv/bin/pip install --quiet --disable-pip-version-check \
-            scapy cryptography certifi pyinstaller
+          spike/.buildvenv/bin/python -m pip install \
+            --quiet \
+            --disable-pip-version-check \
+            --only-binary=:all: \
+            --require-hashes \
+            -r spike/requirements-build.txt
           ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
           rm -rf app-tauri/src-tauri/slipstreamd
           cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd

@@ -4377,6 +4377,10 @@ def _script_runtime_payload(source_file):
     source_dir = os.path.dirname(source_file)
     payload = (
         (source_file, "tproxy.py"),
+        (
+            os.path.join(source_dir, "requirements-runtime.txt"),
+            "requirements-runtime.txt",
+        ),
         (os.path.join(source_dir, "address_attempts.py"), "address_attempts.py"),
         (os.path.join(source_dir, "connection_probe.py"), "connection_probe.py"),
         (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
@@ -6902,17 +6906,22 @@ def do_install(port):
             py = os.path.join(venv, "bin", "python3")
             if not os.path.exists(py):
                 base = getattr(sys, "_base_executable", None) or sys.executable
-                print(">> building self-contained venv + scapy (needs network, ~20s)...")
+                print(">> building self-contained venv (needs network, ~20s)...")
                 _require_command("venv create failed", base, "-m", "venv", venv)
             # cryptography is REQUIRED too: the vendored tg-ws-proxy's _aes.py falls
             # back to a ctypes libcrypto shim without it, which macOS aborts ("loading
             # libcrypto in an unsafe way") -> the daemon crash-loops. certifi gives
             # the GitHub CF-domain refresh a CA bundle in frozen/script installs.
-                _require_command(
-                    "scapy/cryptography/certifi install failed",
-                    py, "-m", "pip", "install", "--quiet",
-                    "--disable-pip-version-check", "scapy", "cryptography", "certifi",
-                )
+            # Use the reviewed runtime lock so this legacy source install resolves
+            # the same distributions as release builds.
+            _require_command(
+                "scapy/cryptography/certifi install failed",
+                py, "-m", "pip", "install", "--quiet",
+                "--disable-pip-version-check",
+                "--only-binary=:all:",
+                "--require-hashes",
+                "-r", os.path.join(_here, "requirements-runtime.txt"),
+            )
             prog_args = [py, script, "--port", str(port)]
             uninstall_hint = f"sudo {py} {script} --uninstall"
         if tgws_secret_backup:

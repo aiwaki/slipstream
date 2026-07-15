@@ -6,11 +6,20 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PY="${PYTHON:-python3}"
+PY_MINOR="$($PY -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+if [[ "$PY_MINOR" != "3.13" ]]; then
+  echo "Python 3.13 is required to build slipstreamd (found $PY_MINOR)" >&2
+  exit 1
+fi
 echo ">> build venv + pyinstaller + runtime deps ..."
 rm -rf .buildvenv
 "$PY" -m venv .buildvenv
-.buildvenv/bin/python -m pip install --quiet --upgrade pip
-.buildvenv/bin/python -m pip install --quiet pyinstaller scapy cryptography certifi
+.buildvenv/bin/python -m pip install \
+  --quiet \
+  --disable-pip-version-check \
+  --only-binary=:all: \
+  --require-hashes \
+  -r requirements-build.txt
 
 echo ">> freezing tproxy.py via slipstreamd.spec ..."
 rm -rf build dist

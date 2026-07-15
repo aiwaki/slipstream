@@ -1,0 +1,4 @@
+# Direct dependencies imported by the frozen daemon or its bundled proxy.
+certifi>=2024.2.2
+cryptography>=42.0.0
+scapy>=2.5.0
