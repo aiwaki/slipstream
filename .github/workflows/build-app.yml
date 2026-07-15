@@ -66,7 +66,7 @@ jobs:
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
           echo "Releasing $v ($tag, $channel)"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
         with:
           targets: aarch64-apple-darwin
 

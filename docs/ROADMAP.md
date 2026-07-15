@@ -138,9 +138,9 @@ PF lifecycle qualification.
 
 ## M3 - Release-Grade macOS
 
-- Pin official GitHub Actions to reviewed immutable Node 24 release commits,
-  build with Node 24 LTS, and make macOS dependency installation explicit and
-  fail-closed. Done.
+- Pin every external GitHub Action to a reviewed immutable commit, build
+  JavaScript with Node 24 LTS, and make macOS dependency installation explicit
+  and fail-closed. Done.
 - Keep stable app, preview app, and internal Geph releases visibly distinct;
   only stable app releases may update GitHub's latest pointer. Done.
 - Pin Python/PyInstaller dependencies with hashes.

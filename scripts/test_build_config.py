@@ -36,6 +36,10 @@ ACTION_PINS = {
         "3d0d9888cb7fd7b750713d6e236d1fcb99157228",
         "v3.0.2",
     ),
+    "dtolnay/rust-toolchain": (
+        "4be7066ada62dd38de10e7b70166bc74ed198c30",
+        "stable-2026-06-30",
+    ),
 }
 
 
@@ -53,7 +57,7 @@ class BuildConfigTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.update(environment)
-        env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+        env["PATH"] = str(bin_dir)
         env["SLIPSTREAM_HOMEBREW_BIN"] = str(brew)
         return subprocess.run(
             ("/bin/bash", str(BUILD_DEPS)),
@@ -206,29 +210,35 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("gh pr merge", workflow)
         self.assertNotIn("--auto", workflow)
 
-    def test_release_actions_use_reviewed_immutable_pins(self) -> None:
+    def test_external_actions_use_reviewed_immutable_pins(self) -> None:
         pattern = re.compile(
-            r"uses:\s+((?:actions/(?:checkout|setup-python|setup-node|cache|upload-artifact))"
-            r"|(?:softprops/action-gh-release))"
-            r"@([0-9a-f]{40})\s+#\s+(v[^\s]+)"
+            r"uses:\s+([^\s@]+)@([0-9a-f]{40})\s+#\s+([^\s]+)"
         )
         seen: set[str] = set()
 
         for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
             text = workflow.read_text(encoding="utf-8")
-            for action in ACTION_PINS:
-                for line in text.splitlines():
-                    if f"uses: {action}@" not in line:
-                        continue
-                    match = pattern.search(line)
-                    self.assertIsNotNone(match, f"mutable or unlabelled action in {workflow}: {line}")
-                    assert match is not None
-                    self.assertEqual(
-                        (match.group(2), match.group(3)),
-                        ACTION_PINS[action],
-                        f"unexpected release pin in {workflow}: {line}",
-                    )
-                    seen.add(action)
+            for line in text.splitlines():
+                if "uses:" not in line:
+                    continue
+                match = pattern.search(line)
+                self.assertIsNotNone(
+                    match,
+                    f"mutable, unlabelled, or unknown external action in {workflow}: {line}",
+                )
+                assert match is not None
+                action, sha, label = match.groups()
+                self.assertIn(
+                    action,
+                    ACTION_PINS,
+                    f"unreviewed external action in {workflow}: {line}",
+                )
+                self.assertEqual(
+                    (sha, label),
+                    ACTION_PINS[action],
+                    f"unexpected release pin in {workflow}: {line}",
+                )
+                seen.add(action)
 
         self.assertEqual(seen, set(ACTION_PINS))
 
@@ -277,7 +287,7 @@ class BuildConfigTests(unittest.TestCase):
                 write_executable(bin_dir / command)
             marker = bin_dir / "brew-called"
             brew = bin_dir / "brew"
-            write_executable(brew, 'touch "$SLIPSTREAM_BREW_MARKER"\nexit 97\n')
+            write_executable(brew, ': > "$SLIPSTREAM_BREW_MARKER"\nexit 97\n')
 
             result = self.run_build_deps(
                 bin_dir,
@@ -300,11 +310,8 @@ class BuildConfigTests(unittest.TestCase):
                 brew,
                 """printf '%s\\n' \"$*\" > \"$SLIPSTREAM_BREW_LOG\"
 printf '%s\\n' \"$HOMEBREW_NO_AUTO_UPDATE\" > \"$SLIPSTREAM_BREW_AUTO_UPDATE_LOG\"
-cat > \"$SLIPSTREAM_FAKE_BIN/protoc\" <<'EOF'
-#!/bin/bash
-exit 0
-EOF
-chmod +x \"$SLIPSTREAM_FAKE_BIN/protoc\"
+printf '#!/bin/bash\\nexit 0\\n' > \"$SLIPSTREAM_FAKE_BIN/protoc\"
+/bin/chmod +x \"$SLIPSTREAM_FAKE_BIN/protoc\"
 """,
             )
 
@@ -319,6 +326,35 @@ chmod +x \"$SLIPSTREAM_FAKE_BIN/protoc\"
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(log.read_text(encoding="utf-8").strip(), "install protobuf")
             self.assertEqual(auto_update_log.read_text(encoding="utf-8").strip(), "1")
+
+    def test_build_dependency_helper_installs_multiple_formulae_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary)
+            write_executable(bin_dir / "pkg-config")
+            log = bin_dir / "brew.log"
+            brew = bin_dir / "brew"
+            write_executable(
+                brew,
+                """printf '%s\\n' \"$*\" >> \"$SLIPSTREAM_BREW_LOG\"
+for command in protoc cmake; do
+  printf '#!/bin/bash\\nexit 0\\n' > \"$SLIPSTREAM_FAKE_BIN/$command\"
+  /bin/chmod +x \"$SLIPSTREAM_FAKE_BIN/$command\"
+done
+""",
+            )
+
+            result = self.run_build_deps(
+                bin_dir,
+                brew,
+                SLIPSTREAM_BREW_LOG=str(log),
+                SLIPSTREAM_FAKE_BIN=str(bin_dir),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                log.read_text(encoding="utf-8").splitlines(),
+                ["install protobuf cmake"],
+            )
 
     def test_build_dependency_helper_propagates_homebrew_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
