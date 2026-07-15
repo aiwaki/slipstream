@@ -6,6 +6,7 @@ import pytest
 
 import address_attempts
 import route_circuit
+import route_circuit_registry
 import routing_policy
 import routing_recovery
 import tproxy
@@ -22,6 +23,7 @@ POLICY = load_contract("routing-policy-v1.json")
 RECOVERY = load_contract("recovery-v1.json")
 ADDRESS_ATTEMPTS = load_contract("address-attempts-v1.json")
 ROUTE_CIRCUIT = load_contract("route-circuit-v1.json")
+ROUTE_CIRCUIT_REGISTRY = load_contract("route-circuit-registry-v1.json")
 CONNECTION_RACE = load_contract("connection-race-v1.json")
 
 
@@ -46,6 +48,9 @@ def test_contract_metadata_and_vector_names_are_stable():
     assert ROUTE_CIRCUIT["schema_version"] == 1
     assert ROUTE_CIRCUIT["contract"] == "slipstream.route_circuit"
     assert ROUTE_CIRCUIT["contract_version"] == 1
+    assert ROUTE_CIRCUIT_REGISTRY["schema_version"] == 1
+    assert ROUTE_CIRCUIT_REGISTRY["contract"] == "slipstream.route_circuit_registry"
+    assert ROUTE_CIRCUIT_REGISTRY["contract_version"] == 1
     assert CONNECTION_RACE["schema_version"] == 1
     assert CONNECTION_RACE["contract"] == "slipstream.connection_race"
     assert CONNECTION_RACE["contract_version"] == 1
@@ -55,6 +60,7 @@ def test_contract_metadata_and_vector_names_are_stable():
         RECOVERY,
         ADDRESS_ATTEMPTS,
         ROUTE_CIRCUIT,
+        ROUTE_CIRCUIT_REGISTRY,
         CONNECTION_RACE,
     ):
         names = [item["name"] for item in contract["vectors"]]
@@ -109,6 +115,35 @@ def test_route_circuit_contract(case):
     ]
     assert json_ready(decisions) == case["expected_decisions"]
     assert json_ready(snapshots) == case["expected_states"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    ROUTE_CIRCUIT_REGISTRY["vectors"],
+    ids=[item["name"] for item in ROUTE_CIRCUIT_REGISTRY["vectors"]],
+)
+def test_route_circuit_registry_contract(case):
+    registry = route_circuit_registry.RouteCircuitRegistry(
+        route_circuit.CircuitConfig(**ROUTE_CIRCUIT_REGISTRY["circuit_config"]),
+        route_circuit_registry.RouteCircuitRegistryConfig(
+            **ROUTE_CIRCUIT_REGISTRY["registry_config"]
+        ),
+    )
+    decisions = []
+    for item in case["events"]:
+        decision = registry.apply(
+            route_circuit.CircuitEvent(
+                kind=item["kind"],
+                key=route_circuit.RouteCircuitKey(**item["key"]),
+                now_ms=item["now_ms"],
+            )
+        )
+        decisions.append(asdict(decision))
+
+    assert json_ready(decisions) == case["expected_decisions"]
+    assert json_ready([asdict(item) for item in registry.snapshot()]) == case[
+        "expected_entries"
+    ]
 
 
 @pytest.mark.parametrize(

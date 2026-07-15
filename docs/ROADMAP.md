@@ -123,11 +123,18 @@ PF lifecycle qualification.
   commands against numeric candidates, transfers only the winning stream, and
   closes every loser or cancelled task. A policy-preserving runtime wrapper now
   races the existing first-payload probes inside already-selected local, Xbox
-  DNS, and proven Smart DNS backends. It does not race routes, touch the Geph
-  branch, or persist circuit state across requests. Fake handler endpoints cover
-  stalled-first/healthy-second local and Smart DNS edges while forbidding Geph.
-  Persistent route circuits, IPv6 use in the current daemon dialers, and other
-  platform adapters remain pending and require separate evidence.
+  DNS, and proven Smart DNS backends. It does not race routes or backend classes.
+  A separate v1 runtime-registry contract now persists only complete backend
+  outcomes across requests: one full protected local ladder is one local-engine
+  result, while proven Smart DNS and verified owned Geph have independent
+  geo-exit keys. The registry is bounded by idle TTL and deterministic LRU;
+  eviction only forgets suppression and cannot select a different route.
+  Unknown and direct traffic never enter persistent circuit state, and protected
+  local groups still have no Geph edge. Fake handler endpoints cover
+  stalled-first/healthy-second address races, per-ladder failure accounting,
+  backend isolation, and unknown-host non-promotion. IPv6 use in the current
+  daemon dialers and other platform adapters remain pending and require separate
+  evidence.
 
 ## M3 - Release-Grade macOS
 

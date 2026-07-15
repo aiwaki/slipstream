@@ -10,6 +10,7 @@
 pub mod address_attempts;
 pub mod connection_race;
 pub mod route_circuit;
+pub mod route_circuit_registry;
 
 use std::ffi::OsStr;
 use std::fs;
