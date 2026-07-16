@@ -193,6 +193,12 @@ or file cleanup.
 - External VPN coexistence remains explicit and non-mutating, especially where
   Android permits only one active VPN service.
 
+Progress: `crates/slipstream-core` now owns the deterministic address-attempt,
+route-circuit, bounded registry, and connection-race modules. Their frozen v1
+JSON vectors run directly against the core crate, while the macOS tray only
+re-exports the modules for compatibility. Policy classification, recovery
+reduction, signed updates, and typed StatusV2 remain to be moved or implemented.
+
 ## M5 - Packet-Level Capabilities
 
 Only after adapters stabilize:

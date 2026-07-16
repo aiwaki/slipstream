@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use slipstream_lib::address_attempts::AddressCandidate;
-use slipstream_lib::connection_race::{
+use slipstream_core::address_attempts::AddressCandidate;
+use slipstream_core::connection_race::{
     advance_connection_race, start_connection_race, ConnectionRaceCommand,
     ConnectionRaceCommandKind, ConnectionRaceConfig, ConnectionRaceEvent, ConnectionRaceEventKind,
     ConnectionRacePhase, ConnectionRaceTransition,
 };
-use slipstream_lib::route_circuit::{
+use slipstream_core::route_circuit::{
     circuit_snapshot, CircuitConfig, CircuitDecision, CircuitStates, RouteCircuitKey,
 };
 use std::collections::{BTreeMap, BTreeSet};

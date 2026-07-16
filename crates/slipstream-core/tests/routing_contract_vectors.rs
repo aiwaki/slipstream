@@ -1,11 +1,11 @@
 use serde_json::Value;
-use slipstream_lib::address_attempts::{
+use slipstream_core::address_attempts::{
     plan_address_attempts, AddressAttempt, AddressCandidate, AddressPlanContext,
 };
-use slipstream_lib::route_circuit::{
+use slipstream_core::route_circuit::{
     circuit_snapshot, reduce_route_circuit, CircuitConfig, CircuitEvent, CircuitStates,
 };
-use slipstream_lib::route_circuit_registry::{RouteCircuitRegistry, RouteCircuitRegistryConfig};
+use slipstream_core::route_circuit_registry::{RouteCircuitRegistry, RouteCircuitRegistryConfig};
 use std::collections::HashSet;
 
 const POLICY_V1: &str = include_str!("../../../contracts/routing-policy-v1.json");
