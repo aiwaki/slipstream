@@ -19,8 +19,9 @@ Slipstream routing decisions and bounded recovery primitives.
   adapters without touching the network.
 
 Python's pure implementations live in `spike/routing_policy.py` and
-`spike/routing_recovery.py`, with address and circuit models beside them.
-Rust mirrors the new primitives in `app-tauri/src-tauri/src/`. Python and Rust
+`spike/routing_recovery.py`, with address and circuit models beside them. Rust
+implements the shared primitives in `crates/slipstream-core`; the macOS tray is
+an adapter and may re-export core modules during migration. Python and Rust
 execute the same files. Version 1 is append-only: correct an objectively invalid
 vector in place, but introduce behavior changes as a new contract version so
 platform adapters can migrate deliberately.

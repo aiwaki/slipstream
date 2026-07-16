@@ -194,10 +194,10 @@ or file cleanup.
   Android permits only one active VPN service.
 
 Progress: `crates/slipstream-core` now owns the deterministic address-attempt,
-route-circuit, bounded registry, and connection-race modules. Their frozen v1
-JSON vectors run directly against the core crate, while the macOS tray only
-re-exports the modules for compatibility. Policy classification, recovery
-reduction, signed updates, and typed StatusV2 remain to be moved or implemented.
+route-circuit, bounded registry, connection-race, routing-policy, and recovery
+modules. Python and Rust run the same frozen policy and recovery v1 vectors,
+including the protected Discord/YouTube no-Geph invariant. Policy parsing,
+signed updates, typed StatusV2, and runtime adapter migration remain.
 
 ## M5 - Packet-Level Capabilities
 
