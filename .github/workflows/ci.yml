@@ -117,6 +117,7 @@ jobs:
             scripts/make_release_manifest.py \
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
+            scripts/check_project_state.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
             scripts/test_pf_installed_lifecycle_smoke.py \
@@ -126,6 +127,9 @@ jobs:
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \
             scripts/test_verify_release_artifacts.py
+
+      - name: Project continuity contract
+        run: python3 scripts/check_project_state.py
 
       - name: Core traffic contracts
         run: python3 -m pytest -q spike/test_traffic_contracts.py

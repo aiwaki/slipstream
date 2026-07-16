@@ -12,6 +12,7 @@ support notes here.
 | System boundaries and data flow | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Contribution workflow | [../CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Private vulnerability reporting and security scope | [../SECURITY.md](../SECURITY.md) |
+| Current evidence checkpoint and next verified action | [CURRENT_STATE.md](CURRENT_STATE.md) |
 | Current implementation order | [ROADMAP.md](ROADMAP.md) |
 | Active routing invariants and decisions | [DECISIONS.md](DECISIONS.md) |
 | Operational checks and repeated user symptoms | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
@@ -33,6 +34,9 @@ support notes here.
 - Put repeated support symptoms and concrete checks in
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 - Put roadmap changes in [ROADMAP.md](ROADMAP.md), not in research notes.
+- Keep the compaction/resume checkpoint in
+  [CURRENT_STATE.md](CURRENT_STATE.md); update it whenever a PR changes the
+  verified next action or milestone status.
 - Keep root README files short and user-facing.
 - Review `README.md`, `README.en.md`, repository About/topics, and the Releases
   page together for every tagged app release and whenever installation,
