@@ -56,6 +56,7 @@ import geph_backend
 import pf_adapter
 import route_circuit
 import route_circuit_registry
+import route_policy_bundle as route_policy_bundle_contract
 import route_policy_manifest as route_policy_manifest_contract
 from primes import build_fake_stun, classify as classify_voice_payload
 from routing_recovery import (
@@ -221,7 +222,7 @@ IP_ATTEMPT_LIMIT_BY_ROUTE = {
 }
 ROUTE_POLICY_VERSION = 2
 ROUTE_POLICY_SOURCE = "bundled"
-ROUTE_POLICY_SCHEMA_VERSION = 1
+ROUTE_POLICY_SCHEMA_VERSION = route_policy_bundle_contract.SCHEMA_VERSION
 ROUTE_POLICY_CHANNEL_KIND = "slipstream.route_policy_channel"
 ROUTE_POLICY_CHANNEL_SCHEMA_VERSION = 1
 
@@ -548,6 +549,7 @@ def _require_policy_int(value, name, *, min_value=0, max_value=100):
 
 
 RoutePolicyManifestError = route_policy_manifest_contract.RoutePolicyManifestError
+RoutePolicyBundleError = route_policy_bundle_contract.RoutePolicyBundleError
 
 
 def validate_route_policy_manifest(manifest):
@@ -559,56 +561,26 @@ def validate_route_policy_manifest(manifest):
 
 def route_policy_canonical_bytes(manifest=None):
     manifest = route_policy_manifest() if manifest is None else manifest
-    normalized = validate_route_policy_manifest(manifest)
-    return json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return route_policy_bundle_contract.route_policy_canonical_bytes(
+        manifest,
+        ROUTE_POLICY_TABLE,
+    )
 
 
 def route_policy_hash(manifest=None):
-    return hashlib.sha256(route_policy_canonical_bytes(manifest)).hexdigest()
+    manifest = route_policy_manifest() if manifest is None else manifest
+    return route_policy_bundle_contract.route_policy_hash(
+        manifest,
+        ROUTE_POLICY_TABLE,
+    )
 
 
 def verify_signed_route_policy_bundle(bundle, public_keys):
-    if not isinstance(bundle, dict):
-        raise ValueError("signed policy bundle must be an object")
-    if not isinstance(public_keys, dict) or not public_keys:
-        raise ValueError("trusted policy keys are required")
-    schema = _require_policy_int(
-        bundle.get("schema"),
-        "schema",
-        min_value=ROUTE_POLICY_SCHEMA_VERSION,
-        max_value=ROUTE_POLICY_SCHEMA_VERSION,
+    return route_policy_bundle_contract.verify_signed_route_policy_bundle(
+        bundle,
+        public_keys,
+        ROUTE_POLICY_TABLE,
     )
-    if schema != ROUTE_POLICY_SCHEMA_VERSION:
-        raise ValueError("unsupported policy bundle schema")
-    key_id = bundle.get("key_id")
-    if not isinstance(key_id, str) or key_id not in public_keys:
-        raise ValueError("unknown policy key")
-    signature = bundle.get("signature")
-    if not isinstance(signature, str):
-        raise ValueError("policy signature must be base64")
-    try:
-        signature_bytes = base64.b64decode(signature, validate=True)
-        public_key_bytes = base64.b64decode(public_keys[key_id], validate=True)
-    except (ValueError, TypeError) as exc:
-        raise ValueError("policy signature or key is not valid base64") from exc
-
-    manifest = validate_route_policy_manifest(bundle.get("manifest"))
-    expected_hash = bundle.get("sha256")
-    if expected_hash is not None and expected_hash != route_policy_hash(manifest):
-        raise ValueError("policy hash mismatch")
-    try:
-        from cryptography.exceptions import InvalidSignature
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    except ImportError as exc:
-        raise ValueError("policy signature support unavailable") from exc
-    try:
-        Ed25519PublicKey.from_public_bytes(public_key_bytes).verify(
-            signature_bytes,
-            route_policy_canonical_bytes(manifest),
-        )
-    except InvalidSignature as exc:
-        raise ValueError("policy signature verification failed") from exc
-    return manifest
 
 
 def apply_route_policy_manifest(manifest):
@@ -4272,6 +4244,10 @@ def _script_runtime_payload(source_file):
         (
             os.path.join(source_dir, "route_circuit_registry.py"),
             "route_circuit_registry.py",
+        ),
+        (
+            os.path.join(source_dir, "route_policy_bundle.py"),
+            "route_policy_bundle.py",
         ),
         (
             os.path.join(source_dir, "route_policy_manifest.py"),

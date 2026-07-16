@@ -8,6 +8,7 @@ import pytest
 import address_attempts
 import route_circuit
 import route_circuit_registry
+import route_policy_bundle
 import routing_policy
 import routing_recovery
 import tproxy
@@ -28,6 +29,7 @@ ROUTE_CIRCUIT_REGISTRY = load_contract("route-circuit-registry-v1.json")
 CONNECTION_RACE = load_contract("connection-race-v1.json")
 STATUS_V2 = load_contract("status-v2-v1.json")
 ROUTE_POLICY_MANIFEST = load_contract("route-policy-manifest-v1.json")
+ROUTE_POLICY_BUNDLE = load_contract("route-policy-bundle-v1.json")
 
 
 def merge(defaults, override):
@@ -63,6 +65,12 @@ def test_contract_metadata_and_vector_names_are_stable():
     assert ROUTE_POLICY_MANIFEST["schema_version"] == 1
     assert ROUTE_POLICY_MANIFEST["contract"] == "slipstream.route_policy_manifest"
     assert ROUTE_POLICY_MANIFEST["contract_version"] == 1
+    assert ROUTE_POLICY_BUNDLE["schema_version"] == 1
+    assert ROUTE_POLICY_BUNDLE["contract"] == "slipstream.route_policy_bundle"
+    assert ROUTE_POLICY_BUNDLE["contract_version"] == (
+        route_policy_bundle.CONTRACT_VERSION
+    )
+    assert route_policy_bundle.SCHEMA_VERSION == tproxy.ROUTE_POLICY_SCHEMA_VERSION
 
     for contract in (
         POLICY,
@@ -73,6 +81,7 @@ def test_contract_metadata_and_vector_names_are_stable():
         CONNECTION_RACE,
         STATUS_V2,
         ROUTE_POLICY_MANIFEST,
+        ROUTE_POLICY_BUNDLE,
     ):
         names = [item["name"] for item in contract["vectors"]]
         assert names
@@ -128,6 +137,56 @@ def test_route_policy_manifest_contract(case):
     assert caught.value.code == expected["error_code"]
     assert caught.value.path == expected["path"]
     assert expected["message_contains"] in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ROUTE_POLICY_BUNDLE["canonical_vectors"],
+    ids=[item["name"] for item in ROUTE_POLICY_BUNDLE["canonical_vectors"]],
+)
+def test_route_policy_bundle_canonical_hash_contract(case):
+    manifest = copy.deepcopy(ROUTE_POLICY_MANIFEST["normalized_manifest"])
+    manifest["source"] = case["source"]
+    canonical = tproxy.route_policy_canonical_bytes(manifest)
+
+    assert canonical.isascii()
+    assert tproxy.route_policy_hash(manifest) == case["expected_sha256"]
+
+
+def resolved_route_policy_bundle():
+    bundle = copy.deepcopy(ROUTE_POLICY_BUNDLE["base_bundle"])
+    assert bundle["manifest"]["$ref"] == (
+        "route-policy-manifest-v1.json#/normalized_manifest"
+    )
+    bundle["manifest"] = copy.deepcopy(ROUTE_POLICY_MANIFEST["normalized_manifest"])
+    return bundle
+
+
+@pytest.mark.parametrize(
+    "case",
+    ROUTE_POLICY_BUNDLE["vectors"],
+    ids=[item["name"] for item in ROUTE_POLICY_BUNDLE["vectors"]],
+)
+def test_route_policy_bundle_contract(case):
+    bundle = resolved_route_policy_bundle()
+    trusted_keys = copy.deepcopy(ROUTE_POLICY_BUNDLE["trusted_keys"])
+    apply_manifest_mutations(bundle, case["bundle_mutations"])
+    apply_manifest_mutations(trusted_keys, case["trusted_key_mutations"])
+    expected = case["expected"]
+
+    if expected["ok"]:
+        assert tproxy.verify_signed_route_policy_bundle(bundle, trusted_keys) == (
+            ROUTE_POLICY_MANIFEST["normalized_manifest"]
+        )
+        return
+
+    with pytest.raises(tproxy.RoutePolicyBundleError) as caught:
+        tproxy.verify_signed_route_policy_bundle(bundle, trusted_keys)
+    assert caught.value.code == expected["error_code"]
+    assert caught.value.path == expected["path"]
+    assert expected["message_contains"] in str(caught.value)
+    if "manifest_error_code" in expected:
+        assert caught.value.manifest_error_code == expected["manifest_error_code"]
 
 
 def test_status_v2_fixture_is_privacy_bounded():

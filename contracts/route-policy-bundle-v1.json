@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.route_policy_bundle",
+  "contract_version": 1,
+  "manifest_contract": "route-policy-manifest-v1.json",
+  "test_key": {
+    "key_id": "fixture-ed25519-v1",
+    "public_key_base64": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+    "purpose": "deterministic contract fixture only; never a production trust key"
+  },
+  "canonical_vectors": [
+    {
+      "name": "normalized-manifest",
+      "source": "contract-fixture",
+      "expected_sha256": "70007d61b5b3430d83182b5fc9bba03091f08e4c1e4a35aa77c75b04daec897e"
+    },
+    {
+      "name": "unicode-source-uses-python-ascii-escaping",
+      "source": "fixture-π-😀",
+      "expected_sha256": "21a3e1d2d0e314079807d1d7cd470c41da04e140b7e068890ac1405590604678"
+    },
+    {
+      "name": "control-quotes-and-backslash-are-stable",
+      "source": "line\n\"slash\\\t\u0001",
+      "expected_sha256": "31f28dbf7087ffed9536f9b844531c36ebbc965687c35fddb891a01fdedac5c7"
+    }
+  ],
+  "base_bundle": {
+    "schema": 1,
+    "key_id": "fixture-ed25519-v1",
+    "signature": "RfdvoOTXW/Er3rQLCEgYK5Qruv9vvA+2+QqSh+ZNJLiToOneMhFo8uR45vQsDEnWNgm4L61DmESdP0dXdOPvBg==",
+    "sha256": "70007d61b5b3430d83182b5fc9bba03091f08e4c1e4a35aa77c75b04daec897e",
+    "manifest": {
+      "$ref": "route-policy-manifest-v1.json#/normalized_manifest"
+    }
+  },
+  "trusted_keys": {
+    "fixture-ed25519-v1": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ="
+  },
+  "vectors": [
+    {
+      "name": "valid-signed-bundle",
+      "bundle_mutations": [],
+      "trusted_key_mutations": [],
+      "expected": {"ok": true}
+    },
+    {
+      "name": "optional-hash-may-be-absent",
+      "bundle_mutations": [
+        {"op": "remove", "path": ["sha256"]}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {"ok": true}
+    },
+    {
+      "name": "unknown-envelope-fields-are-ignored",
+      "bundle_mutations": [
+        {"op": "set", "path": ["future_field"], "value": {"ignored": true}}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {"ok": true}
+    },
+    {
+      "name": "schema-is-required",
+      "bundle_mutations": [
+        {"op": "remove", "path": ["schema"]}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "missing_field",
+        "path": "$.schema",
+        "message_contains": "schema is required"
+      }
+    },
+    {
+      "name": "boolean-schema-is-not-an-integer",
+      "bundle_mutations": [
+        {"op": "set", "path": ["schema"], "value": true}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.schema",
+        "message_contains": "schema must be an integer"
+      }
+    },
+    {
+      "name": "unsupported-schema-is-rejected",
+      "bundle_mutations": [
+        {"op": "set", "path": ["schema"], "value": 2}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "out_of_range",
+        "path": "$.schema",
+        "message_contains": "unsupported policy bundle schema"
+      }
+    },
+    {
+      "name": "trusted-key-set-cannot-be-empty",
+      "bundle_mutations": [],
+      "trusted_key_mutations": [
+        {"op": "remove", "path": ["fixture-ed25519-v1"]}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "trusted_keys_required",
+        "path": "$.trusted_keys",
+        "message_contains": "trusted policy keys are required"
+      }
+    },
+    {
+      "name": "unknown-key-id-is-rejected",
+      "bundle_mutations": [
+        {"op": "set", "path": ["key_id"], "value": "missing-key"}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "unknown_key",
+        "path": "$.key_id",
+        "message_contains": "unknown policy key"
+      }
+    },
+    {
+      "name": "signature-must-be-a-string",
+      "bundle_mutations": [
+        {"op": "set", "path": ["signature"], "value": true}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.signature",
+        "message_contains": "policy signature must be base64"
+      }
+    },
+    {
+      "name": "signature-must-be-valid-base64",
+      "bundle_mutations": [
+        {"op": "set", "path": ["signature"], "value": "***"}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_base64",
+        "path": "$.signature",
+        "message_contains": "policy signature is not valid base64"
+      }
+    },
+    {
+      "name": "signature-must-be-64-bytes",
+      "bundle_mutations": [
+        {"op": "set", "path": ["signature"], "value": "AA=="}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_signature_length",
+        "path": "$.signature",
+        "message_contains": "policy signature must be 64 bytes"
+      }
+    },
+    {
+      "name": "public-key-must-be-valid-base64",
+      "bundle_mutations": [],
+      "trusted_key_mutations": [
+        {"op": "set", "path": ["fixture-ed25519-v1"], "value": "***"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_base64",
+        "path": "$.trusted_keys.fixture-ed25519-v1",
+        "message_contains": "policy public key is not valid base64"
+      }
+    },
+    {
+      "name": "public-key-must-be-32-bytes",
+      "bundle_mutations": [],
+      "trusted_key_mutations": [
+        {"op": "set", "path": ["fixture-ed25519-v1"], "value": "AA=="}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_public_key_length",
+        "path": "$.trusted_keys.fixture-ed25519-v1",
+        "message_contains": "policy public key must be 32 bytes"
+      }
+    },
+    {
+      "name": "sha256-must-be-a-string",
+      "bundle_mutations": [
+        {"op": "set", "path": ["sha256"], "value": true}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.sha256",
+        "message_contains": "policy hash must be a string"
+      }
+    },
+    {
+      "name": "sha256-must-have-canonical-shape",
+      "bundle_mutations": [
+        {"op": "set", "path": ["sha256"], "value": "not-a-sha256"}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_sha256",
+        "path": "$.sha256",
+        "message_contains": "policy hash must be lowercase SHA-256"
+      }
+    },
+    {
+      "name": "hash-mismatch-is-rejected-before-signature-check",
+      "bundle_mutations": [
+        {"op": "set", "path": ["sha256"], "value": "0000000000000000000000000000000000000000000000000000000000000000"}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "hash_mismatch",
+        "path": "$.sha256",
+        "message_contains": "policy hash mismatch"
+      }
+    },
+    {
+      "name": "signature-mismatch-is-rejected",
+      "bundle_mutations": [
+        {"op": "remove", "path": ["sha256"]},
+        {"op": "set", "path": ["manifest", "source"], "value": "tampered-source"}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "signature_verification_failed",
+        "path": "$.signature",
+        "message_contains": "policy signature verification failed"
+      }
+    },
+    {
+      "name": "invalid-manifest-preserves-nested-error-code",
+      "bundle_mutations": [
+        {"op": "set", "path": ["manifest", "static_routes", 2, "route_class"], "value": "geo_exit"},
+        {"op": "set", "path": ["manifest", "static_routes", 2, "strategy_set"], "value": "geph"}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "manifest_invalid",
+        "manifest_error_code": "protected_local_bypass",
+        "path": "$.manifest.static_routes[2]",
+        "message_contains": "discord must stay local_bypass/fake_only"
+      }
+    }
+  ]
+}

@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-16, after PR #137 at
-`39f40509ffb20cd9e2819ff152fcfe2ea8e59721`.
+Last evidence audit: 2026-07-16, after PR #138 at
+`a6edf7dbe56b038ab244237037f05d7f847760f8`.
 
 ## Resume Protocol
 
@@ -37,20 +37,20 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | StatusV2, policy/recovery modules, PF and Geph identity adapters, plus tray status, diagnostics, and Geph configuration are isolated. Python PF/Geph orchestration and Rust runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Status, policy/recovery, and manifest contracts implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, privacy-bounded StatusV2, and route-policy manifest models. Python and Rust execute the same frozen routing and manifest vectors; first-match validation preserves every protected local-bypass/direct-first suffix and rejects static-table geo exit. Signed-bundle verification and runtime adapter migration remain. |
+| M4 - Cross-Platform Core | Pure verification contracts implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, privacy-bounded StatusV2, route-policy manifest, and signed-bundle verification models. Python and Rust execute the same frozen routing, manifest, canonical-byte, hash, and Ed25519 vectors. First-match validation preserves every protected local-bypass/direct-first suffix and rejects static-table geo exit. Pure activation/rollback state and runtime adapter migration remain. |
 
 The required `checks` and `packaged-app-lifecycle` jobs passed for the audited
 main commit in
-[CI run 29525148613](https://github.com/aiwaki/slipstream/actions/runs/29525148613).
+[CI run 29527535752](https://github.com/aiwaki/slipstream/actions/runs/29527535752).
 The dependency and vendored-Geph audits passed in
-[audit run 29525148390](https://github.com/aiwaki/slipstream/actions/runs/29525148390).
+[audit run 29527535831](https://github.com/aiwaki/slipstream/actions/runs/29527535831).
 
 ## Next Verified Action
 
-Define language-neutral vectors for route-policy canonical bytes and signed
-bundle verification, then move that pure verification into `slipstream-core`.
-Do not add production trust keys, enable remote fetch/apply, or switch the
-runtime policy channel in that extraction PR.
+Define a language-neutral signed-policy activation/rollback reducer above the
+verified manifest. Keep persistence, network fetch, production trust keys, and
+runtime adapter effects outside the core until those pure transitions are
+frozen.
 
 ## External Gates
 
