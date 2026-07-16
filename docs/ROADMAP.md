@@ -198,8 +198,11 @@ route-circuit, bounded registry, connection-race, routing-policy, and recovery
 modules. Python and Rust run the same frozen policy and recovery v1 vectors,
 including the protected Discord/YouTube no-Geph invariant. The core also owns a
 privacy-bounded, forward-compatible StatusV2 model; a language-neutral fixture
-freezes its exact legacy tray projection while V1 remains accepted. Policy
-manifest parsing, signed updates, and runtime adapter migration remain.
+freezes its exact legacy tray projection while V1 remains accepted. A separate
+manifest contract now gives Python and Rust the same normalization, bounded
+hostname validation, structured failures, first-match protection, and
+static/geo table separation. Signed-bundle verification and runtime adapter
+migration remain.
 
 ## M5 - Packet-Level Capabilities
 

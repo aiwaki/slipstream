@@ -19,6 +19,9 @@ Slipstream routing decisions and bounded recovery primitives.
   adapters without touching the network.
 - `status-v2-v1.json` freezes one complete privacy-bounded StatusV2 payload and
   its legacy tray projection, including additive-field preservation.
+- `route-policy-manifest-v1.json` freezes manifest normalization, structured
+  validation failures, bounded input limits, and effective first-match
+  protection for local-bypass and direct-first domains.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -30,6 +33,11 @@ platform adapters can migrate deliberately.
 
 The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
+The manifest contract also rejects `geo_exit` entries in the earlier
+`static_routes` table and any geo-exit suffix that overlaps a protected domain.
+It validates the route selected by table order, not merely the presence of a
+later correct entry, including more-specific static subdomains inside a
+protected suffix family.
 The connection-race contract gates its request-local circuit before emitting
 `resolve`, records one result for the whole logical request rather than one per
 IP, and ignores adapter completions after a terminal result. The Python I/O

@@ -360,9 +360,10 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "primes.py": "VALUE = 7\n",
     "route_circuit.py": "VALUE = 8\n",
     "route_circuit_registry.py": "VALUE = 9\n",
-    "routing_policy.py": "VALUE = 10\n",
-    "routing_recovery.py": "VALUE = 11\n",
-    "xbox_dns.py": "VALUE = 12\n",
+    "route_policy_manifest.py": "VALUE = 10\n",
+    "routing_policy.py": "VALUE = 11\n",
+    "routing_recovery.py": "VALUE = 12\n",
+    "xbox_dns.py": "VALUE = 13\n",
 }
 
 
@@ -483,6 +484,7 @@ def test_copy_script_runtime_requires_geph_backend_before_install(tmp_path):
         "requirements-runtime.txt",
         "route_circuit.py",
         "route_circuit_registry.py",
+        "route_policy_manifest.py",
     ),
 )
 def test_copy_script_runtime_requires_complete_payload_before_install(tmp_path, missing):

@@ -9,6 +9,7 @@ pub mod address_attempts;
 pub mod connection_race;
 pub mod route_circuit;
 pub mod route_circuit_registry;
+pub mod route_policy_manifest;
 pub mod routing_policy;
 pub mod routing_recovery;
 pub mod status_v2;

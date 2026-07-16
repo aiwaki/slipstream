@@ -56,6 +56,7 @@ import geph_backend
 import pf_adapter
 import route_circuit
 import route_circuit_registry
+import route_policy_manifest as route_policy_manifest_contract
 from primes import build_fake_stun, classify as classify_voice_payload
 from routing_recovery import (
     ConnectionOutcome,
@@ -327,25 +328,6 @@ GEO_EXIT_POLICY_TABLE = (
 GEPH_HOSTS = tuple(
     domain for policy in GEO_EXIT_POLICY_TABLE for domain in policy["domains"]
 )
-POLICY_PROTECTED_DIRECT_FIRST_DOMAINS = frozenset(DIRECT_FIRST_HOSTS)
-POLICY_ALLOWED_SERVICE_GROUPS = frozenset((
-    SERVICE_DISCORD,
-    SERVICE_YOUTUBE,
-    SERVICE_OPENAI,
-    SERVICE_ANTHROPIC,
-    SERVICE_TELEGRAM,
-    SERVICE_STEAM_STORE,
-    SERVICE_GITHUB,
-    SERVICE_GOOGLE,
-    SERVICE_SPOTIFY,
-    SERVICE_GENERIC,
-))
-POLICY_ALLOWED_STRATEGY_BY_ROUTE = {
-    ROUTE_DIRECT: frozenset((STRATEGY_DIRECT,)),
-    ROUTE_DIRECT_FIRST: frozenset((STRATEGY_DIRECT_FIRST,)),
-    ROUTE_LOCAL_BYPASS: frozenset((STRATEGY_FAKE_ONLY,)),
-    ROUTE_GEO_EXIT: frozenset((STRATEGY_GEPH,)),
-}
 POLICY_STATE_DIR = "/var/db/slipstream"
 ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
 ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
@@ -563,130 +545,14 @@ def _require_policy_int(value, name, *, min_value=0, max_value=100):
     return value
 
 
-def _normalize_policy_domains(domains, name):
-    if not isinstance(domains, (list, tuple)) or not domains:
-        raise ValueError(f"{name}.domains must be a non-empty list")
-    normalized = []
-    seen = set()
-    for domain in domains:
-        if not isinstance(domain, str):
-            raise ValueError(f"{name}.domains entries must be strings")
-        host = normalize_host(domain)
-        if (
-            not host
-            or "*" in host
-            or "/" in host
-            or ":" in host
-            or any(part == "" for part in host.split("."))
-        ):
-            raise ValueError(f"{name}.domains contains invalid host {domain!r}")
-        if host not in seen:
-            normalized.append(host)
-            seen.add(host)
-    return normalized
-
-
-def _normalize_policy_entry(
-    entry, name, *, default_route_class=None, default_strategy_set=None,
-):
-    if not isinstance(entry, dict):
-        raise ValueError(f"{name} must be an object")
-    group = entry.get("service_group")
-    if group not in POLICY_ALLOWED_SERVICE_GROUPS:
-        raise ValueError(f"{name}.service_group is not supported")
-    route_class = entry.get("route_class", default_route_class)
-    if route_class not in POLICY_ALLOWED_STRATEGY_BY_ROUTE:
-        raise ValueError(f"{name}.route_class is not supported")
-    strategy_set = entry.get("strategy_set", default_strategy_set)
-    if strategy_set not in POLICY_ALLOWED_STRATEGY_BY_ROUTE[route_class]:
-        raise ValueError(f"{name}.strategy_set does not match route_class")
-    if group in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS and (
-        route_class != ROUTE_LOCAL_BYPASS or strategy_set != STRATEGY_FAKE_ONLY
-    ):
-        raise ValueError(f"{group} must stay local_bypass/fake_only")
-    return {
-        "domains": _normalize_policy_domains(entry.get("domains"), name),
-        "route_class": route_class,
-        "service_group": group,
-        "strategy_set": strategy_set,
-    }
+RoutePolicyManifestError = route_policy_manifest_contract.RoutePolicyManifestError
 
 
 def validate_route_policy_manifest(manifest):
-    if not isinstance(manifest, dict):
-        raise ValueError("policy manifest must be an object")
-    normalized = {
-        "version": _require_policy_int(
-            manifest.get("version"),
-            "version",
-            min_value=1,
-            max_value=1_000_000,
-        ),
-        "source": manifest.get("source"),
-        "static_routes": [],
-        "geo_exit_routes": [],
-        "attempt_limits": {},
-    }
-    if not isinstance(normalized["source"], str) or not normalized["source"].strip():
-        raise ValueError("source must be a non-empty string")
-
-    static_routes = manifest.get("static_routes")
-    geo_exit_routes = manifest.get("geo_exit_routes")
-    if not isinstance(static_routes, list) or not static_routes:
-        raise ValueError("static_routes must be a non-empty list")
-    if not isinstance(geo_exit_routes, list):
-        raise ValueError("geo_exit_routes must be a list")
-
-    protected_seen = set()
-    protected_direct_first_seen = set()
-    for index, entry in enumerate(static_routes):
-        item = _normalize_policy_entry(entry, f"static_routes[{index}]")
-        normalized["static_routes"].append(item)
-        if item["service_group"] in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS:
-            protected_seen.add(item["service_group"])
-        if (
-            item["route_class"] == ROUTE_DIRECT_FIRST
-            and item["strategy_set"] == STRATEGY_DIRECT_FIRST
-        ):
-            protected_direct_first_seen.update(item["domains"])
-    missing = POLICY_PROTECTED_LOCAL_BYPASS_GROUPS - protected_seen
-    if missing:
-        raise ValueError(f"protected local-bypass groups missing: {', '.join(sorted(missing))}")
-    missing_direct = (
-        POLICY_PROTECTED_DIRECT_FIRST_DOMAINS - protected_direct_first_seen
+    return route_policy_manifest_contract.validate_route_policy_manifest(
+        manifest,
+        ROUTE_POLICY_TABLE,
     )
-    if missing_direct:
-        raise ValueError(
-            "protected direct-first domains missing: "
-            + ", ".join(sorted(missing_direct))
-        )
-
-    for index, entry in enumerate(geo_exit_routes):
-        item = _normalize_policy_entry(
-            entry,
-            f"geo_exit_routes[{index}]",
-            default_route_class=ROUTE_GEO_EXIT,
-            default_strategy_set=STRATEGY_GEPH,
-        )
-        if item["route_class"] != ROUTE_GEO_EXIT:
-            raise ValueError(f"geo_exit_routes[{index}] must be geo_exit")
-        normalized["geo_exit_routes"].append(item)
-
-    attempt_limits = manifest.get("attempt_limits")
-    if not isinstance(attempt_limits, dict):
-        raise ValueError("attempt_limits must be an object")
-    for route_class, value in attempt_limits.items():
-        if route_class != "default" and route_class not in POLICY_ALLOWED_STRATEGY_BY_ROUTE:
-            raise ValueError(f"attempt_limits has unsupported route {route_class!r}")
-        normalized["attempt_limits"][route_class] = _require_policy_int(
-            value,
-            f"attempt_limits[{route_class}]",
-            min_value=1,
-            max_value=8,
-        )
-    if "default" not in normalized["attempt_limits"]:
-        raise ValueError("attempt_limits.default is required")
-    return normalized
 
 
 def route_policy_canonical_bytes(manifest=None):
@@ -4396,6 +4262,10 @@ def _script_runtime_payload(source_file):
         (
             os.path.join(source_dir, "route_circuit_registry.py"),
             "route_circuit_registry.py",
+        ),
+        (
+            os.path.join(source_dir, "route_policy_manifest.py"),
+            "route_policy_manifest.py",
         ),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),

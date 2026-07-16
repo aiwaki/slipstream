@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-16, after PR #135 at
-`3c8922e142eed72aa4308ce402ae62634c79a5d6`.
+Last evidence audit: 2026-07-16, after PR #136 at
+`e963b3215b3298b52ed06413350624f8e91d8008`.
 
 ## Resume Protocol
 
@@ -37,20 +37,20 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | StatusV2, policy/recovery modules, PF and Geph identity adapters, plus tray status, diagnostics, and Geph configuration are isolated. Python PF/Geph orchestration and Rust runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Status and policy/recovery contracts implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, and privacy-bounded StatusV2 models. Python and Rust execute the same frozen routing vectors, and the Rust status client projects the shared StatusV2 fixture to the existing tray contract while retaining V1. Policy manifest parsing, signed updates, and runtime adapter migration remain. |
+| M4 - Cross-Platform Core | Status, policy/recovery, and manifest contracts implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, privacy-bounded StatusV2, and route-policy manifest models. Python and Rust execute the same frozen routing and manifest vectors; first-match validation preserves every protected local-bypass/direct-first suffix and rejects static-table geo exit. Signed-bundle verification and runtime adapter migration remain. |
 
 The required `checks` and rerun `packaged-app-lifecycle` jobs passed for the
 audited main commit in
-[CI run 29512947852](https://github.com/aiwaki/slipstream/actions/runs/29512947852).
+[CI run 29516804391](https://github.com/aiwaki/slipstream/actions/runs/29516804391).
 The dependency and vendored-Geph audits passed in
-[audit run 29512947963](https://github.com/aiwaki/slipstream/actions/runs/29512947963).
+[audit run 29516804396](https://github.com/aiwaki/slipstream/actions/runs/29516804396).
 
 ## Next Verified Action
 
-Define a language-neutral route-policy manifest validation fixture and move
-policy parsing and validation into `slipstream-core`. Preserve the protected
-local-bypass and direct-first invariants; do not enable remote policy, add trust
-keys, or switch the runtime policy channel in that extraction PR.
+Define language-neutral vectors for route-policy canonical bytes and signed
+bundle verification, then move that pure verification into `slipstream-core`.
+Do not add production trust keys, enable remote fetch/apply, or switch the
+runtime policy channel in that extraction PR.
 
 ## External Gates
 
