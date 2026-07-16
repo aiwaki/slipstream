@@ -454,7 +454,7 @@ jobs:
             "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
             "- \`Slipstream.spdx.json\` — состав зависимостей." \
             "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
-            "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
+            "- \`gh attestation verify $dmg_name --repo ${{ github.repository }}\` — проверка provenance." \
             >> dist-release/release-notes.md
           printf '\n</details>\n' >> dist-release/release-notes.md
 

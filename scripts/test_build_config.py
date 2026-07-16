@@ -231,6 +231,7 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("DMG для установки", workflow)
         self.assertIn("dmg_name=", workflow)
+        self.assertIn("gh attestation verify $dmg_name", workflow)
         self.assertIn("releases/download/${{ steps.ver.outputs.tag }}", workflow)
         self.assertIn("Mark previous preview as archival", workflow)
         self.assertIn(
@@ -273,7 +274,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
         self.assertIn("--deny-self-hosted-runners", workflow)
         self.assertIn(
-            "gh attestation verify Slipstream-macos-arm64.zip --repo",
+            "gh attestation verify $dmg_name --repo",
             workflow,
         )
         self.assertLess(
