@@ -380,7 +380,7 @@ fn push_json_string(output: &mut String, value: &str) {
                 write!(output, "\\u{:04x}", character as u32)
                     .expect("writing to String cannot fail");
             }
-            character if character.is_ascii() => output.push(character),
+            character if (character as u32) <= 0x7e => output.push(character),
             character if (character as u32) <= 0xffff => {
                 write!(output, "\\u{:04x}", character as u32)
                     .expect("writing to String cannot fail");

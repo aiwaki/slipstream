@@ -23,6 +23,11 @@
       "name": "control-quotes-and-backslash-are-stable",
       "source": "line\n\"slash\\\t\u0001",
       "expected_sha256": "31f28dbf7087ffed9536f9b844531c36ebbc965687c35fddb891a01fdedac5c7"
+    },
+    {
+      "name": "delete-control-uses-python-ascii-escaping",
+      "source": "del-\u007f",
+      "expected_sha256": "613845cc0942e2bfaf6b5c840ab47ad0a52017fb4d7640379c26610492b03fa8"
     }
   ],
   "base_bundle": {
@@ -194,6 +199,19 @@
       "name": "sha256-must-be-a-string",
       "bundle_mutations": [
         {"op": "set", "path": ["sha256"], "value": true}
+      ],
+      "trusted_key_mutations": [],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.sha256",
+        "message_contains": "policy hash must be a string"
+      }
+    },
+    {
+      "name": "explicit-null-sha256-is-not-omission",
+      "bundle_mutations": [
+        {"op": "set", "path": ["sha256"], "value": null}
       ],
       "trusted_key_mutations": [],
       "expected": {

@@ -167,8 +167,8 @@ def verify_signed_route_policy_bundle(bundle, public_keys, bundled_static_routes
 
     normalized = _normalize_manifest(bundle.get("manifest"), bundled_static_routes)
     canonical = _canonical_bytes_from_normalized(normalized)
-    expected_hash = bundle.get("sha256")
-    if expected_hash is not None:
+    if "sha256" in bundle:
+        expected_hash = bundle["sha256"]
         _validate_sha256(expected_hash)
         if expected_hash != hashlib.sha256(canonical).hexdigest():
             _error("hash_mismatch", "$.sha256", "policy hash mismatch")
