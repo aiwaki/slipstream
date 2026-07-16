@@ -433,27 +433,30 @@ jobs:
       - name: Write release notes
         run: |
           set -euo pipefail
+          dmg_path="$(find dist-release -maxdepth 1 -type f -name 'Slipstream_*.dmg' -print -quit)"
+          [ -n "$dmg_path" ] || { echo "release DMG is missing"; exit 1; }
+          dmg_name="$(basename "$dmg_path")"
+          download_url="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/$dmg_name"
           if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
-            printf '%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s\n' \
-              "Предварительная сборка Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." \
-              "- \`Slipstream-macos-arm64.zip\` — приложение для первой установки." \
-              "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
-              "- \`Slipstream.spdx.json\` — состав зависимостей." \
-              "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
-              "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
-              "Сборка устанавливается вручную, не заменяет stable-канал и не содержит remote policy assets. Нотарификация Apple пока отсутствует." \
-              > dist-release/release-notes.md
+            headline="Предварительная сборка Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon."
+            channel_note="Preview-сборка устанавливается вручную, не заменяет stable-канал и не содержит remote policy assets. Нотарификация Apple пока отсутствует."
           else
-            printf '%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s\n' \
-              "Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." \
-              "- \`Slipstream-macos-arm64.zip\` — приложение для первой установки." \
-              "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
-              "- \`Slipstream.spdx.json\` — состав зависимостей." \
-              "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
-              "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
-              "Сборка опубликована в stable-канале вместе с подписанным каналом route policy. Нотарификация Apple пока отсутствует." \
-              > dist-release/release-notes.md
+            headline="Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon."
+            channel_note="Сборка опубликована в stable-канале вместе с подписанным каналом route policy. Нотарификация Apple пока отсутствует."
           fi
+          printf '%s\n\n' "$headline" > dist-release/release-notes.md
+          printf '## Установка\n\n' >> dist-release/release-notes.md
+          printf '[DMG для установки — `%s`](%s)\n\n' "$dmg_name" "$download_url" >> dist-release/release-notes.md
+          printf '%s\n\n' "После открытия образа приложение переносится в «Программы». ZIP-архив доступен как альтернативный формат." >> dist-release/release-notes.md
+          printf '> [!NOTE]\n> %s\n\n' "$channel_note" >> dist-release/release-notes.md
+          printf '<details>\n<summary>Проверка сборки</summary>\n\n' >> dist-release/release-notes.md
+          printf '%s\n' \
+            "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
+            "- \`Slipstream.spdx.json\` — состав зависимостей." \
+            "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
+            "- \`gh attestation verify Slipstream-macos-arm64.zip --repo ${{ github.repository }}\` — проверка provenance." \
+            >> dist-release/release-notes.md
+          printf '\n</details>\n' >> dist-release/release-notes.md
 
       - name: Publish release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -478,3 +481,24 @@ jobs:
             dist-release/route-policy-latest.json
             dist-release/route-policy-keys.json
             dist-release/*.dmg
+
+      - name: Mark previous preview as archival
+        if: steps.ver.outputs.channel == 'preview' && steps.previous.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous_tag="${{ steps.previous.outputs.tag }}"
+          case "$previous_tag" in
+            v*-preview.*) ;;
+            *) echo "refusing to relabel non-preview release: $previous_tag"; exit 1 ;;
+          esac
+          previous_name="$(gh release view "$previous_tag" --repo "${{ github.repository }}" --json name --jq .name)"
+          case "$previous_name" in
+            *архивная*) echo "$previous_tag is already archival"; exit 0 ;;
+            *\)) archival_name="${previous_name%?}, архивная)" ;;
+            *) archival_name="$previous_name (архивная)" ;;
+          esac
+          gh release edit "$previous_tag" \
+            --repo "${{ github.repository }}" \
+            --title "$archival_name"
