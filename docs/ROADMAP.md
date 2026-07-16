@@ -172,8 +172,9 @@ PF lifecycle qualification.
   release workflow now runs the sentinel against the exact signed `.app` before
   publishing; broader release test coverage remains pending.
 - Separate preview and stable channels. Manual builds now create non-updating
-  GitHub prereleases; stable requires Developer ID, hardened runtime,
-  notarization, and stapling.
+  GitHub prereleases. Stable tag events fail before checkout until Developer ID,
+  hardened runtime, notarization, and stapling are implemented as a fail-closed
+  publication gate.
 - Define production custody and rotation for policy-signing keys. Remote policy
   stays off by default; preview releases omit its channel until stable custody
   and rollback are reviewed.
