@@ -143,6 +143,8 @@ PF lifecycle qualification.
 
 ## M3 - Release-Grade macOS
 
+- Keep the Rust tray warning-free with strict Clippy in the required macOS
+  checks job. Done.
 - Pin every external GitHub Action to a reviewed immutable commit, build
   JavaScript with Node 24 LTS, and make macOS dependency installation explicit
   and fail-closed. Done.
