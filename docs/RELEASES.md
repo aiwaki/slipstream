@@ -18,6 +18,20 @@ After a preview is published successfully, the immediately preceding preview
 is marked as archival in its release title. Its tag and verified artifacts are
 retained unchanged.
 
+## Legacy App Releases
+
+`v0.1.1` through `v0.1.4` predate the current channel policy and the private PF
+anchor. They remain immutable, non-prerelease GitHub releases so the legacy
+updater endpoint at `releases/latest/download/latest.json` continues to resolve
+until a qualified stable release replaces it. GitHub may therefore label
+`v0.1.4` as **Latest** even though its title and release notes mark it as an
+archival build.
+
+These legacy releases are not used for a new installation. The root README
+points new users to the newest non-archival Slipstream preview. Do not delete,
+retag, or convert the legacy releases to prereleases merely to change their
+presentation: doing so would also change the updater endpoint.
+
 ## App Artifacts
 
 | File | Purpose |
@@ -79,7 +93,11 @@ locked build.
 
 - A manual `build-app` run creates a uniquely numbered preview only from
   `main`; dispatches from tags or other branches stop before building.
-- A pushed tag exactly matching `v$(cat VERSION)` creates a stable release.
+- The current workflow is preview-only. A pushed `v*` tag stops before checkout
+  until Developer ID signing, hardened runtime, notarization, and stapling are
+  implemented as a fail-closed stable-channel gate.
+- Once that gate exists, a pushed tag exactly matching `v$(cat VERSION)` may
+  create a stable release.
 - The exact packaged app must pass disposable-CI lifecycle qualification before
   either channel is published.
 - Stable publication also requires the reviewed signing and route-policy

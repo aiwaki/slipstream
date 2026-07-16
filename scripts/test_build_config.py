@@ -593,6 +593,20 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("make_latest: false", geph)
         self.assertIn("This is not an app release", geph)
 
+    def test_stable_channel_stays_closed_until_notarization_exists(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        gate = workflow.index("- name: Keep incomplete stable channel closed")
+        checkout = workflow.index("- uses: actions/checkout@")
+
+        self.assertLess(gate, checkout)
+        self.assertIn("if: github.event_name == 'push'", workflow[gate:checkout])
+        self.assertIn(
+            "Stable release publication is disabled", workflow[gate:checkout]
+        )
+        self.assertIn("exit 1", workflow[gate:checkout])
+
     def test_build_dependency_helper_skips_homebrew_when_tools_exist(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             bin_dir = Path(temporary)
