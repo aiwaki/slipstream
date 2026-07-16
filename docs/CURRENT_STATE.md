@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-16, after PR #132 at
-`b3f1ad0a160133ab92c042ff35c1daaf36ca5781`.
+Last evidence audit: 2026-07-16, after PR #133 at
+`1adc5198eb7ed0b766b7e7bf652eb6576e246378`.
 
 ## Resume Protocol
 
@@ -33,22 +33,23 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Implemented; qualification required | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. The final production exception that reloaded `/etc/pf.conf` for a guessed legacy signature is removed in the current change; M0 is closed only after its required source, sentinel, and packaged lifecycle checks pass. |
+| M0 - Safe Base | CI-qualified | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PR #133 removed the final production path that reloaded `/etc/pf.conf` from guessed legacy evidence; source, sentinel, and packaged lifecycle checks passed on the merged commit. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | StatusV2, policy/recovery modules, PF and Geph identity adapters, plus tray status, diagnostics, and Geph configuration are isolated. Python PF/Geph orchestration and Rust runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Foundation only | Shared JSON contracts and pure Rust address-attempt, route-circuit, registry, and connection-race modules exist inside the tray crate. There is no `slipstream-core` crate, Rust policy/recovery implementation, signed update core, or shared typed StatusV2 model yet. |
+| M4 - Cross-Platform Core | Core crate established | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, and connection-race modules plus their unchanged language-neutral v1 contract tests. The tray re-exports those modules for compatibility. Rust policy/recovery, signed updates, and a shared typed StatusV2 model remain. |
 
 The required `checks` and `packaged-app-lifecycle` jobs passed for the audited
-main commit in [CI run 29500114018](https://github.com/aiwaki/slipstream/actions/runs/29500114018).
+main commit in [CI run 29505517858](https://github.com/aiwaki/slipstream/actions/runs/29505517858).
+The dependency and vendored-Geph audits passed in
+[audit run 29505514280](https://github.com/aiwaki/slipstream/actions/runs/29505514280).
 
 ## Next Verified Action
 
-After the no-global-PF change passes required CI, create a real pure Rust
-`slipstream-core` crate and move the existing address-attempt, route-circuit,
-registry, and connection-race modules into it without changing their frozen
-contracts. Keep sockets, clocks, launchd, PF, Tauri, and every OS call in
-adapters.
+Implement the routing-policy classifier and recovery reducer in
+`slipstream-core` against the existing `routing-policy-v1` and `recovery-v1`
+golden vectors. Preserve the protected Discord/YouTube invariants and keep all
+transport, clock, PF, launchd, and other OS effects in adapters.
 
 ## External Gates
 

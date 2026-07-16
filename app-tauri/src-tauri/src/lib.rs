@@ -7,13 +7,13 @@
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
 
-pub mod address_attempts;
-pub mod connection_race;
 mod diagnostics;
 mod geph_config;
-pub mod route_circuit;
-pub mod route_circuit_registry;
 mod status_client;
+
+pub use slipstream_core::{
+    address_attempts, connection_race, route_circuit, route_circuit_registry,
+};
 
 use std::ffi::OsStr;
 use std::fs;

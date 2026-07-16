@@ -3505,6 +3505,7 @@ version = "0.1.8"
 dependencies = [
  "serde",
  "serde_json",
+ "slipstream-core",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -3514,6 +3515,13 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tokio",
+]
+
+[[package]]
+name = "slipstream-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@ __pycache__/
 spike/.venv/
 *.app/
 app/Slipstream.app/
+crates/*/target/
 
 spike/.buildvenv/
 spike/build/

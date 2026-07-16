@@ -126,6 +126,7 @@ jobs:
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \
+            scripts/test_slipstream_core.py \
             scripts/test_verify_release_artifacts.py
 
       - name: Project continuity contract
@@ -153,9 +154,15 @@ jobs:
         working-directory: app-tauri/src-tauri
         run: cargo test
 
+      - name: Rust core tests
+        run: cargo test --locked --manifest-path crates/slipstream-core/Cargo.toml
+
       - name: Rust tray lint
         working-directory: app-tauri/src-tauri
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust core lint
+        run: cargo clippy --locked --manifest-path crates/slipstream-core/Cargo.toml --all-targets -- -D warnings
 
       - name: Installed daemon lifecycle sentinel smoke
         env:

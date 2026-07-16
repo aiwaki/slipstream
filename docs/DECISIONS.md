@@ -5,6 +5,7 @@ survive across sessions and agents.
 
 | Date | Decision | Status |
 |---|---|---|
+| 2026-07-16 | Shared routing state machines live in the pure `crates/slipstream-core` crate. The core accepts addresses, times, and outcomes as data and owns no sockets, clocks, filesystem, process, Tauri, or OS calls; adapters own those effects. Frozen language-neutral contract tests move with the core, while the tray may re-export modules only for transition compatibility. | Active |
 | 2026-07-16 | After automatic context compaction or task resume, agents must verify the current worktree, merged/open PRs, required CI, and `docs/CURRENT_STATE.md` before choosing work. Conversation summaries and milestone labels are navigation only, never completion evidence. A PR that changes the next verified action or milestone status updates the checkpoint in the same change. | Active |
 | 2026-07-07 | Discord traffic stays on local bypass/desync, including `updates.discord.com` and `gateway.discord.gg`. It must not route through Geph. | Active |
 | 2026-07-07 | YouTube/googlevideo video delivery stays on local bypass. Geph is not the fallback for video playback. | Active |

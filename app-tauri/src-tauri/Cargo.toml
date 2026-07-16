@@ -23,6 +23,7 @@ tauri-plugin-autostart = "2"    # real Launch-at-Login (LoginItem)
 tauri-plugin-notification = "2" # geph up/down + update toasts
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+slipstream-core = { path = "../../crates/slipstream-core" }
 tokio = { version = "1", features = ["time", "net", "io-util", "macros"] }
 
 [profile.release]
