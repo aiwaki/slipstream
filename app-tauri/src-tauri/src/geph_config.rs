@@ -86,8 +86,8 @@ fn keychain_get() -> Option<String> {
     (!secret.is_empty()).then_some(secret)
 }
 
-pub(super) fn keychain_set(secret: &str) {
-    let _ = Command::new("/usr/bin/security")
+pub(super) fn keychain_set(secret: &str) -> bool {
+    Command::new("/usr/bin/security")
         .args([
             "add-generic-password",
             "-U",
@@ -98,7 +98,8 @@ pub(super) fn keychain_set(secret: &str) {
             "-w",
             secret,
         ])
-        .status();
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn keychain_delete_args() -> [&'static str; 5] {
@@ -117,19 +118,38 @@ pub(super) fn keychain_delete() {
         .status();
 }
 
+fn migrate_legacy_secret(
+    legacy: &str,
+    store: impl FnOnce(&str) -> bool,
+    scrub: impl FnOnce(),
+) -> (Option<String>, bool) {
+    let secret = legacy.trim().to_string();
+    if secret.is_empty() {
+        return (None, false);
+    }
+    let stored = store(&secret);
+    if stored {
+        scrub();
+    }
+    (Some(secret), stored)
+}
+
 /// Read the account secret from the Keychain. A legacy plaintext secret is
 /// migrated once and then removed from geph.json.
 pub(super) fn geph_secret(app: &AppHandle) -> Option<String> {
     if let Some(secret) = keychain_get() {
+        // Retry cleanup if a previous atomic config write could not remove the
+        // migrated plaintext copy after Keychain storage had succeeded.
+        geph_config_unset(app, "secret");
         return Some(secret);
     }
-    let legacy = geph_field(app, "secret")?.trim().to_string();
-    if legacy.is_empty() {
-        return None;
+    let legacy = geph_field(app, "secret")?;
+    let (secret, stored) =
+        migrate_legacy_secret(&legacy, keychain_set, || geph_config_unset(app, "secret"));
+    if secret.is_some() && !stored {
+        eprintln!("geph secret migration deferred: Keychain write unavailable");
     }
-    keychain_set(&legacy);
-    geph_config_unset(app, "secret");
-    Some(legacy)
+    secret
 }
 
 fn resolve_geph_enabled_state(
@@ -166,7 +186,7 @@ pub(super) fn geph_enabled(app: &AppHandle) -> bool {
 mod tests {
     use super::{
         config_map, config_with_field, config_without_field, keychain_delete_args,
-        resolve_geph_enabled_state,
+        migrate_legacy_secret, resolve_geph_enabled_state,
     };
 
     #[test]
@@ -221,5 +241,30 @@ mod tests {
                 "account-secret",
             ]
         );
+    }
+
+    #[test]
+    fn legacy_secret_is_scrubbed_only_after_keychain_storage_succeeds() {
+        let mut scrubbed = false;
+        let (secret, stored) = migrate_legacy_secret(
+            "  legacy-secret  ",
+            |value| {
+                assert_eq!(value, "legacy-secret");
+                false
+            },
+            || scrubbed = true,
+        );
+        assert_eq!(secret.as_deref(), Some("legacy-secret"));
+        assert!(!stored);
+        assert!(!scrubbed);
+
+        let (secret, stored) = migrate_legacy_secret("legacy-secret", |_| true, || scrubbed = true);
+        assert_eq!(secret.as_deref(), Some("legacy-secret"));
+        assert!(stored);
+        assert!(scrubbed);
+
+        let (secret, stored) = migrate_legacy_secret("  ", |_| true, || {});
+        assert!(secret.is_none());
+        assert!(!stored);
     }
 }

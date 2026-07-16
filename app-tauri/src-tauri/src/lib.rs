@@ -120,6 +120,7 @@ fn tr(en: &str) -> String {
         "Restart Proxy" => "Перезапустить прокси",
         "Open Log" => "Открыть лог",
         "Copy Diagnostics" => "Скопировать диагностику",
+        "Unable to save Geph account" => "Не удалось сохранить аккаунт Geph",
         "Check for Updates…" => "Проверить обновления…",
         "Uninstall Slipstream…" => "Удалить Slipstream…",
         "Quit Slipstream" => "Выйти из Slipstream",
@@ -2289,7 +2290,13 @@ pub fn run() {
                         ID_ACCOUNT => {
                             let cur = geph_secret(app).unwrap_or_default();
                             if let Some(secret) = prompt_secret(&cur) {
-                                keychain_set(&secret); // Keychain, not plaintext config
+                                if !keychain_set(&secret) {
+                                    eprintln!(
+                                        "geph account update unavailable: Keychain write failed"
+                                    );
+                                    notify(app, &tr("Unable to save Geph account"));
+                                    return;
+                                }
                                 if let Err(error) = ensure_geph_launch_agent(app, true) {
                                     eprintln!("geph account update unavailable: {error}");
                                 }
