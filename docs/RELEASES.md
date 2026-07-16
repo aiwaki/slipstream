@@ -7,7 +7,7 @@ purpose must remain visually and mechanically separate.
 |---|---|---|---|
 | Stable app | `vX.Y.Z` | Release and latest | Signed updater feed and first installation |
 | Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Manual qualification build from `main` |
-| Geph dependency | `geph-vendor-X.Y.Z` | Internal pre-release, never latest | Verified build input, not an app release |
+| Geph dependency | `geph-vendor-X.Y.Z-rN` | Internal pre-release, never latest | Reviewed and attested build input, not an app release |
 
 Preview and internal dependency releases never replace GitHub's latest pointer
 or the stable updater feed. Old tags are retained as build history and never
@@ -45,10 +45,31 @@ allows only exact package/version/advisory exceptions with an expiry date.
 Scanner failures and empty inventories fail closed.
 
 The published report is part of `artifact-manifest.json`, and release
-verification recomputes its SBOM and policy hashes. The current inventory lists
-Geph and `tg-ws-proxy` as top-level vendored applications; their transitive
-dependency graphs require separate vendor-build SBOMs and are not yet claimed
-as covered by the app audit.
+verification recomputes its SBOM and policy hashes. The application inventory
+lists Geph and `tg-ws-proxy` as top-level vendored applications. Geph
+additionally has its own reviewed source contract, `Cargo.lock`, full
+transitive SPDX inventory, and fail-closed audit in the `geph-vendor-*-r*` release.
+The app workflow verifies that exact vendor payload and its attestations before
+embedding it, then performs a fresh full-graph scan so newly published
+advisories and expired exceptions still block a later app release.
+`tg-ws-proxy` remains covered by its separate vendored-source review rather
+than a Rust dependency graph.
+
+## Geph Dependency Artifacts
+
+| File | Purpose |
+|---|---|
+| `geph5-client` | Universal macOS binary built from the reviewed lock |
+| `geph5-client.SOURCE.json` | Exact crates.io URL, SHA-256, features, targets, and lock digest |
+| `geph5-client.Cargo.lock` | Complete reviewed Rust dependency graph |
+| `geph5-client.spdx.json` | Deterministic SPDX 2.3 inventory for both macOS architectures |
+| `geph5-client-dependency-audit.json` | Full-coverage, policy-bound vulnerability result |
+| `geph5-client.LICENSE` | MPL-2.0 text |
+| `SHA256SUMS` | SHA-256 for every Geph dependency asset |
+
+A new upstream Geph crate cannot publish a binary immediately. Automation first
+opens a source-contract PR; only the reviewed and merged contract may trigger a
+locked build.
 
 ## Publication
 

@@ -1,0 +1,122 @@
+{
+  "exceptions": [
+    {
+      "advisories": [
+        "GHSA-g59m-gf8j-gjf5"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-aws-sdk-lambda-1.35.0-region-validation",
+      "package": "aws-sdk-lambda",
+      "reason": "geph5-client pins this SDK for its broker transport. The advisory is defense-in-depth region validation; Slipstream supplies no user AWS credentials or region override. Track upstream and remove when Geph permits aws-sdk-lambda 1.104.0 or newer.",
+      "version": "1.35.0"
+    },
+    {
+      "advisories": [
+        "CVE-2023-49092"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rsa-0.8.2-marvin-public-key-only",
+      "package": "rsa",
+      "reason": "This graph enters through blind-rsa-signatures/Mizaru. The Geph client uses public-key blind, finalize, and verify operations; the vulnerable private-key decryption/signing operation is not present in the client flow. Replace with an upstream-fixed graph.",
+      "version": "0.8.2"
+    },
+    {
+      "advisories": [
+        "CVE-2026-21895"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rsa-0.8.2-prime-validation-public-key-only",
+      "package": "rsa",
+      "reason": "The affected malformed private-key construction path is not used by the Geph client, which imports and applies only Mizaru public keys. Replace with an upstream-fixed blind-rsa-signatures graph.",
+      "version": "0.8.2"
+    },
+    {
+      "advisories": [
+        "CVE-2023-49092"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rsa-0.9.10-unused-sqlx-mysql",
+      "package": "rsa",
+      "reason": "This package is pulled by sqlx-mysql default features, while geph5-client uses SQLite and does not execute the MySQL authentication path or RSA private-key operations. Remove when upstream disables unused SQLx defaults or updates SQLx.",
+      "version": "0.9.10"
+    },
+    {
+      "advisories": [
+        "GHSA-82j2-j2ch-gfr8"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rustls-webpki-0.101.7-no-crl-input",
+      "package": "rustls-webpki",
+      "reason": "The panic requires a crafted certificate revocation list. Geph configures WebPKI roots and does not load CRLs. Keep this exception short-lived and remove when upstream updates rustls-webpki.",
+      "version": "0.101.7"
+    },
+    {
+      "advisories": [
+        "GHSA-965h-392x-2mh5"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rustls-webpki-0.101.7-name-constraints-0098",
+      "package": "rustls-webpki",
+      "reason": "This is accepted residual TLS risk requiring a CA to issue a certificate that exploits incomplete name-constraint enforcement. It is not declared unreachable; remove as soon as upstream moves to a fixed rustls-webpki.",
+      "version": "0.101.7"
+    },
+    {
+      "advisories": [
+        "GHSA-xgp8-3hg3-c2mh"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-rustls-webpki-0.101.7-name-constraints-0099",
+      "package": "rustls-webpki",
+      "reason": "This is accepted residual TLS risk requiring a CA to issue a certificate that exploits incomplete name-constraint enforcement. It is not declared unreachable; remove as soon as upstream moves to a fixed rustls-webpki.",
+      "version": "0.101.7"
+    },
+    {
+      "advisories": [
+        "GHSA-7gcf-g7xr-8hxj"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-serde-with-1.14.0-key-value-map-unused",
+      "package": "serde_with",
+      "reason": "The advisory affects KeyValueMap serialization with empty entries. No KeyValueMap use exists in the reviewed geph5-client, stdcode, or Mizaru client path. Remove when upstream updates serde_with.",
+      "version": "1.14.0"
+    },
+    {
+      "advisories": [
+        "GHSA-xmrp-424f-vfpx"
+      ],
+      "ecosystem": "crates.io",
+      "expires": "2026-09-30",
+      "id": "geph-sqlx-0.7.4-sqlite-only",
+      "package": "sqlx",
+      "reason": "The affected Postgres protocol path is not used; geph5-client persists state through SQLite. The advisory does not identify SQLite as exploitable. Remove when upstream updates SQLx and disables unused backend defaults.",
+      "version": "0.7.4"
+    }
+  ],
+  "rules": {
+    "informational": "record",
+    "unreviewed": "block"
+  },
+  "scanner": {
+    "assets": {
+      "darwin-arm64": {
+        "name": "osv-scanner_darwin_arm64",
+        "sha256": "a8cd6507b06239f463a7642430cfd2d154882f150f6e30cdc0653e28dfc34216"
+      },
+      "linux-amd64": {
+        "name": "osv-scanner_linux_amd64",
+        "sha256": "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
+      }
+    },
+    "repository": "google/osv-scanner",
+    "version": "2.3.8"
+  },
+  "schema_version": 1
+}

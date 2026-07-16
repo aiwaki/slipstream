@@ -141,7 +141,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
-          tag="geph-vendor-$version"
+          release_revision="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["release_revision"])')"
+          tag="geph-vendor-$version-r$release_revision"
           echo "using geph vendor tag: $tag"
           rm -rf /tmp/geph
           mkdir -p app-tauri/src-tauri/binaries /tmp/geph
@@ -149,6 +150,10 @@ jobs:
             --pattern 'geph5-client' \
             --pattern 'geph5-client.VERSION' \
             --pattern 'geph5-client.LICENSE' \
+            --pattern 'geph5-client.SOURCE.json' \
+            --pattern 'geph5-client.Cargo.lock' \
+            --pattern 'geph5-client.spdx.json' \
+            --pattern 'geph5-client-dependency-audit.json' \
             --pattern 'SHA256SUMS' \
             --dir /tmp/geph
           asset_version="$(tr -d '[:space:]' < /tmp/geph/geph5-client.VERSION)"
@@ -157,6 +162,64 @@ jobs:
             exit 1
           }
           ( cd /tmp/geph && shasum -a 256 -c SHA256SUMS )
+          cmp /tmp/geph/geph5-client.SOURCE.json vendor/geph/SOURCE.json
+          cmp /tmp/geph/geph5-client.Cargo.lock vendor/geph/Cargo.lock
+          cmp /tmp/geph/geph5-client.LICENSE vendor/geph/LICENSE
+          vendor_commit="$(python3 -c 'import json; print(json.load(open("/tmp/geph/geph5-client-dependency-audit.json"))["source"]["commit"])')"
+          tag_commit="$(gh api "repos/${{ github.repository }}/commits/$tag" --jq .sha)"
+          [ "$vendor_commit" = "$tag_commit" ] || {
+            echo "Geph audit source commit does not match immutable tag $tag"; exit 1;
+          }
+          python3 scripts/make_geph_vendor_sbom.py verify \
+            --source /tmp/geph/geph5-client.SOURCE.json \
+            --version-file /tmp/geph/geph5-client.VERSION \
+            --cargo-lock /tmp/geph/geph5-client.Cargo.lock \
+            --repository "${{ github.repository }}" \
+            --source-commit "$vendor_commit" \
+            --target macos-universal \
+            --sbom /tmp/geph/geph5-client.spdx.json
+          python3 scripts/dependency_audit.py verify \
+            --report /tmp/geph/geph5-client-dependency-audit.json \
+            --sbom /tmp/geph/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$vendor_commit" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full
+          signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
+          for artifact in /tmp/geph/*; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$vendor_commit" \
+              --deny-self-hosted-runners >/dev/null
+          done
+          gh attestation verify /tmp/geph/geph5-client \
+            --repo "${{ github.repository }}" \
+            --signer-workflow "$signer_workflow" \
+            --source-digest "$vendor_commit" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --deny-self-hosted-runners >/dev/null
+          python3 scripts/dependency_audit.py fetch-scanner \
+            --policy security/geph-dependency-audit-policy.json \
+            --platform darwin-arm64 \
+            --output /tmp/geph/osv-scanner
+          python3 scripts/dependency_audit.py scan \
+            --scanner /tmp/geph/osv-scanner \
+            --platform darwin-arm64 \
+            --sbom /tmp/geph/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$vendor_commit" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full \
+            --evaluation-date "$(date -u +%F)" \
+            --output /tmp/geph/geph5-client-current-audit.json
+          python3 scripts/dependency_audit.py verify \
+            --report /tmp/geph/geph5-client-current-audit.json \
+            --sbom /tmp/geph/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$vendor_commit" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full
           cp /tmp/geph/geph5-client \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
@@ -270,6 +333,7 @@ jobs:
             --npm-lock app-tauri/package-lock.json \
             --python-lock spike/requirements-runtime.txt \
             --geph-version-file vendor/geph/VERSION \
+            --geph-source-file vendor/geph/SOURCE.json \
             --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
             --output dist-release/Slipstream.spdx.json
 

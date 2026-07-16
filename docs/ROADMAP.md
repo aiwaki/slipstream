@@ -157,8 +157,10 @@ PF lifecycle qualification.
 - Audit the exact application SBOM on pull requests, `main`, a weekly schedule,
   and before every release. Done with a checksum-pinned OSV Scanner and an
   expiring, fail-closed review policy; the published report is bound into the
-  artifact manifest. Transitive SBOM and vulnerability coverage for the
-  separately built Geph binary remains pending in its vendor workflow.
+  artifact manifest. The separately built Geph binary now has an exact
+  crates.io digest, reviewed `Cargo.lock`, two-target SPDX inventory, full
+  transitive audit, and verified provenance/SBOM attestations. New Geph versions
+  pass through a source-contract PR before any binary is published.
 - Run full tests and a privileged PF-anchor sentinel test in release CI. The
   release workflow now runs the sentinel against the exact signed `.app` before
   publishing; broader release test coverage remains pending.

@@ -1,36 +1,37 @@
 # Vendored geph5-client
 
-Slipstream embeds geph **without making the user install it separately**. We do
-not reimplement geph (it is a whole obfuscated overlay network — broker, exits,
-Mizaru auth, mutating obfuscation — not a trick you can port) and we do not ship
-a pre-built blob that rots. Instead:
+Slipstream embeds the headless `geph5-client` for routes that require a foreign
+exit. The vendored source identity is reviewable and reproducible:
 
-1. `.github/workflows/build-geph.yml` compiles the headless `geph5-client` from
-   the MPL-2.0 source (`geph-official/geph5`, crate `geph5-client`) in CI — which
-   has Rust + network. macOS builds are universal (arm64 + x86_64).
-2. It publishes the binary as a GitHub Release asset `geph-vendor-<tag>` and
-   records the built version in `VERSION` here.
-3. The app-build workflow drops that binary into
-   `Slipstream.app/Contents/Resources/geph5-client`.
-4. A daily scheduled run watches geph upstream for a new `geph5-client-v*` tag and
-   rebuilds. New geph version → CI rebuild → Slipstream release → the app's own
-   auto-update delivers it. **Tracking upstream is automatic; nothing is installed
-   by hand.**
+- `VERSION` records the crates.io version;
+- `SOURCE.json` records the canonical `.crate` URL, SHA-256, build features,
+  targets, lock digest, and immutable release revision;
+- `Cargo.lock` freezes the complete Rust dependency graph;
+- `LICENSE` is the redistributed MPL-2.0 text.
 
-The daemon spawns + supervises this binary in SOCKS mode (login + exit come from
-Slipstream's tray UI, stored in the Keychain) and routes only geo-blocked hosts
-through it; Russian services are split-tunnel-excluded. See `spike/tproxy.py`.
+`.github/workflows/build-geph.yml` is deliberately two-phase. A newly published
+crate first opens a PR containing only the updated source contract and lock. No
+binary is built until normal review and required checks merge that PR. A later
+run downloads the exact archive, replaces its packaged lock with the reviewed
+one, builds both macOS architectures with `--locked`, and publishes the
+universal binary as `geph-vendor-<version>-r<revision>`. A new revision is
+required if build inputs or policy change; an existing tag is never replaced.
 
-`VERSION` holds the currently-vendored upstream tag (empty = build on next run).
+Each internal dependency release contains the binary, source contract, lock,
+license, SHA-256 manifest, full transitive SPDX 2.3 inventory, and a fail-closed
+OSV audit. GitHub attestations bind the payload and SBOM to the exact
+`build-geph.yml` run. The app workflow verifies all of these before embedding
+the binary.
 
-## tg-ws-proxy is different
+The reviewed `0.3.0` source currently emits an upstream deprecation warning for
+`aws_config::BehaviorVersion::v2025_08_07`. Slipstream does not patch the
+redistributed crate silently; the next source update should confirm that Geph
+has moved to the newer AWS behavior version.
 
-`Flowseal/tg-ws-proxy` is **already Python** (a local MTProto proxy). It is
-vendored as a Python module into the daemon directly — no binary, no rewrite —
-and a separate watcher bumps the pinned copy. Same "CI tracks upstream" idea,
-without a compile step.
+The daemon supervises only Slipstream's owned copy. Geph remains limited to
+geo-exit routes; local bypass groups such as Discord and YouTube never use it.
 
-## License
+## tg-ws-proxy
 
-geph5-client is MPL-2.0. Bundling the unmodified binary inside the MIT Slipstream
-app is permitted; we ship geph's LICENSE next to the binary and link the source.
+`Flowseal/tg-ws-proxy` is Python and is vendored directly into the daemon under
+`vendor/tg-ws-proxy`. It has a separate update and license path.

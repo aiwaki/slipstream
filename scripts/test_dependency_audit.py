@@ -13,6 +13,9 @@ import dependency_audit
 SOURCE_COMMIT = "a" * 40
 TARGET = "aarch64-apple-darwin"
 POLICY_PATH = dependency_audit.DEFAULT_POLICY
+GEPH_POLICY_PATH = (
+    dependency_audit.DEFAULT_POLICY.parent / "geph-dependency-audit-policy.json"
+)
 
 
 def scanner_metadata(policy: dict, platform: str = "darwin-arm64") -> dict:
@@ -57,12 +60,21 @@ def osv_result(*packages: tuple[dict, list[dict]]) -> dict:
 
 
 class DependencyAuditTests(unittest.TestCase):
+    def test_geph_policy_uses_the_same_pinned_scanner_and_fail_closed_rules(self) -> None:
+        application = dependency_audit.load_policy(POLICY_PATH)
+        geph = dependency_audit.load_policy(GEPH_POLICY_PATH)
+
+        self.assertEqual(geph["scanner"], application["scanner"])
+        self.assertEqual(geph["rules"], application["rules"])
+        self.assertGreaterEqual(len(geph["exceptions"]), 1)
+
     def _build_report(
         self,
         root: Path,
         result: dict,
         *,
         evaluated_on: date = date(2026, 7, 16),
+        vendored_transitive_dependencies: str = "top-level-only",
     ) -> tuple[dict, Path]:
         policy = dependency_audit.load_policy(POLICY_PATH)
         sbom = root / "Slipstream.spdx.json"
@@ -97,6 +109,7 @@ class DependencyAuditTests(unittest.TestCase):
             source_commit=SOURCE_COMMIT,
             target=TARGET,
             evaluated_on=evaluated_on,
+            vendored_transitive_dependencies=vendored_transitive_dependencies,
         )
         return report, sbom
 
@@ -260,6 +273,40 @@ class DependencyAuditTests(unittest.TestCase):
                 json.dumps(first, sort_keys=True),
                 json.dumps(second, sort_keys=True),
             )
+
+    def test_full_vendor_coverage_is_explicit_and_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report, sbom = self._build_report(
+                root,
+                osv_result(
+                    (
+                        {"ecosystem": "crates.io", "name": "serde", "version": "1"},
+                        [],
+                    )
+                ),
+                vendored_transitive_dependencies="full",
+            )
+            self.assertEqual(
+                report["coverage"]["vendored_transitive_dependencies"],
+                "full",
+            )
+            dependency_audit.validate_audit_report(
+                report,
+                policy_path=POLICY_PATH,
+                sbom_path=sbom,
+                source_commit=SOURCE_COMMIT,
+                target=TARGET,
+                vendored_transitive_dependencies="full",
+            )
+            with self.assertRaisesRegex(ValueError, "coverage"):
+                dependency_audit.validate_audit_report(
+                    report,
+                    policy_path=POLICY_PATH,
+                    sbom_path=sbom,
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
 
     def test_scanner_operational_error_is_not_treated_as_clean(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
