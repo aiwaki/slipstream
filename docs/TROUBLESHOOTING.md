@@ -34,6 +34,13 @@ The watchdog runs only when launchd reports the Slipstream label explicitly
 enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
 is the explicit action that may reinstall or re-enable it.
 
+After the daemon stops, `/var/run/slipstream.status` must disappear. A former
+shutdown race allowed the monitor thread to recreate that file after PF cleanup,
+so the tray could display stale state even though the private anchor was gone.
+Status publication is now serialized with teardown and permanently disabled for
+the remainder of the process. A surviving file after a confirmed daemon exit is
+a lifecycle defect; do not infer active routing from that file alone.
+
 `strategy_scores` in daemon status and copied diagnostics summary is
 aggregate-only: it reports host counts and ok/fail totals by service group and
 strategy, but does not expose hostnames.

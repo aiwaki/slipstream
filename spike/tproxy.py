@@ -170,6 +170,8 @@ STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
 DAEMON_VERSION = "0.1.8"
 _conn_count = 0                # live proxied connections
+_status_write_lock = threading.RLock()
+_shutdown_started = threading.Event()
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
 # The elegant hybrid (not a blunt VPN toggle): MOST traffic uses our local desync;
@@ -3762,17 +3764,22 @@ def status_snapshot_is_terminal_conflict(status):
 
 
 def write_status(state, iface, voice_iface):
+    if _shutdown_started.is_set():
+        return
     try:
         now = time.time()
         prune_telegram_direct_failures(now)
         prune_auto_geph(now)
         consume_telegram_proxy_acceptance()
         st = status_v2_snapshot(state, iface, voice_iface, now)
-        tmp = STATUS_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(st, f)
-        os.chmod(tmp, STATUS_PUBLIC_MODE)
-        os.replace(tmp, STATUS_PATH)
+        with _status_write_lock:
+            if _shutdown_started.is_set():
+                return
+            tmp = STATUS_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(st, f)
+            os.chmod(tmp, STATUS_PUBLIC_MODE)
+            os.replace(tmp, STATUS_PATH)
     except Exception:
         pass
 
@@ -4179,10 +4186,13 @@ def pf_state_snapshot(port=PROXY_PORT):
 
 def pf_teardown():
     global _pf_applied, _pf_interceptor_conflicts
-    try:
-        os.remove(STATUS_PATH)        # daemon is going away -> app shows "off"
-    except Exception:
-        pass
+    _shutdown_started.set()
+    with _status_write_lock:
+        for path in (STATUS_PATH + ".tmp", STATUS_PATH):
+            try:
+                os.remove(path)      # daemon is going away -> app shows "off"
+            except Exception:
+                pass
     _pf_flush()
     _pf_release_enable_token()
     _pf_applied = False
