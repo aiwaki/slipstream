@@ -33,9 +33,11 @@ PAC, and VPN settings are detected but never changed.
 
 Available build: macOS Apple Silicon.
 
-1. In [Releases](https://github.com/aiwaki/slipstream/releases), select the newest `Slipstream` release marked **Pre-release** and download `Slipstream-macos-arm64.zip`.
-2. Extract the archive and move `Slipstream.app` to Applications.
+1. In [Releases](https://github.com/aiwaki/slipstream/releases), select the newest `Slipstream` release marked **Pre-release** and download `Slipstream_*.dmg`.
+2. Open the disk image and move `Slipstream.app` to Applications.
 3. Launch Slipstream and approve installation of the background service.
+
+The ZIP archive in the same release remains available as an alternative format.
 
 The Geph account and exit are configured from the menu only for foreign-exit
 routes. The Telegram proxy offer appears automatically.

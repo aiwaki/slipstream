@@ -226,6 +226,25 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
 
+    def test_release_workflow_presents_dmg_and_archives_previous_preview(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+
+        self.assertIn("DMG для установки", workflow)
+        self.assertIn("dmg_name=", workflow)
+        self.assertIn("gh attestation verify $dmg_name", workflow)
+        self.assertIn("releases/download/${{ steps.ver.outputs.tag }}", workflow)
+        self.assertIn("Mark previous preview as archival", workflow)
+        self.assertIn(
+            "if: steps.ver.outputs.channel == 'preview' && steps.previous.outputs.tag != ''",
+            workflow,
+        )
+        self.assertIn("v*-preview.*", workflow)
+        self.assertIn("gh release edit", workflow)
+        self.assertLess(
+            workflow.index("Publish release"),
+            workflow.index("Mark previous preview as archival"),
+        )
+
     def test_release_workflow_binds_tags_and_notes_to_the_built_commit(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
@@ -255,7 +274,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
         self.assertIn("--deny-self-hosted-runners", workflow)
         self.assertIn(
-            "gh attestation verify Slipstream-macos-arm64.zip --repo",
+            "gh attestation verify $dmg_name --repo",
             workflow,
         )
         self.assertLess(

@@ -14,12 +14,16 @@ or the stable updater feed. Old tags are retained as build history and never
 moved; user-facing installation instructions always select the newest
 compatible app release.
 
+After a preview is published successfully, the immediately preceding preview
+is marked as archival in its release title. Its tag and verified artifacts are
+retained unchanged.
+
 ## App Artifacts
 
 | File | Purpose |
 |---|---|
-| `Slipstream-macos-arm64.zip` | First installation on macOS Apple Silicon |
-| `Slipstream_*.dmg` | Optional disk image |
+| `Slipstream_*.dmg` | Primary first-install format for macOS Apple Silicon |
+| `Slipstream-macos-arm64.zip` | Alternative first-install archive |
 | `Slipstream.app.tar.gz` | Tauri updater archive |
 | `Slipstream.app.tar.gz.sig` | Tauri updater signature |
 | `latest.json` | Tauri updater index |
