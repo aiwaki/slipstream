@@ -10,6 +10,7 @@
 pub mod address_attempts;
 pub mod connection_race;
 mod diagnostics;
+mod geph_config;
 pub mod route_circuit;
 pub mod route_circuit_registry;
 mod status_client;
@@ -30,6 +31,9 @@ use diagnostics::{
     daemon_recovery_status_value, diagnostic_log_tail, diagnostic_log_tail_from_path,
     diagnostic_snapshot_path, redact_sensitive_text, sanitize_json, unix_now_secs,
     write_diagnostic_snapshot_file,
+};
+use geph_config::{
+    geph_config_set, geph_enabled, geph_field, geph_secret, keychain_delete, keychain_set,
 };
 use serde_json::{json, Value};
 use status_client::{read_status, STATUS_PATH};
@@ -899,25 +903,6 @@ fn prompt_uninstall() -> bool {
     String::from_utf8_lossy(&out.stdout).contains(&format!("button returned:{expected}"))
 }
 
-/// Persist a geph setting (secret / exit / launch) into the per-user config the
-/// bundled geph5-client supervisor will read. Does NOT touch a separately
-/// installed Geph.app.
-fn geph_config_set(app: &AppHandle, key: &str, val: &str) {
-    let Ok(dir) = app.path().app_config_dir() else {
-        return;
-    };
-    let _ = fs::create_dir_all(&dir);
-    let path = dir.join("geph.json");
-    let mut cfg: serde_json::Map<String, Value> = fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    cfg.insert(key.to_string(), Value::String(val.to_string()));
-    if let Ok(s) = serde_json::to_string_pretty(&Value::Object(cfg)) {
-        let _ = write_private_atomic(&path, s.as_bytes());
-    }
-}
-
 fn telegram_proxy_detail(proxy: &str, suggested: bool, ru: bool) -> Option<&'static str> {
     if suggested {
         return Some(if ru {
@@ -1281,135 +1266,6 @@ async fn check_for_updates(app: AppHandle) {
             app.restart();
         }
     }
-}
-
-/// Read a string field from geph.json.
-fn geph_field(app: &AppHandle, key: &str) -> Option<String> {
-    let path = app.path().app_config_dir().ok()?.join("geph.json");
-    let v: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    v.get(key).and_then(|x| x.as_str()).map(|s| s.to_string())
-}
-
-/// Remove a key from geph.json (used to scrub a migrated plaintext secret).
-fn geph_config_unset(app: &AppHandle, key: &str) {
-    let Ok(dir) = app.path().app_config_dir() else {
-        return;
-    };
-    let path = dir.join("geph.json");
-    let Ok(text) = fs::read_to_string(&path) else {
-        return;
-    };
-    let Ok(mut cfg) = serde_json::from_str::<serde_json::Map<String, Value>>(&text) else {
-        return;
-    };
-    if cfg.remove(key).is_some() {
-        if let Ok(s) = serde_json::to_string_pretty(&Value::Object(cfg)) {
-            let _ = write_private_atomic(&path, s.as_bytes());
-        }
-    }
-}
-
-// The account secret lives in the macOS Keychain, not the plaintext config.
-const KC_SERVICE: &str = "dev.slipstream.geph";
-const KC_ACCOUNT: &str = "account-secret";
-
-fn keychain_get() -> Option<String> {
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-s",
-            KC_SERVICE,
-            "-a",
-            KC_ACCOUNT,
-            "-w",
-        ])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!s.is_empty()).then_some(s)
-}
-
-fn keychain_set(secret: &str) {
-    let _ = Command::new("/usr/bin/security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            KC_SERVICE,
-            "-a",
-            KC_ACCOUNT,
-            "-w",
-            secret,
-        ])
-        .status();
-}
-
-fn keychain_delete_args() -> [&'static str; 5] {
-    [
-        "delete-generic-password",
-        "-s",
-        KC_SERVICE,
-        "-a",
-        KC_ACCOUNT,
-    ]
-}
-
-fn keychain_delete() {
-    let _ = Command::new("/usr/bin/security")
-        .args(keychain_delete_args())
-        .status();
-}
-
-/// Read the geph account secret from the Keychain (None → not signed in → don't
-/// start geph). One-time migration: a legacy plaintext secret in geph.json is
-/// moved into the Keychain and scrubbed from the file.
-fn geph_secret(app: &AppHandle) -> Option<String> {
-    if let Some(s) = keychain_get() {
-        return Some(s);
-    }
-    let legacy = geph_field(app, "secret")?.trim().to_string();
-    if legacy.is_empty() {
-        return None;
-    }
-    keychain_set(&legacy);
-    geph_config_unset(app, "secret");
-    Some(legacy)
-}
-
-fn resolve_geph_enabled_state(
-    explicit: Option<&str>,
-    legacy_config_present: bool,
-    secret_present: bool,
-) -> (bool, bool) {
-    if let Some(value) = explicit {
-        return (value != "0", false);
-    }
-    let migrate_legacy_opt_in = legacy_config_present && secret_present;
-    (migrate_legacy_opt_in, migrate_legacy_opt_in)
-}
-
-/// Whether OUR bundled geph should run. A valid legacy config plus credentials
-/// is migrated once; an orphaned Keychain secret cannot recreate deleted state.
-fn geph_enabled(app: &AppHandle) -> bool {
-    let explicit = geph_field(app, "enabled");
-    let legacy_config_present = app
-        .path()
-        .app_config_dir()
-        .ok()
-        .map(|dir| dir.join("geph.json"))
-        .and_then(|path| fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .is_some_and(|value| value.is_object());
-    let secret_present = explicit.is_none() && legacy_config_present && geph_secret(app).is_some();
-    let (enabled, migrate) =
-        resolve_geph_enabled_state(explicit.as_deref(), legacy_config_present, secret_present);
-    if migrate {
-        geph_config_set(app, "enabled", "1");
-    }
-    enabled
 }
 
 /// geph exit_constraint for a menu exit value. Three shapes:
@@ -2674,9 +2530,8 @@ mod tests {
         exit_catalog, exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
-        keychain_delete_args, launchd_label_disabled_from_output,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, remove_owned_geph_runtime, resolve_geph_enabled_state,
+        launchd_label_disabled_from_output, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
+        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
         route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
         should_request_daemon_install, sync_private_executable, system_proxy_active_from_scutil,
         system_proxy_from_status, telegram_proxy_detail, uninstall_dialog_script_for,
@@ -2734,27 +2589,6 @@ mod tests {
 
         assert!(should_request_daemon_install(true, None, true));
         assert!(should_request_daemon_install(false, Some(true), true));
-    }
-
-    #[test]
-    fn legacy_geph_opt_in_migrates_without_reviving_orphaned_secrets() {
-        assert_eq!(
-            resolve_geph_enabled_state(Some("0"), true, true),
-            (false, false)
-        );
-        assert_eq!(
-            resolve_geph_enabled_state(Some("1"), true, true),
-            (true, false)
-        );
-        assert_eq!(resolve_geph_enabled_state(None, true, true), (true, true));
-        assert_eq!(
-            resolve_geph_enabled_state(None, false, true),
-            (false, false)
-        );
-        assert_eq!(
-            resolve_geph_enabled_state(None, true, false),
-            (false, false)
-        );
     }
 
     #[test]
@@ -2894,20 +2728,6 @@ mod tests {
         assert!(!config_dir.exists());
         assert!(untouched.exists());
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn keychain_cleanup_targets_only_slipstream_geph_account() {
-        assert_eq!(
-            keychain_delete_args(),
-            [
-                "delete-generic-password",
-                "-s",
-                "dev.slipstream.geph",
-                "-a",
-                "account-secret",
-            ]
-        );
     }
 
     #[test]
