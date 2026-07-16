@@ -107,6 +107,10 @@ class _ScapyMacNoiseFilter(logging.Filter):
 
 logging.getLogger("scapy.runtime").addFilter(_ScapyMacNoiseFilter())
 
+
+class LegacyGlobalPfConflict(RuntimeError):
+    """A global HTTPS redirect targets our port but has no ownership proof."""
+
 PROXY_PORT = 1080
 DIOCNATLOOK = 0xC0544417
 PF_OUT = 2
@@ -4223,11 +4227,11 @@ def pf_setup_if_ready(port, now=None):
     return pf_setup(port)
 
 
-def _legacy_pf_rules_loaded(port):
+def _legacy_global_pf_conflict(port):
     # A killed daemon can leave the private child anchor populated until the
     # next instance starts. Some macOS pfctl listings include those effective
-    # child rules in the root view; never mistake our current anchor for the
-    # pre-anchor legacy global ruleset and reload /etc/pf.conf over it.
+    # child rules in the root view. A matching global signature is therefore a
+    # conflict signal, never proof that Slipstream owns or may rewrite it.
     if pf_has_rules(port):
         return False
     nat = _run("pfctl", "-sn")
@@ -4238,16 +4242,6 @@ def _legacy_pf_rules_loaded(port):
     route = "route-to (lo0 127.0.0.1)" in rules.stdout
     https = re.search(r"\bport\s*(?:=\s*)?443\b", rules.stdout)
     return bool(redirect and route and https)
-
-
-def _restore_legacy_pf_rules(port):
-    if not _legacy_pf_rules_loaded(port):
-        return False
-    result = _run("pfctl", "-f", PF_CONFIG_PATH)
-    if result.returncode != 0:
-        raise RuntimeError("unable to restore the pre-anchor pf ruleset")
-    print(">> migrated legacy global pf rules to the private Slipstream anchor")
-    return True
 
 
 def _pf_load(port):
@@ -4443,11 +4437,30 @@ def _replace_tree_resilient(src, dst, attempts=3, delay=0.15):
 
 def cleanup_stale(port=PROXY_PORT):
     """Clear only Slipstream-owned state left by a prior daemon instance."""
-    if not running_from_install_dir():
+    installed = running_from_install_dir()
+    legacy_global_conflict = _legacy_global_pf_conflict(port)
+    disable_error = ""
+
+    if not installed:
         _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
-    _restore_legacy_pf_rules(port)
+    elif legacy_global_conflict:
+        result = _run("launchctl", "disable", _launchd_target())
+        if result.returncode != 0:
+            disable_error = (result.stderr or result.stdout or "unknown error").strip()
+
     _pf_flush()
     _pf_release_enable_token()
+
+    if legacy_global_conflict:
+        detail = (
+            f"; unable to disable owned launchd label: {disable_error[:240]}"
+            if disable_error
+            else ""
+        )
+        raise LegacyGlobalPfConflict(
+            "global HTTPS PF rules target Slipstream's listener, but their "
+            "ownership cannot be proven; refusing to reload /etc/pf.conf" + detail
+        )
 
 
 def orig_dst(sock):
@@ -7152,7 +7165,7 @@ def main():
     ap.add_argument("--install", action="store_true",
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
     ap.add_argument("--uninstall", action="store_true",
-                    help="remove the LaunchDaemon and restore pf")
+                    help="remove the LaunchDaemon and clear private pf state")
     ap.add_argument("--status", action="store_true",
                     help="print daemon status JSON and exit (no root needed)")
     args = ap.parse_args()
@@ -7195,7 +7208,13 @@ def main():
         pass
     _open_fd_reserve()
 
-    cleanup_stale()        # release only state owned by the previous daemon
+    try:
+        cleanup_stale()    # release only state owned by the previous daemon
+    except LegacyGlobalPfConflict as exc:
+        write_status("conflict", "", "")
+        print(f">> {exc}", file=sys.stderr)
+        _release_fd_reserve()
+        sys.exit(1)
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel

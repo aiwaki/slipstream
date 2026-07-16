@@ -896,6 +896,41 @@ def test_status_command_marks_stale_v2_status_off(monkeypatch, tmp_path, capsys)
     assert json.loads(capsys.readouterr().out) == {"state": "off"}
 
 
+def test_main_publishes_conflict_and_exits_on_legacy_global_pf(monkeypatch, capsys):
+    status_calls = []
+    reserve_released = []
+
+    def raise_conflict():
+        raise tproxy.LegacyGlobalPfConflict("legacy conflict")
+
+    monkeypatch.setattr(sys, "argv", ["tproxy.py"])
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(tproxy.resource, "getrlimit", lambda _kind: (256, 256))
+    monkeypatch.setattr(tproxy.resource, "setrlimit", lambda *_args: None)
+    monkeypatch.setattr(tproxy, "_open_fd_reserve", lambda: None)
+    monkeypatch.setattr(tproxy, "cleanup_stale", raise_conflict)
+    monkeypatch.setattr(
+        tproxy,
+        "write_status",
+        lambda state, iface, voice_iface: status_calls.append(
+            (state, iface, voice_iface)
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_release_fd_reserve",
+        lambda: reserve_released.append(True),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        tproxy.main()
+
+    assert exc.value.code == 1
+    assert status_calls == [("conflict", "", "")]
+    assert reserve_released == [True]
+    assert "legacy conflict" in capsys.readouterr().err
+
+
 def test_strategy_score_snapshot_is_aggregated_without_hostnames():
     tproxy._record_strategy_result("discord.com", "split64+fake", True, now=100.0)
     tproxy._record_strategy_result("cdn.discordapp.com", "split64+fake", False, now=110.0)
@@ -1186,7 +1221,7 @@ def test_pf_acquire_keeps_memory_token_when_pf_is_still_enabled(monkeypatch):
     assert calls == [("pfctl", "-s", "info"), ("pfctl", "-X", "456")]
 
 
-def test_legacy_pf_restore_is_explicit_and_preserves_config_source(monkeypatch):
+def test_legacy_global_pf_detection_is_read_only(monkeypatch):
     calls = []
 
     def fake_run(*args):
@@ -1201,11 +1236,13 @@ def test_legacy_pf_restore_is_explicit_and_preserves_config_source(monkeypatch):
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
 
-    assert tproxy._restore_legacy_pf_rules(1080)
-    assert calls[-1] == ("pfctl", "-f", tproxy.PF_CONFIG_PATH)
+    assert tproxy._legacy_global_pf_conflict(1080)
+    assert ("pfctl", "-sn") in calls
+    assert ("pfctl", "-sr") in calls
+    assert not any("-f" in args or "-d" in args for args in calls)
 
 
-def test_legacy_pf_restore_ignores_unrelated_route_to_rule(monkeypatch):
+def test_legacy_global_pf_detection_ignores_unrelated_route_to_rule(monkeypatch):
     def fake_run(*args):
         if args == ("pfctl", "-sn"):
             stdout = "rdr pass proto tcp to any port = 80 -> 127.0.0.1 port 1080\n"
@@ -1217,10 +1254,10 @@ def test_legacy_pf_restore_ignores_unrelated_route_to_rule(monkeypatch):
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
 
-    assert not tproxy._restore_legacy_pf_rules(1080)
+    assert not tproxy._legacy_global_pf_conflict(1080)
 
 
-def test_legacy_pf_restore_never_reloads_over_live_private_anchor(monkeypatch):
+def test_legacy_global_pf_detection_ignores_live_private_anchor(monkeypatch):
     calls = []
 
     def fake_run(*args):
@@ -1245,8 +1282,52 @@ def test_legacy_pf_restore_never_reloads_over_live_private_anchor(monkeypatch):
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
 
-    assert not tproxy._restore_legacy_pf_rules(1080)
-    assert not any(args[:3] == ("pfctl", "-f", tproxy.PF_CONFIG_PATH) for args in calls)
+    assert not tproxy._legacy_global_pf_conflict(1080)
+    assert not any("-f" in args or "-d" in args for args in calls)
+
+
+def test_cleanup_stale_disables_owned_job_on_legacy_global_conflict(monkeypatch):
+    calls = []
+
+    def fake_run(*args):
+        calls.append(args)
+        outputs = {
+            ("pfctl", "-sn"): (
+                "rdr pass proto tcp to any port = 443 -> 127.0.0.1 port 1080\n"
+            ),
+            ("pfctl", "-sr"): (
+                "pass out route-to (lo0 127.0.0.1) proto tcp to any port = 443\n"
+            ),
+        }
+        return SimpleNamespace(returncode=0, stdout=outputs.get(args, ""), stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "running_from_install_dir", lambda: True)
+    monkeypatch.setattr(tproxy, "_read_pf_token", lambda path=None: None)
+    monkeypatch.setattr(tproxy, "_remove_pf_token", lambda path=None: None)
+
+    with pytest.raises(tproxy.LegacyGlobalPfConflict, match="refusing to reload"):
+        tproxy.cleanup_stale()
+
+    assert ("launchctl", "disable", f"system/{tproxy.LAUNCHD_LABEL}") in calls
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "rules") in calls
+    assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "nat") in calls
+    assert not any("-f" in args or "-d" in args for args in calls)
+
+
+def test_tproxy_source_forbids_global_pf_mutation_calls():
+    tree = ast.parse(inspect.getsource(tproxy))
+    forbidden = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        if node.func.id != "_run":
+            continue
+        args = [arg.value for arg in node.args if isinstance(arg, ast.Constant)]
+        if len(args) >= 2 and args[0] == "pfctl" and args[1] in {"-f", "-d"}:
+            forbidden.append((node.lineno, args[:3]))
+
+    assert forbidden == []
 
 
 def test_cleanup_stale_never_uses_process_pattern_or_global_pf_disable(monkeypatch):
