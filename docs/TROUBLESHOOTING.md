@@ -156,9 +156,14 @@ Do not use `pfctl -F all`, `pfctl -F states`, `pfctl -d`, or load a replacement
 global ruleset as Slipstream recovery. On macOS, `-F all` includes the shared PF
 state table even when `-a` is present. The daemon therefore flushes only its
 private filter and NAT rulesets. It stores its own PF enable token under
-`/var/run` and releases only that reference during normal teardown. An upgrade
-from a legacy build may reload the canonical `/etc/pf.conf` once after detecting
-old global Slipstream redirect rules; it never writes that file.
+`/var/run` and releases only that reference during normal teardown.
+
+If a pre-anchor build left a global HTTPS redirect targeting Slipstream's local
+port, the current daemon treats the matching signature as an unowned conflict.
+It disables only its own launchd label, clears its private anchor and token,
+reports the conflict, and exits. It never reloads `/etc/pf.conf`: a root ruleset
+listing cannot prove which product owns those rules. Inspect and remove the
+legacy rules explicitly before selecting `Restart Proxy`.
 
 Reviewed PF changes use the disposable privileged smoke in CI instead of an
 installed workstation. Its local no-root preflight is:

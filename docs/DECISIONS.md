@@ -17,6 +17,8 @@ survive across sessions and agents.
 | 2026-07-09 | GitHub developer/download endpoints use direct passthrough and plain TLS; they should not route through Geph or the generic desync ladder. | Active |
 | 2026-07-09 | Human-facing runtime logs should avoid `failed` for expected transient retry/fallback events; reserve alarming wording for action-required errors. | Active |
 | 2026-07-10 | Slipstream owns only the `com.apple/slipstream` PF anchor. It must not load Slipstream rules into the global ruleset, edit `/etc/pf.conf`, or disable PF globally. | Active |
+| 2026-07-16 | A root PF listing that resembles a pre-anchor Slipstream redirect is not ownership proof. Detection is read-only: the daemon disables only its own launchd label, clears only its private anchor/token, reports the conflict, and exits. Startup, recovery, upgrade, and uninstall never reload `/etc/pf.conf` automatically. | Active |
+| 2026-07-16 | A terminal startup `conflict` remains visible after the normal 15-second live-status TTL. Successful startup replaces it and uninstall removes the status file; stale live states still become `off`. | Active |
 | 2026-07-10 | PF enablement is reference-counted with the token returned by `pfctl -E`; cleanup flushes only the private anchor and releases only that token. | Active |
 | 2026-07-10 | The bundled Geph listener on `127.0.0.1:9954` is usable only when PID, executable, config path, and listener ownership agree. An unknown listener is a fail-closed conflict. | Active |
 | 2026-07-10 | A separately managed Geph listener on `127.0.0.1:9909` is diagnostic-only unless the user explicitly opts into that port. Slipstream never stops it. | Active |
