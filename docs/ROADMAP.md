@@ -29,6 +29,8 @@ Target: before `v0.1.5`.
   Failure disables the label and removes only owned plist/runtime/PF state.
 - Treat an absent or disabled daemon label as durable stop intent. Startup and
   watchdog recovery do nothing until the user explicitly requests restart.
+- Make daemon shutdown a one-way transition: stop status publication before
+  cleanup and serialize final status removal with every in-flight writer.
 - Require ownership proof for bundled Geph on `:9954`; treat external `:9909` as
   read-only diagnostics unless explicitly selected.
 - Keep Geph config owner-only and secret-bearing files at `0600`.

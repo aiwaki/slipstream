@@ -11,6 +11,7 @@ import re
 import signal
 import ssl
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from collections import OrderedDict, deque
@@ -22,6 +23,7 @@ from tproxy import _doh_request, _doh_ssl_context
 
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state():
+    shutdown_started = tproxy._shutdown_started.is_set()
     dns_cache = dict(tproxy._system_dns_cache)
     smart_ok = dict(tproxy._smart_dns_ok_until)
     smart_failure = dict(tproxy._smart_dns_last_failure)
@@ -59,6 +61,7 @@ def reset_smart_dns_state():
         tproxy._fd_pressure_at,
     )
     try:
+        tproxy._shutdown_started.clear()
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
             "ts": 0.0,
@@ -114,6 +117,10 @@ def reset_smart_dns_state():
         tproxy._fd_pressure_at = 0.0
         yield
     finally:
+        if shutdown_started:
+            tproxy._shutdown_started.set()
+        else:
+            tproxy._shutdown_started.clear()
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.clear()
         tproxy._system_dns_cache.update(dns_cache)
@@ -1143,6 +1150,8 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
     calls = []
     status_path = tmp_path / "status"
     status_path.write_text("{}")
+    status_tmp_path = tmp_path / "status.tmp"
+    status_tmp_path.write_text("{}")
 
     def fake_run(*args):
         calls.append(args)
@@ -1162,6 +1171,52 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
     assert not any("states" in args or "all" in args for args in calls)
     assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
+    assert not status_path.exists()
+    assert not status_tmp_path.exists()
+
+
+def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
+    monkeypatch,
+    tmp_path,
+):
+    status_path = tmp_path / "status"
+    writer_inside_lock = threading.Event()
+    release_writer = threading.Event()
+    real_chmod = tproxy.os.chmod
+
+    def blocking_chmod(path, mode):
+        writer_inside_lock.set()
+        assert release_writer.wait(timeout=2)
+        real_chmod(path, mode)
+
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    monkeypatch.setattr(tproxy, "status_v2_snapshot", lambda *_: {"state": "active"})
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: None)
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy.os, "chmod", blocking_chmod)
+
+    writer = threading.Thread(
+        target=tproxy.write_status,
+        args=("active", "en0", None),
+    )
+    writer.start()
+    assert writer_inside_lock.wait(timeout=2)
+
+    teardown = threading.Thread(target=tproxy.pf_teardown)
+    teardown.start()
+    assert tproxy._shutdown_started.wait(timeout=2)
+    assert teardown.is_alive()
+
+    release_writer.set()
+    writer.join(timeout=2)
+    teardown.join(timeout=2)
+
+    assert not writer.is_alive()
+    assert not teardown.is_alive()
+    assert not status_path.exists()
+    assert not (tmp_path / "status.tmp").exists()
+
+    tproxy.write_status("active", "en0", None)
     assert not status_path.exists()
 
 
