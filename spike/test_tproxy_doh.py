@@ -367,10 +367,11 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "primes.py": "VALUE = 7\n",
     "route_circuit.py": "VALUE = 8\n",
     "route_circuit_registry.py": "VALUE = 9\n",
-    "route_policy_manifest.py": "VALUE = 10\n",
-    "routing_policy.py": "VALUE = 11\n",
-    "routing_recovery.py": "VALUE = 12\n",
-    "xbox_dns.py": "VALUE = 13\n",
+    "route_policy_bundle.py": "VALUE = 10\n",
+    "route_policy_manifest.py": "VALUE = 11\n",
+    "routing_policy.py": "VALUE = 12\n",
+    "routing_recovery.py": "VALUE = 13\n",
+    "xbox_dns.py": "VALUE = 14\n",
 }
 
 

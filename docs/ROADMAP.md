@@ -203,8 +203,10 @@ privacy-bounded, forward-compatible StatusV2 model; a language-neutral fixture
 freezes its exact legacy tray projection while V1 remains accepted. A separate
 manifest contract now gives Python and Rust the same normalization, bounded
 hostname validation, structured failures, first-match protection, and
-static/geo table separation. Signed-bundle verification and runtime adapter
-migration remain.
+static/geo table separation. Signed-bundle contract v1 now also freezes
+Python-compatible canonical bytes, SHA-256 identity, Ed25519 verification, and
+structured envelope failures in both languages. Pure activation/rollback state
+and runtime adapter migration remain.
 
 ## M5 - Packet-Level Capabilities
 

@@ -22,6 +22,8 @@ Slipstream routing decisions and bounded recovery primitives.
 - `route-policy-manifest-v1.json` freezes manifest normalization, structured
   validation failures, bounded input limits, and effective first-match
   protection for local-bypass and direct-first domains.
+- `route-policy-bundle-v1.json` freezes Python-compatible canonical bytes,
+  SHA-256 identity, Ed25519 verification, and structured envelope failures.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -33,6 +35,9 @@ platform adapters can migrate deliberately.
 
 The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
+The signed-bundle contract contains one deterministic test public key and
+signature. It is not a production trust key and does not enable remote policy
+fetch or application.
 The manifest contract also rejects `geo_exit` entries in the earlier
 `static_routes` table and any geo-exit suffix that overlaps a protected domain.
 It validates the route selected by table order, not merely the presence of a
