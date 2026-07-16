@@ -113,7 +113,9 @@ PF lifecycle qualification.
   and menu orchestration. Status freshness and the V1/V2 compatibility
   projection now live in an isolated status client. Diagnostic redaction, log
   tailing, recovery-state parsing, and owner-only export primitives are also
-  isolated; summary construction, installer facts, and UI orchestration remain.
+  isolated. Geph user settings, Keychain ownership, and legacy-secret migration
+  now live behind a separate configuration adapter; runtime/LaunchAgent control,
+  summary construction, installer facts, and UI orchestration remain.
 - Keep Python transport; avoid a big-bang rewrite.
 - Add language-neutral policy fixtures and recovery vectors. Done for contract
   v1. Deterministic address-attempt planning and route-scoped circuit breaking
