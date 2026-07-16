@@ -896,6 +896,30 @@ def test_status_command_marks_stale_v2_status_off(monkeypatch, tmp_path, capsys)
     assert json.loads(capsys.readouterr().out) == {"state": "off"}
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        {"state": "conflict", "ts": 900.0},
+        {
+            "schema_version": 2,
+            "daemon": {"state": "conflict", "updated_at": 900.0},
+        },
+    ],
+)
+def test_status_command_preserves_stale_terminal_conflict(
+    monkeypatch, tmp_path, capsys, status
+):
+    status_path = tmp_path / "slipstream.status"
+    status_path.write_text(json.dumps(status))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+    monkeypatch.setattr(tproxy.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(sys, "argv", ["tproxy.py", "--status"])
+
+    tproxy.main()
+
+    assert json.loads(capsys.readouterr().out) == status
+
+
 def test_main_publishes_conflict_and_exits_on_legacy_global_pf(monkeypatch, capsys):
     status_calls = []
     reserve_released = []

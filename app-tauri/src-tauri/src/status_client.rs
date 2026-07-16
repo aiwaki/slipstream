@@ -16,6 +16,13 @@ fn status_updated_at(status: &Value) -> f64 {
     status.get("ts").and_then(Value::as_f64).unwrap_or(0.0)
 }
 
+fn status_is_terminal_conflict(status: &Value) -> bool {
+    if status.get("schema_version").and_then(Value::as_u64) == Some(STATUS_SCHEMA_V2) {
+        return status.pointer("/daemon/state").and_then(Value::as_str) == Some("conflict");
+    }
+    status.get("state").and_then(Value::as_str) == Some("conflict")
+}
+
 fn v2_status_for_tray(status: &Value) -> Value {
     let daemon = status.get("daemon").unwrap_or(&Value::Null);
     let routes = status.get("routes").unwrap_or(&Value::Null);
@@ -89,13 +96,15 @@ fn status_for_tray(status: Value) -> Value {
 
 fn status_from_raw(raw: &str, now: f64) -> Option<Value> {
     let status: Value = serde_json::from_str(raw).ok()?;
-    if now - status_updated_at(&status) > STATUS_STALE_AFTER_SECS {
+    if now - status_updated_at(&status) > STATUS_STALE_AFTER_SECS
+        && !status_is_terminal_conflict(&status)
+    {
         return None;
     }
     Some(status_for_tray(status))
 }
 
-/// Daemon status, or `None` if the file is missing or stale.
+/// Daemon status, or `None` if the file is missing or has a stale live state.
 pub(crate) fn read_status() -> Option<Value> {
     let raw = fs::read_to_string(STATUS_PATH).ok()?;
     let now = std::time::SystemTime::now()
@@ -194,5 +203,18 @@ mod tests {
 
         assert!(status_from_raw(r#"{"state":"active","ts":89.99}"#, 105.0).is_none());
         assert!(status_from_raw("not-json", 105.0).is_none());
+    }
+
+    #[test]
+    fn status_reader_preserves_stale_terminal_conflict() {
+        let v1 = status_from_raw(r#"{"state":"conflict","ts":1.0}"#, 100.0).unwrap();
+        assert_eq!(v1["state"], "conflict");
+
+        let v2 = status_from_raw(
+            r#"{"schema_version":2,"daemon":{"state":"conflict","updated_at":1.0}}"#,
+            100.0,
+        )
+        .unwrap();
+        assert_eq!(v2["state"], "conflict");
     }
 }

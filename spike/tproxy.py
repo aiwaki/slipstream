@@ -3885,6 +3885,16 @@ def status_snapshot_updated_at(status):
     return 0.0
 
 
+def status_snapshot_is_terminal_conflict(status):
+    """Keep an actionable startup conflict visible after the daemon exits."""
+    if not isinstance(status, dict):
+        return False
+    if status.get("schema_version") == STATUS_SCHEMA_VERSION:
+        daemon = status.get("daemon")
+        return isinstance(daemon, dict) and daemon.get("state") == "conflict"
+    return status.get("state") == "conflict"
+
+
 def write_status(state, iface, voice_iface):
     try:
         now = time.time()
@@ -7175,9 +7185,14 @@ def main():
         try:
             with open(STATUS_PATH) as f:
                 line = f.read().strip()
-            # treat a stale file (>15s) as off — the daemon writes every 5s
+            # Live states expire because the daemon writes every 5s. A startup
+            # conflict is terminal and must remain visible after that daemon
+            # deliberately exits instead of refreshing the snapshot.
             st = json.loads(line)
-            if time.time() - status_snapshot_updated_at(st) > 15:
+            if (
+                time.time() - status_snapshot_updated_at(st) > 15
+                and not status_snapshot_is_terminal_conflict(st)
+            ):
                 line = '{"state": "off"}'
             print(line)
         except Exception:
