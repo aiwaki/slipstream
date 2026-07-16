@@ -1,0 +1,376 @@
+# Instincts generated from https://github.com/aiwaki/slipstream
+# Generated: 2026-07-16T00:27:51.674Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: slipstream-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/aiwaki/slipstream
+---
+
+# Slipstream Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: build
+
+## Evidence
+
+- 1 commits analyzed
+- Detected conventional commit pattern
+- Examples: build: make vendored geph reproducible and auditable
+
+---
+id: slipstream-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/aiwaki/slipstream
+---
+
+# Slipstream Commit Length
+
+## Action
+
+Write moderate-length commit messages (~52 characters)
+
+## Evidence
+
+- Average commit message length: 52 chars
+- Based on 1 commits
+
+---
+id: slipstream-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/aiwaki/slipstream
+---
+
+# Slipstream Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: slipstream-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/aiwaki/slipstream
+---
+
+# Slipstream Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: slipstream-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/aiwaki/slipstream
+---
+
+# Slipstream Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: slipstream-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/aiwaki/slipstream
+---
+
+# Slipstream Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: slipstream-instinct-file-naming
+trigger: "When creating a new Python file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct File Naming
+
+## Action
+
+Name the file using snake_case
+
+## Evidence
+
+- Pattern in files: namingConventions.files = snake_case
+
+---
+id: slipstream-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Function Naming
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern in files: namingConventions.functions = camelCase
+
+---
+id: slipstream-instinct-class-naming
+trigger: "When defining a new class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Class Naming
+
+## Action
+
+Name the class using PascalCase
+
+## Evidence
+
+- Pattern in files: namingConventions.classes = PascalCase
+
+---
+id: slipstream-instinct-constant-naming
+trigger: "When declaring a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Constant Naming
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern in files: namingConventions.constants = SCREAMING_SNAKE_CASE
+
+---
+id: slipstream-instinct-import-style
+trigger: "When importing modules in Python code"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in files: importStyle = relative
+
+---
+id: slipstream-instinct-export-style
+trigger: "When exporting functions or classes"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in files: exportStyle = named
+
+---
+id: slipstream-instinct-test-location
+trigger: "When adding new tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Test Location
+
+## Action
+
+Place test files in a separate folder from source files
+
+## Evidence
+
+- Pattern in architecture: testLocation = separate
+
+---
+id: slipstream-instinct-git-commit-prefix
+trigger: "When writing a commit message for build-related changes"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Git Commit Prefix
+
+## Action
+
+Prefix the commit message with 'build:'
+
+## Evidence
+
+- Seen in commit: 'build: make vendored geph reproducible and auditable'
+- Pattern in commits.prefixes = ["build"]
+
+---
+id: slipstream-instinct-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Git Commit Length
+
+## Action
+
+Keep the commit message around 52 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength = 52
+
+---
+id: slipstream-instinct-git-commit-format
+trigger: "When writing a commit message"
+confidence: 0.8
+domain: git
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Git Commit Format
+
+## Action
+
+Follow the conventional commit format: <type>: <description>
+
+## Evidence
+
+- Pattern in commits.type = conventional
+- Seen in commit: 'build: make vendored geph reproducible and auditable'
+
+---
+id: slipstream-instinct-workflow-build-app
+trigger: "When configuring CI/CD for app builds"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Workflow Build App
+
+## Action
+
+Use the workflow defined in .github/workflows/build-app.yml
+
+## Evidence
+
+- Pattern in configFiles: .github/workflows/build-app.yml
+
+---
+id: slipstream-instinct-workflow-build-geph
+trigger: "When configuring CI/CD for geph builds"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Workflow Build Geph
+
+## Action
+
+Use the workflow defined in .github/workflows/build-geph.yml
+
+## Evidence
+
+- Pattern in configFiles: .github/workflows/build-geph.yml
+
+---
+id: slipstream-instinct-workflow-dependency-audit
+trigger: "When setting up dependency auditing in CI/CD"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: aiwaki/slipstream
+---
+
+# Slipstream Instinct Workflow Dependency Audit
+
+## Action
+
+Use the workflow defined in .github/workflows/dependency-audit.yml
+
+## Evidence
+
+- Pattern in configFiles: .github/workflows/dependency-audit.yml
+
