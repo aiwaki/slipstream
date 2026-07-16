@@ -27,10 +27,11 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+use diagnostics::redact_sensitive_text;
 use diagnostics::{
     daemon_recovery_status_value, diagnostic_log_tail, diagnostic_log_tail_from_path,
-    diagnostic_snapshot_path, redact_sensitive_text, sanitize_json, unix_now_secs,
-    write_diagnostic_snapshot_file,
+    diagnostic_snapshot_path, sanitize_json, unix_now_secs, write_diagnostic_snapshot_file,
 };
 use geph_config::{
     geph_config_set, geph_enabled, geph_field, geph_secret, keychain_delete, keychain_set,
@@ -2134,10 +2135,10 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
         if !geph_launch_agent_bootstrap(&uid, &paths.plist) && !geph_launch_agent_loaded(&uid) {
             return Err("geph LaunchAgent bootstrap unavailable".into());
         }
-    } else if force_restart || binary_changed || config_changed || launcher_changed {
-        if !geph_launch_agent_kickstart(&uid) {
-            return Err("geph LaunchAgent restart unavailable".into());
-        }
+    } else if (force_restart || binary_changed || config_changed || launcher_changed)
+        && !geph_launch_agent_kickstart(&uid)
+    {
+        return Err("geph LaunchAgent restart unavailable".into());
     }
     Ok(true)
 }
