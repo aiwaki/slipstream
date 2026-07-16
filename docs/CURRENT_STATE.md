@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-16, after PR #134 at
-`8076c5076da0f16922fbf9148d94af857798b69f`.
+Last evidence audit: 2026-07-16, after PR #135 at
+`3c8922e142eed72aa4308ce402ae62634c79a5d6`.
 
 ## Resume Protocol
 
@@ -37,20 +37,20 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | StatusV2, policy/recovery modules, PF and Geph identity adapters, plus tray status, diagnostics, and Geph configuration are isolated. Python PF/Geph orchestration and Rust runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Policy/recovery contracts implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, and recovery modules. Python and Rust execute the same frozen v1 vectors; Discord/YouTube recovery cannot produce a Geph restart. Policy parsing, signed updates, a shared typed StatusV2 model, and runtime adapter migration remain. |
+| M4 - Cross-Platform Core | Status and policy/recovery contracts implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, and privacy-bounded StatusV2 models. Python and Rust execute the same frozen routing vectors, and the Rust status client projects the shared StatusV2 fixture to the existing tray contract while retaining V1. Policy manifest parsing, signed updates, and runtime adapter migration remain. |
 
 The required `checks` and rerun `packaged-app-lifecycle` jobs passed for the
 audited main commit in
-[CI run 29508133525](https://github.com/aiwaki/slipstream/actions/runs/29508133525).
+[CI run 29512947852](https://github.com/aiwaki/slipstream/actions/runs/29512947852).
 The dependency and vendored-Geph audits passed in
-[audit run 29508134678](https://github.com/aiwaki/slipstream/actions/runs/29508134678).
+[audit run 29512947963](https://github.com/aiwaki/slipstream/actions/runs/29512947963).
 
 ## Next Verified Action
 
-Define the privacy-bounded StatusV2 model and a language-neutral status fixture
-in `slipstream-core`, then make the Rust status client consume those shared
-types while retaining V1 compatibility. Do not change daemon output or tray
-copy in the type-extraction PR.
+Define a language-neutral route-policy manifest validation fixture and move
+policy parsing and validation into `slipstream-core`. Preserve the protected
+local-bypass and direct-first invariants; do not enable remote policy, add trust
+keys, or switch the runtime policy channel in that extraction PR.
 
 ## External Gates
 

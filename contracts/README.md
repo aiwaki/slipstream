@@ -17,6 +17,8 @@ Slipstream routing decisions and bounded recovery primitives.
 - `connection-race-v1.json` composes those primitives as a pure command/event
   state machine and executes them through scripted resolver and connector
   adapters without touching the network.
+- `status-v2-v1.json` freezes one complete privacy-bounded StatusV2 payload and
+  its legacy tray projection, including additive-field preservation.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust

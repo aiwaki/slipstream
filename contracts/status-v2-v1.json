@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.status_v2",
+  "contract_version": 1,
+  "vectors": [
+    {
+      "name": "complete-public-status",
+      "status": {
+        "schema_version": 2,
+        "daemon": {
+          "version": "0.1.8",
+          "state": "active",
+          "pid": 42,
+          "updated_at": 100.0,
+          "connections": 7,
+          "hosts_learned": 23,
+          "dead_hosts": 1
+        },
+        "routes": {
+          "local_bypass": {
+            "state": "ok",
+            "updated_at": 99.0
+          },
+          "geo_exit": {
+            "state": "degraded",
+            "updated_at": 98.0
+          },
+          "direct_passthrough": {
+            "state": "unknown",
+            "updated_at": 0.0
+          }
+        },
+        "backends": {
+          "local_engine": {
+            "state": "ready"
+          },
+          "geph": {
+            "state": "up",
+            "owned": true,
+            "port_conflict": false,
+            "external_detected": false,
+            "restart_recommended": false,
+            "active_sessions": 2,
+            "auto_geo_exit": {
+              "enabled": true,
+              "learned": 1,
+              "pending": 0,
+              "last_state": "ready",
+              "updated_at": 97.0
+            },
+            "future_signal": "preserved"
+          },
+          "telegram": {
+            "state": "ready",
+            "suggested": false
+          }
+        },
+        "environment": {
+          "pf": {
+            "state": "ready",
+            "applied": true,
+            "enabled": true,
+            "rules_loaded": true,
+            "interceptor_conflict": false
+          },
+          "proxy": {
+            "state": "active",
+            "kind": "pac",
+            "managed_by_slipstream": false
+          },
+          "dns": {
+            "state": "xbox_dns",
+            "providers": "xbox_dns",
+            "managed_by_slipstream": false,
+            "resolution_state": "ok",
+            "future_dns_signal": "preserved"
+          }
+        },
+        "recovery": {
+          "state": "idle",
+          "last_action": "none",
+          "reason": "",
+          "updated_at": 90.0,
+          "count": 1
+        },
+        "canaries": {
+          "running": false,
+          "total": 3,
+          "ok": 2,
+          "warnings": 0,
+          "degraded": 1,
+          "unknown": 0,
+          "next_due_in": 30,
+          "future_count": 4
+        },
+        "extension_marker": {
+          "enabled": true
+        }
+      },
+      "expected_tray": {
+        "schema_version": 2,
+        "state": "active",
+        "version": "0.1.8",
+        "pid": 42,
+        "ts": 100.0,
+        "conns": 7,
+        "hosts_learned": 23,
+        "dead": 1,
+        "geph": "up",
+        "geph_detail": {
+          "state": "up",
+          "owned": true,
+          "port_conflict": false,
+          "external_detected": false,
+          "restart_recommended": false,
+          "active_sessions": 2,
+          "auto_geo_exit": {
+            "enabled": true,
+            "learned": 1,
+            "pending": 0,
+            "last_state": "ready",
+            "updated_at": 97.0
+          },
+          "future_signal": "preserved"
+        },
+        "auto_geo_exit": {
+          "enabled": true,
+          "learned": 1,
+          "pending": 0,
+          "last_state": "ready",
+          "updated_at": 97.0
+        },
+        "telegram_proxy": "ready",
+        "telegram_proxy_suggest": false,
+        "route_health": {
+          "local_bypass": {
+            "state": "ok",
+            "last_route_class": "local_bypass"
+          },
+          "geo_exit": {
+            "state": "degraded",
+            "last_route_class": "geo_exit"
+          },
+          "direct_passthrough": {
+            "state": "unknown",
+            "last_route_class": "direct_passthrough"
+          }
+        },
+        "system_proxy": {
+          "state": "active",
+          "kind": "pac",
+          "managed_by_slipstream": false
+        },
+        "system_dns": {
+          "state": "xbox_dns",
+          "providers": "xbox_dns",
+          "managed_by_slipstream": false,
+          "resolution_state": "ok",
+          "future_dns_signal": "preserved",
+          "resolution_checks": {
+            "state": "ok"
+          }
+        },
+        "pf_state": {
+          "state": "ready",
+          "applied": true,
+          "enabled": true,
+          "rules_loaded": true,
+          "interceptor_conflict": false
+        },
+        "rearm": {
+          "last_at": 90.0,
+          "last_reason": "none",
+          "count": 1
+        },
+        "canaries": {
+          "running": false,
+          "total": 3,
+          "ok": 2,
+          "warnings": 0,
+          "degraded": 1,
+          "unknown": 0,
+          "next_due_in": 30,
+          "future_count": 4
+        }
+      }
+    }
+  ],
+  "privacy_forbidden_values": [
+    "chatgpt.com",
+    "111.88.96.50",
+    "split64+fake",
+    "account-secret"
+  ]
+}
