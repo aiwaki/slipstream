@@ -1,4 +1,5 @@
 from dataclasses import asdict
+import copy
 import json
 from pathlib import Path
 
@@ -26,6 +27,7 @@ ROUTE_CIRCUIT = load_contract("route-circuit-v1.json")
 ROUTE_CIRCUIT_REGISTRY = load_contract("route-circuit-registry-v1.json")
 CONNECTION_RACE = load_contract("connection-race-v1.json")
 STATUS_V2 = load_contract("status-v2-v1.json")
+ROUTE_POLICY_MANIFEST = load_contract("route-policy-manifest-v1.json")
 
 
 def merge(defaults, override):
@@ -58,6 +60,9 @@ def test_contract_metadata_and_vector_names_are_stable():
     assert STATUS_V2["schema_version"] == 1
     assert STATUS_V2["contract"] == "slipstream.status_v2"
     assert STATUS_V2["contract_version"] == 1
+    assert ROUTE_POLICY_MANIFEST["schema_version"] == 1
+    assert ROUTE_POLICY_MANIFEST["contract"] == "slipstream.route_policy_manifest"
+    assert ROUTE_POLICY_MANIFEST["contract_version"] == 1
 
     for contract in (
         POLICY,
@@ -67,10 +72,62 @@ def test_contract_metadata_and_vector_names_are_stable():
         ROUTE_CIRCUIT_REGISTRY,
         CONNECTION_RACE,
         STATUS_V2,
+        ROUTE_POLICY_MANIFEST,
     ):
         names = [item["name"] for item in contract["vectors"]]
         assert names
         assert len(names) == len(set(names))
+
+
+def value_at_path(root, path):
+    current = root
+    for segment in path:
+        current = current[segment]
+    return current
+
+
+def apply_manifest_mutations(manifest, mutations):
+    for mutation in mutations:
+        operation = mutation["op"]
+        path = mutation["path"]
+        if operation == "set":
+            parent = value_at_path(manifest, path[:-1])
+            parent[path[-1]] = copy.deepcopy(mutation["value"])
+        elif operation == "remove":
+            parent = value_at_path(manifest, path[:-1])
+            del parent[path[-1]]
+        elif operation == "append":
+            value_at_path(manifest, path).append(copy.deepcopy(mutation["value"]))
+        elif operation == "insert":
+            value_at_path(manifest, path).insert(
+                mutation["index"],
+                copy.deepcopy(mutation["value"]),
+            )
+        else:
+            raise AssertionError(f"unsupported fixture mutation {operation!r}")
+
+
+@pytest.mark.parametrize(
+    "case",
+    ROUTE_POLICY_MANIFEST["vectors"],
+    ids=[item["name"] for item in ROUTE_POLICY_MANIFEST["vectors"]],
+)
+def test_route_policy_manifest_contract(case):
+    manifest = copy.deepcopy(ROUTE_POLICY_MANIFEST["base_manifest"])
+    apply_manifest_mutations(manifest, case["mutations"])
+    expected = case["expected"]
+
+    if expected["ok"]:
+        assert tproxy.validate_route_policy_manifest(manifest) == (
+            ROUTE_POLICY_MANIFEST["normalized_manifest"]
+        )
+        return
+
+    with pytest.raises(tproxy.RoutePolicyManifestError) as caught:
+        tproxy.validate_route_policy_manifest(manifest)
+    assert caught.value.code == expected["error_code"]
+    assert caught.value.path == expected["path"]
+    assert expected["message_contains"] in str(caught.value)
 
 
 def test_status_v2_fixture_is_privacy_bounded():

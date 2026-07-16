@@ -1,0 +1,446 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.route_policy_manifest",
+  "contract_version": 1,
+  "base_manifest": {
+    "version": 2,
+    "source": "contract-fixture",
+    "static_routes": [
+      {
+        "domains": ["google.com"],
+        "route_class": "direct_first",
+        "service_group": "google",
+        "strategy_set": "direct_first",
+        "future_entry_field": "ignored"
+      },
+      {
+        "domains": ["spotify.com", "spotifycdn.com", "scdn.co"],
+        "route_class": "direct_first",
+        "service_group": "spotify",
+        "strategy_set": "direct_first"
+      },
+      {
+        "domains": [
+          "discord.com",
+          "discord.gg",
+          "discord.media",
+          "discordapp.com",
+          "discordapp.net",
+          "discordcdn.com",
+          "discord.app",
+          "discord.co",
+          "discord.dev",
+          "discord.design",
+          "discord.gift",
+          "discord.gifts",
+          "discord.new",
+          "discord.store",
+          "discord.status",
+          "discord-activities.com",
+          "discordactivities.com",
+          "discordmerch.com",
+          "discordpartygames.com",
+          "discordsays.com",
+          "discordsez.com",
+          "discordstatus.com",
+          "dis.gd",
+          "DISCORD.COM."
+        ],
+        "route_class": "local_bypass",
+        "service_group": "discord",
+        "strategy_set": "fake_only"
+      },
+      {
+        "domains": [
+          "googlevideo.com",
+          "youtube.com",
+          "youtu.be",
+          "ytimg.com",
+          "ggpht.com",
+          "gvt1.com",
+          "gvt2.com"
+        ],
+        "route_class": "local_bypass",
+        "service_group": "youtube_video",
+        "strategy_set": "fake_only"
+      }
+    ],
+    "geo_exit_routes": [
+      {
+        "domains": ["CHATGPT.COM.", "chatgpt.com"],
+        "service_group": "openai"
+      }
+    ],
+    "attempt_limits": {
+      "default": 2,
+      "local_bypass": 4
+    },
+    "future_root_field": {
+      "ignored": true
+    }
+  },
+  "normalized_manifest": {
+    "version": 2,
+    "source": "contract-fixture",
+    "static_routes": [
+      {
+        "domains": ["google.com"],
+        "route_class": "direct_first",
+        "service_group": "google",
+        "strategy_set": "direct_first"
+      },
+      {
+        "domains": ["spotify.com", "spotifycdn.com", "scdn.co"],
+        "route_class": "direct_first",
+        "service_group": "spotify",
+        "strategy_set": "direct_first"
+      },
+      {
+        "domains": [
+          "discord.com",
+          "discord.gg",
+          "discord.media",
+          "discordapp.com",
+          "discordapp.net",
+          "discordcdn.com",
+          "discord.app",
+          "discord.co",
+          "discord.dev",
+          "discord.design",
+          "discord.gift",
+          "discord.gifts",
+          "discord.new",
+          "discord.store",
+          "discord.status",
+          "discord-activities.com",
+          "discordactivities.com",
+          "discordmerch.com",
+          "discordpartygames.com",
+          "discordsays.com",
+          "discordsez.com",
+          "discordstatus.com",
+          "dis.gd"
+        ],
+        "route_class": "local_bypass",
+        "service_group": "discord",
+        "strategy_set": "fake_only"
+      },
+      {
+        "domains": [
+          "googlevideo.com",
+          "youtube.com",
+          "youtu.be",
+          "ytimg.com",
+          "ggpht.com",
+          "gvt1.com",
+          "gvt2.com"
+        ],
+        "route_class": "local_bypass",
+        "service_group": "youtube_video",
+        "strategy_set": "fake_only"
+      }
+    ],
+    "geo_exit_routes": [
+      {
+        "domains": ["chatgpt.com"],
+        "route_class": "geo_exit",
+        "service_group": "openai",
+        "strategy_set": "geph"
+      }
+    ],
+    "attempt_limits": {
+      "default": 2,
+      "local_bypass": 4
+    }
+  },
+  "vectors": [
+    {
+      "name": "valid-manifest-normalizes-domains-defaults-and-unknown-fields",
+      "mutations": [],
+      "expected": {"ok": true}
+    },
+    {
+      "name": "version-is-required",
+      "mutations": [
+        {"op": "remove", "path": ["version"]}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "missing_field",
+        "path": "$.version",
+        "message_contains": "version is required"
+      }
+    },
+    {
+      "name": "boolean-version-is-not-an-integer",
+      "mutations": [
+        {"op": "set", "path": ["version"], "value": true}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.version",
+        "message_contains": "version must be an integer"
+      }
+    },
+    {
+      "name": "empty-source-is-rejected",
+      "mutations": [
+        {"op": "set", "path": ["source"], "value": "   "}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "empty_value",
+        "path": "$.source",
+        "message_contains": "source must be a non-empty string"
+      }
+    },
+    {
+      "name": "empty-static-table-is-rejected",
+      "mutations": [
+        {"op": "set", "path": ["static_routes"], "value": []}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "empty_value",
+        "path": "$.static_routes",
+        "message_contains": "static_routes must be a non-empty list"
+      }
+    },
+    {
+      "name": "geo-exit-table-must-be-a-list",
+      "mutations": [
+        {"op": "set", "path": ["geo_exit_routes"], "value": {}}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.geo_exit_routes",
+        "message_contains": "geo_exit_routes must be a list"
+      }
+    },
+    {
+      "name": "ip-literal-is-not-a-policy-hostname",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 0, "domains", 0], "value": "8.8.8.8"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_hostname",
+        "path": "$.static_routes[0].domains[0]",
+        "message_contains": "IP literals are not policy hostnames"
+      }
+    },
+    {
+      "name": "domains-field-is-required",
+      "mutations": [
+        {"op": "remove", "path": ["static_routes", 0, "domains"]}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "missing_field",
+        "path": "$.static_routes[0].domains",
+        "message_contains": "static_routes[0].domains is required"
+      }
+    },
+    {
+      "name": "service-group-must-be-a-string",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 0, "service_group"], "value": true}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "invalid_type",
+        "path": "$.static_routes[0].service_group",
+        "message_contains": "service_group must be a string"
+      }
+    },
+    {
+      "name": "unsupported-service-group-is-rejected",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 0, "service_group"], "value": "future_group"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "unsupported_service_group",
+        "path": "$.static_routes[0].service_group",
+        "message_contains": "service_group is not supported"
+      }
+    },
+    {
+      "name": "strategy-must-match-route-class",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 0, "strategy_set"], "value": "fake_only"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "strategy_mismatch",
+        "path": "$.static_routes[0].strategy_set",
+        "message_contains": "strategy_set does not match route_class"
+      }
+    },
+    {
+      "name": "protected-group-cannot-move-to-geph",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 2, "route_class"], "value": "geo_exit"},
+        {"op": "set", "path": ["static_routes", 2, "strategy_set"], "value": "geph"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_local_bypass",
+        "path": "$.static_routes[2]",
+        "message_contains": "discord must stay local_bypass/fake_only"
+      }
+    },
+    {
+      "name": "protected-domain-cannot-be-omitted-behind-unrelated-group-entry",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 2, "domains", 0], "value": "example.com"},
+        {"op": "remove", "path": ["static_routes", 2, "domains", 23]}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_route_mismatch",
+        "path": "$.static_routes",
+        "message_contains": "protected local-bypass domain missing or shadowed: discord.com"
+      }
+    },
+    {
+      "name": "earlier-static-entry-cannot-shadow-protected-domain",
+      "mutations": [
+        {
+          "op": "insert",
+          "path": ["static_routes"],
+          "index": 0,
+          "value": {
+            "domains": ["discord.com"],
+            "route_class": "direct_passthrough",
+            "service_group": "generic",
+            "strategy_set": "direct"
+          }
+        }
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_route_mismatch",
+        "path": "$.static_routes",
+        "message_contains": "protected local-bypass domain missing or shadowed: discord.com"
+      }
+    },
+    {
+      "name": "earlier-static-subdomain-cannot-shadow-protected-family",
+      "mutations": [
+        {
+          "op": "insert",
+          "path": [
+            "static_routes"
+          ],
+          "index": 0,
+          "value": {
+            "domains": [
+              "updates.discord.com"
+            ],
+            "route_class": "direct_passthrough",
+            "service_group": "generic",
+            "strategy_set": "direct"
+          }
+        }
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_route_mismatch",
+        "path": "$.static_routes",
+        "message_contains": "protected local-bypass domain missing or shadowed: updates.discord.com under protected suffix discord.com"
+      }
+    },
+    {
+      "name": "protected-direct-first-domain-cannot-be-omitted",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 0, "domains", 0], "value": "example.com"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_direct_first",
+        "path": "$.static_routes",
+        "message_contains": "protected direct-first domains missing or shadowed: google.com"
+      }
+    },
+    {
+      "name": "static-table-cannot-contain-geo-exit",
+      "mutations": [
+        {
+          "op": "insert",
+          "path": ["static_routes"],
+          "index": 0,
+          "value": {
+            "domains": ["example.net"],
+            "route_class": "geo_exit",
+            "service_group": "generic",
+            "strategy_set": "geph"
+          }
+        }
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "static_geo_exit_forbidden",
+        "path": "$.static_routes[0].route_class",
+        "message_contains": "geo_exit routes belong in geo_exit_routes"
+      }
+    },
+    {
+      "name": "geo-exit-cannot-overlap-protected-domain",
+      "mutations": [
+        {
+          "op": "append",
+          "path": ["geo_exit_routes"],
+          "value": {
+            "domains": ["discord.com"],
+            "service_group": "generic"
+          }
+        }
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_geo_exit_overlap",
+        "path": "$.geo_exit_routes[1].domains[0]",
+        "message_contains": "overlaps protected domain"
+      }
+    },
+    {
+      "name": "attempt-limit-route-must-be-supported",
+      "mutations": [
+        {"op": "set", "path": ["attempt_limits", "unknown"], "value": 2}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "unsupported_attempt_route",
+        "path": "$.attempt_limits.unknown",
+        "message_contains": "attempt_limits has unsupported route"
+      }
+    },
+    {
+      "name": "default-attempt-limit-is-required",
+      "mutations": [
+        {"op": "remove", "path": ["attempt_limits", "default"]}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "missing_field",
+        "path": "$.attempt_limits.default",
+        "message_contains": "attempt_limits.default is required"
+      }
+    },
+    {
+      "name": "attempt-limit-is-bounded",
+      "mutations": [
+        {"op": "set", "path": ["attempt_limits", "default"], "value": 9}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "out_of_range",
+        "path": "$.attempt_limits.default",
+        "message_contains": "default out of range"
+      }
+    }
+  ]
+}
