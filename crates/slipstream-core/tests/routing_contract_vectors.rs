@@ -15,6 +15,7 @@ const ROUTE_CIRCUIT_V1: &str = include_str!("../../../contracts/route-circuit-v1
 const ROUTE_CIRCUIT_REGISTRY_V1: &str =
     include_str!("../../../contracts/route-circuit-registry-v1.json");
 const CONNECTION_RACE_V1: &str = include_str!("../../../contracts/connection-race-v1.json");
+const STATUS_V2_V1: &str = include_str!("../../../contracts/status-v2-v1.json");
 
 fn parse_contract(raw: &str) -> Value {
     serde_json::from_str(raw).expect("routing contract must be valid JSON")
@@ -32,6 +33,7 @@ fn rust_reads_versioned_language_neutral_contracts() {
             "slipstream.route_circuit_registry",
         ),
         (CONNECTION_RACE_V1, "slipstream.connection_race"),
+        (STATUS_V2_V1, "slipstream.status_v2"),
     ] {
         let contract = parse_contract(raw);
         assert_eq!(contract["schema_version"], 1);

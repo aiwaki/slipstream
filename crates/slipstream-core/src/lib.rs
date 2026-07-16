@@ -11,3 +11,4 @@ pub mod route_circuit;
 pub mod route_circuit_registry;
 pub mod routing_policy;
 pub mod routing_recovery;
+pub mod status_v2;

@@ -1,37 +1,76 @@
 use std::fs;
 
 use serde_json::{json, Map, Value};
+use slipstream_core::status_v2::{status_v2_from_value, StatusV2, STATUS_SCHEMA_V2};
 
 pub(crate) const STATUS_PATH: &str = "/var/run/slipstream.status";
-const STATUS_SCHEMA_V2: u64 = 2;
 const STATUS_STALE_AFTER_SECS: f64 = 15.0;
 
+enum ParsedStatus {
+    V1(Value),
+    V2(Box<StatusV2>),
+}
+
+impl ParsedStatus {
+    fn from_value(status: Value) -> Option<Self> {
+        if status.get("schema_version").and_then(Value::as_u64) == Some(STATUS_SCHEMA_V2) {
+            return status_v2_from_value(status)
+                .ok()
+                .map(Box::new)
+                .map(Self::V2);
+        }
+        Some(Self::V1(status))
+    }
+
+    fn updated_at(&self) -> f64 {
+        match self {
+            Self::V1(status) => status.get("ts").and_then(Value::as_f64).unwrap_or(0.0),
+            Self::V2(status) => status.updated_at(),
+        }
+    }
+
+    fn is_terminal_conflict(&self) -> bool {
+        match self {
+            Self::V1(status) => status.get("state").and_then(Value::as_str) == Some("conflict"),
+            Self::V2(status) => status.is_terminal_conflict(),
+        }
+    }
+
+    fn into_tray(self) -> Value {
+        match self {
+            Self::V1(status) => status,
+            Self::V2(status) => v2_status_for_tray(&status),
+        }
+    }
+}
+
+#[cfg(test)]
 fn status_updated_at(status: &Value) -> f64 {
-    if status.get("schema_version").and_then(Value::as_u64) == Some(STATUS_SCHEMA_V2) {
-        return status
-            .pointer("/daemon/updated_at")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-    }
-    status.get("ts").and_then(Value::as_f64).unwrap_or(0.0)
+    ParsedStatus::from_value(status.clone())
+        .map(|status| status.updated_at())
+        .unwrap_or(0.0)
 }
 
-fn status_is_terminal_conflict(status: &Value) -> bool {
-    if status.get("schema_version").and_then(Value::as_u64) == Some(STATUS_SCHEMA_V2) {
-        return status.pointer("/daemon/state").and_then(Value::as_str) == Some("conflict");
-    }
-    status.get("state").and_then(Value::as_str) == Some("conflict")
-}
-
-fn v2_status_for_tray(status: &Value) -> Value {
-    let daemon = status.get("daemon").unwrap_or(&Value::Null);
-    let routes = status.get("routes").unwrap_or(&Value::Null);
+fn v2_status_for_tray(status: &StatusV2) -> Value {
+    let daemon = status.daemon.as_ref();
+    let routes = status.routes.as_ref();
     let mut route_health = Map::new();
-    for route_class in ["local_bypass", "geo_exit", "direct_passthrough"] {
-        let state = routes
-            .get(route_class)
-            .and_then(|route| route.get("state"))
-            .and_then(Value::as_str)
+    for (route_class, route) in [
+        (
+            "local_bypass",
+            routes.and_then(|routes| routes.local_bypass.as_ref()),
+        ),
+        (
+            "geo_exit",
+            routes.and_then(|routes| routes.geo_exit.as_ref()),
+        ),
+        (
+            "direct_passthrough",
+            routes.and_then(|routes| routes.direct_passthrough.as_ref()),
+        ),
+    ] {
+        let state = route
+            .and_then(|route| route.state.as_deref())
             .unwrap_or("unknown");
         route_health.insert(
             route_class.to_string(),
@@ -42,14 +81,17 @@ fn v2_status_for_tray(status: &Value) -> Value {
         );
     }
 
-    let mut system_dns = status
-        .pointer("/environment/dns")
-        .cloned()
+    let environment = status.environment.as_ref();
+    let dns = environment.and_then(|environment| environment.dns.as_ref());
+    let mut system_dns = dns
+        .map(|dns| serde_json::to_value(dns).expect("StatusV2 DNS must serialize"))
         .unwrap_or_else(|| json!({"state": "unknown"}));
     if let Value::Object(dns) = &mut system_dns {
-        let resolution_state = dns
-            .get("resolution_state")
-            .and_then(Value::as_str)
+        let resolution_state = status
+            .environment
+            .as_ref()
+            .and_then(|environment| environment.dns.as_ref())
+            .and_then(|dns| dns.resolution_state.as_deref())
             .unwrap_or("unknown")
             .to_string();
         dns.insert(
@@ -58,50 +100,50 @@ fn v2_status_for_tray(status: &Value) -> Value {
         );
     }
 
-    let recovery = status.get("recovery").unwrap_or(&Value::Null);
+    let backends = status.backends.as_ref();
+    let geph = backends.and_then(|backends| backends.geph.as_ref());
+    let telegram = backends.and_then(|backends| backends.telegram.as_ref());
+    let recovery = status.recovery.as_ref();
     json!({
         "schema_version": STATUS_SCHEMA_V2,
-        "state": daemon.get("state").and_then(Value::as_str).unwrap_or("off"),
-        "version": daemon.get("version").and_then(Value::as_str).unwrap_or("unknown"),
-        "pid": daemon.get("pid").and_then(Value::as_i64).unwrap_or(0),
-        "ts": daemon.get("updated_at").and_then(Value::as_f64).unwrap_or(0.0),
-        "conns": daemon.get("connections").and_then(Value::as_i64).unwrap_or(0),
-        "hosts_learned": daemon.get("hosts_learned").and_then(Value::as_i64).unwrap_or(0),
-        "dead": daemon.get("dead_hosts").and_then(Value::as_i64).unwrap_or(0),
-        "geph": status.pointer("/backends/geph/state").and_then(Value::as_str).unwrap_or("off"),
-        "geph_detail": status.pointer("/backends/geph").cloned().unwrap_or_else(|| json!({})),
-        "auto_geo_exit": status.pointer("/backends/geph/auto_geo_exit").cloned().unwrap_or_else(|| json!({})),
-        "telegram_proxy": status.pointer("/backends/telegram/state").and_then(Value::as_str).unwrap_or("unknown"),
-        "telegram_proxy_suggest": status.pointer("/backends/telegram/suggested").and_then(Value::as_bool).unwrap_or(false),
+        "state": daemon.and_then(|daemon| daemon.state.as_deref()).unwrap_or("off"),
+        "version": daemon.and_then(|daemon| daemon.version.as_deref()).unwrap_or("unknown"),
+        "pid": daemon.and_then(|daemon| daemon.pid).unwrap_or(0),
+        "ts": daemon.and_then(|daemon| daemon.updated_at).unwrap_or(0.0),
+        "conns": daemon.and_then(|daemon| daemon.connections).unwrap_or(0),
+        "hosts_learned": daemon.and_then(|daemon| daemon.hosts_learned).unwrap_or(0),
+        "dead": daemon.and_then(|daemon| daemon.dead_hosts).unwrap_or(0),
+        "geph": geph.and_then(|geph| geph.state.as_deref()).unwrap_or("off"),
+        "geph_detail": geph.map(|geph| serde_json::to_value(geph).expect("StatusV2 Geph must serialize")).unwrap_or_else(|| json!({})),
+        "auto_geo_exit": geph.and_then(|geph| geph.auto_geo_exit.as_ref()).map(|auto| serde_json::to_value(auto).expect("StatusV2 auto geo-exit must serialize")).unwrap_or_else(|| json!({})),
+        "telegram_proxy": telegram.and_then(|telegram| telegram.state.as_deref()).unwrap_or("unknown"),
+        "telegram_proxy_suggest": telegram.and_then(|telegram| telegram.suggested).unwrap_or(false),
         "route_health": route_health,
-        "system_proxy": status.pointer("/environment/proxy").cloned().unwrap_or_else(|| json!({"state": "unknown", "kind": ""})),
+        "system_proxy": environment.and_then(|environment| environment.proxy.as_ref()).map(|proxy| serde_json::to_value(proxy).expect("StatusV2 proxy must serialize")).unwrap_or_else(|| json!({"state": "unknown", "kind": ""})),
         "system_dns": system_dns,
-        "pf_state": status.pointer("/environment/pf").cloned().unwrap_or_else(|| json!({"applied": false, "enabled": false, "rules_loaded": false})),
+        "pf_state": environment.and_then(|environment| environment.pf.as_ref()).map(|pf| serde_json::to_value(pf).expect("StatusV2 PF must serialize")).unwrap_or_else(|| json!({"applied": false, "enabled": false, "rules_loaded": false})),
         "rearm": {
-            "last_at": recovery.get("updated_at").and_then(Value::as_f64).unwrap_or(0.0),
-            "last_reason": recovery.get("last_action").and_then(Value::as_str).unwrap_or(""),
-            "count": recovery.get("count").and_then(Value::as_i64).unwrap_or(0),
+            "last_at": recovery.and_then(|recovery| recovery.updated_at).unwrap_or(0.0),
+            "last_reason": recovery.and_then(|recovery| recovery.last_action.as_deref()).unwrap_or(""),
+            "count": recovery.and_then(|recovery| recovery.count).unwrap_or(0),
         },
-        "canaries": status.get("canaries").cloned().unwrap_or_else(|| json!({})),
+        "canaries": status.canaries.as_ref().map(|canaries| serde_json::to_value(canaries).expect("StatusV2 canaries must serialize")).unwrap_or_else(|| json!({})),
     })
 }
 
+#[cfg(test)]
 fn status_for_tray(status: Value) -> Value {
-    if status.get("schema_version").and_then(Value::as_u64) == Some(STATUS_SCHEMA_V2) {
-        v2_status_for_tray(&status)
-    } else {
-        status
-    }
+    ParsedStatus::from_value(status)
+        .map(ParsedStatus::into_tray)
+        .unwrap_or(Value::Null)
 }
 
 fn status_from_raw(raw: &str, now: f64) -> Option<Value> {
-    let status: Value = serde_json::from_str(raw).ok()?;
-    if now - status_updated_at(&status) > STATUS_STALE_AFTER_SECS
-        && !status_is_terminal_conflict(&status)
-    {
+    let status = ParsedStatus::from_value(serde_json::from_str(raw).ok()?)?;
+    if now - status.updated_at() > STATUS_STALE_AFTER_SECS && !status.is_terminal_conflict() {
         return None;
     }
-    Some(status_for_tray(status))
+    Some(status.into_tray())
 }
 
 /// Daemon status, or `None` if the file is missing or has a stale live state.
@@ -119,6 +161,18 @@ mod tests {
     use super::{status_for_tray, status_from_raw, status_updated_at};
     use crate::{routing_health_summary, system_proxy_from_status};
     use serde_json::json;
+
+    const STATUS_V2_V1: &str = include_str!("../../../contracts/status-v2-v1.json");
+
+    #[test]
+    fn shared_status_v2_fixture_preserves_the_existing_tray_projection() {
+        let contract: serde_json::Value = serde_json::from_str(STATUS_V2_V1).unwrap();
+        let case = &contract["vectors"][0];
+        assert_eq!(
+            status_for_tray(case["status"].clone()),
+            case["expected_tray"]
+        );
+    }
 
     #[test]
     fn status_v2_projects_to_the_existing_tray_contract() {

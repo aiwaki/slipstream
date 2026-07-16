@@ -25,6 +25,7 @@ ADDRESS_ATTEMPTS = load_contract("address-attempts-v1.json")
 ROUTE_CIRCUIT = load_contract("route-circuit-v1.json")
 ROUTE_CIRCUIT_REGISTRY = load_contract("route-circuit-registry-v1.json")
 CONNECTION_RACE = load_contract("connection-race-v1.json")
+STATUS_V2 = load_contract("status-v2-v1.json")
 
 
 def merge(defaults, override):
@@ -54,6 +55,9 @@ def test_contract_metadata_and_vector_names_are_stable():
     assert CONNECTION_RACE["schema_version"] == 1
     assert CONNECTION_RACE["contract"] == "slipstream.connection_race"
     assert CONNECTION_RACE["contract_version"] == 1
+    assert STATUS_V2["schema_version"] == 1
+    assert STATUS_V2["contract"] == "slipstream.status_v2"
+    assert STATUS_V2["contract_version"] == 1
 
     for contract in (
         POLICY,
@@ -62,10 +66,17 @@ def test_contract_metadata_and_vector_names_are_stable():
         ROUTE_CIRCUIT,
         ROUTE_CIRCUIT_REGISTRY,
         CONNECTION_RACE,
+        STATUS_V2,
     ):
         names = [item["name"] for item in contract["vectors"]]
         assert names
         assert len(names) == len(set(names))
+
+
+def test_status_v2_fixture_is_privacy_bounded():
+    public_status = json.dumps(STATUS_V2["vectors"][0]["status"], sort_keys=True)
+    for private_value in STATUS_V2["privacy_forbidden_values"]:
+        assert private_value not in public_status
 
 
 @pytest.mark.parametrize(
