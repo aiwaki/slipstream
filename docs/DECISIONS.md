@@ -5,6 +5,7 @@ survive across sessions and agents.
 
 | Date | Decision | Status |
 |---|---|---|
+| 2026-07-16 | After automatic context compaction or task resume, agents must verify the current worktree, merged/open PRs, required CI, and `docs/CURRENT_STATE.md` before choosing work. Conversation summaries and milestone labels are navigation only, never completion evidence. A PR that changes the next verified action or milestone status updates the checkpoint in the same change. | Active |
 | 2026-07-07 | Discord traffic stays on local bypass/desync, including `updates.discord.com` and `gateway.discord.gg`. It must not route through Geph. | Active |
 | 2026-07-07 | YouTube/googlevideo video delivery stays on local bypass. Geph is not the fallback for video playback. | Active |
 | 2026-07-07 | QUIC/UDP must not be blocked globally. Any future QUIC handling must be scoped to verified host/IP evidence and a concrete failure mode. | Active |

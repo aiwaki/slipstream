@@ -4,10 +4,26 @@
 
 ## Start Here
 
+- After automatic context compaction, task resume, or a bare "continue"
+  request, read `docs/CURRENT_STATE.md` and verify it against the current
+  worktree, merged/open PRs, and required CI before choosing work.
 - Read `docs/README.md` before docs, routing, release, or troubleshooting work.
 - Read `docs/DECISIONS.md` before changing routing policy, canaries, Geph, DNS,
   proxy, PAC, or VPN behavior.
 - Keep root README files short and user-facing. Put project knowledge in `docs/`.
+
+## Resume And Continuity
+
+- Conversation summaries, milestone labels, and `docs/CURRENT_STATE.md` are
+  navigation aids, not proof. Current source, git state, PR state, and matching
+  CI evidence are authoritative.
+- Never continue from a claimed milestone number alone. Reconcile every
+  incomplete gate in `docs/CURRENT_STATE.md` with current evidence first.
+- Prefer executing the next verified action over restating the roadmap. Update
+  `docs/CURRENT_STATE.md` in the same PR when that action or milestone status
+  changes.
+- Do not repeat work after compaction. Check whether its branch, PR, equivalent
+  tree, or merge already exists before editing.
 
 ## Code Discovery
 
@@ -37,6 +53,9 @@
   findings, and network behavior.
 - Use `docs/DECISIONS.md` for stable decisions and invariants.
 - Use `docs/TROUBLESHOOTING.md` for repeated user-visible symptoms and checks.
+- Use `docs/CURRENT_STATE.md` only for the compact evidence checkpoint, open
+  gates, and next verified action; keep detailed investigations in their
+  existing topic documents.
 - Keep Codex memory compact; repo docs are the project source of truth.
 
 ## Git And PR Hygiene
