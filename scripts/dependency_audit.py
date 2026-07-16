@@ -27,6 +27,7 @@ DEFAULT_POLICY = (
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 MAX_SCANNER_BYTES = 128 * 1024 * 1024
+VENDORED_TRANSITIVE_COVERAGE = ("top-level-only", "full")
 
 
 def hash_file(path: Path) -> str:
@@ -400,11 +401,14 @@ def build_audit_report(
     source_commit: str,
     target: str,
     evaluated_on: date,
+    vendored_transitive_dependencies: str = "top-level-only",
 ) -> dict:
     if not SOURCE_COMMIT_PATTERN.fullmatch(source_commit):
         raise ValueError("source commit must be a full lowercase Git object ID")
     if not target:
         raise ValueError("release target is required")
+    if vendored_transitive_dependencies not in VENDORED_TRANSITIVE_COVERAGE:
+        raise ValueError("vendored transitive dependency coverage is invalid")
     findings, packages_scanned = evaluate_osv_result(
         result=osv_result,
         policy=policy,
@@ -429,7 +433,7 @@ def build_audit_report(
     return {
         "coverage": {
             "sbom_packages": "all",
-            "vendored_transitive_dependencies": "top-level-only",
+            "vendored_transitive_dependencies": vendored_transitive_dependencies,
         },
         "evaluated_on": evaluated_on.isoformat(),
         "findings": findings,
@@ -483,9 +487,12 @@ def validate_audit_report(
     sbom_path: Path,
     source_commit: str,
     target: str,
+    vendored_transitive_dependencies: str = "top-level-only",
 ) -> dict:
     if not isinstance(report, dict):
         raise ValueError("dependency audit report must be a JSON object")
+    if vendored_transitive_dependencies not in VENDORED_TRANSITIVE_COVERAGE:
+        raise ValueError("vendored transitive dependency coverage is invalid")
     expected = {
         "schema_version": SCHEMA_VERSION,
         "generator": GENERATOR,
@@ -493,7 +500,7 @@ def validate_audit_report(
         "source": {"commit": source_commit, "target": target},
         "coverage": {
             "sbom_packages": "all",
-            "vendored_transitive_dependencies": "top-level-only",
+            "vendored_transitive_dependencies": vendored_transitive_dependencies,
         },
     }
     for key, value in expected.items():
@@ -611,6 +618,7 @@ def validate_audit_report_file(
     sbom_path: Path,
     source_commit: str,
     target: str,
+    vendored_transitive_dependencies: str = "top-level-only",
 ) -> dict:
     report = _read_json_object(report_path, "dependency audit report")
     return validate_audit_report(
@@ -619,6 +627,7 @@ def validate_audit_report_file(
         sbom_path=sbom_path,
         source_commit=source_commit,
         target=target,
+        vendored_transitive_dependencies=vendored_transitive_dependencies,
     )
 
 
@@ -640,6 +649,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     scan.add_argument("--target", required=True)
     scan.add_argument("--evaluation-date", required=True, type=date.fromisoformat)
     scan.add_argument("--output", required=True, type=Path)
+    scan.add_argument(
+        "--vendored-transitive-dependencies",
+        choices=VENDORED_TRANSITIVE_COVERAGE,
+        default="top-level-only",
+    )
 
     verify = subparsers.add_parser("verify")
     verify.add_argument("--report", required=True, type=Path)
@@ -647,6 +661,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verify.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
     verify.add_argument("--source-commit", required=True)
     verify.add_argument("--target", required=True)
+    verify.add_argument(
+        "--vendored-transitive-dependencies",
+        choices=VENDORED_TRANSITIVE_COVERAGE,
+        default="top-level-only",
+    )
     return parser.parse_args(argv)
 
 
@@ -675,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
             source_commit=args.source_commit,
             target=args.target,
             evaluated_on=args.evaluation_date,
+            vendored_transitive_dependencies=args.vendored_transitive_dependencies,
         )
         write_json_atomic(args.output, report)
         result = report["summary"] | {"status": report["status"]}
@@ -688,6 +708,7 @@ def main(argv: list[str] | None = None) -> int:
             sbom_path=args.sbom,
             source_commit=args.source_commit,
             target=args.target,
+            vendored_transitive_dependencies=args.vendored_transitive_dependencies,
         )
     print(json.dumps(result, sort_keys=True))
     return 0

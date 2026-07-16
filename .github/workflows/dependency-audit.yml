@@ -49,6 +49,7 @@ jobs:
             --npm-lock app-tauri/package-lock.json \
             --python-lock spike/requirements-runtime.txt \
             --geph-version-file vendor/geph/VERSION \
+            --geph-source-file vendor/geph/SOURCE.json \
             --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
             --output dist-audit/Slipstream.spdx.json
 
@@ -79,5 +80,84 @@ jobs:
         with:
           name: dependency-audit-${{ github.sha }}
           path: dist-audit/
+          if-no-files-found: error
+          retention-days: 14
+
+  geph-vendor-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - name: Materialize the reviewed Geph source graph
+        run: |
+          set -euo pipefail
+          mkdir -p dist-geph-audit /tmp/geph-source /tmp/geph-metadata
+          crate_url="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["crate"]["url"])')"
+          curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+            "$crate_url" -o /tmp/geph5-client.crate
+          source_json="$(python3 scripts/geph_vendor_source.py extract \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --crate /tmp/geph5-client.crate \
+            --output /tmp/geph-source)"
+          source_root="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root"])' <<< "$source_json")"
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo metadata \
+              --manifest-path "$source_root/Cargo.toml" \
+              --locked \
+              --features aws_lambda \
+              --filter-platform "$target" \
+              --format-version 1 \
+              > "/tmp/geph-metadata/$target.json"
+          done
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          python3 scripts/make_geph_vendor_sbom.py generate \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --cargo-metadata aarch64-apple-darwin=/tmp/geph-metadata/aarch64-apple-darwin.json \
+            --cargo-metadata x86_64-apple-darwin=/tmp/geph-metadata/x86_64-apple-darwin.json \
+            --repository "${{ github.repository }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$source_date_epoch" \
+            --target macos-universal \
+            --output dist-geph-audit/geph5-client.spdx.json
+
+      - name: Enforce the Geph dependency policy
+        run: |
+          set -euo pipefail
+          python3 scripts/dependency_audit.py fetch-scanner \
+            --policy security/geph-dependency-audit-policy.json \
+            --platform linux-amd64 \
+            --output /tmp/osv-scanner
+          python3 scripts/dependency_audit.py scan \
+            --scanner /tmp/osv-scanner \
+            --platform linux-amd64 \
+            --sbom dist-geph-audit/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full \
+            --evaluation-date "$(date -u +%F)" \
+            --output dist-geph-audit/geph5-client-dependency-audit.json
+          python3 scripts/dependency_audit.py verify \
+            --report dist-geph-audit/geph5-client-dependency-audit.json \
+            --sbom dist-geph-audit/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph-vendor-dependency-audit-${{ github.sha }}
+          path: dist-geph-audit/
           if-no-files-found: error
           retention-days: 14

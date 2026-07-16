@@ -158,6 +158,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("cargo metadata", workflow)
         self.assertIn("--filter-platform \"$SLIPSTREAM_TAURI_TARGET\"", workflow)
         self.assertIn("--cargo-metadata /tmp/slipstream-cargo-metadata.json", workflow)
+        self.assertIn("--geph-source-file vendor/geph/SOURCE.json", workflow)
         self.assertIn("Audit release dependencies", workflow)
         self.assertIn("scripts/dependency_audit.py scan", workflow)
         self.assertIn("security/dependency-audit-policy.json", workflow)
@@ -182,18 +183,38 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("scripts/dependency_audit.py scan", workflow)
         self.assertIn("scripts/dependency_audit.py verify", workflow)
         self.assertIn("dist-audit/dependency-audit.json", workflow)
+        self.assertIn("geph-vendor-audit:", workflow)
+        self.assertIn("scripts/geph_vendor_source.py extract", workflow)
+        self.assertIn("scripts/make_geph_vendor_sbom.py generate", workflow)
+        self.assertIn("security/geph-dependency-audit-policy.json", workflow)
+        self.assertIn("--vendored-transitive-dependencies full", workflow)
 
     def test_release_workflow_uses_the_recorded_verified_geph_artifact(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
 
         self.assertIn('version="$(tr -d \'[:space:]\' < vendor/geph/VERSION)"', workflow)
-        self.assertIn('tag="geph-vendor-$version"', workflow)
+        self.assertIn('json.load(open("vendor/geph/SOURCE.json"))["release_revision"]', workflow)
+        self.assertIn('tag="geph-vendor-$version-r$release_revision"', workflow)
         self.assertIn("--pattern 'geph5-client.VERSION'", workflow)
         self.assertIn("--pattern 'geph5-client.LICENSE'", workflow)
+        self.assertIn("--pattern 'geph5-client.SOURCE.json'", workflow)
+        self.assertIn("--pattern 'geph5-client.Cargo.lock'", workflow)
+        self.assertIn("--pattern 'geph5-client.spdx.json'", workflow)
+        self.assertIn("--pattern 'geph5-client-dependency-audit.json'", workflow)
         self.assertIn("--pattern 'SHA256SUMS'", workflow)
         self.assertIn('asset_version="$(tr -d \'[:space:]\' < /tmp/geph/geph5-client.VERSION)"', workflow)
         self.assertIn('"$asset_version" = "$version"', workflow)
         self.assertIn("shasum -a 256 -c SHA256SUMS", workflow)
+        self.assertIn("cmp /tmp/geph/geph5-client.SOURCE.json vendor/geph/SOURCE.json", workflow)
+        self.assertIn("--vendored-transitive-dependencies full", workflow)
+        self.assertIn("release_revision", workflow)
+        self.assertIn("scripts/make_geph_vendor_sbom.py verify", workflow)
+        self.assertIn('commits/$tag" --jq .sha', workflow)
+        self.assertIn('"$vendor_commit" = "$tag_commit"', workflow)
+        self.assertIn(".github/workflows/build-geph.yml", workflow)
+        self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
+        self.assertIn("geph5-client-current-audit.json", workflow)
+        self.assertIn('--evaluation-date "$(date -u +%F)"', workflow)
         self.assertNotIn("select(startswith(\"geph-vendor-\"))", workflow)
 
     def test_release_workflow_keeps_manual_previews_off_the_stable_feed(self) -> None:
@@ -316,6 +337,39 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("gh pr review", workflow)
         self.assertNotIn("gh pr merge", workflow)
         self.assertNotIn("--auto", workflow)
+
+    def test_geph_vendor_workflow_reviews_source_before_building(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-geph.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("scripts/geph_vendor_source.py prepare", workflow)
+        self.assertIn("vendor/geph/SOURCE.json", workflow)
+        self.assertIn("vendor/geph/Cargo.lock", workflow)
+        self.assertIn("needs.resolve.outputs.should_prepare == 'true'", workflow)
+        self.assertIn("needs.resolve.outputs.should_build == 'true'", workflow)
+        self.assertIn("cargo install", workflow)
+        self.assertIn("--locked", workflow)
+        self.assertIn("--path \"$source_root\"", workflow)
+        self.assertNotIn("cargo install geph5-client --version", workflow)
+        self.assertIn("scripts/make_geph_vendor_sbom.py generate", workflow)
+        self.assertIn("security/geph-dependency-audit-policy.json", workflow)
+        self.assertIn("--vendored-transitive-dependencies full", workflow)
+        self.assertIn("overwrite_files: false", workflow)
+        self.assertEqual(
+            workflow.count(
+                "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763"
+            ),
+            2,
+        )
+        self.assertLess(
+            workflow.index("scripts/geph_vendor_source.py prepare"),
+            workflow.index("gh pr create"),
+        )
+        self.assertLess(
+            workflow.index("scripts/dependency_audit.py verify"),
+            workflow.index("Publish the verified internal dependency release"),
+        )
 
     def test_external_actions_use_reviewed_immutable_pins(self) -> None:
         pattern = re.compile(

@@ -1,208 +1,387 @@
-# Build the headless geph5-client and publish it as a vendored binary that the
-# Slipstream app bundles. This is how we "embed geph without installing it
-# separately": CI (which HAS Rust + network) compiles geph5-client from the
-# MPL-2.0 source, and the app-build workflow drops the result into
-# Slipstream.app/Contents/Resources. The scheduled run watches crates.io for new
-# geph5-client versions and publishes a matching vendored binary.
-#
-# geph5-client is MPL-2.0 (file-level copyleft). Redistributing the unmodified
-# binary inside a larger MIT app is allowed; we ship geph's LICENSE alongside it
-# and link the source (compliance handled in the `license` step).
+# Build the exact reviewed geph5-client source graph and publish it as an
+# internal Slipstream dependency. A new upstream crate first produces a PR with
+# SOURCE.json and Cargo.lock; binaries are built only after that review lands.
 name: build-geph
 
 on:
-  workflow_dispatch:            # manual trigger
+  workflow_dispatch:
   schedule:
-    - cron: "17 6 * * *"        # daily: catch a new geph5-client release
+    - cron: "17 6 * * *"
   push:
     branches: ["main"]
     paths:
       - ".github/workflows/build-geph.yml"
+      - "scripts/dependency_audit.py"
+      - "scripts/geph_vendor_source.py"
+      - "scripts/make_geph_vendor_sbom.py"
+      - "security/geph-dependency-audit-policy.json"
+      - "vendor/geph/**"
 
 permissions:
-  contents: write               # publish the vendored binary + update branch
-  pull-requests: write          # propose vendor/geph/VERSION through a PR
-
-env:
-  GEPH_REPO: geph-official/geph5
+  contents: write
+  pull-requests: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
-  # 1) Find the latest geph5-client crate; rebuild only when it differs
-  #    from what we've already vendored (vendor/geph/VERSION).
   resolve:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.up.outputs.version }}
-      should_build: ${{ steps.cmp.outputs.should_build }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - id: up
-        name: Resolve latest geph5-client version (crates.io)
-        run: |
-          # geph-official/geph5 does NOT publish geph5-client-v* git tags (it tags
-          # individual workspace crates like sillad-v*). crates.io is the source of
-          # truth and what `cargo install` builds, so resolve the version there.
-          # crates.io returns 403 without a descriptive User-Agent (their policy).
-          ver=$(curl -fsSL -A "slipstream-ci (+https://github.com/aiwaki/slipstream)" \
-            "https://crates.io/api/v1/crates/geph5-client" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin)["crate"]["max_version"])')
-          echo "Latest crates.io version: ${ver:-<none>}"
-          [ -n "$ver" ] || { echo "no geph5-client version found on crates.io"; exit 1; }
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-      - id: cmp
-        name: Compare with vendored version
-        run: |
-          have=$(cat vendor/geph/VERSION 2>/dev/null || echo "")
-          want="${{ steps.up.outputs.version }}"
-          echo "vendored=$have wanted=$want"
-          if [ "$have" = "$want" ]; then
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  # 2) Build geph5-client per platform. macOS = universal (arm64 + x86_64).
-  #    The matrix is the cross-platform seam: add linux/windows/android targets
-  #    here later (the user's portability requirement) without touching the rest.
-  build:
-    needs: resolve
-    if: needs.resolve.outputs.should_build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            name: macos-universal
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-          # --- cross-platform (enable when we tackle each OS) ---
-          # - os: ubuntu-latest
-          #   name: linux-x86_64
-          #   rust_targets: x86_64-unknown-linux-gnu
-          # - os: windows-latest
-          #   name: windows-x86_64
-          #   rust_targets: x86_64-pc-windows-msvc
-    runs-on: ${{ matrix.os }}
+      crate_sha256: ${{ steps.upstream.outputs.crate_sha256 }}
+      crate_url: ${{ steps.upstream.outputs.crate_url }}
+      release_revision: ${{ steps.state.outputs.release_revision }}
+      release_tag: ${{ steps.state.outputs.release_tag }}
+      should_build: ${{ steps.state.outputs.should_build }}
+      should_prepare: ${{ steps.state.outputs.should_prepare }}
+      version: ${{ steps.upstream.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install Rust (stable) + targets
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
-        with:
-          targets: ${{ matrix.rust_targets }}
-
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: geph-${{ matrix.name }}-${{ needs.resolve.outputs.version }}
-
-      - name: Build deps (macOS)
-        if: runner.os == 'macOS'
-        run: bash scripts/ensure_macos_build_deps.sh
-
-      - name: Build geph5-client ${{ needs.resolve.outputs.version }} from crates.io
+      - id: upstream
+        name: Resolve the latest crates.io source identity
         run: |
           set -euo pipefail
-          VER="${{ needs.resolve.outputs.version }}"
-          IFS=',' read -ra TARGETS <<< "${{ matrix.rust_targets }}"
-          mkdir -p out
-          bins=()
-          for t in "${TARGETS[@]}"; do
-            echo "::group::cargo install geph5-client@$VER ($t)"
-            # crates.io is the only release channel (no git tags); cargo install
-            # downloads + builds the published crate. --no-track keeps it stateless;
-            # --force lets a re-run overwrite a cached install root.
-            # --features aws_lambda: the GUI's fast broker path (aws-sdk-lambda
-            # bouncer). Without it, heavy broker ops (register_user_secret, and
-            # slower connect-token) fall to the domain-fronted transport and can
-            # time out — it's what makes in-app account auto-registration work.
-            cargo install geph5-client --version "$VER" --target "$t" \
-              --root "install-$t" --no-track --force --features aws_lambda
-            bins+=("install-$t/bin/geph5-client")
-            echo "::endgroup::"
-          done
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            lipo -create -output out/geph5-client "${bins[@]}"
-            strip -x out/geph5-client
-            lipo -info out/geph5-client
-          elif [ "${{ runner.os }}" = "Windows" ]; then
-            cp "${bins[0]}.exe" out/geph5-client.exe
-          else
-            cp "${bins[0]}" out/geph5-client
-          fi
-          # sanity: --features aws_lambda must actually be compiled in (the fast
-          # broker/bouncer path + what account auto-registration needs).
-          if grep -aq aws_smithy out/geph5-client*; then
-            echo "aws_lambda feature present ✓"
-          else
-            echo "::error::aws_lambda feature NOT in the built binary"; exit 1
-          fi
+          user_agent="slipstream-ci (+https://github.com/${{ github.repository }})"
+          version="$(curl -fsSL -A "$user_agent" \
+            https://crates.io/api/v1/crates/geph5-client \
+            | python3 -c 'import json,sys; c=json.load(sys.stdin)["crate"]; print(c.get("max_stable_version") or c["max_version"])')"
+          crate_sha256="$(curl -fsSL -A "$user_agent" \
+            "https://crates.io/api/v1/crates/geph5-client/$version" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"]["checksum"])')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || {
+            echo "invalid crates.io version: $version"; exit 1;
+          }
+          [[ "$crate_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "invalid crates.io checksum"; exit 1;
+          }
+          crate_url="https://static.crates.io/crates/geph5-client/geph5-client-$version.crate"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "crate_sha256=$crate_sha256" >> "$GITHUB_OUTPUT"
+          echo "crate_url=$crate_url" >> "$GITHUB_OUTPUT"
 
-      - name: Bundle MPL-2.0 license (compliance)
+      - id: state
+        name: Decide whether review or build is required
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # cargo install doesn't retain the source LICENSE, so ship the canonical
-          # MPL-2.0 text (binary is the unmodified upstream build).
-          curl -fsSL https://www.mozilla.org/media/MPL/2.0/index.txt \
-            -o out/geph5-client.LICENSE \
-            || echo "geph5-client is MPL-2.0 (https://www.mozilla.org/MPL/2.0/); source: https://github.com/${GEPH_REPO}, crate: https://crates.io/crates/geph5-client" > out/geph5-client.LICENSE
-          echo "${{ needs.resolve.outputs.version }}" > out/geph5-client.VERSION
-          ( cd out && shasum -a 256 geph5-client* > SHA256SUMS )
+          set -euo pipefail
+          version="${{ steps.upstream.outputs.version }}"
+          checksum="${{ steps.upstream.outputs.crate_sha256 }}"
+          if source_summary="$(python3 scripts/geph_vendor_source.py verify \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --expected-version "$version" \
+            --expected-crate-sha256 "$checksum" 2>/dev/null)"; then
+            echo "should_prepare=false" >> "$GITHUB_OUTPUT"
+            release_tag="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["release_tag"])' <<< "$source_summary")"
+            echo "release_revision=${release_tag##*-r}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_prepare=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "release_revision=1" >> "$GITHUB_OUTPUT"
+            echo "release_tag=geph-vendor-$version-r1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: geph5-client-${{ matrix.name }}
-          path: out/*
+          should_build=false
+          tag="$release_tag"
+          required=(
+            geph5-client
+            geph5-client.LICENSE
+            geph5-client.VERSION
+            geph5-client.SOURCE.json
+            geph5-client.Cargo.lock
+            geph5-client.spdx.json
+            geph5-client-dependency-audit.json
+            SHA256SUMS
+          )
+          if ! assets="$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+            should_build=true
+          else
+            for name in "${required[@]}"; do
+              grep -Fxq "$name" <<< "$assets" || {
+                echo "release $tag exists but is incomplete; bump release_revision instead of replacing it"
+                exit 1
+              }
+            done
+            rm -rf /tmp/geph-existing
+            mkdir -p /tmp/geph-existing
+            gh release download "$tag" --repo "${{ github.repository }}" \
+              --pattern geph5-client.SOURCE.json \
+              --pattern geph5-client.Cargo.lock \
+              --pattern geph5-client.spdx.json \
+              --pattern geph5-client-dependency-audit.json \
+              --dir /tmp/geph-existing
+            cmp vendor/geph/SOURCE.json /tmp/geph-existing/geph5-client.SOURCE.json || {
+              echo "release $tag has a different source contract; bump release_revision"
+              exit 1
+            }
+            cmp vendor/geph/Cargo.lock /tmp/geph-existing/geph5-client.Cargo.lock || {
+              echo "release $tag has a different lock; bump release_revision"
+              exit 1
+            }
+            vendor_commit="$(python3 -c 'import json; print(json.load(open("/tmp/geph-existing/geph5-client-dependency-audit.json"))["source"]["commit"])')"
+            tag_commit="$(gh api "repos/${{ github.repository }}/commits/$tag" --jq .sha)"
+            [ "$vendor_commit" = "$tag_commit" ] || {
+              echo "release $tag audit source does not match its immutable tag"
+              exit 1
+            }
+            python3 scripts/make_geph_vendor_sbom.py verify \
+              --source vendor/geph/SOURCE.json \
+              --version-file vendor/geph/VERSION \
+              --cargo-lock vendor/geph/Cargo.lock \
+              --repository "${{ github.repository }}" \
+              --source-commit "$vendor_commit" \
+              --target macos-universal \
+              --sbom /tmp/geph-existing/geph5-client.spdx.json
+            python3 scripts/dependency_audit.py verify \
+              --report /tmp/geph-existing/geph5-client-dependency-audit.json \
+              --sbom /tmp/geph-existing/geph5-client.spdx.json \
+              --policy security/geph-dependency-audit-policy.json \
+              --source-commit "$vendor_commit" \
+              --target macos-universal \
+              --vendored-transitive-dependencies full
+          fi
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
 
-      - name: Publish vendored binary as a release asset
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          tag_name: geph-vendor-${{ needs.resolve.outputs.version }}
-          name: "Internal dependency: geph5-client ${{ needs.resolve.outputs.version }}"
-          prerelease: true
-          make_latest: false
-          body: |
-            Internal build dependency for Slipstream. This is not an app release.
-
-            Headless geph5-client built from ${{ env.GEPH_REPO }}@${{ needs.resolve.outputs.version }}
-            for embedding in Slipstream. MPL-2.0; source linked above.
-            Consumed by the app-build workflow -> Slipstream.app/Contents/Resources.
-          files: out/*
-
-  # 3) Propose the vendored version through a PR. Scheduled automation must not
-  #    bypass main-branch review or required checks.
   bump:
-    needs: [resolve, build]
-    if: needs.resolve.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.should_prepare == 'true'
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Open vendor version PR
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - name: Open the reviewed-source update PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="${{ needs.resolve.outputs.version }}"
           branch="automation/geph-${version}"
-          if git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"; then
-            git checkout -B "${branch}" "origin/${branch}"
-          else
-            git checkout -B "${branch}"
-          fi
-          echo "$version" > vendor/geph/VERSION
-          git config user.name  "slipstream-ci"
+          curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+            "${{ needs.resolve.outputs.crate_url }}" -o /tmp/geph5-client.crate
+          python3 scripts/geph_vendor_source.py prepare \
+            --crate /tmp/geph5-client.crate \
+            --version "$version" \
+            --crate-sha256 "${{ needs.resolve.outputs.crate_sha256 }}" \
+            --output-dir vendor/geph
+
+          git checkout -B "$branch"
+          git config user.name "slipstream-ci"
           git config user.email "ci@slipstream.local"
-          git add vendor/geph/VERSION
-          if ! git diff --cached --quiet; then
-            git commit -m "vendor: geph5-client ${version}"
-            git push --force-with-lease origin "HEAD:refs/heads/${branch}"
+          git add vendor/geph/VERSION vendor/geph/SOURCE.json vendor/geph/Cargo.lock
+          if git diff --cached --quiet; then
+            exit 0
           fi
-          if ! gh pr view "$branch" --json number >/dev/null 2>&1; then
+          git commit -m "vendor: geph5-client $version source contract"
+          remote_ref="refs/heads/$branch"
+          remote_oid="$(git ls-remote --heads origin "$remote_ref" | awk '{print $1}')"
+          if [ -n "$remote_oid" ]; then
+            git push --force-with-lease="$remote_ref:$remote_oid" origin "HEAD:$remote_ref"
+          else
+            git push origin "HEAD:$remote_ref"
+          fi
+          body="$(cat <<EOF
+          Automated Geph source-contract update.
+
+          - exact crates.io archive SHA-256
+          - freshly resolved Cargo.lock
+          - reviewed features and macOS targets
+
+          The binary is not built or published until this PR passes checks and is merged.
+          EOF
+          )"
+          if gh pr view "$branch" --repo "${{ github.repository }}" --json number >/dev/null 2>&1; then
+            gh pr edit "$branch" --repo "${{ github.repository }}" --body "$body"
+          else
             gh pr create \
+              --repo "${{ github.repository }}" \
               --base main \
               --head "$branch" \
-              --title "vendor: geph5-client ${version}" \
-              --body "Automated vendored Geph update. The matching release asset was built from crates.io, smoke-checked for the aws_lambda feature, licensed, and published with SHA-256 checksums."
+              --title "vendor: geph5-client $version source contract" \
+              --body "$body"
           fi
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: macos-14
+    env:
+      GEPH_TARGETS: aarch64-apple-darwin,x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: geph-macos-universal-${{ hashFiles('vendor/geph/Cargo.lock', 'vendor/geph/SOURCE.json') }}
+
+      - name: Install checked macOS build dependencies
+        run: bash scripts/ensure_macos_build_deps.sh
+
+      - id: source
+        name: Materialize the reviewed Geph source
+        run: |
+          set -euo pipefail
+          curl -fsSL -A "slipstream-ci (+https://github.com/${{ github.repository }})" \
+            "${{ needs.resolve.outputs.crate_url }}" -o /tmp/geph5-client.crate
+          source_json="$(python3 scripts/geph_vendor_source.py extract \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --crate /tmp/geph5-client.crate \
+            --output /tmp/geph-source)"
+          source_root="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root"])' <<< "$source_json")"
+          echo "root=$source_root" >> "$GITHUB_OUTPUT"
+
+      - name: Build the exact locked universal binary
+        run: |
+          set -euo pipefail
+          source_root="${{ steps.source.outputs.root }}"
+          mkdir -p out /tmp/geph-metadata
+          IFS=',' read -ra targets <<< "$GEPH_TARGETS"
+          bins=()
+          for target in "${targets[@]}"; do
+            cargo metadata \
+              --manifest-path "$source_root/Cargo.toml" \
+              --locked \
+              --features aws_lambda \
+              --filter-platform "$target" \
+              --format-version 1 \
+              > "/tmp/geph-metadata/$target.json"
+            cargo install \
+              --path "$source_root" \
+              --locked \
+              --target "$target" \
+              --root "/tmp/geph-install-$target" \
+              --no-track \
+              --force \
+              --features aws_lambda
+            bins+=("/tmp/geph-install-$target/bin/geph5-client")
+          done
+          lipo -create -output out/geph5-client "${bins[@]}"
+          strip -x out/geph5-client
+          lipo -verify_arch arm64 x86_64 out/geph5-client
+          grep -aq aws_smithy out/geph5-client || {
+            echo "aws_lambda feature is absent from the built binary"; exit 1;
+          }
+
+      - name: Build and audit the vendored dependency inventory
+        run: |
+          set -euo pipefail
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          python3 scripts/make_geph_vendor_sbom.py generate \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --cargo-metadata aarch64-apple-darwin=/tmp/geph-metadata/aarch64-apple-darwin.json \
+            --cargo-metadata x86_64-apple-darwin=/tmp/geph-metadata/x86_64-apple-darwin.json \
+            --repository "${{ github.repository }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$source_date_epoch" \
+            --target macos-universal \
+            --output out/geph5-client.spdx.json
+          python3 scripts/dependency_audit.py fetch-scanner \
+            --policy security/geph-dependency-audit-policy.json \
+            --platform darwin-arm64 \
+            --output /tmp/osv-scanner
+          python3 scripts/dependency_audit.py scan \
+            --scanner /tmp/osv-scanner \
+            --platform darwin-arm64 \
+            --sbom out/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full \
+            --evaluation-date "$(date -u +%F)" \
+            --output out/geph5-client-dependency-audit.json
+          python3 scripts/dependency_audit.py verify \
+            --report out/geph5-client-dependency-audit.json \
+            --sbom out/geph5-client.spdx.json \
+            --policy security/geph-dependency-audit-policy.json \
+            --source-commit "$GITHUB_SHA" \
+            --target macos-universal \
+            --vendored-transitive-dependencies full
+
+      - name: Assemble the internal release payload
+        run: |
+          set -euo pipefail
+          cp vendor/geph/LICENSE out/geph5-client.LICENSE
+          cp vendor/geph/VERSION out/geph5-client.VERSION
+          cp vendor/geph/SOURCE.json out/geph5-client.SOURCE.json
+          cp vendor/geph/Cargo.lock out/geph5-client.Cargo.lock
+          ( cd out && shasum -a 256 geph5-client* > SHA256SUMS )
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geph5-client-macos-universal-${{ needs.resolve.outputs.version }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attest Geph build provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: out/*
+
+      - name: Attest the Geph SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: out/geph5-client
+          sbom-path: out/geph5-client.spdx.json
+
+      - name: Verify stored Geph attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
+          for artifact in out/*; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners >/dev/null
+          done
+          gh attestation verify out/geph5-client \
+            --repo "${{ github.repository }}" \
+            --signer-workflow "$signer_workflow" \
+            --source-digest "$GITHUB_SHA" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --deny-self-hosted-runners >/dev/null
+
+      - name: Publish the verified internal dependency release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ needs.resolve.outputs.release_tag }}
+          name: "Internal dependency: geph5-client ${{ needs.resolve.outputs.version }} (r${{ needs.resolve.outputs.release_revision }})"
+          prerelease: true
+          make_latest: false
+          overwrite_files: false
+          body: |
+            Internal build dependency for Slipstream. This is not an app release.
+
+            The universal macOS binary is built from the exact crates.io archive,
+            reviewed Cargo.lock, and `aws_lambda` feature recorded in SOURCE.json.
+            The release includes its full transitive SPDX inventory, fail-closed
+            vulnerability audit, SHA-256 manifest, and GitHub attestations.
+          files: out/*

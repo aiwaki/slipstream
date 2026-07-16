@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
+import geph_vendor_source
+
 
 SPDX_VERSION = "SPDX-2.3"
 DATA_LICENSE = "CC0-1.0"
@@ -245,7 +247,7 @@ def _cargo_components(metadata_path: Path, lock_path: Path) -> list[Component]:
             )
         )
     if not components:
-        raise ValueError(f"no Cargo dependencies found in {path}")
+        raise ValueError(f"no Cargo dependencies found in {metadata_path}")
     return components
 
 
@@ -307,9 +309,13 @@ def collect_components(
     npm_lock: Path,
     python_lock: Path,
     geph_version_file: Path,
+    geph_source_file: Path,
     tg_ws_proxy_version_file: Path,
 ) -> list[Component]:
     geph_version = _require_version_file(geph_version_file, "Geph")
+    geph_source = geph_vendor_source.load_source_contract(geph_source_file)
+    if geph_source["crate"]["version"] != geph_version:
+        raise ValueError("Geph source contract and version file disagree")
     tg_ws_proxy_version = _require_version_file(
         tg_ws_proxy_version_file, "tg-ws-proxy"
     )
@@ -321,10 +327,12 @@ def collect_components(
             ecosystem="cargo",
             name="geph5-client",
             version=geph_version,
-            download_location="https://github.com/geph-official/geph5",
+            download_location=geph_source["crate"]["url"],
             purl=_purl("cargo", "geph5-client", geph_version),
             license_declared="MPL-2.0",
             purpose="APPLICATION",
+            checksum_algorithm="SHA256",
+            checksum_value=geph_source["crate"]["sha256"],
         ),
         Component(
             ecosystem="github",
@@ -591,6 +599,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--npm-lock", required=True, type=Path)
     parser.add_argument("--python-lock", required=True, type=Path)
     parser.add_argument("--geph-version-file", required=True, type=Path)
+    parser.add_argument("--geph-source-file", required=True, type=Path)
     parser.add_argument("--tg-ws-proxy-version-file", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args(argv)
@@ -604,6 +613,7 @@ def main(argv: list[str] | None = None) -> int:
         npm_lock=args.npm_lock,
         python_lock=args.python_lock,
         geph_version_file=args.geph_version_file,
+        geph_source_file=args.geph_source_file,
         tg_ws_proxy_version_file=args.tg_ws_proxy_version_file,
     )
     document = build_spdx_document(

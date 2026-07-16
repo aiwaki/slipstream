@@ -155,6 +155,28 @@ cryptography==46.0.5 \\
         )
         geph_version = root / "geph.VERSION"
         geph_version.write_text("0.3.0\n", encoding="utf-8")
+        geph_source = root / "geph.SOURCE.json"
+        geph_source.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "crate": {
+                        "name": "geph5-client",
+                        "version": "0.3.0",
+                        "url": "https://static.crates.io/crates/geph5-client/geph5-client-0.3.0.crate",
+                        "sha256": "dd" * 32,
+                    },
+                    "features": ["aws_lambda"],
+                    "targets": [
+                        "aarch64-apple-darwin",
+                        "x86_64-apple-darwin",
+                    ],
+                    "lock_sha256": "ee" * 32,
+                    "release_revision": 1,
+                }
+            ),
+            encoding="utf-8",
+        )
         tg_version = root / "tg-ws-proxy.VERSION"
         tg_version.write_text("1.8.1\n", encoding="utf-8")
         return {
@@ -163,6 +185,7 @@ cryptography==46.0.5 \\
             "npm_lock": npm_lock,
             "python_lock": python_lock,
             "geph_version_file": geph_version,
+            "geph_source_file": geph_source,
             "tg_ws_proxy_version_file": tg_version,
         }
 
@@ -212,6 +235,18 @@ cryptography==46.0.5 \\
                 "pkg:github/Flowseal/tg-ws-proxy@1.8.1",
             )
             self.assertEqual(tg_proxy.purpose, "APPLICATION")
+
+            geph = next(
+                item
+                for item in components
+                if item.ecosystem == "cargo" and item.name == "geph5-client"
+            )
+            self.assertEqual(geph.checksum_algorithm, "SHA256")
+            self.assertEqual(geph.checksum_value, "dd" * 32)
+            self.assertEqual(
+                geph.download_location,
+                "https://static.crates.io/crates/geph5-client/geph5-client-0.3.0.crate",
+            )
 
             npm = next(item for item in components if item.ecosystem == "npm")
             self.assertEqual(npm.checksum_algorithm, "SHA512")
@@ -281,6 +316,8 @@ cryptography==46.0.5 \\
                 str(inputs["python_lock"]),
                 "--geph-version-file",
                 str(inputs["geph_version_file"]),
+                "--geph-source-file",
+                str(inputs["geph_source_file"]),
                 "--tg-ws-proxy-version-file",
                 str(inputs["tg_ws_proxy_version_file"]),
                 "--output",

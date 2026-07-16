@@ -10,8 +10,11 @@ apply to those components independently of Slipstream's MIT license.
 - License: Mozilla Public License 2.0
 - Distribution: unmodified headless client binary built by Slipstream CI
 
-Release artifacts include the MPL-2.0 text, source location, exact crate
-version, and SHA-256 manifest next to the binary.
+Release artifacts include the MPL-2.0 text, a reference to the canonical
+crates.io archive and its SHA-256, reviewed `Cargo.lock`, full transitive SPDX
+inventory, vulnerability audit, SHA-256 manifest, and GitHub provenance/SBOM
+attestations next to the binary. The reviewed source contract is stored in
+[`vendor/geph/SOURCE.json`](vendor/geph/SOURCE.json).
 
 ## tg-ws-proxy
 
