@@ -280,7 +280,7 @@ jobs:
           done
           lipo -create -output out/geph5-client "${bins[@]}"
           strip -x out/geph5-client
-          lipo -verify_arch arm64 x86_64 out/geph5-client
+          lipo out/geph5-client -verify_arch arm64 x86_64
           grep -aq aws_smithy out/geph5-client || {
             echo "aws_lambda feature is absent from the built binary"; exit 1;
           }

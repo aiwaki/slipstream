@@ -351,6 +351,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("cargo install", workflow)
         self.assertIn("--locked", workflow)
         self.assertIn("--path \"$source_root\"", workflow)
+        self.assertIn(
+            "lipo out/geph5-client -verify_arch arm64 x86_64", workflow
+        )
+        self.assertNotIn(
+            "lipo -verify_arch arm64 x86_64 out/geph5-client", workflow
+        )
         self.assertNotIn("cargo install geph5-client --version", workflow)
         self.assertIn("scripts/make_geph_vendor_sbom.py generate", workflow)
         self.assertIn("security/geph-dependency-audit-policy.json", workflow)
