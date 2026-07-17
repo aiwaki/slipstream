@@ -416,6 +416,13 @@ impl WindowsServiceLifecycleV1 {
         effects: &mut E,
     ) -> Result<WindowsServiceLifecycleResult, WindowsServiceLifecycleError> {
         identity.validate()?;
+        if self.state.desired == WindowsServiceDesiredState::Running
+            && self.state.observed == WindowsServiceObservedState::Running
+            && self.state.ownership == WindowsServiceOwnership::Owned
+            && self.state.active.as_ref() == Some(&identity)
+        {
+            return Ok(self.result(WindowsServiceDecision::NoChange, true, None));
+        }
         if self.state != WindowsServiceState::absent() {
             return Ok(self
                 .refused("install requires a verified absent service and absent durable intent"));

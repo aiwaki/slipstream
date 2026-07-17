@@ -200,8 +200,8 @@ jobs:
           SLIPSTREAM_WINDOWS_SCM_DISPOSABLE_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml service_scm::windows::tests::native_register_and_unregister_are_exact_and_disposable -- --exact --test-threads=1
 
-      - name: Build the disposable Windows service fixture
-        run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bin slipstream-disposable-service
+      - name: Build the disposable Windows service and controller fixtures
+        run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bins
 
       - name: Qualify the composed Windows service lifecycle and compensation
         shell: pwsh
@@ -211,6 +211,17 @@ jobs:
           $fixture = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-disposable-service.exe"
           $env:SLIPSTREAM_WINDOWS_SERVICE_FIXTURE = $fixture.Path
           cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_native::windows::tests::native_full_lifecycle_and_post_commit_compensation_are_disposable -- --exact --test-threads=1
+
+      - name: Qualify controller-process restart reconciliation
+        shell: pwsh
+        env:
+          SLIPSTREAM_WINDOWS_CONTROLLER_RESTART_CI: "1"
+        run: |
+          $service = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-disposable-service.exe"
+          $controller = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-disposable-controller.exe"
+          $env:SLIPSTREAM_WINDOWS_SERVICE_FIXTURE = $service.Path
+          $env:SLIPSTREAM_WINDOWS_CONTROLLER_FIXTURE = $controller.Path
+          cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_controller::windows::tests::controller_process_restarts_preserve_idempotence_and_recovery_budget -- --exact --test-threads=1
 
       - name: Lint Windows contracts, ownership, payload, lifecycle state, and SCM effects
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings

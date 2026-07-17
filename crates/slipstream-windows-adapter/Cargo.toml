@@ -17,6 +17,13 @@ required-features = ["disposable-windows-service-fixture"]
 test = false
 bench = false
 
+[[bin]]
+name = "slipstream-disposable-controller"
+path = "tests/fixtures/windows_controller_fixture.rs"
+required-features = ["disposable-windows-service-fixture"]
+test = false
+bench = false
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
