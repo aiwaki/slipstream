@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_host",
+  "contract_version": 1,
+  "service_name": "dev.slipstream.service",
+  "service_argument": "--service",
+  "result_schema_version": 1,
+  "invariants": {
+    "network_effects": false,
+    "process_discovery_or_termination": false,
+    "service_mode_is_explicit": true,
+    "management_mode_is_explicit": true,
+    "install_uses_current_executable": true,
+    "install_generation_is_positive": true,
+    "management_results_are_json": true,
+    "stop_and_shutdown_share_a_bounded_sequence": true,
+    "valid_shutdown_order": [
+      "start_pending",
+      "running",
+      "stop_pending",
+      "stopped"
+    ]
+  },
+  "invocations": [
+    {
+      "name": "service-mode",
+      "arguments": ["--service"],
+      "expected": { "kind": "service" }
+    },
+    {
+      "name": "install",
+      "arguments": ["manage", "install", "--generation", "17"],
+      "expected": {
+        "kind": "manage",
+        "command": { "kind": "install", "generation": 17 }
+      }
+    },
+    {
+      "name": "start",
+      "arguments": ["manage", "start"],
+      "expected": { "kind": "manage", "command": { "kind": "start" } }
+    },
+    {
+      "name": "stop",
+      "arguments": ["manage", "stop"],
+      "expected": { "kind": "manage", "command": { "kind": "stop" } }
+    },
+    {
+      "name": "recover",
+      "arguments": ["manage", "recover"],
+      "expected": { "kind": "manage", "command": { "kind": "recover" } }
+    },
+    {
+      "name": "uninstall",
+      "arguments": ["manage", "uninstall"],
+      "expected": { "kind": "manage", "command": { "kind": "uninstall" } }
+    }
+  ],
+  "invalid_invocations": [
+    {
+      "name": "missing-mode",
+      "arguments": [],
+      "error": "missing_mode"
+    },
+    {
+      "name": "service-extra-argument",
+      "arguments": ["--service", "extra"],
+      "error": "unexpected_argument"
+    },
+    {
+      "name": "unknown-mode",
+      "arguments": ["serve"],
+      "error": "unknown_mode"
+    },
+    {
+      "name": "missing-management-command",
+      "arguments": ["manage"],
+      "error": "missing_command"
+    },
+    {
+      "name": "unknown-management-command",
+      "arguments": ["manage", "restart"],
+      "error": "unknown_command"
+    },
+    {
+      "name": "missing-generation",
+      "arguments": ["manage", "install"],
+      "error": "missing_generation"
+    },
+    {
+      "name": "wrong-generation-flag",
+      "arguments": ["manage", "install", "--version", "17"],
+      "error": "unexpected_argument"
+    },
+    {
+      "name": "zero-generation",
+      "arguments": ["manage", "install", "--generation", "0"],
+      "error": "invalid_generation"
+    },
+    {
+      "name": "invalid-generation",
+      "arguments": ["manage", "install", "--generation", "latest"],
+      "error": "invalid_generation"
+    },
+    {
+      "name": "extra-management-argument",
+      "arguments": ["manage", "stop", "now"],
+      "error": "unexpected_argument"
+    }
+  ],
+  "shutdown_scenarios": [
+    {
+      "name": "stop-control",
+      "initial_status": "start_pending",
+      "events": [
+        {
+          "event": "ready",
+          "expected": {
+            "phase": "running",
+            "report": "running",
+            "request_worker_stop": false
+          }
+        },
+        {
+          "event": "stop_requested",
+          "expected": {
+            "phase": "stop_pending",
+            "report": "stop_pending",
+            "request_worker_stop": true
+          }
+        },
+        {
+          "event": "worker_stopped",
+          "expected": {
+            "phase": "stopped",
+            "report": "stopped",
+            "request_worker_stop": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "shutdown-control",
+      "initial_status": "start_pending",
+      "events": [
+        {
+          "event": "ready",
+          "expected": {
+            "phase": "running",
+            "report": "running",
+            "request_worker_stop": false
+          }
+        },
+        {
+          "event": "shutdown_requested",
+          "expected": {
+            "phase": "stop_pending",
+            "report": "stop_pending",
+            "request_worker_stop": true
+          }
+        },
+        {
+          "event": "shutdown_requested",
+          "expected": {
+            "phase": "stop_pending",
+            "report": null,
+            "request_worker_stop": false
+          }
+        },
+        {
+          "event": "worker_stopped",
+          "expected": {
+            "phase": "stopped",
+            "report": "stopped",
+            "request_worker_stop": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "startup-failure",
+      "initial_status": "start_pending",
+      "events": [
+        {
+          "event": "startup_failed",
+          "expected": {
+            "phase": "stopped",
+            "report": "stopped",
+            "request_worker_stop": false
+          }
+        }
+      ]
+    }
+  ],
+  "result_example": {
+    "schema_version": 1,
+    "service_name": "dev.slipstream.service",
+    "command": "uninstall",
+    "lifecycle": {
+      "state": {
+        "desired": "absent",
+        "observed": "absent",
+        "ownership": "absent",
+        "active": null,
+        "crash_restart_attempts": 0
+      },
+      "decision": "no_change",
+      "accepted": true,
+      "error": null
+    }
+  },
+  "failure_example": {
+    "schema_version": 1,
+    "service_name": "dev.slipstream.service",
+    "code": "invalid_arguments",
+    "message": "missing Windows service host mode"
+  }
+}

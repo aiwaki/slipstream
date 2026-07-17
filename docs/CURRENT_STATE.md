@@ -9,10 +9,10 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through main commit
-`bc82171c065ba8feed5376243152c1015892aedc` after merged
-[PR #152](https://github.com/aiwaki/slipstream/pull/152) and its successful
-main CI and dependency-audit runs linked below, plus the green Windows
-controller gate for [PR #153](https://github.com/aiwaki/slipstream/pull/153).
+`d2a2c7fb443bf58223a4e2dcac1c24c9cc2763a5` after merged
+[PR #153](https://github.com/aiwaki/slipstream/pull/153) and its successful
+main CI and dependency-audit runs linked below, plus the green production-host
+Windows gate for [PR #154](https://github.com/aiwaki/slipstream/pull/154).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -42,13 +42,17 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows controller CI-qualified; production host pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, and command-wide controller boundaries. The controller takes the shared lock before reconstructing state from durable and live exact-ownership evidence, then holds it through the reducer and native effects. Foreign, unknown, interrupted, and inconsistent evidence remains non-mutating. Disposable Windows CI has qualified native install, stop, start, bounded crash recovery across separate controller processes, idempotent reinstall, uninstall, exact terminal cleanup, and post-commit compensation against a real service. A production Windows service host/management entry point, Windows networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows production host CI-qualified; data plane pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, and production host boundaries. The same no-network binary enters SCM mode only through exact `--service`; explicit management processes install its current content-addressed executable and produce versioned JSON results. Disposable Windows CI has qualified install, idempotent reinstall, stop, idempotent restop, start with PID replacement, idempotent restart, exact uninstall, bounded crash recovery, terminal cleanup, and post-commit compensation against a real service. Windows data-plane contracts and adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
 [CI run 29616479709](https://github.com/aiwaki/slipstream/actions/runs/29616479709).
 The dependency and vendored-Geph audits passed in
 [audit run 29616479684](https://github.com/aiwaki/slipstream/actions/runs/29616479684).
+The audited main commit passed the same required jobs in
+[CI run 29618787071](https://github.com/aiwaki/slipstream/actions/runs/29618787071),
+and its dependency and vendored-Geph audits passed in
+[run 29618787086](https://github.com/aiwaki/slipstream/actions/runs/29618787086).
 The Windows ownership collector and its disposable owner-only fixture passed in
 [PR #147 CI run 29592866727](https://github.com/aiwaki/slipstream/actions/runs/29592866727),
 alongside the required checks and packaged lifecycle job; its dependency audit
@@ -100,16 +104,25 @@ controller processes passed in
 [PR #153 CI run 29618202282](https://github.com/aiwaki/slipstream/actions/runs/29618202282).
 Its dependency and vendored-Geph audits passed in
 [run 29618202290](https://github.com/aiwaki/slipstream/actions/runs/29618202290).
+The production Windows service host, exact command/result contract, bounded SCM
+stop/shutdown state machine, current-executable staging, repeatable management
+commands from separate processes, PID replacement after restart, exact terminal
+uninstall, and strict Windows lint passed in
+[PR #154 CI run 29620298459](https://github.com/aiwaki/slipstream/actions/runs/29620298459).
+Its dependency and vendored-Geph audits passed in
+[run 29620298461](https://github.com/aiwaki/slipstream/actions/runs/29620298461).
 
 ## Next Verified Action
 
-Add a production Windows service-host/management entry point that consumes the
-qualified controller without adding networking. Freeze its command/result and
-shutdown boundaries, then qualify install, repeated invocation, controller/host
-restart, and exact uninstall from separate processes in disposable Windows CI.
-Only after that production entry point is fail-closed and recoverable should the
-first Windows data-plane contract be frozen; native networking APIs remain out
-of scope for that host-integration PR.
+Freeze the first Windows data-plane contract before introducing a native network
+API. Define the request/session lifecycle, adapter-owned resource and
+cancellation rules, route/backend invariants, normalized outcomes, service-host
+worker readiness, and bounded shutdown behavior as pure commands and events.
+Execute it through deterministic fake effects, including stalled, reset,
+partial-payload, cancellation, and late-completion vectors. Discord and YouTube
+must have no Geph edge; external DNS, proxy, PAC, and VPN state remains
+read-only. Native Windows networking belongs only in a later PR after this
+contract is frozen and cross-checked against `slipstream-core`.
 
 ## External Gates
 

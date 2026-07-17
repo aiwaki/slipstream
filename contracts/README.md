@@ -50,6 +50,11 @@ Slipstream routing decisions and bounded recovery primitives.
   for exact registration, start, stop, and removal. Stable state and staged
   payload evidence are prerequisites; foreign, transitional, or mismatched
   service evidence always refuses mutation.
+- `windows-service-host-v1.json` freezes the production host command surface,
+  structured management results, and bounded SCM shutdown sequence. The same
+  binary runs only as exact `--service` or explicit `manage` commands, installs
+  from its currently opened executable identity, and has no networking or
+  process-discovery surface.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -71,6 +76,10 @@ adapter responsibilities; JSON content cannot assert its own trustworthiness.
 The production-facing service controller holds the shared machine-wide lock
 from evidence collection through reducer and native-effect completion, so
 controller restarts cannot split authorization from mutation.
+The production service host reports `START_PENDING`, `RUNNING`, `STOP_PENDING`,
+and `STOPPED` through SCM and accepts both stop and system-shutdown controls.
+Windows CI invokes its management commands through separate processes and
+proves repeated install, stop, start, and uninstall remain idempotent.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.

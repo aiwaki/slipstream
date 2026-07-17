@@ -11,6 +11,12 @@ publish = false
 disposable-windows-service-fixture = []
 
 [[bin]]
+name = "slipstream-windows-service"
+path = "src/bin/slipstream_windows_service.rs"
+test = false
+bench = false
+
+[[bin]]
 name = "slipstream-disposable-service"
 path = "tests/fixtures/windows_service_fixture.rs"
 required-features = ["disposable-windows-service-fixture"]

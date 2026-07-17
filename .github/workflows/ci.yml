@@ -200,7 +200,7 @@ jobs:
           SLIPSTREAM_WINDOWS_SCM_DISPOSABLE_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml service_scm::windows::tests::native_register_and_unregister_are_exact_and_disposable -- --exact --test-threads=1
 
-      - name: Build the disposable Windows service and controller fixtures
+      - name: Build the production host and disposable Windows fixtures
         run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bins
 
       - name: Qualify the composed Windows service lifecycle and compensation
@@ -222,6 +222,15 @@ jobs:
           $env:SLIPSTREAM_WINDOWS_SERVICE_FIXTURE = $service.Path
           $env:SLIPSTREAM_WINDOWS_CONTROLLER_FIXTURE = $controller.Path
           cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_controller::windows::tests::controller_process_restarts_preserve_idempotence_and_recovery_budget -- --exact --test-threads=1
+
+      - name: Qualify the production Windows service host and manager
+        shell: pwsh
+        env:
+          SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI: "1"
+        run: |
+          $serviceHost = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-windows-service.exe"
+          $env:SLIPSTREAM_WINDOWS_PRODUCTION_HOST = $serviceHost.Path
+          cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_host::windows::tests::production_host_is_self_managing_idempotent_and_stops_through_scm -- --exact --test-threads=1
 
       - name: Lint Windows contracts, ownership, payload, lifecycle state, and SCM effects
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings

@@ -9,6 +9,7 @@
 #![deny(unsafe_code)]
 
 pub mod service_controller;
+pub mod service_host;
 pub mod service_lifecycle;
 pub mod service_lifecycle_state;
 pub mod service_native;
