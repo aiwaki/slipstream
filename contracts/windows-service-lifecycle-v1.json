@@ -1,0 +1,485 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_lifecycle",
+  "contract_version": 1,
+  "service_name": "dev.slipstream.service",
+  "max_crash_restarts": 3,
+  "invariants": {
+    "native_effects": false,
+    "network_effects": false,
+    "exact_owned_identity_required": true,
+    "durable_intent_is_identity_bound": true,
+    "foreign_or_unknown_service_is_never_mutated": true,
+    "absent_intent_cannot_be_weakened_by_start_or_stop": true,
+    "stop_intent_precedes_stop": true,
+    "uninstall_intent_precedes_cleanup": true,
+    "clearing_active_install_preserves_absent_intent": true,
+    "non_running_intent_suppresses_crash_recovery": true,
+    "crash_recovery_is_bounded": true,
+    "crash_restart_attempt_is_durable_before_restart": true,
+    "failed_install_is_compensated": true,
+    "rollback_non_running_intent_precedes_cleanup": true,
+    "compensation_requires_final_absence_proof": true,
+    "external_dns_proxy_pac_vpn_read_only": true
+  },
+  "identities": {
+    "v1": {
+      "service_name": "dev.slipstream.service",
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "generation": 1
+    }
+  },
+  "states": {
+    "absent": {
+      "desired": "absent",
+      "observed": "absent",
+      "ownership": "absent",
+      "active": null,
+      "crash_restart_attempts": 0
+    },
+    "owned_stopped": {
+      "desired": "stopped",
+      "observed": "stopped",
+      "ownership": "owned",
+      "active": {
+        "service_name": "dev.slipstream.service",
+        "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "generation": 1
+      },
+      "crash_restart_attempts": 0
+    },
+    "owned_running": {
+      "desired": "running",
+      "observed": "running",
+      "ownership": "owned",
+      "active": {
+        "service_name": "dev.slipstream.service",
+        "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "generation": 1
+      },
+      "crash_restart_attempts": 0
+    }
+  },
+  "scenarios": [
+    {
+      "name": "clean-install-commits-only-after-readiness",
+      "initial": { "$ref": "#/states/absent" },
+      "command": {
+        "kind": "install",
+        "identity": { "$ref": "#/identities/v1" }
+      },
+      "expected": {
+        "accepted": true,
+        "decision": "installed",
+        "state": {
+          "desired": "running",
+          "observed": "running",
+          "ownership": "owned",
+          "active": { "$ref": "#/identities/v1" },
+          "crash_restart_attempts": 0
+        },
+        "effects": [
+          "persist_intent",
+          "stage_payload",
+          "register_service",
+          "start_owned_service",
+          "verify_ready",
+          "commit_install"
+        ]
+      }
+    },
+    {
+      "name": "install-readiness-failure-rolls-back-to-verified-absence",
+      "initial": { "$ref": "#/states/absent" },
+      "command": {
+        "kind": "install",
+        "identity": { "$ref": "#/identities/v1" }
+      },
+      "failures": [
+        { "stage": "verify_ready", "message": "fake readiness timeout" }
+      ],
+      "expected": {
+        "accepted": false,
+        "decision": "rolled_back",
+        "error_contains": "verify_ready effect failed",
+        "state": { "$ref": "#/states/absent" },
+        "effects": [
+          "persist_intent",
+          "stage_payload",
+          "register_service",
+          "start_owned_service",
+          "verify_ready",
+          "persist_intent",
+          "stop_owned_service",
+          "unregister_owned_service",
+          "remove_owned_payload",
+          "verify_absent"
+        ]
+      }
+    },
+    {
+      "name": "failed-absence-proof-makes-install-compensation-hard",
+      "initial": { "$ref": "#/states/absent" },
+      "command": {
+        "kind": "install",
+        "identity": { "$ref": "#/identities/v1" }
+      },
+      "failures": [
+        { "stage": "verify_ready", "message": "fake readiness timeout" },
+        { "stage": "verify_absent", "message": "fake absence proof unavailable" }
+      ],
+      "expected": {
+        "hard_error": true,
+        "error_contains": "compensation incomplete",
+        "state": {
+          "desired": "unknown",
+          "observed": "unknown",
+          "ownership": "unknown",
+          "active": null,
+          "crash_restart_attempts": 0
+        },
+        "effects": [
+          "persist_intent",
+          "stage_payload",
+          "register_service",
+          "start_owned_service",
+          "verify_ready",
+          "persist_intent",
+          "stop_owned_service",
+          "unregister_owned_service",
+          "remove_owned_payload",
+          "verify_absent"
+        ]
+      }
+    },
+    {
+      "name": "commit-failure-clears-install-record-before-rollback",
+      "initial": { "$ref": "#/states/absent" },
+      "command": {
+        "kind": "install",
+        "identity": { "$ref": "#/identities/v1" }
+      },
+      "failures": [
+        { "stage": "commit_install", "message": "fake install record unavailable" }
+      ],
+      "expected": {
+        "accepted": false,
+        "decision": "rolled_back",
+        "error_contains": "commit_install effect failed",
+        "state": { "$ref": "#/states/absent" },
+        "effects": [
+          "persist_intent",
+          "stage_payload",
+          "register_service",
+          "start_owned_service",
+          "verify_ready",
+          "commit_install",
+          "persist_intent",
+          "clear_active_install_record",
+          "stop_owned_service",
+          "unregister_owned_service",
+          "remove_owned_payload",
+          "verify_absent"
+        ]
+      }
+    },
+    {
+      "name": "explicit-start-persists-intent-before-starting",
+      "initial": { "$ref": "#/states/owned_stopped" },
+      "command": { "kind": "start" },
+      "expected": {
+        "accepted": true,
+        "decision": "started",
+        "state": { "$ref": "#/states/owned_running" },
+        "effects": ["persist_intent", "start_owned_service", "verify_ready"]
+      }
+    },
+    {
+      "name": "failed-start-restores-stopped-intent-and-state",
+      "initial": { "$ref": "#/states/owned_stopped" },
+      "command": { "kind": "start" },
+      "failures": [
+        { "stage": "verify_ready", "message": "fake readiness timeout" }
+      ],
+      "expected": {
+        "accepted": false,
+        "decision": "rolled_back",
+        "error_contains": "readiness verification failed",
+        "state": { "$ref": "#/states/owned_stopped" },
+        "effects": [
+          "persist_intent",
+          "start_owned_service",
+          "verify_ready",
+          "persist_intent",
+          "stop_owned_service",
+          "verify_stopped"
+        ]
+      }
+    },
+    {
+      "name": "stop-error-is-tolerated-when-stopped-state-is-proven",
+      "initial": { "$ref": "#/states/owned_running" },
+      "command": { "kind": "stop" },
+      "failures": [
+        { "stage": "stop_owned_service", "message": "fake stop returned an error" }
+      ],
+      "expected": {
+        "accepted": true,
+        "decision": "stopped",
+        "state": { "$ref": "#/states/owned_stopped" },
+        "effects": ["persist_intent", "stop_owned_service", "verify_stopped"]
+      }
+    },
+    {
+      "name": "failed-stop-proof-keeps-durable-stop-intent",
+      "initial": { "$ref": "#/states/owned_running" },
+      "command": { "kind": "stop" },
+      "failures": [
+        { "stage": "verify_stopped", "message": "fake stopped proof unavailable" }
+      ],
+      "expected": {
+        "accepted": false,
+        "decision": "incomplete",
+        "error_contains": "stopped-state verification failed",
+        "state": {
+          "desired": "stopped",
+          "observed": "unknown",
+          "ownership": "owned",
+          "active": { "$ref": "#/identities/v1" },
+          "crash_restart_attempts": 0
+        },
+        "effects": ["persist_intent", "stop_owned_service", "verify_stopped"]
+      }
+    },
+    {
+      "name": "stopped-intent-suppresses-crash-recovery",
+      "initial": {
+        "desired": "stopped",
+        "observed": "unknown",
+        "ownership": "owned",
+        "active": { "$ref": "#/identities/v1" },
+        "crash_restart_attempts": 0
+      },
+      "command": { "kind": "crash_observed" },
+      "expected": {
+        "accepted": true,
+        "decision": "no_change",
+        "state": {
+          "desired": "stopped",
+          "observed": "unknown",
+          "ownership": "owned",
+          "active": { "$ref": "#/identities/v1" },
+          "crash_restart_attempts": 0
+        },
+        "effects": []
+      }
+    },
+    {
+      "name": "owned-running-intent-recovers-one-crash",
+      "initial": {
+        "desired": "running",
+        "observed": "stopped",
+        "ownership": "owned",
+        "active": { "$ref": "#/identities/v1" },
+        "crash_restart_attempts": 1
+      },
+      "command": { "kind": "crash_observed" },
+      "expected": {
+        "accepted": true,
+        "decision": "restarted",
+        "state": { "$ref": "#/states/owned_running" },
+        "effects": [
+          "persist_intent",
+          "start_owned_service",
+          "verify_ready",
+          "persist_intent"
+        ]
+      }
+    },
+    {
+      "name": "crash-restart-never-runs-without-durable-budget",
+      "initial": {
+        "desired": "running",
+        "observed": "stopped",
+        "ownership": "owned",
+        "active": { "$ref": "#/identities/v1" },
+        "crash_restart_attempts": 1
+      },
+      "command": { "kind": "crash_observed" },
+      "failures": [
+        { "stage": "persist_intent", "message": "fake budget store unavailable" }
+      ],
+      "expected": {
+        "accepted": false,
+        "decision": "incomplete",
+        "error_contains": "persist_intent effect failed",
+        "state": {
+          "desired": "running",
+          "observed": "stopped",
+          "ownership": "owned",
+          "active": { "$ref": "#/identities/v1" },
+          "crash_restart_attempts": 1
+        },
+        "effects": ["persist_intent"]
+      }
+    },
+    {
+      "name": "successful-restart-keeps-consumed-budget-when-reset-fails",
+      "initial": {
+        "desired": "running",
+        "observed": "stopped",
+        "ownership": "owned",
+        "active": { "$ref": "#/identities/v1" },
+        "crash_restart_attempts": 1
+      },
+      "command": { "kind": "crash_observed" },
+      "failures": [
+        {
+          "stage": "persist_intent",
+          "call": 2,
+          "message": "fake budget reset unavailable"
+        }
+      ],
+      "expected": {
+        "accepted": true,
+        "decision": "restarted",
+        "error_contains": "budget reset failed",
+        "state": {
+          "desired": "running",
+          "observed": "running",
+          "ownership": "owned",
+          "active": { "$ref": "#/identities/v1" },
+          "crash_restart_attempts": 2
+        },
+        "effects": [
+          "persist_intent",
+          "start_owned_service",
+          "verify_ready",
+          "persist_intent"
+        ]
+      }
+    },
+    {
+      "name": "crash-restart-budget-is-bounded",
+      "initial": {
+        "desired": "running",
+        "observed": "stopped",
+        "ownership": "owned",
+        "active": { "$ref": "#/identities/v1" },
+        "crash_restart_attempts": 3
+      },
+      "command": { "kind": "crash_observed" },
+      "expected": {
+        "accepted": false,
+        "decision": "refused",
+        "error_contains": "budget exhausted",
+        "state": {
+          "desired": "running",
+          "observed": "stopped",
+          "ownership": "owned",
+          "active": { "$ref": "#/identities/v1" },
+          "crash_restart_attempts": 3
+        },
+        "effects": []
+      }
+    },
+    {
+      "name": "foreign-service-is-never-restarted",
+      "initial": {
+        "desired": "running",
+        "observed": "stopped",
+        "ownership": "foreign",
+        "active": null,
+        "crash_restart_attempts": 0
+      },
+      "command": { "kind": "crash_observed" },
+      "expected": {
+        "accepted": false,
+        "decision": "refused",
+        "error_contains": "exact owned service identity",
+        "state": {
+          "desired": "running",
+          "observed": "stopped",
+          "ownership": "foreign",
+          "active": null,
+          "crash_restart_attempts": 0
+        },
+        "effects": []
+      }
+    },
+    {
+      "name": "uninstall-cleans-best-effort-and-trusts-final-absence-proof",
+      "initial": { "$ref": "#/states/owned_running" },
+      "command": { "kind": "uninstall" },
+      "failures": [
+        { "stage": "stop_owned_service", "message": "fake stop returned an error" },
+        { "stage": "unregister_owned_service", "message": "fake unregister returned an error" }
+      ],
+      "expected": {
+        "accepted": true,
+        "decision": "uninstalled",
+        "state": { "$ref": "#/states/absent" },
+        "effects": [
+          "persist_intent",
+          "stop_owned_service",
+          "unregister_owned_service",
+          "remove_owned_payload",
+          "clear_active_install_record",
+          "verify_absent"
+        ]
+      }
+    },
+    {
+      "name": "uninstall-without-absence-proof-stays-dormant-and-unknown",
+      "initial": { "$ref": "#/states/owned_running" },
+      "command": { "kind": "uninstall" },
+      "failures": [
+        { "stage": "verify_absent", "message": "fake absence proof unavailable" }
+      ],
+      "expected": {
+        "accepted": false,
+        "decision": "incomplete",
+        "error_contains": "verify_absent",
+        "state": {
+          "desired": "absent",
+          "observed": "unknown",
+          "ownership": "unknown",
+          "active": null,
+          "crash_restart_attempts": 0
+        },
+        "effects": [
+          "persist_intent",
+          "stop_owned_service",
+          "unregister_owned_service",
+          "remove_owned_payload",
+          "clear_active_install_record",
+          "verify_absent"
+        ]
+      }
+    },
+    {
+      "name": "foreign-service-is-never-uninstalled",
+      "initial": {
+        "desired": "absent",
+        "observed": "running",
+        "ownership": "foreign",
+        "active": null,
+        "crash_restart_attempts": 0
+      },
+      "command": { "kind": "uninstall" },
+      "expected": {
+        "accepted": false,
+        "decision": "refused",
+        "error_contains": "unowned service",
+        "state": {
+          "desired": "absent",
+          "observed": "running",
+          "ownership": "foreign",
+          "active": null,
+          "crash_restart_attempts": 0
+        },
+        "effects": []
+      }
+    }
+  ]
+}

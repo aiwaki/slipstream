@@ -222,8 +222,13 @@ boundary. Its isolated v1 harness consumes all frozen policy, recovery,
 StatusV2, bundle, and activation contracts through an injected effects trait.
 The recording implementation proves effect ordering and compensation without
 native APIs, processes, files, services, DNS, proxy, VPN, sockets, or packets.
-Native Windows service lifecycle and networking effects remain; they must pass
-their own disposable-VM contracts before they can replace the fake boundary.
+An isolated service-lifecycle v1 contract now adds exact content-addressed
+ownership, transactional install compensation, intent-first start/stop and
+uninstall, bounded crash recovery, final-state proofs, and fail-closed handling
+when compensation cannot be verified. Its recording executor never calls a
+native service manager or touches the host. Native Windows service observation
+and effects still remain; they must pass the same contract on a disposable VM
+before any networking effects can be introduced.
 
 ## M5 - Packet-Level Capabilities
 
