@@ -270,8 +270,11 @@ SCM absence after deletion before payload removal, and defers active-record
 clearing when post-commit compensation still has owned SCM or payload state.
 The disposable full-lifecycle gate builds a minimal real Windows service and
 exercises install, stop, start, bounded crash recovery, uninstall, and an
-injected failure after durable install commit. That gate must pass before any
-Windows networking effect is introduced.
+injected failure after durable install commit. PR #152 qualifies that gate in
+Windows CI. The next boundary is a production-facing controller that rebuilds
+the reducer state from durable intent, read-only SCM observation, and exact
+ownership evidence after its own process restart; that reconciliation gate must
+pass before any Windows networking effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 
