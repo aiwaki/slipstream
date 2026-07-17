@@ -258,6 +258,9 @@ fn final_path_matches(file: &File, expected: &Path) -> Result<bool, NativeEviden
     }
     actual.truncate(length as usize);
     let actual = strip_extended_dos_prefix(&actual);
+    let expected = expected
+        .canonicalize()
+        .map_err(|_| NativeEvidenceError::Inaccessible)?;
     let expected: Vec<u16> = expected.as_os_str().encode_wide().collect();
     let expected = strip_extended_dos_prefix(&expected);
     if actual.len() > i32::MAX as usize || expected.len() > i32::MAX as usize {
