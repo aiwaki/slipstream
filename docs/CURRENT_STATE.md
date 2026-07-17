@@ -99,12 +99,14 @@ in
 ## Next Verified Action
 
 Add a production-facing, still non-networking Windows service controller. It
-must reconstruct `WindowsServiceState` from durable intent, the read-only SCM
-observation, and exact ownership evidence before invoking the native compositor.
-Qualify idempotent install, crash recovery, and uninstall retries across a
-controller-process restart. Unknown, foreign, inaccessible, or inconsistent
-evidence must remain non-mutating; no Windows networking effect may be added
-until this restart/reconciliation boundary passes disposable CI.
+must acquire the shared machine-wide operation lock before reconstructing
+`WindowsServiceState` from durable intent, the read-only SCM observation, and
+exact ownership evidence, then hold that same lock through the complete reducer
+command and native-compositor execution. Qualify idempotent install, crash
+recovery, and uninstall retries across a controller-process restart. Unknown,
+foreign, inaccessible, or inconsistent evidence must remain non-mutating; no
+Windows networking effect may be added until this restart/reconciliation
+boundary passes disposable CI.
 
 ## External Gates
 

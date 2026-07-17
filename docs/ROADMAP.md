@@ -273,8 +273,11 @@ exercises install, stop, start, bounded crash recovery, uninstall, and an
 injected failure after durable install commit. PR #152 qualifies that gate in
 Windows CI. The next boundary is a production-facing controller that rebuilds
 the reducer state from durable intent, read-only SCM observation, and exact
-ownership evidence after its own process restart; that reconciliation gate must
-pass before any Windows networking effect is introduced.
+ownership evidence after its own process restart. It must hold the shared
+machine-wide operation lock continuously across that reconstruction and the
+complete reducer command, preventing interleaving between individual durable
+effects. That reconciliation gate must pass before any Windows networking
+effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 
