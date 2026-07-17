@@ -17,6 +17,7 @@ class HealthEvidence:
 
 @dataclass(frozen=True)
 class CandidateEffects:
+    persist_trial_generation: Callable[[int], None]
     activate_trial: Callable[[activation.PolicyIdentity], None]
     run_health_gate: Callable[[activation.PolicyIdentity, int], HealthEvidence]
     commit_candidate: Callable[
@@ -108,6 +109,8 @@ def activate_candidate(state, candidate, effects):
         ),
     )
     if begin.decision == activation.DECISION_NO_CHANGE:
+        # Contract v1 uses the canonical SHA-256 as the active content identity.
+        # A signed envelope for identical bytes does not create a new trial.
         _require_actions(begin, ())
         return AdapterResult(
             state=begin.state,
@@ -121,6 +124,19 @@ def activate_candidate(state, candidate, effects):
         (activation.ACTION_ACTIVATE_TRIAL, activation.ACTION_RUN_HEALTH_GATE),
     )
     trial_state = begin.state
+    try:
+        effects.persist_trial_generation(trial_state.trial_generation)
+    except Exception as exc:
+        detail = f"persist_trial_generation effect failed: {exc}"
+        aborted = _abort_trial(trial_state, effects, detail)
+        return AdapterResult(
+            state=aborted.state,
+            decision=aborted.decision,
+            reason=aborted.reason,
+            accepted=False,
+            error=detail,
+        )
+
     try:
         effects.activate_trial(begin.actions[0].policy)
     except Exception as exc:

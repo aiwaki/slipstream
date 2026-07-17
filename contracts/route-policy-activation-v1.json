@@ -318,6 +318,35 @@
       }
     },
     {
+      "name": "signed-envelope-matching-bundled-content-is-idempotent",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_bundled_content"}
+        }
+      ],
+      "expected": [
+        {"ok": true, "decision": "no_change", "reason": "already_active", "actions": []}
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
       "name": "rollback-prefers-one-previous-policy",
       "initial_state": {
         "bundled": {"$policy": "bundled"},

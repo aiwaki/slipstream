@@ -2393,6 +2393,84 @@ def test_signed_bundled_content_keeps_signed_provenance_until_rollback(tmp_path)
     assert not previous_path.exists()
 
 
+def test_signed_bundled_content_candidate_is_a_contract_noop(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    activation_path = tmp_path / "route-policy.json.activation"
+    bundle, public_keys = signed_test_policy_bundle(
+        tproxy.bundled_route_policy_manifest()
+    )
+
+    status = tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: (_ for _ in ()).throw(AssertionError("health repeated")),
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+
+    assert status["source"] == tproxy.ROUTE_POLICY_SOURCE
+    assert tproxy._active_route_policy_kind == (
+        tproxy.route_policy_activation_contract.POLICY_BUNDLED
+    )
+    assert tproxy._route_policy_trial_generation == 0
+    assert not policy_path.exists()
+    assert not previous_path.exists()
+    assert not activation_path.exists()
+
+
+def test_rejected_trial_generation_survives_restart(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    activation_path = tmp_path / "route-policy.json.activation"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:retry"
+    manifest["geo_exit_routes"].append({
+        "domains": ["retry.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: {"ok": 0, "degraded": 1, "blocked": 0},
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    ) is None
+    assert json.loads(activation_path.read_text()) == {
+        "contract": 1,
+        "trial_generation": 1,
+    }
+    assert activation_path.stat().st_mode & 0o777 == 0o600
+    assert not policy_path.exists()
+
+    tproxy._route_policy_trial_generation = 0
+    tproxy.reset_route_policy_manifest()
+    assert not tproxy.load_persisted_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+    )
+    assert tproxy._route_policy_trial_generation == 1
+
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=200.0,
+    )
+    assert json.loads(activation_path.read_text())["trial_generation"] == 2
+    assert json.loads(policy_path.read_text())["activation"][
+        "trial_generation"
+    ] == 2
+
+
 def test_active_signed_policy_is_a_noop_without_repeating_health(tmp_path):
     policy_path = tmp_path / "route-policy.json"
     previous_path = tmp_path / "route-policy.previous.json"

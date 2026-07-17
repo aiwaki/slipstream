@@ -336,6 +336,10 @@ GEPH_HOSTS = tuple(
 POLICY_STATE_DIR = "/var/db/slipstream"
 ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
 ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
+ROUTE_POLICY_ACTIVATION_PATH = os.path.join(
+    POLICY_STATE_DIR,
+    "route-policy.activation.json",
+)
 ROUTE_POLICY_KEYS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy-keys.json")
 ROUTE_POLICY_BUNDLED_KEYS_FILENAME = "route-policy-keys.json"
 ROUTE_POLICY_REMOTE_URL_ENV = "SLIP_ROUTE_POLICY_URL"
@@ -985,13 +989,22 @@ def apply_signed_route_policy_bundle_with_health_gate(
     *,
     policy_path=ROUTE_POLICY_STATE_PATH,
     previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    activation_path=None,
     now=None,
 ):
     global _route_policy_trial_generation
     with _route_policy_activation_lock:
+        activation_path = _route_policy_activation_state_path(
+            policy_path,
+            activation_path,
+        )
         previous_manifest = route_policy_manifest()
         previous_storage = route_policy_storage_snapshot()
         manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+        _route_policy_trial_generation = max(
+            _route_policy_trial_generation,
+            _read_route_policy_trial_generation(activation_path),
+        )
         candidate = _route_policy_identity(
             manifest,
             kind=route_policy_activation_contract.POLICY_SIGNED,
@@ -1004,6 +1017,12 @@ def apply_signed_route_policy_bundle_with_health_gate(
             _restore_route_policy_manifest(previous_manifest, policy)
 
         effects = route_policy_activation_adapter.CandidateEffects(
+            persist_trial_generation=lambda generation: (
+                _persist_route_policy_trial_generation(
+                    activation_path,
+                    generation,
+                )
+            ),
             activate_trial=lambda policy: _activate_candidate_manifest(
                 policy,
                 candidate,
@@ -1198,6 +1217,60 @@ def _run_policy_file_transaction(paths, operation):
         raise
 
 
+def _route_policy_activation_state_path(policy_path, activation_path=None):
+    if activation_path is not None:
+        return activation_path
+    if os.fspath(policy_path) == ROUTE_POLICY_STATE_PATH:
+        return ROUTE_POLICY_ACTIVATION_PATH
+    return f"{os.fspath(policy_path)}.activation"
+
+
+def _validate_route_policy_trial_generation(generation, message):
+    if (
+        isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or not 0
+        <= generation
+        <= route_policy_activation_contract.MAX_TRIAL_GENERATION
+    ):
+        raise ValueError(message)
+    return generation
+
+
+def _read_route_policy_trial_generation(path):
+    snapshot = _policy_file_snapshot(path)
+    if snapshot is None:
+        return 0
+    state = json.loads(snapshot["data"].decode("utf-8"))
+    if not isinstance(state, dict):
+        raise ValueError("persisted policy activation state is invalid")
+    if state.get("contract") != route_policy_activation_contract.CONTRACT_VERSION:
+        raise ValueError("unsupported persisted policy activation contract")
+    return _validate_route_policy_trial_generation(
+        state.get("trial_generation"),
+        "persisted policy trial generation is invalid",
+    )
+
+
+def _persist_route_policy_trial_generation(path, generation):
+    generation = _validate_route_policy_trial_generation(
+        generation,
+        "route policy trial generation is invalid",
+    )
+    current = _read_route_policy_trial_generation(path)
+    if generation < current:
+        raise RuntimeError("route policy trial generation cannot decrease")
+    if generation == current:
+        return
+    _atomic_write_json(
+        path,
+        {
+            "contract": route_policy_activation_contract.CONTRACT_VERSION,
+            "trial_generation": generation,
+        },
+    )
+
+
 def _persisted_route_policy_generation(state):
     metadata = state.get("activation")
     if metadata is None:
@@ -1206,14 +1279,10 @@ def _persisted_route_policy_generation(state):
         raise ValueError("persisted policy activation metadata is invalid")
     if metadata.get("contract") != route_policy_activation_contract.CONTRACT_VERSION:
         raise ValueError("unsupported persisted policy activation contract")
-    generation = metadata.get("trial_generation")
-    if (
-        isinstance(generation, bool)
-        or not isinstance(generation, int)
-        or not 0 <= generation <= route_policy_activation_contract.MAX_TRIAL_GENERATION
-    ):
-        raise ValueError("persisted policy trial generation is invalid")
-    return generation
+    return _validate_route_policy_trial_generation(
+        metadata.get("trial_generation"),
+        "persisted policy trial generation is invalid",
+    )
 
 
 def _read_signed_route_policy_state(path, public_keys):
@@ -1247,14 +1316,10 @@ def signed_route_policy_state(
     trial_generation=0,
 ):
     manifest = verify_signed_route_policy_bundle(bundle, public_keys)
-    if (
-        isinstance(trial_generation, bool)
-        or not isinstance(trial_generation, int)
-        or not 0
-        <= trial_generation
-        <= route_policy_activation_contract.MAX_TRIAL_GENERATION
-    ):
-        raise ValueError("route policy trial generation is invalid")
+    trial_generation = _validate_route_policy_trial_generation(
+        trial_generation,
+        "route policy trial generation is invalid",
+    )
     return {
         "schema": ROUTE_POLICY_SCHEMA_VERSION,
         "saved_at": time.time() if now is None else now,
@@ -1335,9 +1400,32 @@ def load_persisted_route_policy(
     public_keys,
     *,
     policy_path=ROUTE_POLICY_STATE_PATH,
+    activation_path=None,
 ):
     global _route_policy_trial_generation
     with _route_policy_activation_lock:
+        activation_path = _route_policy_activation_state_path(
+            policy_path,
+            activation_path,
+        )
+        try:
+            durable_generation = _read_route_policy_trial_generation(
+                activation_path
+            )
+        except Exception as exc:
+            reset_route_policy_manifest()
+            _set_route_policy_storage(
+                "invalid",
+                source=ROUTE_POLICY_SOURCE,
+                sha256=route_policy_hash(),
+                error=str(exc),
+                path=policy_path,
+            )
+            return False
+        _route_policy_trial_generation = max(
+            _route_policy_trial_generation,
+            durable_generation,
+        )
         if not os.path.exists(policy_path):
             reset_route_policy_manifest()
             _set_route_policy_storage(
@@ -1355,6 +1443,7 @@ def load_persisted_route_policy(
             )
             _route_policy_trial_generation = max(
                 _route_policy_trial_generation,
+                durable_generation,
                 persisted["trial_generation"],
             )
             _set_route_policy_storage(

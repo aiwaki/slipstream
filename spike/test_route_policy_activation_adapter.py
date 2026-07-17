@@ -18,6 +18,9 @@ def stable_state(*, active=None, previous=None, generation=0):
 
 def candidate_effects(calls, *, health=None, commit=None):
     return adapter.CandidateEffects(
+        persist_trial_generation=lambda generation: calls.append(
+            ("persist", generation)
+        ),
         activate_trial=lambda value: calls.append(("activate", value.sha256)),
         run_health_gate=(
             health
@@ -61,6 +64,7 @@ def test_candidate_success_executes_reducer_actions_in_order():
     assert result.state.previous == state.active
     assert result.state.trial_generation == 1
     assert calls == [
+        ("persist", 1),
         ("activate", candidate.sha256),
         ("health", candidate.sha256, 1),
         ("commit", candidate.sha256, state.active.sha256, 1),
@@ -126,6 +130,45 @@ def test_commit_failure_aborts_trial_and_restores_active():
             candidate.sha256,
             activation.REASON_ROLLBACK_REQUESTED,
             "commit_candidate effect failed: disk full",
+        ),
+    ]
+
+
+def test_generation_persistence_failure_prevents_candidate_activation():
+    calls = []
+    state = stable_state()
+    candidate = policy(activation.POLICY_SIGNED, "signed:a", "a")
+    effects = candidate_effects(calls)
+
+    def fail_persist(generation):
+        calls.append(("persist", generation))
+        raise OSError("read-only filesystem")
+
+    effects = adapter.CandidateEffects(
+        persist_trial_generation=fail_persist,
+        activate_trial=effects.activate_trial,
+        run_health_gate=effects.run_health_gate,
+        commit_candidate=effects.commit_candidate,
+        restore_active=effects.restore_active,
+        record_rejection=effects.record_rejection,
+    )
+
+    result = adapter.activate_candidate(state, candidate, effects)
+
+    assert result.accepted is False
+    assert result.state.active == state.active
+    assert result.state.trial_generation == 1
+    assert result.error == (
+        "persist_trial_generation effect failed: read-only filesystem"
+    )
+    assert calls == [
+        ("persist", 1),
+        ("restore", state.active.sha256),
+        (
+            "reject",
+            candidate.sha256,
+            activation.REASON_ROLLBACK_REQUESTED,
+            "persist_trial_generation effect failed: read-only filesystem",
         ),
     ]
 

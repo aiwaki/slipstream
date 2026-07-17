@@ -213,10 +213,12 @@ late result from an aborted attempt from committing a retry of the same SHA-256.
 The existing Python daemon now runs verified apply, health, persistence,
 rejection restore, startup load, and rollback through that reducer. Its owned
 policy files use compensating transactions, legacy persisted state remains
-readable, and signed provenance survives content equality with the bundled
-manifest. The remote channel remains disabled and no production trust key is
-present. Platform adapters remain; the first target is a no-network Windows
-harness before any native networking effects are introduced.
+readable, and every consumed trial generation is made durable before candidate
+activation. Persisted signed provenance survives content equality with the
+bundled manifest, while a new envelope for the already-active canonical hash
+remains a v1 no-op. The remote channel remains disabled and no production trust
+key is present. Platform adapters remain; the first target is a no-network
+Windows harness before any native networking effects are introduced.
 
 ## M5 - Packet-Level Capabilities
 
