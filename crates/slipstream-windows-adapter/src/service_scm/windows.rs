@@ -12,12 +12,17 @@ use crate::service_observer::windows::observe_open_service_handle;
 use crate::service_observer::{
     WindowsScmState, WindowsServiceObservation, WindowsServiceObserverError, WindowsServiceSnapshot,
 };
+use crate::service_operation_lock::{
+    acquire_service_operation_lock, WindowsServiceOperationLockError,
+};
 use crate::service_ownership::{
     WindowsOwnerRecordEvidence, WindowsServiceOwnershipCollector, WindowsStagedPayloadEvidence,
 };
 use std::fmt;
 use std::mem::MaybeUninit;
 use std::ptr::{null, null_mut};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use crate::service_ownership::windows::staged_payload_evidence_at;
@@ -38,6 +43,8 @@ use windows_sys::Win32::System::Services::{
 // DELETE is a standard access right; windows-sys has no service-specific alias.
 const SERVICE_DELETE_ACCESS: u32 = 0x0001_0000;
 const SERVICE_DISPLAY_NAME: &str = "Slipstream";
+const STOP_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const STOP_WAIT_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct WindowsServiceScmEffects {
     state_effects: WindowsServiceLifecycleStateEffects,
@@ -203,6 +210,7 @@ impl WindowsServiceEffects for WindowsServiceScmEffects {
         identity.validate().map_err(|_| {
             WindowsServiceScmError::Gate(WindowsServiceScmGateReason::InvalidIdentity)
         })?;
+        let _operation_guard = acquire_service_operation_lock()?;
         let lifecycle = self.state_effects.collect().assess();
         let payload = self.collect_payload();
 
@@ -291,12 +299,7 @@ fn stop_exact_service(
             code,
         });
     }
-    verify_post_request(
-        service,
-        identity,
-        payload,
-        "stopped service changed identity after the accepted request",
-    )
+    wait_for_stopped(service, identity, payload)
 }
 
 fn delete_exact_service(service: &OwnedScHandle) -> Result<(), WindowsServiceScmError> {
@@ -329,6 +332,37 @@ fn verify_post_request(
         return Ok(());
     }
     Err(WindowsServiceScmError::Verification(detail))
+}
+
+fn wait_for_stopped(
+    service: &OwnedScHandle,
+    identity: &WindowsServiceIdentity,
+    payload: &WindowsStagedPayloadEvidence,
+) -> Result<(), WindowsServiceScmError> {
+    let deadline = Instant::now() + STOP_WAIT_TIMEOUT;
+    loop {
+        let snapshot = present_snapshot(observe_open_service_handle(service.raw())?)?;
+        if !snapshot_matches_staged_payload(&snapshot, identity, payload) {
+            return Err(WindowsServiceScmError::Verification(
+                "stopping service changed identity",
+            ));
+        }
+        match snapshot.scm_state {
+            WindowsScmState::Stopped => return Ok(()),
+            WindowsScmState::Running | WindowsScmState::StopPending => {}
+            _ => {
+                return Err(WindowsServiceScmError::Verification(
+                    "stopping service entered an unexpected SCM state",
+                ))
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(WindowsServiceScmError::Verification(
+                "service did not reach stopped state before the bounded deadline",
+            ));
+        }
+        thread::sleep(STOP_WAIT_INTERVAL);
+    }
 }
 
 fn present_snapshot(
@@ -431,6 +465,7 @@ pub enum WindowsServiceScmError {
     Observer(WindowsServiceObserverError),
     Win32 { operation: &'static str, code: u32 },
     Verification(&'static str),
+    OperationLock(String),
 }
 
 impl fmt::Display for WindowsServiceScmError {
@@ -443,11 +478,18 @@ impl fmt::Display for WindowsServiceScmError {
                 write!(formatter, "{operation} failed with Win32 error {code}")
             }
             Self::Verification(detail) => write!(formatter, "SCM verification failed: {detail}"),
+            Self::OperationLock(error) => write!(formatter, "{error}"),
         }
     }
 }
 
 impl std::error::Error for WindowsServiceScmError {}
+
+impl From<WindowsServiceOperationLockError> for WindowsServiceScmError {
+    fn from(value: WindowsServiceOperationLockError) -> Self {
+        Self::OperationLock(value.to_string())
+    }
+}
 
 impl From<WindowsServiceObserverError> for WindowsServiceScmError {
     fn from(value: WindowsServiceObserverError) -> Self {

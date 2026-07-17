@@ -109,6 +109,7 @@ fn native_state_store_has_only_filesystem_lifecycle_surface() {
         "WindowsServiceAction::PersistIntent",
         "WindowsServiceAction::CommitInstall",
         "WindowsServiceAction::ClearActiveInstallRecord",
+        "acquire_service_operation_lock",
     ] {
         assert!(
             production.contains(required),

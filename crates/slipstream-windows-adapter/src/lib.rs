@@ -11,6 +11,9 @@
 pub mod service_lifecycle;
 pub mod service_lifecycle_state;
 pub mod service_observer;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod service_operation_lock;
 pub mod service_ownership;
 pub mod service_payload;
 pub mod service_scm;

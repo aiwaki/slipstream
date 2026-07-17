@@ -3,6 +3,9 @@
 use crate::service_lifecycle::{
     WindowsServiceAction, WindowsServiceActionKind, WindowsServiceEffects, WindowsServiceIdentity,
 };
+use crate::service_operation_lock::{
+    acquire_service_operation_lock, WindowsServiceOperationLockError,
+};
 use crate::service_ownership::windows::{
     final_path_matches, has_trusted_machine_write_permissions, machine_owner_record_path,
     raw_handle, staged_payload_evidence_at, validate_regular_file, NativeEvidenceError,
@@ -80,6 +83,7 @@ impl WindowsServicePayloadEffects {
         &self,
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServicePayloadError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         identity
             .validate()
             .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
@@ -105,6 +109,7 @@ impl WindowsServicePayloadEffects {
         &self,
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServicePayloadError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         identity
             .validate()
             .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
@@ -364,6 +369,7 @@ pub enum WindowsServicePayloadError {
     Io(&'static str),
     Win32 { operation: &'static str, code: u32 },
     CompensationFailed { primary: String, cleanup: String },
+    OperationLock(String),
 }
 
 impl fmt::Display for WindowsServicePayloadError {
@@ -385,11 +391,18 @@ impl fmt::Display for WindowsServicePayloadError {
                 formatter,
                 "Windows payload transaction failed ({primary}); exact cleanup also failed ({cleanup})"
             ),
+            Self::OperationLock(error) => write!(formatter, "{error}"),
         }
     }
 }
 
 impl std::error::Error for WindowsServicePayloadError {}
+
+impl From<WindowsServiceOperationLockError> for WindowsServicePayloadError {
+    fn from(value: WindowsServiceOperationLockError) -> Self {
+        Self::OperationLock(value.to_string())
+    }
+}
 
 #[derive(Debug)]
 struct DestinationPaths {
