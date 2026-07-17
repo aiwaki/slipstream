@@ -24,6 +24,7 @@ from tproxy import _doh_request, _doh_ssl_context
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state():
     shutdown_started = tproxy._shutdown_started.is_set()
+    route_policy_trial_generation = tproxy._route_policy_trial_generation
     dns_cache = dict(tproxy._system_dns_cache)
     smart_ok = dict(tproxy._smart_dns_ok_until)
     smart_failure = dict(tproxy._smart_dns_last_failure)
@@ -62,6 +63,7 @@ def reset_smart_dns_state():
     )
     try:
         tproxy._shutdown_started.clear()
+        tproxy._route_policy_trial_generation = 0
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
             "ts": 0.0,
@@ -121,6 +123,7 @@ def reset_smart_dns_state():
             tproxy._shutdown_started.set()
         else:
             tproxy._shutdown_started.clear()
+        tproxy._route_policy_trial_generation = route_policy_trial_generation
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.clear()
         tproxy._system_dns_cache.update(dns_cache)
@@ -367,11 +370,13 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "primes.py": "VALUE = 7\n",
     "route_circuit.py": "VALUE = 8\n",
     "route_circuit_registry.py": "VALUE = 9\n",
-    "route_policy_bundle.py": "VALUE = 10\n",
-    "route_policy_manifest.py": "VALUE = 11\n",
-    "routing_policy.py": "VALUE = 12\n",
-    "routing_recovery.py": "VALUE = 13\n",
-    "xbox_dns.py": "VALUE = 14\n",
+    "route_policy_activation.py": "VALUE = 10\n",
+    "route_policy_activation_adapter.py": "VALUE = 11\n",
+    "route_policy_bundle.py": "VALUE = 12\n",
+    "route_policy_manifest.py": "VALUE = 13\n",
+    "routing_policy.py": "VALUE = 14\n",
+    "routing_recovery.py": "VALUE = 15\n",
+    "xbox_dns.py": "VALUE = 16\n",
 }
 
 
@@ -2226,7 +2231,7 @@ def test_apply_route_policy_manifest_updates_lookup_status_and_reset():
     assert reset_status["domains"][tproxy.ROUTE_GEO_EXIT] == len(tproxy.GEPH_HOSTS)
 
 
-def test_apply_signed_route_policy_bundle_activates_manifest():
+def test_signed_route_policy_health_gate_activates_manifest(tmp_path):
     manifest = tproxy.route_policy_manifest()
     manifest["source"] = "signed:test"
     manifest["geo_exit_routes"].append({
@@ -2237,12 +2242,26 @@ def test_apply_signed_route_policy_bundle_activates_manifest():
     })
     bundle, public_keys = signed_test_policy_bundle(manifest)
 
-    status = tproxy.apply_signed_route_policy_bundle(bundle, public_keys)
+    status = tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(tmp_path / "route-policy.json"),
+        previous_path=str(tmp_path / "route-policy.previous.json"),
+        now=100.0,
+    )
 
     assert status["source"] == "signed:test"
     assert tproxy.route_policy("payments.example.org")["route_class"] == (
         tproxy.ROUTE_GEO_EXIT
     )
+
+
+def test_route_policy_health_evidence_rejects_non_integer_counters():
+    evidence = tproxy._route_policy_health_evidence({"ok": 1.5})
+
+    assert evidence.completed is False
+    assert evidence.detail == "health gate returned invalid counters"
 
 
 def test_persisted_route_policy_loads_and_rolls_back(tmp_path):
@@ -2259,15 +2278,20 @@ def test_persisted_route_policy_loads_and_rolls_back(tmp_path):
     })
     first_bundle, public_keys = signed_test_policy_bundle(first)
 
-    tproxy.save_signed_route_policy_bundle(
+    tproxy.apply_signed_route_policy_bundle_with_health_gate(
         first_bundle,
         public_keys,
+        lambda: True,
         policy_path=str(policy_path),
         previous_path=str(previous_path),
         now=100.0,
     )
     assert policy_path.exists()
     assert not previous_path.exists()
+    assert json.loads(policy_path.read_text())["activation"] == {
+        "contract": 1,
+        "trial_generation": 1,
+    }
     assert tproxy.route_policy("alpha.example.org")["route_class"] == (
         tproxy.ROUTE_GEO_EXIT
     )
@@ -2292,15 +2316,17 @@ def test_persisted_route_policy_loads_and_rolls_back(tmp_path):
     })
     second_bundle, second_public_keys = signed_test_policy_bundle(second, key_id="test2")
     public_keys.update(second_public_keys)
-    tproxy.save_signed_route_policy_bundle(
+    tproxy.apply_signed_route_policy_bundle_with_health_gate(
         second_bundle,
         public_keys,
+        lambda: True,
         policy_path=str(policy_path),
         previous_path=str(previous_path),
         now=200.0,
     )
 
     assert previous_path.exists()
+    assert json.loads(policy_path.read_text())["activation"]["trial_generation"] == 2
     assert tproxy.route_policy("beta.example.org")["route_class"] == (
         tproxy.ROUTE_GEO_EXIT
     )
@@ -2314,6 +2340,294 @@ def test_persisted_route_policy_loads_and_rolls_back(tmp_path):
     )
     assert tproxy.route_policy("beta.example.org")["route_class"] == tproxy.ROUTE_UNKNOWN
     assert tproxy.route_policy_storage_snapshot()["state"] == "rolled_back"
+    assert not previous_path.exists()
+    assert json.loads(policy_path.read_text())["activation"]["trial_generation"] == 2
+
+
+def test_persisted_route_policy_without_activation_metadata_remains_readable(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:legacy"
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+    state = tproxy.signed_route_policy_state(bundle, public_keys, now=100.0)
+    state.pop("activation")
+    policy_path.write_text(json.dumps(state))
+
+    assert tproxy.load_persisted_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+    )
+    assert tproxy._route_policy_trial_generation == 0
+
+
+def test_signed_bundled_content_keeps_signed_provenance_until_rollback(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    bundle, public_keys = signed_test_policy_bundle(
+        tproxy.bundled_route_policy_manifest()
+    )
+    state = tproxy.signed_route_policy_state(
+        bundle,
+        public_keys,
+        now=100.0,
+        trial_generation=4,
+    )
+    policy_path.write_text(json.dumps(state))
+
+    assert tproxy.load_persisted_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+    )
+    assert tproxy._active_route_policy_kind == (
+        tproxy.route_policy_activation_contract.POLICY_SIGNED
+    )
+    assert tproxy.rollback_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+    )
+    assert tproxy._active_route_policy_kind == (
+        tproxy.route_policy_activation_contract.POLICY_BUNDLED
+    )
+    assert not policy_path.exists()
+    assert not previous_path.exists()
+
+
+def test_active_signed_policy_is_a_noop_without_repeating_health(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:same"
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+    persisted = policy_path.read_bytes()
+
+    status = tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: (_ for _ in ()).throw(AssertionError("health repeated")),
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=200.0,
+    )
+
+    assert status["source"] == "signed:same"
+    assert policy_path.read_bytes() == persisted
+    assert not previous_path.exists()
+    assert tproxy._route_policy_trial_generation == 1
+
+
+def test_candidate_activation_failure_restores_bundled_policy(tmp_path, monkeypatch):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    manifest = tproxy.route_policy_manifest()
+    manifest["source"] = "signed:cannot-activate"
+    manifest["geo_exit_routes"].append({
+        "domains": ["activation.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    bundle, public_keys = signed_test_policy_bundle(manifest)
+    original_apply = tproxy.apply_route_policy_manifest
+
+    def fail_candidate(value, *, kind=None):
+        if value["source"] == "signed:cannot-activate":
+            raise RuntimeError("activation refused")
+        return original_apply(value, kind=kind)
+
+    monkeypatch.setattr(tproxy, "apply_route_policy_manifest", fail_candidate)
+
+    status = tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+
+    assert status is None
+    assert not policy_path.exists()
+    assert not previous_path.exists()
+    assert tproxy.route_policy("activation.example.org")["route_class"] == (
+        tproxy.ROUTE_UNKNOWN
+    )
+    storage = tproxy.route_policy_storage_snapshot()
+    assert storage["state"] == "rejected"
+    assert "activate_trial effect failed: activation refused" in storage["last_error"]
+
+
+def test_candidate_commit_failure_restores_files_and_active_policy(
+    tmp_path,
+    monkeypatch,
+):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    first = tproxy.route_policy_manifest()
+    first["source"] = "signed:first"
+    first["geo_exit_routes"].append({
+        "domains": ["first.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    first_bundle, public_keys = signed_test_policy_bundle(first)
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        first_bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+    previous_path.write_bytes(b"pre-existing rollback slot\n")
+    policy_before = policy_path.read_bytes()
+    previous_before = previous_path.read_bytes()
+
+    second = tproxy.route_policy_manifest()
+    second["source"] = "signed:second"
+    second["geo_exit_routes"].append({
+        "domains": ["second.example.org"],
+        "service_group": tproxy.SERVICE_GENERIC,
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    })
+    second_bundle, second_keys = signed_test_policy_bundle(second, key_id="second")
+    public_keys.update(second_keys)
+    original_write = tproxy._atomic_write_json
+
+    def fail_candidate_write(path, data, *, mode=0o600):
+        if str(path) == str(policy_path) and data.get("source") == "signed:second":
+            raise OSError("disk full")
+        return original_write(path, data, mode=mode)
+
+    monkeypatch.setattr(tproxy, "_atomic_write_json", fail_candidate_write)
+
+    status = tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        second_bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=200.0,
+    )
+
+    assert status is None
+    assert policy_path.read_bytes() == policy_before
+    assert previous_path.read_bytes() == previous_before
+    assert tproxy.route_policy("first.example.org")["route_class"] == (
+        tproxy.ROUTE_GEO_EXIT
+    )
+    assert tproxy.route_policy("second.example.org")["route_class"] == (
+        tproxy.ROUTE_UNKNOWN
+    )
+    storage = tproxy.route_policy_storage_snapshot()
+    assert storage["state"] == "rejected"
+    assert "commit_candidate effect failed: disk full" in storage["last_error"]
+
+
+def test_corrupt_rollback_slot_does_not_replace_active_policy(tmp_path):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    first = tproxy.route_policy_manifest()
+    first["source"] = "signed:first"
+    first_bundle, public_keys = signed_test_policy_bundle(first)
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        first_bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+    second = tproxy.route_policy_manifest()
+    second["source"] = "signed:second"
+    second_bundle, second_keys = signed_test_policy_bundle(second, key_id="second")
+    public_keys.update(second_keys)
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        second_bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=200.0,
+    )
+    previous_path.write_text("not json")
+    policy_before = policy_path.read_bytes()
+    previous_before = previous_path.read_bytes()
+
+    assert not tproxy.rollback_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+    )
+    assert policy_path.read_bytes() == policy_before
+    assert previous_path.read_bytes() == previous_before
+    assert tproxy.route_policy_status_snapshot()["source"] == "signed:second"
+    assert tproxy.route_policy_storage_snapshot()["state"] == "rollback_error"
+
+
+def test_rollback_activation_failure_restores_files_and_active_policy(
+    tmp_path,
+    monkeypatch,
+):
+    policy_path = tmp_path / "route-policy.json"
+    previous_path = tmp_path / "route-policy.previous.json"
+    first = tproxy.route_policy_manifest()
+    first["source"] = "signed:first"
+    first_bundle, public_keys = signed_test_policy_bundle(first)
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        first_bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=100.0,
+    )
+    second = tproxy.route_policy_manifest()
+    second["source"] = "signed:second"
+    second_bundle, second_keys = signed_test_policy_bundle(second, key_id="second")
+    public_keys.update(second_keys)
+    assert tproxy.apply_signed_route_policy_bundle_with_health_gate(
+        second_bundle,
+        public_keys,
+        lambda: True,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+        now=200.0,
+    )
+    policy_before = policy_path.read_bytes()
+    previous_before = previous_path.read_bytes()
+    original_apply = tproxy.apply_route_policy_manifest
+    failed = {"value": False}
+
+    def fail_first_target_once(manifest, *, kind=None):
+        if manifest["source"] == "signed:first" and not failed["value"]:
+            failed["value"] = True
+            raise RuntimeError("runtime apply refused")
+        return original_apply(manifest, kind=kind)
+
+    monkeypatch.setattr(tproxy, "apply_route_policy_manifest", fail_first_target_once)
+
+    assert not tproxy.rollback_route_policy(
+        public_keys,
+        policy_path=str(policy_path),
+        previous_path=str(previous_path),
+    )
+    assert policy_path.read_bytes() == policy_before
+    assert previous_path.read_bytes() == previous_before
+    assert tproxy.route_policy_status_snapshot()["source"] == "signed:second"
+    storage = tproxy.route_policy_storage_snapshot()
+    assert storage["state"] == "rollback_error"
+    assert "runtime apply refused" in storage["last_error"]
 
 
 def test_persisted_route_policy_hash_mismatch_falls_back_to_bundled(tmp_path):

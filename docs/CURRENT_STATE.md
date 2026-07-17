@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, after PR #139 at
-`0ec154541bbab3f081a8c2fb086e05ab7771ba04`.
+Last evidence audit: 2026-07-17, after PR #140 at
+`df15eaf60bca401f963a0d7f595ad15f986203ff`.
 
 ## Resume Protocol
 
@@ -37,20 +37,20 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | StatusV2, policy/recovery modules, PF and Geph identity adapters, plus tray status, diagnostics, and Geph configuration are isolated. Python PF/Geph orchestration and Rust runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Pure signed-policy lifecycle implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, privacy-bounded StatusV2, route-policy manifest, signed-bundle verification, and activation/rollback models. Python and Rust execute the same frozen routing, verification, compare-and-swap trial, trial-generation, health, rejection restore, stale-event, and single-slot rollback vectors. First-match validation preserves every protected local-bypass/direct-first suffix and rejects static-table geo exit. Runtime adapter migration remains. |
+| M4 - Cross-Platform Core | Python signed-policy adapter implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, privacy-bounded StatusV2, route-policy manifest, signed-bundle verification, and activation/rollback models. Python and Rust execute the same frozen routing, verification, compare-and-swap trial, trial-generation, health, rejection restore, stale-event, and single-slot rollback vectors. First-match validation preserves every protected local-bypass/direct-first suffix and rejects static-table geo exit. The Python daemon now runs signed apply, health, persistence, rejection restore, startup load, and rollback behind the reducer with transactional owned-file compensation and backward-compatible generation metadata. Platform adapters remain. |
 
 The required `checks` and `packaged-app-lifecycle` jobs passed for the audited
 main commit in
-[CI run 29532950859](https://github.com/aiwaki/slipstream/actions/runs/29532950859).
+[CI run 29567169475](https://github.com/aiwaki/slipstream/actions/runs/29567169475).
 The dependency and vendored-Geph audits passed in
-[audit run 29532950851](https://github.com/aiwaki/slipstream/actions/runs/29532950851).
+[audit run 29567169495](https://github.com/aiwaki/slipstream/actions/runs/29567169495).
 
 ## Next Verified Action
 
-Migrate the existing Python signed-policy apply, health, persistence, and
-rollback adapter onto the frozen activation reducer under behavior-parity and
-effect-failure tests. Keep the remote channel disabled and add no production
-trust keys while this adapter boundary is qualified.
+Define the first no-network Windows adapter harness around `slipstream-core`.
+It should consume the frozen policy, recovery, StatusV2, signed-bundle, and
+activation contracts with fake effects before any Windows packet interception,
+DNS, proxy, VPN, service, or installer behavior is added.
 
 ## External Gates
 

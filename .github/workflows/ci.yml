@@ -98,12 +98,14 @@ jobs:
             spike/route_circuit.py \
             spike/route_circuit_registry.py \
             spike/route_policy_activation.py \
+            spike/route_policy_activation_adapter.py \
             spike/routing_policy.py \
             spike/routing_recovery.py \
             spike/tproxy.py \
             spike/xbox_dns.py \
             spike/test_recovery.py \
             spike/test_route_policy_activation.py \
+            spike/test_route_policy_activation_adapter.py \
             spike/test_connection_race_contract.py \
             spike/test_connection_race_io.py \
             spike/test_connection_probe.py \

@@ -210,7 +210,13 @@ freezes compare-and-swap trial, health, rejection restore, stale-event, and
 single-slot rollback transitions as ordered data-only actions. Health evidence
 is bound to both policy content and a monotonic trial generation, preventing a
 late result from an aborted attempt from committing a retry of the same SHA-256.
-Runtime adapter migration remains.
+The existing Python daemon now runs verified apply, health, persistence,
+rejection restore, startup load, and rollback through that reducer. Its owned
+policy files use compensating transactions, legacy persisted state remains
+readable, and signed provenance survives content equality with the bundled
+manifest. The remote channel remains disabled and no production trust key is
+present. Platform adapters remain; the first target is a no-network Windows
+harness before any native networking effects are introduced.
 
 ## M5 - Packet-Level Capabilities
 
