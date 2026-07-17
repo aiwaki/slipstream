@@ -451,13 +451,13 @@ fn exact_staged_record(
 
 fn ensure_secure_directory(path: &Path) -> Result<(), WindowsServicePayloadError> {
     let descriptor = owner_only_security_descriptor()?;
-    let mut attributes = SECURITY_ATTRIBUTES {
+    let attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor.0.cast::<c_void>(),
         bInheritHandle: 0,
     };
     let wide = wide_path(path);
-    let created = unsafe { CreateDirectoryW(wide.as_ptr(), &mut attributes) } != 0;
+    let created = unsafe { CreateDirectoryW(wide.as_ptr(), &attributes) } != 0;
     if !created {
         let code = unsafe { GetLastError() };
         if code != ERROR_ALREADY_EXISTS {
@@ -531,7 +531,7 @@ fn owner_only_security_descriptor(
 
 fn create_new_secure_file(path: &Path) -> Result<File, WindowsServicePayloadError> {
     let descriptor = owner_only_security_descriptor()?;
-    let mut attributes = SECURITY_ATTRIBUTES {
+    let attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor.0.cast::<c_void>(),
         bInheritHandle: 0,
@@ -542,7 +542,7 @@ fn create_new_secure_file(path: &Path) -> Result<File, WindowsServicePayloadErro
             wide.as_ptr(),
             GENERIC_READ | GENERIC_WRITE | READ_CONTROL | DELETE,
             FILE_SHARE_READ | FILE_SHARE_DELETE,
-            &mut attributes,
+            &attributes,
             CREATE_NEW,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
             null_mut(),
