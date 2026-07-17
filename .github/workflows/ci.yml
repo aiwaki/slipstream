@@ -190,12 +190,12 @@ jobs:
         with:
           components: clippy
 
-      - name: Test Windows contracts and the read-only SCM observer
+      - name: Test Windows contracts and read-only ownership evidence
         env:
           SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
 
-      - name: Lint Windows contracts and the read-only SCM observer
+      - name: Lint Windows contracts and read-only ownership evidence
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets -- -D warnings
 
   packaged-app-lifecycle:
