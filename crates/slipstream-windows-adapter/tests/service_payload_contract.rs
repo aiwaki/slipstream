@@ -68,3 +68,23 @@ fn payload_commit_marker_is_written_after_the_executable() {
     assert!(executable_commit < record_commit);
     assert!(record_commit < final_evidence);
 }
+
+#[test]
+fn pending_handles_are_registered_before_fallible_io() {
+    let source = include_str!("../src/service_payload/windows.rs").replace("\r\n", "\n");
+    let executable_registration = source
+        .find("transaction.executable = Some(create_new_secure_file")
+        .expect("pending executable registration");
+    let executable_copy = source
+        .find("copy_exact_payload")
+        .expect("pending executable copy");
+    let record_registration = source
+        .find("transaction.record = Some(create_new_secure_file")
+        .expect("pending record registration");
+    let record_write = source
+        .find(".write_all(&record_bytes)")
+        .expect("pending record write");
+
+    assert!(executable_registration < executable_copy);
+    assert!(record_registration < record_write);
+}

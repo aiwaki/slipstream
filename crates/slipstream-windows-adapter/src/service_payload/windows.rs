@@ -56,6 +56,10 @@ pub struct WindowsServicePayloadEffects {
     destination_directory_override: Option<PathBuf>,
     #[cfg(test)]
     fail_after_record_commit: bool,
+    #[cfg(test)]
+    fail_after_executable_create: bool,
+    #[cfg(test)]
+    fail_after_record_create: bool,
 }
 
 impl WindowsServicePayloadEffects {
@@ -66,6 +70,10 @@ impl WindowsServicePayloadEffects {
             destination_directory_override: None,
             #[cfg(test)]
             fail_after_record_commit: false,
+            #[cfg(test)]
+            fail_after_executable_create: false,
+            #[cfg(test)]
+            fail_after_record_create: false,
         }
     }
 
@@ -182,19 +190,31 @@ impl WindowsServicePayloadEffects {
         ensure_secure_directory(&paths.payload_directory)?;
 
         if !verify_optional_existing_executable(&paths.executable, &identity.executable_sha256)? {
-            let mut pending = create_new_secure_file(&paths.executable_pending)?;
+            transaction.executable = Some(create_new_secure_file(&paths.executable_pending)?);
+            #[cfg(test)]
+            if self.fail_after_executable_create {
+                return Err(WindowsServicePayloadError::Verification(
+                    "injected failure after pending executable creation",
+                ));
+            }
+            let pending =
+                transaction
+                    .executable
+                    .as_mut()
+                    .ok_or(WindowsServicePayloadError::Verification(
+                        "payload transaction lost its executable handle",
+                    ))?;
             copy_exact_payload(
                 &mut source,
-                &mut pending,
+                pending,
                 source_size,
                 &identity.executable_sha256,
             )?;
             verify_created_file(
-                &mut pending,
+                pending,
                 &paths.executable_pending,
                 &identity.executable_sha256,
             )?;
-            transaction.executable = Some(pending);
             move_file_exact(
                 &paths.executable_pending,
                 &paths.executable,
@@ -229,13 +249,25 @@ impl WindowsServicePayloadEffects {
             ));
         }
 
-        let mut pending_record = create_new_secure_file(&paths.record_pending)?;
+        transaction.record = Some(create_new_secure_file(&paths.record_pending)?);
+        #[cfg(test)]
+        if self.fail_after_record_create {
+            return Err(WindowsServicePayloadError::Verification(
+                "injected failure after pending owner record creation",
+            ));
+        }
+        let pending_record =
+            transaction
+                .record
+                .as_mut()
+                .ok_or(WindowsServicePayloadError::Verification(
+                    "payload transaction lost its owner record handle",
+                ))?;
         pending_record
             .write_all(&record_bytes)
             .map_err(|_| WindowsServicePayloadError::Io("write owner record"))?;
-        flush_file(&pending_record, "flush owner record")?;
-        verify_record_handle(&mut pending_record, &paths.record_pending, &record)?;
-        transaction.record = Some(pending_record);
+        flush_file(pending_record, "flush owner record")?;
+        verify_record_handle(pending_record, &paths.record_pending, &record)?;
         move_file_exact(&paths.record_pending, &paths.record, "commit owner record")?;
         let pending_record =
             transaction
@@ -299,6 +331,8 @@ impl WindowsServicePayloadEffects {
             source_path,
             destination_directory_override: Some(destination_directory),
             fail_after_record_commit: false,
+            fail_after_executable_create: false,
+            fail_after_record_create: false,
         }
     }
 }
@@ -1004,6 +1038,56 @@ mod tests {
         assert!(!root
             .join("Slipstream")
             .join(WINDOWS_OWNER_RECORD_FILE_NAME)
+            .exists());
+        assert!(!root
+            .join("Slipstream")
+            .join(WINDOWS_PAYLOAD_DIRECTORY)
+            .join(format!("{WINDOWS_PAYLOAD_FILE_PREFIX}{PAYLOAD_SHA256}.exe"))
+            .exists());
+        fs::remove_dir_all(root).expect("remove disposable payload root");
+        fs::remove_file(source).expect("remove disposable payload source");
+    }
+
+    #[test]
+    fn pending_executable_failure_compensates_the_registered_handle() {
+        if std::env::var_os("SLIPSTREAM_WINDOWS_DISPOSABLE_CI").is_none() {
+            return;
+        }
+        let (mut effects, root, source) = disposable_effects("pending-executable");
+        effects.fail_after_executable_create = true;
+        assert!(matches!(
+            effects.stage_payload(&identity(1)),
+            Err(WindowsServicePayloadError::Verification(
+                "injected failure after pending executable creation"
+            ))
+        ));
+        assert!(!root
+            .join("Slipstream")
+            .join(WINDOWS_PAYLOAD_DIRECTORY)
+            .join(format!(
+                ".{WINDOWS_PAYLOAD_FILE_PREFIX}{PAYLOAD_SHA256}.exe{WINDOWS_PAYLOAD_PENDING_SUFFIX}"
+            ))
+            .exists());
+        fs::remove_dir_all(root).expect("remove disposable payload root");
+        fs::remove_file(source).expect("remove disposable payload source");
+    }
+
+    #[test]
+    fn pending_record_failure_compensates_both_registered_handles() {
+        if std::env::var_os("SLIPSTREAM_WINDOWS_DISPOSABLE_CI").is_none() {
+            return;
+        }
+        let (mut effects, root, source) = disposable_effects("pending-record");
+        effects.fail_after_record_create = true;
+        assert!(matches!(
+            effects.stage_payload(&identity(1)),
+            Err(WindowsServicePayloadError::Verification(
+                "injected failure after pending owner record creation"
+            ))
+        ));
+        assert!(!root
+            .join("Slipstream")
+            .join(WINDOWS_OWNER_RECORD_PENDING_FILE_NAME)
             .exists());
         assert!(!root
             .join("Slipstream")
