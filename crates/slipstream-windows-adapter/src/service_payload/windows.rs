@@ -181,37 +181,34 @@ impl WindowsServicePayloadEffects {
         ensure_secure_directory(&paths.destination_directory)?;
         ensure_secure_directory(&paths.payload_directory)?;
 
-        let executable_created =
-            if verify_optional_existing_executable(&paths.executable, &identity.executable_sha256)?
-            {
-                false
-            } else {
-                let mut pending = create_new_secure_file(&paths.executable_pending)?;
-                copy_exact_payload(
-                    &mut source,
-                    &mut pending,
-                    source_size,
-                    &identity.executable_sha256,
-                )?;
-                verify_created_file(
-                    &mut pending,
-                    &paths.executable_pending,
-                    &identity.executable_sha256,
-                )?;
-                transaction.executable = Some(pending);
-                move_file_exact(
-                    &paths.executable_pending,
-                    &paths.executable,
-                    "commit payload executable",
-                )?;
-                let pending = transaction.executable.as_mut().ok_or(
-                    WindowsServicePayloadError::Verification(
+        if !verify_optional_existing_executable(&paths.executable, &identity.executable_sha256)? {
+            let mut pending = create_new_secure_file(&paths.executable_pending)?;
+            copy_exact_payload(
+                &mut source,
+                &mut pending,
+                source_size,
+                &identity.executable_sha256,
+            )?;
+            verify_created_file(
+                &mut pending,
+                &paths.executable_pending,
+                &identity.executable_sha256,
+            )?;
+            transaction.executable = Some(pending);
+            move_file_exact(
+                &paths.executable_pending,
+                &paths.executable,
+                "commit payload executable",
+            )?;
+            let pending =
+                transaction
+                    .executable
+                    .as_mut()
+                    .ok_or(WindowsServicePayloadError::Verification(
                         "payload transaction lost its executable handle",
-                    ),
-                )?;
-                verify_executable_handle(pending, &paths.executable, &identity.executable_sha256)?;
-                true
-            };
+                    ))?;
+            verify_executable_handle(pending, &paths.executable, &identity.executable_sha256)?;
+        }
 
         let record = WindowsServiceOwnershipRecord {
             schema_version: WINDOWS_SERVICE_OWNERSHIP_RECORD_SCHEMA_VERSION,
@@ -258,10 +255,6 @@ impl WindowsServicePayloadEffects {
 
         let evidence = staged_payload_evidence_at(&paths.record);
         exact_staged_record(&evidence, identity, &paths.executable)?;
-        verify_existing_executable(&paths.executable, &identity.executable_sha256)?;
-        if !executable_created {
-            transaction.executable = None;
-        }
         Ok(())
     }
 
