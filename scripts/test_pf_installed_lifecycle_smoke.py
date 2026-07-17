@@ -945,6 +945,18 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
 
         kill.assert_not_called()
 
+    def test_safari_exiting_is_already_stopped_without_signalling(self) -> None:
+        identity = (501, "?E", "(Safari)")
+        with mock.patch.object(
+            lifecycle,
+            "_safari_process_identity_for_pid",
+            return_value=identity,
+        ), mock.patch.object(lifecycle.os, "kill") as kill:
+            self.assertFalse(lifecycle._safari_pid_is_owned(4242, 501))
+            lifecycle._stop_owned_safari_process(4242, 501, "cleanup")
+
+        kill.assert_not_called()
+
     def test_safari_identity_parser_preserves_zombie_state(self) -> None:
         completed = subprocess.CompletedProcess((), 0, " 501 Z+ (Safari)\n", "")
         with mock.patch.object(
