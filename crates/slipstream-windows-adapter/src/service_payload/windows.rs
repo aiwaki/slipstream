@@ -11,7 +11,7 @@ use crate::service_ownership::windows::{
 use crate::service_ownership::{
     canonical_scm_binary_path, parse_windows_owner_record_v1, WindowsExecutableEvidence,
     WindowsOwnerRecordEvidence, WindowsServiceOwnershipRecord, MAX_WINDOWS_OWNER_RECORD_BYTES,
-    WINDOWS_OWNER_RECORD_FILE_NAME, WINDOWS_SERVICE_OWNERSHIP_RECORD_SCHEMA_VERSION,
+    WINDOWS_SERVICE_OWNERSHIP_RECORD_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 use std::ffi::c_void;
@@ -900,6 +900,7 @@ impl Drop for OwnedLocalSecurityDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service_ownership::WINDOWS_OWNER_RECORD_FILE_NAME;
     use std::fs;
 
     const PAYLOAD: &[u8] = b"slipstream-windows-evidence";
