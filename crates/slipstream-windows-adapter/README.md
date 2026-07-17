@@ -52,11 +52,20 @@ reopens both paths and must reproduce the exact identity. Failure compensation
 marks only handles created by that transaction for deletion, while an existing
 foreign or ambiguous path is never replaced.
 
-Native SCM mutation, process, durable lifecycle-state, DNS, proxy, VPN, packet,
-and installer effects belong in later modules and must keep the v1 recording
-harnesses available for regression tests. Policy rollback remains explicitly
-atomic: durable commit and runtime activation must either both succeed or leave
-the current policy active.
+`service_lifecycle_state` implements the separate native filesystem effects for
+`PersistIntent`, `CommitInstall`, and `ClearActiveInstallRecord`. Intent and
+active-install records are strict, bounded, owner-only, and committed through a
+flushed pending file. A surviving pending file is interruption evidence, not
+cleanup permission. Active install requires matching running intent and exact
+staged-payload ownership; clearing it requires an absent tombstone and verifies
+that the exact record disappeared. Unknown or inconsistent evidence blocks all
+later service-manager mutation. Stable state is only a prerequisite for a
+separate action-specific ownership gate, not authorization by itself.
+
+Native SCM mutation, process, DNS, proxy, VPN, packet, and installer effects
+belong in later modules and must keep the v1 recording harnesses available for
+regression tests. Policy rollback remains explicitly atomic: durable commit and
+runtime activation must either both succeed or leave the current policy active.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
@@ -67,5 +76,6 @@ cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.to
 The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-lifecycle-v1.json`,
 `contracts/windows-service-observer-v1.json`,
-`contracts/windows-service-ownership-v1.json`, and the existing routing,
+`contracts/windows-service-ownership-v1.json`,
+`contracts/windows-service-lifecycle-state-v1.json`, and the existing routing,
 recovery, StatusV2, manifest, signed-bundle, and activation contracts.

@@ -326,7 +326,10 @@ impl WindowsServicePayloadEffects {
     }
 
     #[cfg(test)]
-    fn for_disposable_test(source_path: PathBuf, destination_directory: PathBuf) -> Self {
+    pub(crate) fn for_disposable_test(
+        source_path: PathBuf,
+        destination_directory: PathBuf,
+    ) -> Self {
         Self {
             source_path,
             destination_directory_override: Some(destination_directory),
