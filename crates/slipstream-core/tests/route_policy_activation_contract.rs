@@ -121,6 +121,7 @@ fn policy_source_limit_is_measured_in_utf8_bytes() {
     let state = PolicyActivationState {
         bundled: bundled.clone(),
         active: bundled.clone(),
+        trial_generation: 0,
         previous: None,
         candidate: None,
         phase: slipstream_core::route_policy_activation::PolicyActivationPhase::Stable,

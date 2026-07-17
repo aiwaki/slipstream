@@ -32,6 +32,7 @@ pub enum PolicyActivationPhase {
 pub struct PolicyActivationState {
     pub bundled: PolicyIdentity,
     pub active: PolicyIdentity,
+    pub trial_generation: u64,
     pub previous: Option<PolicyIdentity>,
     pub candidate: Option<PolicyIdentity>,
     pub phase: PolicyActivationPhase,
@@ -46,6 +47,7 @@ pub enum PolicyActivationEvent {
     },
     HealthResult {
         candidate_sha256: String,
+        trial_generation: u64,
         completed: bool,
         ok: u32,
         degraded: u32,
@@ -142,6 +144,8 @@ pub enum PolicyActivationErrorCode {
     NoCandidate,
     StaleCandidate,
     StaleActive,
+    StaleTrial,
+    TrialGenerationExhausted,
 }
 
 impl PolicyActivationErrorCode {
@@ -157,6 +161,8 @@ impl PolicyActivationErrorCode {
             Self::NoCandidate => "no_candidate",
             Self::StaleCandidate => "stale_candidate",
             Self::StaleActive => "stale_active",
+            Self::StaleTrial => "stale_trial",
+            Self::TrialGenerationExhausted => "trial_generation_exhausted",
         }
     }
 }
@@ -264,6 +270,14 @@ fn validate_state(state: &PolicyActivationState) -> Result<(), PolicyActivationE
                 "previous policy must differ from the active policy",
             ));
         }
+    }
+
+    if state.phase == PolicyActivationPhase::Trial && state.trial_generation == 0 {
+        return Err(PolicyActivationError::new(
+            PolicyActivationErrorCode::InconsistentState,
+            "$.trial_generation",
+            "trial state requires a non-zero generation",
+        ));
     }
 
     match (state.phase, &state.candidate) {
@@ -376,9 +390,18 @@ fn begin_trial(
         ));
     }
 
+    let trial_generation = state.trial_generation.checked_add(1).ok_or_else(|| {
+        PolicyActivationError::new(
+            PolicyActivationErrorCode::TrialGenerationExhausted,
+            "$.trial_generation",
+            "trial generation is exhausted",
+        )
+    })?;
+
     let mut next_state = state.clone();
     next_state.candidate = Some(policy.clone());
     next_state.phase = PolicyActivationPhase::Trial;
+    next_state.trial_generation = trial_generation;
     Ok(transition(
         PolicyActivationDecisionKind::TrialStarted,
         PolicyActivationReason::CandidateVerified,
@@ -417,6 +440,7 @@ fn health_reason(completed: bool, ok: u32, degraded: u32, blocked: u32) -> Polic
 fn apply_health_result(
     state: &PolicyActivationState,
     candidate_sha256: &str,
+    trial_generation: u64,
     completed: bool,
     ok: u32,
     degraded: u32,
@@ -432,6 +456,13 @@ fn apply_health_result(
             ));
         }
     };
+    if trial_generation != state.trial_generation {
+        return Err(PolicyActivationError::new(
+            PolicyActivationErrorCode::StaleTrial,
+            "$.event.trial_generation",
+            "health result does not match the current trial generation",
+        ));
+    }
     validate_sha256(candidate_sha256, "$.event.candidate_sha256")?;
     if candidate_sha256 != candidate.sha256 {
         return Err(PolicyActivationError::new(
@@ -446,6 +477,7 @@ fn apply_health_result(
         let next_state = PolicyActivationState {
             bundled: state.bundled.clone(),
             active: candidate.clone(),
+            trial_generation: state.trial_generation,
             previous: Some(state.active.clone()),
             candidate: None,
             phase: PolicyActivationPhase::Stable,
@@ -537,6 +569,7 @@ fn rollback(
     let next_state = PolicyActivationState {
         bundled: state.bundled.clone(),
         active: target.clone(),
+        trial_generation: state.trial_generation,
         previous: None,
         candidate: None,
         phase: PolicyActivationPhase::Stable,
@@ -574,6 +607,7 @@ pub fn reduce_policy_activation(
         } => begin_trial(state, expected_active_sha256, policy),
         PolicyActivationEvent::HealthResult {
             candidate_sha256,
+            trial_generation,
             completed,
             ok,
             degraded,
@@ -581,6 +615,7 @@ pub fn reduce_policy_activation(
         } => apply_health_result(
             state,
             candidate_sha256,
+            *trial_generation,
             *completed,
             *ok,
             *degraded,

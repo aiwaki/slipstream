@@ -44,7 +44,9 @@ fetch or application.
 The activation contract emits ordered data-only adapter actions. It does not
 fetch, verify, persist, or apply a manifest itself. A trial and rollback are
 bound to the expected active SHA-256, while every health result is bound to the
-current candidate SHA-256 so late events cannot commit a different policy.
+current candidate SHA-256 and reducer-issued monotonic trial generation. A late
+result therefore cannot commit either a different policy or a newer retry of
+the same policy content.
 The manifest contract also rejects `geo_exit` entries in the earlier
 `static_routes` table and any geo-exit suffix that overlaps a protected domain.
 It validates the route selected by table order, not merely the presence of a

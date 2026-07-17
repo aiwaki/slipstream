@@ -35,6 +35,7 @@ def activation_state(value):
     return activation.PolicyActivationState(
         bundled=policy_identity(value["bundled"]),
         active=policy_identity(value["active"]),
+        trial_generation=value["trial_generation"],
         previous=(
             policy_identity(value["previous"])
             if value.get("previous") is not None
@@ -116,12 +117,14 @@ def test_health_counters_reject_python_booleans():
     state = activation.PolicyActivationState(
         bundled=bundled,
         active=bundled,
+        trial_generation=1,
         candidate=candidate,
         phase=activation.PHASE_TRIAL,
     )
     event = activation.PolicyActivationEvent(
         kind=activation.EVENT_HEALTH_RESULT,
         candidate_sha256=candidate.sha256,
+        trial_generation=1,
         completed=True,
         ok=True,
     )

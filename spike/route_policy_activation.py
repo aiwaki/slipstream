@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 CONTRACT_VERSION = 1
 MAX_SOURCE_BYTES = 128
 MAX_COUNTER = (1 << 32) - 1
+MAX_TRIAL_GENERATION = (1 << 64) - 1
 
 POLICY_BUNDLED = "bundled"
 POLICY_SIGNED = "signed"
@@ -54,6 +55,8 @@ ERROR_CANDIDATE_MUST_BE_SIGNED = "candidate_must_be_signed"
 ERROR_NO_CANDIDATE = "no_candidate"
 ERROR_STALE_CANDIDATE = "stale_candidate"
 ERROR_STALE_ACTIVE = "stale_active"
+ERROR_STALE_TRIAL = "stale_trial"
+ERROR_TRIAL_GENERATION_EXHAUSTED = "trial_generation_exhausted"
 ERROR_INVALID_COUNTER = "invalid_counter"
 ERROR_UNSUPPORTED_EVENT = "unsupported_event"
 
@@ -69,6 +72,7 @@ class PolicyIdentity:
 class PolicyActivationState:
     bundled: PolicyIdentity
     active: PolicyIdentity
+    trial_generation: int = 0
     previous: PolicyIdentity | None = None
     candidate: PolicyIdentity | None = None
     phase: str = PHASE_STABLE
@@ -80,6 +84,7 @@ class PolicyActivationEvent:
     expected_active_sha256: str = ""
     policy: PolicyIdentity | None = None
     candidate_sha256: str = ""
+    trial_generation: int = 0
     completed: bool = False
     ok: int = 0
     degraded: int = 0
@@ -175,6 +180,8 @@ def _validate_state(state):
             "previous policy must differ from the active policy",
         )
 
+    _validate_trial_generation(state.trial_generation, "$.trial_generation")
+
     if state.phase not in (PHASE_STABLE, PHASE_TRIAL):
         _error(ERROR_INVALID_PHASE, "$.phase", "unsupported activation phase")
     if state.phase == PHASE_STABLE and state.candidate is not None:
@@ -188,6 +195,12 @@ def _validate_state(state):
             ERROR_INCONSISTENT_STATE,
             "$.candidate",
             "trial state requires a candidate",
+        )
+    if state.phase == PHASE_TRIAL and state.trial_generation == 0:
+        _error(
+            ERROR_INCONSISTENT_STATE,
+            "$.trial_generation",
+            "trial state requires a non-zero generation",
         )
     if state.candidate is not None:
         _validate_policy(state.candidate, "$.candidate")
@@ -208,6 +221,19 @@ def _validate_state(state):
 def _validate_counter(value, path):
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_COUNTER:
         _error(ERROR_INVALID_COUNTER, path, "health counter must be an unsigned 32-bit integer")
+
+
+def _validate_trial_generation(value, path):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= MAX_TRIAL_GENERATION
+    ):
+        _error(
+            ERROR_INCONSISTENT_STATE,
+            path,
+            "trial generation must be an unsigned 64-bit integer",
+        )
 
 
 def _action(kind, policy, *, previous=None, reason=""):
@@ -263,7 +289,19 @@ def _begin_trial(state, event):
             state,
         )
 
-    next_state = replace(state, candidate=event.policy, phase=PHASE_TRIAL)
+    if state.trial_generation == MAX_TRIAL_GENERATION:
+        _error(
+            ERROR_TRIAL_GENERATION_EXHAUSTED,
+            "$.trial_generation",
+            "trial generation is exhausted",
+        )
+
+    next_state = replace(
+        state,
+        candidate=event.policy,
+        phase=PHASE_TRIAL,
+        trial_generation=state.trial_generation + 1,
+    )
     return PolicyActivationTransition(
         DECISION_TRIAL_STARTED,
         REASON_CANDIDATE_VERIFIED,
@@ -278,6 +316,16 @@ def _begin_trial(state, event):
 def _apply_health_result(state, event):
     if state.phase != PHASE_TRIAL or state.candidate is None:
         _error(ERROR_NO_CANDIDATE, "$.candidate", "no candidate is awaiting health")
+    _validate_trial_generation(
+        event.trial_generation,
+        "$.event.trial_generation",
+    )
+    if event.trial_generation != state.trial_generation:
+        _error(
+            ERROR_STALE_TRIAL,
+            "$.event.trial_generation",
+            "health result does not match the current trial generation",
+        )
     _validate_sha256(event.candidate_sha256, "$.event.candidate_sha256")
     if event.candidate_sha256 != state.candidate.sha256:
         _error(
@@ -292,6 +340,7 @@ def _apply_health_result(state, event):
         next_state = PolicyActivationState(
             bundled=state.bundled,
             active=candidate,
+            trial_generation=state.trial_generation,
             previous=state.active,
             candidate=None,
             phase=PHASE_STABLE,
@@ -352,6 +401,7 @@ def _rollback(state, event):
     next_state = PolicyActivationState(
         bundled=state.bundled,
         active=target,
+        trial_generation=state.trial_generation,
         previous=None,
         candidate=None,
         phase=PHASE_STABLE,

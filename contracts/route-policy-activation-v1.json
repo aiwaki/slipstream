@@ -15,7 +15,8 @@
       "blocked": 0
     },
     "rollback_depth": 1,
-    "side_effects": false
+    "side_effects": false,
+    "health_result_compares_trial_generation": true
   },
   "policies": {
     "bundled": {
@@ -62,7 +63,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -76,7 +78,8 @@
           "completed": true,
           "ok": 3,
           "degraded": 0,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 1
         }
       ],
       "expected": [
@@ -103,7 +106,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -113,7 +117,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -127,7 +132,8 @@
           "completed": true,
           "ok": 2,
           "degraded": 1,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 1
         }
       ],
       "expected": [
@@ -155,7 +161,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -165,7 +172,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": {"$policy": "signed_a"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       },
       "events": [
         {
@@ -174,7 +182,8 @@
           "completed": true,
           "ok": 4,
           "degraded": 2,
-          "blocked": 1
+          "blocked": 1,
+          "trial_generation": 1
         }
       ],
       "expected": [
@@ -193,7 +202,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -203,7 +213,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": {"$policy": "signed_a"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       },
       "events": [
         {
@@ -212,7 +223,8 @@
           "completed": false,
           "ok": 5,
           "degraded": 0,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 1
         }
       ],
       "expected": [
@@ -231,7 +243,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -241,7 +254,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": {"$policy": "signed_a"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       },
       "events": [
         {
@@ -250,7 +264,8 @@
           "completed": true,
           "ok": 0,
           "degraded": 0,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 1
         }
       ],
       "expected": [
@@ -269,7 +284,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -279,7 +295,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -296,7 +313,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -306,7 +324,8 @@
         "active": {"$policy": "signed_b"},
         "previous": {"$policy": "signed_a"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -330,7 +349,8 @@
         "active": {"$policy": "signed_a"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -340,7 +360,8 @@
         "active": {"$policy": "signed_a"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -364,7 +385,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -374,7 +396,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -390,7 +413,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -400,7 +424,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": {"$policy": "signed_b"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       },
       "events": [
         {
@@ -424,7 +449,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -434,7 +460,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -448,7 +475,8 @@
           "completed": true,
           "ok": 1,
           "degraded": 0,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 1
         },
         {
           "kind": "rollback",
@@ -488,7 +516,8 @@
         "active": {"$policy": "signed_a"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 1
       }
     },
     {
@@ -498,7 +527,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -522,7 +552,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -532,7 +563,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": {"$policy": "signed_b"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       },
       "events": [
         {
@@ -541,7 +573,8 @@
           "completed": true,
           "ok": 9,
           "degraded": 0,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 1
         }
       ],
       "expected": [
@@ -559,7 +592,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": {"$policy": "signed_b"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       }
     },
     {
@@ -569,7 +603,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": {"$policy": "signed_b"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       },
       "events": [
         {
@@ -593,7 +628,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "bundled"},
         "candidate": {"$policy": "signed_b"},
-        "phase": "trial"
+        "phase": "trial",
+        "trial_generation": 1
       }
     },
     {
@@ -603,7 +639,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -612,7 +649,8 @@
           "completed": true,
           "ok": 1,
           "degraded": 0,
-          "blocked": 0
+          "blocked": 0,
+          "trial_generation": 0
         }
       ],
       "expected": [
@@ -630,7 +668,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -640,7 +679,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -664,7 +704,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -674,7 +715,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -698,7 +740,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -708,7 +751,8 @@
         "active": {"$policy": "signed_bundled_content"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -732,7 +776,8 @@
         "active": {"$policy": "bundled"},
         "previous": null,
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -742,7 +787,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "signed_a"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -765,7 +811,8 @@
         "active": {"$policy": "signed_a"},
         "previous": {"$policy": "signed_a"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       }
     },
     {
@@ -775,7 +822,8 @@
         "active": {"$policy": "signed_b"},
         "previous": {"$policy": "signed_a"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
       },
       "events": [
         {
@@ -798,7 +846,125 @@
         "active": {"$policy": "signed_b"},
         "previous": {"$policy": "signed_a"},
         "candidate": null,
-        "phase": "stable"
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "late-health-from-aborted-retry-cannot-commit-the-same-candidate",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        },
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        },
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "trial_generation": 1,
+          "completed": true,
+          "ok": 4,
+          "degraded": 0,
+          "blocked": 0
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "trial_aborted",
+          "reason": "rollback_requested",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_a"}, "previous": null, "reason": "rollback_requested"}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": false,
+          "error": {
+            "code": "stale_trial",
+            "path": "$.event.trial_generation",
+            "message_contains": "current trial generation"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": {"$policy": "signed_a"},
+        "phase": "trial",
+        "trial_generation": 2
+      }
+    },
+    {
+      "name": "trial-generation-exhaustion-is-fail-closed",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 18446744073709551615
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "trial_generation_exhausted",
+            "path": "$.trial_generation",
+            "message_contains": "exhausted"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 18446744073709551615
       }
     }
   ]
