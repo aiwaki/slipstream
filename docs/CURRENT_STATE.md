@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, after PR #141 at
-`37938e29b80506f504cb1c448577830131ae6c26`.
+Last evidence audit: 2026-07-17, after PR #142 at
+`942e5db53c1dbdd665530be9b96c0da6dc490d82`.
 
 ## Resume Protocol
 
@@ -41,9 +41,9 @@ Before continuing existing work, including after context compaction or a bare
 
 The required `checks` and `packaged-app-lifecycle` jobs passed for the audited
 main commit in
-[CI run 29574607696](https://github.com/aiwaki/slipstream/actions/runs/29574607696).
+[CI run 29580054820](https://github.com/aiwaki/slipstream/actions/runs/29580054820).
 The dependency and vendored-Geph audits passed in
-[audit run 29574607680](https://github.com/aiwaki/slipstream/actions/runs/29574607680).
+[audit run 29580054810](https://github.com/aiwaki/slipstream/actions/runs/29580054810).
 
 ## Next Verified Action
 
