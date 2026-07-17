@@ -201,6 +201,7 @@ fn verify_executable_with_share(
     }
 }
 
+#[cfg(test)]
 fn verify_executable_inner(
     record: &WindowsServiceOwnershipRecord,
 ) -> Result<String, NativeEvidenceError> {

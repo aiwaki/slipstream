@@ -40,6 +40,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING, READ_CONTROL,
 };
 
+#[cfg(test)]
+use crate::service_ownership::WINDOWS_OWNER_RECORD_FILE_NAME;
+
 const WINDOWS_PAYLOAD_DIRECTORY: &str = "payloads";
 const WINDOWS_PAYLOAD_FILE_PREFIX: &str = "slipstream-service-";
 const WINDOWS_PAYLOAD_PENDING_SUFFIX: &str = ".pending-v1";
@@ -900,7 +903,6 @@ impl Drop for OwnedLocalSecurityDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service_ownership::WINDOWS_OWNER_RECORD_FILE_NAME;
     use std::fs;
 
     const PAYLOAD: &[u8] = b"slipstream-windows-evidence";
