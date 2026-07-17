@@ -9,9 +9,9 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-17, through native-qualified code commit
-`01e516a8aeaa13b272690008365c6e7a664b574d` in open
+`aa0962227e7a915da81e8a5251bf6410d89f9237` in open
 [PR #149](https://github.com/aiwaki/slipstream/pull/149), based on main at
-`64f10ffdebaeb5e788c799266704fafa894c1c5e`.
+`b3b4954c65ed387000622c4ed5a3c25abbf15df6`.
 
 ## Resume Protocol
 
@@ -64,7 +64,9 @@ and its dependency audit passed in
 [run 29598632248](https://github.com/aiwaki/slipstream/actions/runs/29598632248).
 The lifecycle-state contract, protected filesystem transaction, disposable
 interruption/compensation cases, and strict Windows lint passed in
-[PR #149 CI run 29602737513](https://github.com/aiwaki/slipstream/actions/runs/29602737513).
+[PR #149 CI run 29603653185](https://github.com/aiwaki/slipstream/actions/runs/29603653185).
+The exiting-Safari lifecycle regression and packaged smoke passed in
+[PR #150 CI run 29604297728](https://github.com/aiwaki/slipstream/actions/runs/29604297728).
 
 ## Next Verified Action
 
