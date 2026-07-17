@@ -91,6 +91,17 @@ or inconsistent evidence never becomes cleanup authority. A disposable CI gate
 executes install, a failed and then successful bounded crash restart, and
 uninstall through separate controller processes.
 
+`service_host` makes that boundary executable without adding a data plane. The
+same production binary enters SCM mode only with exact `--service`; management
+uses explicit `manage install|start|stop|recover|uninstall` commands and emits a
+versioned JSON result. Install hashes the current executable before the existing
+payload transaction reopens and independently verifies it. The service reports
+the bounded `START_PENDING -> RUNNING -> STOP_PENDING -> STOPPED` sequence and
+accepts both stop and shutdown controls. It opens no socket, discovers no other
+process, and performs no DNS, proxy, PAC, VPN, or packet operation. A separate
+Windows CI process exercises repeatable install, stop, restart, and uninstall
+through the real SCM.
+
 Windows networking and installer integration remain later steps and must keep
 every v1 recording harness available for regression tests. Policy rollback
 remains explicitly atomic: durable commit and runtime activation must either
@@ -107,5 +118,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-observer-v1.json`,
 `contracts/windows-service-ownership-v1.json`,
 `contracts/windows-service-lifecycle-state-v1.json`,
-`contracts/windows-service-scm-gate-v1.json`, and the existing routing,
-recovery, StatusV2, manifest, signed-bundle, and activation contracts.
+`contracts/windows-service-scm-gate-v1.json`,
+`contracts/windows-service-host-v1.json`, and the existing routing, recovery,
+StatusV2, manifest, signed-bundle, and activation contracts.
