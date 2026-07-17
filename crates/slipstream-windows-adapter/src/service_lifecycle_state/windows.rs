@@ -417,8 +417,12 @@ fn validate_intent_transition(
         }
     }
     if let Some(current) = current {
+        let restores_absent_without_committed_install = active.is_none()
+            && next.desired == WindowsServiceDesiredState::Absent
+            && next.identity.is_none();
         if current.desired != WindowsServiceDesiredState::Absent
             && current.identity != next.identity
+            && !restores_absent_without_committed_install
         {
             return Err(WindowsServiceLifecycleStateError::ExistingState(
                 "intent cannot replace a live identity",
@@ -547,7 +551,7 @@ fn inspect_pending_at(path: &Path) -> Result<bool, NativeEvidenceError> {
         Ok(None) => return Ok(false),
         Err(_) => return Err(NativeEvidenceError::Inaccessible),
     };
-    validate_regular_file(&file, MAX_WINDOWS_SERVICE_STATE_RECORD_BYTES as u64)?;
+    validate_pending_file(&file)?;
     if !final_path_matches(&file, path)? {
         return Err(NativeEvidenceError::Invalid);
     }
@@ -555,6 +559,23 @@ fn inspect_pending_at(path: &Path) -> Result<bool, NativeEvidenceError> {
         return Err(NativeEvidenceError::UntrustedPermissions);
     }
     Ok(true)
+}
+
+fn validate_pending_file(file: &File) -> Result<(), NativeEvidenceError> {
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    if unsafe { GetFileInformationByHandle(raw_handle(file), information.as_mut_ptr()) } == 0 {
+        return Err(NativeEvidenceError::Inaccessible);
+    }
+    let information = unsafe { information.assume_init() };
+    if information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0
+    {
+        return Err(NativeEvidenceError::Invalid);
+    }
+    let size = (u64::from(information.nFileSizeHigh) << 32) | u64::from(information.nFileSizeLow);
+    if size > MAX_WINDOWS_SERVICE_STATE_RECORD_BYTES as u64 {
+        return Err(NativeEvidenceError::Invalid);
+    }
+    Ok(())
 }
 
 struct AtomicRecordWrite<'a> {
@@ -1031,6 +1052,63 @@ mod tests {
         .expect("pending exists");
         mark_delete_on_close(&pending, "remove interrupted test pending").expect("delete pending");
         drop(pending);
+        fs::remove_dir_all(root).expect("remove disposable lifecycle state root");
+        fs::remove_file(source).expect("remove disposable payload source");
+    }
+
+    #[test]
+    fn empty_registered_pending_intent_is_an_interrupted_write() {
+        if std::env::var_os("SLIPSTREAM_WINDOWS_DISPOSABLE_CI").is_none() {
+            return;
+        }
+        let (state, _payload, root, source) = disposable_effects("empty-pending");
+        let paths = state.state_paths().expect("state paths");
+        ensure_secure_directory(&paths.root).expect("secure state root");
+        let pending = create_new_secure_file(&paths.intent_pending).expect("register pending");
+        drop(pending);
+
+        assert_eq!(
+            state.collect().assess(),
+            WindowsServiceLifecycleStateAssessment::InterruptedWrite
+        );
+
+        let pending = open_existing_file(
+            &paths.intent_pending,
+            GENERIC_READ | READ_CONTROL | DELETE,
+            FILE_SHARE_READ | FILE_SHARE_DELETE,
+        )
+        .expect("open empty pending for cleanup")
+        .expect("empty pending exists");
+        mark_delete_on_close(&pending, "remove empty pending test file").expect("delete pending");
+        drop(pending);
+        fs::remove_dir_all(root).expect("remove disposable lifecycle state root");
+        fs::remove_file(source).expect("remove disposable payload source");
+    }
+
+    #[test]
+    fn uncommitted_install_intent_can_roll_back_to_absent_without_identity() {
+        if std::env::var_os("SLIPSTREAM_WINDOWS_DISPOSABLE_CI").is_none() {
+            return;
+        }
+        let (state, _payload, root, source) = disposable_effects("rollback-intent");
+        state
+            .persist_intent(WindowsServiceDesiredState::Running, Some(identity(1)), 0)
+            .expect("persist uncommitted install intent");
+        state
+            .persist_intent(WindowsServiceDesiredState::Absent, None, 0)
+            .expect("restore prior absent intent");
+
+        assert!(matches!(
+            state.collect().intent,
+            WindowsDurableRecordEvidence::Committed {
+                record: WindowsServiceIntentRecordV1 {
+                    desired: WindowsServiceDesiredState::Absent,
+                    identity: None,
+                    ..
+                }
+            }
+        ));
+
         fs::remove_dir_all(root).expect("remove disposable lifecycle state root");
         fs::remove_file(source).expect("remove disposable payload source");
     }
