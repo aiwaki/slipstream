@@ -266,6 +266,69 @@ fn failed_intent_compensation_is_hard_and_suppresses_recovery() {
 }
 
 #[test]
+fn install_rollback_persists_absent_intent_before_cleanup() {
+    let contract = fixture();
+    let initial: WindowsServiceState =
+        serde_json::from_value(resolve(&contract, &contract["states"]["absent"])).unwrap();
+    let identity: WindowsServiceIdentity =
+        serde_json::from_value(resolve(&contract, &contract["identities"]["v1"])).unwrap();
+    let mut lifecycle = WindowsServiceLifecycleV1::new(initial).unwrap();
+    let mut effects = RecordingWindowsServiceEffects::default();
+    effects.fail_once(
+        WindowsServiceActionKind::VerifyReady,
+        "fake readiness timeout",
+    );
+
+    lifecycle
+        .execute(&WindowsServiceCommand::Install { identity }, &mut effects)
+        .unwrap();
+
+    let rollback = &effects.events()[5..];
+    assert!(matches!(
+        rollback.first(),
+        Some(WindowsServiceAction::PersistIntent {
+            desired: WindowsServiceDesiredState::Absent,
+            identity: None,
+            ..
+        })
+    ));
+    assert_eq!(
+        rollback[1].kind(),
+        WindowsServiceActionKind::StopOwnedService
+    );
+}
+
+#[test]
+fn start_rollback_persists_stopped_intent_before_stop() {
+    let contract = fixture();
+    let initial: WindowsServiceState =
+        serde_json::from_value(resolve(&contract, &contract["states"]["owned_stopped"])).unwrap();
+    let mut lifecycle = WindowsServiceLifecycleV1::new(initial).unwrap();
+    let mut effects = RecordingWindowsServiceEffects::default();
+    effects.fail_once(
+        WindowsServiceActionKind::VerifyReady,
+        "fake readiness timeout",
+    );
+
+    lifecycle
+        .execute(&WindowsServiceCommand::Start, &mut effects)
+        .unwrap();
+
+    assert!(matches!(
+        &effects.events()[3],
+        WindowsServiceAction::PersistIntent {
+            desired: WindowsServiceDesiredState::Stopped,
+            identity: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(
+        effects.events()[4].kind(),
+        WindowsServiceActionKind::StopOwnedService
+    );
+}
+
+#[test]
 fn absent_intent_cannot_be_weakened_by_start_or_stop() {
     let contract = fixture();
     let identity: WindowsServiceIdentity =

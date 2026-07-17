@@ -512,11 +512,24 @@ impl WindowsServiceLifecycleV1 {
     ) -> Result<WindowsServiceLifecycleResult, WindowsServiceLifecycleError> {
         let mut failed_stages = Vec::new();
         let mut intent_restored = true;
-        for action in compensation.into_iter().rev() {
+        let mut intent_restore = None;
+        let mut cleanup = Vec::new();
+        for action in compensation {
+            if action.kind() == WindowsServiceActionKind::PersistIntent {
+                intent_restore = Some(action);
+            } else {
+                cleanup.push(action);
+            }
+        }
+
+        if let Some(action) = intent_restore {
             if apply_effect(effects, &action).is_err() {
-                if action.kind() == WindowsServiceActionKind::PersistIntent {
-                    intent_restored = false;
-                }
+                intent_restored = false;
+                failed_stages.push(action.kind());
+            }
+        }
+        for action in cleanup.into_iter().rev() {
+            if apply_effect(effects, &action).is_err() {
                 failed_stages.push(action.kind());
             }
         }
@@ -613,16 +626,16 @@ impl WindowsServiceLifecycleV1 {
         primary_message: String,
         effects: &mut E,
     ) -> Result<WindowsServiceLifecycleResult, WindowsServiceLifecycleError> {
-        let stop = WindowsServiceAction::StopOwnedService {
-            identity: identity.clone(),
-        };
-        let stop_reported_success = apply_effect(effects, &stop).is_ok();
         let persist = WindowsServiceAction::PersistIntent {
             desired: prior.desired,
             identity: prior.active.clone(),
             crash_restart_attempts: prior.crash_restart_attempts,
         };
         let intent_restored = apply_effect(effects, &persist).is_ok();
+        let stop = WindowsServiceAction::StopOwnedService {
+            identity: identity.clone(),
+        };
+        let stop_reported_success = apply_effect(effects, &stop).is_ok();
         let verify = WindowsServiceAction::VerifyStopped {
             identity: identity.clone(),
         };

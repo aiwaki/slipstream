@@ -18,6 +18,7 @@
     "crash_recovery_is_bounded": true,
     "crash_restart_attempt_is_durable_before_restart": true,
     "failed_install_is_compensated": true,
+    "rollback_non_running_intent_precedes_cleanup": true,
     "compensation_requires_final_absence_proof": true,
     "external_dns_proxy_pac_vpn_read_only": true
   },
@@ -108,10 +109,10 @@
           "register_service",
           "start_owned_service",
           "verify_ready",
+          "persist_intent",
           "stop_owned_service",
           "unregister_owned_service",
           "remove_owned_payload",
-          "persist_intent",
           "verify_absent"
         ]
       }
@@ -143,10 +144,10 @@
           "register_service",
           "start_owned_service",
           "verify_ready",
+          "persist_intent",
           "stop_owned_service",
           "unregister_owned_service",
           "remove_owned_payload",
-          "persist_intent",
           "verify_absent"
         ]
       }
@@ -173,11 +174,11 @@
           "start_owned_service",
           "verify_ready",
           "commit_install",
+          "persist_intent",
           "clear_active_install_record",
           "stop_owned_service",
           "unregister_owned_service",
           "remove_owned_payload",
-          "persist_intent",
           "verify_absent"
         ]
       }
@@ -209,8 +210,8 @@
           "persist_intent",
           "start_owned_service",
           "verify_ready",
-          "stop_owned_service",
           "persist_intent",
+          "stop_owned_service",
           "verify_stopped"
         ]
       }
