@@ -1,0 +1,501 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_ownership",
+  "contract_version": 1,
+  "service_name": "dev.slipstream.service",
+  "invariants": {
+    "owner_only_record_required": true,
+    "exact_scm_binary_path_required": true,
+    "exact_executable_path_required": true,
+    "exact_executable_sha256_required": true,
+    "positive_generation_required": true,
+    "transitional_state_is_never_owned": true,
+    "missing_or_inaccessible_evidence_is_never_owned": true,
+    "native_effects": false,
+    "network_effects": false
+  },
+  "records": {
+    "v1": {
+      "schema_version": 1,
+      "service_name": "dev.slipstream.service",
+      "scm_binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+      "executable_path": "C:\\Program Files\\Slipstream\\slipstreamd.exe",
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "generation": 7
+    },
+    "invalid_generation": {
+      "schema_version": 1,
+      "service_name": "dev.slipstream.service",
+      "scm_binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+      "executable_path": "C:\\Program Files\\Slipstream\\slipstreamd.exe",
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "generation": 0
+    }
+  },
+  "record_evidence": {
+    "missing": { "state": "missing" },
+    "owner_only": { "state": "owner_only", "record": { "$ref": "#/records/v1" } },
+    "invalid_record": {
+      "state": "owner_only",
+      "record": { "$ref": "#/records/invalid_generation" }
+    },
+    "inaccessible": { "state": "inaccessible" },
+    "invalid": { "state": "invalid" },
+    "untrusted": { "state": "untrusted_permissions" }
+  },
+  "scm_evidence": {
+    "absent": {
+      "state": "observed",
+      "observation": {
+        "presence": "absent",
+        "service_name": "dev.slipstream.service"
+      }
+    },
+    "running": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+          "scm_state": "running",
+          "observed": "running",
+          "process_id": 4242
+        }
+      }
+    },
+    "stopped": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+          "scm_state": "stopped",
+          "observed": "stopped",
+          "process_id": null
+        }
+      }
+    },
+    "running_without_process": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+          "scm_state": "running",
+          "observed": "running",
+          "process_id": null
+        }
+      }
+    },
+    "inconsistent_state": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+          "scm_state": "start_pending",
+          "observed": "running",
+          "process_id": null
+        }
+      }
+    },
+    "transitional": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+          "scm_state": "start_pending",
+          "observed": "unknown",
+          "process_id": null
+        }
+      }
+    },
+    "binary_mismatch": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Temp\\slipstreamd.exe\" --service",
+          "scm_state": "running",
+          "observed": "running",
+          "process_id": 4343
+        }
+      }
+    },
+    "service_name_mismatch": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "Slipstream",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service",
+          "scm_state": "running",
+          "observed": "running",
+          "process_id": 4444
+        }
+      }
+    },
+    "inaccessible": { "state": "inaccessible" },
+    "invalid": { "state": "invalid" }
+  },
+  "executable_evidence": {
+    "verified": {
+      "state": "verified",
+      "executable_path": "C:\\Program Files\\Slipstream\\slipstreamd.exe",
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path_mismatch": {
+      "state": "verified",
+      "executable_path": "C:\\Temp\\slipstreamd.exe",
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "hash_mismatch": {
+      "state": "verified",
+      "executable_path": "C:\\Program Files\\Slipstream\\slipstreamd.exe",
+      "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "not_checked": { "state": "not_checked" },
+    "missing": { "state": "missing" },
+    "inaccessible": { "state": "inaccessible" },
+    "invalid": { "state": "invalid" }
+  },
+  "scenarios": [
+    {
+      "name": "absent-service-and-record-is-absent",
+      "input": {
+        "record": { "$ref": "#/record_evidence/missing" },
+        "scm": { "$ref": "#/scm_evidence/absent" },
+        "executable": { "$ref": "#/executable_evidence/not_checked" }
+      },
+      "expected": {
+        "ownership": "absent",
+        "observed": "absent",
+        "identity": null,
+        "reason": "absent"
+      }
+    },
+    {
+      "name": "service-without-record-is-foreign",
+      "input": {
+        "record": { "$ref": "#/record_evidence/missing" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "foreign",
+        "observed": "running",
+        "identity": null,
+        "reason": "service_without_record"
+      }
+    },
+    {
+      "name": "record-without-service-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/absent" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "absent",
+        "identity": null,
+        "reason": "record_without_service"
+      }
+    },
+    {
+      "name": "absent-service-does-not-hide-inaccessible-record",
+      "input": {
+        "record": { "$ref": "#/record_evidence/inaccessible" },
+        "scm": { "$ref": "#/scm_evidence/absent" },
+        "executable": { "$ref": "#/executable_evidence/not_checked" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "absent",
+        "identity": null,
+        "reason": "record_inaccessible"
+      }
+    },
+    {
+      "name": "inaccessible-record-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/inaccessible" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "record_inaccessible"
+      }
+    },
+    {
+      "name": "invalid-record-evidence-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/invalid" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "record_invalid"
+      }
+    },
+    {
+      "name": "untrusted-record-permissions-are-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/untrusted" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "record_permissions_untrusted"
+      }
+    },
+    {
+      "name": "owner-only-but-invalid-record-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/invalid_record" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "record_invalid"
+      }
+    },
+    {
+      "name": "inaccessible-scm-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/inaccessible" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "unknown",
+        "identity": null,
+        "reason": "scm_inaccessible"
+      }
+    },
+    {
+      "name": "invalid-scm-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/invalid" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "unknown",
+        "identity": null,
+        "reason": "scm_invalid"
+      }
+    },
+    {
+      "name": "transitional-service-is-never-owned",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/transitional" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "unknown",
+        "identity": null,
+        "reason": "transitional_service_state"
+      }
+    },
+    {
+      "name": "running-without-process-is-invalid",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running_without_process" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "unknown",
+        "identity": null,
+        "reason": "scm_invalid"
+      }
+    },
+    {
+      "name": "inconsistent-scm-projection-is-invalid",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/inconsistent_state" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "unknown",
+        "identity": null,
+        "reason": "scm_invalid"
+      }
+    },
+    {
+      "name": "service-name-mismatch-is-foreign",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/service_name_mismatch" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "foreign",
+        "observed": "running",
+        "identity": null,
+        "reason": "service_name_mismatch"
+      }
+    },
+    {
+      "name": "scm-binary-path-mismatch-is-foreign",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/binary_mismatch" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "foreign",
+        "observed": "running",
+        "identity": null,
+        "reason": "scm_binary_path_mismatch"
+      }
+    },
+    {
+      "name": "unchecked-executable-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/not_checked" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_not_checked"
+      }
+    },
+    {
+      "name": "missing-executable-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/missing" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_missing"
+      }
+    },
+    {
+      "name": "inaccessible-executable-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/inaccessible" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_inaccessible"
+      }
+    },
+    {
+      "name": "invalid-executable-evidence-is-unknown",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/invalid" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_invalid"
+      }
+    },
+    {
+      "name": "executable-path-mismatch-is-foreign",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/path_mismatch" }
+      },
+      "expected": {
+        "ownership": "foreign",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_path_mismatch"
+      }
+    },
+    {
+      "name": "executable-hash-mismatch-is-foreign",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/hash_mismatch" }
+      },
+      "expected": {
+        "ownership": "foreign",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_hash_mismatch"
+      }
+    },
+    {
+      "name": "fully-matching-running-evidence-is-owned",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "owned",
+        "observed": "running",
+        "identity": {
+          "service_name": "dev.slipstream.service",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 7
+        },
+        "reason": "owned"
+      }
+    },
+    {
+      "name": "fully-matching-stopped-evidence-is-owned",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/stopped" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "owned",
+        "observed": "stopped",
+        "identity": {
+          "service_name": "dev.slipstream.service",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 7
+        },
+        "reason": "owned"
+      }
+    }
+  ]
+}
