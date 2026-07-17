@@ -217,8 +217,13 @@ readable, and every consumed trial generation is made durable before candidate
 activation. Persisted signed provenance survives content equality with the
 bundled manifest, while a new envelope for the already-active canonical hash
 remains a v1 no-op. The remote channel remains disabled and no production trust
-key is present. Platform adapters remain; the first target is a no-network
-Windows harness before any native networking effects are introduced.
+key is present. `crates/slipstream-windows-adapter` is now the first platform
+boundary. Its isolated v1 harness consumes all frozen policy, recovery,
+StatusV2, bundle, and activation contracts through an injected effects trait.
+The recording implementation proves effect ordering and compensation without
+native APIs, processes, files, services, DNS, proxy, VPN, sockets, or packets.
+Native Windows service lifecycle and networking effects remain; they must pass
+their own disposable-VM contracts before they can replace the fake boundary.
 
 ## M5 - Packet-Level Capabilities
 

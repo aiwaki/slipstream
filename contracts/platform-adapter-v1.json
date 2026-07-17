@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.platform_adapter",
+  "contract_version": 1,
+  "first_adapter": "windows",
+  "imports": {
+    "manifest": "route-policy-manifest-v1.json#/normalized_manifest",
+    "signed_bundle": "route-policy-bundle-v1.json#/base_bundle",
+    "trusted_keys": "route-policy-bundle-v1.json#/trusted_keys",
+    "status": "status-v2-v1.json#/vectors/0/status"
+  },
+  "invariants": {
+    "network_effects": false,
+    "os_effects": false,
+    "external_dns_proxy_pac_vpn_read_only": true,
+    "protected_local_bypass_never_uses_geph": true,
+    "activation_effects_follow_reducer_order": true,
+    "effect_failure_is_compensated": true
+  },
+  "bundled_source": "bundled:v1",
+  "activation_scenarios": [
+    {
+      "name": "clean-health-commits-verified-candidate",
+      "health": {
+        "completed": true,
+        "ok": 3,
+        "degraded": 0,
+        "blocked": 0,
+        "detail": ""
+      },
+      "expected": {
+        "accepted": true,
+        "decision": "candidate_activated",
+        "reason": "health_passed",
+        "active_source": "contract-fixture",
+        "effects": [
+          "persist_trial_generation",
+          "activate_trial",
+          "run_health_gate",
+          "commit_candidate"
+        ]
+      }
+    },
+    {
+      "name": "degraded-health-restores-bundled-policy",
+      "health": {
+        "completed": true,
+        "ok": 2,
+        "degraded": 1,
+        "blocked": 0,
+        "detail": "local bypass degraded"
+      },
+      "expected": {
+        "accepted": false,
+        "decision": "candidate_rejected",
+        "reason": "health_degraded",
+        "active_source": "bundled:v1",
+        "error_contains": "local bypass degraded",
+        "effects": [
+          "persist_trial_generation",
+          "activate_trial",
+          "run_health_gate",
+          "restore_active",
+          "record_rejection"
+        ]
+      }
+    },
+    {
+      "name": "commit-failure-aborts-and-restores-bundled-policy",
+      "health": {
+        "completed": true,
+        "ok": 3,
+        "degraded": 0,
+        "blocked": 0,
+        "detail": ""
+      },
+      "fail_once": {
+        "stage": "commit_candidate",
+        "message": "fake durable store unavailable"
+      },
+      "expected": {
+        "accepted": false,
+        "decision": "trial_aborted",
+        "reason": "rollback_requested",
+        "active_source": "bundled:v1",
+        "error_contains": "commit_candidate effect failed",
+        "effects": [
+          "persist_trial_generation",
+          "activate_trial",
+          "run_health_gate",
+          "commit_candidate",
+          "restore_active",
+          "record_rejection"
+        ]
+      }
+    },
+    {
+      "name": "generation-persistence-failure-never-activates-candidate",
+      "health": {
+        "completed": true,
+        "ok": 3,
+        "degraded": 0,
+        "blocked": 0,
+        "detail": ""
+      },
+      "fail_once": {
+        "stage": "persist_trial_generation",
+        "message": "fake generation store unavailable"
+      },
+      "expected": {
+        "accepted": false,
+        "decision": "trial_aborted",
+        "reason": "rollback_requested",
+        "active_source": "bundled:v1",
+        "error_contains": "persist_trial_generation effect failed",
+        "effects": [
+          "persist_trial_generation",
+          "restore_active",
+          "record_rejection"
+        ]
+      }
+    }
+  ]
+}
+
