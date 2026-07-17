@@ -205,8 +205,12 @@ manifest contract now gives Python and Rust the same normalization, bounded
 hostname validation, structured failures, first-match protection, and
 static/geo table separation. Signed-bundle contract v1 now also freezes
 Python-compatible canonical bytes, SHA-256 identity, Ed25519 verification, and
-structured envelope failures in both languages. Pure activation/rollback state
-and runtime adapter migration remain.
+structured envelope failures in both languages. Activation contract v1 now
+freezes compare-and-swap trial, health, rejection restore, stale-event, and
+single-slot rollback transitions as ordered data-only actions. Health evidence
+is bound to both policy content and a monotonic trial generation, preventing a
+late result from an aborted attempt from committing a retry of the same SHA-256.
+Runtime adapter migration remains.
 
 ## M5 - Packet-Level Capabilities
 

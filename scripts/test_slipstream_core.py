@@ -21,14 +21,15 @@ class SlipstreamCoreBoundaryTests(unittest.TestCase):
 
     def test_sources_do_not_own_platform_io(self) -> None:
         forbidden = re.compile(
-            r"std::(?:(?:fs|net|os|process|thread|time)\b|"
-            r"\{[^}]*\b(?:fs|net|os|process|thread|time)\b)|"
-            r"(?:Tcp|Udp|Unix)(?:Listener|Socket|Stream)|"
+            r"std::(?:(?:fs|os|process|thread|time)\b|"
+            r"\{[^}]*\b(?:fs|os|process|thread|time)\b)|"
+            r"(?:Tcp|Udp|Unix)(?:Datagram|Listener|Socket|Stream)|ToSocketAddrs|"
             r"Command::new|unsafe\s*\{"
         )
 
-        sources = sorted((CORE / "src").glob("*.rs"))
+        sources = sorted((CORE / "src").rglob("*.rs"))
         self.assertGreaterEqual(len(sources), 5)
+        self.assertIn(CORE / "src" / "route_policy_activation" / "v1.rs", sources)
         for source in sources:
             text = source.read_text(encoding="utf-8")
             self.assertIsNone(forbidden.search(text), source.relative_to(ROOT))

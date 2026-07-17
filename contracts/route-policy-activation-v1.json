@@ -1,0 +1,971 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.route_policy_activation",
+  "contract_version": 1,
+  "invariants": {
+    "verified_candidates_only": true,
+    "one_candidate_at_a_time": true,
+    "begin_and_rollback_compare_active_sha256": true,
+    "health_result_compares_candidate_sha256": true,
+    "rollback_slot_differs_from_active": true,
+    "health_pass_requires": {
+      "completed": true,
+      "ok_min": 1,
+      "degraded": 0,
+      "blocked": 0
+    },
+    "rollback_depth": 1,
+    "side_effects": false,
+    "health_result_compares_trial_generation": true
+  },
+  "policies": {
+    "bundled": {
+      "kind": "bundled",
+      "source": "bundled:v1",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "signed_a": {
+      "kind": "signed",
+      "source": "signed:a",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "signed_b": {
+      "kind": "signed",
+      "source": "signed:b",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "signed_c": {
+      "kind": "signed",
+      "source": "signed:c",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "signed_bundled_content": {
+      "kind": "signed",
+      "source": "signed:bundled-content",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "bundled_candidate": {
+      "kind": "bundled",
+      "source": "bundled:candidate",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "invalid_sha": {
+      "kind": "signed",
+      "source": "signed:invalid",
+      "sha256": "ABC"
+    }
+  },
+  "vectors": [
+    {
+      "name": "verified-candidate-commits-after-clean-health",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        },
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "completed": true,
+          "ok": 3,
+          "degraded": 0,
+          "blocked": 0,
+          "trial_generation": 1
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "candidate_activated",
+          "reason": "health_passed",
+          "actions": [
+            {"kind": "commit_candidate", "policy": {"$policy": "signed_a"}, "previous": {"$policy": "bundled"}, "reason": ""}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "degraded-health-restores-active-policy",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "policy": {"$policy": "signed_b"}
+        },
+        {
+          "kind": "health_result",
+          "candidate_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "completed": true,
+          "ok": 2,
+          "degraded": 1,
+          "blocked": 0,
+          "trial_generation": 1
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_b"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_b"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "candidate_rejected",
+          "reason": "health_degraded",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_b"}, "previous": null, "reason": "health_degraded"}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "blocked-health-takes-precedence-over-degraded",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": {"$policy": "signed_a"},
+        "phase": "trial",
+        "trial_generation": 1
+      },
+      "events": [
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "completed": true,
+          "ok": 4,
+          "degraded": 2,
+          "blocked": 1,
+          "trial_generation": 1
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "candidate_rejected",
+          "reason": "health_blocked",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_a"}, "previous": null, "reason": "health_blocked"}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "incomplete-health-is-rejected-before-counts",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": {"$policy": "signed_a"},
+        "phase": "trial",
+        "trial_generation": 1
+      },
+      "events": [
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "completed": false,
+          "ok": 5,
+          "degraded": 0,
+          "blocked": 0,
+          "trial_generation": 1
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "candidate_rejected",
+          "reason": "health_incomplete",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_a"}, "previous": null, "reason": "health_incomplete"}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "zero-success-health-is-rejected",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": {"$policy": "signed_a"},
+        "phase": "trial",
+        "trial_generation": 1
+      },
+      "events": [
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "completed": true,
+          "ok": 0,
+          "degraded": 0,
+          "blocked": 0,
+          "trial_generation": 1
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "candidate_rejected",
+          "reason": "health_no_success",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_a"}, "previous": null, "reason": "health_no_success"}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "duplicate-active-candidate-is-idempotent",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "policy": {"$policy": "signed_a"}
+        }
+      ],
+      "expected": [
+        {"ok": true, "decision": "no_change", "reason": "already_active", "actions": []}
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "rollback-prefers-one-previous-policy",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_b"},
+        "previous": {"$policy": "signed_a"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "rolled_back",
+          "reason": "previous_policy",
+          "actions": [
+            {"kind": "commit_rollback", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "activate_rollback", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "rollback-without-previous-falls-back-to-bundled",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "rolled_back",
+          "reason": "bundled_policy",
+          "actions": [
+            {"kind": "commit_rollback", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "activate_rollback", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "rollback-while-bundled-is-idempotent",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "expected": [
+        {"ok": true, "decision": "no_change", "reason": "already_bundled", "actions": []}
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "rollback-during-trial-aborts-only-the-candidate",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": {"$policy": "signed_b"},
+        "phase": "trial",
+        "trial_generation": 1
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "trial_aborted",
+          "reason": "rollback_requested",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_b"}, "previous": null, "reason": "rollback_requested"}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "second-activation-rotates-the-single-rollback-slot",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "policy": {"$policy": "signed_b"}
+        },
+        {
+          "kind": "health_result",
+          "candidate_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "completed": true,
+          "ok": 1,
+          "degraded": 0,
+          "blocked": 0,
+          "trial_generation": 1
+        },
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_b"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_b"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "candidate_activated",
+          "reason": "health_passed",
+          "actions": [
+            {"kind": "commit_candidate", "policy": {"$policy": "signed_b"}, "previous": {"$policy": "signed_a"}, "reason": ""}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "rolled_back",
+          "reason": "previous_policy",
+          "actions": [
+            {"kind": "commit_rollback", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "activate_rollback", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "stale-active-sha-cannot-start-a-trial",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_b"}
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "stale_active",
+            "path": "$.event.expected_active_sha256",
+            "message_contains": "active policy"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "late-health-result-cannot-commit-an-old-candidate",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": {"$policy": "signed_b"},
+        "phase": "trial",
+        "trial_generation": 1
+      },
+      "events": [
+        {
+          "kind": "health_result",
+          "candidate_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "completed": true,
+          "ok": 9,
+          "degraded": 0,
+          "blocked": 0,
+          "trial_generation": 1
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "stale_candidate",
+            "path": "$.event.candidate_sha256",
+            "message_contains": "current candidate"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": {"$policy": "signed_b"},
+        "phase": "trial",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "second-candidate-cannot-replace-an-active-trial",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": {"$policy": "signed_b"},
+        "phase": "trial",
+        "trial_generation": 1
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "policy": {"$policy": "signed_c"}
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "candidate_in_progress",
+            "path": "$.phase",
+            "message_contains": "already in trial"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "bundled"},
+        "candidate": {"$policy": "signed_b"},
+        "phase": "trial",
+        "trial_generation": 1
+      }
+    },
+    {
+      "name": "health-without-a-candidate-is-rejected",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "completed": true,
+          "ok": 1,
+          "degraded": 0,
+          "blocked": 0,
+          "trial_generation": 0
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "no_candidate",
+            "path": "$.candidate",
+            "message_contains": "awaiting health"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "candidate-must-be-a-signed-policy",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "bundled_candidate"}
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "candidate_must_be_signed",
+            "path": "$.event.policy.kind",
+            "message_contains": "must be signed"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "candidate-hash-must-be-lowercase-sha256",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "invalid_sha"}
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "invalid_sha256",
+            "path": "$.event.policy.sha256",
+            "message_contains": "lowercase SHA-256"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "rollback-clears-signed-identity-with-bundled-content",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_bundled_content"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "rolled_back",
+          "reason": "bundled_policy",
+          "actions": [
+            {"kind": "commit_rollback", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "activate_rollback", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""}
+          ]
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "rollback-slot-cannot-duplicate-active-policy",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "signed_a"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "inconsistent_state",
+            "path": "$.previous.sha256",
+            "message_contains": "must differ from the active policy"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_a"},
+        "previous": {"$policy": "signed_a"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "stale-active-sha-cannot-rollback-a-newer-policy",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_b"},
+        "previous": {"$policy": "signed_a"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "stale_active",
+            "path": "$.event.expected_active_sha256",
+            "message_contains": "active policy"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "signed_b"},
+        "previous": {"$policy": "signed_a"},
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      }
+    },
+    {
+      "name": "late-health-from-aborted-retry-cannot-commit-the-same-candidate",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 0
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        },
+        {
+          "kind": "rollback",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        },
+        {
+          "kind": "health_result",
+          "candidate_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "trial_generation": 1,
+          "completed": true,
+          "ok": 4,
+          "degraded": 0,
+          "blocked": 0
+        }
+      ],
+      "expected": [
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "trial_aborted",
+          "reason": "rollback_requested",
+          "actions": [
+            {"kind": "restore_active", "policy": {"$policy": "bundled"}, "previous": null, "reason": ""},
+            {"kind": "record_rejection", "policy": {"$policy": "signed_a"}, "previous": null, "reason": "rollback_requested"}
+          ]
+        },
+        {
+          "ok": true,
+          "decision": "trial_started",
+          "reason": "candidate_verified",
+          "actions": [
+            {"kind": "activate_trial", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""},
+            {"kind": "run_health_gate", "policy": {"$policy": "signed_a"}, "previous": null, "reason": ""}
+          ]
+        },
+        {
+          "ok": false,
+          "error": {
+            "code": "stale_trial",
+            "path": "$.event.trial_generation",
+            "message_contains": "current trial generation"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": {"$policy": "signed_a"},
+        "phase": "trial",
+        "trial_generation": 2
+      }
+    },
+    {
+      "name": "trial-generation-exhaustion-is-fail-closed",
+      "initial_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 18446744073709551615
+      },
+      "events": [
+        {
+          "kind": "begin_trial",
+          "expected_active_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "policy": {"$policy": "signed_a"}
+        }
+      ],
+      "expected": [
+        {
+          "ok": false,
+          "error": {
+            "code": "trial_generation_exhausted",
+            "path": "$.trial_generation",
+            "message_contains": "exhausted"
+          }
+        }
+      ],
+      "expected_final_state": {
+        "bundled": {"$policy": "bundled"},
+        "active": {"$policy": "bundled"},
+        "previous": null,
+        "candidate": null,
+        "phase": "stable",
+        "trial_generation": 18446744073709551615
+      }
+    }
+  ]
+}
