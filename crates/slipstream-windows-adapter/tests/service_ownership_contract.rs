@@ -148,6 +148,7 @@ fn owned_requires_the_complete_evidence_conjunction() {
         "transitional",
         "binary_mismatch",
         "service_name_mismatch",
+        "malformed_binary_path",
         "inaccessible",
         "invalid",
     ];
@@ -155,6 +156,7 @@ fn owned_requires_the_complete_evidence_conjunction() {
         "verified",
         "path_mismatch",
         "hash_mismatch",
+        "malformed_verified",
         "not_checked",
         "missing",
         "inaccessible",

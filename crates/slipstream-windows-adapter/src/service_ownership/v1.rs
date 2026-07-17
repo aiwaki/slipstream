@@ -42,6 +42,7 @@ impl WindowsServiceOwnershipRecord {
                 "scm_binary_path",
             ));
         }
+        validate_sha256("executable_sha256", &self.executable_sha256)?;
         self.identity()
             .validate()
             .map_err(|_| WindowsServiceOwnershipContractError::InvalidRecord("identity"))
@@ -64,6 +65,8 @@ pub fn canonical_scm_binary_path(executable_path: &str) -> String {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum WindowsOwnerRecordEvidence {
     Missing,
+    /// The adapter has already proven a non-reparse regular file with the
+    /// required owner and restrictive DACL.
     OwnerOnly {
         record: WindowsServiceOwnershipRecord,
     },
@@ -86,6 +89,8 @@ pub enum WindowsScmEvidence {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum WindowsExecutableEvidence {
     NotChecked,
+    /// The adapter opened the exact path without following a reparse point and
+    /// computed SHA-256 from that same handle.
     Verified {
         executable_path: String,
         executable_sha256: String,
@@ -230,6 +235,14 @@ pub fn assess_windows_service_ownership(
                     WindowsServiceOwnershipReason::ScmInvalid,
                 );
             }
+            if validate_bounded_text("scm_binary_path", &snapshot.binary_path).is_err() {
+                return assessment(
+                    WindowsServiceOwnership::Unknown,
+                    WindowsServiceObservedState::Unknown,
+                    None,
+                    WindowsServiceOwnershipReason::ScmInvalid,
+                );
+            }
             if observed == WindowsServiceObservedState::Unknown {
                 return assessment(
                     WindowsServiceOwnership::Unknown,
@@ -328,6 +341,16 @@ pub fn assess_windows_service_ownership(
                     executable_path,
                     executable_sha256,
                 } => {
+                    if validate_executable_path(executable_path).is_err()
+                        || validate_sha256("executable_sha256", executable_sha256).is_err()
+                    {
+                        return assessment(
+                            WindowsServiceOwnership::Unknown,
+                            observed,
+                            None,
+                            WindowsServiceOwnershipReason::ExecutableInvalid,
+                        );
+                    }
                     if executable_path != &record.executable_path {
                         return assessment(
                             WindowsServiceOwnership::Foreign,
@@ -402,6 +425,20 @@ fn validate_executable_path(path: &str) -> Result<(), WindowsServiceOwnershipCon
         return Err(WindowsServiceOwnershipContractError::InvalidRecord(
             "executable_path",
         ));
+    }
+    Ok(())
+}
+
+fn validate_sha256(
+    field: &'static str,
+    value: &str,
+) -> Result<(), WindowsServiceOwnershipContractError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(WindowsServiceOwnershipContractError::InvalidRecord(field));
     }
     Ok(())
 }

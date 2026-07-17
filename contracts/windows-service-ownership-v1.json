@@ -142,6 +142,19 @@
         }
       }
     },
+    "malformed_binary_path": {
+      "state": "observed",
+      "observation": {
+        "presence": "present",
+        "snapshot": {
+          "service_name": "dev.slipstream.service",
+          "binary_path": "\"C:\\Program Files\\Slipstream\\slipstreamd.exe\" --service\n",
+          "scm_state": "running",
+          "observed": "running",
+          "process_id": 4545
+        }
+      }
+    },
     "inaccessible": { "state": "inaccessible" },
     "invalid": { "state": "invalid" }
   },
@@ -160,6 +173,11 @@
       "state": "verified",
       "executable_path": "C:\\Program Files\\Slipstream\\slipstreamd.exe",
       "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "malformed_verified": {
+      "state": "verified",
+      "executable_path": "C:\\Program Files\\Slipstream\\slipstreamd.exe",
+      "executable_sha256": "not-a-sha256"
     },
     "not_checked": { "state": "not_checked" },
     "missing": { "state": "missing" },
@@ -308,6 +326,20 @@
       }
     },
     {
+      "name": "malformed-scm-command-is-invalid",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/malformed_binary_path" },
+        "executable": { "$ref": "#/executable_evidence/verified" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "unknown",
+        "identity": null,
+        "reason": "scm_invalid"
+      }
+    },
+    {
       "name": "transitional-service-is-never-owned",
       "input": {
         "record": { "$ref": "#/record_evidence/owner_only" },
@@ -425,6 +457,20 @@
         "record": { "$ref": "#/record_evidence/owner_only" },
         "scm": { "$ref": "#/scm_evidence/running" },
         "executable": { "$ref": "#/executable_evidence/invalid" }
+      },
+      "expected": {
+        "ownership": "unknown",
+        "observed": "running",
+        "identity": null,
+        "reason": "executable_invalid"
+      }
+    },
+    {
+      "name": "malformed-verified-executable-is-invalid",
+      "input": {
+        "record": { "$ref": "#/record_evidence/owner_only" },
+        "scm": { "$ref": "#/scm_evidence/running" },
+        "executable": { "$ref": "#/executable_evidence/malformed_verified" }
       },
       "expected": {
         "ownership": "unknown",
