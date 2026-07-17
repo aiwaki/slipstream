@@ -242,10 +242,17 @@ smoke combines those native proofs with the frozen reducer. A separate native
 payload effect now stages only a source whose opened-handle SHA-256 matches the
 content-addressed identity. It creates owner-only pending files, flushes and
 renames the executable before the owner record commit marker, reopens both
-through the collector, and compensates only transaction-owned handles. It has
-no SCM, process, DNS, proxy, VPN, socket, or packet API. Durable lifecycle-state
-storage, SCM effects, and lifecycle qualification remain and must land as
-separate bounded steps before any Windows networking effect is introduced.
+through the collector, and compensates only transaction-owned handles. A
+separate lifecycle-state transaction persists strict bounded intent and
+active-install records under the same protected machine directory. Pending
+files are durable interruption evidence; inaccessible, invalid, permissive, or
+identity-inconsistent records block mutation. Active install commit requires
+the exact running intent and already-proven staged payload, while removal
+requires an absent tombstone and preserves it. Stable state is only input to a
+later action-specific ownership gate, not SCM authorization. Neither filesystem effect has an
+SCM, process, DNS, proxy, VPN, socket, or packet API. Native state qualification,
+SCM effects, and full lifecycle qualification remain and must land as separate
+bounded steps before any Windows networking effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 

@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_lifecycle_state",
+  "contract_version": 1,
+  "directory": "ProgramData\\Slipstream",
+  "files": {
+    "intent": "service-intent-v1.json",
+    "intent_pending": ".service-intent-v1.json.pending-v1",
+    "active_install": "service-active-v1.json",
+    "active_install_pending": ".service-active-v1.json.pending-v1"
+  },
+  "invariants": {
+    "owner_only_records": true,
+    "exact_non_reparse_handles": true,
+    "strict_bounded_json": true,
+    "pending_handle_registered_before_io": true,
+    "file_flushed_before_atomic_rename": true,
+    "same_volume_write_through_commit": true,
+    "interrupted_write_blocks_scm_mutation": true,
+    "stable_state_is_prerequisite_not_authorization": true,
+    "active_install_requires_matching_committed_intent": true,
+    "active_install_requires_owned_staged_payload": true,
+    "clear_requires_absent_intent": true,
+    "clear_preserves_absent_tombstone": true,
+    "native_scm_effects": false,
+    "process_effects": false,
+    "network_effects": false,
+    "external_dns_proxy_pac_vpn_read_only": true
+  },
+  "identity": {
+    "service_name": "dev.slipstream.service",
+    "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "generation": 1
+  },
+  "records": {
+    "running_intent": {
+      "schema_version": 1,
+      "record_kind": "slipstream.windows_service_intent",
+      "desired": "running",
+      "identity": {
+        "service_name": "dev.slipstream.service",
+        "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "generation": 1
+      },
+      "crash_restart_attempts": 0
+    },
+    "absent_tombstone": {
+      "schema_version": 1,
+      "record_kind": "slipstream.windows_service_intent",
+      "desired": "absent",
+      "identity": {
+        "service_name": "dev.slipstream.service",
+        "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "generation": 1
+      },
+      "crash_restart_attempts": 0
+    },
+    "active_install": {
+      "schema_version": 1,
+      "record_kind": "slipstream.windows_active_install",
+      "identity": {
+        "service_name": "dev.slipstream.service",
+        "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "generation": 1
+      }
+    }
+  },
+  "evidence_scenarios": [
+    {
+      "name": "committed-intent-without-pending-is-stable",
+      "intent": "committed",
+      "active_install": "missing",
+      "expected": "stable"
+    },
+    {
+      "name": "pending-intent-blocks-service-effects",
+      "intent": "interrupted_write",
+      "active_install": "missing",
+      "expected": "interrupted_write"
+    },
+    {
+      "name": "matching-active-install-is-stable",
+      "intent": "committed",
+      "active_install": "committed_matching",
+      "expected": "stable"
+    },
+    {
+      "name": "orphan-active-install-is-inconsistent",
+      "intent": "missing",
+      "active_install": "committed",
+      "expected": "inconsistent"
+    }
+  ]
+}
