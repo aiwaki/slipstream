@@ -8,6 +8,7 @@ import pytest
 import address_attempts
 import route_circuit
 import route_circuit_registry
+import route_policy_activation
 import route_policy_bundle
 import routing_policy
 import routing_recovery
@@ -30,6 +31,7 @@ CONNECTION_RACE = load_contract("connection-race-v1.json")
 STATUS_V2 = load_contract("status-v2-v1.json")
 ROUTE_POLICY_MANIFEST = load_contract("route-policy-manifest-v1.json")
 ROUTE_POLICY_BUNDLE = load_contract("route-policy-bundle-v1.json")
+ROUTE_POLICY_ACTIVATION = load_contract("route-policy-activation-v1.json")
 
 
 def merge(defaults, override):
@@ -70,6 +72,13 @@ def test_contract_metadata_and_vector_names_are_stable():
     assert ROUTE_POLICY_BUNDLE["contract_version"] == (
         route_policy_bundle.CONTRACT_VERSION
     )
+    assert ROUTE_POLICY_ACTIVATION["schema_version"] == 1
+    assert ROUTE_POLICY_ACTIVATION["contract"] == (
+        "slipstream.route_policy_activation"
+    )
+    assert ROUTE_POLICY_ACTIVATION["contract_version"] == (
+        route_policy_activation.CONTRACT_VERSION
+    )
     assert route_policy_bundle.SCHEMA_VERSION == tproxy.ROUTE_POLICY_SCHEMA_VERSION
 
     for contract in (
@@ -82,6 +91,7 @@ def test_contract_metadata_and_vector_names_are_stable():
         STATUS_V2,
         ROUTE_POLICY_MANIFEST,
         ROUTE_POLICY_BUNDLE,
+        ROUTE_POLICY_ACTIVATION,
     ):
         names = [item["name"] for item in contract["vectors"]]
         assert names

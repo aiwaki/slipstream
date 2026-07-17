@@ -24,6 +24,9 @@ Slipstream routing decisions and bounded recovery primitives.
   protection for local-bypass and direct-first domains.
 - `route-policy-bundle-v1.json` freezes Python-compatible canonical bytes,
   SHA-256 identity, Ed25519 verification, and structured envelope failures.
+- `route-policy-activation-v1.json` freezes compare-and-swap trial activation,
+  health acceptance, rejection restore, stale-event protection, and one-level
+  rollback for already-verified policy identities.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -38,6 +41,10 @@ open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.
+The activation contract emits ordered data-only adapter actions. It does not
+fetch, verify, persist, or apply a manifest itself. A trial and rollback are
+bound to the expected active SHA-256, while every health result is bound to the
+current candidate SHA-256 so late events cannot commit a different policy.
 The manifest contract also rejects `geo_exit` entries in the earlier
 `static_routes` table and any geo-exit suffix that overlaps a protected domain.
 It validates the route selected by table order, not merely the presence of a
