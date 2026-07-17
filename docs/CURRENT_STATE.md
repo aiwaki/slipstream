@@ -37,7 +37,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows no-network harness implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` now executes every frozen routing and recovery vector plus a versioned adapter contract through injected recording effects. It has no native API, process, filesystem, service, DNS, proxy, VPN, socket, or packet dependency. Native Windows lifecycle and networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows no-OS lifecycle contract implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and now owns a separate service-lifecycle v1 contract for exact identity, transactional install compensation, durable non-running intent, bounded crash recovery, fail-forward uninstall, and final-state proof through injected recording effects. It still has no native API, process, filesystem, service-manager, DNS, proxy, VPN, socket, or packet dependency. Native Windows service effects and networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks` and `packaged-app-lifecycle` jobs passed for the audited
 main commit in
@@ -47,11 +47,11 @@ The dependency and vendored-Geph audits passed in
 
 ## Next Verified Action
 
-Keep the no-network harness qualified by native Windows CI and define the first
-Windows service-lifecycle contract behind injected effects. Installation,
-start, stop, crash recovery, and rollback must be proven on a disposable VM
-before any Windows packet interception, DNS, proxy, VPN, or route mutation is
-introduced.
+Implement the first native Windows service observer and effect adapter behind
+the frozen lifecycle contract. Exact service identity, install, start, stop,
+bounded crash recovery, uninstall, and failed-install compensation must be
+proven on a disposable VM before any Windows packet interception, DNS, proxy,
+VPN, or route mutation is introduced.
 
 ## External Gates
 

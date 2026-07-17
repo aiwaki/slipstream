@@ -190,10 +190,10 @@ jobs:
         with:
           components: clippy
 
-      - name: Test the no-network Windows adapter contract
+      - name: Test the effect-injected Windows adapter contracts
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
 
-      - name: Lint the no-network Windows adapter contract
+      - name: Lint the effect-injected Windows adapter contracts
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets -- -D warnings
 
   packaged-app-lifecycle:

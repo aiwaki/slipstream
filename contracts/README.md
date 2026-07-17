@@ -31,6 +31,10 @@ Slipstream routing decisions and bounded recovery primitives.
   verified policy activation, fake-effect ordering, compensation, StatusV2
   consumption, and recovery dispatch. Windows is the first implementation;
   later adapters consume the same contract before adding native effects.
+- `windows-service-lifecycle-v1.json` freezes the Windows service boundary before
+  native service-manager code exists: exact owned identity, transactional
+  install compensation, intent-first stop/uninstall, bounded crash recovery,
+  final-state verification, and refusal to mutate foreign or unknown services.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -43,8 +47,9 @@ platform adapters can migrate deliberately.
 The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
 The Windows adapter harness in `crates/slipstream-windows-adapter` also remains
-effect-free by construction: tests inject a recording implementation, and the
-crate has no native, process, filesystem, or network dependency.
+effect-free by construction: tests inject recording implementations for policy
+and service lifecycle actions, and the crate has no native, process, filesystem,
+service-manager, or network dependency.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.
