@@ -87,6 +87,15 @@ impl WindowsServiceLifecycleStateEffects {
         crash_restart_attempts: u32,
     ) -> Result<(), WindowsServiceLifecycleStateError> {
         let _operation_guard = acquire_service_operation_lock()?;
+        self.persist_intent_locked(desired, identity, crash_restart_attempts)
+    }
+
+    fn persist_intent_locked(
+        &self,
+        desired: WindowsServiceDesiredState,
+        identity: Option<WindowsServiceIdentity>,
+        crash_restart_attempts: u32,
+    ) -> Result<(), WindowsServiceLifecycleStateError> {
         let record = WindowsServiceIntentRecordV1::new(desired, identity, crash_restart_attempts)
             .map_err(|_| WindowsServiceLifecycleStateError::InvalidRecord("intent"))?;
         let paths = self.state_paths()?;
@@ -119,6 +128,13 @@ impl WindowsServiceLifecycleStateEffects {
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServiceLifecycleStateError> {
         let _operation_guard = acquire_service_operation_lock()?;
+        self.commit_install_locked(identity)
+    }
+
+    fn commit_install_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<(), WindowsServiceLifecycleStateError> {
         identity
             .validate()
             .map_err(|_| WindowsServiceLifecycleStateError::InvalidIdentity)?;
@@ -173,6 +189,13 @@ impl WindowsServiceLifecycleStateEffects {
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServiceLifecycleStateError> {
         let _operation_guard = acquire_service_operation_lock()?;
+        self.clear_active_install_record_locked(identity)
+    }
+
+    fn clear_active_install_record_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<(), WindowsServiceLifecycleStateError> {
         identity
             .validate()
             .map_err(|_| WindowsServiceLifecycleStateError::InvalidIdentity)?;
@@ -282,6 +305,28 @@ impl WindowsServiceLifecycleStateEffects {
             false
         }
     }
+
+    pub(crate) fn apply_locked(
+        &mut self,
+        action: &WindowsServiceAction,
+    ) -> Result<(), WindowsServiceLifecycleStateError> {
+        match action {
+            WindowsServiceAction::PersistIntent {
+                desired,
+                identity,
+                crash_restart_attempts,
+            } => self.persist_intent_locked(*desired, identity.clone(), *crash_restart_attempts),
+            WindowsServiceAction::CommitInstall { identity } => {
+                self.commit_install_locked(identity)
+            }
+            WindowsServiceAction::ClearActiveInstallRecord { identity } => {
+                self.clear_active_install_record_locked(identity)
+            }
+            _ => Err(WindowsServiceLifecycleStateError::UnsupportedAction(
+                action.kind(),
+            )),
+        }
+    }
 }
 
 impl Default for WindowsServiceLifecycleStateEffects {
@@ -294,20 +339,8 @@ impl WindowsServiceEffects for WindowsServiceLifecycleStateEffects {
     type Error = WindowsServiceLifecycleStateError;
 
     fn apply(&mut self, action: &WindowsServiceAction) -> Result<(), Self::Error> {
-        match action {
-            WindowsServiceAction::PersistIntent {
-                desired,
-                identity,
-                crash_restart_attempts,
-            } => self.persist_intent(*desired, identity.clone(), *crash_restart_attempts),
-            WindowsServiceAction::CommitInstall { identity } => self.commit_install(identity),
-            WindowsServiceAction::ClearActiveInstallRecord { identity } => {
-                self.clear_active_install_record(identity)
-            }
-            _ => Err(WindowsServiceLifecycleStateError::UnsupportedAction(
-                action.kind(),
-            )),
-        }
+        let _operation_guard = acquire_service_operation_lock()?;
+        self.apply_locked(action)
     }
 }
 

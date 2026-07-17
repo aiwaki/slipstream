@@ -9,10 +9,13 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-17, through main commit
-`583dcb9ccfa978e05dd64db112646880c281c791` after merged
-[PR #149](https://github.com/aiwaki/slipstream/pull/149), plus the current
-[PR #151](https://github.com/aiwaki/slipstream/pull/151) implementation
-qualified in CI and dependency-audit runs linked below.
+`9448dfc868ec1a7e9a515d5c991f934f924ebfc1` after merged
+[PR #151](https://github.com/aiwaki/slipstream/pull/151) and its successful
+main CI and dependency-audit runs linked below, plus the green checks for
+[PR #152](https://github.com/aiwaki/slipstream/pull/152). Its implementation
+commit `d21e8a0f9461c78962321d0efc47b8999b352e81` composes the native Windows
+lifecycle and qualifies it against a disposable real service. Live PR and
+`main` state still take precedence over this recorded evidence boundary.
 
 ## Resume Protocol
 
@@ -40,7 +43,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows SCM effects CI-qualified; full lifecycle pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, and action-specific SCM boundaries. The SCM gate requires compatible intent, exact staged payload, serialized authorization evidence, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Every returned lifecycle-lock handle independently proves a trusted owner and DACL, so permissive or squatted named objects fail closed. Disposable Windows CI has qualified the native register/remove path and the hostile pre-created mutex fixture. Full lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows full lifecycle PR-qualified; controller pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, and single-lock native composition boundaries. The SCM gate requires compatible intent, exact staged payload, serialized authorization evidence, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Every returned lifecycle-lock handle independently proves a trusted owner and DACL, so permissive or squatted named objects fail closed. Disposable Windows CI has qualified native install, stop, start, bounded crash recovery, uninstall, exact terminal cleanup, and post-commit compensation against a real service. A production-facing controller that reconstructs lifecycle state after its own process restart, Windows networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -75,20 +78,35 @@ The exiting-Safari lifecycle regression and packaged smoke passed in
 The action-specific Windows SCM gate, exact native registration/removal,
 machine-wide lifecycle serialization, bounded stop wait, strict lint, required
 checks, and packaged lifecycle passed in
-[PR #151 CI run 29611685751](https://github.com/aiwaki/slipstream/actions/runs/29611685751).
+[PR #151 CI run 29612116541](https://github.com/aiwaki/slipstream/actions/runs/29612116541).
 That run also qualified independent owner/DACL verification for every returned
 kernel-object handle and rejection of a permissive pre-created mutex.
 Its dependency and vendored-Geph audits passed in
-[run 29611685757](https://github.com/aiwaki/slipstream/actions/runs/29611685757).
+[run 29612116544](https://github.com/aiwaki/slipstream/actions/runs/29612116544).
+The merged SCM implementation passed again on main in
+[CI run 29612504541](https://github.com/aiwaki/slipstream/actions/runs/29612504541),
+and its dependency audit passed in
+[run 29612504538](https://github.com/aiwaki/slipstream/actions/runs/29612504538).
+The single-lock native compositor, disposable real-service lifecycle, bounded
+crash recovery, exact uninstall ordering, and injected post-commit compensation
+passed in
+[PR #152 CI run 29614734338](https://github.com/aiwaki/slipstream/actions/runs/29614734338).
+That run executed the gated full-lifecycle test as one real Windows test rather
+than filtering or skipping it. The dependency and vendored-Geph audits passed
+in
+[run 29614734358](https://github.com/aiwaki/slipstream/actions/runs/29614734358).
 
 ## Next Verified Action
 
-Compose payload, durable-state, and SCM effects behind a disposable
-full-lifecycle harness.
-Qualify install, start, stop, bounded crash recovery, uninstall, and failed-step
-compensation without adding Windows networking. Unknown or foreign evidence
-must remain non-mutating, and every terminal cleanup path must prove exact
-service absence before removing owned payload state.
+Add a production-facing, still non-networking Windows service controller. It
+must acquire the shared machine-wide operation lock before reconstructing
+`WindowsServiceState` from durable intent, the read-only SCM observation, and
+exact ownership evidence, then hold that same lock through the complete reducer
+command and native-compositor execution. Qualify idempotent install, crash
+recovery, and uninstall retries across a controller-process restart. Unknown,
+foreign, inaccessible, or inconsistent evidence must remain non-mutating; no
+Windows networking effect may be added until this restart/reconciliation
+boundary passes disposable CI.
 
 ## External Gates
 

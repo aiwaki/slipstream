@@ -31,7 +31,7 @@ use std::path::PathBuf;
 
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST,
-    ERROR_SERVICE_NOT_ACTIVE,
+    ERROR_SERVICE_MARKED_FOR_DELETE, ERROR_SERVICE_NOT_ACTIVE,
 };
 use windows_sys::Win32::System::Services::{
     CloseServiceHandle, ControlService, CreateServiceW, DeleteService, OpenSCManagerW,
@@ -45,6 +45,8 @@ const SERVICE_DELETE_ACCESS: u32 = 0x0001_0000;
 const SERVICE_DISPLAY_NAME: &str = "Slipstream";
 const STOP_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_WAIT_INTERVAL: Duration = Duration::from_millis(50);
+const DELETE_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const DELETE_WAIT_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct WindowsServiceScmEffects {
     state_effects: WindowsServiceLifecycleStateEffects,
@@ -166,7 +168,12 @@ impl WindowsServiceScmEffects {
         match mutation {
             ExistingMutation::Start => start_exact_service(&service, identity, payload),
             ExistingMutation::Stop => stop_exact_service(&service, identity, payload),
-            ExistingMutation::Unregister => delete_exact_service(&service),
+            ExistingMutation::Unregister => {
+                delete_exact_service(&service)?;
+                drop(service);
+                drop(manager);
+                wait_for_exact_service_absent()
+            }
         }
     }
 
@@ -188,18 +195,39 @@ impl WindowsServiceScmEffects {
             owner_record_path_override: Some(owner_record_path),
         }
     }
-}
 
-impl Default for WindowsServiceScmEffects {
-    fn default() -> Self {
-        Self::new()
+    pub(crate) fn wait_for_owned_state_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+        expected: WindowsScmState,
+    ) -> Result<(), WindowsServiceScmError> {
+        identity.validate().map_err(|_| {
+            WindowsServiceScmError::Gate(WindowsServiceScmGateReason::InvalidIdentity)
+        })?;
+        let payload = self.collect_payload();
+        let manager = open_manager(SC_MANAGER_CONNECT)?;
+        let service =
+            open_exact_service(manager.raw(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS)?.ok_or(
+                WindowsServiceScmError::Verification(
+                    "owned service is absent during state verification",
+                ),
+            )?;
+        wait_for_owned_state(&service, identity, &payload, expected)
     }
-}
 
-impl WindowsServiceEffects for WindowsServiceScmEffects {
-    type Error = WindowsServiceScmError;
+    pub(crate) fn wait_for_absent_locked(&self) -> Result<(), WindowsServiceScmError> {
+        wait_for_exact_service_absent()
+    }
 
-    fn apply(&mut self, action: &WindowsServiceAction) -> Result<(), Self::Error> {
+    pub(crate) fn exact_service_is_absent_locked(&self) -> Result<bool, WindowsServiceScmError> {
+        let manager = open_manager(SC_MANAGER_CONNECT)?;
+        exact_service_is_absent(&manager)
+    }
+
+    pub(crate) fn apply_locked(
+        &mut self,
+        action: &WindowsServiceAction,
+    ) -> Result<(), WindowsServiceScmError> {
         let identity = match action {
             WindowsServiceAction::RegisterService { identity }
             | WindowsServiceAction::StartOwnedService { identity }
@@ -210,7 +238,6 @@ impl WindowsServiceEffects for WindowsServiceScmEffects {
         identity.validate().map_err(|_| {
             WindowsServiceScmError::Gate(WindowsServiceScmGateReason::InvalidIdentity)
         })?;
-        let _operation_guard = acquire_service_operation_lock()?;
         let lifecycle = self.state_effects.collect().assess();
         let payload = self.collect_payload();
 
@@ -244,6 +271,21 @@ impl WindowsServiceEffects for WindowsServiceScmEffects {
             ),
             _ => Err(WindowsServiceScmError::UnsupportedAction),
         }
+    }
+}
+
+impl Default for WindowsServiceScmEffects {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WindowsServiceEffects for WindowsServiceScmEffects {
+    type Error = WindowsServiceScmError;
+
+    fn apply(&mut self, action: &WindowsServiceAction) -> Result<(), Self::Error> {
+        let _operation_guard = acquire_service_operation_lock()?;
+        self.apply_locked(action)
     }
 }
 
@@ -305,9 +347,84 @@ fn stop_exact_service(
 fn delete_exact_service(service: &OwnedScHandle) -> Result<(), WindowsServiceScmError> {
     let ok = unsafe { DeleteService(service.raw()) };
     if ok == 0 {
-        return Err(last_error("DeleteService"));
+        let code = unsafe { GetLastError() };
+        if code == ERROR_SERVICE_MARKED_FOR_DELETE {
+            return Ok(());
+        }
+        return Err(WindowsServiceScmError::Win32 {
+            operation: "DeleteService",
+            code,
+        });
     }
     Ok(())
+}
+
+fn wait_for_owned_state(
+    service: &OwnedScHandle,
+    identity: &WindowsServiceIdentity,
+    payload: &WindowsStagedPayloadEvidence,
+    expected: WindowsScmState,
+) -> Result<(), WindowsServiceScmError> {
+    let deadline = Instant::now() + STOP_WAIT_TIMEOUT;
+    loop {
+        let snapshot = present_snapshot(observe_open_service_handle(service.raw())?)?;
+        if !snapshot_matches_staged_payload(&snapshot, identity, payload) {
+            return Err(WindowsServiceScmError::Verification(
+                "service changed identity during state verification",
+            ));
+        }
+        if snapshot.scm_state == expected {
+            return Ok(());
+        }
+        let transitional = matches!(
+            (expected, snapshot.scm_state),
+            (WindowsScmState::Running, WindowsScmState::StartPending)
+                | (WindowsScmState::Stopped, WindowsScmState::Running)
+                | (WindowsScmState::Stopped, WindowsScmState::StopPending)
+        );
+        if !transitional {
+            return Err(WindowsServiceScmError::Verification(
+                "service entered an unexpected SCM state",
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(WindowsServiceScmError::Verification(
+                "service did not reach the expected state before the bounded deadline",
+            ));
+        }
+        thread::sleep(STOP_WAIT_INTERVAL);
+    }
+}
+
+fn wait_for_exact_service_absent() -> Result<(), WindowsServiceScmError> {
+    let manager = open_manager(SC_MANAGER_CONNECT)?;
+    let deadline = Instant::now() + DELETE_WAIT_TIMEOUT;
+    loop {
+        if exact_service_is_absent(&manager)? {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(WindowsServiceScmError::Verification(
+                "service remained registered after deletion before the bounded deadline",
+            ));
+        }
+        thread::sleep(DELETE_WAIT_INTERVAL);
+    }
+}
+
+fn exact_service_is_absent(manager: &OwnedScHandle) -> Result<bool, WindowsServiceScmError> {
+    match open_exact_service(manager.raw(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS) {
+        Ok(None) => Ok(true),
+        Ok(Some(service)) => {
+            drop(service);
+            Ok(false)
+        }
+        Err(WindowsServiceScmError::Win32 {
+            operation: "OpenServiceW",
+            code: ERROR_SERVICE_MARKED_FOR_DELETE,
+        }) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn verify_stable_state(

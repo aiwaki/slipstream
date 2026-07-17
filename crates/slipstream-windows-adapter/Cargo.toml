@@ -7,6 +7,16 @@ rust-version = "1.77"
 license = "MIT"
 publish = false
 
+[features]
+disposable-windows-service-fixture = []
+
+[[bin]]
+name = "slipstream-disposable-service"
+path = "tests/fixtures/windows_service_fixture.rs"
+required-features = ["disposable-windows-service-fixture"]
+test = false
+bench = false
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

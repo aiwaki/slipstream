@@ -84,6 +84,13 @@ impl WindowsServicePayloadEffects {
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServicePayloadError> {
         let _operation_guard = acquire_service_operation_lock()?;
+        self.stage_payload_locked(identity)
+    }
+
+    fn stage_payload_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<(), WindowsServicePayloadError> {
         identity
             .validate()
             .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
@@ -110,6 +117,13 @@ impl WindowsServicePayloadEffects {
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServicePayloadError> {
         let _operation_guard = acquire_service_operation_lock()?;
+        self.remove_owned_payload_locked(identity)
+    }
+
+    fn remove_owned_payload_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<(), WindowsServicePayloadError> {
         identity
             .validate()
             .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
@@ -151,6 +165,45 @@ impl WindowsServicePayloadEffects {
         mark_delete_on_close(&executable_file, "delete owned executable")?;
         drop(executable_file);
         Ok(())
+    }
+
+    pub(crate) fn verify_payload_absent_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<(), WindowsServicePayloadError> {
+        if self.payload_is_absent_locked(identity)? {
+            return Ok(());
+        }
+        Err(WindowsServicePayloadError::ExistingState(
+            "owned or pending payload state remains",
+        ))
+    }
+
+    pub(crate) fn payload_is_absent_locked(
+        &self,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<bool, WindowsServicePayloadError> {
+        identity
+            .validate()
+            .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
+        let paths = self.destination_paths(identity)?;
+        for path in [
+            &paths.record,
+            &paths.record_pending,
+            &paths.executable,
+            &paths.executable_pending,
+        ] {
+            if open_existing_file(
+                path,
+                GENERIC_READ | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            )?
+            .is_some()
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn stage_payload_inner(
@@ -342,19 +395,27 @@ impl WindowsServicePayloadEffects {
             fail_after_record_create: false,
         }
     }
+
+    pub(crate) fn apply_locked(
+        &mut self,
+        action: &WindowsServiceAction,
+    ) -> Result<(), WindowsServicePayloadError> {
+        match action {
+            WindowsServiceAction::StagePayload { identity } => self.stage_payload_locked(identity),
+            WindowsServiceAction::RemoveOwnedPayload { identity } => {
+                self.remove_owned_payload_locked(identity)
+            }
+            _ => Err(WindowsServicePayloadError::UnsupportedAction(action.kind())),
+        }
+    }
 }
 
 impl WindowsServiceEffects for WindowsServicePayloadEffects {
     type Error = WindowsServicePayloadError;
 
     fn apply(&mut self, action: &WindowsServiceAction) -> Result<(), Self::Error> {
-        match action {
-            WindowsServiceAction::StagePayload { identity } => self.stage_payload(identity),
-            WindowsServiceAction::RemoveOwnedPayload { identity } => {
-                self.remove_owned_payload(identity)
-            }
-            _ => Err(WindowsServicePayloadError::UnsupportedAction(action.kind())),
-        }
+        let _operation_guard = acquire_service_operation_lock()?;
+        self.apply_locked(action)
     }
 }
 
