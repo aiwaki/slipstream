@@ -3,15 +3,17 @@
 use crate::service_lifecycle::{
     WindowsServiceAction, WindowsServiceActionKind, WindowsServiceEffects, WindowsServiceIdentity,
 };
+use crate::service_operation_lock::{
+    acquire_service_operation_lock, WindowsServiceOperationLockError,
+};
 use crate::service_ownership::windows::{
     final_path_matches, has_trusted_machine_write_permissions, machine_owner_record_path,
     raw_handle, staged_payload_evidence_at, validate_regular_file, NativeEvidenceError,
-    WindowsStagedPayloadEvidence,
 };
 use crate::service_ownership::{
     canonical_scm_binary_path, parse_windows_owner_record_v1, WindowsExecutableEvidence,
-    WindowsOwnerRecordEvidence, WindowsServiceOwnershipRecord, MAX_WINDOWS_OWNER_RECORD_BYTES,
-    WINDOWS_SERVICE_OWNERSHIP_RECORD_SCHEMA_VERSION,
+    WindowsOwnerRecordEvidence, WindowsServiceOwnershipRecord, WindowsStagedPayloadEvidence,
+    MAX_WINDOWS_OWNER_RECORD_BYTES, WINDOWS_SERVICE_OWNERSHIP_RECORD_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 use std::ffi::c_void;
@@ -81,6 +83,7 @@ impl WindowsServicePayloadEffects {
         &self,
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServicePayloadError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         identity
             .validate()
             .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
@@ -106,6 +109,7 @@ impl WindowsServicePayloadEffects {
         &self,
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServicePayloadError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         identity
             .validate()
             .map_err(|_| WindowsServicePayloadError::InvalidIdentity)?;
@@ -365,6 +369,7 @@ pub enum WindowsServicePayloadError {
     Io(&'static str),
     Win32 { operation: &'static str, code: u32 },
     CompensationFailed { primary: String, cleanup: String },
+    OperationLock(String),
 }
 
 impl fmt::Display for WindowsServicePayloadError {
@@ -386,11 +391,18 @@ impl fmt::Display for WindowsServicePayloadError {
                 formatter,
                 "Windows payload transaction failed ({primary}); exact cleanup also failed ({cleanup})"
             ),
+            Self::OperationLock(error) => write!(formatter, "{error}"),
         }
     }
 }
 
 impl std::error::Error for WindowsServicePayloadError {}
+
+impl From<WindowsServiceOperationLockError> for WindowsServicePayloadError {
+    fn from(value: WindowsServiceOperationLockError) -> Self {
+        Self::OperationLock(value.to_string())
+    }
+}
 
 #[derive(Debug)]
 struct DestinationPaths {
@@ -475,8 +487,8 @@ fn exact_staged_record(
         WindowsExecutableEvidence::Verified {
             executable_path,
             executable_sha256,
-        } if executable_path == &expected_path
-            && executable_sha256 == &identity.executable_sha256 => {}
+        } if executable_path.as_str() == expected_path.as_str()
+            && executable_sha256.as_str() == identity.executable_sha256.as_str() => {}
         _ => {
             return Err(WindowsServicePayloadError::ExistingState(
                 "owned executable evidence is incomplete",

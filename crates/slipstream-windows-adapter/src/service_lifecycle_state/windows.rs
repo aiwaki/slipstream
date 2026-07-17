@@ -12,6 +12,9 @@ use crate::service_lifecycle::{
     WindowsServiceAction, WindowsServiceActionKind, WindowsServiceDesiredState,
     WindowsServiceEffects, WindowsServiceIdentity,
 };
+use crate::service_operation_lock::{
+    acquire_service_operation_lock, WindowsServiceOperationLockError,
+};
 use crate::service_ownership::windows::{
     final_path_matches, has_trusted_machine_write_permissions, machine_owner_record_path,
     raw_handle, staged_payload_evidence_at, validate_regular_file, NativeEvidenceError,
@@ -83,6 +86,7 @@ impl WindowsServiceLifecycleStateEffects {
         identity: Option<WindowsServiceIdentity>,
         crash_restart_attempts: u32,
     ) -> Result<(), WindowsServiceLifecycleStateError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         let record = WindowsServiceIntentRecordV1::new(desired, identity, crash_restart_attempts)
             .map_err(|_| WindowsServiceLifecycleStateError::InvalidRecord("intent"))?;
         let paths = self.state_paths()?;
@@ -114,6 +118,7 @@ impl WindowsServiceLifecycleStateEffects {
         &self,
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServiceLifecycleStateError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         identity
             .validate()
             .map_err(|_| WindowsServiceLifecycleStateError::InvalidIdentity)?;
@@ -167,6 +172,7 @@ impl WindowsServiceLifecycleStateEffects {
         &self,
         identity: &WindowsServiceIdentity,
     ) -> Result<(), WindowsServiceLifecycleStateError> {
+        let _operation_guard = acquire_service_operation_lock()?;
         identity
             .validate()
             .map_err(|_| WindowsServiceLifecycleStateError::InvalidIdentity)?;
@@ -247,7 +253,7 @@ impl WindowsServiceLifecycleStateEffects {
     }
 
     #[cfg(test)]
-    fn for_disposable_test(destination_directory: PathBuf) -> Self {
+    pub(crate) fn for_disposable_test(destination_directory: PathBuf) -> Self {
         Self {
             destination_directory_override: Some(destination_directory),
             fail_after_intent_pending_create: false,
@@ -316,6 +322,7 @@ pub enum WindowsServiceLifecycleStateError {
     Io(&'static str),
     Win32 { operation: &'static str, code: u32 },
     CompensationFailed { primary: String, cleanup: String },
+    OperationLock(String),
 }
 
 impl fmt::Display for WindowsServiceLifecycleStateError {
@@ -343,11 +350,18 @@ impl fmt::Display for WindowsServiceLifecycleStateError {
                 formatter,
                 "Windows lifecycle state transaction failed ({primary}); pending-file cleanup also failed ({cleanup})"
             ),
+            Self::OperationLock(error) => write!(formatter, "{error}"),
         }
     }
 }
 
 impl std::error::Error for WindowsServiceLifecycleStateError {}
+
+impl From<WindowsServiceOperationLockError> for WindowsServiceLifecycleStateError {
+    fn from(value: WindowsServiceOperationLockError) -> Self {
+        Self::OperationLock(value.to_string())
+    }
+}
 
 #[derive(Debug)]
 struct StatePaths {

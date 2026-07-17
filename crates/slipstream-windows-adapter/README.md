@@ -62,10 +62,20 @@ that the exact record disappeared. Unknown or inconsistent evidence blocks all
 later service-manager mutation. Stable state is only a prerequisite for a
 separate action-specific ownership gate, not authorization by itself.
 
-Native SCM mutation, process, DNS, proxy, VPN, packet, and installer effects
-belong in later modules and must keep the v1 recording harnesses available for
-regression tests. Policy rollback remains explicitly atomic: durable commit and
-runtime activation must either both succeed or leave the current policy active.
+`service_scm` adds that action-specific gate and the isolated native effects for
+`RegisterService`, `StartOwnedService`, `StopOwnedService`, and
+`UnregisterOwnedService`. Every call recollects stable lifecycle state and the
+exact staged payload. Existing services are observed through the same handle
+that carries only the required mutation right plus query rights. Registration
+requires exact absence; start, stop, and removal require a stable exact-owned
+service, with uninstall and install-compensation tombstones handled explicitly.
+No process, DNS, proxy, PAC, VPN, socket, or packet API is present.
+
+Full native lifecycle qualification, process supervision, networking, and
+installer effects remain later steps and must keep every v1 recording harness
+available for regression tests. Policy rollback remains explicitly atomic:
+durable commit and runtime activation must either both succeed or leave the
+current policy active.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
@@ -77,5 +87,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-lifecycle-v1.json`,
 `contracts/windows-service-observer-v1.json`,
 `contracts/windows-service-ownership-v1.json`,
-`contracts/windows-service-lifecycle-state-v1.json`, and the existing routing,
+`contracts/windows-service-lifecycle-state-v1.json`,
+`contracts/windows-service-scm-gate-v1.json`, and the existing routing,
 recovery, StatusV2, manifest, signed-bundle, and activation contracts.

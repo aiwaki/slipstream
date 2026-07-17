@@ -19,6 +19,7 @@ fn native_payload_staging_is_handle_bound_and_has_no_service_or_network_surface(
         "staged_payload_evidence_at",
         "WindowsServiceAction::StagePayload",
         "WindowsServiceAction::RemoveOwnedPayload",
+        "acquire_service_operation_lock",
     ] {
         assert!(
             production.contains(required),

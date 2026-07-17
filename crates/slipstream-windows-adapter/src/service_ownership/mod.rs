@@ -11,4 +11,4 @@ pub use evidence::*;
 pub use v1::*;
 
 #[cfg(windows)]
-pub use windows::{WindowsServiceOwnershipCollector, WindowsStagedPayloadEvidence};
+pub use windows::WindowsServiceOwnershipCollector;

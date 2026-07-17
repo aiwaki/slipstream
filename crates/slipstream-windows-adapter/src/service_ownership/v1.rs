@@ -101,6 +101,12 @@ pub enum WindowsExecutableEvidence {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WindowsStagedPayloadEvidence {
+    pub record: WindowsOwnerRecordEvidence,
+    pub executable: WindowsExecutableEvidence,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WindowsServiceOwnershipInput {
     pub record: WindowsOwnerRecordEvidence,
     pub scm: WindowsScmEvidence,

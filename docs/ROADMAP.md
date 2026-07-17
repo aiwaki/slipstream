@@ -249,10 +249,23 @@ files are durable interruption evidence; inaccessible, invalid, permissive, or
 identity-inconsistent records block mutation. Active install commit requires
 the exact running intent and already-proven staged payload, while removal
 requires an absent tombstone and preserves it. Stable state is only input to a
-later action-specific ownership gate, not SCM authorization. Neither filesystem effect has an
-SCM, process, DNS, proxy, VPN, socket, or packet API. Native state qualification,
-SCM effects, and full lifecycle qualification remain and must land as separate
-bounded steps before any Windows networking effect is introduced.
+later action-specific ownership gate, not SCM authorization. Neither filesystem
+effect has an SCM, process, DNS, proxy, VPN, socket, or packet API. A shared,
+bounded, machine-wide operation lock now serializes durable-state, staged-payload,
+and SCM effects so authorization evidence cannot change during a native mutation.
+The returned kernel object is accepted only after its owner and DACL independently
+prove that no untrusted principal can wait, acquire, or rewrite it.
+A separate pure v1 SCM gate
+now binds each register, start, stop, or unregister action to compatible durable
+intent, exact staged payload, and exact read evidence. Its native effect opens
+only `dev.slipstream.service`, requests one mutation right plus query rights,
+and rechecks the same service handle before acting. An accepted stop keeps that
+handle and waits to an exact bounded `Stopped` observation before cleanup may
+continue; it never enumerates or
+reconfigures services and has no process or networking surface. Disposable CI
+qualifies exact registration and removal. Full install/start/stop/crash/uninstall
+lifecycle qualification remains a separate bounded step before any Windows
+networking effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 
