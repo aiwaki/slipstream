@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-17, through
-[PR #145](https://github.com/aiwaki/slipstream/pull/145), based on main at
-`f468acbe0fcc312a754938cbcf547c25a523fadd`.
+[PR #146](https://github.com/aiwaki/slipstream/pull/146), based on main at
+`47dcea673b6d93590b8a31b9ce09d87f44c4441b`.
 
 ## Resume Protocol
 
@@ -38,22 +38,23 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows read-only SCM observer implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns a separate service-lifecycle v1 contract for exact identity, transactional compensation, durable non-running intent, bounded crash recovery, fail-forward uninstall, and final-state proof through recording effects. Its first Windows-only adapter opens only the exact Slipstream service with query rights, maps native status conservatively, and preserves the configured binary command. It cannot infer ownership or mutate services, files, processes, DNS, proxy, VPN, sockets, or packets. Durable ownership evidence, native service effects and qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows ownership proof contract implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, read-only SCM observer, and ownership-proof v1 contracts. `Owned` now requires an owner-only record plus exact SCM command, executable path, SHA-256, positive generation, and stable SCM state; missing/inaccessible evidence is unknown and mismatched evidence is foreign. The current native adapter only queries the exact Slipstream service and cannot infer ownership or mutate services, files, processes, DNS, proxy, VPN, sockets, or packets. Native record/ACL/hash evidence, service effects and qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
-[CI run 29584820389](https://github.com/aiwaki/slipstream/actions/runs/29584820389).
+[CI run 29587591825](https://github.com/aiwaki/slipstream/actions/runs/29587591825).
 The dependency and vendored-Geph audits passed in
-[audit run 29584820339](https://github.com/aiwaki/slipstream/actions/runs/29584820339).
+[audit run 29587591781](https://github.com/aiwaki/slipstream/actions/runs/29587591781).
 
 ## Next Verified Action
 
-Define an owner-only Windows service record and bind it to the exact configured
-binary path, executable SHA-256, and lifecycle generation. Observation must
-classify mismatched, missing, inaccessible, or transitional evidence as
-foreign/unknown before any mutating SCM effect is implemented. Install, start,
-stop, crash recovery, uninstall, and compensation then qualify on a disposable
-VM before any Windows packet interception, DNS, proxy, VPN, or route mutation.
+Implement the read-only Windows evidence collector behind the ownership
+contract. It must locate the machine-level record, prove its owner/DACL and
+non-reparse regular-file identity, parse bounded v1 JSON, open the exact
+executable without following reparse points, and compute SHA-256 from that
+handle. It then feeds the existing SCM observation and pure ownership reducer.
+No record write, payload install, process control, or mutating SCM API is added
+until this evidence path qualifies on disposable Windows.
 
 ## External Gates
 

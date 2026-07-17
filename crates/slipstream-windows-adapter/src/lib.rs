@@ -10,6 +10,7 @@
 
 pub mod service_lifecycle;
 pub mod service_observer;
+pub mod service_ownership;
 mod v1;
 
 pub use v1::*;

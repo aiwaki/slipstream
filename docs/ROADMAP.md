@@ -230,9 +230,13 @@ native service manager or touches the host. A target-scoped read-only SCM
 observer now queries only the exact Slipstream service name, maps native status
 conservatively, preserves the configured binary command, and treats only the
 service-not-found result as absence. It does not infer ownership or expose a
-mutating API. Durable ownership evidence, native service effects, and lifecycle
-qualification still remain; they must pass the same contract on a disposable
-VM before any networking effects can be introduced.
+mutating API. A separate pure ownership contract now requires an owner-only
+record, canonical SCM command, exact executable path and SHA-256, positive
+generation, and stable SCM state before producing an owned identity. Missing or
+inaccessible evidence remains unknown and mismatches are foreign. The native
+record/ACL/hash collector, service effects, and lifecycle qualification still
+remain; they must pass the same contract on a disposable VM before any
+networking effects can be introduced.
 
 ## M5 - Packet-Level Capabilities
 
