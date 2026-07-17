@@ -10,7 +10,7 @@ file.
 
 Last evidence audit: 2026-07-17, through open
 [PR #148](https://github.com/aiwaki/slipstream/pull/148), including native-qualified
-code commit `5883c04868c3e1cfb864c2d082556129d7a0b05c`, based on main at
+code commit `fb7c383027984ba30280085c4257ebc167750595`, based on main at
 `0ecf51dcd03e5ddf0aa396b7bd44766affe2af40`.
 
 ## Resume Protocol
@@ -57,7 +57,7 @@ and its dependency audit passed in
 [run 29594235966](https://github.com/aiwaki/slipstream/actions/runs/29594235966).
 The native Windows payload transaction, disposable rollback cases, and strict
 lint passed in
-[PR #148 CI run 29597379805](https://github.com/aiwaki/slipstream/actions/runs/29597379805).
+[PR #148 CI run 29597856734](https://github.com/aiwaki/slipstream/actions/runs/29597856734).
 
 ## Next Verified Action
 
