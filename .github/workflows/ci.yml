@@ -228,8 +228,8 @@ jobs:
         env:
           SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI: "1"
         run: |
-          $host = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-windows-service.exe"
-          $env:SLIPSTREAM_WINDOWS_PRODUCTION_HOST = $host.Path
+          $serviceHost = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-windows-service.exe"
+          $env:SLIPSTREAM_WINDOWS_PRODUCTION_HOST = $serviceHost.Path
           cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_host::windows::tests::production_host_is_self_managing_idempotent_and_stops_through_scm -- --exact --test-threads=1
 
       - name: Lint Windows contracts, ownership, payload, lifecycle state, and SCM effects
