@@ -13,6 +13,7 @@
     "absent_intent_cannot_be_weakened_by_start_or_stop": true,
     "stop_intent_precedes_stop": true,
     "uninstall_intent_precedes_cleanup": true,
+    "clearing_active_install_preserves_absent_intent": true,
     "non_running_intent_suppresses_crash_recovery": true,
     "crash_recovery_is_bounded": true,
     "crash_restart_attempt_is_durable_before_restart": true,
@@ -172,7 +173,7 @@
           "start_owned_service",
           "verify_ready",
           "commit_install",
-          "clear_install_record",
+          "clear_active_install_record",
           "stop_owned_service",
           "unregister_owned_service",
           "remove_owned_payload",
@@ -422,7 +423,7 @@
           "stop_owned_service",
           "unregister_owned_service",
           "remove_owned_payload",
-          "clear_install_record",
+          "clear_active_install_record",
           "verify_absent"
         ]
       }
@@ -450,7 +451,7 @@
           "stop_owned_service",
           "unregister_owned_service",
           "remove_owned_payload",
-          "clear_install_record",
+          "clear_active_install_record",
           "verify_absent"
         ]
       }

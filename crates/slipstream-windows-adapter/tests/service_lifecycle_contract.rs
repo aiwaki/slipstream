@@ -44,7 +44,7 @@ fn stage(value: &str) -> WindowsServiceActionKind {
         "start_owned_service" => WindowsServiceActionKind::StartOwnedService,
         "verify_ready" => WindowsServiceActionKind::VerifyReady,
         "commit_install" => WindowsServiceActionKind::CommitInstall,
-        "clear_install_record" => WindowsServiceActionKind::ClearInstallRecord,
+        "clear_active_install_record" => WindowsServiceActionKind::ClearActiveInstallRecord,
         "stop_owned_service" => WindowsServiceActionKind::StopOwnedService,
         "verify_stopped" => WindowsServiceActionKind::VerifyStopped,
         "unregister_owned_service" => WindowsServiceActionKind::UnregisterOwnedService,

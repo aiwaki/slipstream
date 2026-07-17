@@ -181,7 +181,7 @@ pub enum WindowsServiceActionKind {
     StartOwnedService,
     VerifyReady,
     CommitInstall,
-    ClearInstallRecord,
+    ClearActiveInstallRecord,
     StopOwnedService,
     VerifyStopped,
     UnregisterOwnedService,
@@ -198,7 +198,7 @@ impl WindowsServiceActionKind {
             Self::StartOwnedService => "start_owned_service",
             Self::VerifyReady => "verify_ready",
             Self::CommitInstall => "commit_install",
-            Self::ClearInstallRecord => "clear_install_record",
+            Self::ClearActiveInstallRecord => "clear_active_install_record",
             Self::StopOwnedService => "stop_owned_service",
             Self::VerifyStopped => "verify_stopped",
             Self::UnregisterOwnedService => "unregister_owned_service",
@@ -231,7 +231,7 @@ pub enum WindowsServiceAction {
     CommitInstall {
         identity: WindowsServiceIdentity,
     },
-    ClearInstallRecord {
+    ClearActiveInstallRecord {
         identity: WindowsServiceIdentity,
     },
     StopOwnedService {
@@ -260,7 +260,9 @@ impl WindowsServiceAction {
             Self::StartOwnedService { .. } => WindowsServiceActionKind::StartOwnedService,
             Self::VerifyReady { .. } => WindowsServiceActionKind::VerifyReady,
             Self::CommitInstall { .. } => WindowsServiceActionKind::CommitInstall,
-            Self::ClearInstallRecord { .. } => WindowsServiceActionKind::ClearInstallRecord,
+            Self::ClearActiveInstallRecord { .. } => {
+                WindowsServiceActionKind::ClearActiveInstallRecord
+            }
             Self::StopOwnedService { .. } => WindowsServiceActionKind::StopOwnedService,
             Self::VerifyStopped { .. } => WindowsServiceActionKind::VerifyStopped,
             Self::UnregisterOwnedService { .. } => WindowsServiceActionKind::UnregisterOwnedService,
@@ -467,7 +469,7 @@ impl WindowsServiceLifecycleV1 {
                 WindowsServiceAction::CommitInstall {
                     identity: identity.clone(),
                 },
-                Some(WindowsServiceAction::ClearInstallRecord {
+                Some(WindowsServiceAction::ClearActiveInstallRecord {
                     identity: identity.clone(),
                 }),
             ),
@@ -851,7 +853,7 @@ impl WindowsServiceLifecycleV1 {
             WindowsServiceAction::RemoveOwnedPayload {
                 identity: identity.clone(),
             },
-            WindowsServiceAction::ClearInstallRecord {
+            WindowsServiceAction::ClearActiveInstallRecord {
                 identity: identity.clone(),
             },
         ];
