@@ -271,13 +271,17 @@ clearing when post-commit compensation still has owned SCM or payload state.
 The disposable full-lifecycle gate builds a minimal real Windows service and
 exercises install, stop, start, bounded crash recovery, uninstall, and an
 injected failure after durable install commit. PR #152 qualifies that gate in
-Windows CI. The next boundary is a production-facing controller that rebuilds
-the reducer state from durable intent, read-only SCM observation, and exact
-ownership evidence after its own process restart. It must hold the shared
-machine-wide operation lock continuously across that reconstruction and the
-complete reducer command, preventing interleaving between individual durable
-effects. That reconciliation gate must pass before any Windows networking
-effect is introduced.
+Windows CI. PR #153 adds the production-facing controller: it acquires the
+shared lock before reading durable intent or live SCM/ownership evidence,
+reconstructs actionable state only from an exact committed owned identity, and
+holds the lock through the complete reducer command and native compositor.
+Repeated identical install and terminal uninstall are idempotent; foreign,
+unknown, interrupted, and inconsistent evidence remains non-mutating. A second
+disposable gate proves that a failed crash restart persists its bounded attempt
+and a later controller process resumes recovery before uninstalling exactly.
+The next boundary is a production Windows service-host/management entry point
+that consumes this controller without adding networking, followed by a frozen
+data-plane contract before any native Windows network API is introduced.
 
 ## M5 - Packet-Level Capabilities
 

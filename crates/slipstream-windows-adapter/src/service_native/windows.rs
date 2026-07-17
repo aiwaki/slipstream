@@ -59,7 +59,7 @@ impl WindowsServiceNativeEffects {
         }
     }
 
-    fn apply_locked(
+    pub(crate) fn apply_locked(
         &mut self,
         action: &WindowsServiceAction,
     ) -> Result<(), WindowsServiceNativeError> {

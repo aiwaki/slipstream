@@ -54,7 +54,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-10 | External Geph coexistence | Fixed and live-verified | `:9909` is detected for diagnostics only and is never adopted or stopped without explicit port opt-in. | Preserve this constraint when Geph moves to a user LaunchAgent. |
 | 2026-07-10 | Geph secret permissions | Fixed and live-verified | Config directory is `0700`; secret-bearing files and runtime ownership state are atomically written as `0600`, including migration of existing files. | Move the account secret to Keychain in a later hardening PR. |
 | 2026-07-10 | PyInstaller spec working directory | Fixed in M0 | Resolve daemon, policy keys, and vendored Telegram proxy from `SPECPATH`; invoking PyInstaller from the repo root must not silently omit `proxy.*`. | Keep the path-stability assertion and frozen Telegram readiness smoke test. |
-| 2026-07-08 | Codebase graph MCP transport | Workaround active | Graph backend is healthy; use `codebase-memory-mcp cli` when the live MCP transport is stale. | Recheck native MCP tool after a new Codex session reloads tools. |
+| 2026-07-18 | Codebase graph MCP transport | Workaround active | Fresh-clone indexing again returned `Transport closed`; discovery used the audited source plus narrow searches rather than assuming the graph was current. | Repair or restart the MCP transport before relying on graph freshness; keep the documented narrow-search fallback. |
 | 2026-07-08 | SonicDPI target identity | Reference only | Copy the principle of verified host/IP identity, not raw packet interception. | Use this when designing any future UDP/QUIC handling. |
 | 2026-07-08 | Discord domain family | Partially adopted | Keep Discord on local bypass and cover the broad brand family. | Add only evidence-backed host expansions. |
 | 2026-07-08 | Discord voice UDP | Future platform work | Full UDP handling needs packet-level filtering, not broad pf redirects. | Revisit under Network Extension or platform adapter work. |
@@ -128,6 +128,10 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
   The CLI `list_projects` path remained healthy. Discovery continued from the
   current `main` graph plus narrow `rtk` source searches. Re-index after the MCP
   process or Codex session is restarted.
+- Observed again on 2026-07-18 while indexing the clean Windows-controller
+  clone: the MCP transport returned `Transport closed`. The controller audit
+  continued from exact `main` source and narrow symbol/string searches; no stale
+  graph result was treated as current evidence.
 
 Indexed routing projects:
 

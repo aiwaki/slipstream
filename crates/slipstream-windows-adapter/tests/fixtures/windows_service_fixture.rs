@@ -55,6 +55,10 @@ mod windows_service {
         if !report_status(status_handle, SERVICE_START_PENDING, 0, 1, 5_000) {
             return;
         }
+        if start_failure_sentinel_path().is_file() {
+            let _ = report_status(status_handle, SERVICE_STOPPED, 0, 0, 0);
+            return;
+        }
         if !report_status(status_handle, SERVICE_RUNNING, SERVICE_ACCEPT_STOP, 0, 0) {
             return;
         }
@@ -102,6 +106,12 @@ mod windows_service {
         std::env::current_exe()
             .expect("resolve disposable service executable")
             .with_extension("crash-v1")
+    }
+
+    fn start_failure_sentinel_path() -> PathBuf {
+        std::env::current_exe()
+            .expect("resolve disposable service executable")
+            .with_extension("fail-start-v1")
     }
 
     fn wide_null(value: &str) -> Vec<u16> {

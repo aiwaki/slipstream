@@ -17,6 +17,7 @@
     "non_running_intent_suppresses_crash_recovery": true,
     "crash_recovery_is_bounded": true,
     "crash_restart_attempt_is_durable_before_restart": true,
+    "same_identity_install_is_idempotent": true,
     "failed_install_is_compensated": true,
     "rollback_non_running_intent_precedes_cleanup": true,
     "compensation_requires_final_absence_proof": true,
@@ -86,6 +87,20 @@
           "verify_ready",
           "commit_install"
         ]
+      }
+    },
+    {
+      "name": "same-identity-install-is-idempotent",
+      "initial": { "$ref": "#/states/owned_running" },
+      "command": {
+        "kind": "install",
+        "identity": { "$ref": "#/identities/v1" }
+      },
+      "expected": {
+        "accepted": true,
+        "decision": "no_change",
+        "state": { "$ref": "#/states/owned_running" },
+        "effects": []
       }
     },
     {

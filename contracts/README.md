@@ -34,7 +34,8 @@ Slipstream routing decisions and bounded recovery primitives.
 - `windows-service-lifecycle-v1.json` freezes the Windows service boundary before
   native service-manager code exists: exact owned identity, transactional
   install compensation, intent-first stop/uninstall, bounded crash recovery,
-  final-state verification, and refusal to mutate foreign or unknown services.
+  same-identity install idempotence, final-state verification, and refusal to
+  mutate foreign or unknown services.
 - `windows-service-observer-v1.json` freezes conservative SCM state mapping for
   the read-only native Windows observer. It never infers ownership and exposes a
   process ID only for a stable running state.
@@ -67,6 +68,9 @@ rights, rechecks the opened service handle, and first consumes protected
 lifecycle state plus exact staged-payload evidence. It has no process or
 networking surface. Owner-only record, ACL, and executable hash evidence remain
 adapter responsibilities; JSON content cannot assert its own trustworthiness.
+The production-facing service controller holds the shared machine-wide lock
+from evidence collection through reducer and native-effect completion, so
+controller restarts cannot split authorization from mutation.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.

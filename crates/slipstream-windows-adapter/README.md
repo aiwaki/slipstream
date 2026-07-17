@@ -81,6 +81,16 @@ record until both SCM and payload absence are proven. A disposable service
 fixture exercises install, stop, start, crash recovery, uninstall, and that
 post-commit compensation path in Windows CI.
 
+`service_controller` is the production-facing command boundary. It acquires the
+same machine-wide operation lock before collecting durable lifecycle and live
+SCM/ownership evidence, reconstructs actionable state only when those domains
+agree on the exact owned identity, and holds the lock through reducer execution
+and every native effect. Fresh and terminal absence remain idempotent; installing
+an already-running identical service is a no-op. Foreign, unknown, interrupted,
+or inconsistent evidence never becomes cleanup authority. A disposable CI gate
+executes install, a failed and then successful bounded crash restart, and
+uninstall through separate controller processes.
+
 Windows networking and installer integration remain later steps and must keep
 every v1 recording harness available for regression tests. Policy rollback
 remains explicitly atomic: durable commit and runtime activation must either
