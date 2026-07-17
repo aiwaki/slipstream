@@ -253,6 +253,8 @@ later action-specific ownership gate, not SCM authorization. Neither filesystem
 effect has an SCM, process, DNS, proxy, VPN, socket, or packet API. A shared,
 bounded, machine-wide operation lock now serializes durable-state, staged-payload,
 and SCM effects so authorization evidence cannot change during a native mutation.
+The returned kernel object is accepted only after its owner and DACL independently
+prove that no untrusted principal can wait, acquire, or rewrite it.
 A separate pure v1 SCM gate
 now binds each register, start, stop, or unregister action to compatible durable
 intent, exact staged payload, and exact read evidence. Its native effect opens

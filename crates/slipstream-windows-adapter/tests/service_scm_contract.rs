@@ -117,7 +117,7 @@ fn native_scm_source_is_exactly_scoped_and_has_no_network_or_process_surface() {
 }
 
 #[test]
-fn native_operation_lock_is_machine_wide_bounded_and_owner_only() {
+fn native_operation_lock_is_machine_wide_bounded_and_trusted_only() {
     let source = include_str!("../src/service_operation_lock.rs").replace("\r\n", "\n");
     let production = source
         .split("#[cfg(test)]\nmod tests")
@@ -130,8 +130,11 @@ fn native_operation_lock_is_machine_wide_bounded_and_owner_only() {
         "WaitForSingleObject",
         "WAIT_TIMEOUT",
         "ReleaseMutex",
-        "OWNER_ONLY_SDDL",
+        "TRUSTED_KERNEL_OBJECT_SDDL",
         "OPERATION_LOCK_TIMEOUT_MS",
+        "GetSecurityInfo",
+        "SE_KERNEL_OBJECT",
+        "is_trusted_machine_sid",
     ] {
         assert!(
             production.contains(required),
