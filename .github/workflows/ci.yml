@@ -200,8 +200,20 @@ jobs:
           SLIPSTREAM_WINDOWS_SCM_DISPOSABLE_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml service_scm::windows::tests::native_register_and_unregister_are_exact_and_disposable -- --exact --test-threads=1
 
+      - name: Build the disposable Windows service fixture
+        run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bin slipstream-disposable-service
+
+      - name: Qualify the composed Windows service lifecycle and compensation
+        shell: pwsh
+        env:
+          SLIPSTREAM_WINDOWS_FULL_LIFECYCLE_CI: "1"
+        run: |
+          $fixture = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-disposable-service.exe"
+          $env:SLIPSTREAM_WINDOWS_SERVICE_FIXTURE = $fixture.Path
+          cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_native::windows::tests::native_full_lifecycle_and_post_commit_compensation_are_disposable -- --exact --test-threads=1
+
       - name: Lint Windows contracts, ownership, payload, lifecycle state, and SCM effects
-        run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings
 
   packaged-app-lifecycle:
     runs-on: macos-14

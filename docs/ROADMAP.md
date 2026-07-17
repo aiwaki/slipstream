@@ -263,9 +263,15 @@ and rechecks the same service handle before acting. An accepted stop keeps that
 handle and waits to an exact bounded `Stopped` observation before cleanup may
 continue; it never enumerates or
 reconfigures services and has no process or networking surface. Disposable CI
-qualifies exact registration and removal. Full install/start/stop/crash/uninstall
-lifecycle qualification remains a separate bounded step before any Windows
-networking effect is introduced.
+qualifies exact registration and removal. A single native compositor now holds
+the shared operation lock across each complete action, verifies readiness and
+terminal states against the same content-addressed identity, waits for actual
+SCM absence after deletion before payload removal, and defers active-record
+clearing when post-commit compensation still has owned SCM or payload state.
+The disposable full-lifecycle gate builds a minimal real Windows service and
+exercises install, stop, start, bounded crash recovery, uninstall, and an
+injected failure after durable install commit. That gate must pass before any
+Windows networking effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 

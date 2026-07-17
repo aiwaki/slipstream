@@ -10,6 +10,7 @@
 
 pub mod service_lifecycle;
 pub mod service_lifecycle_state;
+pub mod service_native;
 pub mod service_observer;
 #[cfg(windows)]
 #[allow(unsafe_code)]

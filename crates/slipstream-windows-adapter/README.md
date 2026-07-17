@@ -71,16 +71,25 @@ requires exact absence; start, stop, and removal require a stable exact-owned
 service, with uninstall and install-compensation tombstones handled explicitly.
 No process, DNS, proxy, PAC, VPN, socket, or packet API is present.
 
-Full native lifecycle qualification, process supervision, networking, and
-installer effects remain later steps and must keep every v1 recording harness
-available for regression tests. Policy rollback remains explicitly atomic:
-durable commit and runtime activation must either both succeed or leave the
-current policy active.
+`service_native` composes durable state, payload, and SCM effects while holding
+the shared operation lock once per lifecycle action. Readiness and stopped-state
+proofs bind to the exact staged identity. Unregister closes its delete handles
+and waits for the exact service name to disappear before payload removal is
+allowed. If a failure is reported after active-install commit, compensation
+keeps the exact identity in the absent tombstone and defers clearing the active
+record until both SCM and payload absence are proven. A disposable service
+fixture exercises install, stop, start, crash recovery, uninstall, and that
+post-commit compensation path in Windows CI.
+
+Windows networking and installer integration remain later steps and must keep
+every v1 recording harness available for regression tests. Policy rollback
+remains explicitly atomic: durable commit and runtime activation must either
+both succeed or leave the current policy active.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
 cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml \
-  --all-targets -- -D warnings
+  --all-targets --all-features -- -D warnings
 ```
 
 The adapter executes `contracts/platform-adapter-v1.json`,

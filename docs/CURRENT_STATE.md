@@ -9,10 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-17, through main commit
-`583dcb9ccfa978e05dd64db112646880c281c791` after merged
-[PR #149](https://github.com/aiwaki/slipstream/pull/149), plus the current
-[PR #151](https://github.com/aiwaki/slipstream/pull/151) implementation
-qualified in CI and dependency-audit runs linked below.
+`9448dfc868ec1a7e9a515d5c991f934f924ebfc1` after merged
+[PR #151](https://github.com/aiwaki/slipstream/pull/151) and its successful
+main CI and dependency-audit runs linked below. The current branch composes the
+native Windows lifecycle and adds its disposable qualification; that work is
+not considered qualified until its own Windows CI passes.
 
 ## Resume Protocol
 
@@ -40,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows SCM effects CI-qualified; full lifecycle pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, and action-specific SCM boundaries. The SCM gate requires compatible intent, exact staged payload, serialized authorization evidence, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Every returned lifecycle-lock handle independently proves a trusted owner and DACL, so permissive or squatted named objects fail closed. Disposable Windows CI has qualified the native register/remove path and the hostile pre-created mutex fixture. Full lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows SCM effects CI-qualified; composed lifecycle in current branch | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, and action-specific SCM boundaries. The SCM gate requires compatible intent, exact staged payload, serialized authorization evidence, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Every returned lifecycle-lock handle independently proves a trusted owner and DACL, so permissive or squatted named objects fail closed. Disposable Windows CI has qualified the native register/remove path and the hostile pre-created mutex fixture. The current branch adds single-lock composition, exact terminal cleanup ordering, and a real service fixture for full lifecycle and post-commit compensation; Windows CI qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -75,11 +76,15 @@ The exiting-Safari lifecycle regression and packaged smoke passed in
 The action-specific Windows SCM gate, exact native registration/removal,
 machine-wide lifecycle serialization, bounded stop wait, strict lint, required
 checks, and packaged lifecycle passed in
-[PR #151 CI run 29611685751](https://github.com/aiwaki/slipstream/actions/runs/29611685751).
+[PR #151 CI run 29612116541](https://github.com/aiwaki/slipstream/actions/runs/29612116541).
 That run also qualified independent owner/DACL verification for every returned
 kernel-object handle and rejection of a permissive pre-created mutex.
 Its dependency and vendored-Geph audits passed in
-[run 29611685757](https://github.com/aiwaki/slipstream/actions/runs/29611685757).
+[run 29612116544](https://github.com/aiwaki/slipstream/actions/runs/29612116544).
+The merged SCM implementation passed again on main in
+[CI run 29612504541](https://github.com/aiwaki/slipstream/actions/runs/29612504541),
+and its dependency audit passed in
+[run 29612504538](https://github.com/aiwaki/slipstream/actions/runs/29612504538).
 
 ## Next Verified Action
 
