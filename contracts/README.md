@@ -35,6 +35,9 @@ Slipstream routing decisions and bounded recovery primitives.
   native service-manager code exists: exact owned identity, transactional
   install compensation, intent-first stop/uninstall, bounded crash recovery,
   final-state verification, and refusal to mutate foreign or unknown services.
+- `windows-service-observer-v1.json` freezes conservative SCM state mapping for
+  the read-only native Windows observer. It never infers ownership and exposes a
+  process ID only for a stable running state.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -46,10 +49,11 @@ platform adapters can migrate deliberately.
 
 The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
-The Windows adapter harness in `crates/slipstream-windows-adapter` also remains
-effect-free by construction: tests inject recording implementations for policy
-and service lifecycle actions, and the crate has no native, process, filesystem,
-service-manager, or network dependency.
+The Windows adapter's routing and lifecycle v1 modules remain effect-free by
+construction: tests inject recording implementations for policy and service
+lifecycle actions. Its target-scoped native observer may query the Windows SCM,
+but cannot create, start, stop, delete, or claim ownership of a service and has
+no network dependency.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.

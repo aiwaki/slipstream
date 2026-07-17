@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_observer",
+  "contract_version": 1,
+  "service_name": "dev.slipstream.service",
+  "invariants": {
+    "read_only": true,
+    "service_not_found_is_absent": true,
+    "other_query_failures_are_not_absent": true,
+    "ownership_is_not_inferred": true,
+    "binary_path_is_preserved": true,
+    "network_effects": false
+  },
+  "state_vectors": [
+    {
+      "name": "stopped-has-no-process",
+      "scm_state": "stopped",
+      "raw_process_id": 0,
+      "expected_observed": "stopped",
+      "expected_process_id": null
+    },
+    {
+      "name": "running-keeps-stable-process",
+      "scm_state": "running",
+      "raw_process_id": 4242,
+      "expected_observed": "running",
+      "expected_process_id": 4242
+    },
+    {
+      "name": "running-zero-process-is-not-invented",
+      "scm_state": "running",
+      "raw_process_id": 0,
+      "expected_observed": "running",
+      "expected_process_id": null
+    },
+    {
+      "name": "start-pending-is-unknown",
+      "scm_state": "start_pending",
+      "raw_process_id": 111,
+      "expected_observed": "unknown",
+      "expected_process_id": null
+    },
+    {
+      "name": "stop-pending-is-unknown",
+      "scm_state": "stop_pending",
+      "raw_process_id": 222,
+      "expected_observed": "unknown",
+      "expected_process_id": null
+    },
+    {
+      "name": "continue-pending-is-unknown",
+      "scm_state": "continue_pending",
+      "raw_process_id": 223,
+      "expected_observed": "unknown",
+      "expected_process_id": null
+    },
+    {
+      "name": "pause-pending-is-unknown",
+      "scm_state": "pause_pending",
+      "raw_process_id": 224,
+      "expected_observed": "unknown",
+      "expected_process_id": null
+    },
+    {
+      "name": "paused-is-not-ready",
+      "scm_state": "paused",
+      "raw_process_id": 333,
+      "expected_observed": "unknown",
+      "expected_process_id": null
+    },
+    {
+      "name": "unknown-native-state-stays-unknown",
+      "scm_state": { "unknown": 99 },
+      "raw_process_id": 444,
+      "expected_observed": "unknown",
+      "expected_process_id": null
+    }
+  ]
+}
