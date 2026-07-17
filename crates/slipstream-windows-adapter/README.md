@@ -32,6 +32,16 @@ owner-only, the SCM state is stable, and the observed command, opened path, and
 hash all match. Missing or inaccessible evidence stays `unknown`; mismatches
 are `foreign`. The model reads no files and calls no native or network API.
 
+On Windows, `WindowsServiceOwnershipCollector` supplies that proof without
+mutating the machine. It locates `Slipstream/service-owner-v1.json` below the
+system `ProgramData` known folder, opens it with reparse traversal disabled,
+checks the final handle path and regular-file identity, and accepts write access
+only for LocalSystem or built-in Administrators. The bounded strict-v1 JSON is
+read from that same handle. A present service's executable is opened the same
+way and SHA-256 is computed before the handle is released. Missing,
+inaccessible, ambiguous, or permissively writable evidence cannot become
+`owned`.
+
 Native service mutation, process, storage, DNS, proxy, VPN, packet, and
 installer effects belong in later modules and must keep the v1 recording
 harnesses available for regression tests. Policy rollback remains explicitly
@@ -46,6 +56,6 @@ cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.to
 
 The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-lifecycle-v1.json`,
-`contracts/windows-service-observer-v1.json`, and the existing routing,
+`contracts/windows-service-observer-v1.json`,
 `contracts/windows-service-ownership-v1.json`, and the existing routing,
 recovery, StatusV2, manifest, signed-bundle, and activation contracts.

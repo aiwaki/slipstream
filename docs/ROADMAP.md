@@ -233,10 +233,15 @@ service-not-found result as absence. It does not infer ownership or expose a
 mutating API. A separate pure ownership contract now requires an owner-only
 record, canonical SCM command, exact executable path and SHA-256, positive
 generation, and stable SCM state before producing an owned identity. Missing or
-inaccessible evidence remains unknown and mismatches are foreign. The native
-record/ACL/hash collector, service effects, and lifecycle qualification still
-remain; they must pass the same contract on a disposable VM before any
-networking effects can be introduced.
+inaccessible evidence remains unknown and mismatches are foreign. A Windows-only
+read-only collector now resolves the machine record through the system
+`ProgramData` known folder, proves the opened file's final path, non-reparse
+regular-file identity, owner and restrictive DACL, parses bounded strict-v1
+JSON, and hashes the exact opened executable handle. Its disposable Windows
+smoke combines those native proofs with the frozen reducer; the production code
+still exposes no write or SCM mutation API. Native payload staging, service
+effects, and lifecycle qualification remain and must land as separate bounded
+steps before any Windows networking effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 
