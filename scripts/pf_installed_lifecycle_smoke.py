@@ -1192,14 +1192,14 @@ def _safari_process_identity_for_pid(pid: int) -> tuple[int, str, str] | None:
         return None
 
 
-def _safari_identity_is_stopped(
+def _safari_identity_is_terminal(
     identity: tuple[int, str, str] | None,
     uid: int,
 ) -> bool:
     if identity is None:
         return False
     actual_uid, state, _command = identity
-    return actual_uid == uid and state.startswith("Z")
+    return actual_uid == uid and (state.startswith("Z") or "E" in state)
 
 
 def _safari_identity_matches(
@@ -1229,7 +1229,7 @@ def _owned_safari_pids(uid: int) -> tuple[int, ...]:
         identity = _safari_process_identity_for_pid(pid)
         if identity is None:
             continue
-        if _safari_identity_is_stopped(identity, uid):
+        if _safari_identity_is_terminal(identity, uid):
             continue
         if _safari_identity_matches(identity, uid):
             owned.append(pid)
@@ -1268,7 +1268,7 @@ def _safari_pid_is_owned(pid: int, uid: int) -> bool:
     identity = _safari_process_identity_for_pid(pid)
     if identity is None:
         return False
-    if _safari_identity_is_stopped(identity, uid):
+    if _safari_identity_is_terminal(identity, uid):
         return False
     if not _safari_identity_matches(identity, uid):
         raise LifecycleError(
