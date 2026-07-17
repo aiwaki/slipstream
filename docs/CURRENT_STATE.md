@@ -8,10 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, through native-qualified code commit
-`aa0962227e7a915da81e8a5251bf6410d89f9237` in open
-[PR #149](https://github.com/aiwaki/slipstream/pull/149), based on main at
-`b3b4954c65ed387000622c4ed5a3c25abbf15df6`.
+Last evidence audit: 2026-07-17, through main commit
+`583dcb9ccfa978e05dd64db112646880c281c791` after merged
+[PR #149](https://github.com/aiwaki/slipstream/pull/149).
 
 ## Resume Protocol
 
@@ -39,7 +38,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows lifecycle state native CI-qualified in PR #149 | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, ownership-proof, payload-effect, and durable-state boundaries. Native CI now qualifies exact handles, restrictive DACLs, strict JSON, same-handle SHA-256, ordered payload and state commits, bounded compensation, pending-write detection, exact identity gates, and tombstone-preserving clear. Stable state is only a prerequisite for a separate action-specific ownership gate, not SCM authorization. SCM effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows SCM effects implemented; native CI pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, and action-specific SCM boundaries. The SCM gate requires compatible intent, exact staged payload, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Disposable CI must still qualify the native register/remove path in this PR. Full lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -65,17 +64,21 @@ and its dependency audit passed in
 The lifecycle-state contract, protected filesystem transaction, disposable
 interruption/compensation cases, and strict Windows lint passed in
 [PR #149 CI run 29603653185](https://github.com/aiwaki/slipstream/actions/runs/29603653185).
+The merged lifecycle-state implementation passed again on main in
+[CI run 29605608961](https://github.com/aiwaki/slipstream/actions/runs/29605608961),
+and its dependency audit passed in
+[run 29605608707](https://github.com/aiwaki/slipstream/actions/runs/29605608707).
 The exiting-Safari lifecycle regression and packaged smoke passed in
 [PR #150 CI run 29604297728](https://github.com/aiwaki/slipstream/actions/runs/29604297728).
 
 ## Next Verified Action
 
-Implement native SCM mutation effects in a separate bounded PR. Each action
-must require an exact compatible intent plus stable durable state, read-only SCM
-observation, ownership proof, and staged-payload evidence. Register, start,
-stop, and unregister may target only `dev.slipstream.service`; unknown, foreign,
-transitional, or mismatched evidence performs no mutation. Keep process
-supervision, networking, DNS, proxy, PAC, and VPN out of that PR.
+After this SCM-effects PR is native-qualified and merged, compose payload,
+durable-state, and SCM effects behind a disposable full-lifecycle harness.
+Qualify install, start, stop, bounded crash recovery, uninstall, and failed-step
+compensation without adding Windows networking. Unknown or foreign evidence
+must remain non-mutating, and every terminal cleanup path must prove exact
+service absence before removing owned payload state.
 
 ## External Gates
 

@@ -3,8 +3,8 @@
 //! The routing harness and service lifecycle v1 contracts intentionally contain
 //! no native or network implementation. They consume platform-neutral state and
 //! delegate every concrete effect through injected interfaces that can be
-//! recorded in tests. The separate service observer contains one isolated,
-//! read-only Windows SCM boundary; it cannot mutate services or networking.
+//! recorded in tests. The service observer is read-only; the separate SCM
+//! effect admits only exact, evidence-gated service mutations and no networking.
 
 #![deny(unsafe_code)]
 
@@ -13,6 +13,7 @@ pub mod service_lifecycle_state;
 pub mod service_observer;
 pub mod service_ownership;
 pub mod service_payload;
+pub mod service_scm;
 mod v1;
 
 pub use v1::*;

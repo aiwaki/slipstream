@@ -3,8 +3,8 @@
 use super::{
     assess_windows_service_ownership, parse_windows_owner_record_v1, WindowsExecutableEvidence,
     WindowsOwnerRecordEvidence, WindowsScmEvidence, WindowsServiceOwnershipAssessment,
-    WindowsServiceOwnershipInput, WindowsServiceOwnershipRecord, MAX_WINDOWS_OWNER_RECORD_BYTES,
-    WINDOWS_OWNER_RECORD_DIRECTORY, WINDOWS_OWNER_RECORD_FILE_NAME,
+    WindowsServiceOwnershipInput, WindowsServiceOwnershipRecord, WindowsStagedPayloadEvidence,
+    MAX_WINDOWS_OWNER_RECORD_BYTES, WINDOWS_OWNER_RECORD_DIRECTORY, WINDOWS_OWNER_RECORD_FILE_NAME,
 };
 use crate::service_observer::{
     WindowsScmObserver, WindowsServiceObservation, WindowsServiceObserver,
@@ -100,12 +100,6 @@ impl WindowsServiceOwnershipCollector {
             },
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WindowsStagedPayloadEvidence {
-    pub record: WindowsOwnerRecordEvidence,
-    pub executable: WindowsExecutableEvidence,
 }
 
 fn scm_evidence() -> WindowsScmEvidence {

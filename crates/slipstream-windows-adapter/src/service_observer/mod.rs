@@ -4,7 +4,7 @@ pub mod v1;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-mod windows;
+pub(crate) mod windows;
 
 pub use v1::*;
 

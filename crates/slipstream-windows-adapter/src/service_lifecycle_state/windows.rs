@@ -247,7 +247,7 @@ impl WindowsServiceLifecycleStateEffects {
     }
 
     #[cfg(test)]
-    fn for_disposable_test(destination_directory: PathBuf) -> Self {
+    pub(crate) fn for_disposable_test(destination_directory: PathBuf) -> Self {
         Self {
             destination_directory_override: Some(destination_directory),
             fail_after_intent_pending_create: false,

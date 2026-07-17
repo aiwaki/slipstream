@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_scm_gate",
+  "contract_version": 1,
+  "service_name": "dev.slipstream.service",
+  "invariants": {
+    "action_specific": true,
+    "stable_lifecycle_state_required": true,
+    "exact_staged_payload_required": true,
+    "same_service_identity_required": true,
+    "register_requires_absence": true,
+    "foreign_or_unknown_service_is_never_mutated": true,
+    "transitional_service_is_never_mutated": true,
+    "install_rollback_absent_intent_is_supported": true,
+    "network_effects": false
+  },
+  "identities": {
+    "v1": {
+      "service_name": "dev.slipstream.service",
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "generation": 1
+    }
+  },
+  "lifecycle_states": {
+    "install_running": {
+      "state": "stable",
+      "intent": {
+        "desired": "running",
+        "identity": "v1",
+        "crash_restart_attempts": 0
+      },
+      "active_install": null
+    },
+    "running_active": {
+      "state": "stable",
+      "intent": {
+        "desired": "running",
+        "identity": "v1",
+        "crash_restart_attempts": 0
+      },
+      "active_install": "v1"
+    },
+    "stopped_active": {
+      "state": "stable",
+      "intent": {
+        "desired": "stopped",
+        "identity": "v1",
+        "crash_restart_attempts": 0
+      },
+      "active_install": "v1"
+    },
+    "absent_owned_active": {
+      "state": "stable",
+      "intent": {
+        "desired": "absent",
+        "identity": "v1",
+        "crash_restart_attempts": 0
+      },
+      "active_install": "v1"
+    },
+    "absent_rollback": {
+      "state": "stable",
+      "intent": {
+        "desired": "absent",
+        "identity": null,
+        "crash_restart_attempts": 0
+      },
+      "active_install": null
+    },
+    "missing_intent": {
+      "state": "stable",
+      "intent": null,
+      "active_install": null
+    },
+    "interrupted": {
+      "state": "interrupted_write"
+    }
+  },
+  "payloads": {
+    "exact": {
+      "record": {
+        "state": "owner_only",
+        "record": {
+          "schema_version": 1,
+          "service_name": "dev.slipstream.service",
+          "scm_binary_path": "\"C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe\" --service",
+          "executable_path": "C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 1
+        }
+      },
+      "executable": {
+        "state": "verified",
+        "executable_path": "C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe",
+        "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "mismatched_hash": {
+      "record": {
+        "state": "owner_only",
+        "record": {
+          "schema_version": 1,
+          "service_name": "dev.slipstream.service",
+          "scm_binary_path": "\"C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe\" --service",
+          "executable_path": "C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 1
+        }
+      },
+      "executable": {
+        "state": "verified",
+        "executable_path": "C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe",
+        "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "missing": {
+      "record": { "state": "missing" },
+      "executable": { "state": "not_checked" }
+    }
+  },
+  "observations": {
+    "absent": {
+      "presence": "absent",
+      "service_name": "dev.slipstream.service"
+    },
+    "owned_stopped": {
+      "presence": "present",
+      "snapshot": {
+        "service_name": "dev.slipstream.service",
+        "binary_path": "\"C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe\" --service",
+        "scm_state": "stopped",
+        "observed": "stopped",
+        "process_id": null
+      }
+    },
+    "owned_running": {
+      "presence": "present",
+      "snapshot": {
+        "service_name": "dev.slipstream.service",
+        "binary_path": "\"C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe\" --service",
+        "scm_state": "running",
+        "observed": "running",
+        "process_id": 4242
+      }
+    },
+    "foreign_stopped": {
+      "presence": "present",
+      "snapshot": {
+        "service_name": "dev.slipstream.service",
+        "binary_path": "\"C:\\Foreign\\service.exe\" --service",
+        "scm_state": "stopped",
+        "observed": "stopped",
+        "process_id": null
+      }
+    },
+    "start_pending": {
+      "presence": "present",
+      "snapshot": {
+        "service_name": "dev.slipstream.service",
+        "binary_path": "\"C:\\ProgramData\\Slipstream\\payloads\\slipstream-service-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe\" --service",
+        "scm_state": "start_pending",
+        "observed": "unknown",
+        "process_id": null
+      }
+    }
+  },
+  "vectors": [
+    {
+      "name": "register-exact-absent-service",
+      "action": "register_service",
+      "identity": "v1",
+      "lifecycle": "install_running",
+      "payload": "exact",
+      "observation": "absent",
+      "expected": { "outcome": "mutate", "reason": "authorized" }
+    },
+    {
+      "name": "register-refuses-existing-active-install",
+      "action": "register_service",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "exact",
+      "observation": "absent",
+      "expected": { "outcome": "refuse", "reason": "active_install_mismatch" }
+    },
+    {
+      "name": "register-refuses-present-service",
+      "action": "register_service",
+      "identity": "v1",
+      "lifecycle": "install_running",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "refuse", "reason": "service_must_be_absent" }
+    },
+    {
+      "name": "register-refuses-missing-payload",
+      "action": "register_service",
+      "identity": "v1",
+      "lifecycle": "install_running",
+      "payload": "missing",
+      "observation": "absent",
+      "expected": { "outcome": "refuse", "reason": "payload_mismatch" }
+    },
+    {
+      "name": "start-exact-stopped-service",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "mutate", "reason": "authorized" }
+    },
+    {
+      "name": "start-running-service-is-no-change",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "exact",
+      "observation": "owned_running",
+      "expected": { "outcome": "no_change", "reason": "already_satisfied" }
+    },
+    {
+      "name": "start-cannot-override-absent-intent",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_owned_active",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "refuse", "reason": "intent_mismatch" }
+    },
+    {
+      "name": "start-refuses-foreign-service",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "exact",
+      "observation": "foreign_stopped",
+      "expected": { "outcome": "refuse", "reason": "service_not_owned" }
+    },
+    {
+      "name": "start-refuses-transitional-service",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "exact",
+      "observation": "start_pending",
+      "expected": { "outcome": "refuse", "reason": "service_not_owned" }
+    },
+    {
+      "name": "stop-running-owned-service",
+      "action": "stop_owned_service",
+      "identity": "v1",
+      "lifecycle": "stopped_active",
+      "payload": "exact",
+      "observation": "owned_running",
+      "expected": { "outcome": "mutate", "reason": "authorized" }
+    },
+    {
+      "name": "install-rollback-stop-accepts-absent-tombstone",
+      "action": "stop_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_rollback",
+      "payload": "exact",
+      "observation": "owned_running",
+      "expected": { "outcome": "mutate", "reason": "authorized" }
+    },
+    {
+      "name": "stop-stopped-service-is-no-change",
+      "action": "stop_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_rollback",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "no_change", "reason": "already_satisfied" }
+    },
+    {
+      "name": "unregister-stopped-owned-service",
+      "action": "unregister_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_owned_active",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "mutate", "reason": "authorized" }
+    },
+    {
+      "name": "install-rollback-unregister-accepts-absent-tombstone",
+      "action": "unregister_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_rollback",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "mutate", "reason": "authorized" }
+    },
+    {
+      "name": "unregister-absent-service-is-no-change",
+      "action": "unregister_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_rollback",
+      "payload": "exact",
+      "observation": "absent",
+      "expected": { "outcome": "no_change", "reason": "already_satisfied" }
+    },
+    {
+      "name": "unregister-refuses-running-service",
+      "action": "unregister_owned_service",
+      "identity": "v1",
+      "lifecycle": "absent_owned_active",
+      "payload": "exact",
+      "observation": "owned_running",
+      "expected": { "outcome": "refuse", "reason": "service_state_mismatch" }
+    },
+    {
+      "name": "mismatched-executable-hash-blocks-mutation",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "mismatched_hash",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "refuse", "reason": "payload_mismatch" }
+    },
+    {
+      "name": "interrupted-state-blocks-mutation",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "interrupted",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "refuse", "reason": "lifecycle_state_unavailable" }
+    },
+    {
+      "name": "missing-intent-blocks-mutation",
+      "action": "start_owned_service",
+      "identity": "v1",
+      "lifecycle": "missing_intent",
+      "payload": "exact",
+      "observation": "owned_stopped",
+      "expected": { "outcome": "refuse", "reason": "intent_mismatch" }
+    },
+    {
+      "name": "verification-action-is-outside-scm-effect",
+      "action": "verify_ready",
+      "identity": "v1",
+      "lifecycle": "running_active",
+      "payload": "exact",
+      "observation": "owned_running",
+      "expected": { "outcome": "refuse", "reason": "unsupported_action" }
+    }
+  ]
+}

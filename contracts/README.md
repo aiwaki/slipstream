@@ -43,6 +43,12 @@ Slipstream routing decisions and bounded recovery primitives.
   command, exact executable path, SHA-256, positive generation, and stable SCM
   state must all agree; incomplete evidence is unknown and mismatched evidence
   is foreign.
+- `windows-service-lifecycle-state-v1.json` freezes strict durable intent and
+  active-install records plus interruption, identity, and tombstone barriers.
+- `windows-service-scm-gate-v1.json` freezes the action-specific authorization
+  for exact registration, start, stop, and removal. Stable state and staged
+  payload evidence are prerequisites; foreign, transitional, or mismatched
+  service evidence always refuses mutation.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -54,13 +60,13 @@ platform adapters can migrate deliberately.
 
 The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
-The Windows adapter's routing, lifecycle, and ownership v1 modules remain
-effect-free by construction: tests inject recording implementations for policy
-and service lifecycle actions. Its target-scoped native observer may query the
-Windows SCM, but cannot create, start, stop, delete, or claim ownership of a
-service and has no network dependency. Owner-only record, ACL, and executable
-hash evidence remain adapter responsibilities; JSON content cannot assert its
-own trustworthiness.
+The Windows adapter's routing and lifecycle reducers remain effect-free by
+construction. Its target-scoped native observer is read-only. The separate SCM
+effect can mutate only `dev.slipstream.service`, requests only action-specific
+rights, rechecks the opened service handle, and first consumes protected
+lifecycle state plus exact staged-payload evidence. It has no process or
+networking surface. Owner-only record, ACL, and executable hash evidence remain
+adapter responsibilities; JSON content cannot assert its own trustworthiness.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.

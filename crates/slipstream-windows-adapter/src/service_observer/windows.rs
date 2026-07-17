@@ -54,12 +54,24 @@ impl WindowsServiceObserver for WindowsScmObserver {
         }
         let service = OwnedScHandle(service_handle);
 
-        let (scm_state, process_id) = query_status(&service)?;
-        let binary_path = query_binary_path(&service)?;
-        Ok(WindowsServiceObservation::Present {
-            snapshot: WindowsServiceSnapshot::from_scm(binary_path, scm_state, process_id),
-        })
+        observe_open_service_handle(service.raw())
     }
+}
+
+pub(crate) fn observe_open_service_handle(
+    service: SC_HANDLE,
+) -> Result<WindowsServiceObservation, WindowsServiceObserverError> {
+    if service.is_null() {
+        return Err(WindowsServiceObserverError::InvalidData {
+            field: "service_handle",
+            detail: "handle is null",
+        });
+    }
+    let (scm_state, process_id) = query_status(service)?;
+    let binary_path = query_binary_path(service)?;
+    Ok(WindowsServiceObservation::Present {
+        snapshot: WindowsServiceSnapshot::from_scm(binary_path, scm_state, process_id),
+    })
 }
 
 struct OwnedScHandle(SC_HANDLE);
@@ -97,14 +109,12 @@ fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn query_status(
-    service: &OwnedScHandle,
-) -> Result<(WindowsScmState, u32), WindowsServiceObserverError> {
+fn query_status(service: SC_HANDLE) -> Result<(WindowsScmState, u32), WindowsServiceObserverError> {
     let mut status = MaybeUninit::<SERVICE_STATUS_PROCESS>::zeroed();
     let mut bytes_needed = 0;
     let ok = unsafe {
         QueryServiceStatusEx(
-            service.raw(),
+            service,
             SC_STATUS_PROCESS_INFO,
             status.as_mut_ptr().cast::<u8>(),
             size_of::<SERVICE_STATUS_PROCESS>() as u32,
@@ -118,9 +128,9 @@ fn query_status(
     Ok((map_scm_state(status.dwCurrentState), status.dwProcessId))
 }
 
-fn query_binary_path(service: &OwnedScHandle) -> Result<String, WindowsServiceObserverError> {
+fn query_binary_path(service: SC_HANDLE) -> Result<String, WindowsServiceObserverError> {
     let mut bytes_needed = 0;
-    let first = unsafe { QueryServiceConfigW(service.raw(), null_mut(), 0, &mut bytes_needed) };
+    let first = unsafe { QueryServiceConfigW(service, null_mut(), 0, &mut bytes_needed) };
     if first != 0 {
         return Err(WindowsServiceObserverError::InvalidData {
             field: "configuration",
@@ -147,14 +157,8 @@ fn query_binary_path(service: &OwnedScHandle) -> Result<String, WindowsServiceOb
     let mut buffer = vec![0usize; word_count];
     let buffer_bytes = buffer.len() * word_size;
     let config = buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
-    let ok = unsafe {
-        QueryServiceConfigW(
-            service.raw(),
-            config,
-            buffer_bytes as u32,
-            &mut bytes_needed,
-        )
-    };
+    let ok =
+        unsafe { QueryServiceConfigW(service, config, buffer_bytes as u32, &mut bytes_needed) };
     if ok == 0 {
         return Err(last_error("QueryServiceConfigW"));
     }
