@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, through the read-only Windows SCM observer
-branch, based on main at
+Last evidence audit: 2026-07-17, through
+[PR #145](https://github.com/aiwaki/slipstream/pull/145), based on main at
 `f468acbe0fcc312a754938cbcf547c25a523fadd`.
 
 ## Resume Protocol
