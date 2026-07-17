@@ -10,7 +10,9 @@ file.
 
 Last evidence audit: 2026-07-17, through main commit
 `583dcb9ccfa978e05dd64db112646880c281c791` after merged
-[PR #149](https://github.com/aiwaki/slipstream/pull/149).
+[PR #149](https://github.com/aiwaki/slipstream/pull/149), plus
+[PR #151](https://github.com/aiwaki/slipstream/pull/151) head
+`0ba482b87b349b72c614ab2e1e98a030c5b5a7db`.
 
 ## Resume Protocol
 
@@ -38,7 +40,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows SCM effects implemented; native CI pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, and action-specific SCM boundaries. The SCM gate requires compatible intent, exact staged payload, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Disposable CI must still qualify the native register/remove path in this PR. Full lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows SCM effects CI-qualified; full lifecycle pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, and action-specific SCM boundaries. The SCM gate requires compatible intent, exact staged payload, serialized authorization evidence, and same-handle stable ownership before the exact service may be registered, started, stopped, or removed. Disposable Windows CI has qualified the native register/remove path. Full lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -70,11 +72,17 @@ and its dependency audit passed in
 [run 29605608707](https://github.com/aiwaki/slipstream/actions/runs/29605608707).
 The exiting-Safari lifecycle regression and packaged smoke passed in
 [PR #150 CI run 29604297728](https://github.com/aiwaki/slipstream/actions/runs/29604297728).
+The action-specific Windows SCM gate, exact native registration/removal,
+machine-wide lifecycle serialization, bounded stop wait, strict lint, required
+checks, and packaged lifecycle passed in
+[PR #151 CI run 29609956613](https://github.com/aiwaki/slipstream/actions/runs/29609956613).
+Its dependency and vendored-Geph audits passed in
+[run 29609956586](https://github.com/aiwaki/slipstream/actions/runs/29609956586).
 
 ## Next Verified Action
 
-After this SCM-effects PR is native-qualified and merged, compose payload,
-durable-state, and SCM effects behind a disposable full-lifecycle harness.
+Compose payload, durable-state, and SCM effects behind a disposable
+full-lifecycle harness.
 Qualify install, start, stop, bounded crash recovery, uninstall, and failed-step
 compensation without adding Windows networking. Unknown or foreign evidence
 must remain non-mutating, and every terminal cleanup path must prove exact
