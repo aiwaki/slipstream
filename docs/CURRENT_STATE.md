@@ -8,8 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, through merged
-[PR #147](https://github.com/aiwaki/slipstream/pull/147), on main at
+Last evidence audit: 2026-07-17, through open
+[PR #148](https://github.com/aiwaki/slipstream/pull/148), including native-qualified
+code commit `5883c04868c3e1cfb864c2d082556129d7a0b05c`, based on main at
 `0ecf51dcd03e5ddf0aa396b7bd44766affe2af40`.
 
 ## Resume Protocol
@@ -38,7 +39,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows payload staging implemented; native CI pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, ownership-proof, and payload-effect boundaries. The CI-qualified collector resolves a fixed machine record through the system `ProgramData` known folder and proves handle paths, non-reparse files, restrictive DACL, strict JSON, and same-handle SHA-256. The new filesystem-only effect stages an exact content-addressed executable before the owner-record commit marker, reopens both through that collector, and compensates only its own handles. Native payload CI, durable lifecycle-state storage, SCM effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows payload staging CI-qualified in PR #148 | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, ownership-proof, and payload-effect boundaries. The CI-qualified collector resolves a fixed machine record through the system `ProgramData` known folder and proves handle paths, non-reparse files, restrictive DACL, strict JSON, and same-handle SHA-256. The filesystem-only effect stages an exact content-addressed executable before the owner-record commit marker, reopens both through staging-only read evidence, and compensates only its own handles. Native Windows CI covers exact staging, idempotency, hash mismatch, generation collision, post-commit rollback, removal, and strict lint. Durable lifecycle-state storage, SCM effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -54,6 +55,9 @@ The merged collector passed again on main in
 [CI run 29594236053](https://github.com/aiwaki/slipstream/actions/runs/29594236053),
 and its dependency audit passed in
 [run 29594235966](https://github.com/aiwaki/slipstream/actions/runs/29594235966).
+The native Windows payload transaction, disposable rollback cases, and strict
+lint passed in
+[PR #148 CI run 29597379805](https://github.com/aiwaki/slipstream/actions/runs/29597379805).
 
 ## Next Verified Action
 
