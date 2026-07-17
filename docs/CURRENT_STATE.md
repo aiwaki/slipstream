@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, through the Windows service ownership contract
-in this branch, based on main at
+Last evidence audit: 2026-07-17, through
+[PR #146](https://github.com/aiwaki/slipstream/pull/146), based on main at
 `47dcea673b6d93590b8a31b9ce09d87f44c4441b`.
 
 ## Resume Protocol
