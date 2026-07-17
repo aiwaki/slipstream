@@ -65,7 +65,7 @@ fn absent_observation_uses_only_the_exact_service_name() {
 #[test]
 fn native_observer_source_is_read_only_and_has_no_network_surface() {
     let source = include_str!("../src/service_observer/windows.rs");
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = include_str!("../Cargo.toml").replace("\r\n", "\n");
     assert!(
         manifest.contains("[target.'cfg(windows)'.dependencies]\nwindows-sys"),
         "WinAPI bindings must remain Windows-target-only"
