@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, after PR #140 at
-`df15eaf60bca401f963a0d7f595ad15f986203ff`.
+Last evidence audit: 2026-07-17, after PR #141 at
+`37938e29b80506f504cb1c448577830131ae6c26`.
 
 ## Resume Protocol
 
@@ -35,22 +35,23 @@ Before continuing existing work, including after context compaction or a bare
 |---|---|---|
 | M0 - Safe Base | CI-qualified | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PR #133 removed the final production path that reloaded `/etc/pf.conf` from guessed legacy evidence. Daemon shutdown now blocks new status publication and serializes final status cleanup with any in-flight writer, preventing stale `active` state after the private anchor is cleared. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
-| M2 - Contracts And Code | Partial | StatusV2, policy/recovery modules, PF and Geph identity adapters, plus tray status, diagnostics, and Geph configuration are isolated. Python PF/Geph orchestration and Rust runtime, installer, summary, and menu orchestration remain coupled. |
+| M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Python signed-policy adapter implemented | `crates/slipstream-core` owns the pure Rust address-attempt, route-circuit, registry, connection-race, routing-policy, recovery, privacy-bounded StatusV2, route-policy manifest, signed-bundle verification, and activation/rollback models. Python and Rust execute the same frozen routing, verification, compare-and-swap trial, trial-generation, health, rejection restore, stale-event, and single-slot rollback vectors. First-match validation preserves every protected local-bypass/direct-first suffix and rejects static-table geo exit. The Python daemon now runs signed apply, health, persistence, rejection restore, startup load, and rollback behind the reducer with transactional owned-file compensation, backward-compatible policy metadata, and a durable owner-only generation sidecar written before candidate effects. Platform adapters remain. |
+| M4 - Cross-Platform Core | Windows no-network harness implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` now executes every frozen routing and recovery vector plus a versioned adapter contract through injected recording effects. It has no native API, process, filesystem, service, DNS, proxy, VPN, socket, or packet dependency. Native Windows lifecycle and networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks` and `packaged-app-lifecycle` jobs passed for the audited
 main commit in
-[CI run 29567169475](https://github.com/aiwaki/slipstream/actions/runs/29567169475).
+[CI run 29574607696](https://github.com/aiwaki/slipstream/actions/runs/29574607696).
 The dependency and vendored-Geph audits passed in
-[audit run 29567169495](https://github.com/aiwaki/slipstream/actions/runs/29567169495).
+[audit run 29574607680](https://github.com/aiwaki/slipstream/actions/runs/29574607680).
 
 ## Next Verified Action
 
-Define the first no-network Windows adapter harness around `slipstream-core`.
-It should consume the frozen policy, recovery, StatusV2, signed-bundle, and
-activation contracts with fake effects before any Windows packet interception,
-DNS, proxy, VPN, service, or installer behavior is added.
+Keep the no-network harness qualified by native Windows CI and define the first
+Windows service-lifecycle contract behind injected effects. Installation,
+start, stop, crash recovery, and rollback must be proven on a disposable VM
+before any Windows packet interception, DNS, proxy, VPN, or route mutation is
+introduced.
 
 ## External Gates
 
@@ -60,6 +61,10 @@ DNS, proxy, VPN, service, or installer behavior is added.
   disposable Mac.
 - Add Developer ID signing, hardened runtime, notarization, stapling, policy-key
   custody, and cross-version rollback before opening the stable channel.
+- The local Parallels Windows 11 ARM64 VM has minimal Rust 1.97.1 but no Windows
+  SDK or Visual Studio Build Tools; native compilation therefore remains a CI
+  gate until that disposable VM is provisioned deliberately. A Fedora VM is
+  also available for the later Linux adapter.
 
 ## Update Rule
 

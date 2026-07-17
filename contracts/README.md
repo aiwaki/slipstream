@@ -27,6 +27,10 @@ Slipstream routing decisions and bounded recovery primitives.
 - `route-policy-activation-v1.json` freezes compare-and-swap trial activation,
   health acceptance, rejection restore, stale-event protection, and one-level
   rollback for already-verified policy identities.
+- `platform-adapter-v1.json` freezes the first no-network adapter boundary:
+  verified policy activation, fake-effect ordering, compensation, StatusV2
+  consumption, and recovery dispatch. Windows is the first implementation;
+  later adapters consume the same contract before adding native effects.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -38,6 +42,9 @@ platform adapters can migrate deliberately.
 
 The contracts describe pure decisions only. They do not perform DNS queries,
 open sockets, mutate PF, or change external DNS, proxy, PAC, or VPN state.
+The Windows adapter harness in `crates/slipstream-windows-adapter` also remains
+effect-free by construction: tests inject a recording implementation, and the
+crate has no native, process, filesystem, or network dependency.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.
