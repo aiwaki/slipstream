@@ -279,9 +279,15 @@ Repeated identical install and terminal uninstall are idempotent; foreign,
 unknown, interrupted, and inconsistent evidence remains non-mutating. A second
 disposable gate proves that a failed crash restart persists its bounded attempt
 and a later controller process resumes recovery before uninstalling exactly.
-The next boundary is a production Windows service-host/management entry point
-that consumes this controller without adding networking, followed by a frozen
-data-plane contract before any native Windows network API is introduced.
+PR #154 adds the production no-network service host and management binary. Exact
+`--service` is the only SCM mode; explicit management commands hash the current
+executable and consume the qualified controller. The host reports bounded
+start, running, stop-pending, and stopped states, accepts stop and shutdown, and
+emits versioned management results. Separate-process Windows CI proves
+idempotent install, stop, start, and uninstall against the real SCM, including
+PID replacement after restart. The next boundary is a pure Windows data-plane
+request/session and worker-lifecycle contract with deterministic fake effects;
+no native network API is admitted until that contract is frozen.
 
 ## M5 - Packet-Level Capabilities
 
