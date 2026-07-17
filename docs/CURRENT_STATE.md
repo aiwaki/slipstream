@@ -38,18 +38,23 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows read-only ownership evidence implemented; native CI pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, and ownership-proof v1 contracts. The Windows-only collector now resolves a fixed machine record through the system `ProgramData` known folder, proves final handle paths, regular non-reparse files, owner/restrictive DACL, bounded strict JSON, and same-handle executable SHA-256 before the pure reducer can return `Owned`. It has no write, process-control, mutating SCM, DNS, proxy, VPN, socket, or packet API. Native Windows CI, payload staging, service effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows read-only ownership evidence CI-qualified | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, and ownership-proof v1 contracts. The Windows-only collector now resolves a fixed machine record through the system `ProgramData` known folder, proves final handle paths, regular non-reparse files, owner/restrictive DACL, bounded strict JSON, and same-handle executable SHA-256 before the pure reducer can return `Owned`. It has no write, process-control, mutating SCM, DNS, proxy, VPN, socket, or packet API. Disposable native Windows CI now exercises the handle, ACL, record, hash, and ownership conjunction. Payload staging, service effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
 [CI run 29589892727](https://github.com/aiwaki/slipstream/actions/runs/29589892727).
 The dependency and vendored-Geph audits passed in
 [audit run 29589892711](https://github.com/aiwaki/slipstream/actions/runs/29589892711).
+The Windows ownership collector and its disposable owner-only fixture passed in
+[PR #147 CI run 29592866727](https://github.com/aiwaki/slipstream/actions/runs/29592866727),
+alongside the required checks and packaged lifecycle job; its dependency audit
+passed in
+[run 29592866706](https://github.com/aiwaki/slipstream/actions/runs/29592866706).
 
 ## Next Verified Action
 
-After this collector passes disposable Windows CI, implement only the native
-`StagePayload` transaction behind the existing lifecycle action. It must stage
+Implement only the native `StagePayload` transaction behind the existing
+lifecycle action. It must stage
 the content-addressed executable and owner record atomically on one local
 volume, apply the exact ACL expected by this reader, re-open both through the
 collector, and compensate only those exact identities on failure. Keep service
