@@ -35,9 +35,9 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, GetFinalPathNameByHandleW, BY_HANDLE_FILE_INFORMATION,
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
-    WRITE_OWNER,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
+    FILE_WRITE_EA, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE};
@@ -45,6 +45,7 @@ use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath};
 
 const MAX_WINDOWS_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_FINAL_PATH_UTF16_UNITS: usize = 32_768;
+const STAGING_SHARE_MODE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const MUTATING_FILE_ACCESS: u32 = FILE_WRITE_DATA
     | FILE_APPEND_DATA
     | FILE_WRITE_EA
@@ -89,6 +90,22 @@ impl WindowsServiceOwnershipCollector {
     pub fn assess(&self) -> WindowsServiceOwnershipAssessment {
         assess_windows_service_ownership(&self.collect_input())
     }
+
+    pub fn collect_staged_payload(&self) -> WindowsStagedPayloadEvidence {
+        match machine_owner_record_path() {
+            Ok(path) => staged_payload_evidence_at(&path),
+            Err(_) => WindowsStagedPayloadEvidence {
+                record: WindowsOwnerRecordEvidence::Inaccessible,
+                executable: WindowsExecutableEvidence::NotChecked,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowsStagedPayloadEvidence {
+    pub record: WindowsOwnerRecordEvidence,
+    pub executable: WindowsExecutableEvidence,
 }
 
 fn scm_evidence() -> WindowsScmEvidence {
@@ -99,7 +116,7 @@ fn scm_evidence() -> WindowsScmEvidence {
     }
 }
 
-fn machine_owner_record_path() -> Result<PathBuf, NativeEvidenceError> {
+pub(crate) fn machine_owner_record_path() -> Result<PathBuf, NativeEvidenceError> {
     let mut raw_path = null_mut();
     let result =
         unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, null_mut(), &mut raw_path) };
@@ -114,8 +131,23 @@ fn machine_owner_record_path() -> Result<PathBuf, NativeEvidenceError> {
     Ok(path)
 }
 
+pub(crate) fn staged_payload_evidence_at(path: &Path) -> WindowsStagedPayloadEvidence {
+    let record = read_owner_record_with_share(path, STAGING_SHARE_MODE);
+    let executable = match &record {
+        WindowsOwnerRecordEvidence::OwnerOnly { record } => {
+            verify_executable_with_share(record, STAGING_SHARE_MODE)
+        }
+        _ => WindowsExecutableEvidence::NotChecked,
+    };
+    WindowsStagedPayloadEvidence { record, executable }
+}
+
 fn read_owner_record(path: &Path) -> WindowsOwnerRecordEvidence {
-    match read_owner_record_inner(path) {
+    read_owner_record_with_share(path, FILE_SHARE_READ)
+}
+
+fn read_owner_record_with_share(path: &Path, share_mode: u32) -> WindowsOwnerRecordEvidence {
+    match read_owner_record_inner(path, share_mode) {
         Ok(record) => WindowsOwnerRecordEvidence::OwnerOnly { record },
         Err(NativeEvidenceError::Missing) => WindowsOwnerRecordEvidence::Missing,
         Err(NativeEvidenceError::Inaccessible) => WindowsOwnerRecordEvidence::Inaccessible,
@@ -128,8 +160,9 @@ fn read_owner_record(path: &Path) -> WindowsOwnerRecordEvidence {
 
 fn read_owner_record_inner(
     path: &Path,
+    share_mode: u32,
 ) -> Result<WindowsServiceOwnershipRecord, NativeEvidenceError> {
-    let mut file = open_readonly(path, GENERIC_READ | READ_CONTROL)?;
+    let mut file = open_readonly(path, GENERIC_READ | READ_CONTROL, share_mode)?;
     let size = validate_regular_file(&file, MAX_WINDOWS_OWNER_RECORD_BYTES as u64)?;
     if !final_path_matches(&file, path)? {
         return Err(NativeEvidenceError::Invalid);
@@ -148,7 +181,14 @@ fn read_owner_record_inner(
 }
 
 fn verify_executable(record: &WindowsServiceOwnershipRecord) -> WindowsExecutableEvidence {
-    match verify_executable_inner(record) {
+    verify_executable_with_share(record, FILE_SHARE_READ)
+}
+
+fn verify_executable_with_share(
+    record: &WindowsServiceOwnershipRecord,
+    share_mode: u32,
+) -> WindowsExecutableEvidence {
+    match verify_executable_inner_with_share(record, share_mode) {
         Ok(executable_sha256) => WindowsExecutableEvidence::Verified {
             executable_path: record.executable_path.clone(),
             executable_sha256,
@@ -161,11 +201,19 @@ fn verify_executable(record: &WindowsServiceOwnershipRecord) -> WindowsExecutabl
     }
 }
 
+#[cfg(test)]
 fn verify_executable_inner(
     record: &WindowsServiceOwnershipRecord,
 ) -> Result<String, NativeEvidenceError> {
+    verify_executable_inner_with_share(record, FILE_SHARE_READ)
+}
+
+fn verify_executable_inner_with_share(
+    record: &WindowsServiceOwnershipRecord,
+    share_mode: u32,
+) -> Result<String, NativeEvidenceError> {
     let path = Path::new(&record.executable_path);
-    let mut file = open_readonly(path, GENERIC_READ)?;
+    let mut file = open_readonly(path, GENERIC_READ, share_mode)?;
     let size = validate_regular_file(&file, MAX_WINDOWS_EXECUTABLE_BYTES)?;
     if !final_path_matches(&file, path)? {
         return Err(NativeEvidenceError::Invalid);
@@ -195,7 +243,11 @@ fn verify_executable_inner(
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn open_readonly(path: &Path, desired_access: u32) -> Result<File, NativeEvidenceError> {
+fn open_readonly(
+    path: &Path,
+    desired_access: u32,
+    share_mode: u32,
+) -> Result<File, NativeEvidenceError> {
     let wide_path: Vec<u16> = path
         .as_os_str()
         .encode_wide()
@@ -205,7 +257,7 @@ fn open_readonly(path: &Path, desired_access: u32) -> Result<File, NativeEvidenc
         CreateFileW(
             wide_path.as_ptr(),
             desired_access,
-            FILE_SHARE_READ,
+            share_mode,
             null(),
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
@@ -225,7 +277,10 @@ fn open_readonly(path: &Path, desired_access: u32) -> Result<File, NativeEvidenc
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 
-fn validate_regular_file(file: &File, maximum_size: u64) -> Result<u64, NativeEvidenceError> {
+pub(crate) fn validate_regular_file(
+    file: &File,
+    maximum_size: u64,
+) -> Result<u64, NativeEvidenceError> {
     let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
     let ok = unsafe { GetFileInformationByHandle(raw_handle(file), information.as_mut_ptr()) };
     if ok == 0 {
@@ -243,7 +298,10 @@ fn validate_regular_file(file: &File, maximum_size: u64) -> Result<u64, NativeEv
     Ok(size)
 }
 
-fn final_path_matches(file: &File, expected: &Path) -> Result<bool, NativeEvidenceError> {
+pub(crate) fn final_path_matches(
+    file: &File,
+    expected: &Path,
+) -> Result<bool, NativeEvidenceError> {
     let mut actual = vec![0u16; MAX_FINAL_PATH_UTF16_UNITS];
     let length = unsafe {
         GetFinalPathNameByHandleW(
@@ -286,7 +344,9 @@ fn strip_extended_dos_prefix(path: &[u16]) -> &[u16] {
     path.strip_prefix(PREFIX).unwrap_or(path)
 }
 
-fn has_trusted_machine_write_permissions(file: &File) -> Result<bool, NativeEvidenceError> {
+pub(crate) fn has_trusted_machine_write_permissions(
+    file: &File,
+) -> Result<bool, NativeEvidenceError> {
     let mut owner: PSID = null_mut();
     let mut dacl: *mut ACL = null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
@@ -367,7 +427,7 @@ fn is_trusted_machine_sid(sid: PSID) -> bool {
     }
 }
 
-fn raw_handle(file: &File) -> HANDLE {
+pub(crate) fn raw_handle(file: &File) -> HANDLE {
     file.as_raw_handle()
 }
 
@@ -406,7 +466,7 @@ impl Drop for OwnedLocalSecurityDescriptor {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NativeEvidenceError {
+pub(crate) enum NativeEvidenceError {
     Missing,
     Inaccessible,
     Invalid,
