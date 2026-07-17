@@ -1,6 +1,6 @@
 #[test]
 fn native_payload_staging_is_handle_bound_and_has_no_service_or_network_surface() {
-    let source = include_str!("../src/service_payload/windows.rs");
+    let source = include_str!("../src/service_payload/windows.rs").replace("\r\n", "\n");
     let production = source
         .split("#[cfg(test)]\nmod tests")
         .next()
