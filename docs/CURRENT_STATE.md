@@ -9,8 +9,7 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-17, through
-[PR #146](https://github.com/aiwaki/slipstream/pull/146) plus the current
-Windows evidence-collector branch, based on main at
+[PR #147](https://github.com/aiwaki/slipstream/pull/147), based on main at
 `22a59ade20894eac1eaef9fb6c868c5b78f74451`.
 
 ## Resume Protocol
