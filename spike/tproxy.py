@@ -56,6 +56,8 @@ import geph_backend
 import pf_adapter
 import route_circuit
 import route_circuit_registry
+import route_policy_activation as route_policy_activation_contract
+import route_policy_activation_adapter
 import route_policy_bundle as route_policy_bundle_contract
 import route_policy_manifest as route_policy_manifest_contract
 from primes import build_fake_stun, classify as classify_voice_payload
@@ -334,6 +336,10 @@ GEPH_HOSTS = tuple(
 POLICY_STATE_DIR = "/var/db/slipstream"
 ROUTE_POLICY_STATE_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.json")
 ROUTE_POLICY_PREVIOUS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy.previous.json")
+ROUTE_POLICY_ACTIVATION_PATH = os.path.join(
+    POLICY_STATE_DIR,
+    "route-policy.activation.json",
+)
 ROUTE_POLICY_KEYS_PATH = os.path.join(POLICY_STATE_DIR, "route-policy-keys.json")
 ROUTE_POLICY_BUNDLED_KEYS_FILENAME = "route-policy-keys.json"
 ROUTE_POLICY_REMOTE_URL_ENV = "SLIP_ROUTE_POLICY_URL"
@@ -346,6 +352,7 @@ ROUTE_POLICY_REMOTE_RETRY_BASE = 15 * 60.0
 ROUTE_POLICY_REMOTE_RETRY_MAX = 6 * 60 * 60.0
 TRUSTED_ROUTE_POLICY_KEYS = {}
 _active_route_policy_manifest = None
+_active_route_policy_kind = route_policy_activation_contract.POLICY_BUNDLED
 _route_policy_storage = {
     "state": "bundled",
     "path": ROUTE_POLICY_STATE_PATH,
@@ -366,6 +373,8 @@ _route_policy_remote = {
     "failures": 0,
     "last_reason": "",
 }
+_route_policy_activation_lock = threading.RLock()
+_route_policy_trial_generation = 0
 
 DNS_DIAGNOSTIC_HOSTS = (
     ("updates.discord.com", SERVICE_DISCORD),
@@ -583,22 +592,59 @@ def verify_signed_route_policy_bundle(bundle, public_keys):
     )
 
 
-def apply_route_policy_manifest(manifest):
+def _route_policy_identity(manifest, *, kind=None):
+    normalized = validate_route_policy_manifest(manifest)
+    if kind is None:
+        bundled = bundled_route_policy_manifest()
+        kind = (
+            route_policy_activation_contract.POLICY_BUNDLED
+            if route_policy_hash(normalized) == route_policy_hash(bundled)
+            else route_policy_activation_contract.POLICY_SIGNED
+        )
+    return route_policy_activation_contract.PolicyIdentity(
+        kind=kind,
+        source=normalized["source"],
+        sha256=route_policy_hash(normalized),
+    )
+
+
+def _active_route_policy_identity(active_manifest=None):
+    manifest = route_policy_manifest() if active_manifest is None else active_manifest
+    return _route_policy_identity(manifest, kind=_active_route_policy_kind)
+
+
+def _stable_route_policy_activation_state(active_manifest, *, previous=None):
+    bundled_manifest = bundled_route_policy_manifest()
+    return route_policy_activation_contract.PolicyActivationState(
+        bundled=_route_policy_identity(
+            bundled_manifest,
+            kind=route_policy_activation_contract.POLICY_BUNDLED,
+        ),
+        active=_active_route_policy_identity(active_manifest),
+        previous=previous,
+        trial_generation=_route_policy_trial_generation,
+    )
+
+
+def apply_route_policy_manifest(manifest, *, kind=None):
     """Activate a validated route policy manifest in memory.
 
     Remote fetch/persistence is deliberately outside this function. This keeps
     policy updates staged: verify first, activate atomically, then expose the
     active hash in status for diagnostics/rollback decisions.
     """
-    global _active_route_policy_manifest
+    global _active_route_policy_kind, _active_route_policy_manifest
     normalized = validate_route_policy_manifest(manifest)
+    if kind is None:
+        kind = _route_policy_identity(normalized).kind
+    if kind not in {
+        route_policy_activation_contract.POLICY_BUNDLED,
+        route_policy_activation_contract.POLICY_SIGNED,
+    }:
+        raise ValueError("route policy kind is invalid")
     _active_route_policy_manifest = _copy_route_policy_manifest(normalized)
+    _active_route_policy_kind = kind
     return route_policy_status_snapshot()
-
-
-def apply_signed_route_policy_bundle(bundle, public_keys):
-    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
-    return apply_route_policy_manifest(manifest)
 
 
 def _set_route_policy_storage(state, *, source=None, sha256="", error="", path=None):
@@ -880,32 +926,60 @@ def fetch_signed_route_policy_bundle(
             max_bytes=max_bytes,
         )
     return data
-
-
-
-def _route_policy_health_gate_passed(result):
+def _route_policy_health_evidence(result):
     if result is True:
-        return True, ""
+        return route_policy_activation_adapter.HealthEvidence(completed=True, ok=1)
     if result is False:
-        return False, "health gate failed"
+        return route_policy_activation_adapter.HealthEvidence(
+            completed=True,
+            detail="health gate failed",
+        )
+
     if isinstance(result, (list, tuple)) and len(result) >= 2:
-        ok, degraded = result[0], result[1]
-        try:
-            ok_count = int(ok)
-            degraded_count = int(degraded)
-        except (TypeError, ValueError):
-            return False, "health gate returned invalid counters"
-        if degraded_count == 0 and ok_count > 0:
-            return True, ""
-        return False, f"health gate degraded={degraded_count} ok={ok_count}"
-    if isinstance(result, dict):
-        degraded = int(result.get("degraded") or 0)
-        blocked = int(result.get("blocked") or 0)
-        ok = int(result.get("ok") or 0)
-        if degraded == 0 and blocked == 0 and ok > 0:
-            return True, ""
-        return False, f"health gate degraded={degraded} blocked={blocked} ok={ok}"
-    return False, "health gate did not run"
+        raw = (result[0], result[1], 0)
+    elif isinstance(result, dict):
+        raw = (
+            result.get("ok", 0),
+            result.get("degraded", 0),
+            result.get("blocked", 0),
+        )
+    else:
+        return route_policy_activation_adapter.HealthEvidence(
+            completed=False,
+            detail="health gate did not run",
+        )
+
+    counters = []
+    for value in raw:
+        if isinstance(value, bool) or not isinstance(value, int):
+            return route_policy_activation_adapter.HealthEvidence(
+                completed=False,
+                detail="health gate returned invalid counters",
+            )
+        parsed = value
+        if not 0 <= parsed <= route_policy_activation_contract.MAX_COUNTER:
+            return route_policy_activation_adapter.HealthEvidence(
+                completed=False,
+                detail="health gate returned invalid counters",
+            )
+        counters.append(parsed)
+
+    ok, degraded, blocked = counters
+    detail = ""
+    if degraded or blocked or not ok:
+        if isinstance(result, dict):
+            detail = (
+                f"health gate degraded={degraded} blocked={blocked} ok={ok}"
+            )
+        else:
+            detail = f"health gate degraded={degraded} ok={ok}"
+    return route_policy_activation_adapter.HealthEvidence(
+        completed=True,
+        ok=ok,
+        degraded=degraded,
+        blocked=blocked,
+        detail=detail,
+    )
 
 
 def apply_signed_route_policy_bundle_with_health_gate(
@@ -915,36 +989,104 @@ def apply_signed_route_policy_bundle_with_health_gate(
     *,
     policy_path=ROUTE_POLICY_STATE_PATH,
     previous_path=ROUTE_POLICY_PREVIOUS_PATH,
+    activation_path=None,
     now=None,
 ):
-    previous_manifest = route_policy_manifest()
-    previous_storage = route_policy_storage_snapshot()
-    manifest = verify_signed_route_policy_bundle(bundle, public_keys)
-    apply_route_policy_manifest(manifest)
-    try:
-        gate_ok, gate_error = _route_policy_health_gate_passed(health_runner())
-    except Exception as exc:
-        gate_ok, gate_error = False, f"health gate error: {exc}"
-    if not gate_ok:
-        if previous_manifest.get("source") == ROUTE_POLICY_SOURCE:
-            reset_route_policy_manifest()
-        else:
-            apply_route_policy_manifest(previous_manifest)
-        _set_route_policy_storage(
-            "rejected",
-            source=previous_storage.get("source") or previous_manifest.get("source"),
-            sha256=previous_storage.get("sha256") or route_policy_hash(previous_manifest),
-            error=gate_error,
-            path=policy_path,
+    global _route_policy_trial_generation
+    with _route_policy_activation_lock:
+        activation_path = _route_policy_activation_state_path(
+            policy_path,
+            activation_path,
         )
-        return None
-    return save_signed_route_policy_bundle(
-        bundle,
-        public_keys,
-        policy_path=policy_path,
-        previous_path=previous_path,
-        now=now,
-    )
+        previous_manifest = route_policy_manifest()
+        previous_storage = route_policy_storage_snapshot()
+        manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+        _route_policy_trial_generation = max(
+            _route_policy_trial_generation,
+            _read_route_policy_trial_generation(activation_path),
+        )
+        candidate = _route_policy_identity(
+            manifest,
+            kind=route_policy_activation_contract.POLICY_SIGNED,
+        )
+        activation_state = _stable_route_policy_activation_state(previous_manifest)
+
+        def restore_active(policy):
+            if policy != activation_state.active:
+                raise RuntimeError("reducer requested an unexpected active policy")
+            _restore_route_policy_manifest(previous_manifest, policy)
+
+        effects = route_policy_activation_adapter.CandidateEffects(
+            persist_trial_generation=lambda generation: (
+                _persist_route_policy_trial_generation(
+                    activation_path,
+                    generation,
+                )
+            ),
+            activate_trial=lambda policy: _activate_candidate_manifest(
+                policy,
+                candidate,
+                manifest,
+            ),
+            run_health_gate=lambda _policy, _generation: (
+                _route_policy_health_evidence(health_runner())
+            ),
+            commit_candidate=lambda policy, previous, generation: (
+                _commit_signed_route_policy_bundle(
+                    bundle,
+                    public_keys,
+                    candidate=policy,
+                    previous=previous,
+                    trial_generation=generation,
+                    policy_path=policy_path,
+                    previous_path=previous_path,
+                    now=now,
+                )
+            ),
+            restore_active=restore_active,
+            record_rejection=lambda _policy, _reason, detail: (
+                _set_route_policy_storage(
+                    "rejected",
+                    source=(
+                        previous_storage.get("source")
+                        or previous_manifest.get("source")
+                    ),
+                    sha256=(
+                        previous_storage.get("sha256")
+                        or route_policy_hash(previous_manifest)
+                    ),
+                    error=detail,
+                    path=policy_path,
+                )
+            ),
+        )
+        try:
+            result = route_policy_activation_adapter.activate_candidate(
+                activation_state,
+                candidate,
+                effects,
+            )
+        except route_policy_activation_adapter.PolicyActivationAdapterError as exc:
+            _route_policy_trial_generation = max(
+                _route_policy_trial_generation,
+                exc.state.trial_generation,
+            )
+            _set_route_policy_storage(
+                "error",
+                source=previous_manifest.get("source"),
+                sha256=route_policy_hash(previous_manifest),
+                error=str(exc),
+                path=policy_path,
+            )
+            raise
+
+        _route_policy_trial_generation = max(
+            _route_policy_trial_generation,
+            result.state.trial_generation,
+        )
+        if not result.accepted:
+            return None
+        return result.value or route_policy_status_snapshot()
 
 
 def update_route_policy_from_remote(
@@ -995,15 +1137,14 @@ def update_route_policy_from_remote(
         return False
 
 
-def _atomic_write_json(path, data, *, mode=0o600):
+def _atomic_write_bytes(path, data, *, mode=0o600):
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     try:
-        with open(tmp, "w") as f:
-            json.dump(data, f, sort_keys=True, separators=(",", ":"))
-            f.write("\n")
+        with open(tmp, "xb") as f:
+            f.write(data)
         os.chmod(tmp, mode)
         os.replace(tmp, path)
     finally:
@@ -1015,82 +1156,370 @@ def _atomic_write_json(path, data, *, mode=0o600):
             pass
 
 
-def signed_route_policy_state(bundle, public_keys, now=None):
+def _atomic_write_json(path, data, *, mode=0o600):
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _atomic_write_bytes(path, payload + b"\n", mode=mode)
+
+
+def _remove_policy_file(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def _policy_file_snapshot(path):
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise ValueError(f"route policy path is not a regular file: {path}")
+        with os.fdopen(fd, "rb", closefd=False) as file_handle:
+            data = file_handle.read()
+        return {
+            "data": data,
+            "mode": stat.S_IMODE(file_stat.st_mode),
+        }
+    finally:
+        os.close(fd)
+
+
+def _restore_policy_file_snapshot(path, snapshot):
+    if snapshot is None:
+        _remove_policy_file(path)
+        return
+    _atomic_write_bytes(path, snapshot["data"], mode=snapshot["mode"])
+
+
+def _run_policy_file_transaction(paths, operation):
+    unique_paths = tuple(dict.fromkeys(paths))
+    snapshots = {path: _policy_file_snapshot(path) for path in unique_paths}
+    try:
+        return operation()
+    except Exception as original_error:
+        restore_errors = []
+        for path in unique_paths:
+            try:
+                _restore_policy_file_snapshot(path, snapshots[path])
+            except Exception as exc:
+                restore_errors.append(f"{path}: {exc}")
+        if restore_errors:
+            raise RuntimeError(
+                f"{original_error}; route policy file restore failed: "
+                + "; ".join(restore_errors)
+            ) from original_error
+        raise
+
+
+def _route_policy_activation_state_path(policy_path, activation_path=None):
+    if activation_path is not None:
+        return activation_path
+    if os.fspath(policy_path) == ROUTE_POLICY_STATE_PATH:
+        return ROUTE_POLICY_ACTIVATION_PATH
+    return f"{os.fspath(policy_path)}.activation"
+
+
+def _validate_route_policy_trial_generation(generation, message):
+    if (
+        isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or not 0
+        <= generation
+        <= route_policy_activation_contract.MAX_TRIAL_GENERATION
+    ):
+        raise ValueError(message)
+    return generation
+
+
+def _read_route_policy_trial_generation(path):
+    snapshot = _policy_file_snapshot(path)
+    if snapshot is None:
+        return 0
+    state = json.loads(snapshot["data"].decode("utf-8"))
+    if not isinstance(state, dict):
+        raise ValueError("persisted policy activation state is invalid")
+    if state.get("contract") != route_policy_activation_contract.CONTRACT_VERSION:
+        raise ValueError("unsupported persisted policy activation contract")
+    return _validate_route_policy_trial_generation(
+        state.get("trial_generation"),
+        "persisted policy trial generation is invalid",
+    )
+
+
+def _persist_route_policy_trial_generation(path, generation):
+    generation = _validate_route_policy_trial_generation(
+        generation,
+        "route policy trial generation is invalid",
+    )
+    current = _read_route_policy_trial_generation(path)
+    if generation < current:
+        raise RuntimeError("route policy trial generation cannot decrease")
+    if generation == current:
+        return
+    _atomic_write_json(
+        path,
+        {
+            "contract": route_policy_activation_contract.CONTRACT_VERSION,
+            "trial_generation": generation,
+        },
+    )
+
+
+def _persisted_route_policy_generation(state):
+    metadata = state.get("activation")
+    if metadata is None:
+        return 0
+    if not isinstance(metadata, dict):
+        raise ValueError("persisted policy activation metadata is invalid")
+    if metadata.get("contract") != route_policy_activation_contract.CONTRACT_VERSION:
+        raise ValueError("unsupported persisted policy activation contract")
+    return _validate_route_policy_trial_generation(
+        metadata.get("trial_generation"),
+        "persisted policy trial generation is invalid",
+    )
+
+
+def _read_signed_route_policy_state(path, public_keys):
+    snapshot = _policy_file_snapshot(path)
+    if snapshot is None:
+        raise FileNotFoundError(path)
+    state = json.loads(snapshot["data"].decode("utf-8"))
+    if not isinstance(state, dict) or state.get("schema") != ROUTE_POLICY_SCHEMA_VERSION:
+        raise ValueError("unsupported persisted policy schema")
+    manifest = verify_signed_route_policy_bundle(state.get("bundle"), public_keys)
+    expected_hash = state.get("sha256")
+    actual_hash = route_policy_hash(manifest)
+    if expected_hash != actual_hash:
+        raise ValueError("persisted policy hash mismatch")
+    return {
+        "state": state,
+        "manifest": manifest,
+        "identity": _route_policy_identity(
+            manifest,
+            kind=route_policy_activation_contract.POLICY_SIGNED,
+        ),
+        "trial_generation": _persisted_route_policy_generation(state),
+    }
+
+
+def signed_route_policy_state(
+    bundle,
+    public_keys,
+    now=None,
+    *,
+    trial_generation=0,
+):
     manifest = verify_signed_route_policy_bundle(bundle, public_keys)
+    trial_generation = _validate_route_policy_trial_generation(
+        trial_generation,
+        "route policy trial generation is invalid",
+    )
     return {
         "schema": ROUTE_POLICY_SCHEMA_VERSION,
         "saved_at": time.time() if now is None else now,
         "sha256": route_policy_hash(manifest),
         "source": manifest["source"],
         "bundle": bundle,
+        "activation": {
+            "contract": route_policy_activation_contract.CONTRACT_VERSION,
+            "trial_generation": trial_generation,
+        },
     }
 
 
-def save_signed_route_policy_bundle(
+def _restore_route_policy_manifest(manifest, identity):
+    if _route_policy_identity(manifest, kind=identity.kind) != identity:
+        raise RuntimeError("policy manifest does not match reducer identity")
+    if identity.kind == route_policy_activation_contract.POLICY_BUNDLED:
+        return reset_route_policy_manifest()
+    return apply_route_policy_manifest(manifest, kind=identity.kind)
+
+
+def _activate_candidate_manifest(policy, expected, manifest):
+    if policy != expected:
+        raise RuntimeError("reducer requested an unexpected candidate policy")
+    apply_route_policy_manifest(manifest, kind=policy.kind)
+
+
+def _commit_signed_route_policy_bundle(
     bundle,
     public_keys,
     *,
+    candidate,
+    previous,
+    trial_generation,
     policy_path=ROUTE_POLICY_STATE_PATH,
     previous_path=ROUTE_POLICY_PREVIOUS_PATH,
     now=None,
 ):
-    state = signed_route_policy_state(bundle, public_keys, now=now)
-    if os.path.exists(policy_path):
-        os.makedirs(os.path.dirname(previous_path), exist_ok=True)
-        shutil.copy2(policy_path, previous_path)
-    _atomic_write_json(policy_path, state)
-    apply_signed_route_policy_bundle(bundle, public_keys)
-    _set_route_policy_storage(
-        "saved",
-        source=state["source"],
-        sha256=state["sha256"],
-        path=policy_path,
+    state = signed_route_policy_state(
+        bundle,
+        public_keys,
+        now=now,
+        trial_generation=trial_generation,
     )
-    return route_policy_status_snapshot()
+    if state["sha256"] != candidate.sha256:
+        raise RuntimeError("candidate bundle does not match reducer identity")
+    storage_before = route_policy_storage_snapshot()
+
+    def commit():
+        if previous.kind == route_policy_activation_contract.POLICY_SIGNED:
+            current = _read_signed_route_policy_state(policy_path, public_keys)
+            if current["identity"] != previous:
+                raise RuntimeError("persisted active policy does not match reducer state")
+            _atomic_write_json(previous_path, current["state"])
+        else:
+            _remove_policy_file(previous_path)
+        _atomic_write_json(policy_path, state)
+        _set_route_policy_storage(
+            "saved",
+            source=state["source"],
+            sha256=state["sha256"],
+            path=policy_path,
+        )
+        return route_policy_status_snapshot()
+
+    try:
+        return _run_policy_file_transaction(
+            (policy_path, previous_path),
+            commit,
+        )
+    except Exception:
+        _route_policy_storage.clear()
+        _route_policy_storage.update(storage_before)
+        raise
 
 
 def load_persisted_route_policy(
     public_keys,
     *,
     policy_path=ROUTE_POLICY_STATE_PATH,
+    activation_path=None,
 ):
-    if not os.path.exists(policy_path):
-        reset_route_policy_manifest()
-        _set_route_policy_storage(
-            "bundled",
-            source=ROUTE_POLICY_SOURCE,
-            sha256=route_policy_hash(),
-            path=policy_path,
+    global _route_policy_trial_generation
+    with _route_policy_activation_lock:
+        activation_path = _route_policy_activation_state_path(
+            policy_path,
+            activation_path,
         )
-        return False
-    try:
-        with open(policy_path) as f:
-            state = json.load(f)
-        if state.get("schema") != ROUTE_POLICY_SCHEMA_VERSION:
-            raise ValueError("unsupported persisted policy schema")
-        manifest = verify_signed_route_policy_bundle(state.get("bundle"), public_keys)
-        expected_hash = state.get("sha256")
-        actual_hash = route_policy_hash(manifest)
-        if expected_hash != actual_hash:
-            raise ValueError("persisted policy hash mismatch")
-        apply_route_policy_manifest(manifest)
+        try:
+            durable_generation = _read_route_policy_trial_generation(
+                activation_path
+            )
+        except Exception as exc:
+            reset_route_policy_manifest()
+            _set_route_policy_storage(
+                "invalid",
+                source=ROUTE_POLICY_SOURCE,
+                sha256=route_policy_hash(),
+                error=str(exc),
+                path=policy_path,
+            )
+            return False
+        _route_policy_trial_generation = max(
+            _route_policy_trial_generation,
+            durable_generation,
+        )
+        if not os.path.exists(policy_path):
+            reset_route_policy_manifest()
+            _set_route_policy_storage(
+                "bundled",
+                source=ROUTE_POLICY_SOURCE,
+                sha256=route_policy_hash(),
+                path=policy_path,
+            )
+            return False
+        try:
+            persisted = _read_signed_route_policy_state(policy_path, public_keys)
+            apply_route_policy_manifest(
+                persisted["manifest"],
+                kind=persisted["identity"].kind,
+            )
+            _route_policy_trial_generation = max(
+                _route_policy_trial_generation,
+                durable_generation,
+                persisted["trial_generation"],
+            )
+            _set_route_policy_storage(
+                "loaded",
+                source=persisted["manifest"]["source"],
+                sha256=persisted["identity"].sha256,
+                path=policy_path,
+            )
+            return True
+        except Exception as exc:
+            reset_route_policy_manifest()
+            _set_route_policy_storage(
+                "invalid",
+                source=ROUTE_POLICY_SOURCE,
+                sha256=route_policy_hash(),
+                error=str(exc),
+                path=policy_path,
+            )
+            return False
+
+
+def _commit_route_policy_rollback(
+    *,
+    target,
+    target_manifest,
+    target_state,
+    active_manifest,
+    active,
+    trial_generation,
+    policy_path,
+    previous_path,
+):
+    storage_before = route_policy_storage_snapshot()
+
+    def commit():
+        if target.kind == route_policy_activation_contract.POLICY_SIGNED:
+            state = dict(target_state)
+            state["activation"] = {
+                "contract": route_policy_activation_contract.CONTRACT_VERSION,
+                "trial_generation": trial_generation,
+            }
+            _atomic_write_json(policy_path, state)
+        else:
+            _remove_policy_file(policy_path)
+        _remove_policy_file(previous_path)
+        _restore_route_policy_manifest(target_manifest, target)
         _set_route_policy_storage(
-            "loaded",
-            source=manifest["source"],
-            sha256=actual_hash,
+            (
+                "rolled_back"
+                if target.kind == route_policy_activation_contract.POLICY_SIGNED
+                else "rolled_back_bundled"
+            ),
+            source=target.source,
+            sha256=target.sha256,
             path=policy_path,
         )
         return True
-    except Exception as exc:
-        reset_route_policy_manifest()
-        _set_route_policy_storage(
-            "invalid",
-            source=ROUTE_POLICY_SOURCE,
-            sha256=route_policy_hash(),
-            error=str(exc),
-            path=policy_path,
+
+    try:
+        return _run_policy_file_transaction(
+            (policy_path, previous_path),
+            commit,
         )
-        return False
+    except Exception as original_error:
+        restore_error = None
+        try:
+            _restore_route_policy_manifest(active_manifest, active)
+        except Exception as exc:
+            restore_error = exc
+        _route_policy_storage.clear()
+        _route_policy_storage.update(storage_before)
+        if restore_error is not None:
+            raise RuntimeError(
+                f"{original_error}; active policy restore failed: {restore_error}"
+            ) from original_error
+        raise
 
 
 def rollback_route_policy(
@@ -1099,29 +1528,93 @@ def rollback_route_policy(
     policy_path=ROUTE_POLICY_STATE_PATH,
     previous_path=ROUTE_POLICY_PREVIOUS_PATH,
 ):
-    if os.path.exists(previous_path):
-        os.replace(previous_path, policy_path)
-        loaded = load_persisted_route_policy(public_keys, policy_path=policy_path)
-        if loaded:
-            _route_policy_storage["state"] = "rolled_back"
-        return loaded
-    try:
-        os.remove(policy_path)
-    except FileNotFoundError:
-        pass
-    reset_route_policy_manifest()
-    _set_route_policy_storage(
-        "rolled_back_bundled",
-        source=ROUTE_POLICY_SOURCE,
-        sha256=route_policy_hash(),
-        path=policy_path,
-    )
-    return True
+    global _route_policy_trial_generation
+    with _route_policy_activation_lock:
+        active_manifest = route_policy_manifest()
+        active = _active_route_policy_identity(active_manifest)
+        bundled_manifest = bundled_route_policy_manifest()
+        bundled = _route_policy_identity(
+            bundled_manifest,
+            kind=route_policy_activation_contract.POLICY_BUNDLED,
+        )
+
+        try:
+            target_manifest = bundled_manifest
+            target_state = None
+            previous = None
+            if active.kind == route_policy_activation_contract.POLICY_SIGNED:
+                current = _read_signed_route_policy_state(policy_path, public_keys)
+                if current["identity"] != active:
+                    raise RuntimeError(
+                        "persisted active policy does not match reducer state"
+                    )
+                if os.path.exists(previous_path):
+                    target_record = _read_signed_route_policy_state(
+                        previous_path,
+                        public_keys,
+                    )
+                    target_manifest = target_record["manifest"]
+                    target_state = target_record["state"]
+                    previous = target_record["identity"]
+                else:
+                    previous = bundled
+
+            activation_state = _stable_route_policy_activation_state(
+                active_manifest,
+                previous=previous,
+            )
+            effects = route_policy_activation_adapter.RollbackEffects(
+                commit_rollback=lambda target, generation: (
+                    _commit_route_policy_rollback(
+                        target=target,
+                        target_manifest=target_manifest,
+                        target_state=target_state,
+                        active_manifest=active_manifest,
+                        active=active,
+                        trial_generation=generation,
+                        policy_path=policy_path,
+                        previous_path=previous_path,
+                    )
+                ),
+                restore_active=lambda policy: _restore_route_policy_manifest(
+                    active_manifest,
+                    policy,
+                ),
+                record_rejection=lambda _policy, _reason, _detail: None,
+            )
+            result = route_policy_activation_adapter.rollback_policy(
+                activation_state,
+                effects,
+            )
+            _route_policy_trial_generation = max(
+                _route_policy_trial_generation,
+                result.state.trial_generation,
+            )
+            if result.accepted:
+                return True if result.value is None else bool(result.value)
+            _set_route_policy_storage(
+                "rollback_error",
+                source=active.source,
+                sha256=active.sha256,
+                error=result.error,
+                path=policy_path,
+            )
+            return False
+        except Exception as exc:
+            _set_route_policy_storage(
+                "rollback_error",
+                source=active.source,
+                sha256=active.sha256,
+                error=str(exc),
+                path=policy_path,
+            )
+            return False
 
 
 def reset_route_policy_manifest():
-    global _active_route_policy_manifest
+    global _active_route_policy_kind, _active_route_policy_manifest
     _active_route_policy_manifest = None
+    _active_route_policy_kind = route_policy_activation_contract.POLICY_BUNDLED
     _set_route_policy_storage(
         "bundled",
         source=ROUTE_POLICY_SOURCE,
@@ -4244,6 +4737,14 @@ def _script_runtime_payload(source_file):
         (
             os.path.join(source_dir, "route_circuit_registry.py"),
             "route_circuit_registry.py",
+        ),
+        (
+            os.path.join(source_dir, "route_policy_activation.py"),
+            "route_policy_activation.py",
+        ),
+        (
+            os.path.join(source_dir, "route_policy_activation_adapter.py"),
+            "route_policy_activation_adapter.py",
         ),
         (
             os.path.join(source_dir, "route_policy_bundle.py"),
