@@ -442,9 +442,8 @@ fn invalid_status_does_not_replace_the_last_valid_snapshot() {
 }
 
 #[test]
-fn harness_source_and_manifest_have_no_native_or_network_dependencies() {
+fn harness_source_has_no_native_or_network_dependencies() {
     let source = include_str!("../src/v1.rs");
-    let manifest = include_str!("../Cargo.toml");
     for forbidden in [
         "std::net",
         "std::process",
@@ -458,10 +457,6 @@ fn harness_source_and_manifest_have_no_native_or_network_dependencies() {
         assert!(
             !source.contains(forbidden),
             "no-network harness source contains {forbidden:?}"
-        );
-        assert!(
-            !manifest.contains(forbidden),
-            "no-network harness manifest contains {forbidden:?}"
         );
     }
 }

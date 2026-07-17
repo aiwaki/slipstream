@@ -226,9 +226,13 @@ An isolated service-lifecycle v1 contract now adds exact content-addressed
 ownership, transactional install compensation, intent-first start/stop and
 uninstall, bounded crash recovery, final-state proofs, and fail-closed handling
 when compensation cannot be verified. Its recording executor never calls a
-native service manager or touches the host. Native Windows service observation
-and effects still remain; they must pass the same contract on a disposable VM
-before any networking effects can be introduced.
+native service manager or touches the host. A target-scoped read-only SCM
+observer now queries only the exact Slipstream service name, maps native status
+conservatively, preserves the configured binary command, and treats only the
+service-not-found result as absence. It does not infer ownership or expose a
+mutating API. Durable ownership evidence, native service effects, and lifecycle
+qualification still remain; they must pass the same contract on a disposable
+VM before any networking effects can be introduced.
 
 ## M5 - Packet-Level Capabilities
 

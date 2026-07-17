@@ -411,9 +411,8 @@ fn service_identity_is_exact_and_content_addressed() {
 }
 
 #[test]
-fn lifecycle_source_and_manifest_have_no_native_or_network_dependencies() {
+fn lifecycle_source_has_no_native_or_network_dependencies() {
     let source = include_str!("../src/service_lifecycle/v1.rs");
-    let manifest = include_str!("../Cargo.toml");
     for forbidden in [
         "std::net",
         "std::process",
@@ -427,10 +426,6 @@ fn lifecycle_source_and_manifest_have_no_native_or_network_dependencies() {
         assert!(
             !source.contains(forbidden),
             "service lifecycle source contains {forbidden:?}"
-        );
-        assert!(
-            !manifest.contains(forbidden),
-            "service lifecycle manifest contains {forbidden:?}"
         );
     }
 }
