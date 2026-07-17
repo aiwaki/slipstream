@@ -11,11 +11,11 @@ file.
 Last evidence audit: 2026-07-17, through main commit
 `9448dfc868ec1a7e9a515d5c991f934f924ebfc1` after merged
 [PR #151](https://github.com/aiwaki/slipstream/pull/151) and its successful
-main CI and dependency-audit runs linked below, plus the green checks for open
+main CI and dependency-audit runs linked below, plus the green checks for
 [PR #152](https://github.com/aiwaki/slipstream/pull/152). Its implementation
 commit `d21e8a0f9461c78962321d0efc47b8999b352e81` composes the native Windows
-lifecycle and qualifies it against a disposable real service; the work is not
-part of `main` until the PR is merged.
+lifecycle and qualifies it against a disposable real service. Live PR and
+`main` state still take precedence over this recorded evidence boundary.
 
 ## Resume Protocol
 
