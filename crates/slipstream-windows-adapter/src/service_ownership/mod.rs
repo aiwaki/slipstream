@@ -5,10 +5,10 @@ pub mod v1;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-mod windows;
+pub(crate) mod windows;
 
 pub use evidence::*;
 pub use v1::*;
 
 #[cfg(windows)]
-pub use windows::WindowsServiceOwnershipCollector;
+pub use windows::{WindowsServiceOwnershipCollector, WindowsStagedPayloadEvidence};

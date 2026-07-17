@@ -8,9 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-17, through
-[PR #147](https://github.com/aiwaki/slipstream/pull/147), based on main at
-`22a59ade20894eac1eaef9fb6c868c5b78f74451`.
+Last evidence audit: 2026-07-17, through merged
+[PR #147](https://github.com/aiwaki/slipstream/pull/147), on main at
+`0ecf51dcd03e5ddf0aa396b7bd44766affe2af40`.
 
 ## Resume Protocol
 
@@ -38,7 +38,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows read-only ownership evidence CI-qualified | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, and ownership-proof v1 contracts. The Windows-only collector now resolves a fixed machine record through the system `ProgramData` known folder, proves final handle paths, regular non-reparse files, owner/restrictive DACL, bounded strict JSON, and same-handle executable SHA-256 before the pure reducer can return `Owned`. It has no write, process-control, mutating SCM, DNS, proxy, VPN, socket, or packet API. Disposable native Windows CI now exercises the handle, ACL, record, hash, and ownership conjunction. Payload staging, service effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows payload staging implemented; native CI pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only SCM observer, ownership-proof, and payload-effect boundaries. The CI-qualified collector resolves a fixed machine record through the system `ProgramData` known folder and proves handle paths, non-reparse files, restrictive DACL, strict JSON, and same-handle SHA-256. The new filesystem-only effect stages an exact content-addressed executable before the owner-record commit marker, reopens both through that collector, and compensates only its own handles. Native payload CI, durable lifecycle-state storage, SCM effects and lifecycle qualification, networking adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -50,16 +50,19 @@ The Windows ownership collector and its disposable owner-only fixture passed in
 alongside the required checks and packaged lifecycle job; its dependency audit
 passed in
 [run 29592866706](https://github.com/aiwaki/slipstream/actions/runs/29592866706).
+The merged collector passed again on main in
+[CI run 29594236053](https://github.com/aiwaki/slipstream/actions/runs/29594236053),
+and its dependency audit passed in
+[run 29594235966](https://github.com/aiwaki/slipstream/actions/runs/29594235966).
 
 ## Next Verified Action
 
-Implement only the native `StagePayload` transaction behind the existing
-lifecycle action. It must stage
-the content-addressed executable and owner record atomically on one local
-volume, apply the exact ACL expected by this reader, re-open both through the
-collector, and compensate only those exact identities on failure. Keep service
-registration, process control, networking, DNS, proxy, PAC, and VPN out of that
-PR.
+After payload staging passes disposable Windows CI, implement owner-only durable
+lifecycle-state effects for `PersistIntent`, `CommitInstall`, and
+`ClearActiveInstallRecord` as a separate transaction. Recovery must be able to
+distinguish committed intent from an interrupted write before any SCM mutation
+is admitted. Keep service registration, process control, networking, DNS,
+proxy, PAC, and VPN out of that PR.
 
 ## External Gates
 

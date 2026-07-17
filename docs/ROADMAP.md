@@ -238,10 +238,14 @@ read-only collector now resolves the machine record through the system
 `ProgramData` known folder, proves the opened file's final path, non-reparse
 regular-file identity, owner and restrictive DACL, parses bounded strict-v1
 JSON, and hashes the exact opened executable handle. Its disposable Windows
-smoke combines those native proofs with the frozen reducer; the production code
-still exposes no write or SCM mutation API. Native payload staging, service
-effects, and lifecycle qualification remain and must land as separate bounded
-steps before any Windows networking effect is introduced.
+smoke combines those native proofs with the frozen reducer. A separate native
+payload effect now stages only a source whose opened-handle SHA-256 matches the
+content-addressed identity. It creates owner-only pending files, flushes and
+renames the executable before the owner record commit marker, reopens both
+through the collector, and compensates only transaction-owned handles. It has
+no SCM, process, DNS, proxy, VPN, socket, or packet API. Durable lifecycle-state
+storage, SCM effects, and lifecycle qualification remain and must land as
+separate bounded steps before any Windows networking effect is introduced.
 
 ## M5 - Packet-Level Capabilities
 

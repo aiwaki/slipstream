@@ -89,6 +89,22 @@ impl WindowsServiceOwnershipCollector {
     pub fn assess(&self) -> WindowsServiceOwnershipAssessment {
         assess_windows_service_ownership(&self.collect_input())
     }
+
+    pub fn collect_staged_payload(&self) -> WindowsStagedPayloadEvidence {
+        match machine_owner_record_path() {
+            Ok(path) => staged_payload_evidence_at(&path),
+            Err(_) => WindowsStagedPayloadEvidence {
+                record: WindowsOwnerRecordEvidence::Inaccessible,
+                executable: WindowsExecutableEvidence::NotChecked,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowsStagedPayloadEvidence {
+    pub record: WindowsOwnerRecordEvidence,
+    pub executable: WindowsExecutableEvidence,
 }
 
 fn scm_evidence() -> WindowsScmEvidence {
@@ -99,7 +115,7 @@ fn scm_evidence() -> WindowsScmEvidence {
     }
 }
 
-fn machine_owner_record_path() -> Result<PathBuf, NativeEvidenceError> {
+pub(crate) fn machine_owner_record_path() -> Result<PathBuf, NativeEvidenceError> {
     let mut raw_path = null_mut();
     let result =
         unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, null_mut(), &mut raw_path) };
@@ -112,6 +128,15 @@ fn machine_owner_record_path() -> Result<PathBuf, NativeEvidenceError> {
     path.push(WINDOWS_OWNER_RECORD_DIRECTORY);
     path.push(WINDOWS_OWNER_RECORD_FILE_NAME);
     Ok(path)
+}
+
+pub(crate) fn staged_payload_evidence_at(path: &Path) -> WindowsStagedPayloadEvidence {
+    let record = read_owner_record(path);
+    let executable = match &record {
+        WindowsOwnerRecordEvidence::OwnerOnly { record } => verify_executable(record),
+        _ => WindowsExecutableEvidence::NotChecked,
+    };
+    WindowsStagedPayloadEvidence { record, executable }
 }
 
 fn read_owner_record(path: &Path) -> WindowsOwnerRecordEvidence {
@@ -225,7 +250,10 @@ fn open_readonly(path: &Path, desired_access: u32) -> Result<File, NativeEvidenc
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 
-fn validate_regular_file(file: &File, maximum_size: u64) -> Result<u64, NativeEvidenceError> {
+pub(crate) fn validate_regular_file(
+    file: &File,
+    maximum_size: u64,
+) -> Result<u64, NativeEvidenceError> {
     let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
     let ok = unsafe { GetFileInformationByHandle(raw_handle(file), information.as_mut_ptr()) };
     if ok == 0 {
@@ -243,7 +271,10 @@ fn validate_regular_file(file: &File, maximum_size: u64) -> Result<u64, NativeEv
     Ok(size)
 }
 
-fn final_path_matches(file: &File, expected: &Path) -> Result<bool, NativeEvidenceError> {
+pub(crate) fn final_path_matches(
+    file: &File,
+    expected: &Path,
+) -> Result<bool, NativeEvidenceError> {
     let mut actual = vec![0u16; MAX_FINAL_PATH_UTF16_UNITS];
     let length = unsafe {
         GetFinalPathNameByHandleW(
@@ -286,7 +317,9 @@ fn strip_extended_dos_prefix(path: &[u16]) -> &[u16] {
     path.strip_prefix(PREFIX).unwrap_or(path)
 }
 
-fn has_trusted_machine_write_permissions(file: &File) -> Result<bool, NativeEvidenceError> {
+pub(crate) fn has_trusted_machine_write_permissions(
+    file: &File,
+) -> Result<bool, NativeEvidenceError> {
     let mut owner: PSID = null_mut();
     let mut dacl: *mut ACL = null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
@@ -367,7 +400,7 @@ fn is_trusted_machine_sid(sid: PSID) -> bool {
     }
 }
 
-fn raw_handle(file: &File) -> HANDLE {
+pub(crate) fn raw_handle(file: &File) -> HANDLE {
     file.as_raw_handle()
 }
 
@@ -406,7 +439,7 @@ impl Drop for OwnedLocalSecurityDescriptor {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NativeEvidenceError {
+pub(crate) enum NativeEvidenceError {
     Missing,
     Inaccessible,
     Invalid,

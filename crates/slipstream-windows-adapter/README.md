@@ -42,8 +42,18 @@ way and SHA-256 is computed before the handle is released. Missing,
 inaccessible, ambiguous, or permissively writable evidence cannot become
 `owned`.
 
-Native service mutation, process, storage, DNS, proxy, VPN, packet, and
-installer effects belong in later modules and must keep the v1 recording
+`service_payload` implements only the native `StagePayload` and
+`RemoveOwnedPayload` effects. It accepts a source only when the exact opened
+regular-file handle hashes to the lifecycle identity, creates owner-only
+non-reparse directories and pending files, flushes each file, and renames on the
+same volume with write-through semantics. The executable is committed first;
+the strict owner record is the final commit marker. The read-only collector then
+reopens both paths and must reproduce the exact identity. Failure compensation
+marks only handles created by that transaction for deletion, while an existing
+foreign or ambiguous path is never replaced.
+
+Native SCM mutation, process, durable lifecycle-state, DNS, proxy, VPN, packet,
+and installer effects belong in later modules and must keep the v1 recording
 harnesses available for regression tests. Policy rollback remains explicitly
 atomic: durable commit and runtime activation must either both succeed or leave
 the current policy active.
