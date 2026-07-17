@@ -51,7 +51,7 @@ pub enum WindowsEffectStage {
     CommitCandidate,
     RestoreActive,
     RecordRejection,
-    CommitRollback,
+    CommitAndActivateRollback,
     ApplyRecovery,
 }
 
@@ -64,7 +64,7 @@ impl WindowsEffectStage {
             Self::CommitCandidate => "commit_candidate",
             Self::RestoreActive => "restore_active",
             Self::RecordRejection => "record_rejection",
-            Self::CommitRollback => "commit_rollback",
+            Self::CommitAndActivateRollback => "commit_and_activate_rollback",
             Self::ApplyRecovery => "apply_recovery",
         }
     }
@@ -95,7 +95,7 @@ pub enum RecordedWindowsEffect {
         reason: String,
         detail: String,
     },
-    CommitRollback {
+    CommitAndActivateRollback {
         policy: PolicyIdentity,
         generation: u64,
     },
@@ -113,7 +113,7 @@ impl RecordedWindowsEffect {
             Self::CommitCandidate { .. } => "commit_candidate",
             Self::RestoreActive { .. } => "restore_active",
             Self::RecordRejection { .. } => "record_rejection",
-            Self::CommitRollback { .. } => "commit_rollback",
+            Self::CommitAndActivateRollback { .. } => "commit_and_activate_rollback",
             Self::ApplyRecovery { .. } => "apply_recovery",
         }
     }
@@ -158,7 +158,7 @@ pub trait WindowsEffects {
         detail: &str,
     ) -> Result<(), Self::Error>;
 
-    fn commit_rollback(
+    fn commit_and_activate_rollback(
         &mut self,
         manifest: &RoutePolicyManifest,
         policy: &PolicyIdentity,
@@ -291,17 +291,18 @@ impl WindowsEffects for RecordingWindowsEffects {
         self.finish(WindowsEffectStage::RecordRejection)
     }
 
-    fn commit_rollback(
+    fn commit_and_activate_rollback(
         &mut self,
         _manifest: &RoutePolicyManifest,
         policy: &PolicyIdentity,
         generation: u64,
     ) -> Result<(), Self::Error> {
-        self.events.push(RecordedWindowsEffect::CommitRollback {
-            policy: policy.clone(),
-            generation,
-        });
-        self.finish(WindowsEffectStage::CommitRollback)
+        self.events
+            .push(RecordedWindowsEffect::CommitAndActivateRollback {
+                policy: policy.clone(),
+                generation,
+            });
+        self.finish(WindowsEffectStage::CommitAndActivateRollback)
     }
 
     fn apply_recovery(&mut self, action: &RecoveryAction) -> Result<(), Self::Error> {
@@ -504,7 +505,7 @@ impl WindowsAdapterV1 {
                 )?;
                 let action = &transition.actions[0];
                 let manifest = self.manifest_for(&action.policy)?;
-                if let Err(error) = effects.commit_rollback(
+                if let Err(error) = effects.commit_and_activate_rollback(
                     &manifest,
                     &action.policy,
                     transition.state.trial_generation,
@@ -514,7 +515,9 @@ impl WindowsAdapterV1 {
                         decision: PolicyActivationDecisionKind::NoChange,
                         reason: transition.reason,
                         accepted: false,
-                        error: Some(format!("commit_rollback effect failed: {error}")),
+                        error: Some(format!(
+                            "commit_and_activate_rollback effect failed: {error}"
+                        )),
                     });
                 }
                 self.activation_state = transition.state.clone();

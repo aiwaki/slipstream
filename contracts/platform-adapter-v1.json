@@ -15,6 +15,7 @@
     "external_dns_proxy_pac_vpn_read_only": true,
     "protected_local_bypass_never_uses_geph": true,
     "activation_effects_follow_reducer_order": true,
+    "rollback_commit_and_activation_are_atomic": true,
     "effect_failure_is_compensated": true
   },
   "bundled_source": "bundled:v1",
@@ -122,4 +123,3 @@
     }
   ]
 }
-

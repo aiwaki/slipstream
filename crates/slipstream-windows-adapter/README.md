@@ -8,6 +8,8 @@ StatusV2, and classifies traffic without calling Windows or touching the host.
 `RecordingWindowsEffects` is the deterministic fake used by contract tests.
 Native service, process, DNS, proxy, VPN, packet, and installer effects belong
 in later modules and must keep the v1 harness available for regression tests.
+The rollback boundary is explicitly atomic: durable commit and runtime
+activation must either both succeed or leave the current policy active.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml

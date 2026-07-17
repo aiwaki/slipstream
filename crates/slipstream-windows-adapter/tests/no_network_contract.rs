@@ -78,7 +78,7 @@ fn stage(value: &str) -> WindowsEffectStage {
         "commit_candidate" => WindowsEffectStage::CommitCandidate,
         "restore_active" => WindowsEffectStage::RestoreActive,
         "record_rejection" => WindowsEffectStage::RecordRejection,
-        "commit_rollback" => WindowsEffectStage::CommitRollback,
+        "commit_and_activate_rollback" => WindowsEffectStage::CommitAndActivateRollback,
         "apply_recovery" => WindowsEffectStage::ApplyRecovery,
         other => panic!("unknown fake effect stage {other:?}"),
     }
@@ -324,7 +324,46 @@ fn windows_harness_rolls_back_only_through_the_effect_boundary() {
             .iter()
             .map(|event| event.kind())
             .collect::<Vec<_>>(),
-        vec!["commit_rollback"]
+        vec!["commit_and_activate_rollback"]
+    );
+}
+
+#[test]
+fn atomic_rollback_failure_preserves_the_active_policy() {
+    let adapter_contract = fixture();
+    let bundle_contract = parse_json(BUNDLE_V1, "route policy bundle contract");
+    let manifest_contract = parse_json(MANIFEST_V1, "route policy manifest contract");
+    let bundle = resolved_bundle(&bundle_contract, &manifest_contract);
+    let keys = trusted_keys(&bundle_contract);
+    let mut adapter = new_adapter(&adapter_contract);
+    let mut effects = RecordingWindowsEffects::default();
+
+    adapter
+        .apply_signed_bundle(&bundle, &keys, &mut effects)
+        .unwrap();
+    let signed_source = adapter.active_manifest().unwrap().source.clone();
+    effects.clear_events();
+    effects.fail_once(
+        WindowsEffectStage::CommitAndActivateRollback,
+        "fake atomic rollback unavailable",
+    );
+
+    let rollback = adapter.rollback(&mut effects).unwrap();
+    assert!(!rollback.accepted);
+    assert_eq!(rollback.decision, PolicyActivationDecisionKind::NoChange);
+    assert_eq!(adapter.active_manifest().unwrap().source, signed_source);
+    assert!(rollback
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("commit_and_activate_rollback effect failed"));
+    assert_eq!(
+        effects
+            .events()
+            .iter()
+            .map(|event| event.kind())
+            .collect::<Vec<_>>(),
+        vec!["commit_and_activate_rollback"]
     );
 }
 
