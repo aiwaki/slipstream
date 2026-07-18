@@ -184,11 +184,17 @@ hosts are reclassified through the active tables. Resolver evidence binds one
 canonical host to its observed address set, and the selected destination must
 belong to that set. The evidence type is opaque and non-deserializable so only
 the future native collector can issue it. IPv6 candidates are conservatively limited to reviewed
-global-unicast space and exclude IANA special-purpose ranges. A candidate is
-not native route authorization and still requires shared-destination conflict
-evidence. The pure contract cannot load a DLL, create an adapter, install a
-route, change the default route, or touch system DNS, proxy, PAC, VPN, or
-production traffic.
+global-unicast space and exclude IANA special-purpose ranges. A separate pure
+admission requires a complete collector-owned binding snapshot for the exact
+destination. The candidate host must occur in a bounded canonical sorted set,
+and every host in that set must reclassify to the same route class and strategy.
+Partial DNS observations, stale evidence, and shared direct/local/geo
+destinations fail closed. The admission is generation-bound and expires at the
+earlier evidence deadline. It is still not native route authorization: a future
+effect must retain the same collector-generation lease for the route's entire
+lifetime and remove the route before releasing it. The pure contract cannot load
+a DLL, create an adapter, install a route, change the default route, or touch
+system DNS, proxy, PAC, VPN, or production traffic.
 
 Wintun exposes L3 packets rather than the accepted TCP stream expected by
 direct-ingress and capture-source v1. A separately reviewed userspace packet

@@ -3,6 +3,8 @@ use serde_json::Value;
 use slipstream_windows_adapter::packet_adapter::{
     admit_windows_packet_adapter_artifact, WindowsPacketAdapterArtifactEvidence,
     WindowsPacketAdapterErrorCode, WindowsPacketAdapterSignatureStatus,
+    WindowsPacketRouteConflictErrorCode, MAX_PACKET_ROUTE_CONFLICT_EVIDENCE_LIFETIME_MS,
+    MAX_PACKET_ROUTE_CONFLICT_HOSTS, MAX_PACKET_ROUTE_CONFLICT_HOST_BYTES,
     WINDOWS_PACKET_ADAPTER_CONTRACT_VERSION, WINTUN_AMD64_DLL_LENGTH, WINTUN_AMD64_DLL_PATH,
     WINTUN_AMD64_DLL_SHA256, WINTUN_AMD64_PE_MACHINE, WINTUN_ARCHIVE_LENGTH, WINTUN_ARCHIVE_SHA256,
     WINTUN_ARM64_DLL_LENGTH, WINTUN_ARM64_DLL_PATH, WINTUN_ARM64_DLL_SHA256,
@@ -147,6 +149,42 @@ fn source_record_and_contract_freeze_the_same_official_artifacts() {
         fixture.invariants["shared_destination_conflict_check_required"],
         true
     );
+    assert_eq!(
+        fixture.invariants["conflict_evidence_is_collector_issued"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["conflict_evidence_is_deserializable"],
+        false
+    );
+    assert_eq!(
+        fixture.invariants["complete_owned_resolution_boundary_required"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["partial_dns_observation_is_sufficient"],
+        false
+    );
+    assert_eq!(
+        fixture.invariants["conflict_binding_hosts_are_policy_hostnames"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["binding_changes_advance_collector_generation"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["native_route_effect_requires_atomic_generation_guard"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["route_lifetime_requires_collector_generation_lease"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["conflict_admission_is_native_authorization"],
+        false
+    );
     assert_eq!(fixture.invariants["native_route_installation"], false);
     assert_eq!(fixture.invariants["system_dns_mutation"], false);
     assert_eq!(fixture.invariants["proxy_pac_vpn_mutation"], false);
@@ -191,6 +229,28 @@ fn every_artifact_failure_has_a_stable_machine_code() {
         WindowsPacketAdapterErrorCode::TimestampMissing,
     ];
     assert!(codes.iter().all(|code| !code.as_str().is_empty()));
+}
+
+#[test]
+fn every_route_conflict_failure_has_a_stable_machine_code() {
+    let codes = [
+        WindowsPacketRouteConflictErrorCode::RouteEvidenceExpired,
+        WindowsPacketRouteConflictErrorCode::RoutePolicyChanged,
+        WindowsPacketRouteConflictErrorCode::EvidenceDestinationMismatch,
+        WindowsPacketRouteConflictErrorCode::EvidenceCoverageIncomplete,
+        WindowsPacketRouteConflictErrorCode::EvidenceGenerationInvalid,
+        WindowsPacketRouteConflictErrorCode::EvidenceWindowInvalid,
+        WindowsPacketRouteConflictErrorCode::EvidenceExpired,
+        WindowsPacketRouteConflictErrorCode::EvidenceBindingLimitExceeded,
+        WindowsPacketRouteConflictErrorCode::EvidenceHostNotCanonical,
+        WindowsPacketRouteConflictErrorCode::EvidenceHostsNotSortedUnique,
+        WindowsPacketRouteConflictErrorCode::EvidenceCandidateHostMissing,
+        WindowsPacketRouteConflictErrorCode::SharedDestinationConflict,
+    ];
+    assert!(codes.iter().all(|code| !code.as_str().is_empty()));
+    assert_eq!(MAX_PACKET_ROUTE_CONFLICT_EVIDENCE_LIFETIME_MS, 30_000);
+    assert_eq!(MAX_PACKET_ROUTE_CONFLICT_HOSTS, 256);
+    assert_eq!(MAX_PACKET_ROUTE_CONFLICT_HOST_BYTES, 253);
 }
 
 #[test]
@@ -352,4 +412,17 @@ fn native_collector_is_handle_bound_offline_and_has_no_packet_effects() {
     let production_host = include_str!("../src/service_host/windows.rs");
     assert!(!production_host.contains("packet_adapter"));
     assert!(!production_host.contains("wintun"));
+}
+
+#[test]
+fn shared_destination_admission_is_opaque_pure_and_not_composed() {
+    let source = include_str!("../src/packet_adapter/v1.rs").replace("\r\n", "\n");
+    assert!(source.contains(
+        "#[derive(Debug, Eq, PartialEq)]\npub struct WindowsPacketRouteConflictEvidence"
+    ));
+    assert!(source.contains("#[derive(Debug)]\npub struct WindowsPacketRouteConflictAdmission"));
+
+    let production_host = include_str!("../src/service_host/windows.rs");
+    assert!(!production_host.contains("admit_windows_packet_route_conflicts"));
+    assert!(!production_host.contains("WindowsPacketRouteConflictAdmission"));
 }
