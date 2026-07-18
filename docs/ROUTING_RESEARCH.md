@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-18 | Native Wintun artifact evidence | Implemented read-only; Windows qualification required | The native collector hashes bounded non-reparse archive, license, and DLL handles, parses the exact PE machine, and gives `WinVerifyTrust` the same held DLL handle. It performs no UI or network retrieval, extracts the exact certificate organization and SHA-256, requires a trusted timestamp countersigner, and retains the DLL handle in an opaque admission. It cannot load Wintun or create adapters/routes. | Qualify both official AMD64 and ARM64 DLLs in Windows CI, including exact admission and tamper rejection; only then move to shared-destination conflict admission. |
 | 2026-07-18 | Windows packet-route evidence review | Fixed before merge | A policy result and a caller-labeled DNS source did not prove that the selected destination came from resolving the policy host; reserved IPv6 such as `::2` could also pass the former denylist. Route requests now consume an opaque, non-deserializable resolver evidence capability binding the canonical host to the complete observed address set, require the selected destination to occur in that set, and conservatively admit only reviewed global-unicast IPv6 space outside IANA special-purpose ranges. The future native collector is the only allowed issuer; the plan remains non-authorizing. | Keep evidence issuance inside the native collector and require a separate shared-destination conflict gate before any route-table effect. |
 | 2026-07-18 | Windows production signing and packet-adapter pivot | Pure artifact/route-plan admission implemented; native effects absent | Do not ship a Slipstream-owned kernel driver. Use only the unmodified official signed Wintun 0.14.1 AMD64/ARM64 package after exact archive, license, DLL, PE-machine, Authenticode publisher, signer, and timestamp verification. Wintun is L3 rather than an accepted-stream source, so old WFP contracts remain dormant research. Candidate `/32` and `/128` plans are not native authorization and cannot mutate default routes or external DNS/proxy/PAC/VPN. | Implement a read-only native artifact collector with `WinVerifyTrust`, then qualify both architectures. Keep DLL loading, adapter creation, routes, and production composition disabled. |
 | 2026-07-18 | Native Windows TCP capture mechanism | Superseded shipping path; frozen research contracts remain | The WFP wire, runtime, and management-session contracts still document a safe connect-redirect lifecycle, but implementing it requires a separately signed Slipstream kernel driver. Do not build or package that driver. | Preserve v1 fixtures without composing them. Continue through the no-own-driver Wintun packet boundary. |
@@ -57,7 +58,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-10 | External Geph coexistence | Fixed and live-verified | `:9909` is detected for diagnostics only and is never adopted or stopped without explicit port opt-in. | Preserve this constraint when Geph moves to a user LaunchAgent. |
 | 2026-07-10 | Geph secret permissions | Fixed and live-verified | Config directory is `0700`; secret-bearing files and runtime ownership state are atomically written as `0600`, including migration of existing files. | Move the account secret to Keychain in a later hardening PR. |
 | 2026-07-10 | PyInstaller spec working directory | Fixed in M0 | Resolve daemon, policy keys, and vendored Telegram proxy from `SPECPATH`; invoking PyInstaller from the repo root must not silently omit `proxy.*`. | Keep the path-stability assertion and frozen Telegram readiness smoke test. |
-| 2026-07-18 | Codebase graph MCP transport | Workaround active | Fresh-clone indexing again returned `Transport closed`; discovery used the audited source plus narrow searches rather than assuming the graph was current. | Repair or restart the MCP transport before relying on graph freshness; keep the documented narrow-search fallback. |
+| 2026-07-18 | Codebase graph MCP transport | Workaround active; repeated during Wintun collector work | Fresh-clone indexing and the later project-list request both returned `Transport closed`; discovery used the audited source plus narrow searches rather than assuming the graph was current. | Repair or restart the MCP transport before relying on graph freshness; keep the documented narrow-search fallback. |
 | 2026-07-08 | SonicDPI target identity | Reference only | Copy the principle of verified host/IP identity, not raw packet interception. | Use this when designing any future UDP/QUIC handling. |
 | 2026-07-08 | Discord domain family | Partially adopted | Keep Discord on local bypass and cover the broad brand family. | Add only evidence-backed host expansions. |
 | 2026-07-08 | Discord voice UDP | Future platform work | Full UDP handling needs packet-level filtering, not broad pf redirects. | Revisit under Network Extension or platform adapter work. |
@@ -136,6 +137,8 @@ reputation for the userspace application remain a separate release concern.
 [Wintun](https://www.wintun.net/) publishes precompiled, signed DLLs that may
 be distributed unchanged with software. Version 0.14.1 includes AMD64 and
 ARM64 builds and exposes an L3 adapter for userspace IPv4/IPv6 packet handling.
+It is a local adapter API, not the WireGuard network protocol: this choice adds
+no WireGuard tunnel, peer, endpoint, or wire traffic.
 It therefore avoids a Slipstream-owned driver certificate, but it is not a
 drop-in replacement for the old WFP stream boundary: Wintun supplies packets,
 not an accepted TCP socket or original-destination context.
@@ -177,6 +180,33 @@ No current code downloads or loads `wintun.dll`, creates an adapter, installs a
 route, handles a packet, changes the default route, or composes network effects
 into the production Windows service. External DNS, proxy, PAC, and VPN state
 remain read-only.
+
+### Native artifact collector
+
+The Windows collector opens the already-staged archive, license, and DLL with
+`FILE_FLAG_OPEN_REPARSE_POINT` and read-only sharing, verifies each final path,
+and hashes each exact handle. It parses only the bounded DOS and PE headers for
+the machine value. The DLL stays open while its same handle is supplied through
+`WINTRUST_FILE_INFO.hFile` to
+[`WinVerifyTrust`](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust),
+which prevents a path replacement between hashing and signature validation.
+
+The Authenticode operation uses no UI and
+`WTD_CACHE_ONLY_URL_RETRIEVAL`; it does not perform hidden online revocation
+lookups. A result is valid only when Windows returns exact success, the leaf
+certificate organization is `WireGuard LLC`, its SHA-256 matches the pinned
+certificate, and the provider exposes a successful timestamp countersigner.
+Every verification state is closed through `WTD_STATEACTION_CLOSE`. Microsoft
+documents both the optional held handle in
+[`WINTRUST_FILE_INFO`](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_file_info)
+and the required verify/close lifecycle in
+[`WINTRUST_DATA`](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data).
+
+The returned native admission is non-cloneable and retains the read-only DLL
+handle. No loader exists in this change. CI first verifies the official archive
+length and SHA-256 before extraction, then asks the collector to admit both the
+AMD64 and ARM64 DLLs and reject a changed copy. Adapter creation, exact-route
+ownership, packet processing, and production composition remain absent.
 
 ### Remaining safety gates
 

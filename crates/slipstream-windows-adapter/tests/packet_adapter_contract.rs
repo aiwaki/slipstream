@@ -294,3 +294,62 @@ fn every_pinned_artifact_field_is_enforced() {
         );
     }
 }
+
+#[test]
+fn native_collector_is_handle_bound_offline_and_has_no_packet_effects() {
+    let source = include_str!("../src/packet_adapter/windows.rs").replace("\r\n", "\n");
+    let production = source
+        .split("#[cfg(test)]\nmod tests")
+        .next()
+        .expect("production collector source");
+
+    for required in [
+        "open_readonly",
+        "FILE_SHARE_READ",
+        "final_path_matches",
+        "validate_regular_file",
+        "Sha256",
+        "read_pe_machine",
+        "WinVerifyTrust",
+        "hFile: raw_handle(file)",
+        "WTD_CACHE_ONLY_URL_RETRIEVAL",
+        "WTHelperProvDataFromStateData",
+        "WTHelperGetProvSignerFromChain",
+        "CertGetCertificateContextProperty",
+        "CERT_SHA256_HASH_PROP_ID",
+        "SGNR_TYPE_TIMESTAMP",
+    ] {
+        assert!(
+            production.contains(required),
+            "native packet-adapter collector must retain {required}"
+        );
+    }
+
+    for forbidden in [
+        "LoadLibrary",
+        "GetProcAddress",
+        "WintunCreateAdapter",
+        "WintunOpenAdapter",
+        "WintunStartSession",
+        "CreateIpForwardEntry",
+        "CreateIpForwardEntry2",
+        "SetIpForwardEntry",
+        "DeleteIpForwardEntry",
+        "DnsQuery",
+        "Set-DnsClientServerAddress",
+        "WinHttp",
+        "TcpStream",
+        "UdpSocket",
+        "std::process",
+        "Command::",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "read-only collector contains forbidden effect surface {forbidden}"
+        );
+    }
+
+    let production_host = include_str!("../src/service_host/windows.rs");
+    assert!(!production_host.contains("packet_adapter"));
+    assert!(!production_host.contains("wintun"));
+}

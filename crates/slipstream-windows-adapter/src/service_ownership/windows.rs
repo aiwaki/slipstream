@@ -237,7 +237,7 @@ fn verify_executable_inner_with_share(
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn open_readonly(
+pub(crate) fn open_readonly(
     path: &Path,
     desired_access: u32,
     share_mode: u32,
