@@ -62,6 +62,12 @@ const GEPH_LAUNCH_AGENT_PLIST: &str = "dev.slipstream.geph.plist";
 const GEPH_RUNTIME_DIR: &str = "runtime";
 const GEPH_RUNTIME_BIN: &str = "geph5-client";
 const GEPH_LAUNCHER_FILE: &str = "geph-launcher";
+const GEPH_STDOUT_LOG_FILE: &str = "geph.stdout.log";
+const GEPH_STDERR_LOG_FILE: &str = "geph.stderr.log";
+const GEPH_LOG_ARCHIVE_SUFFIX: &str = ".previous";
+const GEPH_LOG_MAX_BYTES: u64 = 1024 * 1024;
+const GEPH_LOG_RETAIN_BYTES: u64 = 256 * 1024;
+const GEPH_LOG_GUARD_INTERVAL_SECS: u64 = 5;
 
 // geph5-client is owned by a per-user LaunchAgent. A private launcher writes the
 // current PID/executable/config record immediately before exec; a listener alone
@@ -119,7 +125,7 @@ fn tr(en: &str) -> String {
         "Streaming" => "Стриминг",
         "Launch at Login" => "Запускать при входе",
         "Restart Proxy" => "Перезапустить прокси",
-        "Open Log" => "Открыть лог",
+        "Open Status" => "Открыть статус",
         "Copy Diagnostics" => "Скопировать диагностику",
         "Unable to save Geph account" => "Не удалось сохранить аккаунт Geph",
         "Check for Updates…" => "Проверить обновления…",
@@ -206,26 +212,6 @@ fn copy_log_snapshot_direct(log_path: &str, snapshot_path: &Path) -> bool {
         return false;
     }
     fs::set_permissions(snapshot_path, fs::Permissions::from_mode(0o600)).is_ok()
-}
-
-fn open_log_snapshot() -> bool {
-    let snapshot = std::env::temp_dir().join("slipstream.log");
-    if !copy_log_snapshot_direct(LOG_PATH, &snapshot) {
-        let Some(uid) = current_numeric_id("-u") else {
-            return false;
-        };
-        let Some(gid) = current_numeric_id("-g") else {
-            return false;
-        };
-        let shell = log_snapshot_shell(LOG_PATH, &snapshot, &uid, &gid);
-        if !run_admin_status(
-            &shell,
-            "Slipstream needs administrator access to copy its daemon log.",
-        ) {
-            return false;
-        }
-    }
-    Command::new("/usr/bin/open").arg(snapshot).spawn().is_ok()
 }
 
 fn diagnostic_log_tail_with_admin_fallback(log_path: &str, max_lines: usize) -> Value {
@@ -559,6 +545,67 @@ fn diagnostic_snapshot_value(
     snapshot
 }
 
+fn attach_geph_log_tails(app: &AppHandle, snapshot: &mut Value) {
+    let Ok(paths) = geph_launch_agent_paths_for_app(app) else {
+        return;
+    };
+    snapshot["geph_logs"] = json!({
+        "stdout": {
+            "current": diagnostic_log_tail_from_path(
+                GEPH_STDOUT_LOG_FILE,
+                &paths.stdout_log,
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+            "previous": diagnostic_log_tail_from_path(
+                &format!("{GEPH_STDOUT_LOG_FILE}{GEPH_LOG_ARCHIVE_SUFFIX}"),
+                &geph_log_archive_path(&paths.stdout_log),
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+        },
+        "stderr": {
+            "current": diagnostic_log_tail_from_path(
+                GEPH_STDERR_LOG_FILE,
+                &paths.stderr_log,
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+            "previous": diagnostic_log_tail_from_path(
+                &format!("{GEPH_STDERR_LOG_FILE}{GEPH_LOG_ARCHIVE_SUFFIX}"),
+                &geph_log_archive_path(&paths.stderr_log),
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+        },
+    });
+    sanitize_json(snapshot);
+}
+
+fn open_status_snapshot(app: &AppHandle) -> bool {
+    let bundled_daemon = bundled_daemon_path(app);
+    let status = read_status();
+    let daemon_status_present = status.is_some();
+    let mut snapshot = diagnostic_snapshot_value(
+        &app.package_info().version.to_string(),
+        status,
+        geph_lifecycle_diagnostic_value(
+            Path::new(INSTALLED_DAEMON).exists() && Path::new(LAUNCHD_PLIST).exists(),
+            daemon_status_present,
+            current_numeric_id("-u").is_some_and(|uid| geph_launch_agent_loaded(&uid)),
+        ),
+        unix_now_secs(),
+        None,
+        Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
+        bundled_daemon.as_deref(),
+    );
+    attach_geph_log_tails(app, &mut snapshot);
+    let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
+        return false;
+    };
+    let path = std::env::temp_dir().join("slipstream-status.json");
+    if !write_diagnostic_snapshot_file(&path, &text) {
+        return false;
+    }
+    Command::new("/usr/bin/open").arg(path).spawn().is_ok()
+}
+
 fn copy_text_to_clipboard(text: &str) -> bool {
     let Ok(mut child) = Command::new("/usr/bin/pbcopy")
         .stdin(Stdio::piped())
@@ -584,7 +631,7 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
     let bundled_daemon = bundled_daemon_path(app);
     let status = read_status();
     let daemon_status_present = status.is_some();
-    let snapshot = diagnostic_snapshot_value(
+    let mut snapshot = diagnostic_snapshot_value(
         &app.package_info().version.to_string(),
         status,
         geph_lifecycle_diagnostic_value(
@@ -600,6 +647,7 @@ fn copy_diagnostic_snapshot(app: &AppHandle) -> bool {
         Some(daemon_recovery_status_value(DAEMON_RECOVERY_STATUS_PATH)),
         bundled_daemon.as_deref(),
     );
+    attach_geph_log_tails(app, &mut snapshot);
     let Ok(text) = serde_json::to_string_pretty(&snapshot) else {
         return false;
     };
@@ -791,18 +839,30 @@ fn uninstall_shell_for_paths(
 ) -> String {
     let installed = shell_quote(&installed.to_string_lossy());
     let bundled = shell_quote(&bundled.to_string_lossy());
+    let staged_bundle = PathBuf::from(format!(
+        "{}.removing-{tray_pid}",
+        app_bundle.to_string_lossy()
+    ));
+    let ready = uninstall_ready_path(tray_pid);
     let app_bundle = shell_quote(&app_bundle.to_string_lossy());
+    let staged_bundle = shell_quote(&staged_bundle.to_string_lossy());
+    let ready = shell_quote(&ready.to_string_lossy());
     let remove_app = format!(
-        "pid={tray_pid}; app={app_bundle}; i=0; \
+        "pid={tray_pid}; original={app_bundle}; staged={staged_bundle}; ready={ready}; i=0; \
+         while [ ! -f \"$ready\" ] && [ \"$i\" -lt 600 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
+         [ -f \"$ready\" ] || exit 0; /bin/rm -f -- \"$ready\"; \
+         bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+         \"$original/Contents/Info.plist\" 2>/dev/null || true); \
+         [ \"$bundle_id\" = 'dev.slipstream.tray' ] || exit 1; \
+         [ ! -e \"$staged\" ] && [ ! -L \"$staged\" ] || exit 1; \
+         /bin/mv \"$original\" \"$staged\" || exit 1; i=0; \
          process_is_owned() {{ command=$(/bin/ps -p \"$pid\" -o command= 2>/dev/null || true); \
-         case \"$command\" in \"$app\"/Contents/MacOS/*) return 0;; *) return 1;; esac; }}; \
-         while process_is_owned && [ \"$i\" -lt 50 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
+         case \"$command\" in \"$original\"/Contents/MacOS/*|\"$staged\"/Contents/MacOS/*) return 0;; *) return 1;; esac; }}; \
+         while process_is_owned && [ \"$i\" -lt 300 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
          if process_is_owned; then /bin/kill -TERM \"$pid\" 2>/dev/null || true; fi; \
          i=0; while process_is_owned && [ \"$i\" -lt 20 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
          if process_is_owned; then /bin/kill -KILL \"$pid\" 2>/dev/null || true; fi; \
-         bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
-         \"$app/Contents/Info.plist\" 2>/dev/null || true); \
-         if [ \"$bundle_id\" = 'dev.slipstream.tray' ]; then /bin/rm -rf -- \"$app\"; fi"
+         /bin/rm -rf -- \"$staged\""
     );
     let remove_app = shell_quote(&remove_app);
     format!(
@@ -810,8 +870,45 @@ fn uninstall_shell_for_paths(
          elif [ -x {bundled} ] && {bundled} --uninstall; then cleaned=1; \
          else exit 1; fi; \
          [ \"$cleaned\" = 1 ] || exit 1; \
+         bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+         {app_bundle}/Contents/Info.plist 2>/dev/null || true); \
+         [ \"$bundle_id\" = 'dev.slipstream.tray' ] || exit 1; \
+         [ ! -e {staged_bundle} ] && [ ! -L {staged_bundle} ] || exit 1; \
+         [ ! -e {ready} ] && [ ! -L {ready} ] || exit 1; \
          /usr/bin/nohup /bin/sh -c {remove_app} </dev/null >/dev/null 2>&1 &"
     )
+}
+
+fn uninstall_ready_path(tray_pid: u32) -> PathBuf {
+    std::env::temp_dir().join(format!("slipstream-uninstall-{tray_pid}.ready"))
+}
+
+fn signal_uninstall_ready(tray_pid: u32) -> bool {
+    let path = uninstall_ready_path(tray_pid);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let tmp = path.with_extension(format!("ready.tmp-{}-{nonce}", std::process::id()));
+    let Ok(mut file) = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&tmp)
+    else {
+        return false;
+    };
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(b"ready\n")?;
+        file.sync_all()?;
+        set_mode(&tmp, 0o600)?;
+        fs::hard_link(&tmp, &path)
+    })();
+    let _ = fs::remove_file(&tmp);
+    if result.is_err() {
+        return false;
+    }
+    true
 }
 
 fn uninstall_shell(app: &AppHandle) -> Option<String> {
@@ -1395,6 +1492,38 @@ struct ExitMenuItems {
     dynamic: Vec<MenuItemKind<tauri::Wry>>,
 }
 
+#[derive(Default)]
+struct ExitMenuRefreshState {
+    running: bool,
+    pending: bool,
+}
+
+fn begin_exit_menu_refresh(state: &Mutex<ExitMenuRefreshState>) -> bool {
+    let mut state = state.lock().expect("exit refresh state lock poisoned");
+    if state.running {
+        state.pending = true;
+        return false;
+    }
+    state.running = true;
+    state.pending = false;
+    true
+}
+
+fn finish_exit_menu_refresh(state: &Mutex<ExitMenuRefreshState>, succeeded: bool) -> bool {
+    let mut state = state.lock().expect("exit refresh state lock poisoned");
+    if succeeded {
+        state.running = false;
+        state.pending = false;
+        return false;
+    }
+    if state.pending {
+        state.pending = false;
+        return true;
+    }
+    state.running = false;
+    false
+}
+
 fn cached_exit_catalog(cache_path: Option<&Path>) -> Option<ExitCatalog> {
     let path = cache_path?;
     let raw = fs::read_to_string(path).ok()?;
@@ -1438,8 +1567,12 @@ fn refresh_exit_menu(
     cache_path: Option<PathBuf>,
     geph_menu: Submenu<tauri::Wry>,
     exit_items: Arc<Mutex<ExitMenuItems>>,
+    refresh_state: Arc<Mutex<ExitMenuRefreshState>>,
 ) {
-    std::thread::spawn(move || {
+    if !begin_exit_menu_refresh(&refresh_state) {
+        return;
+    }
+    std::thread::spawn(move || loop {
         for _ in 0..20 {
             std::thread::sleep(Duration::from_secs(2));
             if let Some(live) = geph_net_status_catalog() {
@@ -1458,8 +1591,12 @@ fn refresh_exit_menu(
                         eprintln!("geph exit menu refresh unavailable: {error}");
                     }
                 });
+                finish_exit_menu_refresh(&refresh_state, true);
                 return;
             }
+        }
+        if !finish_exit_menu_refresh(&refresh_state, false) {
+            return;
         }
     });
 }
@@ -1622,6 +1759,8 @@ struct GephLaunchAgentPaths {
     config: PathBuf,
     cache: PathBuf,
     ownership: PathBuf,
+    stdout_log: PathBuf,
+    stderr_log: PathBuf,
     plist: PathBuf,
 }
 
@@ -1635,11 +1774,19 @@ fn geph_launch_agent_paths(config_dir: &Path, home: &Path) -> GephLaunchAgentPat
         config: config_dir.join("geph-active.yaml"),
         cache: config_dir.join("geph-cache.db"),
         ownership: config_dir.join(GEPH_OWNERSHIP_FILE),
+        stdout_log: config_dir.join(GEPH_STDOUT_LOG_FILE),
+        stderr_log: config_dir.join(GEPH_STDERR_LOG_FILE),
         plist: home
             .join("Library")
             .join("LaunchAgents")
             .join(GEPH_LAUNCH_AGENT_PLIST),
     }
+}
+
+fn geph_log_archive_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(GEPH_LOG_ARCHIVE_SUFFIX);
+    PathBuf::from(name)
 }
 
 fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
@@ -1663,6 +1810,10 @@ fn harden_geph_dir(dir: &Path) -> std::io::Result<()> {
         "geph-exits.json",
         "geph.json",
         GEPH_OWNERSHIP_FILE,
+        GEPH_STDOUT_LOG_FILE,
+        GEPH_STDERR_LOG_FILE,
+        "geph.stdout.log.previous",
+        "geph.stderr.log.previous",
     ] {
         let path = dir.join(name);
         if path.exists() {
@@ -1676,6 +1827,15 @@ fn harden_geph_dir(dir: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn ensure_private_append_file(path: &Path) -> std::io::Result<()> {
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(path)?;
+    set_mode(path, 0o600)
 }
 
 fn write_atomic_mode(path: &Path, content: &[u8], mode: u32) -> std::io::Result<()> {
@@ -1803,9 +1963,27 @@ fn xml_escape(value: &str) -> String {
 }
 
 fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
+    geph_launcher_script_with_log_limits(
+        paths,
+        GEPH_LOG_MAX_BYTES,
+        GEPH_LOG_RETAIN_BYTES,
+        GEPH_LOG_GUARD_INTERVAL_SECS,
+        GEPH_SOCKS_PORT,
+    )
+}
+
+fn geph_launcher_script_with_log_limits(
+    paths: &GephLaunchAgentPaths,
+    log_max_bytes: u64,
+    log_retain_bytes: u64,
+    log_guard_interval: u64,
+    socks_port: u16,
+) -> String {
     let executable = paths.executable.to_string_lossy().into_owned();
     let config = paths.config.to_string_lossy().into_owned();
     let ownership = paths.ownership.to_string_lossy().into_owned();
+    let stdout_log = paths.stdout_log.to_string_lossy().into_owned();
+    let stderr_log = paths.stderr_log.to_string_lossy().into_owned();
     let executable_json = serde_json::to_string(&executable).unwrap_or_else(|_| "\"\"".into());
     let config_json = serde_json::to_string(&config).unwrap_or_else(|_| "\"\"".into());
     let label_json = serde_json::to_string(GEPH_LAUNCHD_LABEL).unwrap_or_else(|_| "\"\"".into());
@@ -1816,19 +1994,55 @@ fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
          executable={}\n\
          config={}\n\
          ownership={}\n\
+         stdout_log={}\n\
+         stderr_log={}\n\
+         log_max_bytes={log_max_bytes}\n\
+         log_retain_bytes={log_retain_bytes}\n\
+         log_guard_interval={log_guard_interval}\n\
+         compact_log() {{\n\
+         \x20 path=\"$1\"\n\
+         \x20 [ -f \"$path\" ] || return 0\n\
+         \x20 [ ! -L \"$path\" ] || return 0\n\
+         \x20 size=$(/usr/bin/stat -f %z \"$path\" 2>/dev/null || /usr/bin/printf 0)\n\
+         \x20 case \"$size\" in ''|*[!0-9]*) return 0 ;; esac\n\
+         \x20 [ \"$size\" -le \"$log_max_bytes\" ] && return 0\n\
+         \x20 archive=\"${{path}}{GEPH_LOG_ARCHIVE_SUFFIX}\"\n\
+         \x20 tmp=\"${{archive}}.tmp.$$\"\n\
+         \x20 if /usr/bin/tail -c \"$log_retain_bytes\" \"$path\" > \"$tmp\" 2>/dev/null; then\n\
+         \x20\x20 /bin/chmod 600 \"$tmp\" 2>/dev/null || true\n\
+         \x20\x20 /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null || true\n\
+         \x20\x20 : > \"$path\"\n\
+         \x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20 fi\n\
+         \x20 /bin/rm -f \"$tmp\" 2>/dev/null || true\n\
+         \x20 return 0\n\
+         }}\n\
          uid=$(/usr/bin/id -u)\n\
          /bin/rm -f \"$ownership\"\n\
-         while /usr/bin/nc -z -w 1 127.0.0.1 {GEPH_SOCKS_PORT} >/dev/null 2>&1; do\n\
+         while /usr/bin/nc -z -w 1 127.0.0.1 {socks_port} >/dev/null 2>&1; do\n\
          \x20 /bin/sleep 5\n\
          done\n\
          tmp=\"${{ownership}}.tmp.$$\"\n\
          /usr/bin/printf '{{\"pid\":%s,\"uid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" \"$uid\" {} {} {} > \"$tmp\"\n\
          /bin/chmod 600 \"$tmp\"\n\
          /bin/mv -f \"$tmp\" \"$ownership\"\n\
-         exec \"$executable\" --config \"$config\"\n",
+         compact_log \"$stdout_log\"\n\
+         compact_log \"$stderr_log\"\n\
+         target_pid=$$\n\
+         (\n\
+         \x20 while /bin/kill -0 \"$target_pid\" 2>/dev/null; do\n\
+         \x20\x20 /bin/sleep \"$log_guard_interval\"\n\
+         \x20\x20 /bin/kill -0 \"$target_pid\" 2>/dev/null || exit 0\n\
+         \x20\x20 compact_log \"$stdout_log\"\n\
+         \x20\x20 compact_log \"$stderr_log\"\n\
+         \x20 done\n\
+         ) </dev/null >/dev/null 2>&1 &\n\
+         exec \"$executable\" --config \"$config\" >> \"$stdout_log\" 2>> \"$stderr_log\"\n",
         shell_quote(&executable),
         shell_quote(&config),
         shell_quote(&ownership),
+        shell_quote(&stdout_log),
+        shell_quote(&stderr_log),
         shell_quote(&executable_json),
         shell_quote(&config_json),
         shell_quote(&label_json),
@@ -1840,7 +2054,7 @@ fn geph_launch_agent_plist(paths: &GephLaunchAgentPaths) -> String {
     let workdir = xml_escape(&paths.config_dir.to_string_lossy());
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \\\n+         \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
          <plist version=\"1.0\"><dict>\n\
          <key>Label</key><string>{GEPH_LAUNCHD_LABEL}</string>\n\
          <key>ProgramArguments</key><array><string>{launcher}</string></array>\n\
@@ -2100,6 +2314,10 @@ fn ensure_geph_launch_agent(app: &AppHandle, force_restart: bool) -> Result<bool
     let paths = geph_launch_agent_paths_for_app(app)?;
     harden_geph_dir(&paths.config_dir)
         .map_err(|error| format!("geph config permissions unavailable: {error}"))?;
+    for log_path in [&paths.stdout_log, &paths.stderr_log] {
+        ensure_private_append_file(log_path)
+            .map_err(|error| format!("geph log setup unavailable: {error}"))?;
+    }
     fs::create_dir_all(&paths.runtime_dir)
         .map_err(|error| format!("geph runtime directory unavailable: {error}"))?;
     set_mode(&paths.runtime_dir, 0o700)
@@ -2195,7 +2413,8 @@ pub fn run() {
                 .app_config_dir()
                 .ok()
                 .map(|d| d.join("geph-exits.json"));
-            let catalog = exit_catalog(exits_cache);
+            let catalog = exit_catalog(exits_cache.clone());
+            let exit_refreshing = Arc::new(Mutex::new(ExitMenuRefreshState::default()));
 
             let geph_menu = SubmenuBuilder::new(app, "Geph")
                 .item(
@@ -2232,7 +2451,7 @@ pub fn run() {
                 .item(&geph_menu)
                 .item(&launch)
                 .item(&MenuItemBuilder::with_id(ID_RESTART, tr("Restart Proxy")).build(app)?)
-                .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Log")).build(app)?)
+                .item(&MenuItemBuilder::with_id(ID_LOG, tr("Open Status")).build(app)?)
                 .item(&MenuItemBuilder::with_id(ID_DIAGNOSTICS, tr("Copy Diagnostics")).build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id(ID_UPDATE, tr("Check for Updates…")).build(app)?)
@@ -2268,6 +2487,9 @@ pub fn run() {
             let enable_h = geph_enable.clone();
             let tg_offer_reset_menu = tg_offer_reset.clone();
             let exit_items_menu = exit_items.clone();
+            let exits_cache_menu = exits_cache.clone();
+            let geph_menu_events = geph_menu.clone();
+            let exit_refreshing_menu = exit_refreshing.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
@@ -2298,8 +2520,18 @@ pub fn run() {
                                     notify(app, &tr("Unable to save Geph account"));
                                     return;
                                 }
-                                if let Err(error) = ensure_geph_launch_agent(app, true) {
-                                    eprintln!("geph account update unavailable: {error}");
+                                match ensure_geph_launch_agent(app, true) {
+                                    Ok(true) => refresh_exit_menu(
+                                        app.clone(),
+                                        exits_cache_menu.clone(),
+                                        geph_menu_events.clone(),
+                                        exit_items_menu.clone(),
+                                        exit_refreshing_menu.clone(),
+                                    ),
+                                    Ok(false) => {}
+                                    Err(error) => {
+                                        eprintln!("geph account update unavailable: {error}");
+                                    }
                                 }
                             }
                         }
@@ -2308,8 +2540,18 @@ pub fn run() {
                             geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
                             let _ = enable_h.set_checked(new_on);
                             if new_on {
-                                if let Err(error) = ensure_geph_launch_agent(app, false) {
-                                    eprintln!("geph enable unavailable: {error}");
+                                match ensure_geph_launch_agent(app, false) {
+                                    Ok(true) => refresh_exit_menu(
+                                        app.clone(),
+                                        exits_cache_menu.clone(),
+                                        geph_menu_events.clone(),
+                                        exit_items_menu.clone(),
+                                        exit_refreshing_menu.clone(),
+                                    ),
+                                    Ok(false) => {}
+                                    Err(error) => {
+                                        eprintln!("geph enable unavailable: {error}");
+                                    }
                                 }
                             } else {
                                 // Boot out only Slipstream's user LaunchAgent and
@@ -2327,6 +2569,15 @@ pub fn run() {
                         }
                         ID_RESTART => {
                             tg_offer_reset_menu.fetch_add(1, Ordering::Relaxed);
+                            if geph_enabled(app) {
+                                refresh_exit_menu(
+                                    app.clone(),
+                                    exits_cache_menu.clone(),
+                                    geph_menu_events.clone(),
+                                    exit_items_menu.clone(),
+                                    exit_refreshing_menu.clone(),
+                                );
+                            }
                             if !request_daemon_install(app, true) {
                                 run_admin(
                                     &format!("launchctl kickstart -k system/{LAUNCHD_LABEL}"),
@@ -2335,8 +2586,8 @@ pub fn run() {
                             }
                         }
                         ID_LOG => {
-                            if !open_log_snapshot() {
-                                notify(app, "Unable to open Slipstream log");
+                            if !open_status_snapshot(app) {
+                                notify(app, "Unable to open Slipstream status");
                             }
                         }
                         ID_DIAGNOSTICS => {
@@ -2365,20 +2616,28 @@ pub fn run() {
                                 notify(app, "Unable to disable Slipstream launch at login");
                                 return;
                             }
-                            geph_config_set(app, "enabled", "0");
-                            if let Err(error) = geph_launch_agent_uninstall(app) {
-                                eprintln!("geph uninstall cleanup unavailable: {error}");
-                                notify(app, "Unable to stop bundled Geph; uninstall halted");
-                                return;
-                            }
                             if !run_admin_status(
                                 &uninstall,
                                 "Slipstream needs administrator access to remove its background service and application.",
                             ) {
                                 notify(
                                     app,
-                                    "Bundled Geph stopped; unable to remove Slipstream background service",
+                                    "Unable to remove Slipstream background service",
                                 );
+                                return;
+                            }
+                            // The daemon clears PF and drains accepted streams while
+                            // its geo-exit backend is still alive. Stopping Geph first
+                            // would tear down active ChatGPT/OpenAI connections while
+                            // new TCP attempts were still being intercepted.
+                            if let Err(error) = geph_launch_agent_uninstall(app) {
+                                eprintln!("geph uninstall cleanup unavailable: {error}");
+                                notify(app, "Unable to stop bundled Geph; uninstall incomplete");
+                                return;
+                            }
+                            geph_config_set(app, "enabled", "0");
+                            if !signal_uninstall_ready(std::process::id()) {
+                                notify(app, "Unable to remove Slipstream application");
                                 return;
                             }
                             notify(app, "Slipstream uninstalled");
@@ -2502,12 +2761,10 @@ pub fn run() {
             // RPC is ready, replace the explicit unavailable state in this live menu.
             refresh_exit_menu(
                 app.handle().clone(),
-                app.path()
-                    .app_config_dir()
-                    .ok()
-                    .map(|d| d.join("geph-exits.json")),
+                exits_cache,
                 geph_menu.clone(),
                 exit_items.clone(),
+                exit_refreshing,
             );
 
             Ok(())
@@ -2531,25 +2788,29 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_shell_script, app_bundle_for_bundled_daemon, command_matches_geph,
-        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
-        daemon_recovery_status_value, daemon_state_text, diagnostic_log_tail,
-        diagnostic_log_tail_from_path, diagnostic_snapshot_value, diagnostic_summary_value,
-        exit_catalog, exit_catalog_availability, geph_launch_agent_paths, geph_launch_agent_plist,
+        admin_shell_script, app_bundle_for_bundled_daemon, begin_exit_menu_refresh,
+        command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
+        daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
+        diagnostic_log_tail, diagnostic_log_tail_from_path, diagnostic_snapshot_value,
+        diagnostic_summary_value, exit_catalog, exit_catalog_availability,
+        finish_exit_menu_refresh, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_domain, geph_launch_target, geph_launcher_script,
-        geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
-        launchd_label_disabled_from_output, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
-        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
-        should_request_daemon_install, sync_private_executable, system_proxy_active_from_scutil,
+        geph_launcher_script_with_log_limits, geph_lifecycle_diagnostic_value, harden_geph_dir,
+        install_diagnostic_value, launchd_label_disabled_from_output,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, remove_owned_geph_runtime, route_class_health,
+        routing_health_summary, shell_quote, should_recover_daemon, should_request_daemon_install,
+        signal_uninstall_ready, sync_private_executable, system_proxy_active_from_scutil,
         system_proxy_from_status, telegram_proxy_detail, uninstall_dialog_script_for,
-        uninstall_shell_for_paths, valid_bundled_daemon, write_atomic_if_changed,
-        write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, PF_TOKEN_PATH,
+        uninstall_ready_path, uninstall_shell_for_paths, valid_bundled_daemon,
+        write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
+        ExitCatalogAvailability, ExitMenuRefreshState, DAEMON_RECOVERY_STATUS_PATH,
+        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
+    use std::sync::Mutex;
 
     #[test]
     fn shell_quote_wraps_plain_argument() {
@@ -2615,6 +2876,12 @@ mod tests {
         assert!(shell.contains("/usr/bin/nohup /bin/sh -c"));
         assert!(shell.contains("/bin/ps -p \"$pid\" -o command="));
         assert!(shell.contains("pid=4242"));
+        assert!(shell.contains("Slipstream.app.removing-4242"));
+        assert!(shell.contains("slipstream-uninstall-4242.ready"));
+        assert!(shell.contains("[ ! -e"));
+        assert!(shell.contains("[ ! -L"));
+        assert!(shell.contains("/bin/mv"));
+        assert!(shell.contains("[ \"$i\" -lt 300 ]"));
         assert!(shell.contains("/bin/kill -TERM"));
         assert!(shell.contains("/bin/kill -KILL"));
         assert!(shell.contains("/usr/libexec/PlistBuddy"));
@@ -2688,19 +2955,26 @@ mod tests {
             &app,
             u32::MAX,
         );
+        let staged =
+            std::path::PathBuf::from(format!("{}.removing-{}", app.to_string_lossy(), u32::MAX));
+        let ready = uninstall_ready_path(u32::MAX);
+        let _ = std::fs::remove_file(&ready);
         assert!(std::process::Command::new("/bin/sh")
             .args(["-c", &shell])
             .status()
             .unwrap()
             .success());
+        assert!(signal_uninstall_ready(u32::MAX));
         for _ in 0..40 {
-            if !app.exists() {
+            if !app.exists() && !staged.exists() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         assert!(!app.exists());
+        assert!(!staged.exists());
+        assert!(!ready.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2715,6 +2989,19 @@ mod tests {
         assert!(russian.contains("default button \"Отмена\" cancel button \"Отмена\""));
         assert!(russian.contains("\"Удалить\""));
         assert!(!russian.contains("останется в Applications"));
+    }
+
+    #[test]
+    fn uninstall_ready_signal_never_replaces_an_existing_path() {
+        let pid = u32::MAX - 1;
+        let ready = uninstall_ready_path(pid);
+        let _ = std::fs::remove_file(&ready);
+        std::fs::write(&ready, b"foreign\n").unwrap();
+
+        assert!(!signal_uninstall_ready(pid));
+        assert_eq!(std::fs::read(&ready).unwrap(), b"foreign\n");
+
+        let _ = std::fs::remove_file(ready);
     }
 
     #[test]
@@ -2764,6 +3051,20 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn exit_catalog_refresh_queues_a_retrigger_without_parallel_workers() {
+        let state = Mutex::new(ExitMenuRefreshState::default());
+
+        assert!(begin_exit_menu_refresh(&state));
+        assert!(!begin_exit_menu_refresh(&state));
+        assert!(finish_exit_menu_refresh(&state, false));
+        assert!(!finish_exit_menu_refresh(&state, false));
+
+        assert!(begin_exit_menu_refresh(&state));
+        assert!(!finish_exit_menu_refresh(&state, true));
+        assert!(begin_exit_menu_refresh(&state));
     }
 
     #[test]
@@ -3222,6 +3523,30 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_log_tail_reads_only_a_bounded_byte_window() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-byte-tail-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("geph.log");
+        let mut content = String::from("secret=outside-window\n");
+        content.push_str(&"x".repeat(192 * 1024));
+        content.push_str("\ntail-one\ntail-two\n");
+        std::fs::write(&log, content).unwrap();
+
+        let tail = diagnostic_log_tail(log.to_str().unwrap(), 2);
+        let text = serde_json::to_string(&tail).unwrap();
+
+        assert_eq!(tail["available"], true);
+        assert_eq!(tail["truncated"], true);
+        assert_eq!(tail["lines"], json!(["tail-one", "tail-two"]));
+        assert!(!text.contains("outside-window"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn diagnostic_log_tail_from_snapshot_preserves_raw_log_display_path() {
         let dir = std::env::temp_dir().join(format!(
             "slipstream-diagnostic-log-tail-test-{}",
@@ -3352,8 +3677,11 @@ mod tests {
         let config = dir.join("geph-active.yaml");
         let runtime_dir = dir.join("runtime");
         let runtime_bin = runtime_dir.join("geph5-client");
+        let stderr_log = dir.join(GEPH_STDERR_LOG_FILE);
         std::fs::write(&config, "credentials:\n secret: test\n").unwrap();
         std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::write(&stderr_log, "startup failed\n").unwrap();
+        std::fs::set_permissions(&stderr_log, std::fs::Permissions::from_mode(0o644)).unwrap();
         std::fs::create_dir_all(&runtime_dir).unwrap();
         std::fs::write(&runtime_bin, b"binary").unwrap();
         std::fs::set_permissions(&runtime_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -3368,6 +3696,10 @@ mod tests {
         );
         assert_eq!(
             std::fs::metadata(&config).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(&stderr_log).unwrap().permissions().mode() & 0o777,
             0o600
         );
         assert_eq!(
@@ -3411,6 +3743,9 @@ mod tests {
         assert!(plist.contains("<key>KeepAlive</key><true/>"));
         assert!(plist.contains("<key>RunAtLoad</key><true/>"));
         assert!(plist.contains(&format!("<string>{}</string>", paths.launcher.display())));
+        assert_eq!(plist.matches("<string>/dev/null</string>").count(), 2);
+        assert!(!plist.contains(&format!("<string>{}</string>", paths.stdout_log.display())));
+        assert!(!plist.contains(&format!("<string>{}</string>", paths.stderr_log.display())));
         assert!(!plist.contains("geph-active.yaml"));
         assert!(!plist.contains("secret"));
     }
@@ -3429,17 +3764,85 @@ mod tests {
         assert!(script.contains("uid=$(/usr/bin/id -u)"));
         let ownership_write = script
             .lines()
-            .find(|line| line.contains("/usr/bin/printf"))
+            .find(|line| line.contains("/usr/bin/printf") && line.contains("{\"pid\":"))
             .expect("launcher writes an ownership record");
         assert!(ownership_write.contains("\"$$\""));
         assert!(ownership_write.contains("\"$uid\""));
         assert!(ownership_write.contains("> \"$tmp\""));
         assert!(!script.contains("\n+"));
-        assert!(script.contains("exec \"$executable\" --config \"$config\""));
+        assert!(script.contains("log_max_bytes=1048576"));
+        assert!(script.contains("log_retain_bytes=262144"));
+        assert!(script.contains("log_guard_interval=5"));
+        assert!(script.contains("/usr/bin/tail -c \"$log_retain_bytes\""));
+        assert!(script.contains("archive=\"${path}.previous\""));
+        assert!(script.contains("/bin/kill -0 \"$target_pid\""));
+        assert!(script.contains(
+            "exec \"$executable\" --config \"$config\" >> \"$stdout_log\" 2>> \"$stderr_log\""
+        ));
         assert!(script.contains("'\\''"));
         assert!(!script.contains("pkill"));
         assert!(!script.contains("killall"));
-        assert!(!script.contains("/bin/kill"));
+        assert!(!script
+            .lines()
+            .any(|line| line.contains("/bin/kill ") && !line.contains("/bin/kill -0")));
+    }
+
+    #[test]
+    fn geph_launcher_rotates_live_logs_without_replacing_the_geph_pid() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-geph-log-rotation-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let config_dir = dir.join("Application Support").join("dev.slipstream.tray");
+        let home = dir.join("home");
+        let paths = geph_launch_agent_paths(&config_dir, &home);
+        std::fs::create_dir_all(&paths.runtime_dir).unwrap();
+        std::fs::write(&paths.config, "test: true\n").unwrap();
+        std::fs::write(
+            &paths.executable,
+            "#!/bin/sh\n\
+             i=0\n\
+             while [ \"$i\" -lt 300 ]; do\n\
+             \x20 /usr/bin/printf 'stdout-line-that-forces-rotation-%04d\\n' \"$i\"\n\
+             \x20 /usr/bin/printf 'stderr-line-that-forces-rotation-%04d\\n' \"$i\" >&2\n\
+             \x20 i=$((i + 1))\n\
+             done\n\
+             /bin/sleep 2\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&paths.executable, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let unused_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        std::fs::write(
+            &paths.launcher,
+            geph_launcher_script_with_log_limits(&paths, 4096, 512, 1, unused_port),
+        )
+        .unwrap();
+        std::fs::set_permissions(&paths.launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let status = std::process::Command::new(&paths.launcher)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        for path in [&paths.stdout_log, &paths.stderr_log] {
+            let archive = super::geph_log_archive_path(path);
+            assert!(std::fs::metadata(path).unwrap().len() <= 4096);
+            assert!(std::fs::metadata(&archive).unwrap().len() <= 512);
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::metadata(archive).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

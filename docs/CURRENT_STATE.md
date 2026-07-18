@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through merged
-[PR #169](https://github.com/aiwaki/slipstream/pull/169) at main commit
-`1ebfe8a9ef6c89b9da208a57fb06b21e14e72b17`, including its successful
+[PR #170](https://github.com/aiwaki/slipstream/pull/170) at main commit
+`61bdeabea1db49740f5e5902cd4f15273b64d8b2`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -215,15 +215,27 @@ The exact merged PR #169 commit passed all required jobs again on main in
 [CI run 29648441001](https://github.com/aiwaki/slipstream/actions/runs/29648441001),
 and its dependency and vendored-Geph audits passed in
 [run 29648440999](https://github.com/aiwaki/slipstream/actions/runs/29648440999).
+The complete shared-destination conflict gate from PR #170 passed `checks`,
+`windows-adapter-contract`, and `packaged-app-lifecycle` on the exact merge
+commit in
+[CI run 29650142948](https://github.com/aiwaki/slipstream/actions/runs/29650142948),
+and its dependency and vendored-Geph audits passed in
+[run 29650142955](https://github.com/aiwaki/slipstream/actions/runs/29650142955).
+The macOS uninstall/drain safety change in PR #171 passed `checks`,
+`windows-adapter-contract`, and the disposable `packaged-app-lifecycle` gate in
+[CI run 29656556574](https://github.com/aiwaki/slipstream/actions/runs/29656556574).
+Its dependency and vendored-Geph audits passed in
+[run 29656556559](https://github.com/aiwaki/slipstream/actions/runs/29656556559).
+The primary workstation remained uninstalled throughout that qualification.
 
 ## Next Verified Action
 
-Implement the read-only native issuer for complete destination-binding evidence
-without loading Wintun or changing routes. Its generation must advance on every
-binding change, and a future route must retain the same generation lease for its
-entire lifetime and be removed before release. Keep DLL loading, adapter
-creation, route mutation, packet processing, and production SCM composition
-outside that change.
+Resume the read-only native Windows issuer for complete destination-binding
+evidence without loading Wintun or changing routes. Its generation must advance
+on every binding change, and a future route must retain the same generation
+lease for its entire lifetime and be removed before release. Keep DLL loading,
+adapter creation, route mutation, packet processing, and production SCM
+composition outside that change.
 
 ## External Gates
 
