@@ -64,6 +64,10 @@ const GEPH_RUNTIME_BIN: &str = "geph5-client";
 const GEPH_LAUNCHER_FILE: &str = "geph-launcher";
 const GEPH_STDOUT_LOG_FILE: &str = "geph.stdout.log";
 const GEPH_STDERR_LOG_FILE: &str = "geph.stderr.log";
+const GEPH_LOG_ARCHIVE_SUFFIX: &str = ".previous";
+const GEPH_LOG_MAX_BYTES: u64 = 1024 * 1024;
+const GEPH_LOG_RETAIN_BYTES: u64 = 256 * 1024;
+const GEPH_LOG_GUARD_INTERVAL_SECS: u64 = 5;
 
 // geph5-client is owned by a per-user LaunchAgent. A private launcher writes the
 // current PID/executable/config record immediately before exec; a listener alone
@@ -546,16 +550,30 @@ fn attach_geph_log_tails(app: &AppHandle, snapshot: &mut Value) {
         return;
     };
     snapshot["geph_logs"] = json!({
-        "stdout": diagnostic_log_tail_from_path(
-            GEPH_STDOUT_LOG_FILE,
-            &paths.stdout_log,
-            DIAGNOSTIC_LOG_TAIL_LINES,
-        ),
-        "stderr": diagnostic_log_tail_from_path(
-            GEPH_STDERR_LOG_FILE,
-            &paths.stderr_log,
-            DIAGNOSTIC_LOG_TAIL_LINES,
-        ),
+        "stdout": {
+            "current": diagnostic_log_tail_from_path(
+                GEPH_STDOUT_LOG_FILE,
+                &paths.stdout_log,
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+            "previous": diagnostic_log_tail_from_path(
+                &format!("{GEPH_STDOUT_LOG_FILE}{GEPH_LOG_ARCHIVE_SUFFIX}"),
+                &geph_log_archive_path(&paths.stdout_log),
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+        },
+        "stderr": {
+            "current": diagnostic_log_tail_from_path(
+                GEPH_STDERR_LOG_FILE,
+                &paths.stderr_log,
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+            "previous": diagnostic_log_tail_from_path(
+                &format!("{GEPH_STDERR_LOG_FILE}{GEPH_LOG_ARCHIVE_SUFFIX}"),
+                &geph_log_archive_path(&paths.stderr_log),
+                DIAGNOSTIC_LOG_TAIL_LINES,
+            ),
+        },
     });
     sanitize_json(snapshot);
 }
@@ -1765,6 +1783,12 @@ fn geph_launch_agent_paths(config_dir: &Path, home: &Path) -> GephLaunchAgentPat
     }
 }
 
+fn geph_log_archive_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(GEPH_LOG_ARCHIVE_SUFFIX);
+    PathBuf::from(name)
+}
+
 fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     let mut permissions = fs::metadata(path)?.permissions();
     permissions.set_mode(mode);
@@ -1788,6 +1812,8 @@ fn harden_geph_dir(dir: &Path) -> std::io::Result<()> {
         GEPH_OWNERSHIP_FILE,
         GEPH_STDOUT_LOG_FILE,
         GEPH_STDERR_LOG_FILE,
+        "geph.stdout.log.previous",
+        "geph.stderr.log.previous",
     ] {
         let path = dir.join(name);
         if path.exists() {
@@ -1937,9 +1963,27 @@ fn xml_escape(value: &str) -> String {
 }
 
 fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
+    geph_launcher_script_with_log_limits(
+        paths,
+        GEPH_LOG_MAX_BYTES,
+        GEPH_LOG_RETAIN_BYTES,
+        GEPH_LOG_GUARD_INTERVAL_SECS,
+        GEPH_SOCKS_PORT,
+    )
+}
+
+fn geph_launcher_script_with_log_limits(
+    paths: &GephLaunchAgentPaths,
+    log_max_bytes: u64,
+    log_retain_bytes: u64,
+    log_guard_interval: u64,
+    socks_port: u16,
+) -> String {
     let executable = paths.executable.to_string_lossy().into_owned();
     let config = paths.config.to_string_lossy().into_owned();
     let ownership = paths.ownership.to_string_lossy().into_owned();
+    let stdout_log = paths.stdout_log.to_string_lossy().into_owned();
+    let stderr_log = paths.stderr_log.to_string_lossy().into_owned();
     let executable_json = serde_json::to_string(&executable).unwrap_or_else(|_| "\"\"".into());
     let config_json = serde_json::to_string(&config).unwrap_or_else(|_| "\"\"".into());
     let label_json = serde_json::to_string(GEPH_LAUNCHD_LABEL).unwrap_or_else(|_| "\"\"".into());
@@ -1950,19 +1994,55 @@ fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
          executable={}\n\
          config={}\n\
          ownership={}\n\
+         stdout_log={}\n\
+         stderr_log={}\n\
+         log_max_bytes={log_max_bytes}\n\
+         log_retain_bytes={log_retain_bytes}\n\
+         log_guard_interval={log_guard_interval}\n\
+         compact_log() {{\n\
+         \x20 path=\"$1\"\n\
+         \x20 [ -f \"$path\" ] || return 0\n\
+         \x20 [ ! -L \"$path\" ] || return 0\n\
+         \x20 size=$(/usr/bin/stat -f %z \"$path\" 2>/dev/null || /usr/bin/printf 0)\n\
+         \x20 case \"$size\" in ''|*[!0-9]*) return 0 ;; esac\n\
+         \x20 [ \"$size\" -le \"$log_max_bytes\" ] && return 0\n\
+         \x20 archive=\"${{path}}{GEPH_LOG_ARCHIVE_SUFFIX}\"\n\
+         \x20 tmp=\"${{archive}}.tmp.$$\"\n\
+         \x20 if /usr/bin/tail -c \"$log_retain_bytes\" \"$path\" > \"$tmp\" 2>/dev/null; then\n\
+         \x20\x20 /bin/chmod 600 \"$tmp\" 2>/dev/null || true\n\
+         \x20\x20 /bin/mv -f \"$tmp\" \"$archive\" 2>/dev/null || true\n\
+         \x20\x20 : > \"$path\"\n\
+         \x20\x20 /bin/chmod 600 \"$path\" 2>/dev/null || true\n\
+         \x20 fi\n\
+         \x20 /bin/rm -f \"$tmp\" 2>/dev/null || true\n\
+         \x20 return 0\n\
+         }}\n\
          uid=$(/usr/bin/id -u)\n\
          /bin/rm -f \"$ownership\"\n\
-         while /usr/bin/nc -z -w 1 127.0.0.1 {GEPH_SOCKS_PORT} >/dev/null 2>&1; do\n\
+         while /usr/bin/nc -z -w 1 127.0.0.1 {socks_port} >/dev/null 2>&1; do\n\
          \x20 /bin/sleep 5\n\
          done\n\
          tmp=\"${{ownership}}.tmp.$$\"\n\
          /usr/bin/printf '{{\"pid\":%s,\"uid\":%s,\"executable\":%s,\"config\":%s,\"launchd_label\":%s}}\\n' \"$$\" \"$uid\" {} {} {} > \"$tmp\"\n\
          /bin/chmod 600 \"$tmp\"\n\
          /bin/mv -f \"$tmp\" \"$ownership\"\n\
-         exec \"$executable\" --config \"$config\"\n",
+         compact_log \"$stdout_log\"\n\
+         compact_log \"$stderr_log\"\n\
+         target_pid=$$\n\
+         (\n\
+         \x20 while /bin/kill -0 \"$target_pid\" 2>/dev/null; do\n\
+         \x20\x20 /bin/sleep \"$log_guard_interval\"\n\
+         \x20\x20 /bin/kill -0 \"$target_pid\" 2>/dev/null || exit 0\n\
+         \x20\x20 compact_log \"$stdout_log\"\n\
+         \x20\x20 compact_log \"$stderr_log\"\n\
+         \x20 done\n\
+         ) </dev/null >/dev/null 2>&1 &\n\
+         exec \"$executable\" --config \"$config\" >> \"$stdout_log\" 2>> \"$stderr_log\"\n",
         shell_quote(&executable),
         shell_quote(&config),
         shell_quote(&ownership),
+        shell_quote(&stdout_log),
+        shell_quote(&stderr_log),
         shell_quote(&executable_json),
         shell_quote(&config_json),
         shell_quote(&label_json),
@@ -1972,8 +2052,6 @@ fn geph_launcher_script(paths: &GephLaunchAgentPaths) -> String {
 fn geph_launch_agent_plist(paths: &GephLaunchAgentPaths) -> String {
     let launcher = xml_escape(&paths.launcher.to_string_lossy());
     let workdir = xml_escape(&paths.config_dir.to_string_lossy());
-    let stdout_log = xml_escape(&paths.stdout_log.to_string_lossy());
-    let stderr_log = xml_escape(&paths.stderr_log.to_string_lossy());
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -1985,8 +2063,8 @@ fn geph_launch_agent_plist(paths: &GephLaunchAgentPaths) -> String {
          <key>ThrottleInterval</key><integer>10</integer>\n\
          <key>ProcessType</key><string>Background</string>\n\
          <key>WorkingDirectory</key><string>{workdir}</string>\n\
-         <key>StandardOutPath</key><string>{stdout_log}</string>\n\
-         <key>StandardErrorPath</key><string>{stderr_log}</string>\n\
+         <key>StandardOutPath</key><string>/dev/null</string>\n\
+         <key>StandardErrorPath</key><string>/dev/null</string>\n\
          </dict></plist>\n"
     )
 }
@@ -2717,17 +2795,17 @@ mod tests {
         diagnostic_summary_value, exit_catalog, exit_catalog_availability,
         finish_exit_menu_refresh, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_domain, geph_launch_target, geph_launcher_script,
-        geph_lifecycle_diagnostic_value, harden_geph_dir, install_diagnostic_value,
-        launchd_label_disabled_from_output, launchd_plist_uses_bundled_daemon, log_snapshot_shell,
-        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
-        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
-        should_request_daemon_install, signal_uninstall_ready, sync_private_executable,
-        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        uninstall_dialog_script_for, uninstall_ready_path, uninstall_shell_for_paths,
-        valid_bundled_daemon, write_atomic_if_changed, write_diagnostic_snapshot_file,
-        write_private_atomic, ExitCatalogAvailability, ExitMenuRefreshState,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL,
-        GEPH_STDERR_LOG_FILE, PF_TOKEN_PATH,
+        geph_launcher_script_with_log_limits, geph_lifecycle_diagnostic_value, harden_geph_dir,
+        install_diagnostic_value, launchd_label_disabled_from_output,
+        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
+        redact_sensitive_text, remove_owned_geph_runtime, route_class_health,
+        routing_health_summary, shell_quote, should_recover_daemon, should_request_daemon_install,
+        signal_uninstall_ready, sync_private_executable, system_proxy_active_from_scutil,
+        system_proxy_from_status, telegram_proxy_detail, uninstall_dialog_script_for,
+        uninstall_ready_path, uninstall_shell_for_paths, valid_bundled_daemon,
+        write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
+        ExitCatalogAvailability, ExitMenuRefreshState, DAEMON_RECOVERY_STATUS_PATH,
+        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE, PF_TOKEN_PATH,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -3445,6 +3523,30 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_log_tail_reads_only_a_bounded_byte_window() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-diagnostic-byte-tail-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("geph.log");
+        let mut content = String::from("secret=outside-window\n");
+        content.push_str(&"x".repeat(192 * 1024));
+        content.push_str("\ntail-one\ntail-two\n");
+        std::fs::write(&log, content).unwrap();
+
+        let tail = diagnostic_log_tail(log.to_str().unwrap(), 2);
+        let text = serde_json::to_string(&tail).unwrap();
+
+        assert_eq!(tail["available"], true);
+        assert_eq!(tail["truncated"], true);
+        assert_eq!(tail["lines"], json!(["tail-one", "tail-two"]));
+        assert!(!text.contains("outside-window"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn diagnostic_log_tail_from_snapshot_preserves_raw_log_display_path() {
         let dir = std::env::temp_dir().join(format!(
             "slipstream-diagnostic-log-tail-test-{}",
@@ -3641,9 +3743,9 @@ mod tests {
         assert!(plist.contains("<key>KeepAlive</key><true/>"));
         assert!(plist.contains("<key>RunAtLoad</key><true/>"));
         assert!(plist.contains(&format!("<string>{}</string>", paths.launcher.display())));
-        assert!(plist.contains(&format!("<string>{}</string>", paths.stdout_log.display())));
-        assert!(plist.contains(&format!("<string>{}</string>", paths.stderr_log.display())));
-        assert!(!plist.contains("<string>/dev/null</string>"));
+        assert_eq!(plist.matches("<string>/dev/null</string>").count(), 2);
+        assert!(!plist.contains(&format!("<string>{}</string>", paths.stdout_log.display())));
+        assert!(!plist.contains(&format!("<string>{}</string>", paths.stderr_log.display())));
         assert!(!plist.contains("geph-active.yaml"));
         assert!(!plist.contains("secret"));
     }
@@ -3662,17 +3764,85 @@ mod tests {
         assert!(script.contains("uid=$(/usr/bin/id -u)"));
         let ownership_write = script
             .lines()
-            .find(|line| line.contains("/usr/bin/printf"))
+            .find(|line| line.contains("/usr/bin/printf") && line.contains("{\"pid\":"))
             .expect("launcher writes an ownership record");
         assert!(ownership_write.contains("\"$$\""));
         assert!(ownership_write.contains("\"$uid\""));
         assert!(ownership_write.contains("> \"$tmp\""));
         assert!(!script.contains("\n+"));
-        assert!(script.contains("exec \"$executable\" --config \"$config\""));
+        assert!(script.contains("log_max_bytes=1048576"));
+        assert!(script.contains("log_retain_bytes=262144"));
+        assert!(script.contains("log_guard_interval=5"));
+        assert!(script.contains("/usr/bin/tail -c \"$log_retain_bytes\""));
+        assert!(script.contains("archive=\"${path}.previous\""));
+        assert!(script.contains("/bin/kill -0 \"$target_pid\""));
+        assert!(script.contains(
+            "exec \"$executable\" --config \"$config\" >> \"$stdout_log\" 2>> \"$stderr_log\""
+        ));
         assert!(script.contains("'\\''"));
         assert!(!script.contains("pkill"));
         assert!(!script.contains("killall"));
-        assert!(!script.contains("/bin/kill"));
+        assert!(!script
+            .lines()
+            .any(|line| line.contains("/bin/kill ") && !line.contains("/bin/kill -0")));
+    }
+
+    #[test]
+    fn geph_launcher_rotates_live_logs_without_replacing_the_geph_pid() {
+        let dir = std::env::temp_dir().join(format!(
+            "slipstream-geph-log-rotation-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let config_dir = dir.join("Application Support").join("dev.slipstream.tray");
+        let home = dir.join("home");
+        let paths = geph_launch_agent_paths(&config_dir, &home);
+        std::fs::create_dir_all(&paths.runtime_dir).unwrap();
+        std::fs::write(&paths.config, "test: true\n").unwrap();
+        std::fs::write(
+            &paths.executable,
+            "#!/bin/sh\n\
+             i=0\n\
+             while [ \"$i\" -lt 300 ]; do\n\
+             \x20 /usr/bin/printf 'stdout-line-that-forces-rotation-%04d\\n' \"$i\"\n\
+             \x20 /usr/bin/printf 'stderr-line-that-forces-rotation-%04d\\n' \"$i\" >&2\n\
+             \x20 i=$((i + 1))\n\
+             done\n\
+             /bin/sleep 2\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&paths.executable, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let unused_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        std::fs::write(
+            &paths.launcher,
+            geph_launcher_script_with_log_limits(&paths, 4096, 512, 1, unused_port),
+        )
+        .unwrap();
+        std::fs::set_permissions(&paths.launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let status = std::process::Command::new(&paths.launcher)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        for path in [&paths.stdout_log, &paths.stderr_log] {
+            let archive = super::geph_log_archive_path(path);
+            assert!(std::fs::metadata(path).unwrap().len() <= 4096);
+            assert!(std::fs::metadata(&archive).unwrap().len() <= 512);
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::metadata(archive).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

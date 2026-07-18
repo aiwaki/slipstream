@@ -1,10 +1,13 @@
 //! Privacy-bounded diagnostics data and export primitives.
 
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
+
+pub(crate) const DIAGNOSTIC_LOG_TAIL_MAX_BYTES: u64 = 128 * 1024;
 
 fn sensitive_json_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
@@ -125,8 +128,29 @@ pub(crate) fn diagnostic_log_tail_from_path(
     read_path: &Path,
     max_lines: usize,
 ) -> Value {
-    match fs::read_to_string(read_path) {
-        Ok(raw) => {
+    let read_tail = (|| {
+        let mut file = fs::File::open(read_path)?;
+        let length = file.metadata()?.len();
+        let start = length.saturating_sub(DIAGNOSTIC_LOG_TAIL_MAX_BYTES);
+        file.seek(SeekFrom::Start(start))?;
+        let mut bytes = Vec::with_capacity((length - start) as usize);
+        file.take(DIAGNOSTIC_LOG_TAIL_MAX_BYTES)
+            .read_to_end(&mut bytes)?;
+
+        // A bounded read can begin in the middle of a UTF-8 line. Drop that
+        // partial line so diagnostics never show a malformed fragment.
+        if start > 0 {
+            if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
+                bytes.drain(..=newline);
+            } else {
+                bytes.clear();
+            }
+        }
+        Ok::<_, std::io::Error>((String::from_utf8_lossy(&bytes).into_owned(), start > 0))
+    })();
+
+    match read_tail {
+        Ok((raw, byte_truncated)) => {
             let all_lines: Vec<&str> = raw.lines().collect();
             let start = all_lines.len().saturating_sub(max_lines);
             let lines: Vec<String> = all_lines[start..]
@@ -136,7 +160,7 @@ pub(crate) fn diagnostic_log_tail_from_path(
             json!({
                 "path": display_path,
                 "available": true,
-                "truncated": start > 0,
+                "truncated": byte_truncated || start > 0,
                 "lines": lines,
             })
         }

@@ -49,8 +49,10 @@ Tray diagnostics:
 
 - `Open Status` opens a sanitized owner-only JSON snapshot without an
   administrator prompt. It includes StatusV2, install checks, daemon recovery,
-  and the private stdout/stderr tails of Slipstream's owned Geph LaunchAgent,
-  but not the root daemon log.
+  and the current/previous private stdout/stderr tails of Slipstream's owned
+  Geph LaunchAgent, but not the root daemon log. Each current Geph log rotates
+  after 1 MiB into one 256 KiB previous tail. Snapshot generation reads at most
+  the final 128 KiB of each file before selecting and redacting recent lines.
 - `Copy Diagnostics` copies a redacted JSON snapshot and saves the same snapshot
   as `slipstream-diagnostics.json` in the macOS temporary directory, then reveals
   it in Finder for bug reports.
