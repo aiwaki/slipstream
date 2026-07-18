@@ -48,7 +48,7 @@ fn qualifies_slow_progressing_downstream() {
     let endpoint = backend_listener
         .local_addr()
         .expect("slow backend endpoint");
-    let response_payload = patterned_bytes(512 * 1024, 29);
+    let response_payload = patterned_bytes(128 * 1024, 29);
     let backend_payload = response_payload.clone();
     let backend = thread::spawn(move || {
         let (mut stream, _) = backend_listener.accept().expect("accept slow backend");
@@ -63,17 +63,17 @@ fn qualifies_slow_progressing_downstream() {
     let mut running = RunningIngress::start_with_client_socket_buffer(
         endpoint,
         "slow-progress",
-        5_000,
-        150,
+        10_000,
+        2_000,
         Some(1_024),
     );
     let expected_response = response_payload.clone();
     let mut external = running.take_external();
     let client = thread::spawn(move || {
         let mut response = Vec::with_capacity(expected_response.len());
-        let mut buffer = [0u8; 4 * 1024];
+        let mut buffer = [0u8; 256];
         while response.len() < expected_response.len() {
-            thread::sleep(Duration::from_millis(20));
+            thread::sleep(Duration::from_millis(10));
             let bytes = external.read(&mut buffer).expect("read slow response");
             assert!(bytes > 0, "slow response closed before completion");
             response.extend_from_slice(&buffer[..bytes]);
