@@ -87,6 +87,31 @@ not success: the candidate must return first server bytes. Handler contracts
 cover stalled-first/healthy-second Discord and Smart DNS edges and forbid Geph
 in the local case.
 
+## Windows Data Plane V1
+
+`contracts/windows-data-plane-v1.json` freezes the equivalent Windows boundary
+before a native connector exists. A request already contains the normalized
+policy result and selected backend, but that metadata is not trusted. The worker
+reclassifies the host through the active validated policy tables and validates
+the complete tuple before emitting `StartSession`, so a caller cannot hide a
+Discord or YouTube host behind `generic`, silently turn local bypass into Geph,
+or promote unknown traffic to geo exit. Those mismatches are explicit rejection
+vectors.
+
+First payload is a readiness signal, not a claim that a streaming response
+completed. It releases a half-open readiness gate while the session continues
+relaying; a later reset after partial bytes records one normalized `stream`
+failure. Stalls before payload record `first_payload`. Caller and shutdown
+cancellation do not manufacture backend failures. The fake effect owns every
+resource until cancellation acknowledgement or a bounded deadline, closes it
+once before recording an outcome, and ignores late completions after terminal
+state. Monotonic session IDs protect a reused external request ID from stale
+events, and deterministic terminal pruning bounds long-lived worker state.
+Each individual effect command is failure-atomic. Reducer state commits only
+after the entire command batch succeeds; an interrupted batch returns the exact
+cursor needed to resume without replaying a completed start or close. These
+vectors contain no socket, native API, or host mutation.
+
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete
 protected local ladder, a proven Smart DNS attempt, or a verified owned Geph

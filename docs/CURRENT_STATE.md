@@ -9,10 +9,9 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through main commit
-`d2a2c7fb443bf58223a4e2dcac1c24c9cc2763a5` after merged
-[PR #153](https://github.com/aiwaki/slipstream/pull/153) and its successful
-main CI and dependency-audit runs linked below, plus the green production-host
-Windows gate for [PR #154](https://github.com/aiwaki/slipstream/pull/154).
+`6774340de8cc12c9e4874ba24a7ebe8c1f4295d4` after merged
+[PR #154](https://github.com/aiwaki/slipstream/pull/154) and its successful
+exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -42,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows production host CI-qualified; data plane pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, and production host boundaries. The same no-network binary enters SCM mode only through exact `--service`; explicit management processes install its current content-addressed executable and produce versioned JSON results. Disposable Windows CI has qualified install, idempotent reinstall, stop, idempotent restop, start with PID replacement, idempotent restart, exact uninstall, bounded crash recovery, terminal cleanup, and post-commit compensation against a real service. Windows data-plane contracts and adapters, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows production host CI-qualified; pure data-plane contract implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, and pure data-plane boundaries. The same no-network binary enters SCM mode only through exact `--service`; explicit management processes install its current content-addressed executable and produce versioned JSON results. Disposable Windows CI has qualified install, idempotent reinstall, stop, idempotent restop, start with PID replacement, idempotent restart, exact uninstall, bounded crash recovery, terminal cleanup, and post-commit compensation against a real service. Data-plane v1 now freezes active-table host reclassification, request/session validation, first-payload versus terminal outcome semantics, failure-atomic effect commands with exact resume cursors, adapter-owned resource closure, bounded cancellation, monotonic session identity, and bounded terminal retention through deterministic fake effects. Service-host/worker composition, native Windows networking, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -111,18 +110,20 @@ uninstall, and strict Windows lint passed in
 [PR #154 CI run 29620298459](https://github.com/aiwaki/slipstream/actions/runs/29620298459).
 Its dependency and vendored-Geph audits passed in
 [run 29620298461](https://github.com/aiwaki/slipstream/actions/runs/29620298461).
+The exact merged PR #154 commit passed again on main in
+[CI run 29620781624](https://github.com/aiwaki/slipstream/actions/runs/29620781624),
+and its dependency and vendored-Geph audits passed in
+[run 29620781600](https://github.com/aiwaki/slipstream/actions/runs/29620781600).
 
 ## Next Verified Action
 
-Freeze the first Windows data-plane contract before introducing a native network
-API. Define the request/session lifecycle, adapter-owned resource and
-cancellation rules, route/backend invariants, normalized outcomes, service-host
-worker readiness, and bounded shutdown behavior as pure commands and events.
-Execute it through deterministic fake effects, including stalled, reset,
-partial-payload, cancellation, and late-completion vectors. Discord and YouTube
-must have no Geph edge; external DNS, proxy, PAC, and VPN state remains
-read-only. Native Windows networking belongs only in a later PR after this
-contract is frozen and cross-checked against `slipstream-core`.
+Compose the production Windows service host with an injected no-network worker
+through the frozen data-plane contract. SCM `RUNNING` must be reported only
+after worker readiness, and stop or system shutdown must drive bounded session
+cancellation before `STOPPED`. Prove startup failure, normal stop, forced
+deadline, and late-completion behavior through deterministic effects and the
+Windows SCM fixture. Do not add a native network API in that composition PR;
+the first connector belongs only after host/worker lifecycle is qualified.
 
 ## External Gates
 

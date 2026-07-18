@@ -55,6 +55,15 @@ Slipstream routing decisions and bounded recovery primitives.
   binary runs only as exact `--service` or explicit `manage` commands, installs
   from its currently opened executable identity, and has no networking or
   process-discovery surface.
+- `windows-data-plane-v1.json` freezes the first Windows worker and session
+  boundary as pure commands and events. It reclassifies each normalized host
+  through the active validated policy tables instead of trusting caller route
+  metadata, validates the backend before effects, keeps session resources
+  adapter-owned until bounded cancellation completes, distinguishes first
+  payload from terminal stream success, assigns monotonic session identities,
+  retains only bounded terminal history, and emits one normalized outcome after
+  resource close. Its failure vectors resume multi-command effect batches from
+  an exact cursor without replaying already-completed commands.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -80,6 +89,15 @@ The production service host reports `START_PENDING`, `RUNNING`, `STOP_PENDING`,
 and `STOPPED` through SCM and accepts both stop and system-shutdown controls.
 Windows CI invokes its management commands through separate processes and
 proves repeated install, stop, start, and uninstall remain idempotent.
+The Windows data-plane contract still performs no network operation. Its
+recording effect proves that resources close exactly once before an outcome,
+caller and shutdown cancellation are not backend failures, partial payload
+followed by reset remains a stream failure, and late completions cannot
+resurrect terminal sessions. Caller policy metadata is checked against the
+active trusted classifier. Every individual native effect must be
+failure-atomic; reducer state is committed only after the full command batch,
+and a failed batch resumes from its returned cursor. Native networking must
+preserve this contract.
 The signed-bundle contract contains one deterministic test public key and
 signature. It is not a production trust key and does not enable remote policy
 fetch or application.
