@@ -8,9 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-18, through main commit
-`3e1195a16c0f44dd6a1faeb2d9ea8c8f5f938322` after merged
-[PR #165](https://github.com/aiwaki/slipstream/pull/165) and its successful
+Last evidence audit: 2026-07-18, through merged
+[PR #165](https://github.com/aiwaki/slipstream/pull/165) at main commit
+`3e1195a16c0f44dd6a1faeb2d9ea8c8f5f938322`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
