@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_packet_adapter",
+  "contract_version": 1,
+  "invariants": {
+    "slipstream_owned_kernel_driver": false,
+    "official_prebuilt_dll_only": true,
+    "authenticode_required": true,
+    "timestamp_required": true,
+    "packet_interface": "layer_3",
+    "accepted_stream_interface": false,
+    "userspace_packet_stack_required": true,
+    "default_route_mutation": false,
+    "exact_destination_routes_only": true,
+    "route_requires_fresh_policy_bound_ip_evidence": true,
+    "route_plan_is_native_authorization": false,
+    "shared_destination_conflict_check_required": true,
+    "native_route_installation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "production_service_host_composition": false,
+    "native_dll_loading": false
+  },
+  "upstream": {
+    "name": "Wintun",
+    "version": "0.14.1",
+    "source_url": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+    "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+    "archive_length": 750540,
+    "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+    "publisher": "WireGuard LLC",
+    "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136"
+  },
+  "architectures": {
+    "x86_64": {
+      "dll_path": "wintun/bin/amd64/wintun.dll",
+      "dll_sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+      "dll_length": 427552,
+      "pe_machine": 34404
+    },
+    "aarch64": {
+      "dll_path": "wintun/bin/arm64/wintun.dll",
+      "dll_sha256": "f7ba89005544be9d85231a9e0d5f23b2d15b3311667e2dad0debd344918a3f80",
+      "dll_length": 222488,
+      "pe_machine": 43620
+    }
+  },
+  "artifact_vectors": [
+    {
+      "name": "amd64-official-artifact-admitted",
+      "architecture": "x86_64",
+      "evidence": {
+        "version": "0.14.1",
+        "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+        "archive_length": 750540,
+        "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+        "dll_path": "wintun/bin/amd64/wintun.dll",
+        "dll_sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+        "dll_length": 427552,
+        "pe_machine": 34404,
+        "signature_status": "valid",
+        "publisher": "WireGuard LLC",
+        "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+        "timestamped": true
+      },
+      "expected": "admitted"
+    },
+    {
+      "name": "arm64-official-artifact-admitted",
+      "architecture": "aarch64",
+      "evidence": {
+        "version": "0.14.1",
+        "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+        "archive_length": 750540,
+        "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+        "dll_path": "wintun/bin/arm64/wintun.dll",
+        "dll_sha256": "f7ba89005544be9d85231a9e0d5f23b2d15b3311667e2dad0debd344918a3f80",
+        "dll_length": 222488,
+        "pe_machine": 43620,
+        "signature_status": "valid",
+        "publisher": "WireGuard LLC",
+        "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+        "timestamped": true
+      },
+      "expected": "admitted"
+    },
+    {
+      "name": "unsupported-architecture-rejected",
+      "architecture": "x86",
+      "evidence": {
+        "version": "0.14.1",
+        "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+        "archive_length": 750540,
+        "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+        "dll_path": "wintun/bin/amd64/wintun.dll",
+        "dll_sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+        "dll_length": 427552,
+        "pe_machine": 34404,
+        "signature_status": "valid",
+        "publisher": "WireGuard LLC",
+        "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+        "timestamped": true
+      },
+      "expected": "unsupported_architecture"
+    },
+    {
+      "name": "changed-dll-rejected",
+      "architecture": "aarch64",
+      "evidence": {
+        "version": "0.14.1",
+        "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+        "archive_length": 750540,
+        "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+        "dll_path": "wintun/bin/arm64/wintun.dll",
+        "dll_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "dll_length": 222488,
+        "pe_machine": 43620,
+        "signature_status": "valid",
+        "publisher": "WireGuard LLC",
+        "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+        "timestamped": true
+      },
+      "expected": "dll_hash_mismatch"
+    },
+    {
+      "name": "untrusted-signature-rejected",
+      "architecture": "x86_64",
+      "evidence": {
+        "version": "0.14.1",
+        "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+        "archive_length": 750540,
+        "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+        "dll_path": "wintun/bin/amd64/wintun.dll",
+        "dll_sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+        "dll_length": 427552,
+        "pe_machine": 34404,
+        "signature_status": "untrusted",
+        "publisher": "WireGuard LLC",
+        "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+        "timestamped": true
+      },
+      "expected": "signature_not_valid"
+    },
+    {
+      "name": "missing-timestamp-rejected",
+      "architecture": "x86_64",
+      "evidence": {
+        "version": "0.14.1",
+        "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+        "archive_length": 750540,
+        "license_sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2",
+        "dll_path": "wintun/bin/amd64/wintun.dll",
+        "dll_sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+        "dll_length": 427552,
+        "pe_machine": 34404,
+        "signature_status": "valid",
+        "publisher": "WireGuard LLC",
+        "signer_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+        "timestamped": false
+      },
+      "expected": "timestamp_missing"
+    }
+  ],
+  "route_vectors": [
+    {
+      "name": "discord-public-ip-is-local-bypass-exact-route",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "203.0.113.41",
+        "prefix_length": 32,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "unsafe_destination"
+    },
+    {
+      "name": "discord-real-public-ip-is-local-bypass-exact-route",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "104.16.58.5",
+        "prefix_length": 32,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "local_bypass"
+    },
+    {
+      "name": "openai-owned-resolver-evidence-is-geo-exit-exact-route",
+      "now_ms": 5000,
+      "request": {
+        "policy": {
+          "host": "chatgpt.com",
+          "route_class": "geo_exit",
+          "service_group": "openai",
+          "strategy_set": "geph"
+        },
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "prefix_length": 128,
+        "evidence_source": "owned_resolver_query",
+        "observed_at_ms": 4000,
+        "expires_at_ms": 64000
+      },
+      "expected": "geo_exit"
+    },
+    {
+      "name": "default-route-is-rejected",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "104.16.58.5",
+        "prefix_length": 0,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "route_not_exact"
+    },
+    {
+      "name": "direct-service-is-not-captured",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "www.google.com",
+          "route_class": "direct_first",
+          "service_group": "google",
+          "strategy_set": "direct_first"
+        },
+        "destination": "142.250.74.196",
+        "prefix_length": 32,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "route_class_not_captured"
+    },
+    {
+      "name": "caller-cannot-disguise-discord-as-geo-exit",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "geo_exit",
+          "service_group": "openai",
+          "strategy_set": "geph"
+        },
+        "destination": "104.16.58.5",
+        "prefix_length": 32,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "policy_mismatch"
+    },
+    {
+      "name": "ipv6-link-local-destination-is-rejected",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "fe80::1",
+        "prefix_length": 128,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "unsafe_destination"
+    },
+    {
+      "name": "stale-ip-evidence-is-rejected",
+      "now_ms": 62000,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "104.16.58.5",
+        "prefix_length": 32,
+        "evidence_source": "system_dns_observation",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 61000
+      },
+      "expected": "evidence_expired"
+    }
+  ]
+}

@@ -9,7 +9,8 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
-| 2026-07-18 | Native Windows TCP capture mechanism | WFP wire and pure runtime lifecycle v1 implemented; native effects not composed | Use a minimal `ALE_CONNECT_REDIRECT` V4/V6 callout and the exact owned Rust service. The fixed 128-byte context and one-shot redirect-record handoff prove exact data identity and records-before-connect ordering. The new reducer proves kernel-before-listener-before-atomic-session startup, session-close-first teardown, exact filter-absence gating, reducer-issued monotonic runtime-attempt binding against delayed completions, retained safety resources while a filter remains, bounded stream drain, and filter-before-callout removal without invoking WFP or sockets. WinDivert would require a packet NAT/TCP reconstruction path and does not fit this stream boundary. | Implement the native callout and dynamic-session controller behind the injected lifecycle effects. Keep direct connector v1 frozen and production no-network. |
+| 2026-07-18 | Windows production signing and packet-adapter pivot | Pure artifact/route-plan admission implemented; native effects absent | Do not ship a Slipstream-owned kernel driver. Use only the unmodified official signed Wintun 0.14.1 AMD64/ARM64 package after exact archive, license, DLL, PE-machine, Authenticode publisher, signer, and timestamp verification. Wintun is L3 rather than an accepted-stream source, so old WFP contracts remain dormant research. Candidate `/32` and `/128` plans are not native authorization and cannot mutate default routes or external DNS/proxy/PAC/VPN. | Implement a read-only native artifact collector with `WinVerifyTrust`, then qualify both architectures. Keep DLL loading, adapter creation, routes, and production composition disabled. |
+| 2026-07-18 | Native Windows TCP capture mechanism | Superseded shipping path; frozen research contracts remain | The WFP wire, runtime, and management-session contracts still document a safe connect-redirect lifecycle, but implementing it requires a separately signed Slipstream kernel driver. Do not build or package that driver. | Preserve v1 fixtures without composing them. Continue through the no-own-driver Wintun packet boundary. |
 | 2026-07-17 | Python signed-policy activation adapter | Implemented with parity and effect-failure coverage | The daemon's verified candidate apply, health gate, persistence, rejection restore, startup load, and single-slot rollback now execute behind activation contract v1 under one lock. Current and previous policy files are updated as one compensating transaction; corrupt rollback slots, candidate-write failure, and runtime activation failure preserve the prior files and active manifest. Every consumed generation is written to an owner-only activation sidecar before candidate activation, so rejection followed by daemon restart cannot reuse it; successful policy files also retain backward-compatible generation metadata. Persisted signed provenance remains signed even when a legacy bundle contains the exact bundled manifest. A new signed envelope with the already-active canonical SHA-256 is intentionally the frozen v1 content-addressed `no_change` case and is not persisted. The old direct signed apply/save entry points are removed, while the remote URL remains opt-in and no production trust material is present. | Keep the Python adapter and reducer contract frozen under failure injection. Build the first no-network Windows adapter harness against `slipstream-core` before adding any platform networking effects. |
 | 2026-07-17 | Cross-language signed policy activation | Implemented in shared Python/Rust contract v1 | The existing daemon temporarily applied a verified candidate, ran a health callback, then restored or persisted it through one imperative path. That path did not give future adapters a shared transition model or explicit stale-event guard. `route-policy-activation-v1.json` now binds trial start and rollback to the expected active SHA-256 and binds health to both the exact candidate SHA-256 and a reducer-issued monotonic trial generation. The generation persists after abort or rejection, so a delayed result cannot commit a later retry of identical policy content. Only one verified signed candidate may be in trial. A completed gate commits only with at least one success and no degraded or blocked checks; every rejection restores the stable active identity. One previous identity is retained per successful commit, rollback consumes it before falling back to bundled policy, and rollback during trial aborts only that candidate. The reducer emits ordered data-only actions and performs no fetch, signature verification, persistence, runtime apply, PF, DNS, proxy, PAC, VPN, or routing work. | Keep activation contract v1 frozen; the Python runtime migration is recorded in the adapter finding above. |
 | 2026-07-16 | Cross-language signed policy canonicalization | Implemented in shared Python/Rust contract v1 | The former signature verifier lived only inside `tproxy.py`, so a future adapter could normalize the same manifest but sign different bytes, especially when `source` contained Unicode. `route-policy-bundle-v1.json` now freezes canonical hashes for ASCII, Unicode, quotes, backslashes, and controls, plus Ed25519 envelope success and structured failure vectors. Rust emits the same sorted compact JSON as Python `json.dumps(..., ensure_ascii=True)`, uses strict verification, and keeps v1 isolated. The pinned crypto graph remains compatible with the core's Rust 1.77 floor. The only committed key is an explicit deterministic fixture key. No production trust, fetch, apply, PF, DNS, proxy, PAC, VPN, or routing behavior changed. | Keep bundle contract v1 frozen. Define the pure signed-policy activation/rollback state transition next; runtime storage and transport remain adapter effects. |
@@ -109,119 +110,91 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-10 | Exact-host local-bypass re-sweep | Implemented | A real Discord/YouTube runtime miss starts a deduplicated background strategy sweep for that exact host and clears its negative cache only after a fake/desync strategy succeeds. | Tune cooldowns only from observed runtime evidence. |
 | 2026-07-10 | Geph-down log semantics | Superseded 2026-07-11 | A proxied geo-exit attempt still never falls through local desync, but persistent fail-close under an active global redirect was unsafe. Backend loss now pauses only the private PF anchor and leaves native networking in control. | Keep runtime messages aligned with dormant/active PF state. |
 
-## Windows TCP Capture Selection (2026-07-18)
+## Windows Packet Capture Selection (2026-07-18)
 
-### Selected boundary
+### Why Slipstream will not own a kernel driver
 
-Windows capture v1 will use a minimal Windows Filtering Platform callout at
-`FWPS_LAYER_ALE_CONNECT_REDIRECT_V4` and
-`FWPS_LAYER_ALE_CONNECT_REDIRECT_V6`. The callout redirects an application TCP
-connect to an exact loopback listener owned by the Slipstream service. This is
-the native mechanism that directly matches the already-frozen capture-source
-boundary: the service accepts an ordinary TCP stream while WFP supplies its
-original numeric destination and redirect provenance.
+Microsoft requires a driver submission to be certificate-signed and requires
+an EV certificate associated with the Hardware Dev Center account for
+attestation or WHCP submission. The alternative development path enables
+Windows test-signing mode, may require disabling Secure Boot, and is not an
+acceptable user installation model:
 
-The Microsoft documentation and pinned WFPSampler revision demonstrate the
-complete handoff:
+- [Driver code signing requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/dashboard/code-signing-reqs)
+- [Loading test-signed drivers](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option)
 
-- [bind/connect redirection](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/using-bind-or-connect-redirection)
-  exposes original-destination metadata, local redirect context, target PID,
-  and redirect-state inspection;
-- the user-mode proxy queries
-  [`SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT`](https://learn.microsoft.com/en-us/windows/win32/winsock/sio-query-wfp-connection-redirect-context)
-  and opaque redirect records from the accepted socket;
-- before bind/connect, it applies those records to the outbound socket with
-  `SIO_SET_WFP_CONNECTION_REDIRECT_RECORDS`, preserving a redirect chain when
-  another WFP proxy is present;
-- the pinned Microsoft
-  [WFPSampler revision](https://github.com/microsoft/Windows-driver-samples/tree/2ee527bfeb0aeb6be11f0a8b6dce4011b358ce89/network/trans/WFPSampler)
-  shows that exact sequence and uses `FwpsQueryConnectionRedirectState` to
-  distinguish a new connection, another redirector, this redirector, and an
-  earlier pass through this redirector.
+Slipstream therefore will not build, distribute, or seek production signing
+for its own WFP callout. The already-frozen `windows-wfp-*` fixtures remain
+useful records of safe stream-redirection ownership and teardown, but they are
+dormant research contracts rather than the Windows shipping architecture.
+This removes the kernel-driver certificate blocker; optional signing and
+reputation for the userspace application remain a separate release concern.
 
-WFPSampler is MS-PL reference code. This decision copies the protocol and
-safety properties documented by Microsoft, not its implementation.
+### Selected primitive: official Wintun
 
-### Lifecycle and ownership gates
+[Wintun](https://www.wintun.net/) publishes precompiled, signed DLLs that may
+be distributed unchanged with software. Version 0.14.1 includes AMD64 and
+ARM64 builds and exposes an L3 adapter for userspace IPv4/IPv6 packet handling.
+It therefore avoids a Slipstream-owned driver certificate, but it is not a
+drop-in replacement for the old WFP stream boundary: Wintun supplies packets,
+not an accepted TCP socket or original-destination context.
 
-- Register the kernel classify function with `FwpsCalloutRegister` before a
-  management filter can reference it.
-- Open one
-  [dynamic WFP engine session](https://learn.microsoft.com/en-us/windows/win32/fwp/object-management)
-  and add only non-persistent, non-boot provider, sublayer, `FWPM_CALLOUT`
-  management object, provider context, and filters. Add the management callout
-  with `FwpmCalloutAdd` and all filters in the same explicit transaction so a
-  terminating filter cannot survive without its available callout.
-- Start the exact owned listener and verify service plus driver identity before
-  committing that transaction. If any prerequisite fails, no filter becomes
-  active.
-- On stop, close the dynamic filter session first. New application connections
-  then use native networking while already accepted streams receive bounded
-  drain or exact close through capture-source v1. Prove exact filter absence
-  before `FwpsCalloutUnregister` or driver unload.
-- Redirect only to the listener's exact PID. Reject a loopback accept without
-  valid, bounded, versioned WFP context and redirect records.
-- Keep original destination, address family, protocol, adapter generation, and
-  service identity in a strict driver/service context. Treat unknown versions,
-  oversized records, malformed addresses, stale generations, and identity
-  mismatches as non-admissible and close exactly once.
-- Query redirect state before modification. A redirect by this callout is
-  permitted instead of redirected again; a previously self-redirected
-  connection is not reclaimed. A redirect by another provider preserves its
-  records and remains in the chain.
-- Never persist capture filters across service death or reboot. An installed
-  but inactive driver is acceptable; an orphaned active filter is not.
+`vendor/wintun/SOURCE.json` pins the official archive URL, archive and license
+hashes, publisher and signing-certificate identity, plus the exact AMD64 and
+ARM64 DLL sizes, SHA-256 hashes, and PE machine values. The official archive is
+`750540` bytes with SHA-256
+`07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51`.
+Its architecture DLLs are not committed to this repository.
 
-That driver/service boundary is now frozen by
-`contracts/windows-wfp-capture-v1.json` and pure Rust `wfp_capture::v1`. The
-context is exactly 128 bytes and rejects malformed lengths, versions, flags,
-address padding, native or IPv4-mapped unsafe destinations, stale service
-generation/PID/instance/hash, listener mismatch, and missing or oversized
-redirect records. Handoff revalidates the complete direct-ingress request and
-binds it to the capture-source connection ID as well as the endpoint. The
-non-cloneable handoff returns ownership after a mismatch and exposes the opaque
-ingress/connect plan only after redirect records are marked applied. No driver
-is loaded, no WFP filter is added, and capture remains disconnected from the
-production SCM host.
+Static inspection of both PE certificate tables produced the same WireGuard
+LLC signer-certificate SHA-256,
+`c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136`.
+The disposable Windows 11 ARM64 VM also exposed the embedded PKCS#7 signer and
+DigiCert timestamp chain with `certutil` without loading the DLL. This is
+provenance evidence, not a substitute for the next native `WinVerifyTrust`
+qualification; an expired leaf can remain valid only when Windows accepts its
+trusted timestamp.
 
-### Connector compatibility
+`contracts/windows-packet-adapter-v1.json` and pure Rust
+`packet_adapter::v1` currently do only two things:
 
-Direct connector v1 creates a normal outbound `TcpStream` after route
-admission. That API has no redirect-record input and must remain frozen. WFP
-coexistence requires the service to set the accepted socket's opaque redirect
-records on every outbound proxy socket before bind/connect, so native capture
-will introduce a separate direct-connector v2 or a WFP-specific socket
-preparation boundary. Silently dropping those records is not an acceptable
-shortcut.
+- admit caller-provided artifact evidence when every pinned package, DLL,
+  architecture, Authenticode publisher, signer, and timestamp field matches;
+- prepare a non-authorizing candidate only for a fresh policy-bound public
+  exact `/32` or `/128` destination whose active classification is
+  `local_bypass` or `geo_exit`.
 
-### Rejected capture-v1 alternatives
+No current code downloads or loads `wintun.dll`, creates an adapter, installs a
+route, handles a packet, changes the default route, or composes network effects
+into the production Windows service. External DNS, proxy, PAC, and VPN state
+remain read-only.
 
-- **WinDivert:** its
-  [layer capability table](https://reqrypt.org/windivert-doc.html#divert_layers)
-  says the socket layer can observe or block events but cannot inject or modify
-  them, while the network layer captures packets without process ID. Producing
-  an accepted TCP stream would require Slipstream to own packet NAT, TCP
-  redirection, checksums, reinjection, and mapping lifetime. As of 2026-07-18,
-  the [current v2.2.2 release](https://github.com/basil00/WinDivert/releases/tag/v2.2.2)
-  documents x86/x64 artifacts rather than the ARM64 gate needed for the
-  available Windows 11 VM. Keep it only as a possible later M5 packet-level
-  research input, subject to its
-  [LGPLv3/GPLv2 choice](https://github.com/basil00/WinDivert/blob/master/LICENSE).
-- **System proxy or PAC:** not transparent for arbitrary applications and
-  would mutate user-owned settings.
-- **TUN/Wintun:** packet-level route ownership conflicts with the explicit
-  external-VPN coexistence requirement and does not supply the accepted-stream
-  boundary.
-- **Npcap, ETW, or pktmon:** observation does not provide controlled redirect
-  and ownership.
-- **LSP or TDI:** deprecated and outside the supported Windows networking
-  architecture.
+### Remaining safety gates
 
-Disposable qualification remains mandatory on x64 and ARM64 Windows for
-listener/filter ordering, self-loop prevention, another WFP redirector,
-service crash, controller crash, stop deadline, reboot, update, uninstall, and
-external DNS/proxy/VPN coexistence. Production packaging remains closed until
-the driver has the required architecture builds and Windows signing path.
+An exact IP route is still broader than a hostname because CDN destinations
+can be shared. A candidate plan is therefore not sufficient authorization for
+a route-table mutation. Native work remains ordered as follows:
+
+1. Collect archive/DLL hash, PE machine, and Authenticode/timestamp evidence
+   through read-only Windows APIs and feed the pure admission function.
+2. Qualify the official package on disposable AMD64 and ARM64 Windows without
+   loading the DLL or creating an adapter.
+3. Define owned adapter and exact-route transactions with crash-safe rollback,
+   shared-destination conflict rejection, stale-evidence expiry, and explicit
+   coexistence behavior for an already-active external VPN.
+4. Select and bound a userspace IPv4/IPv6 and TCP/UDP stack. Prove that direct,
+   local-bypass, and geo-exit packet flows retain the shared policy invariants;
+   Discord and YouTube must never acquire a Geph edge.
+5. Qualify crash, reboot, sleep/wake, update, uninstall, route churn, and
+   external DNS/proxy/PAC/VPN coexistence on disposable AMD64 and ARM64 hosts.
+6. Compose the adapter into the production service only after every earlier
+   gate passes and teardown leaves no adapter, route, process, or durable
+   ownership residue.
+
+WinDivert remains unsuitable for the current ARM64 gate and would also require
+packet reinjection/NAT ownership. System proxy/PAC would mutate user settings.
+Npcap, ETW, and pktmon are observation tools rather than a controlled routing
+primitive. None is a production fallback for a failed Wintun qualification.
 
 ## Codebase Graph
 
@@ -246,7 +219,9 @@ the driver has the required architecture builds and Windows signing path.
 - Observed again on 2026-07-18 while indexing the clean Windows-controller
   clone: the MCP transport returned `Transport closed`. The controller audit
   continued from exact `main` source and narrow symbol/string searches; no stale
-  graph result was treated as current evidence.
+  graph result was treated as current evidence. A later `list_projects` call in
+  the Wintun continuation failed with the same transport error, so that work
+  retained the same fallback rather than assuming the graph had recovered.
 
 Indexed routing projects:
 

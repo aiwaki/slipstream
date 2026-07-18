@@ -84,7 +84,21 @@ terminal history is bounded. `RecordingWindowsCaptureSourceEffects` proves
 these rules without a socket or native API. The production SCM host does not
 compose this module and remains no-network.
 
-`wfp_capture::v1` freezes the selected WFP driver/service data boundary while
+`packet_adapter::v1` is the active no-own-driver packet boundary. It admits
+only the pinned official Wintun 0.14.1 AMD64 or ARM64 artifact after exact
+archive, license, DLL, PE-machine, Authenticode publisher, signer, and
+timestamp evidence. It can prepare only fresh policy-bound public `/32` or
+`/128` candidate routes for `local_bypass` or `geo_exit`; protected hosts are
+reclassified through the active tables before a plan is returned. A plan is
+not permission to mutate the route table: shared-destination conflict checks,
+native artifact collection, DLL loading, adapter/route ownership, packet-stack
+integration, and rollback remain later gates. This module cannot load a DLL,
+create an adapter, install a route, or touch system DNS, proxy, PAC, VPN, or the
+production service host.
+
+The `wfp_*::v1` modules preserve a now-superseded own-driver research path for
+compatibility and future reference; they are not the Windows shipping plan.
+`wfp_capture::v1` freezes that WFP driver/service data boundary while
 remaining pure Rust. Its fixed 128-byte context is manually encoded with an
 explicit version, lengths, byte order, TCP family, original remote/local
 endpoints, service generation, exact target PID, capture-instance ID, and

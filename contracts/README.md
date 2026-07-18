@@ -86,14 +86,23 @@ Slipstream routing decisions and bounded recovery primitives.
   admission authority, hands off only a separately admitted direct request,
   and closes every unhanded stream under bounded startup, admission, and
   shutdown paths. It does not choose an interception API.
-- `windows-wfp-capture-v1.json` freezes the selected WFP driver/service wire
-  without invoking WFP or opening a socket. Its fixed 128-byte context binds
-  original IPv4/IPv6 endpoints to the exact owned service generation, PID,
-  instance, and executable hash. Accepted loopback streams require that context
-  plus bounded opaque redirect records and a source-issued connection ID. A
-  one-shot type-state handoff consumes an active-policy-validated direct-ingress
-  request with the same connection identity and exposes its outbound endpoint
-  only after those records are marked applied.
+- `windows-packet-adapter-v1.json` freezes the no-own-driver Windows packet
+  boundary. It admits only the pinned official Wintun AMD64/ARM64 binaries
+  after exact package, DLL, PE-machine, Authenticode publisher, signer, and
+  timestamp evidence. Its candidate route plans are fresh policy-bound public
+  `/32` or `/128` destinations only; they are not native authorization and
+  still require shared-destination conflict checks. Default routes and system
+  DNS/proxy/PAC/VPN mutation are impossible. It does not load the DLL, install
+  a route, or compose production traffic.
+- `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
+  research wire without invoking WFP or opening a socket. Its fixed 128-byte
+  context binds original IPv4/IPv6 endpoints to the exact owned service
+  generation, PID, instance, and executable hash. Accepted loopback streams
+  require that context plus bounded opaque redirect records and a source-issued
+  connection ID. A one-shot type-state handoff consumes an
+  active-policy-validated direct-ingress request with the same connection
+  identity and exposes its outbound endpoint only after those records are
+  marked applied.
 - `windows-wfp-runtime-v1.json` freezes the pure lifecycle immediately above
   those future effects. Kernel callouts precede exact listener readiness and
   one atomic dynamic-session transaction. Session close is the first stop
