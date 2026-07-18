@@ -128,8 +128,13 @@ no-network worker through this data-plane contract. SCM `RUNNING` must follow
 worker readiness, and stop/shutdown must preserve bounded cancellation before
 the host reports `STOPPED`. Native networking and installer integration remain
 later steps and must keep every v1 recording harness available for regression
-tests. Policy rollback remains explicitly atomic: durable commit and runtime
-activation must either both succeed or leave the current policy active.
+tests. The worker reclassifies normalized hosts through the active validated
+policy tables instead of trusting caller-supplied route metadata. Every effect
+command must fail before mutation or complete fully; reducer state is committed
+only after the whole command batch, and failures expose the exact cursor for a
+non-replaying resume. Policy rollback remains explicitly atomic: durable commit
+and runtime activation must either both succeed or leave the current policy
+active.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml

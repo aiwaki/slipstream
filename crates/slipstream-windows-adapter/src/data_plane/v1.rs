@@ -6,7 +6,10 @@
 //! same ownership, cancellation, and late-completion rules.
 
 use serde::{Deserialize, Serialize};
-use slipstream_core::routing_policy::{normalize_host, RouteClass, RoutePolicyResult, StrategySet};
+use slipstream_core::routing_policy::{
+    classify_route_policy, normalize_host, RouteClass, RoutePolicyResult, RoutingPolicyTables,
+    StrategySet,
+};
 use slipstream_core::routing_recovery::ConnectionOutcome;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -90,6 +93,7 @@ pub enum WindowsDataPlaneRequestErrorCode {
     InvalidHost,
     InvalidDeadline,
     ProtectedRouteMismatch,
+    PolicyClassificationMismatch,
     PolicyRouteMismatch,
     BackendRouteMismatch,
 }
@@ -101,14 +105,18 @@ impl WindowsDataPlaneRequestErrorCode {
             Self::InvalidHost => "invalid_host",
             Self::InvalidDeadline => "invalid_deadline",
             Self::ProtectedRouteMismatch => "protected_route_mismatch",
+            Self::PolicyClassificationMismatch => "policy_classification_mismatch",
             Self::PolicyRouteMismatch => "policy_route_mismatch",
             Self::BackendRouteMismatch => "backend_route_mismatch",
         }
     }
 }
 
+/// Validates a request against the exact active, already-validated policy tables.
+/// Caller-provided policy metadata is never an authorization source by itself.
 pub fn validate_windows_data_plane_request(
     request: &WindowsDataPlaneRequest,
+    policy_tables: &RoutingPolicyTables,
 ) -> Result<(), WindowsDataPlaneRequestErrorCode> {
     if request.request_id.is_empty()
         || request.request_id.len() > MAX_REQUEST_ID_BYTES
@@ -128,8 +136,9 @@ pub fn validate_windows_data_plane_request(
         return Err(WindowsDataPlaneRequestErrorCode::InvalidDeadline);
     }
 
-    if request.policy.service_group.is_protected_local_bypass()
-        && (request.policy.route_class != RouteClass::LocalBypass
+    let classified_policy = classify_route_policy(host, policy_tables);
+    if classified_policy.service_group.is_protected_local_bypass()
+        && (request.policy != classified_policy
             || request.backend != WindowsDataPlaneBackend::LocalEngine)
     {
         return Err(WindowsDataPlaneRequestErrorCode::ProtectedRouteMismatch);
@@ -163,6 +172,9 @@ pub fn validate_windows_data_plane_request(
     };
     if !backend_matches {
         return Err(WindowsDataPlaneRequestErrorCode::BackendRouteMismatch);
+    }
+    if request.policy != classified_policy {
+        return Err(WindowsDataPlaneRequestErrorCode::PolicyClassificationMismatch);
     }
     Ok(())
 }
@@ -537,6 +549,7 @@ pub fn reduce_windows_data_plane(
     state: &WindowsDataPlaneState,
     event: &WindowsDataPlaneEvent,
     config: &WindowsDataPlaneConfig,
+    policy_tables: &RoutingPolicyTables,
 ) -> Result<WindowsDataPlaneTransition, WindowsDataPlaneError> {
     config.validate()?;
     let now_ms = event.now_ms();
@@ -565,7 +578,7 @@ pub fn reduce_windows_data_plane(
             }
         }
         WindowsDataPlaneEvent::RequestAccepted { request, .. } => {
-            let request_error = validate_windows_data_plane_request(request)
+            let request_error = validate_windows_data_plane_request(request, policy_tables)
                 .err()
                 .or_else(|| {
                     (request.started_at_ms != now_ms)
@@ -948,6 +961,8 @@ impl WindowsDataPlaneEvent {
 pub trait WindowsDataPlaneEffects {
     type Error: fmt::Display;
 
+    /// Executes one command atomically. Returning `Err` must leave no visible
+    /// mutation from this command; earlier successful commands remain committed.
     fn execute(&mut self, command: &WindowsDataPlaneCommand) -> Result<(), Self::Error>;
 }
 
@@ -959,6 +974,7 @@ pub struct RecordingWindowsDataPlaneEffects {
     first_payloads: BTreeSet<u64>,
     outcome_session_ids: BTreeSet<u64>,
     outcomes: Vec<ConnectionOutcome>,
+    fail_once: BTreeMap<String, String>,
 }
 
 impl RecordingWindowsDataPlaneEffects {
@@ -973,12 +989,22 @@ impl RecordingWindowsDataPlaneEffects {
     pub fn outcomes(&self) -> &[ConnectionOutcome] {
         &self.outcomes
     }
+
+    pub fn fail_once(&mut self, command: &str, message: impl Into<String>) {
+        self.fail_once.insert(command.to_owned(), message.into());
+    }
 }
 
 impl WindowsDataPlaneEffects for RecordingWindowsDataPlaneEffects {
     type Error = WindowsDataPlaneEffectError;
 
     fn execute(&mut self, command: &WindowsDataPlaneCommand) -> Result<(), Self::Error> {
+        if let Some(message) = self.fail_once.remove(command.kind()) {
+            return Err(WindowsDataPlaneEffectError::InjectedFailure {
+                command: command.kind().to_owned(),
+                message,
+            });
+        }
         match command {
             WindowsDataPlaneCommand::StartSession {
                 session_id,
@@ -1089,12 +1115,46 @@ pub fn execute_windows_data_plane_transition<E: WindowsDataPlaneEffects>(
     transition: &WindowsDataPlaneTransition,
     effects: &mut E,
 ) -> Result<(), WindowsDataPlaneEffectExecutionError> {
-    for command in &transition.commands {
+    execute_windows_data_plane_transition_from(transition, effects, 0)
+}
+
+/// Resumes the exact same transition at `next_command_index`.
+///
+/// The caller must retain the transition and must not commit `transition.state`
+/// until this returns `Ok`. On failure, retry this function with the returned
+/// `next_command_index`; commands before that cursor must not be replayed.
+pub fn execute_windows_data_plane_transition_from<E: WindowsDataPlaneEffects>(
+    transition: &WindowsDataPlaneTransition,
+    effects: &mut E,
+    next_command_index: usize,
+) -> Result<(), WindowsDataPlaneEffectExecutionError> {
+    if next_command_index > transition.commands.len() {
+        return Err(WindowsDataPlaneEffectExecutionError {
+            command: "transition_cursor",
+            message: format!(
+                "command cursor {next_command_index} exceeds batch length {}",
+                transition.commands.len()
+            ),
+            failed_command_index: next_command_index,
+            next_command_index,
+            completed_commands: 0,
+        });
+    }
+
+    for (command_index, command) in transition
+        .commands
+        .iter()
+        .enumerate()
+        .skip(next_command_index)
+    {
         effects
             .execute(command)
             .map_err(|error| WindowsDataPlaneEffectExecutionError {
                 command: command.kind(),
                 message: error.to_string(),
+                failed_command_index: command_index,
+                next_command_index: command_index,
+                completed_commands: command_index,
             })?;
     }
     Ok(())
@@ -1102,6 +1162,7 @@ pub fn execute_windows_data_plane_transition<E: WindowsDataPlaneEffects>(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WindowsDataPlaneEffectError {
+    InjectedFailure { command: String, message: String },
     DuplicateResource(String),
     DuplicateFirstPayload(String),
     DuplicateOutcome(String),
@@ -1114,6 +1175,9 @@ pub enum WindowsDataPlaneEffectError {
 impl fmt::Display for WindowsDataPlaneEffectError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InjectedFailure { command, message } => {
+                write!(formatter, "injected {command} failure: {message}")
+            }
             Self::DuplicateResource(request_id) => {
                 write!(formatter, "resource {request_id} is already owned")
             }
@@ -1151,14 +1215,17 @@ impl std::error::Error for WindowsDataPlaneEffectError {}
 pub struct WindowsDataPlaneEffectExecutionError {
     pub command: &'static str,
     pub message: String,
+    pub failed_command_index: usize,
+    pub next_command_index: usize,
+    pub completed_commands: usize,
 }
 
 impl fmt::Display for WindowsDataPlaneEffectExecutionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "{} effect failed: {}",
-            self.command, self.message
+            "{} effect at command {} failed after {} completed command(s): {}",
+            self.command, self.failed_command_index, self.completed_commands, self.message
         )
     }
 }
@@ -1201,9 +1268,10 @@ impl std::error::Error for WindowsDataPlaneError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slipstream_core::routing_policy::ServiceGroup;
+    use slipstream_core::routing_policy::{bundled_policy_v1, ServiceGroup};
 
     fn request(
+        host: &str,
         request_id: &str,
         service_group: ServiceGroup,
         route_class: RouteClass,
@@ -1212,7 +1280,7 @@ mod tests {
         WindowsDataPlaneRequest {
             request_id: request_id.to_owned(),
             policy: RoutePolicyResult {
-                host: "example.com".to_owned(),
+                host: host.to_owned(),
                 route_class,
                 service_group,
                 strategy_set: StrategySet::General,
@@ -1225,24 +1293,58 @@ mod tests {
 
     #[test]
     fn protected_groups_reject_every_geph_edge() {
-        for service_group in [ServiceGroup::Discord, ServiceGroup::YoutubeVideo] {
+        let policy_tables = bundled_policy_v1();
+        for (host, service_group) in [
+            ("gateway.discord.gg", ServiceGroup::Discord),
+            ("video.googlevideo.com", ServiceGroup::YoutubeVideo),
+        ] {
             let request = request(
+                host,
                 "protected",
                 service_group,
                 RouteClass::GeoExit,
                 WindowsDataPlaneBackend::Geph,
             );
             assert_eq!(
-                validate_windows_data_plane_request(&request),
+                validate_windows_data_plane_request(&request, &policy_tables),
                 Err(WindowsDataPlaneRequestErrorCode::ProtectedRouteMismatch)
             );
         }
     }
 
     #[test]
+    fn validation_uses_the_injected_active_policy_tables() {
+        let mut policy_tables = bundled_policy_v1();
+        policy_tables
+            .static_routes
+            .iter_mut()
+            .find(|policy| policy.service_group == ServiceGroup::Github)
+            .expect("bundled policy must include GitHub")
+            .domains
+            .push("crystalidea.com".to_owned());
+        let request = WindowsDataPlaneRequest {
+            request_id: "active-policy".to_owned(),
+            policy: classify_route_policy("crystalidea.com", &policy_tables),
+            backend: WindowsDataPlaneBackend::Direct,
+            started_at_ms: 1,
+            first_payload_deadline_at_ms: 100,
+        };
+
+        assert_eq!(
+            validate_windows_data_plane_request(&request, &policy_tables),
+            Ok(())
+        );
+        assert_eq!(
+            validate_windows_data_plane_request(&request, &bundled_policy_v1()),
+            Err(WindowsDataPlaneRequestErrorCode::PolicyClassificationMismatch)
+        );
+    }
+
+    #[test]
     fn recording_effects_require_close_before_outcome() {
         let mut effects = RecordingWindowsDataPlaneEffects::default();
         let owned_request = request(
+            "example.com",
             "owned",
             ServiceGroup::Generic,
             RouteClass::Unknown,
@@ -1255,6 +1357,7 @@ mod tests {
             })
             .unwrap();
         let replacement = request(
+            "example.com",
             "replacement",
             ServiceGroup::Generic,
             RouteClass::Unknown,
@@ -1290,5 +1393,21 @@ mod tests {
             }),
             Err(WindowsDataPlaneEffectError::OutcomeBeforeClose(_))
         ));
+    }
+
+    #[test]
+    fn effect_resume_cursor_must_not_exceed_the_batch() {
+        let transition = WindowsDataPlaneTransition {
+            state: WindowsDataPlaneState::new(0),
+            commands: vec![WindowsDataPlaneCommand::ReportWorkerReady],
+        };
+        let mut effects = RecordingWindowsDataPlaneEffects::default();
+        let error = execute_windows_data_plane_transition_from(&transition, &mut effects, 2)
+            .expect_err("out-of-range cursor must fail");
+        assert_eq!(error.command, "transition_cursor");
+        assert_eq!(error.failed_command_index, 2);
+        assert_eq!(error.next_command_index, 2);
+        assert_eq!(error.completed_commands, 0);
+        assert!(effects.commands().is_empty());
     }
 }

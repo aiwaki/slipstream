@@ -11,6 +11,8 @@
     "partial_payload_failure_is_stream_failure": true,
     "caller_and_shutdown_cancellation_are_not_backend_failures": true,
     "resources_close_exactly_once_before_outcome": true,
+    "request_policy_is_reclassified_against_active_tables": true,
+    "effect_batches_expose_recoverable_partial_progress": true,
     "late_completion_cannot_resurrect_terminal_session": true,
     "shutdown_is_bounded": true,
     "terminal_history_is_bounded_and_aba_safe": true
@@ -572,6 +574,24 @@
       }
     }
   ],
+  "effect_recovery_vectors": [
+    {
+      "name": "start-is-not-replayed-after-deadline-scheduling-fails",
+      "vector": "first-payload-deadline-does-not-close-live-stream",
+      "event_index": 1,
+      "fail_command": "schedule_first_payload_deadline",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    },
+    {
+      "name": "close-is-not-replayed-after-outcome-recording-fails",
+      "vector": "reset-before-first-payload-is-normalized",
+      "event_index": 3,
+      "fail_command": "record_outcome",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    }
+  ],
   "invalid_requests": [
     {
       "name": "discord-has-no-geph-edge",
@@ -594,6 +614,39 @@
         "first_payload_deadline_at_ms": 100
       },
       "error": "protected_route_mismatch"
+    },
+    {
+      "name": "discord-cannot-hide-behind-generic-policy",
+      "request": {
+        "request_id": "discord-generic-geph",
+        "policy": {"host": "gateway.discord.gg", "route_class": "geo_exit", "service_group": "generic", "strategy_set": "geph"},
+        "backend": "geph",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "protected_route_mismatch"
+    },
+    {
+      "name": "youtube-cannot-hide-behind-generic-policy",
+      "request": {
+        "request_id": "youtube-generic-geph",
+        "policy": {"host": "video.googlevideo.com", "route_class": "geo_exit", "service_group": "generic", "strategy_set": "geph"},
+        "backend": "geph",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "protected_route_mismatch"
+    },
+    {
+      "name": "generic-host-policy-must-match-active-classification",
+      "request": {
+        "request_id": "generic-wrong-policy",
+        "policy": {"host": "crystalidea.com", "route_class": "direct_passthrough", "service_group": "generic", "strategy_set": "direct"},
+        "backend": "direct",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "policy_classification_mismatch"
     },
     {
       "name": "local-bypass-cannot-use-direct",

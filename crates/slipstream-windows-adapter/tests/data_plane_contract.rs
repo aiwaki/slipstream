@@ -1,11 +1,13 @@
 use serde::Deserialize;
 use serde_json::Value;
+use slipstream_core::routing_policy::bundled_policy_v1;
 use slipstream_core::routing_recovery::ConnectionOutcome;
 use slipstream_windows_adapter::data_plane::{
-    execute_windows_data_plane_transition, reduce_windows_data_plane,
-    validate_windows_data_plane_request, RecordingWindowsDataPlaneEffects, WindowsDataPlaneCommand,
-    WindowsDataPlaneConfig, WindowsDataPlaneEvent, WindowsDataPlaneRequest,
-    WindowsDataPlaneRequestErrorCode, WindowsDataPlaneState, WINDOWS_DATA_PLANE_CONTRACT_VERSION,
+    execute_windows_data_plane_transition, execute_windows_data_plane_transition_from,
+    reduce_windows_data_plane, validate_windows_data_plane_request,
+    RecordingWindowsDataPlaneEffects, WindowsDataPlaneCommand, WindowsDataPlaneConfig,
+    WindowsDataPlaneEvent, WindowsDataPlaneRequest, WindowsDataPlaneRequestErrorCode,
+    WindowsDataPlaneState, WINDOWS_DATA_PLANE_CONTRACT_VERSION,
 };
 use std::collections::BTreeSet;
 
@@ -19,6 +21,7 @@ struct Contract {
     invariants: Value,
     config: WindowsDataPlaneConfig,
     vectors: Vec<Vector>,
+    effect_recovery_vectors: Vec<EffectRecoveryVector>,
     invalid_requests: Vec<InvalidRequest>,
 }
 
@@ -44,6 +47,16 @@ struct InvalidRequest {
     name: String,
     request: WindowsDataPlaneRequest,
     error: WindowsDataPlaneRequestErrorCode,
+}
+
+#[derive(Debug, Deserialize)]
+struct EffectRecoveryVector {
+    name: String,
+    vector: String,
+    event_index: usize,
+    fail_command: String,
+    failed_command_index: usize,
+    next_command_index: usize,
 }
 
 fn contract() -> Contract {
@@ -156,6 +169,7 @@ fn assert_resource_mirror(
 #[test]
 fn windows_data_plane_executes_every_v1_vector_through_fake_effects() {
     let contract = contract();
+    let policy_tables = bundled_policy_v1();
     assert_eq!(contract.schema_version, 1);
     assert_eq!(contract.contract, "slipstream.windows_data_plane");
     assert_eq!(
@@ -167,8 +181,9 @@ fn windows_data_plane_executes_every_v1_vector_through_fake_effects() {
         let mut state = WindowsDataPlaneState::new(vector.started_at_ms);
         let mut effects = RecordingWindowsDataPlaneEffects::default();
         for event in vector.events {
-            let transition = reduce_windows_data_plane(&state, &event, &contract.config)
-                .unwrap_or_else(|error| panic!("{}: {event:?}: {error}", vector.name));
+            let transition =
+                reduce_windows_data_plane(&state, &event, &contract.config, &policy_tables)
+                    .unwrap_or_else(|error| panic!("{}: {event:?}: {error}", vector.name));
             execute_windows_data_plane_transition(&transition, &mut effects)
                 .unwrap_or_else(|error| panic!("{}: {event:?}: {error}", vector.name));
             state = transition.state;
@@ -235,13 +250,93 @@ fn windows_data_plane_executes_every_v1_vector_through_fake_effects() {
 
 #[test]
 fn windows_data_plane_rejects_every_invalid_v1_request() {
+    let policy_tables = bundled_policy_v1();
     for vector in contract().invalid_requests {
         assert_eq!(
-            validate_windows_data_plane_request(&vector.request),
+            validate_windows_data_plane_request(&vector.request, &policy_tables),
             Err(vector.error),
             "{}",
             vector.name
         );
+    }
+}
+
+#[test]
+fn windows_data_plane_resumes_effect_batches_without_replaying_completed_commands() {
+    let contract = contract();
+    let policy_tables = bundled_policy_v1();
+
+    for recovery in &contract.effect_recovery_vectors {
+        let vector = contract
+            .vectors
+            .iter()
+            .find(|vector| vector.name == recovery.vector)
+            .unwrap_or_else(|| panic!("{}: missing source vector", recovery.name));
+        let mut state = WindowsDataPlaneState::new(vector.started_at_ms);
+        let mut effects = RecordingWindowsDataPlaneEffects::default();
+
+        for event in vector.events.iter().take(recovery.event_index) {
+            let transition =
+                reduce_windows_data_plane(&state, event, &contract.config, &policy_tables)
+                    .unwrap_or_else(|error| panic!("{}: {event:?}: {error}", recovery.name));
+            execute_windows_data_plane_transition(&transition, &mut effects)
+                .unwrap_or_else(|error| panic!("{}: {event:?}: {error}", recovery.name));
+            state = transition.state;
+        }
+
+        let event = vector
+            .events
+            .get(recovery.event_index)
+            .unwrap_or_else(|| panic!("{}: missing target event", recovery.name));
+        let transition = reduce_windows_data_plane(&state, event, &contract.config, &policy_tables)
+            .unwrap_or_else(|error| panic!("{}: {event:?}: {error}", recovery.name));
+        let commands_before = effects.commands().len();
+        effects.fail_once(&recovery.fail_command, "contract fault");
+
+        let error = execute_windows_data_plane_transition(&transition, &mut effects)
+            .expect_err("injected command must fail once");
+        assert_eq!(
+            error.command, recovery.fail_command,
+            "{} command",
+            recovery.name
+        );
+        assert_eq!(
+            error.failed_command_index, recovery.failed_command_index,
+            "{} failed index",
+            recovery.name
+        );
+        assert_eq!(
+            error.next_command_index, recovery.next_command_index,
+            "{} resume index",
+            recovery.name
+        );
+        assert_eq!(
+            error.completed_commands, recovery.failed_command_index,
+            "{} completed commands",
+            recovery.name
+        );
+        assert_eq!(
+            &effects.commands()[commands_before..],
+            &transition.commands[..recovery.failed_command_index],
+            "{} completed prefix",
+            recovery.name
+        );
+
+        execute_windows_data_plane_transition_from(
+            &transition,
+            &mut effects,
+            error.next_command_index,
+        )
+        .unwrap_or_else(|error| panic!("{} resume: {error}", recovery.name));
+        assert_eq!(
+            &effects.commands()[commands_before..],
+            transition.commands.as_slice(),
+            "{} commands execute exactly once",
+            recovery.name
+        );
+
+        state = transition.state;
+        assert_resource_mirror(&recovery.name, &state, &effects);
     }
 }
 
@@ -258,6 +353,8 @@ fn windows_data_plane_contract_freezes_safety_invariants() {
         "partial_payload_failure_is_stream_failure",
         "caller_and_shutdown_cancellation_are_not_backend_failures",
         "resources_close_exactly_once_before_outcome",
+        "request_policy_is_reclassified_against_active_tables",
+        "effect_batches_expose_recoverable_partial_progress",
         "late_completion_cannot_resurrect_terminal_session",
         "shutdown_is_bounded",
         "terminal_history_is_bounded_and_aba_safe",

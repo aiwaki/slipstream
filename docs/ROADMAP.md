@@ -290,14 +290,17 @@ request/session and worker lifecycle as pure commands and events. Deterministic
 fake effects cover readiness, first-payload stalls, reset before payload,
 partial-payload stream failure, caller cancellation, shutdown cancellation,
 bounded forced close, resource ownership, and late completion. Route, strategy,
-service group, and backend must agree before a session starts; Discord and
-YouTube have no Geph edge, and external DNS, proxy, PAC, and VPN state remains
-untouched. Monotonic session IDs and bounded terminal retention also prevent a
-stale completion from targeting a reused request ID without allowing service
-state to grow forever. The next boundary composes the service host with an
-injected no-network worker so SCM readiness and bounded shutdown are proven
-together. Native Windows sockets remain a later PR after that composition is
-qualified.
+service group, and backend must agree with a fresh classification through the
+active validated policy tables before a session starts; Discord and YouTube
+cannot hide behind caller-supplied `generic` metadata and have no Geph edge.
+External DNS, proxy, PAC, and VPN state remains untouched. Effect commands are
+failure-atomic, and a partially completed batch resumes from an exact cursor
+without replaying an opened or closed resource. Monotonic session IDs and
+bounded terminal retention also prevent a stale completion from targeting a
+reused request ID without allowing service state to grow forever. The next
+boundary composes the service host with an injected no-network worker so SCM
+readiness and bounded shutdown are proven together. Native Windows sockets
+remain a later PR after that composition is qualified.
 
 ## M5 - Packet-Level Capabilities
 
