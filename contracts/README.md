@@ -86,6 +86,14 @@ Slipstream routing decisions and bounded recovery primitives.
   admission authority, hands off only a separately admitted direct request,
   and closes every unhanded stream under bounded startup, admission, and
   shutdown paths. It does not choose an interception API.
+- `windows-wfp-capture-v1.json` freezes the selected WFP driver/service wire
+  without invoking WFP or opening a socket. Its fixed 128-byte context binds
+  original IPv4/IPv6 endpoints to the exact owned service generation, PID,
+  instance, and executable hash. Accepted loopback streams require that context
+  plus bounded opaque redirect records and a source-issued connection ID. A
+  one-shot type-state handoff consumes an active-policy-validated direct-ingress
+  request with the same connection identity and exposes its outbound endpoint
+  only after those records are marked applied.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust

@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_wfp_capture",
+  "contract_version": 1,
+  "invariants": {
+    "wire_context_bytes": 128,
+    "wire_version_is_frozen": true,
+    "protocol_is_tcp_only": true,
+    "service_identity_is_exact": true,
+    "accepted_listener_is_exact_loopback": true,
+    "ordinary_loopback_without_context_is_rejected": true,
+    "redirect_records_are_opaque": true,
+    "redirect_records_max_bytes": 16384,
+    "redirect_records_precede_bind_or_connect": true,
+    "exact_ingress_admission_identity_required": true,
+    "admission_mismatch_preserves_capture": true,
+    "direct_connector_v1_is_unchanged": true,
+    "production_service_host_network_effects": false,
+    "dns_proxy_pac_vpn_mutation": false
+  },
+  "wire_format": {
+    "magic_hex": "534c495057465000",
+    "byte_order": "little_except_network_ports_and_address_octets",
+    "fields": [
+      {"name": "magic", "offset": 0, "length": 8},
+      {"name": "version", "offset": 8, "length": 2},
+      {"name": "header_length", "offset": 10, "length": 2},
+      {"name": "total_length", "offset": 12, "length": 4},
+      {"name": "service_generation", "offset": 16, "length": 8},
+      {"name": "target_pid", "offset": 24, "length": 4},
+      {"name": "protocol", "offset": 28, "length": 1},
+      {"name": "address_family", "offset": 29, "length": 1},
+      {"name": "flags", "offset": 30, "length": 2},
+      {"name": "original_port", "offset": 32, "length": 2},
+      {"name": "original_local_port", "offset": 34, "length": 2},
+      {"name": "original_address", "offset": 36, "length": 16},
+      {"name": "original_local_address", "offset": 52, "length": 16},
+      {"name": "capture_instance_id", "offset": 68, "length": 16},
+      {"name": "service_executable_sha256", "offset": 84, "length": 32},
+      {"name": "reserved_zero", "offset": 116, "length": 12}
+    ]
+  },
+  "identity": {
+    "service": {
+      "service_name": "dev.slipstream.service",
+      "executable_sha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "generation": 72623859790382856
+    },
+    "target_pid": 12345,
+    "capture_instance_id": "00112233445566778899aabbccddeeff",
+    "listeners": [
+      {"address": "127.0.0.1", "port": 1443},
+      {"address": "::1", "port": 1443}
+    ]
+  },
+  "valid_contexts": [
+    {
+      "name": "ipv4",
+      "context_hex": "534c49505746500001008000800000000807060504030201393000000604000001bbd6d85db8d822000000000000000000000000c000020500000000000000000000000000112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000000000000000000",
+      "original_destination": {"address": "93.184.216.34", "port": 443},
+      "original_local_endpoint": {"address": "192.0.2.5", "port": 55000},
+      "accepted_local_endpoint": {"address": "127.0.0.1", "port": 1443},
+      "redirect_records_hex": "aabbccdd"
+    },
+    {
+      "name": "ipv6",
+      "context_hex": "534c49505746500001008000800000000807060504030201393000000606000001bbd6d92606470047000000000000000000111120010db800000000000000000000000500112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000000000000000000",
+      "original_destination": {"address": "2606:4700:4700::1111", "port": 443},
+      "original_local_endpoint": {"address": "2001:db8::5", "port": 55001},
+      "accepted_local_endpoint": {"address": "::1", "port": 1443},
+      "redirect_records_hex": "10203040"
+    }
+  ],
+  "context_rejections": [
+    {"name": "truncated-context", "base": "ipv4", "truncate_to": 127, "mutations": [], "expected_error": "invalid_context_length"},
+    {"name": "extended-context", "base": "ipv4", "append_hex": "00", "mutations": [], "expected_error": "invalid_context_length"},
+    {"name": "bad-magic", "base": "ipv4", "mutations": [{"offset": 0, "bytes_hex": "00"}], "expected_error": "invalid_context_magic"},
+    {"name": "unknown-version", "base": "ipv4", "mutations": [{"offset": 8, "bytes_hex": "0200"}], "expected_error": "unsupported_context_version"},
+    {"name": "bad-header-length", "base": "ipv4", "mutations": [{"offset": 10, "bytes_hex": "7f00"}], "expected_error": "invalid_header_length"},
+    {"name": "bad-total-length", "base": "ipv4", "mutations": [{"offset": 12, "bytes_hex": "7f000000"}], "expected_error": "invalid_total_length"},
+    {"name": "zero-generation", "base": "ipv4", "mutations": [{"offset": 16, "bytes_hex": "0000000000000000"}], "expected_error": "invalid_service_generation"},
+    {"name": "zero-pid", "base": "ipv4", "mutations": [{"offset": 24, "bytes_hex": "00000000"}], "expected_error": "invalid_target_pid"},
+    {"name": "not-tcp", "base": "ipv4", "mutations": [{"offset": 28, "bytes_hex": "11"}], "expected_error": "invalid_protocol"},
+    {"name": "unknown-family", "base": "ipv4", "mutations": [{"offset": 29, "bytes_hex": "05"}], "expected_error": "invalid_address_family"},
+    {"name": "unknown-flags", "base": "ipv4", "mutations": [{"offset": 30, "bytes_hex": "0100"}], "expected_error": "unsupported_flags"},
+    {"name": "zero-original-port", "base": "ipv4", "mutations": [{"offset": 32, "bytes_hex": "0000"}], "expected_error": "invalid_original_port"},
+    {"name": "noncanonical-ipv4-padding", "base": "ipv4", "mutations": [{"offset": 40, "bytes_hex": "01"}], "expected_error": "invalid_address_encoding"},
+    {"name": "zero-instance", "base": "ipv4", "mutations": [{"offset": 68, "bytes_hex": "00000000000000000000000000000000"}], "expected_error": "invalid_capture_instance"},
+    {"name": "zero-executable-hash", "base": "ipv4", "mutations": [{"offset": 84, "bytes_hex": "0000000000000000000000000000000000000000000000000000000000000000"}], "expected_error": "invalid_executable_hash"},
+    {"name": "nonzero-reserved-byte", "base": "ipv4", "mutations": [{"offset": 116, "bytes_hex": "01"}], "expected_error": "reserved_not_zero"},
+    {"name": "unspecified-original", "base": "ipv4", "mutations": [{"offset": 36, "bytes_hex": "00000000"}], "expected_error": "unsafe_original_destination"},
+    {"name": "loopback-original", "base": "ipv4", "mutations": [{"offset": 36, "bytes_hex": "7f000001"}], "expected_error": "unsafe_original_destination"},
+    {"name": "multicast-original", "base": "ipv4", "mutations": [{"offset": 36, "bytes_hex": "e0000001"}], "expected_error": "unsafe_original_destination"},
+    {"name": "broadcast-original", "base": "ipv4", "mutations": [{"offset": 36, "bytes_hex": "ffffffff"}], "expected_error": "unsafe_original_destination"},
+    {"name": "link-local-original", "base": "ipv6", "mutations": [{"offset": 36, "bytes_hex": "fe800000000000000000000000000001"}], "expected_error": "unsafe_original_destination"},
+    {"name": "mapped-unspecified-original", "base": "ipv6", "mutations": [{"offset": 36, "bytes_hex": "00000000000000000000ffff00000000"}], "expected_error": "unsafe_original_destination"},
+    {"name": "mapped-loopback-original", "base": "ipv6", "mutations": [{"offset": 36, "bytes_hex": "00000000000000000000ffff7f000001"}], "expected_error": "unsafe_original_destination"},
+    {"name": "mapped-multicast-original", "base": "ipv6", "mutations": [{"offset": 36, "bytes_hex": "00000000000000000000ffffe0000001"}], "expected_error": "unsafe_original_destination"},
+    {"name": "mapped-link-local-original", "base": "ipv6", "mutations": [{"offset": 36, "bytes_hex": "00000000000000000000ffffa9fe0001"}], "expected_error": "unsafe_original_destination"},
+    {"name": "mapped-broadcast-original", "base": "ipv6", "mutations": [{"offset": 36, "bytes_hex": "00000000000000000000ffffffffffff"}], "expected_error": "unsafe_original_destination"}
+  ],
+  "capture_rejections": [
+    {"name": "zero-source-connection-id", "base": "ipv4", "connection_id": 0, "redirect_records_size": 4, "expected_error": "invalid_connection_id"},
+    {"name": "ordinary-loopback-without-wfp-context", "base": "ipv4", "empty_context": true, "redirect_records_size": 4, "expected_error": "invalid_context_length"},
+    {"name": "missing-redirect-records", "base": "ipv4", "redirect_records_size": 0, "expected_error": "missing_redirect_records"},
+    {"name": "oversized-redirect-records", "base": "ipv4", "redirect_records_size": 16385, "expected_error": "redirect_records_too_large"},
+    {"name": "wrong-listener", "base": "ipv4", "accepted_local_endpoint": {"address": "127.0.0.1", "port": 2443}, "redirect_records_size": 4, "expected_error": "listener_mismatch"},
+    {"name": "nonloopback-listener", "base": "ipv4", "accepted_local_endpoint": {"address": "192.0.2.10", "port": 1443}, "redirect_records_size": 4, "expected_error": "listener_not_loopback"},
+    {"name": "listener-family-mismatch", "base": "ipv4", "accepted_local_endpoint": {"address": "::1", "port": 1443}, "redirect_records_size": 4, "expected_error": "listener_family_mismatch"},
+    {"name": "stale-generation", "base": "ipv4", "context_mutations": [{"offset": 16, "bytes_hex": "0907060504030201"}], "redirect_records_size": 4, "expected_error": "stale_service_generation"},
+    {"name": "stale-pid", "base": "ipv4", "context_mutations": [{"offset": 24, "bytes_hex": "3a300000"}], "redirect_records_size": 4, "expected_error": "stale_target_pid"},
+    {"name": "stale-instance", "base": "ipv4", "context_mutations": [{"offset": 68, "bytes_hex": "01"}], "redirect_records_size": 4, "expected_error": "stale_capture_instance"},
+    {"name": "stale-executable-hash", "base": "ipv4", "context_mutations": [{"offset": 84, "bytes_hex": "ff"}], "redirect_records_size": 4, "expected_error": "stale_executable_hash"}
+  ],
+  "handoff_vectors": [
+    {
+      "name": "records-before-connect",
+      "base": "ipv4",
+      "capture_connection_id": 1,
+      "ingress_request": {
+        "connector_request": {
+          "session_id": 7,
+          "data_plane_request": {
+            "request_id": "github-wfp",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1000
+          },
+          "endpoint": {"address": "93.184.216.34", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 120,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 1,
+          "request_id": "github-wfp",
+          "session_id": 7,
+          "endpoint": {"address": "93.184.216.34", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 510
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected_accepted": true,
+      "expected_error": ""
+    },
+    {
+      "name": "different-connection-admission-preserves-capture",
+      "base": "ipv4",
+      "capture_connection_id": 1,
+      "ingress_request": {
+        "connector_request": {
+          "session_id": 8,
+          "data_plane_request": {
+            "request_id": "github-other-connection",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1000
+          },
+          "endpoint": {"address": "93.184.216.34", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 120,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 2,
+          "request_id": "github-other-connection",
+          "session_id": 8,
+          "endpoint": {"address": "93.184.216.34", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 510
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected_accepted": false,
+      "expected_error": "admission_identity_mismatch"
+    },
+    {
+      "name": "different-endpoint-admission-preserves-capture",
+      "base": "ipv4",
+      "capture_connection_id": 1,
+      "ingress_request": {
+        "connector_request": {
+          "session_id": 9,
+          "data_plane_request": {
+            "request_id": "github-other-endpoint",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1000
+          },
+          "endpoint": {"address": "93.184.216.35", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 120,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 1,
+          "request_id": "github-other-endpoint",
+          "session_id": 9,
+          "endpoint": {"address": "93.184.216.35", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 510
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected_accepted": false,
+      "expected_error": "admission_endpoint_mismatch"
+    }
+  ]
+}
