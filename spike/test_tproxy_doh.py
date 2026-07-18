@@ -24,6 +24,7 @@ from tproxy import _doh_request, _doh_ssl_context
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state():
     shutdown_started = tproxy._shutdown_started.is_set()
+    pf_teardown_complete = tproxy._pf_teardown_complete.is_set()
     route_policy_trial_generation = tproxy._route_policy_trial_generation
     dns_cache = dict(tproxy._system_dns_cache)
     smart_ok = dict(tproxy._smart_dns_ok_until)
@@ -63,6 +64,7 @@ def reset_smart_dns_state():
     )
     try:
         tproxy._shutdown_started.clear()
+        tproxy._pf_teardown_complete.clear()
         tproxy._route_policy_trial_generation = 0
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.update({
@@ -123,6 +125,10 @@ def reset_smart_dns_state():
             tproxy._shutdown_started.set()
         else:
             tproxy._shutdown_started.clear()
+        if pf_teardown_complete:
+            tproxy._pf_teardown_complete.set()
+        else:
+            tproxy._pf_teardown_complete.clear()
         tproxy._route_policy_trial_generation = route_policy_trial_generation
         tproxy.reset_route_policy_manifest()
         tproxy._system_dns_cache.clear()
@@ -604,6 +610,38 @@ def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_
 
     assert tproxy.do_uninstall()
     assert stopped == [4242]
+
+
+def test_uninstall_reports_owned_daemon_that_did_not_stop(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "missing-status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    stopped = []
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242, 4343])
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda pid: stopped.append(pid) or pid != 4242,
+    )
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert not tproxy.do_uninstall()
+    assert stopped == [4242, 4343]
 
 
 def test_uninstall_reports_incomplete_pf_token_release(monkeypatch, tmp_path):
@@ -1179,6 +1217,11 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
     assert not status_path.exists()
     assert not status_tmp_path.exists()
+    assert tproxy._pf_teardown_complete.is_set()
+
+    completed_calls = list(calls)
+    tproxy.pf_teardown()
+    assert calls == completed_calls
 
 
 def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
@@ -1197,7 +1240,11 @@ def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
 
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
     monkeypatch.setattr(tproxy, "status_v2_snapshot", lambda *_: {"state": "active"})
-    monkeypatch.setattr(tproxy, "_pf_flush", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
     monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
     monkeypatch.setattr(tproxy.os, "chmod", blocking_chmod)
 
@@ -1224,6 +1271,88 @@ def test_pf_teardown_prevents_inflight_status_writer_from_resurrecting_file(
 
     tproxy.write_status("active", "en0", None)
     assert not status_path.exists()
+
+
+def test_pf_teardown_wins_when_shutdown_arrives_during_pf_load(monkeypatch, tmp_path):
+    load_started = threading.Event()
+    release_load = threading.Event()
+    calls = []
+    arm_result = []
+
+    def blocking_load(_port):
+        calls.append("load")
+        load_started.set()
+        assert release_load.wait(timeout=2)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def flush():
+        calls.append("flush")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status"))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_load", blocking_load)
+    monkeypatch.setattr(tproxy, "_pf_flush", flush)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: calls.append("release"),
+    )
+
+    arm = threading.Thread(
+        target=lambda: arm_result.append(tproxy.arm_private_pf_if_ready(1080))
+    )
+    arm.start()
+    assert load_started.wait(timeout=2)
+
+    teardown = threading.Thread(target=tproxy.pf_teardown)
+    teardown.start()
+    assert tproxy._shutdown_started.wait(timeout=2)
+    assert teardown.is_alive()
+
+    release_load.set()
+    arm.join(timeout=2)
+    teardown.join(timeout=2)
+
+    assert not arm.is_alive()
+    assert not teardown.is_alive()
+    assert arm_result == [False]
+    assert calls == ["load", "flush", "release", "flush", "release"]
+    assert not tproxy._pf_applied
+
+
+def test_pf_teardown_retries_without_releasing_token_after_failed_flush(
+    monkeypatch,
+    tmp_path,
+):
+    results = iter(
+        (
+            SimpleNamespace(returncode=1, stdout="", stderr="busy"),
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+        )
+    )
+    releases = []
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status"))
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_flush", lambda: next(results))
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: releases.append(True),
+    )
+
+    assert not tproxy.pf_teardown()
+    assert not tproxy._pf_teardown_complete.is_set()
+    assert tproxy._pf_applied
+    assert releases == []
+
+    assert tproxy.pf_teardown()
+    assert tproxy._pf_teardown_complete.is_set()
+    assert not tproxy._pf_applied
+    assert releases == [True]
 
 
 def test_pf_release_failure_preserves_token_for_recovery(monkeypatch):
@@ -1623,6 +1752,30 @@ def test_pf_startup_waits_for_enabled_geo_exit_backend(monkeypatch):
     assert not tproxy.pf_setup_if_ready(1080, now=100.0)
 
 
+def test_pf_arm_refuses_to_touch_pf_after_shutdown_starts(monkeypatch):
+    calls = []
+    tproxy._shutdown_started.set()
+    monkeypatch.setattr(
+        tproxy,
+        "pf_parent_anchor_loaded",
+        lambda: calls.append("parent") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_acquire_enable_token",
+        lambda: calls.append("token") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_load",
+        lambda _port: calls.append("load"),
+    )
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert not tproxy.pf_setup(1080)
+    assert calls == []
+
+
 def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     calls = []
 
@@ -1675,6 +1828,128 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     assert ("thread_start",) in calls
 
 
+def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
+    calls = []
+
+    class Server:
+        async def __aenter__(self):
+            calls.append("enter")
+            return self
+
+        async def __aexit__(self, *_args):
+            calls.append("exit")
+            return False
+
+        async def serve_forever(self):
+            await asyncio.Future()
+
+        def close(self):
+            calls.append("listener_closed")
+
+        async def wait_closed(self):
+            calls.append("listener_waited")
+
+    async def wait_for_drain(timeout):
+        calls.append(("drain", timeout))
+        return False
+
+    async def cancel_connections():
+        calls.append("connections_closed")
+        return 1
+
+    async def exercise():
+        shutdown = asyncio.Event()
+        shutdown.set()
+        return await tproxy.serve_until_shutdown(Server(), shutdown, drain_timeout=3.5)
+
+    monkeypatch.setattr(
+        tproxy,
+        "pf_teardown",
+        lambda: calls.append("pf_cleared") or True,
+    )
+    monkeypatch.setattr(tproxy, "wait_for_connections_to_drain", wait_for_drain)
+    monkeypatch.setattr(tproxy, "cancel_active_connections", cancel_connections)
+
+    assert not asyncio.run(exercise())
+    assert calls == [
+        "enter",
+        "listener_closed",
+        "listener_waited",
+        "pf_cleared",
+        ("drain", 3.5),
+        "connections_closed",
+        "exit",
+    ]
+
+
+def test_shutdown_request_is_visible_before_async_drain_starts():
+    async def exercise():
+        shutdown = asyncio.Event()
+        tproxy.request_daemon_shutdown(shutdown)
+        return (
+            shutdown.is_set(),
+            tproxy._shutdown_started.is_set(),
+            tproxy._pf_teardown_complete.is_set(),
+        )
+
+    assert asyncio.run(exercise()) == (True, True, False)
+
+
+def test_connection_drain_is_bounded(monkeypatch):
+    async def exercise():
+        tproxy._conn_count = 1
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.02, setattr, tproxy, "_conn_count", 0)
+        return await tproxy.wait_for_connections_to_drain(timeout=0.2)
+
+    try:
+        assert asyncio.run(exercise())
+        tproxy._conn_count = 1
+        assert not asyncio.run(tproxy.wait_for_connections_to_drain(timeout=0.0))
+    finally:
+        tproxy._conn_count = 0
+
+
+def test_connection_drain_waits_for_a_stable_zero_count():
+    async def exercise():
+        tproxy._conn_count = 0
+        loop = asyncio.get_running_loop()
+        loop.call_soon(setattr, tproxy, "_conn_count", 1)
+        loop.call_later(0.02, setattr, tproxy, "_conn_count", 0)
+        started = loop.time()
+        drained = await tproxy.wait_for_connections_to_drain(timeout=0.3)
+        return drained, loop.time() - started
+
+    try:
+        drained, elapsed = asyncio.run(exercise())
+        assert drained
+        assert elapsed >= tproxy.SHUTDOWN_DRAIN_QUIET_SECONDS
+    finally:
+        tproxy._conn_count = 0
+
+
+def test_cancel_active_connections_awaits_only_owned_handler_tasks():
+    async def exercise():
+        cancelled = asyncio.Event()
+
+        async def connection():
+            task = asyncio.current_task()
+            tproxy._connection_tasks.add(task)
+            try:
+                await asyncio.Future()
+            finally:
+                tproxy._connection_tasks.discard(task)
+                cancelled.set()
+
+        task = asyncio.create_task(connection())
+        await asyncio.sleep(0)
+        count = await tproxy.cancel_active_connections()
+        await asyncio.gather(task, return_exceptions=True)
+        return count, cancelled.is_set(), len(tproxy._connection_tasks)
+
+    assert asyncio.run(exercise()) == (1, True, 0)
+
+
 def test_geo_exit_backend_hold_requires_fresh_probe_after_cooldown(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
@@ -1690,9 +1965,6 @@ def test_geo_exit_backend_hold_requires_fresh_probe_after_cooldown(monkeypatch):
 
 
 def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch):
-    class StopMonitor(Exception):
-        pass
-
     pauses = []
     states = []
     rearms = []
@@ -1702,8 +1974,9 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
         tproxy._pf_applied = False
         return True
 
-    def stop_sleep(_seconds):
-        raise StopMonitor
+    def write_status_and_stop(state, iface, voice_iface):
+        states.append((state, iface, voice_iface))
+        tproxy._shutdown_started.set()
 
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
@@ -1718,7 +1991,7 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
     monkeypatch.setattr(
         tproxy,
         "write_status",
-        lambda state, iface, voice_iface: states.append((state, iface, voice_iface)),
+        write_status_and_stop,
     )
     monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -1731,15 +2004,37 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
         "start_route_policy_remote_update_if_due",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(tproxy.time, "sleep", stop_sleep)
     tproxy._queue_runtime_rearm("network_change")
 
-    with pytest.raises(StopMonitor):
-        tproxy.network_monitor(1080, voice=False)
+    tproxy.network_monitor(1080, voice=False)
 
     assert pauses == [True]
     assert states == [("dormant", "en0", None)]
     assert rearms == [("network_change", "en0")]
+
+
+def test_network_monitor_does_not_rearm_after_shutdown_starts(monkeypatch):
+    calls = []
+    tproxy._shutdown_started.set()
+    monkeypatch.setattr(
+        tproxy,
+        "default_iface",
+        lambda: calls.append("default_iface"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "arm_private_pf_if_ready",
+        lambda _port: calls.append("arm_pf"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **_kwargs: calls.append("restart_geph"),
+    )
+
+    tproxy.network_monitor(1080, voice=False)
+
+    assert calls == []
 
 
 def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
@@ -4676,6 +4971,56 @@ def test_owned_geph_restart_waits_for_active_tunnel(monkeypatch):
     assert result == "busy"
     assert calls == []
     assert hint["recommended"] is True
+
+
+def test_owned_geph_restart_does_nothing_during_shutdown(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    tproxy._shutdown_started.set()
+    calls = []
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=lambda *args: calls.append(("run", args)),
+        pauser=lambda: calls.append(("pause",)),
+    )
+
+    assert result == "shutdown"
+    assert calls == []
+    assert hint["last_attempt_at"] == 0.0
+
+
+def test_owned_geph_restart_does_not_kickstart_if_shutdown_begins_while_pausing(
+    monkeypatch,
+):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    calls = []
+
+    def pause_and_shutdown():
+        calls.append("pause")
+        tproxy._shutdown_started.set()
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        active_sessions=0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=lambda *args: calls.append(("run", args)),
+        pauser=pause_and_shutdown,
+    )
+
+    assert result == "shutdown"
+    assert calls == ["pause"]
 
 
 def test_owned_geph_restart_pauses_pf_and_kickstarts_exact_launchagent(monkeypatch):

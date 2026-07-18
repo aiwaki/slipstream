@@ -47,6 +47,10 @@ strategy, but does not expose hostnames.
 
 Tray diagnostics:
 
+- `Open Status` opens a sanitized owner-only JSON snapshot without an
+  administrator prompt. It includes StatusV2, install checks, daemon recovery,
+  and the private stdout/stderr tails of Slipstream's owned Geph LaunchAgent,
+  but not the root daemon log.
 - `Copy Diagnostics` copies a redacted JSON snapshot and saves the same snapshot
   as `slipstream-diagnostics.json` in the macOS temporary directory, then reveals
   it in Finder for bug reports.
@@ -67,7 +71,8 @@ sudo tail -f /var/log/slipstream.log
 ```
 
 The current log and retained rotations are root-owned regular files with mode
-`0600`. `Open Log` is the normal tray path when a Terminal tail is unnecessary.
+`0600`. Each daemon start writes a `daemon session start` marker so retained
+errors from an older process are not mistaken for the current session.
 
 Administrator prompts:
 
@@ -75,7 +80,7 @@ Slipstream asks macOS for administrator access only for privileged maintenance:
 
 - installing or upgrading the background daemon;
 - restarting or repairing the background daemon;
-- copying the root-owned daemon log for `Open Log` or `Copy Diagnostics`.
+- copying the root-owned daemon log for `Copy Diagnostics`.
 
 The prompt should name Slipstream and the specific action. Cancel unrelated or
 unnamed `osascript` password prompts.
@@ -96,18 +101,24 @@ not claim an active PF redirect; it identifies the remaining user-side job so it
 is not mistaken for an external VPN or proxy.
 
 To remove Slipstream, choose `Uninstall Slipstream…` in the tray and confirm the
-native dialog. It first disables tray autostart and removes only Slipstream's
-verified Geph LaunchAgent, private runtime, and Keychain account entry. It then
-removes the root daemon and private PF state. After the tray exits, a detached
-helper revalidates the exact tray PID and bundle identifier before removing the
-Slipstream app bundle from `Applications`.
+native dialog. It first disables tray autostart, stops new transparent accepts,
+clears only Slipstream's private PF anchor, and gives already accepted streams a
+bounded drain while the owned Geph backend is still alive. It then removes only
+Slipstream's verified Geph LaunchAgent, private runtime, and Keychain account
+entry. A detached privileged helper moves the validated application bundle out
+of its installed path only after that user cleanup succeeds, then revalidates
+the exact tray PID before deleting the staged bundle.
+Cancelling the administrator prompt or failing owned-Geph cleanup does not
+commit application removal.
 
 The root uninstaller disables the launchd label before stopping any detached
 listener, and signals a PID only after verifying the installed daemon command.
-It then removes the plist, owned runtime, status, and private PF rules, and
-releases the owned PF token. The token record is removed only after a successful
-release. If the installed uninstaller was already deleted, the tray uses the
-copy inside the application bundle. A partial install follows the same rollback.
+It reports failure if a verified daemon PID survives the bounded stop, even when
+the listener has already disappeared. It then removes the plist, owned runtime,
+status, and private PF rules, and releases the owned PF token. The token record
+is removed only after a successful release. If the installed uninstaller was
+already deleted, the tray uses the copy inside the application bundle. A
+partial install follows the same rollback.
 
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
@@ -125,19 +136,24 @@ has a bounded shared lifecycle and awaits both stream closures. The daemon keeps
 an emergency descriptor reserve and, at a bounded high watermark or
 `EMFILE`/`ENFILE`, immediately pauses only `com.apple/slipstream`. It may re-arm
 only after descriptor use falls below the low watermark and normal backend
-readiness succeeds. Uninstall performs the owned user cleanup before the root
-prompt, so cancelling or failing root cleanup cannot leave bundled Geph running.
+readiness succeeds. Uninstall keeps the owned Geph process alive only while the
+root daemon clears PF and drains accepted streams, then removes that exact user
+job before the tray exits.
 
 ## Geph Exit Locations
 
 The Geph submenu normally lists city-level exits such as `CA / Montreal`. On a
 fresh launch, Geph may not have answered its local control RPC yet. Until a live
 or cached verified catalog exists, Slipstream shows an unavailable state rather
-than a fabricated country-level fallback list. A restart is not required.
+than a fabricated country-level fallback list. Saving an account, enabling
+Geph, or selecting `Restart Proxy` starts a fresh bounded catalog poll, so a tray
+restart is not required.
 
-If the menu stays country-only after Geph is connected, use `Copy Diagnostics`.
-The app caches the last verified city catalog locally, so later launches should
-show the city list immediately even while Geph is reconnecting.
+If the menu remains unavailable after Geph is connected, use `Open Status` and
+inspect `geph_logs`. The owned LaunchAgent writes private `0600` stdout/stderr
+logs instead of discarding startup errors. The app caches the last verified city
+catalog locally, so later launches should show the city list immediately even
+while Geph is reconnecting.
 
 ## PF Ownership
 
@@ -245,6 +261,26 @@ incident boundary. The source already contained the zero-byte close guard, but
 the installed lifecycle did not guarantee that the fixed daemon was loaded or
 that a partial install rolled back.
 
+A separate 2026-07-18 uninstall incident produced a repeatable
+`Reconnecting 5/5` followed by stable operation. Two effects overlapped:
+
+1. The old tray stopped owned Geph before stopping the root daemon, while the
+   daemon handled `SIGTERM` with immediate `os._exit`. Accepted TCP streams were
+   therefore cut instead of drained.
+2. The user-managed Smart DNS resolved several OpenAI hostnames to
+   `87.228.47.204`. Unified networking logs showed an otherwise viable HTTP/3
+   connection timing out after about 180 seconds, and Chromium's persistent
+   network state recorded repeated broken QUIC attempts before the app settled
+   on working TCP.
+
+The second observation does not mean Slipstream intercepted QUIC: the macOS
+adapter captures TCP only, and global UDP/443 remains untouched. It explains
+why a fixed number of app retries can continue after every Slipstream process,
+listener, launchd job, and private PF rule is already gone. The owned fix is to
+quiesce the listener and PF first, drain accepted TCP streams within a deadline,
+and stop Geph only afterward. Slipstream must not rewrite the user's DNS or add
+a global QUIC block to hide an application or Smart-DNS transport fallback.
+
 Required behavior:
 
 - do not arm PF until the proxy listener and enabled geo-exit backend are ready;
@@ -253,6 +289,8 @@ Required behavior:
   by an early zero-byte remote close, clear only `com.apple/slipstream` and
   enter dormant mode for a bounded hold;
 - do not let tray polling restart a live Geph process from endpoint failures;
+- on uninstall, clear the listener/PF path before a bounded accepted-stream
+  drain, and keep the verified owned Geph backend alive until that drain ends;
 - on file-descriptor pressure, pause only `com.apple/slipstream` before accept
   failures can strand the machine behind a non-serving listener;
 - do not modify DNS, proxy, PAC, VPN, certificates, Keychain, or network plist

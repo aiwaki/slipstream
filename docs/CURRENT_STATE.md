@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through merged
-[PR #169](https://github.com/aiwaki/slipstream/pull/169) at main commit
-`1ebfe8a9ef6c89b9da208a57fb06b21e14e72b17`, including its successful
+[PR #170](https://github.com/aiwaki/slipstream/pull/170) at main commit
+`61bdeabea1db49740f5e5902cd4f15273b64d8b2`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -215,15 +215,23 @@ The exact merged PR #169 commit passed all required jobs again on main in
 [CI run 29648441001](https://github.com/aiwaki/slipstream/actions/runs/29648441001),
 and its dependency and vendored-Geph audits passed in
 [run 29648440999](https://github.com/aiwaki/slipstream/actions/runs/29648440999).
+The complete shared-destination conflict gate from PR #170 passed `checks`,
+`windows-adapter-contract`, and `packaged-app-lifecycle` on the exact merge
+commit in
+[CI run 29650142948](https://github.com/aiwaki/slipstream/actions/runs/29650142948),
+and its dependency and vendored-Geph audits passed in
+[run 29650142955](https://github.com/aiwaki/slipstream/actions/runs/29650142955).
 
 ## Next Verified Action
 
-Implement the read-only native issuer for complete destination-binding evidence
-without loading Wintun or changing routes. Its generation must advance on every
-binding change, and a future route must retain the same generation lease for its
-entire lifetime and be removed before release. Keep DLL loading, adapter
-creation, route mutation, packet processing, and production SCM composition
-outside that change.
+Qualify the macOS uninstall/drain safety change through review, required CI, and
+the packaged lifecycle gate without reinstalling it on the primary Mac. The
+change must stop new transparent accepts and clear only the private PF anchor
+before a bounded accepted-stream drain, leave owned Geph alive until that drain
+finishes, remove the exact user LaunchAgent and app bundle, and retain no daemon
+or Geph process. After that gate passes, resume the read-only native Windows
+issuer for complete destination-binding evidence without loading Wintun or
+changing routes.
 
 ## External Gates
 

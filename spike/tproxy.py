@@ -173,8 +173,12 @@ STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
 DAEMON_VERSION = "0.1.8"
 _conn_count = 0                # live proxied connections
+_connection_tasks = set()
 _status_write_lock = threading.RLock()
 _shutdown_started = threading.Event()
+_pf_teardown_complete = threading.Event()
+SHUTDOWN_DRAIN_SECONDS = 10.0
+SHUTDOWN_DRAIN_QUIET_SECONDS = 0.1
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
 # The elegant hybrid (not a blunt VPN toggle): MOST traffic uses our local desync;
@@ -2817,6 +2821,8 @@ def execute_owned_geph_restart(
     pauser=None,
 ):
     """Kickstart only Slipstream's verified user LaunchAgent after routing is idle."""
+    if _shutdown_started.is_set():
+        return "shutdown"
     now = time.time() if now is None else now
     if not _geph_restart_hint.get("recommended"):
         return "idle"
@@ -2857,7 +2863,15 @@ def execute_owned_geph_restart(
         )
     runner = _run if runner is None else runner
     try:
+        if _shutdown_started.is_set():
+            if managed_drain:
+                _finish_geph_restart_drain()
+            return "shutdown"
         pauser()
+        if _shutdown_started.is_set():
+            if managed_drain:
+                _finish_geph_restart_drain()
+            return "shutdown"
         result = runner("/bin/launchctl", "kickstart", "-k", target)
     except Exception as error:
         if managed_drain:
@@ -4520,7 +4534,11 @@ def pause_private_pf():
 def arm_private_pf_if_ready(port):
     global _pf_applied
     with _pf_state_lock:
-        if not geo_exit_backend_ready() or not pf_parent_anchor_loaded():
+        if (
+            _shutdown_started.is_set()
+            or not geo_exit_backend_ready()
+            or not pf_parent_anchor_loaded()
+        ):
             return False
         if not _pf_acquire_enable_token():
             return False
@@ -4528,7 +4546,11 @@ def arm_private_pf_if_ready(port):
         # A handler may have marked the backend unavailable while pfctl was
         # loading. Recheck under the same transition lock before publishing the
         # active state.
-        if result.returncode == 0 and geo_exit_backend_ready():
+        if (
+            result.returncode == 0
+            and not _shutdown_started.is_set()
+            and geo_exit_backend_ready()
+        ):
             _pf_applied = True
             return True
         _pf_flush()
@@ -4598,32 +4620,41 @@ def _pf_load(port):
 
 def pf_setup(port):
     global _pf_applied, _pf_interceptor_conflicts
-    if not pf_parent_anchor_available() or not pf_parent_anchor_loaded():
-        print(
-            f"pf parent anchor {PF_PARENT_ANCHOR} is unavailable; "
-            "refusing to replace the system ruleset",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    _pf_interceptor_conflicts = pf_preceding_https_interceptors()
-    if _pf_interceptor_conflicts:
-        _pf_applied = False
-        print(
-            ">> another transparent HTTPS filter is active before Slipstream "
-            f"({', '.join(_pf_interceptor_conflicts)}) -> paused; external rules untouched",
-            file=sys.stderr,
-        )
-        return False
-    if not _pf_acquire_enable_token():
-        print("pfctl did not provide a releasable enable token", file=sys.stderr)
-        sys.exit(1)
-    r = _pf_load(port)
-    if r.returncode != 0:
-        _pf_flush()
-        _pf_release_enable_token()
-        print("pfctl load failed:\n" + r.stderr, file=sys.stderr)
-        sys.exit(1)
-    _pf_applied = True
+    with _pf_state_lock:
+        if _shutdown_started.is_set():
+            return False
+        if not pf_parent_anchor_available() or not pf_parent_anchor_loaded():
+            print(
+                f"pf parent anchor {PF_PARENT_ANCHOR} is unavailable; "
+                "refusing to replace the system ruleset",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        _pf_interceptor_conflicts = pf_preceding_https_interceptors()
+        if _pf_interceptor_conflicts:
+            _pf_applied = False
+            print(
+                ">> another transparent HTTPS filter is active before Slipstream "
+                f"({', '.join(_pf_interceptor_conflicts)}) -> paused; "
+                "external rules untouched",
+                file=sys.stderr,
+            )
+            return False
+        if not _pf_acquire_enable_token():
+            print("pfctl did not provide a releasable enable token", file=sys.stderr)
+            sys.exit(1)
+        result = _pf_load(port)
+        if result.returncode != 0:
+            _pf_flush()
+            _pf_release_enable_token()
+            print("pfctl load failed:\n" + result.stderr, file=sys.stderr)
+            sys.exit(1)
+        if _shutdown_started.is_set():
+            _pf_flush()
+            _pf_release_enable_token()
+            _pf_applied = False
+            return False
+        _pf_applied = True
     print(
         f">> pf anchor {PF_ANCHOR} active: TCP/443 -> 127.0.0.1:{port}; "
         "QUIC untouched"
@@ -4658,11 +4689,97 @@ def pf_teardown():
                 os.remove(path)      # daemon is going away -> app shows "off"
             except Exception:
                 pass
-    _pf_flush()
-    _pf_release_enable_token()
-    _pf_applied = False
-    _pf_interceptor_conflicts = []
+    with _pf_state_lock:
+        if _pf_teardown_complete.is_set():
+            return True
+        flush_result = _pf_flush()
+        if flush_result.returncode != 0:
+            print(">> unable to clear Slipstream pf anchor; will retry", file=sys.stderr)
+            return False
+        release_result = _pf_release_enable_token()
+        if release_result is not None and release_result.returncode != 0:
+            print(">> unable to release Slipstream pf token; will retry", file=sys.stderr)
+            return False
+        _pf_applied = False
+        _pf_interceptor_conflicts = []
+        _pf_teardown_complete.set()
     print(">> Slipstream pf anchor cleared")
+    return True
+
+
+async def wait_for_connections_to_drain(timeout=SHUTDOWN_DRAIN_SECONDS):
+    """Give already-accepted streams a bounded chance to finish.
+
+    PF is cleared and the listening socket is closed before this runs, so the
+    count can only fall. A deadline keeps launchd stop/uninstall deterministic
+    when a browser leaves an idle keep-alive connection open indefinitely.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    quiet_since = None
+    while True:
+        now = loop.time()
+        if _conn_count == 0:
+            quiet_since = now if quiet_since is None else quiet_since
+            if (
+                timeout <= 0
+                or now - quiet_since >= SHUTDOWN_DRAIN_QUIET_SECONDS
+            ):
+                return True
+        else:
+            quiet_since = None
+        if now >= deadline:
+            return False
+        await asyncio.sleep(min(0.05, max(0.0, deadline - now)))
+
+
+async def cancel_active_connections():
+    """Cancel and await only connection tasks owned by this daemon."""
+    current = asyncio.current_task()
+    tasks = [
+        task
+        for task in tuple(_connection_tasks)
+        if task is not current and not task.done()
+    ]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return len(tasks)
+
+
+def request_daemon_shutdown(shutdown):
+    """Publish terminal intent to worker threads before asyncio starts draining."""
+    _shutdown_started.set()
+    shutdown.set()
+
+
+async def serve_until_shutdown(server, shutdown, drain_timeout=SHUTDOWN_DRAIN_SECONDS):
+    """Stop new interception before giving accepted streams time to finish."""
+    async with server:
+        serving = asyncio.create_task(server.serve_forever())
+        stopping = asyncio.create_task(shutdown.wait())
+        done, _ = await asyncio.wait(
+            (serving, stopping),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if serving in done:
+            stopping.cancel()
+            await asyncio.gather(stopping, return_exceptions=True)
+            await serving
+            return True
+
+        server.close()
+        await server.wait_closed()
+        if not pf_teardown():
+            await asyncio.sleep(0.1)
+            pf_teardown()
+        drained = await wait_for_connections_to_drain(drain_timeout)
+        if not drained:
+            await cancel_active_connections()
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+        return drained
 
 
 def running_from_install_dir(file_path=None, executable=None, frozen=None):
@@ -5404,7 +5521,7 @@ def network_monitor(port, voice=True):
     last_iface = None
     first_tick = True
     last_conflict_check = time.time()
-    while True:
+    while not _shutdown_started.is_set():
         now = time.time()
         handled_rearms = set()
         if now - last_tick > RUNTIME_WAKE_GAP_SECONDS:
@@ -5436,6 +5553,8 @@ def network_monitor(port, voice=True):
             cur_iface = None
             _apply_runtime_rearm(
                 reason, now=now, iface=iface or last_iface or "")
+        if _shutdown_started.is_set():
+            break
         restart_state = execute_owned_geph_restart(now=now)
         if restart_state == "restarted":
             _geph_up = False
@@ -5447,6 +5566,8 @@ def network_monitor(port, voice=True):
         # remains usable. Only declare down after 3 consecutive misses (~15s of
         # real outage) when a previously verified port is being preserved.
         probe_ok = probe_geph()
+        if _shutdown_started.is_set():
+            break
         was_geph = _geph_up
         _geph_up, geph_strikes = reduce_geph_probe_state(
             previous_up=was_geph,
@@ -5471,6 +5592,8 @@ def network_monitor(port, voice=True):
             last_conflict_check = now
         else:
             conflicts = list(_pf_interceptor_conflicts)
+        if _shutdown_started.is_set():
+            break
         if conflicts != _pf_interceptor_conflicts:
             if conflicts:
                 print(
@@ -5558,7 +5681,8 @@ def network_monitor(port, voice=True):
             if runtime_state == "active":
                 start_canaries_if_due("periodic")
             start_route_policy_remote_update_if_due("periodic")
-        time.sleep(5)
+        if _shutdown_started.wait(5):
+            break
 
 
 # ------------------------------------------------------------- DoH (blocking)
@@ -6419,12 +6543,17 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
 
 async def handle(reader, writer):
     global _conn_count
+    task = asyncio.current_task()
+    if task is not None:
+        _connection_tasks.add(task)
     _conn_count += 1
     try:
         await _handle_impl(reader, writer)
     finally:
         await _close_stream_writer(writer)
         _conn_count -= 1
+        if task is not None:
+            _connection_tasks.discard(task)
 
 
 async def _handle_impl(reader, writer):
@@ -7097,7 +7226,7 @@ def _owned_listener_pids(port):
     ]
 
 
-def _stop_owned_daemon_pid(pid, timeout=3.0):
+def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
     command = _process_command_for_pid(pid)
     if not _installed_daemon_command_owned(command):
         return False
@@ -7198,10 +7327,17 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
     _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
     disable_result = _run("/bin/launchctl", "disable", _launchd_target())
     owned_pids = set(_owned_listener_pids(port))
-    if isinstance(pid, int) and not isinstance(pid, bool):
+    if (
+        isinstance(pid, int)
+        and not isinstance(pid, bool)
+        and _installed_daemon_command_owned(_process_command_for_pid(pid))
+    ):
         owned_pids.add(pid)
-    for owned_pid in sorted(owned_pids):
+    process_results = [
         _stop_owned_daemon_pid(owned_pid)
+        for owned_pid in sorted(owned_pids)
+    ]
+    processes_clean = all(process_results)
     try:
         os.remove(LAUNCHD_PLIST)
     except FileNotFoundError:
@@ -7224,6 +7360,7 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         disable_result.returncode == 0,
         pf_flush_result.returncode == 0,
         pf_release_result is None or pf_release_result.returncode == 0,
+        processes_clean,
         listener_clean,
         runtime_clean,
     ))
@@ -7353,7 +7490,22 @@ def do_uninstall():
 
 async def amain(port, voice=True):
     global _geph_up
-    asyncio.get_running_loop().set_exception_handler(asyncio_exception_handler)
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(asyncio_exception_handler)
+    shutdown = asyncio.Event()
+    shutdown_signals = (
+        signal.SIGTERM,
+        signal.SIGINT,
+        signal.SIGHUP,
+        signal.SIGTSTP,
+    )
+
+    for shutdown_signal in shutdown_signals:
+        loop.add_signal_handler(
+            shutdown_signal,
+            request_daemon_shutdown,
+            shutdown,
+        )
     try:
         server = await asyncio.start_server(
             handle, "127.0.0.1", port, reuse_address=True)
@@ -7391,8 +7543,16 @@ async def amain(port, voice=True):
     print(f">> transparent tlsrec+DoH proxy on 127.0.0.1:{port}  (root)")
     print(">> quit + reopen Discord normally; its updater is captured too")
     print(">> Ctrl-C (or close terminal) to stop and restore pf")
-    async with server:
-        await server.serve_forever()
+    try:
+        drained = await serve_until_shutdown(server, shutdown)
+        if not drained:
+            print(
+                f">> shutdown drain expired with {_conn_count} active connection(s)",
+                file=sys.stderr,
+            )
+    finally:
+        for shutdown_signal in shutdown_signals:
+            loop.remove_signal_handler(shutdown_signal)
 
 
 # ---- Telegram: bundled Flowseal/tg-ws-proxy (vendored proxy/ module) ----------
@@ -7588,6 +7748,7 @@ def main():
         _release_fd_reserve()
         sys.exit(1)
     setup_rotating_logs()   # keep launchd stdout/stderr bounded across long runs
+    print(f">> daemon session start v{DAEMON_VERSION} pid={os.getpid()}")
     load_strat_cache()     # remember per-host winning strategies across restarts
     load_auto_geph()       # remember hosts learned to need the geph tunnel
     try:
@@ -7602,11 +7763,12 @@ def main():
     # past the DC-IP block via WSS. Best-effort; never blocks daemon startup.
     start_tgws_proxy()
 
-    atexit.register(pf_teardown)
-    # Catch close-terminal (SIGHUP) and suspend (SIGTSTP, i.e. Ctrl+Z) too — a
-    # network tool holding pf must never be left half-alive in the background.
-    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGTSTP):
-        signal.signal(s, lambda *_: (pf_teardown(), os._exit(0)))
+    atexit.register(
+        lambda: None if _pf_teardown_complete.is_set() else pf_teardown()
+    )
+    # amain owns graceful SIGTERM/SIGINT/SIGHUP/SIGTSTP handling so launchd
+    # stop and uninstall clear PF immediately without os._exit() tearing down
+    # every in-flight browser stream.
     # Disposable lifecycle qualification may request the same network-change
     # rearm path without mutating the runner's real interfaces. The handler only
     # queues work; the monitor thread performs every PF/backend operation.
@@ -7619,7 +7781,8 @@ def main():
         pass
     finally:
         _release_fd_reserve()
-        pf_teardown()
+        if not _pf_teardown_complete.is_set():
+            pf_teardown()
 
 
 if __name__ == "__main__":
