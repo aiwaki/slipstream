@@ -322,12 +322,13 @@ backend payload is reported only after client delivery. The relay bounds client
 and backend reads, channels, connector buffering, retained state, and both
 backpressure intervals. Client-first close cancels without fabricating a
 backend failure; upstream stall is an explicit reset. A native loopback gate
-drives slow multi-megabyte traffic in both directions plus terminal
-backpressure, reset, cancellation, deadline, and shutdown paths. This still
-does not activate production traffic: the SCM host stays no-network until an
-independently reviewed Windows interception source can provide the owned stream
-and original-destination evidence without adding DNS or route selection to the
-relay.
+drives multi-megabyte traffic in both directions plus reset, cancellation,
+deadline, and shutdown paths. Deterministic relay-state tests qualify the exact
+first-delivery and no-progress boundaries without depending on platform TCP
+buffer sizing or autotuning. This still does not activate production traffic:
+the SCM host stays no-network until an independently reviewed Windows
+interception source can provide the owned stream and original-destination
+evidence without adding DNS or route selection to the relay.
 
 ## M5 - Packet-Level Capabilities
 

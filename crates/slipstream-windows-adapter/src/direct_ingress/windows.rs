@@ -39,6 +39,84 @@ const CONTROL_RUNNING: u8 = 0;
 const CONTROL_CANCEL: u8 = 1;
 const CONTROL_SHUTDOWN: u8 = 2;
 
+#[derive(Debug)]
+struct NoProgressDeadline {
+    last_progress_at: Instant,
+    timeout: Duration,
+}
+
+impl NoProgressDeadline {
+    const fn new(now: Instant, timeout: Duration) -> Self {
+        Self {
+            last_progress_at: now,
+            timeout,
+        }
+    }
+
+    fn record_progress(&mut self, now: Instant) {
+        self.last_progress_at = now;
+    }
+
+    fn expired(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.last_progress_at) >= self.timeout
+    }
+}
+
+#[derive(Debug)]
+struct PendingDownstream {
+    payload: Vec<u8>,
+    written: usize,
+    no_progress: NoProgressDeadline,
+}
+
+impl PendingDownstream {
+    fn new(payload: Vec<u8>, now: Instant, timeout: Duration) -> Self {
+        Self {
+            payload,
+            written: 0,
+            no_progress: NoProgressDeadline::new(now, timeout),
+        }
+    }
+
+    fn remaining(&self) -> &[u8] {
+        &self.payload[self.written..]
+    }
+
+    fn record_write(&mut self, bytes: usize, now: Instant) -> bool {
+        debug_assert!(bytes <= self.remaining().len());
+        self.written += bytes;
+        self.no_progress.record_progress(now);
+        self.written == self.payload.len()
+    }
+
+    fn delivered_bytes(&self) -> u64 {
+        self.payload.len() as u64
+    }
+}
+
+#[derive(Debug)]
+struct PendingUpstream {
+    payload: Vec<u8>,
+    no_progress: NoProgressDeadline,
+}
+
+impl PendingUpstream {
+    fn new(payload: Vec<u8>, now: Instant, timeout: Duration) -> Self {
+        Self {
+            payload,
+            no_progress: NoProgressDeadline::new(now, timeout),
+        }
+    }
+}
+
+fn first_payload_delivery_expired(
+    first_payload_delivered: bool,
+    now: Instant,
+    deadline: Instant,
+) -> bool {
+    !first_payload_delivered && now >= deadline
+}
+
 pub struct WindowsDirectOwnedClientStream {
     connection_id: u64,
     stream: TcpStream,
@@ -558,8 +636,8 @@ fn run_ingress(
     };
 
     let mut client_read_buffer = vec![0u8; plan.max_client_read_chunk_bytes];
-    let mut pending_upstream: Option<(Vec<u8>, Instant)> = None;
-    let mut pending_downstream: Option<(Vec<u8>, usize, Instant)> = None;
+    let mut pending_upstream: Option<PendingUpstream> = None;
+    let mut pending_downstream: Option<PendingDownstream> = None;
     let mut first_payload_delivered = false;
     let mut client_closed = false;
     let mut control_forwarded = CONTROL_RUNNING;
@@ -581,8 +659,11 @@ fn run_ingress(
 
         if control_forwarded == CONTROL_RUNNING
             && !client_closed
-            && !first_payload_delivered
-            && Instant::now() >= first_payload_deadline
+            && first_payload_delivery_expired(
+                first_payload_delivered,
+                Instant::now(),
+                first_payload_deadline,
+            )
         {
             emit_ingress(
                 &events,
@@ -601,7 +682,11 @@ fn run_ingress(
             match connector.try_recv_event() {
                 Ok(Some(WindowsDirectConnectorEvent::Payload { bytes, .. })) => {
                     if !client_closed {
-                        pending_downstream = Some((bytes, 0, Instant::now()));
+                        pending_downstream = Some(PendingDownstream::new(
+                            bytes,
+                            Instant::now(),
+                            backpressure_timeout,
+                        ));
                     }
                 }
                 Ok(Some(event)) => {
@@ -667,8 +752,8 @@ fn run_ingress(
             }
         }
 
-        if let Some((payload, written, last_progress_at)) = pending_downstream.as_mut() {
-            match client.stream.write(&payload[*written..]) {
+        if let Some(pending) = pending_downstream.as_mut() {
+            match client.stream.write(pending.remaining()) {
                 Ok(0) => {
                     close_client(
                         &events,
@@ -683,10 +768,13 @@ fn run_ingress(
                     connector.cancel();
                 }
                 Ok(bytes) => {
-                    *written += bytes;
-                    *last_progress_at = Instant::now();
-                    if *written == payload.len() {
-                        if !first_payload_delivered && Instant::now() >= first_payload_deadline {
+                    let now = Instant::now();
+                    if pending.record_write(bytes, now) {
+                        if first_payload_delivery_expired(
+                            first_payload_delivered,
+                            now,
+                            first_payload_deadline,
+                        ) {
                             emit_ingress(
                                 &events,
                                 WindowsDirectIngressEvent::FirstPayloadDeadline {
@@ -699,7 +787,7 @@ fn run_ingress(
                             let _ = client.stream.shutdown(Shutdown::Both);
                             return Ok(());
                         }
-                        let delivered = payload.len() as u64;
+                        let delivered = pending.delivered_bytes();
                         pending_downstream = None;
                         first_payload_delivered = true;
                         emit_ingress(
@@ -714,7 +802,7 @@ fn run_ingress(
                     }
                 }
                 Err(error) if is_transient(&error) => {
-                    if last_progress_at.elapsed() >= backpressure_timeout {
+                    if pending.no_progress.expired(Instant::now()) {
                         close_client(
                             &events,
                             &request_id,
@@ -749,11 +837,11 @@ fn run_ingress(
             continue;
         }
 
-        if let Some((payload, stalled_at)) = pending_upstream.as_ref() {
-            match connector.send_payload(payload) {
+        if let Some(pending) = pending_upstream.as_ref() {
+            match connector.send_payload(&pending.payload) {
                 Ok(()) => pending_upstream = None,
                 Err(WindowsDirectConnectorNativeError::OutboundQueueFull) => {
-                    if stalled_at.elapsed() >= backpressure_timeout {
+                    if pending.no_progress.expired(Instant::now()) {
                         emit_ingress(
                             &events,
                             WindowsDirectIngressEvent::BackendReset {
@@ -802,7 +890,11 @@ fn run_ingress(
                     connector.cancel();
                 }
                 Ok(bytes) => {
-                    pending_upstream = Some((client_read_buffer[..bytes].to_vec(), Instant::now()));
+                    pending_upstream = Some(PendingUpstream::new(
+                        client_read_buffer[..bytes].to_vec(),
+                        Instant::now(),
+                        backpressure_timeout,
+                    ));
                 }
                 Err(error) if is_transient(&error) => {}
                 Err(_) => {
@@ -996,6 +1088,55 @@ impl From<WindowsDirectIngressNativeError> for WindowsDirectIngressDataPlaneEffe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_payload_deadline_is_preserved_until_full_client_delivery() {
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(100);
+        let mut pending =
+            PendingDownstream::new(vec![1, 2, 3, 4], started, Duration::from_millis(500));
+
+        assert!(!pending.record_write(2, started + Duration::from_millis(50)));
+        assert!(!first_payload_delivery_expired(
+            false,
+            started + Duration::from_millis(99),
+            deadline,
+        ));
+        assert!(pending.record_write(2, deadline));
+        assert!(first_payload_delivery_expired(false, deadline, deadline));
+        assert!(!first_payload_delivery_expired(true, deadline, deadline));
+    }
+
+    #[test]
+    fn downstream_backpressure_deadline_measures_current_no_progress_interval() {
+        let started = Instant::now();
+        let timeout = Duration::from_millis(100);
+        let mut pending = PendingDownstream::new(vec![1, 2, 3], started, timeout);
+
+        assert!(!pending
+            .no_progress
+            .expired(started + Duration::from_millis(99)));
+        assert!(!pending.record_write(1, started + Duration::from_millis(80)));
+        assert!(!pending
+            .no_progress
+            .expired(started + Duration::from_millis(179)));
+        assert!(pending
+            .no_progress
+            .expired(started + Duration::from_millis(180)));
+    }
+
+    #[test]
+    fn upstream_backpressure_deadline_is_bounded_without_socket_buffer_assumptions() {
+        let started = Instant::now();
+        let pending = PendingUpstream::new(vec![1, 2, 3], started, Duration::from_millis(100));
+
+        assert!(!pending
+            .no_progress
+            .expired(started + Duration::from_millis(99)));
+        assert!(pending
+            .no_progress
+            .expired(started + Duration::from_millis(100)));
+    }
 
     #[test]
     fn closed_ingress_bookkeeping_is_bounded_and_drops_payload_markers() {
