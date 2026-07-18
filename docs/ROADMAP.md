@@ -304,7 +304,9 @@ cancellation, and `STOPPED` follows only worker termination. The production
 host consumes the same contract through an injected no-network effect.
 Deterministic vectors cover normal stop, forced deadline, late completion, and
 interrupted mixed effect batches. Native Windows sockets remain a later PR
-after this composition is qualified in disposable Windows CI.
+after this composition, now qualified in disposable Windows CI. The next
+boundary is one bounded connector behind the frozen effect interface, not a
+multi-backend transport implementation.
 
 ## M5 - Packet-Level Capabilities
 
