@@ -297,10 +297,16 @@ External DNS, proxy, PAC, and VPN state remains untouched. Effect commands are
 failure-atomic, and a partially completed batch resumes from an exact cursor
 without replaying an opened or closed resource. Monotonic session IDs and
 bounded terminal retention also prevent a stale completion from targeting a
-reused request ID without allowing service state to grow forever. The next
-boundary composes the service host with an injected no-network worker so SCM
-readiness and bounded shutdown are proven together. Native Windows sockets
-remain a later PR after that composition is qualified.
+reused request ID without allowing service state to grow forever. The pure
+worker-host composition now orders those data-plane effects with SCM: readiness
+gates `RUNNING`, startup failure is terminal, `STOP_PENDING` precedes bounded
+cancellation, and `STOPPED` follows only worker termination. The production
+host consumes the same contract through an injected no-network effect.
+Deterministic vectors cover normal stop, forced deadline, late completion, and
+interrupted mixed effect batches. Native Windows sockets remain a later PR
+after this composition, now qualified in disposable Windows CI. The next
+boundary is one bounded connector behind the frozen effect interface, not a
+multi-backend transport implementation.
 
 ## M5 - Packet-Level Capabilities
 

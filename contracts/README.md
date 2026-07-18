@@ -64,6 +64,12 @@ Slipstream routing decisions and bounded recovery primitives.
   retains only bounded terminal history, and emits one normalized outcome after
   resource close. Its failure vectors resume multi-command effect batches from
   an exact cursor without replaying already-completed commands.
+- `windows-worker-host-v1.json` composes that data-plane reducer with the SCM
+  host without adding a native or network effect. Worker readiness is the only
+  path to `RUNNING`; host-owned stop or shutdown reports `STOP_PENDING` before
+  cancellation and cannot report `STOPPED` until the worker is terminal.
+  Startup failure, graceful drain, forced deadline, late completion, repeated
+  stop, and interrupted effect batches are language-neutral vectors.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
@@ -87,6 +93,9 @@ from evidence collection through reducer and native-effect completion, so
 controller restarts cannot split authorization from mutation.
 The production service host reports `START_PENDING`, `RUNNING`, `STOP_PENDING`,
 and `STOPPED` through SCM and accepts both stop and system-shutdown controls.
+Those reports consume the pure worker-host composition: the injected
+no-network worker must report readiness before `RUNNING`, and both stop paths
+flow through bounded data-plane shutdown before `STOPPED`.
 Windows CI invokes its management commands through separate processes and
 proves repeated install, stop, start, and uninstall remain idempotent.
 The Windows data-plane contract still performs no network operation. Its

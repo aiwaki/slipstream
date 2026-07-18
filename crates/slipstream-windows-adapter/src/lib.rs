@@ -23,5 +23,6 @@ pub mod service_ownership;
 pub mod service_payload;
 pub mod service_scm;
 mod v1;
+pub mod worker_host;
 
 pub use v1::*;
