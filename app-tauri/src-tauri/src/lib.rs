@@ -34,7 +34,8 @@ use diagnostics::{
     diagnostic_snapshot_path, sanitize_json, unix_now_secs, write_diagnostic_snapshot_file,
 };
 use geph_config::{
-    geph_config_set, geph_enabled, geph_field, geph_secret, keychain_delete, keychain_set,
+    geph_config_set, geph_enabled, geph_field, geph_secret, geph_secret_availability,
+    keychain_delete, keychain_set, GephSecretAvailability,
 };
 use serde_json::{json, Value};
 use status_client::{read_status, STATUS_PATH};
@@ -2537,6 +2538,22 @@ pub fn run() {
                         }
                         ID_GEPH_ENABLE => {
                             let new_on = !geph_enabled(app);
+                            if new_on {
+                                match geph_secret_availability(app) {
+                                    GephSecretAvailability::Present => {}
+                                    GephSecretAvailability::Missing => {
+                                        geph_config_set(app, "enabled", "0");
+                                        let _ = enable_h.set_checked(false);
+                                        notify(app, "Set the Geph account first");
+                                        return;
+                                    }
+                                    GephSecretAvailability::Unavailable => {
+                                        let _ = enable_h.set_checked(false);
+                                        notify(app, "Keychain unavailable");
+                                        return;
+                                    }
+                                }
+                            }
                             geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
                             let _ = enable_h.set_checked(new_on);
                             if new_on {

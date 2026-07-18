@@ -59,8 +59,10 @@ release exists; stable distribution remains a separate M3 gate.
 - Keep Discord and YouTube on local bypass with exact-host re-sweep. They never
   fall through to Geph.
 - Never fall an intercepted geo-exit connection through local desync. If the
-  required backend is unavailable, pause the private PF anchor and enter dormant
-  mode so Slipstream no longer owns system HTTPS. Restarting a live Geph process
+  app-owned backend is unavailable, preserve the exact pre-PF destination
+  through a bounded plain probe while local bypass stays active. A full-tunnel
+  user VPN owns the default route and makes Slipstream dormant; split/per-app
+  equivalence requires separate qualification. Restarting a live Geph process
   must be daemon-coordinated after routing is idle.
 - Let unknown hosts try only the local adaptive ladder. A successful Geph
   payload proves tunnel health, not that a host requires a foreign exit;
@@ -70,12 +72,13 @@ release exists; stable distribution remains a separate M3 gate.
 - Keep external DNS, VPN, PAC, and proxy state read-only.
 
 Progress: runtime local-bypass misses, geo-exit failures, and repeated unknown
-host stalls now enter one normalized reducer. Cold-start and runtime backend
-failure also gate or pause the private PF anchor. Owned Geph runs in a user
-LaunchAgent with `KeepAlive`; after repeated post-wake failures, the daemon can
-pause its private PF anchor, wait for active tunnel sessions to drain, verify
-the exact user job and listener identity, and kickstart that job without the
-tray. Disposable CI runs two installed-daemon suspend/resume and network-change
+host stalls now enter one normalized reducer. Local PF readiness is independent
+from optional Geph readiness; backend failure cools only Geph and cannot disable
+Discord/YouTube routing. Owned Geph runs in a user LaunchAgent with `KeepAlive`;
+after repeated post-wake failures, the daemon can cool the backend, wait for
+active tunnel sessions to drain, verify the exact user job and listener
+identity, and kickstart that job without the tray. Disposable CI runs two
+installed-daemon suspend/resume and network-change
 re-arm cycles for both the source installer and the frozen daemon from the
 packaged app. It also launches the exact packaged tray as the original user,
 crashes and restarts only that verified process, and opens fresh non-root HTTPS
@@ -94,9 +97,9 @@ change, and sleep/wake without manual buttons.
 
 Every routing change also passes the deterministic data-plane traffic-contract
 matrix: local bypass, geo exit, direct Telegram, generic local traffic, and
-geo-backend fail-closed behavior. The matrix exercises the production handler
-with fake endpoints; it complements, rather than replaces, live canaries and
-PF lifecycle qualification.
+geo-backend isolation with system-route fallback. The matrix exercises the
+production handler with fake endpoints; it complements, rather than replaces,
+live canaries and PF lifecycle qualification.
 
 ## M2 - Contracts And Code
 

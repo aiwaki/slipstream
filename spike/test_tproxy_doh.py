@@ -1742,14 +1742,55 @@ def test_fd_pressure_stays_dormant_until_usage_falls_below_low_watermark(monkeyp
     assert reserve_reopens == [True]
 
 
-def test_pf_startup_waits_for_enabled_geo_exit_backend(monkeypatch):
+def test_pf_startup_keeps_local_routing_active_without_geph(monkeypatch):
+    calls = []
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_fd_pressure", False)
+    monkeypatch.setattr(
+        tproxy,
+        "pf_setup",
+        lambda port: calls.append(port) or True,
+    )
 
     assert not tproxy.geo_exit_backend_ready(now=100.0)
-    assert not tproxy.pf_setup_if_ready(1080, now=100.0)
+    assert tproxy.pf_setup_if_ready(1080, now=100.0)
+    assert calls == [1080]
+
+
+def test_installed_daemon_readiness_uses_exact_listener_ownership(monkeypatch):
+    now = tproxy.time.time()
+    status = {"updated_at": now, "state": "active", "pid": 321}
+    monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: status)
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda pid: f"owned:{pid}")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda command: True)
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _port: [321])
+    monkeypatch.setattr(tproxy, "pf_state_snapshot", lambda _port: {"rules_loaded": True})
+    monkeypatch.setattr(
+        tproxy,
+        "_tcp_listener_present",
+        lambda _port: pytest.fail("readiness must not open a data-plane connection"),
+    )
+
+    assert tproxy._installed_daemon_readiness(1080) == (True, "ready")
+
+
+def test_installed_daemon_readiness_rejects_foreign_or_shared_listener(monkeypatch):
+    now = tproxy.time.time()
+    status = {"updated_at": now, "state": "active", "pid": 321}
+    monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: status)
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda pid: f"owned:{pid}")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda command: True)
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _port: [321, 654])
+
+    ready, reason = tproxy._installed_daemon_readiness(1080)
+
+    assert not ready
+    assert reason == (
+        "listener 127.0.0.1:1080 is not owned exclusively by the status pid"
+    )
 
 
 def test_pf_arm_refuses_to_touch_pf_after_shutdown_starts(monkeypatch):
@@ -1955,16 +1996,16 @@ def test_geo_exit_backend_hold_requires_fresh_probe_after_cooldown(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_PORTS", [tproxy.GEPH_OWNED_PORT])
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 130.0)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_reason", "runtime miss")
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 130.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "runtime miss")
 
     assert not tproxy.geo_exit_backend_ready(now=120.0)
     assert tproxy.geo_exit_backend_ready(now=131.0)
-    assert tproxy._pf_backend_hold_until == 0.0
-    assert tproxy._pf_backend_hold_reason == ""
+    assert tproxy._geph_backend_hold_until == 0.0
+    assert tproxy._geph_backend_hold_reason == ""
 
 
-def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch):
+def test_network_monitor_keeps_local_routing_active_when_geph_is_not_ready(monkeypatch):
     pauses = []
     states = []
     rearms = []
@@ -1984,10 +2025,12 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
     monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "pause_private_pf", pause)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "arm_private_pf_if_ready", lambda _port: True)
     monkeypatch.setattr(
         tproxy,
         "write_status",
@@ -2008,9 +2051,54 @@ def test_network_monitor_pauses_pf_when_cold_start_geph_is_not_ready(monkeypatch
 
     tproxy.network_monitor(1080, voice=False)
 
-    assert pauses == [True]
-    assert states == [("dormant", "en0", None)]
+    assert pauses == []
+    assert states == [("active", "en0", None)]
     assert rearms == [("network_change", "en0")]
+
+
+def test_network_monitor_yields_to_user_full_tunnel_vpn_without_geph(monkeypatch):
+    pauses = []
+    arms = []
+    states = []
+
+    def pause():
+        pauses.append(tproxy.PF_ANCHOR)
+        tproxy._pf_applied = False
+        return True
+
+    def write_status_and_stop(state, iface, voice_iface):
+        states.append((state, iface, voice_iface))
+        tproxy._shutdown_started.set()
+
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "utun7")
+    monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
+    monkeypatch.setattr(tproxy, "pause_private_pf", pause)
+    monkeypatch.setattr(
+        tproxy,
+        "arm_private_pf_if_ready",
+        lambda _port: arms.append(True) or True,
+    )
+    monkeypatch.setattr(tproxy, "execute_owned_geph_restart", lambda **_kwargs: "idle")
+    monkeypatch.setattr(tproxy, "refresh_fd_pressure", lambda: False)
+    monkeypatch.setattr(tproxy, "write_status", write_status_and_stop)
+    monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        tproxy,
+        "start_route_policy_remote_update_if_due",
+        lambda *_args, **_kwargs: None,
+    )
+
+    tproxy.network_monitor(1080, voice=False)
+
+    assert pauses == [tproxy.PF_ANCHOR]
+    assert arms == []
+    assert states == [("dormant", "utun7", None)]
 
 
 def test_network_monitor_does_not_rearm_after_shutdown_starts(monkeypatch):
@@ -2037,7 +2125,7 @@ def test_network_monitor_does_not_rearm_after_shutdown_starts(monkeypatch):
     assert calls == []
 
 
-def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
+def test_runtime_pf_arm_does_not_depend_on_geph_after_loading_rules(monkeypatch):
     calls = []
 
     def load(_port):
@@ -2050,7 +2138,7 @@ def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "_pf_applied", False)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
     monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
     monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: True)
     monkeypatch.setattr(tproxy, "_pf_load", load)
@@ -2065,44 +2153,35 @@ def test_runtime_pf_arm_rechecks_backend_after_loading_rules(monkeypatch):
         lambda: calls.append("release") or SimpleNamespace(returncode=0),
     )
 
-    assert not tproxy.arm_private_pf_if_ready(1080)
-    assert calls == ["load", "flush", "release"]
-    assert tproxy._pf_applied is False
+    assert tproxy.arm_private_pf_if_ready(1080)
+    assert calls == ["load"]
+    assert tproxy._pf_applied is True
 
 
-def test_suspend_transparent_routing_flushes_only_private_anchor(monkeypatch):
+def test_suspend_geo_exit_backend_keeps_private_anchor_active(monkeypatch):
     calls = []
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_reason", "")
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
     monkeypatch.setattr(
-        tproxy,
-        "_pf_flush",
-        lambda: calls.append("private rulesets flushed") or SimpleNamespace(returncode=0),
+        tproxy, "pause_private_pf", lambda: calls.append("paused") or True
     )
 
-    assert tproxy.suspend_transparent_routing("geo-exit tunnel down", now=100.0)
-    assert calls == ["private rulesets flushed"]
-    assert tproxy._pf_applied is False
+    assert tproxy.suspend_geo_exit_backend("geo-exit tunnel down", now=100.0)
+    assert calls == []
+    assert tproxy._pf_applied is True
     assert tproxy._geph_up is False
-    assert tproxy._pf_backend_hold_until == 100.0 + tproxy.PF_BACKEND_FAILURE_HOLD
-    assert tproxy._pf_backend_hold_reason == "geo-exit tunnel down"
+    assert tproxy._geph_backend_hold_until == 100.0 + tproxy.GEPH_BACKEND_FAILURE_HOLD
+    assert tproxy._geph_backend_hold_reason == "geo-exit tunnel down"
 
 
-def test_suspend_transparent_routing_flushes_stale_anchor_when_flag_is_false(monkeypatch):
-    calls = []
+def test_suspend_geo_exit_backend_is_idempotent_when_already_down(monkeypatch):
     monkeypatch.setattr(tproxy, "_pf_applied", False)
     monkeypatch.setattr(tproxy, "_geph_up", False)
-    monkeypatch.setattr(tproxy, "_pf_backend_hold_until", 0.0)
-    monkeypatch.setattr(
-        tproxy,
-        "_pf_flush",
-        lambda: calls.append(tproxy.PF_ANCHOR) or SimpleNamespace(returncode=0),
-    )
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
 
-    assert tproxy.suspend_transparent_routing("geo-exit tunnel down", now=100.0)
-    assert calls == [tproxy.PF_ANCHOR]
+    assert tproxy.suspend_geo_exit_backend("geo-exit tunnel down", now=100.0)
     assert tproxy._pf_applied is False
 
 
@@ -2112,21 +2191,35 @@ def test_pf_lifecycle_functions_are_not_shadowed_by_later_definitions():
 
     for name in (
         "geo_exit_backend_ready",
+        "transparent_routing_ready",
         "pause_private_pf",
-        "suspend_transparent_routing",
+        "suspend_geo_exit_backend",
         "pf_setup_if_ready",
     ):
         assert names.count(name) == 1, name
 
 
-def test_explicit_local_only_mode_does_not_fail_close_geo_hosts(monkeypatch):
+def test_explicit_local_only_mode_preserves_geo_policy_and_local_pf(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "_fd_pressure", False)
 
-    assert not tproxy.geph_route("chatgpt.com")
-    assert tproxy.geo_exit_backend_ready(now=100.0)
+    assert tproxy.is_geo_exit_route("chatgpt.com")
+    assert not tproxy.geo_exit_backend_ready(now=100.0)
+    assert tproxy.transparent_routing_ready()
 
 
-def test_geo_exit_tunnel_down_suspends_private_pf_before_close(monkeypatch):
+def test_unavailable_geph_keeps_geo_policy_without_disarming_local_pf(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+
+    assert tproxy.is_geo_exit_route("chatgpt.com")
+    assert not tproxy.geo_exit_backend_ready(now=100.0)
+    assert tproxy.route_policy("chatgpt.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
+
+
+def test_geo_exit_tunnel_down_cools_geph_but_keeps_private_pf(monkeypatch):
     class Reader:
         def __init__(self):
             self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
@@ -2146,13 +2239,19 @@ def test_geo_exit_tunnel_down_suspends_private_pf_before_close(monkeypatch):
 
     suspended = []
     writer = Writer()
+
+    async def direct_miss(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
     monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspended.append)
+    monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspended.append)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "dial_and_probe", direct_miss)
 
     asyncio.run(tproxy._handle_impl(Reader(), writer))
 
@@ -2172,7 +2271,7 @@ def test_geo_exit_tunnel_down_suspends_private_pf_before_close(monkeypatch):
         (1, [], [], [True]),
     ],
 )
-def test_geo_exit_payload_result_controls_private_pf(
+def test_geo_exit_payload_result_controls_geph_backend(
     monkeypatch,
     downstream_bytes,
     expected_failure,
@@ -2214,9 +2313,10 @@ def test_geo_exit_payload_result_controls_private_pf(
         lambda host, reason: failures.append((host, reason)),
     )
     monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: cleared.append(True))
-    monkeypatch.setattr(tproxy, "suspend_transparent_routing", suspended.append)
+    monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspended.append)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
     asyncio.run(tproxy._handle_impl(Reader(), Writer()))
 
@@ -2344,9 +2444,9 @@ def test_direct_passthrough_hosts_use_plain_strategy_only():
             "plain", "split64+fake",
         ]
         assert [s["name"] for s in tproxy.strategy_order("i.scdn.co")][0] == "plain"
-        assert not tproxy.geph_route("www.google.com")
-        assert not tproxy.geph_route("api.spotify.com")
-        assert not tproxy.geph_route("i.scdn.co")
+        assert not tproxy.is_geo_exit_route("www.google.com")
+        assert not tproxy.is_geo_exit_route("api.spotify.com")
+        assert not tproxy.is_geo_exit_route("i.scdn.co")
     finally:
         tproxy._strat_cache.clear()
 
@@ -3416,7 +3516,7 @@ def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
         "service_group": tproxy.SERVICE_DISCORD,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
     }
-    assert not tproxy.geph_route(spec["host"])
+    assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
         "split64+fake",
         "split16+fake",
@@ -3433,7 +3533,7 @@ def test_discord_api_canary_stays_local_bypass_and_fake_only():
         "service_group": tproxy.SERVICE_DISCORD,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
     }
-    assert not tproxy.geph_route(spec["host"])
+    assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
         "split64+fake",
         "split16+fake",
@@ -3451,7 +3551,7 @@ def test_youtube_redirector_canary_stays_local_bypass_and_fake_only():
         "service_group": tproxy.SERVICE_YOUTUBE,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
     }
-    assert not tproxy.geph_route(host)
+    assert not tproxy.is_geo_exit_route(host)
     assert [s["name"] for s in tproxy.strategy_order(host)] == [
         "split64+fake",
         "split16+fake",
@@ -3469,7 +3569,7 @@ def test_youtube_web_canary_stays_local_bypass_and_fake_only():
         "service_group": tproxy.SERVICE_YOUTUBE,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
     }
-    assert not tproxy.geph_route(spec["host"])
+    assert not tproxy.is_geo_exit_route(spec["host"])
     assert [s["name"] for s in tproxy.strategy_order(spec["host"])] == [
         "split64+fake",
         "split16+fake",
@@ -3876,7 +3976,7 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
         assert health["last_failure"] == "runtime strategy probe failed"
         assert calls == [f"runtime:{tproxy.SERVICE_DISCORD}"]
         assert resweeps == [host] * tproxy.LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER
-        assert not tproxy.geph_route(host)
+        assert not tproxy.is_geo_exit_route(host)
     finally:
         tproxy._strat_cache.clear()
         tproxy._canary_state.clear()
@@ -3963,7 +4063,7 @@ def test_local_bypass_resweep_caches_exact_host_winner(monkeypatch):
         ]
         assert tproxy._strat_cache[host] == "split16+fake"
         assert host not in tproxy._dead
-        assert not tproxy.geph_route(host)
+        assert not tproxy.is_geo_exit_route(host)
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
@@ -4306,7 +4406,7 @@ def test_geo_exit_canary_failure_does_not_promote_to_local_bypass(monkeypatch):
     spec = {"group": tproxy.SERVICE_OPENAI, "host": "billing.openai.com"}
     assert not asyncio.run(tproxy._run_geo_exit_canary(spec))
 
-    assert tproxy.geph_route("billing.openai.com")
+    assert tproxy.is_geo_exit_route("billing.openai.com")
     health = tproxy.route_health_snapshot()[tproxy.SERVICE_OPENAI]
     assert health["state"] == tproxy.HEALTH_BLOCKED
     assert health["last_route_class"] == tproxy.ROUTE_GEO_EXIT
@@ -4771,12 +4871,12 @@ def test_discord_hosts_use_fake_only_local_bypass_strategy():
 
 
 def test_discord_hosts_do_not_route_via_geph():
-    assert not tproxy.geph_route("updates.discord.com")
-    assert not tproxy.geph_route("gateway.discord.gg")
-    assert not tproxy.geph_route("discord.com")
-    assert not tproxy.geph_route("status.discordstatus.com")
-    assert not tproxy.geph_route("cdn.discordapp.com")
-    assert not tproxy.geph_route("discord-activities.com")
+    assert not tproxy.is_geo_exit_route("updates.discord.com")
+    assert not tproxy.is_geo_exit_route("gateway.discord.gg")
+    assert not tproxy.is_geo_exit_route("discord.com")
+    assert not tproxy.is_geo_exit_route("status.discordstatus.com")
+    assert not tproxy.is_geo_exit_route("cdn.discordapp.com")
+    assert not tproxy.is_geo_exit_route("discord-activities.com")
 
 
 def test_geph_route_failure_log_is_rate_limited(capsys):
@@ -4944,7 +5044,7 @@ def test_owned_geph_restart_rejects_symlinked_ownership_file(monkeypatch, tmp_pa
         },
         listener_owned=True,
         runner=lambda *args: calls.append(args),
-        pauser=lambda: calls.append(("pause",)),
+        backend_suspender=lambda: calls.append(("cool",)),
     )
 
     assert result == "unverified"
@@ -4965,7 +5065,7 @@ def test_owned_geph_restart_waits_for_active_tunnel(monkeypatch):
         owner_uid=502,
         listener_owned=True,
         runner=lambda *args: calls.append(args),
-        pauser=lambda: calls.append(("pause",)),
+        backend_suspender=lambda: calls.append(("cool",)),
     )
 
     assert result == "busy"
@@ -4988,7 +5088,7 @@ def test_owned_geph_restart_does_nothing_during_shutdown(monkeypatch):
         owner_uid=502,
         listener_owned=True,
         runner=lambda *args: calls.append(("run", args)),
-        pauser=lambda: calls.append(("pause",)),
+        backend_suspender=lambda: calls.append(("cool",)),
     )
 
     assert result == "shutdown"
@@ -4996,7 +5096,7 @@ def test_owned_geph_restart_does_nothing_during_shutdown(monkeypatch):
     assert hint["last_attempt_at"] == 0.0
 
 
-def test_owned_geph_restart_does_not_kickstart_if_shutdown_begins_while_pausing(
+def test_owned_geph_restart_does_not_kickstart_if_shutdown_begins_while_cooling(
     monkeypatch,
 ):
     hint = dict(tproxy._geph_restart_hint)
@@ -5004,8 +5104,8 @@ def test_owned_geph_restart_does_not_kickstart_if_shutdown_begins_while_pausing(
     monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
     calls = []
 
-    def pause_and_shutdown():
-        calls.append("pause")
+    def cool_and_shutdown():
+        calls.append("cool")
         tproxy._shutdown_started.set()
 
     result = tproxy.execute_owned_geph_restart(
@@ -5016,14 +5116,14 @@ def test_owned_geph_restart_does_not_kickstart_if_shutdown_begins_while_pausing(
         owner_uid=502,
         listener_owned=True,
         runner=lambda *args: calls.append(("run", args)),
-        pauser=pause_and_shutdown,
+        backend_suspender=cool_and_shutdown,
     )
 
     assert result == "shutdown"
-    assert calls == ["pause"]
+    assert calls == ["cool"]
 
 
-def test_owned_geph_restart_pauses_pf_and_kickstarts_exact_launchagent(monkeypatch):
+def test_owned_geph_restart_cools_backend_and_kickstarts_exact_launchagent(monkeypatch):
     hint = dict(tproxy._geph_restart_hint)
     hint.update({"recommended": True, "last_attempt_at": 0.0})
     monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
@@ -5043,8 +5143,8 @@ def test_owned_geph_restart_pauses_pf_and_kickstarts_exact_launchagent(monkeypat
     )
     monkeypatch.setattr(
         tproxy,
-        "suspend_transparent_routing",
-        lambda reason, now=None: events.append(("pause", reason, now)),
+        "suspend_geo_exit_backend",
+        lambda reason, now=None: events.append(("cool", reason, now)),
     )
     result = tproxy.execute_owned_geph_restart(
         now=100.0,
@@ -5057,7 +5157,7 @@ def test_owned_geph_restart_pauses_pf_and_kickstarts_exact_launchagent(monkeypat
 
     assert result == "restarted"
     assert events == [
-        ("pause", "owned Geph restart in progress", 100.0),
+        ("cool", "owned Geph restart in progress", 100.0),
         ("run", "/bin/launchctl", "kickstart", "-k", "gui/502/dev.slipstream.geph"),
         ("rearm", "geph_restart"),
     ]
@@ -5081,7 +5181,7 @@ def test_owned_geph_restart_never_touches_unverified_listener(monkeypatch):
         owner_uid=502,
         listener_owned=False,
         runner=lambda *args: calls.append(args),
-        pauser=lambda: calls.append(("pause",)),
+        backend_suspender=lambda: calls.append(("cool",)),
     )
 
     assert result == "unverified"
@@ -5106,7 +5206,7 @@ def test_owned_geph_restart_rate_limits_launchctl_retry(monkeypatch, capsys):
         "owner_uid": 502,
         "listener_owned": True,
         "runner": unavailable,
-        "pauser": lambda: None,
+        "backend_suspender": lambda: None,
     }
     assert tproxy.execute_owned_geph_restart(now=100.0, **kwargs) == "unavailable"
     assert tproxy.execute_owned_geph_restart(now=101.0, **kwargs) == "cooldown"
@@ -5149,12 +5249,12 @@ def test_stale_auto_geph_cache_never_overrides_explicit_policy():
     tproxy._auto_geph["payments.example.com"] = tproxy.time.time() + 3600
 
     try:
-        assert not tproxy.geph_route("updates.discord.com")
-        assert not tproxy.geph_route("rr2---sn-ntq7yner.googlevideo.com")
-        assert not tproxy.geph_route("www.google.com")
-        assert not tproxy.geph_route("api.spotify.com")
-        assert not tproxy.geph_route("payments.example.com")
-        assert tproxy.geph_route("chatgpt.com")
+        assert not tproxy.is_geo_exit_route("updates.discord.com")
+        assert not tproxy.is_geo_exit_route("rr2---sn-ntq7yner.googlevideo.com")
+        assert not tproxy.is_geo_exit_route("www.google.com")
+        assert not tproxy.is_geo_exit_route("api.spotify.com")
+        assert not tproxy.is_geo_exit_route("payments.example.com")
+        assert tproxy.is_geo_exit_route("chatgpt.com")
     finally:
         tproxy._auto_geph.clear()
 
@@ -5455,7 +5555,7 @@ def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
         assert tproxy.note_local_stream_stall(host, "split64+fake")
         assert host not in tproxy._strat_cache
         assert tproxy._xbox_dns_candidate_active(host)
-        assert not tproxy.geph_route(host)
+        assert not tproxy.is_geo_exit_route(host)
         assert [strategy["name"] for strategy in tproxy.strategy_order(host)][0] == "split16+fake"
 
         tproxy._strat_cache["updates.discord.com"] = "split64+fake"
@@ -5495,7 +5595,7 @@ def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
         assert host not in tproxy._strat_cache
         assert not tproxy._clean_eof_stalls
         assert tproxy._xbox_dns_candidate_active(host, now=130.2)
-        assert not tproxy.geph_route(host)
+        assert not tproxy.is_geo_exit_route(host)
 
         for protected in (
             "updates.discord.com",
@@ -5541,7 +5641,7 @@ def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
             now=130.2,
         )
         assert not tproxy._xbox_dns_candidate_active(host, now=130.2)
-        assert not tproxy.geph_route(host)
+        assert not tproxy.is_geo_exit_route(host)
     finally:
         tproxy._strat_cache.clear()
         tproxy._strat_scores.clear()
@@ -5621,7 +5721,7 @@ def test_unknown_stalls_use_xbox_dns_without_foreign_exit():
     )
 
     assert confirmations == []
-    assert not tproxy.geph_route(host)
+    assert not tproxy.is_geo_exit_route(host)
 
 
 def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
@@ -5637,7 +5737,7 @@ def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
         )
 
     assert tproxy._xbox_dns_candidate_active(host, now=103.0)
-    assert not tproxy.geph_route(host)
+    assert not tproxy.is_geo_exit_route(host)
 
 
 def test_unknown_stalls_never_promote_to_geph_after_xbox_dns_attempt(monkeypatch):
@@ -5656,7 +5756,7 @@ def test_unknown_stalls_never_promote_to_geph_after_xbox_dns_attempt(monkeypatch
         )
 
     assert confirmations == []
-    assert not tproxy.geph_route(host)
+    assert not tproxy.is_geo_exit_route(host)
     assert not tproxy._auto_geph
     snap = tproxy.auto_geo_exit_status_snapshot()
     assert snap["enabled"] is False
@@ -5688,7 +5788,7 @@ def test_load_auto_geph_discards_legacy_learned_routes(tmp_path, monkeypatch):
 
     assert tproxy._auto_geph == {}
     assert json.loads(path.read_text()) == {}
-    assert not tproxy.geph_route("www.google.com")
+    assert not tproxy.is_geo_exit_route("www.google.com")
 
 
 def test_network_wide_unknown_stalls_do_not_schedule_foreign_exit(monkeypatch):
@@ -5709,7 +5809,7 @@ def test_network_wide_unknown_stalls_do_not_schedule_foreign_exit(monkeypatch):
         )
 
     assert calls == []
-    assert not tproxy.geph_route("payments.example.com")
+    assert not tproxy.is_geo_exit_route("payments.example.com")
 
 
 def test_prune_auto_geph_discards_legacy_learned_hosts(monkeypatch):

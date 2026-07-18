@@ -283,13 +283,25 @@ quiesce the listener and PF first, drain accepted TCP streams within a deadline,
 and stop Geph only afterward. Slipstream must not rewrite the user's DNS or add
 a global QUIC block to hide an application or Smart-DNS transport fallback.
 
+The 2026-07-19 clean-install incident exposed a separate lifecycle defect.
+Exact-main `0.1.8` installed a healthy listener but kept the daemon `dormant`
+because the whole private PF anchor was gated on an owned Geph listener. With
+no Geph account configured, Discord and YouTube therefore received no local
+bypass at all. The packaged smoke had masked this by injecting `SLIP_GEPH=0`
+after installation. Clean install and reinstall now have to become `active`
+without that patch and without any Geph account or listener.
+
 Required behavior:
 
-- do not arm PF until the proxy listener and enabled geo-exit backend are ready;
+- arm the private PF anchor when the proxy listener and local routing capacity
+  are ready, regardless of whether optional Geph is configured;
 - never report Geph up without a verified port;
 - on runtime geo-exit failure, including a successful SOCKS connection followed
-  by an early zero-byte remote close, clear only `com.apple/slipstream` and
-  enter dormant mode for a bounded hold;
+  by an early zero-byte remote close, cool down only Geph and keep local bypass
+  active; the consumed stream closes, while the next client retry may use the
+  original destination selected by the user's DNS/VPN/system route;
+- never move a geo-exit host into the local desync ladder merely because an
+  app-owned backend is absent;
 - do not let tray polling restart a live Geph process from endpoint failures;
 - on uninstall, clear the listener/PF path before a bounded accepted-stream
   drain, and keep the verified owned Geph backend alive until that drain ends;
@@ -319,9 +331,17 @@ them is active, treat it as outside state:
 2. Warn when it may bypass Slipstream routing.
 3. Do not disable, rewrite, restore, or replace it automatically.
 
+Every combination is valid: a user may have an external VPN, custom DNS, both,
+or neither. Slipstream must not require or infer any one of them, and its owned
+Geph backend is optional rather than a substitute for the user's environment.
+
 This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
 of the user's working setup, but Slipstream should not silently enable or remove
-them.
+them. A direct fallback reuses the exact destination selected before PF and
+lets macOS route the new plain connection without changing external state. If a
+full-tunnel VPN owns the default `utun*` route, Slipstream instead clears only
+its own anchor and stays dormant. Split/per-app VPN equivalence is a separate
+qualification boundary and is not inferred from full-tunnel behavior.
 
 Slipstream's on-demand Xbox DNS fallback is separate from that external state:
 after a local failure for one generic hostname, it can make one verified DoH
@@ -355,8 +375,9 @@ After wake, a Geph process can keep its local SOCKS port open while the tunnel
 inside it returns `SOCKS connect failed` or closes payload probes without a
 response. Slipstream records this under `geph_detail`; repeated post-wake
 geo-exit failures across multiple hosts schedule owned recovery. The daemon
-pauses only its private PF anchor, waits for active Geph streams to drain, and
-kickstarts the exact verified user LaunchAgent. The tray is not required.
+blocks new owned-Geph sessions, cools only that backend, waits for active
+owned-Geph streams to drain, and kickstarts the exact verified user LaunchAgent.
+The private PF anchor and local bypass remain active; the tray is not required.
 LaunchAgent `KeepAlive` still handles a process that exits on its own.
 
 While a long-lived Geph stream is active, StatusV2 may briefly report

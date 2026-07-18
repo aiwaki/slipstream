@@ -1490,11 +1490,10 @@ def _wait_for_path(path: Path, *, present: bool, timeout: float = 20) -> None:
     raise LifecycleError(f"{path} did not {state}")
 
 
-def _patch_launchd_for_local_only(plist_path: Path) -> None:
+def _patch_launchd_for_qualification(plist_path: Path) -> None:
     with plist_path.open("rb") as handle:
         data = plistlib.load(handle)
     environment = dict(data.get("EnvironmentVariables") or {})
-    environment["SLIP_GEPH"] = "0"
     environment["SLIP_RUNTIME_WAKE_GAP_SECONDS"] = str(
         int(QUALIFICATION_WAKE_GAP_SECONDS)
     )
@@ -1591,6 +1590,32 @@ def _assert_anchor_active(runner: pf.PfctlRunner) -> None:
         raise LifecycleError(
             "installed daemon did not arm the production private anchor: "
             f"nat={nat!r}, rules={rules!r}"
+        )
+
+
+def _assert_local_routing_without_geph() -> None:
+    status = _read_status()
+    if not isinstance(status, dict) or status.get("schema_version") != 2:
+        raise LifecycleError(f"clean install did not publish StatusV2: {status!r}")
+    backends = status.get("backends")
+    if not isinstance(backends, dict):
+        raise LifecycleError(f"clean install omitted backend status: {status!r}")
+    local_engine = backends.get("local_engine")
+    geph = backends.get("geph")
+    if not isinstance(local_engine, dict) or local_engine.get("state") != "ready":
+        raise LifecycleError(
+            f"clean install local engine is not ready: {local_engine!r}"
+        )
+    if not isinstance(geph, dict):
+        raise LifecycleError(f"clean install omitted Geph status: {geph!r}")
+    if (
+        geph.get("state") != "off"
+        or bool(geph.get("owned"))
+        or bool(geph.get("port_conflict"))
+    ):
+        raise LifecycleError(
+            "clean install unexpectedly depends on a Geph listener: "
+            f"{geph!r}"
         )
 
 
@@ -1770,8 +1795,9 @@ def run_lifecycle(
 
         stage = "cold-install"
         system.run(target.install_command)
-        cold = _wait_for_status("dormant", timeout=90)
-        pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
+        cold = _wait_for_status("active", timeout=90)
+        _assert_anchor_active(runner)
+        _assert_local_routing_without_geph()
         _assert_installed_payload(target)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("cold install changed the sentinel anchor")
@@ -1781,21 +1807,22 @@ def run_lifecycle(
         stage = "reinstall"
         system.run(target.install_command)
         reinstalled = _wait_for_status(
-            "dormant",
+            "active",
             previous_pid=int(cold["pid"]),
             timeout=90,
         )
-        pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
+        _assert_anchor_active(runner)
+        _assert_local_routing_without_geph()
         _assert_installed_payload(target)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
             raise LifecycleError("reinstall changed the sentinel anchor")
         sentinel.check("reinstall")
         _assert_sentinel_state(runner, sentinel_states)
 
-        stage = "activate-local-only"
+        stage = "qualification-runtime-options"
         system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)))
         _wait_for_path(STATUS_PATH, present=False)
-        _patch_launchd_for_local_only(LAUNCHD_PLIST)
+        _patch_launchd_for_qualification(LAUNCHD_PLIST)
         system.run(("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)))
         active = _wait_for_status(
             "active",
@@ -1803,6 +1830,7 @@ def run_lifecycle(
             timeout=60,
         )
         _assert_anchor_active(runner)
+        _assert_local_routing_without_geph()
         sentinel.check("active-start")
         _assert_sentinel_state(runner, sentinel_states)
 
@@ -1971,7 +1999,7 @@ def run_lifecycle(
     return {
         "result": "pass",
         "target": target.name,
-        "cold_install": "dormant",
+        "cold_install": "active_local_routing_without_geph",
         "reinstall": "new_pid_and_payload_replaced",
         "active_start": "private_anchor_loaded",
         "restart": "new_pid_and_anchor_loaded",
@@ -1994,8 +2022,8 @@ def dry_run(target_name: str = "script") -> dict:
         "result": "dry-run",
         "target": target_name,
         "restricted_to": "disposable GitHub Actions macOS runner",
-        "cold_install": "Geph unavailable; PF must stay dormant",
-        "active_phase": "SLIP_GEPH=0 in test-only installed plist",
+        "cold_install": "Geph unavailable; local routing and private PF stay active",
+        "active_phase": "production Geph state with test-only wake/voice options",
         "packaged_tray": (
             "start, crash, restart, and stop exact user-owned process"
             if target_name == "packaged-app"

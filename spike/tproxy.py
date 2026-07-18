@@ -171,7 +171,7 @@ _dead = {}                     # host -> expiry_monotonic
 STATUS_PATH = "/var/run/slipstream.status"
 STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
-DAEMON_VERSION = "0.1.8"
+DAEMON_VERSION = "0.1.9"
 _conn_count = 0                # live proxied connections
 _connection_tasks = set()
 _status_write_lock = threading.RLock()
@@ -181,12 +181,10 @@ SHUTDOWN_DRAIN_SECONDS = 10.0
 SHUTDOWN_DRAIN_QUIET_SECONDS = 0.1
 
 # --------------------------------------------------- Geph split-tunnel (hybrid)
-# The elegant hybrid (not a blunt VPN toggle): MOST traffic uses our local desync;
-# only the handful of services that hard-block Russian IPs server-side (OpenAI,
-# Anthropic, ...) are tunnelled through geph's local SOCKS5 — and ONLY when geph is
-# actually running. Russian services are split-tunnel-EXCLUDED: they must never
-# enter the tunnel (privacy + they'd break, geph exits abroad). geph absent ->
-# _geph_up stays False -> this whole path is inert and behaviour is unchanged.
+# The hybrid route keeps local DPI bypass independent from the optional Geph
+# exit. Reviewed geo-exit services may use Geph only while its owned SOCKS
+# listener is verified; otherwise they retain their original pre-PF destination.
+# Russian/local-bypass services never enter Geph.
 GEPH_ENABLED = os.environ.get("SLIP_GEPH", "1") != "0"
 # Use Slipstream's owned geph5-client (:9954). A separately-running Geph.app on
 # :9909 is diagnostics-only unless SLIP_GEPH_PORT explicitly opts into it.
@@ -204,8 +202,8 @@ _external_geph_detected = False
 _geph_active_sessions = 0
 _geph_restart_draining = False
 _geph_session_lock = threading.Lock()
-_pf_backend_hold_until = 0.0
-_pf_backend_hold_reason = ""
+_geph_backend_hold_until = 0.0
+_geph_backend_hold_reason = ""
 _pf_state_lock = threading.Lock()
 _fd_pressure = False
 _fd_pressure_reason = ""
@@ -453,7 +451,7 @@ GEPH_RESTART_MIN_HOSTS = 2
 GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
 GEPH_RESTART_EXECUTION_RETRY = 30.0
-PF_BACKEND_FAILURE_HOLD = 30.0
+GEPH_BACKEND_FAILURE_HOLD = 30.0
 FD_PRESSURE_HIGH_CAP = 2048
 FD_PRESSURE_LOW_CAP = 1024
 FD_PRESSURE_RESERVE = 8
@@ -2019,9 +2017,9 @@ def _is_geph_infra(host):
     return _host_matches(host, GEPH_INFRA)
 
 
-def geph_route(host):
-    """Only an explicit geo-exit policy may select Geph."""
-    return GEPH_ENABLED and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+def is_geo_exit_route(host):
+    """Return whether the host belongs to the reviewed geo-exit route class."""
+    return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
 
 
 def _record_health_event(
@@ -2818,7 +2816,7 @@ def execute_owned_geph_restart(
     owner_uid=None,
     listener_owned=None,
     runner=None,
-    pauser=None,
+    backend_suspender=None,
 ):
     """Kickstart only Slipstream's verified user LaunchAgent after routing is idle."""
     if _shutdown_started.is_set():
@@ -2856,8 +2854,8 @@ def execute_owned_geph_restart(
         return "busy"
 
     _geph_restart_hint["last_attempt_at"] = now
-    if pauser is None:
-        pauser = lambda: suspend_transparent_routing(
+    if backend_suspender is None:
+        backend_suspender = lambda: suspend_geo_exit_backend(
             "owned Geph restart in progress",
             now=now,
         )
@@ -2867,7 +2865,7 @@ def execute_owned_geph_restart(
             if managed_drain:
                 _finish_geph_restart_drain()
             return "shutdown"
-        pauser()
+        backend_suspender()
         if _shutdown_started.is_set():
             if managed_drain:
                 _finish_geph_restart_drain()
@@ -4122,7 +4120,13 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     geph_sessions = geph_active_session_count()
     auto_geo_exit = auto_geo_exit_status_snapshot(now)
     telegram = tgws_status(now)
-    geph_state = "up" if _geph_up else ("off" if not GEPH_ENABLED else "down")
+    geph_state = (
+        "up"
+        if _geph_up
+        else "down"
+        if _geph_port is not None or _geph_port_conflict
+        else "off"
+    )
 
     if _fd_pressure:
         recovery_state = "recovering"
@@ -4500,25 +4504,23 @@ def asyncio_exception_handler(loop, context):
 
 
 def geo_exit_backend_ready(now=None):
-    """Whether transparent interception can safely serve every route class.
-
-    Explicitly disabling Geph restores the local-only routing mode. When Geph is
-    enabled, PF remains dormant until a verified SOCKS port is live and any
-    runtime-failure hold has elapsed.
-    """
-    global _pf_backend_hold_until, _pf_backend_hold_reason
-    if _fd_pressure:
-        return False
+    """Whether the optional Geph route may accept a new connection."""
+    global _geph_backend_hold_until, _geph_backend_hold_reason
     if not GEPH_ENABLED:
-        return True
+        return False
     now = time.time() if now is None else now
     ready = bool(_geph_up and _geph_port in GEPH_PORTS)
-    if not ready or now < _pf_backend_hold_until:
+    if not ready or now < _geph_backend_hold_until:
         return False
-    if _pf_backend_hold_until:
-        _pf_backend_hold_until = 0.0
-        _pf_backend_hold_reason = ""
+    if _geph_backend_hold_until:
+        _geph_backend_hold_until = 0.0
+        _geph_backend_hold_reason = ""
     return True
+
+
+def transparent_routing_ready():
+    """Whether the local transparent engine can safely accept connections."""
+    return not _fd_pressure
 
 
 def pause_private_pf():
@@ -4536,7 +4538,7 @@ def arm_private_pf_if_ready(port):
     with _pf_state_lock:
         if (
             _shutdown_started.is_set()
-            or not geo_exit_backend_ready()
+            or not transparent_routing_ready()
             or not pf_parent_anchor_loaded()
         ):
             return False
@@ -4549,7 +4551,7 @@ def arm_private_pf_if_ready(port):
         if (
             result.returncode == 0
             and not _shutdown_started.is_set()
-            and geo_exit_backend_ready()
+            and transparent_routing_ready()
         ):
             _pf_applied = True
             return True
@@ -4559,38 +4561,27 @@ def arm_private_pf_if_ready(port):
         return False
 
 
-def suspend_transparent_routing(reason, now=None):
-    """Fail safe by pausing only Slipstream's private PF anchor.
-
-    The current intercepted connection cannot be moved to a different upstream,
-    but clearing the anchor lets the client's next retry use the native network
-    path. External PF anchors, DNS, VPN, proxy settings, and global states are not
-    touched.
-    """
-    global _geph_up, _pf_applied, _pf_backend_hold_until, _pf_backend_hold_reason
+def suspend_geo_exit_backend(reason, now=None):
+    """Cool down only Geph while local routing remains available."""
+    global _geph_up, _geph_backend_hold_until, _geph_backend_hold_reason
     now = time.time() if now is None else now
     _geph_up = False
-    _pf_backend_hold_until = max(
-        _pf_backend_hold_until,
-        now + PF_BACKEND_FAILURE_HOLD,
+    _geph_backend_hold_until = max(
+        _geph_backend_hold_until,
+        now + GEPH_BACKEND_FAILURE_HOLD,
     )
-    _pf_backend_hold_reason = str(reason)[:200]
-    was_applied = _pf_applied
-    if not pause_private_pf():
-        print(
-            ">> unable to pause Slipstream's private pf anchor; will retry",
-            file=sys.stderr,
-        )
-        return False
-    if was_applied:
-        print(">> geo-exit backend unavailable -> transparent routing dormant", file=sys.stderr)
+    _geph_backend_hold_reason = str(reason)[:200]
+    print(
+        ">> geo-exit backend unavailable -> local routing remains active",
+        file=sys.stderr,
+    )
     return True
 
 
 def pf_setup_if_ready(port, now=None):
-    if not geo_exit_backend_ready(now):
+    if not transparent_routing_ready():
         print(
-            ">> geo-exit backend not ready -> leaving transparent routing dormant",
+            ">> local routing capacity unavailable -> leaving transparent routing dormant",
             file=sys.stderr,
         )
         return False
@@ -5562,9 +5553,7 @@ def network_monitor(port, voice=True):
             _finish_geph_restart_drain()
         # Hysteresis: a few missed probes (Geph busy under load, or briefly
         # re-establishing its tunnel) must not flap the route-health state.
-        # Confirmed downtime pauses the private PF anchor so native networking
-        # remains usable. Only declare down after 3 consecutive misses (~15s of
-        # real outage) when a previously verified port is being preserved.
+        # Only geo-exit selection changes; local routing remains available.
         probe_ok = probe_geph()
         if _shutdown_started.is_set():
             break
@@ -5579,7 +5568,7 @@ def network_monitor(port, voice=True):
         if _geph_up != was_geph:
             print(f">> geph SOCKS {'up' if _geph_up else 'down'} "
                   f"(:{_geph_port if _geph_up else GEPH_PORTS}) — geo-exit hosts "
-                  f"{'tunnelled' if _geph_up else 'paused until recovery'}",
+                  f"{'tunnelled' if _geph_up else 'using system-route fallback'}",
                   file=sys.stderr)
             if not first_tick:
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
@@ -5605,7 +5594,7 @@ def network_monitor(port, voice=True):
                 print(">> transparent HTTPS filter conflict cleared -> re-arming")
             _pf_interceptor_conflicts = conflicts
         refresh_fd_pressure()
-        backend_ready = geo_exit_backend_ready(now)
+        backend_ready = transparent_routing_ready()
         if vpn:
             if _pf_applied:
                 print(f">> VPN up (default via {iface}) -> Slipstream dormant",
@@ -5617,13 +5606,13 @@ def network_monitor(port, voice=True):
         elif not backend_ready:
             if _pf_applied:
                 print(
-                    ">> geo-exit backend unavailable -> Slipstream dormant",
+                    ">> local routing capacity unavailable -> Slipstream dormant",
                     file=sys.stderr,
                 )
                 pause_private_pf()
         else:
             if not _pf_applied:
-                print(">> routing backends ready -> Slipstream active", file=sys.stderr)
+                print(">> local routing ready -> Slipstream active", file=sys.stderr)
                 if arm_private_pf_if_ready(port):
                     start_canaries_if_due("pf_reapply", force=True)
                 elif not pf_parent_anchor_loaded():
@@ -6541,6 +6530,38 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
     return raced
 
 
+async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writer):
+    """Keep the system-selected route usable when no app-owned exit is ready.
+
+    ``dst_ip`` is the destination selected before PF redirected the socket, so
+    this preserves the user's DNS, VPN, and routing decisions. It is a bounded
+    plain TLS probe, never a local desync strategy and never an alternate DNS
+    lookup.
+    """
+    direct = await dial_and_probe(dst_ip, port, first_flight)
+    if not direct:
+        return False
+    up_r, up_w, server_first = direct
+    route_health_event(
+        route_policy(host)["service_group"],
+        ROUTE_GEO_EXIT,
+        host,
+        True,
+        backend=BACKEND_DIRECT,
+    )
+    if VERBOSE:
+        print(f"OK {host}:{port} via system route {dst_ip}", file=sys.stderr)
+    try:
+        writer.write(server_first)
+        await writer.drain()
+    except OSError:
+        await _close_stream_writer(up_w)
+        writer.close()
+        return True
+    await relay_local_stream(reader, up_w, up_r, writer)
+    return True
+
+
 async def handle(reader, writer):
     global _conn_count
     task = asyncio.current_task()
@@ -6607,17 +6628,12 @@ async def _handle_impl(reader, writer):
             note_telegram_direct_failure("empty direct response")
         return
 
-    # Split-tunnel: a geo-blocked service (refuses RU IPs) goes through geph's
-    # SOCKS5 tunnel. geph is the ONLY honest path for these hosts — local desync
-    # would exit on the Russian IP and earn a hard 403 ("Request not allowed")
-    # that makes apps like Claude DROP their session (forcing a manual re-login).
-    # On Geph trouble, close only this already-intercepted connection and pause
-    # Slipstream's private PF anchor. The client retry then uses the native path
-    # instead of looping through a dead local backend. (Russian services are
-    # excluded by geph_route and fall through to desync as normal.) A user-owned
-    # Smart DNS can take this branch first, but only after canaries have proven
-    # that the DNS-provided path is live; any runtime miss falls back to Geph.
-    if is_tls and geph_route(host):
+    # Split-tunnel: a reviewed geo-exit service can use a proven Smart DNS path
+    # or the verified owned Geph tunnel. Both are optional. If neither is ready,
+    # preserve the destination chosen by the user's own DNS/VPN/system route;
+    # never move the host into the local desync ladder and never disarm the
+    # independent Discord/YouTube path.
+    if is_tls and is_geo_exit_route(host):
         policy = route_policy(host)
         geph_owned = bool(_geph_owned)
         if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
@@ -6661,101 +6677,128 @@ async def _handle_impl(reader, writer):
                 "smart dns runtime probe failed",
                 policy["service_group"],
             )
-        if _geph_up:
-            if not _geph_session_started():
-                writer.close()
-                return
+        geph_expected = bool(GEPH_ENABLED and (_geph_up or _geph_port or _geph_owned))
+        geph_now = time.time()
+        geph_cooling = geph_now < _geph_backend_hold_until
+        geph_ready = geo_exit_backend_ready(now=geph_now)
+        geph_failure = "tunnel down"
+        geph_suspend = "geo-exit tunnel down"
+        if geph_ready and _geph_session_started():
             try:
-                if not runtime_route_circuit_allows(
+                if runtime_route_circuit_allows(
                     policy,
                     GEO_BACKEND_GEPH,
                     owned=geph_owned,
                 ):
-                    suspend_transparent_routing("geo-exit backend cooling down")
-                    writer.close()
-                    return
-                g = await dial_via_geph(host, dst_port, head + body)
-                if g:
-                    gr, gw = g
-                    if VERBOSE:
-                        print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
-                    t0 = time.monotonic()
-                    geph_result_recorded = False
+                    g = await dial_via_geph(host, dst_port, head + body)
+                    if g:
+                        gr, gw = g
+                        if VERBOSE:
+                            print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
+                        t0 = time.monotonic()
+                        geph_result_recorded = False
 
-                    def record_first_geph_payload():
-                        nonlocal geph_result_recorded
-                        if geph_result_recorded:
-                            return
-                        runtime_route_circuit_record_result(
-                            policy,
-                            GEO_BACKEND_GEPH,
-                            True,
-                            owned=geph_owned,
-                        )
-                        clear_geph_route_failure()
-                        geph_result_recorded = True
+                        def record_first_geph_payload():
+                            nonlocal geph_result_recorded
+                            if geph_result_recorded:
+                                return
+                            runtime_route_circuit_record_result(
+                                policy,
+                                GEO_BACKEND_GEPH,
+                                True,
+                                owned=geph_owned,
+                            )
+                            clear_geph_route_failure()
+                            geph_result_recorded = True
 
-                    activity = _RelayActivity(
-                        last_downstream_at=t0,
-                        on_first_downstream=record_first_geph_payload,
-                    )
-                    res = await relay_local_stream(
-                        reader,
-                        gw,
-                        gr,
-                        writer,
-                        activity,
-                    )
-                    down_b = res[1] or 0
-                    if down_b == 0 and time.monotonic() - t0 < 10:
-                        runtime_route_circuit_record_result(
-                            policy,
-                            GEO_BACKEND_GEPH,
-                            False,
-                            owned=geph_owned,
+                        activity = _RelayActivity(
+                            last_downstream_at=t0,
+                            on_first_downstream=record_first_geph_payload,
                         )
-                        log_geph_route_failure(host, "remote closed without response")
-                        # A successful SOCKS CONNECT is not enough to keep PF armed.
-                        # If the remote side closes before yielding any payload, leave
-                        # the next client retry on the native path instead of sending
-                        # it into the same broken geo-exit tunnel.
-                        suspend_transparent_routing("geo-exit remote close before payload")
-                    elif not geph_result_recorded:
-                        runtime_route_circuit_record_result(
-                            policy,
-                            GEO_BACKEND_GEPH,
-                            True,
-                            owned=geph_owned,
+                        res = await relay_local_stream(
+                            reader,
+                            gw,
+                            gr,
+                            writer,
+                            activity,
                         )
-                        clear_geph_route_failure()
-                    return
+                        down_b = res[1] or 0
+                        if down_b == 0 and time.monotonic() - t0 < 10:
+                            runtime_route_circuit_record_result(
+                                policy,
+                                GEO_BACKEND_GEPH,
+                                False,
+                                owned=geph_owned,
+                            )
+                            log_geph_route_failure(host, "remote closed without response")
+                            # The current client stream cannot be replayed after a
+                            # zero-byte close. Cool down only Geph; the next client
+                            # retry can use the preserved system route.
+                            suspend_geo_exit_backend(
+                                "geo-exit remote close before payload"
+                            )
+                        elif not geph_result_recorded:
+                            runtime_route_circuit_record_result(
+                                policy,
+                                GEO_BACKEND_GEPH,
+                                True,
+                                owned=geph_owned,
+                            )
+                            clear_geph_route_failure()
+                        return
+                    runtime_route_circuit_record_result(
+                        policy,
+                        GEO_BACKEND_GEPH,
+                        False,
+                        owned=geph_owned,
+                    )
+                    geph_failure = "SOCKS connect failed"
+                    geph_suspend = "geo-exit SOCKS connect unavailable"
+                else:
+                    geph_failure = "backend cooling down"
+                    geph_suspend = "geo-exit backend cooling down"
             finally:
                 _geph_session_finished()
+        elif geph_expected and not geph_cooling and runtime_route_circuit_allows(
+            policy,
+            GEO_BACKEND_GEPH,
+            owned=geph_owned,
+        ):
             runtime_route_circuit_record_result(
                 policy,
                 GEO_BACKEND_GEPH,
                 False,
                 owned=geph_owned,
             )
-            log_geph_route_failure(host, "SOCKS connect failed")
-            suspend_transparent_routing("geo-exit SOCKS connect unavailable")
+
+        if geph_expected and not geph_cooling:
+            suspend_geo_exit_backend(geph_suspend)
+        if await _try_system_geo_connect(
+            host,
+            dst_ip,
+            dst_port,
+            head + body,
+            reader,
+            writer,
+        ):
+            return
+        if geph_expected:
+            log_geph_route_failure(host, geph_failure)
         else:
-            if runtime_route_circuit_allows(
-                policy,
-                GEO_BACKEND_GEPH,
-                owned=geph_owned,
-            ):
-                runtime_route_circuit_record_result(
-                    policy,
-                    GEO_BACKEND_GEPH,
-                    False,
-                    owned=geph_owned,
-                )
-            log_geph_route_failure(host, "tunnel down")
-            suspend_transparent_routing("geo-exit tunnel down")
+            route_health_event(
+                policy["service_group"],
+                ROUTE_GEO_EXIT,
+                host,
+                False,
+                "system route unavailable; Geph not configured",
+                backend=BACKEND_DIRECT,
+            )
         if VERBOSE:
-            print(f"  geph unavailable for geo-host {host} -> fail closed "
-                  f"(private pf anchor paused for the retry)", file=sys.stderr)
+            print(
+                f"  no usable route for geo-host {host}; "
+                "local Discord/YouTube routing remains active",
+                file=sys.stderr,
+            )
         writer.close()
         return
 
@@ -7273,8 +7316,12 @@ def _installed_daemon_readiness(port):
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
         return False, "status pid is not the installed daemon"
-    if not _tcp_listener_present(port):
-        return False, f"listener 127.0.0.1:{port} missing"
+    listener_pids = _listener_pids(port)
+    if listener_pids != [pid]:
+        return False, (
+            f"listener 127.0.0.1:{port} is not owned exclusively by "
+            "the status pid"
+        )
     rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
     if rules_loaded != (status.get("state") == "active"):
         return False, "PF state does not match daemon state"
@@ -7515,8 +7562,8 @@ async def amain(port, voice=True):
                   f"kill it and retry:\n  sudo lsof -ti tcp:{port} | xargs sudo kill\n",
                   file=sys.stderr)
         raise
-    # Holding the listener is necessary but not sufficient: do not capture
-    # system HTTPS until the geo-exit backend has a verified SOCKS port.
+    # Local routing is independent of the optional Geph backend. A clean install
+    # must activate Discord/YouTube bypass even before Geph is configured.
     probe_ok = probe_geph()
     _geph_up, _ = reduce_geph_probe_state(
         previous_up=False,

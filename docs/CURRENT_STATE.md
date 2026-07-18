@@ -8,9 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-18, through merged
-[PR #170](https://github.com/aiwaki/slipstream/pull/170) at main commit
-`61bdeabea1db49740f5e5902cd4f15273b64d8b2`, including its successful
+Last evidence audit: 2026-07-19, through merged
+[PR #171](https://github.com/aiwaki/slipstream/pull/171) at main commit
+`1925f9de4ae15415dac06b574f9586a8281900b0`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -37,8 +37,8 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | CI-qualified | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PR #133 removed the final production path that reloaded `/etc/pf.conf` from guessed legacy evidence. Daemon shutdown now blocks new status publication and serializes final status cleanup with any in-flight writer, preventing stale `active` state after the private anchor is cleared. |
-| M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
+| M0 - Safe Base | Regression repair in qualification | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. Exact-main `0.1.8` exposed a missed clean-install contract: the daemon stayed dormant without Geph, so local bypass never activated, while CI injected `SLIP_GEPH=0` and hid the real default. The repair removes that patch and requires clean install/reinstall to be active with no Geph account or listener. The primary workstation remains uninstalled until packaged qualification passes. |
+| M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is now independent of optional Geph; geo-exit backend loss preserves Discord/YouTube local bypass and may use only the original pre-PF destination, not local desync. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Pure packet-route safety gates implemented; packet effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, but the shipping path no longer includes a Slipstream-owned kernel driver because production signing requires an organization-backed certificate workflow. The active `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and admits only exact package, DLL, PE, publisher, signer, and timestamp evidence. Its native read-only collector hashes bounded non-reparse handles, validates Authenticode against the same held DLL handle without network retrieval, and retains that handle in an opaque admission. The pure route boundary prepares only non-authorizing fresh public `/32` or `/128` candidates after active-policy reclassification and host/address binding, rejects reserved IPv6, and now rejects partial, stale, malformed, oversized, or policy-incompatible shared-destination snapshots. A conflict admission is short-lived and generation-bound but still cannot authorize a native route. The complete-boundary native issuer, lifetime generation lease, DLL loading, owned adapter/routes, userspace packet stack, local/geo backends, disposable coexistence qualification, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
@@ -230,12 +230,12 @@ The primary workstation remained uninstalled throughout that qualification.
 
 ## Next Verified Action
 
-Resume the read-only native Windows issuer for complete destination-binding
-evidence without loading Wintun or changing routes. Its generation must advance
-on every binding change, and a future route must retain the same generation
-lease for its entire lifetime and be removed before release. Keep DLL loading,
-adapter creation, route mutation, packet processing, and production SCM
-composition outside that change.
+Qualify the clean-install local-bypass repair on disposable packaged CI before
+resuming M4. The exact packaged app must become `active` with no Geph account,
+listener, or post-install environment rewrite; reinstall and uninstall must
+preserve the sibling PF sentinel and all external DNS/VPN/proxy/PAC state. Only
+after that gate passes may the repaired artifact be installed on the primary
+workstation and checked against Discord and YouTube.
 
 ## External Gates
 

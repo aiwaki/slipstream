@@ -107,7 +107,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(lifecycle.LifecycleError, "executable tray"):
                 lifecycle.packaged_app_target(app)
 
-    def test_plist_patch_enables_local_only_mode_and_disables_voice(self) -> None:
+    def test_plist_patch_changes_only_qualification_runtime_options(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "daemon.plist"
             data = {
@@ -117,17 +117,40 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with path.open("wb") as handle:
                 plistlib.dump(data, handle)
 
-            lifecycle._patch_launchd_for_local_only(path)
+            lifecycle._patch_launchd_for_qualification(path)
 
             with path.open("rb") as handle:
                 updated = plistlib.load(handle)
-            self.assertEqual(updated["EnvironmentVariables"]["SLIP_GEPH"], "0")
+            self.assertNotIn("SLIP_GEPH", updated["EnvironmentVariables"])
             self.assertEqual(
                 updated["EnvironmentVariables"]["SLIP_RUNTIME_WAKE_GAP_SECONDS"],
                 "6",
             )
             self.assertIn("--no-voice", updated["ProgramArguments"])
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+    def test_clean_install_contract_requires_local_engine_without_geph(self) -> None:
+        status = {
+            "schema_version": 2,
+            "backends": {
+                "local_engine": {"state": "ready"},
+                "geph": {
+                    "state": "off",
+                    "owned": False,
+                    "port_conflict": False,
+                },
+            },
+        }
+        with mock.patch.object(lifecycle, "_read_status", return_value=status):
+            lifecycle._assert_local_routing_without_geph()
+
+        status["backends"]["geph"]["state"] = "up"
+        with mock.patch.object(lifecycle, "_read_status", return_value=status):
+            with self.assertRaisesRegex(
+                lifecycle.LifecycleError,
+                "unexpectedly depends on a Geph listener",
+            ):
+                lifecycle._assert_local_routing_without_geph()
 
     def test_disposable_guard_requires_every_ci_marker(self) -> None:
         environment = {
