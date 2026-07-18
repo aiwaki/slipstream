@@ -6678,9 +6678,12 @@ async def _handle_impl(reader, writer):
                 policy["service_group"],
             )
         geph_expected = bool(GEPH_ENABLED and (_geph_up or _geph_port or _geph_owned))
+        geph_now = time.time()
+        geph_cooling = geph_now < _geph_backend_hold_until
+        geph_ready = geo_exit_backend_ready(now=geph_now)
         geph_failure = "tunnel down"
         geph_suspend = "geo-exit tunnel down"
-        if _geph_up and _geph_session_started():
+        if geph_ready and _geph_session_started():
             try:
                 if runtime_route_circuit_allows(
                     policy,
@@ -6756,7 +6759,7 @@ async def _handle_impl(reader, writer):
                     geph_suspend = "geo-exit backend cooling down"
             finally:
                 _geph_session_finished()
-        elif geph_expected and runtime_route_circuit_allows(
+        elif geph_expected and not geph_cooling and runtime_route_circuit_allows(
             policy,
             GEO_BACKEND_GEPH,
             owned=geph_owned,
@@ -6768,7 +6771,7 @@ async def _handle_impl(reader, writer):
                 owned=geph_owned,
             )
 
-        if geph_expected:
+        if geph_expected and not geph_cooling:
             suspend_geo_exit_backend(geph_suspend)
         if await _try_system_geo_connect(
             host,

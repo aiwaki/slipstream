@@ -210,6 +210,9 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
     monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "remember_strategy", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -320,6 +323,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
 
         monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
         monkeypatch.setattr(tproxy, "_geph_up", True)
+        monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
         monkeypatch.setattr(tproxy, "dial_via_geph", fake_geph)
         monkeypatch.setattr(tproxy, "dial_strategy", no_local)
         monkeypatch.setattr(tproxy, "dial_plain", no_direct)
@@ -536,6 +540,7 @@ def test_smart_dns_runtime_miss_falls_back_to_geph_without_local_desync(monkeypa
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.17", 443))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
     monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
     monkeypatch.setattr(
@@ -579,6 +584,7 @@ def test_geo_exit_early_close_cools_only_geph_without_replaying_the_stream(monke
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.18", 443))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "dial_via_geph", empty_geph)
     monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
@@ -660,6 +666,69 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
     assert suspensions == []
     assert smart_dns_misses == ([host] if smart_dns_ready else [])
     assert direct_calls == ["203.0.113.15"]
+
+
+def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch):
+    """A live SOCKS probe cannot bypass the owned backend failure hold."""
+    isolate_runtime_state(monkeypatch)
+    host = "ws.chatgpt.com"
+    client, expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    direct_calls = []
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
+    hold_until = 130.0
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    async def system_route(ip, port, first_flight, probe_timeout=2.5):
+        assert (ip, port, first_flight, probe_timeout) == (
+            "203.0.113.19",
+            443,
+            expected_first_flight,
+            2.5,
+        )
+        direct_calls.append(ip)
+        return probed_upstream_response(response)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", hold_until)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "early close")
+    monkeypatch.setattr(tproxy.time, "time", lambda: 100.0)
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_geo_exit_backend",
+        lambda *_args, **_kwargs: pytest.fail("active hold must not be extended"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(tproxy, "dial_and_probe", system_route)
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("DNS", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert direct_calls == ["203.0.113.19"]
+    assert tproxy.geph_active_session_count() == 0
+    assert tproxy._geph_backend_hold_until == hold_until
+    assert tproxy._geph_backend_hold_reason == "early close"
 
 
 def test_local_circuit_counts_one_full_strategy_ladder_as_one_failure(monkeypatch):
@@ -746,6 +815,7 @@ def test_smart_dns_circuit_suppresses_only_smart_dns_then_uses_owned_geph(
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.41", 443))
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: True)
     monkeypatch.setattr(tproxy, "_try_smart_dns_geo_connect", smart_dns_miss)
     monkeypatch.setattr(
@@ -840,6 +910,7 @@ def test_geph_half_open_recovers_on_first_payload_before_long_relay_ends(
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "dial_via_geph", long_lived_geph)
     monkeypatch.setattr(

@@ -331,6 +331,10 @@ them is active, treat it as outside state:
 2. Warn when it may bypass Slipstream routing.
 3. Do not disable, rewrite, restore, or replace it automatically.
 
+Every combination is valid: a user may have an external VPN, custom DNS, both,
+or neither. Slipstream must not require or infer any one of them, and its owned
+Geph backend is optional rather than a substitute for the user's environment.
+
 This includes user-managed DNS services such as `xbox-dns.ru`. They may be part
 of the user's working setup, but Slipstream should not silently enable or remove
 them. A direct fallback reuses the exact destination selected before PF and

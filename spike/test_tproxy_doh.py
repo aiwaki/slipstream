@@ -2316,6 +2316,7 @@ def test_geo_exit_payload_result_controls_geph_backend(
     monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspended.append)
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
     asyncio.run(tproxy._handle_impl(Reader(), Writer()))
 
