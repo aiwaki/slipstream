@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-19, through merged
-[PR #171](https://github.com/aiwaki/slipstream/pull/171) at main commit
-`1925f9de4ae15415dac06b574f9586a8281900b0`, including its successful
+[PR #172](https://github.com/aiwaki/slipstream/pull/172) at main commit
+`e4249ffeacc6906034fdb319339353dd5e8897fb`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -37,8 +37,8 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Regression repair in qualification | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. Exact-main `0.1.8` exposed a missed clean-install contract: the daemon stayed dormant without Geph, so local bypass never activated, while CI injected `SLIP_GEPH=0` and hid the real default. The repair removes that patch and requires clean install/reinstall to be active with no Geph account or listener. The primary workstation remains uninstalled until packaged qualification passes. |
-| M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is now independent of optional Geph; geo-exit backend loss preserves Discord/YouTube local bypass and may use only the original pre-PF destination, not local desync. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
+| M0 - Safe Base | Blocked after primary install regression | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented, but the exact PR #172 artifact failed the primary workstation smoke twice. Installing its daemon immediately coincided with broad HTTPS failures in ChatGPT/Codex and Discord while app-owned Geph was disabled. Uninstall removed the daemon, listener, runtime install, and PF token without changing user DNS or system proxy state, but left `/Applications/Slipstream.app` behind. The active transparent path and tray self-removal must be repaired and qualified before another primary install. |
+| M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Pure packet-route safety gates implemented; packet effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, but the shipping path no longer includes a Slipstream-owned kernel driver because production signing requires an organization-backed certificate workflow. The active `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and admits only exact package, DLL, PE, publisher, signer, and timestamp evidence. Its native read-only collector hashes bounded non-reparse handles, validates Authenticode against the same held DLL handle without network retrieval, and retains that handle in an opaque admission. The pure route boundary prepares only non-authorizing fresh public `/32` or `/128` candidates after active-policy reclassification and host/address binding, rejects reserved IPv6, and now rejects partial, stale, malformed, oversized, or policy-incompatible shared-destination snapshots. A conflict admission is short-lived and generation-bound but still cannot authorize a native route. The complete-boundary native issuer, lifetime generation lease, DLL loading, owned adapter/routes, userspace packet stack, local/geo backends, disposable coexistence qualification, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
@@ -228,14 +228,46 @@ Its dependency and vendored-Geph audits passed in
 [run 29656556559](https://github.com/aiwaki/slipstream/actions/runs/29656556559).
 The primary workstation remained uninstalled throughout that qualification.
 
+The clean-install local-bypass repair and optional-backend state guards in
+[PR #172](https://github.com/aiwaki/slipstream/pull/172) passed `checks`,
+`windows-adapter-contract`, and `packaged-app-lifecycle` on the exact merge
+commit in
+[CI run 29663263685](https://github.com/aiwaki/slipstream/actions/runs/29663263685).
+Its dependency and vendored-Geph audits passed in
+[run 29663263691](https://github.com/aiwaki/slipstream/actions/runs/29663263691).
+The packaged gate proved active local bypass without a Geph account or
+listener and preserved the independent PF sentinel.
+
+The exact artifact from that run was then installed twice on the primary
+workstation. Both installs immediately coincided with broad HTTPS failures
+before the tray was launched, while app-owned Geph was disabled. Both manual
+uninstalls restored a process-free daemon state with no listener, runtime
+install, or PF token and left the user's `111.88.96.50` / `111.88.96.51` DNS
+and system proxy settings unchanged. The app bundle itself was not removed.
+`Reconnecting 5/5` was also observed after cleanup, so that symptom is not yet
+attributed exclusively to an active Slipstream PF path; the reproducible
+install trigger still makes this build unsafe to reinstall.
+
+The doc-only checkpoint rerun then reproduced the same class of failure in the
+disposable packaged gate: Safari reported `You Are Not Connected to the
+Internet` at `before-tray-start` while the private PF anchor was active in
+[CI run 29666303800](https://github.com/aiwaki/slipstream/actions/runs/29666303800).
+This confirms that the unsafe baseline is in the daemon data plane rather than
+the tray, Geph account state, or the workstation's DNS configuration.
+
+[PR #174](https://github.com/aiwaki/slipstream/pull/174) fixed the independent
+tray-uninstall defect by moving app-bundle removal into a validated one-shot
+launchd worker. Its complete CI, including `packaged-app-lifecycle`, passed in
+[run 29665174375](https://github.com/aiwaki/slipstream/actions/runs/29665174375).
+
 ## Next Verified Action
 
-Qualify the clean-install local-bypass repair on disposable packaged CI before
-resuming M4. The exact packaged app must become `active` with no Geph account,
-listener, or post-install environment rewrite; reinstall and uninstall must
-preserve the sibling PF sentinel and all external DNS/VPN/proxy/PAC state. Only
-after that gate passes may the repaired artifact be installed on the primary
-workstation and checked against Discord and YouTube.
+Do not reinstall or re-arm Slipstream on the primary workstation. The current
+repair gives direct, unknown, non-TLS, and no-SNI/ECH traffic an exact numeric
+destination, byte-transparent baseline path and defers unknown-host recovery to
+a later client retry. Qualify that change with the disposable packaged Safari,
+Chrome, PF-sentinel, and lifecycle gates. Only after those gates pass should a
+new versioned preview artifact be produced for a guarded primary smoke.
 
 ## External Gates
 

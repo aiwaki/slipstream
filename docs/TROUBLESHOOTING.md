@@ -321,6 +321,13 @@ bidirectional relay immediately. If an unknown connection fails, local recovery
 is deferred to a later client retry so a consumed TLS first flight is not
 replayed.
 
+A later doc-only CI rerun reproduced the broad outage before this repair was
+merged: packaged Safari reported `You Are Not Connected to the Internet` at
+`before-tray-start` while `com.apple/slipstream` was active. That disposable
+failure confirms the baseline bug without requiring another install on the
+primary workstation. The same packaged browser gate must pass on the exact
+repair commit before any guarded workstation smoke.
+
 Required behavior:
 
 - arm the private PF anchor when the proxy listener and local routing capacity
