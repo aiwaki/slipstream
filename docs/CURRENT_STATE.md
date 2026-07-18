@@ -221,17 +221,21 @@ commit in
 [CI run 29650142948](https://github.com/aiwaki/slipstream/actions/runs/29650142948),
 and its dependency and vendored-Geph audits passed in
 [run 29650142955](https://github.com/aiwaki/slipstream/actions/runs/29650142955).
+The macOS uninstall/drain safety change in PR #171 passed `checks`,
+`windows-adapter-contract`, and the disposable `packaged-app-lifecycle` gate in
+[CI run 29656556574](https://github.com/aiwaki/slipstream/actions/runs/29656556574).
+Its dependency and vendored-Geph audits passed in
+[run 29656556559](https://github.com/aiwaki/slipstream/actions/runs/29656556559).
+The primary workstation remained uninstalled throughout that qualification.
 
 ## Next Verified Action
 
-Qualify the macOS uninstall/drain safety change through review, required CI, and
-the packaged lifecycle gate without reinstalling it on the primary Mac. The
-change must stop new transparent accepts and clear only the private PF anchor
-before a bounded accepted-stream drain, leave owned Geph alive until that drain
-finishes, remove the exact user LaunchAgent and app bundle, and retain no daemon
-or Geph process. After that gate passes, resume the read-only native Windows
-issuer for complete destination-binding evidence without loading Wintun or
-changing routes.
+Resume the read-only native Windows issuer for complete destination-binding
+evidence without loading Wintun or changing routes. Its generation must advance
+on every binding change, and a future route must retain the same generation
+lease for its entire lifetime and be removed before release. Keep DLL loading,
+adapter creation, route mutation, packet processing, and production SCM
+composition outside that change.
 
 ## External Gates
 
