@@ -360,22 +360,29 @@ host through the active policy and can prepare only fresh public exact `/32` or
 `/128` candidate plans for `local_bypass` or `geo_exit`. One resolver evidence
 object must bind the same canonical host to an address set containing the
 selected destination. The capability is opaque and non-deserializable so only
-the future native collector can issue it, and reserved IPv6 space is rejected. Those plans are not
-native route authorization: shared CDN destinations still require conflict
-evidence. The module loads no DLL, creates no adapter, installs no route, and
-does not touch the production service or external DNS/proxy/PAC/VPN state.
+the future native collector can issue it, and reserved IPv6 space is rejected.
+A separate pure gate now requires complete, fresh, generation-bound evidence
+for every hostname bound to the same destination and admits only one shared
+route class and strategy. A partial cache is never safety evidence. Neither
+result is native route authorization: the future issuer must retain its
+generation lease for the entire route lifetime and remove the route before
+release.
+The module loads no DLL, creates no adapter, installs no route, and does not
+touch the production service or external DNS/proxy/PAC/VPN state.
 
 Wintun changes the data-plane shape: it exposes L3 packets rather than the
 accepted TCP streams expected by direct-ingress v1. Remaining implementation
 therefore stays phased and closed to production traffic:
 
-1. Add a read-only native collector for archive/DLL SHA-256, PE machine, and
-   Authenticode publisher, signer, and timestamp evidence. Qualify the exact
-   pinned artifact on disposable AMD64 and ARM64 Windows without loading it.
-2. Add owned Wintun adapter lifecycle and exact-route transactions with
-   crash-safe rollback, stale-evidence expiry, shared-destination conflict
-   rejection, and explicit external-VPN coexistence. Never add a default route
-   or change system DNS, proxy, PAC, or VPN settings.
+1. Completed: collect archive/DLL SHA-256, PE machine, Authenticode publisher,
+   signer, and timestamp evidence read-only, then qualify both exact pinned DLLs
+   and tamper rejection on disposable AMD64 and ARM64 Windows without loading
+   them.
+2. Implement the native issuer for a complete destination-binding generation,
+   then add owned Wintun adapter lifecycle and exact-route transactions under
+   the same lifetime generation lease. Prove crash-safe rollback, stale-evidence
+   expiry, removal-before-lease-release, and explicit external-VPN coexistence.
+   Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 3. Select a bounded userspace IPv4/IPv6 and TCP/UDP stack and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.

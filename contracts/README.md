@@ -93,11 +93,14 @@ Slipstream routing decisions and bounded recovery primitives.
   host and a selected destination present in the same fresh resolver evidence.
   That evidence is an opaque, non-deserializable capability reserved for the
   future native collector; IPv6 candidates are limited to reviewed
-  global-unicast space. Plans are
-  public `/32` or `/128` destinations only, are not native authorization, and
-  still require shared-destination conflict checks. Default routes and system
-  DNS/proxy/PAC/VPN mutation are impossible. It does not load the DLL, install
-  a route, or compose production traffic.
+  global-unicast space. Its separate shared-destination gate rejects partial,
+  stale, oversized, non-canonical, unsorted, or policy-incompatible binding
+  snapshots. Compatible evidence is collector-issued, generation-bound, and
+  short-lived. Plans and conflict admissions are not native authorization; a
+  future route effect must retain the same generation lease for its entire
+  lifetime and remove the route before release. Default routes and system
+  DNS/proxy/PAC/VPN mutation are impossible. It does not load the DLL, install a
+  route, or compose production traffic.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service

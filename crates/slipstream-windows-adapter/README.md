@@ -94,11 +94,18 @@ canonical host, and the selected address must occur in the same answer set.
 Resolver evidence is opaque and cannot be deserialized or constructed outside
 the adapter boundary; only a future native collector may issue it. IPv6
 admission is conservative global-unicast only and rejects IANA
-special-purpose space. A plan is not permission to mutate the route table:
-shared-destination conflict checks, native artifact collection, DLL loading,
-adapter/route ownership, packet-stack integration, and rollback remain later
-gates. This module cannot load a DLL, create an adapter, install a route, or
-touch system DNS, proxy, PAC, VPN, or the production service host.
+special-purpose space. A second pure gate requires an opaque complete binding
+snapshot for the exact destination. Partial DNS observations fail closed; the
+candidate host must be present, all hosts must be canonical, sorted and unique,
+and every binding must select the same route class and strategy. Evidence lives
+for at most 30 seconds and carries a collector generation that must remain
+leased for the entire lifetime of any future native route; the route must be
+removed before that lease is released. Neither the route plan nor the conflict
+admission permits a route-table mutation. A native conflict
+evidence issuer, DLL loading, adapter/route ownership, packet-stack integration,
+and rollback remain later gates. This module cannot load a DLL, create an
+adapter, install a route, or touch system DNS, proxy, PAC, VPN, or the production
+service host.
 
 The `wfp_*::v1` modules preserve a now-superseded own-driver research path for
 compatibility and future reference; they are not the Windows shipping plan.

@@ -1,9 +1,11 @@
 //! Version 1 Windows packet-adapter boundary.
 //!
 //! This module admits a pinned, already-verified Wintun DLL and prepares only
-//! fresh policy-bound exact-destination route plans. It does not load a DLL,
-//! create an adapter, install a route, resolve a name, or touch system DNS,
-//! proxy, PAC, VPN, or the production service host.
+//! fresh policy-bound exact-destination route plans. A separate pure gate can
+//! reject a candidate when the same address is bound to incompatible routing
+//! policy. Neither result authorizes a native effect. This module does not load
+//! a DLL, create an adapter, install a route, resolve a name, or touch system
+//! DNS, proxy, PAC, VPN, or the production service host.
 
 use serde::{Deserialize, Serialize};
 use slipstream_core::routing_policy::{
@@ -32,6 +34,10 @@ pub const WINTUN_ARM64_DLL_SHA256: &str =
 pub const WINTUN_ARM64_DLL_LENGTH: u64 = 222_488;
 pub const WINTUN_ARM64_PE_MACHINE: u16 = 0xaa64;
 pub const MAX_PACKET_ROUTE_EVIDENCE_LIFETIME_MS: u64 = 5 * 60 * 1000;
+pub const MAX_PACKET_ROUTE_CONFLICT_EVIDENCE_LIFETIME_MS: u64 = 30 * 1000;
+pub const MAX_PACKET_ROUTE_CONFLICT_HOSTS: usize = 256;
+pub const MAX_PACKET_ROUTE_CONFLICT_HOST_BYTES: usize = 253;
+const MAX_PACKET_ROUTE_CONFLICT_LABEL_BYTES: usize = 63;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WindowsPacketAdapterArchitecture {
@@ -298,6 +304,86 @@ impl WindowsPacketRoutePlan {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsPacketRouteConflictCoverage {
+    CompleteOwnedResolutionBoundary,
+    PartialObservation,
+}
+
+/// Opaque evidence issued by a future owner of the complete resolution boundary.
+///
+/// A partial DNS cache cannot construct this value. The future native issuer
+/// must advance `collector_generation` whenever the address bindings change and
+/// retain a lease on that generation for the entire lifetime of any route.
+#[derive(Debug, Eq, PartialEq)]
+pub struct WindowsPacketRouteConflictEvidence {
+    coverage: WindowsPacketRouteConflictCoverage,
+    collector_generation: u64,
+    destination: IpAddr,
+    binding_hosts: Vec<String>,
+    snapshot_started_at_ms: u64,
+    snapshot_completed_at_ms: u64,
+    expires_at_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WindowsPacketRouteConflictErrorCode {
+    RouteEvidenceExpired,
+    RoutePolicyChanged,
+    EvidenceDestinationMismatch,
+    EvidenceCoverageIncomplete,
+    EvidenceGenerationInvalid,
+    EvidenceWindowInvalid,
+    EvidenceExpired,
+    EvidenceBindingLimitExceeded,
+    EvidenceHostNotCanonical,
+    EvidenceHostsNotSortedUnique,
+    EvidenceCandidateHostMissing,
+    SharedDestinationConflict,
+}
+
+impl WindowsPacketRouteConflictErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RouteEvidenceExpired => "route_evidence_expired",
+            Self::RoutePolicyChanged => "route_policy_changed",
+            Self::EvidenceDestinationMismatch => "evidence_destination_mismatch",
+            Self::EvidenceCoverageIncomplete => "evidence_coverage_incomplete",
+            Self::EvidenceGenerationInvalid => "evidence_generation_invalid",
+            Self::EvidenceWindowInvalid => "evidence_window_invalid",
+            Self::EvidenceExpired => "evidence_expired",
+            Self::EvidenceBindingLimitExceeded => "evidence_binding_limit_exceeded",
+            Self::EvidenceHostNotCanonical => "evidence_host_not_canonical",
+            Self::EvidenceHostsNotSortedUnique => "evidence_hosts_not_sorted_unique",
+            Self::EvidenceCandidateHostMissing => "evidence_candidate_host_missing",
+            Self::SharedDestinationConflict => "shared_destination_conflict",
+        }
+    }
+}
+
+/// A short-lived pure admission, not permission to mutate the Windows route table.
+#[derive(Debug)]
+pub struct WindowsPacketRouteConflictAdmission {
+    route: WindowsPacketRoutePlan,
+    collector_generation: u64,
+    expires_at_ms: u64,
+}
+
+impl WindowsPacketRouteConflictAdmission {
+    pub fn route(&self) -> &WindowsPacketRoutePlan {
+        &self.route
+    }
+
+    pub const fn collector_generation(&self) -> u64 {
+        self.collector_generation
+    }
+
+    pub const fn expires_at_ms(&self) -> u64 {
+        self.expires_at_ms
+    }
+}
+
 pub fn prepare_windows_packet_route(
     request: &WindowsPacketRouteRequest,
     now_ms: u64,
@@ -364,6 +450,117 @@ pub fn prepare_windows_packet_route(
         expires_at_ms: evidence.expires_at_ms,
         purpose,
     })
+}
+
+/// Rejects an exact-route candidate unless every host in a complete, fresh
+/// destination binding snapshot selects the same route class and strategy.
+///
+/// A future native caller must additionally retain the collector-generation
+/// lease for the entire native route lifetime and remove the route before that
+/// lease is released. This pure function performs neither operation.
+pub fn admit_windows_packet_route_conflicts(
+    route: WindowsPacketRoutePlan,
+    evidence: WindowsPacketRouteConflictEvidence,
+    now_ms: u64,
+    policy_tables: &RoutingPolicyTables,
+) -> Result<WindowsPacketRouteConflictAdmission, WindowsPacketRouteConflictErrorCode> {
+    if now_ms >= route.expires_at_ms() {
+        return Err(WindowsPacketRouteConflictErrorCode::RouteEvidenceExpired);
+    }
+
+    let active_policy = classify_route_policy(&route.policy().host, policy_tables);
+    if active_policy != *route.policy() {
+        return Err(WindowsPacketRouteConflictErrorCode::RoutePolicyChanged);
+    }
+    if evidence.destination != route.destination() {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceDestinationMismatch);
+    }
+    if evidence.coverage != WindowsPacketRouteConflictCoverage::CompleteOwnedResolutionBoundary {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceCoverageIncomplete);
+    }
+    if evidence.collector_generation == 0 {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceGenerationInvalid);
+    }
+    if evidence.snapshot_started_at_ms > evidence.snapshot_completed_at_ms
+        || evidence.snapshot_completed_at_ms > now_ms
+        || evidence.snapshot_completed_at_ms >= evidence.expires_at_ms
+        || evidence
+            .expires_at_ms
+            .saturating_sub(evidence.snapshot_started_at_ms)
+            > MAX_PACKET_ROUTE_CONFLICT_EVIDENCE_LIFETIME_MS
+    {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceWindowInvalid);
+    }
+    if now_ms >= evidence.expires_at_ms {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceExpired);
+    }
+    if evidence.binding_hosts.is_empty()
+        || evidence.binding_hosts.len() > MAX_PACKET_ROUTE_CONFLICT_HOSTS
+    {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceBindingLimitExceeded);
+    }
+    if evidence
+        .binding_hosts
+        .iter()
+        .any(|host| !is_canonical_policy_host(host))
+    {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceHostNotCanonical);
+    }
+    if evidence
+        .binding_hosts
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceHostsNotSortedUnique);
+    }
+    if evidence
+        .binding_hosts
+        .binary_search(&route.policy().host)
+        .is_err()
+    {
+        return Err(WindowsPacketRouteConflictErrorCode::EvidenceCandidateHostMissing);
+    }
+    if evidence.binding_hosts.iter().any(|host| {
+        let binding_policy = classify_route_policy(host, policy_tables);
+        binding_policy.route_class != route.policy().route_class
+            || binding_policy.strategy_set != route.policy().strategy_set
+    }) {
+        return Err(WindowsPacketRouteConflictErrorCode::SharedDestinationConflict);
+    }
+
+    Ok(WindowsPacketRouteConflictAdmission {
+        expires_at_ms: route.expires_at_ms().min(evidence.expires_at_ms),
+        collector_generation: evidence.collector_generation,
+        route,
+    })
+}
+
+fn is_canonical_policy_host(host: &str) -> bool {
+    if host.is_empty()
+        || host.len() > MAX_PACKET_ROUTE_CONFLICT_HOST_BYTES
+        || !host.is_ascii()
+        || normalize_host(host) != host
+        || host.parse::<IpAddr>().is_ok()
+    {
+        return false;
+    }
+
+    let mut labels = host.split('.');
+    let mut label_count = 0;
+    for label in &mut labels {
+        label_count += 1;
+        if label.is_empty()
+            || label.len() > MAX_PACKET_ROUTE_CONFLICT_LABEL_BYTES
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return false;
+        }
+    }
+    label_count >= 2
 }
 
 fn is_safe_public_destination(destination: IpAddr) -> bool {
@@ -461,6 +658,7 @@ mod tests {
     #[derive(Debug, Deserialize)]
     struct ContractFixture {
         route_vectors: Vec<RouteVector>,
+        conflict_vectors: Vec<RouteConflictVector>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -488,6 +686,28 @@ mod tests {
         expires_at_ms: u64,
     }
 
+    #[derive(Debug, Deserialize)]
+    struct RouteConflictVector {
+        name: String,
+        now_ms: u64,
+        route_host: String,
+        destination: String,
+        route_evidence_expires_at_ms: u64,
+        evidence: RouteConflictEvidenceFixture,
+        expected: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RouteConflictEvidenceFixture {
+        coverage: WindowsPacketRouteConflictCoverage,
+        collector_generation: u64,
+        destination: String,
+        binding_hosts: Vec<String>,
+        snapshot_started_at_ms: u64,
+        snapshot_completed_at_ms: u64,
+        expires_at_ms: u64,
+    }
+
     impl RouteRequestFixture {
         fn into_request(self) -> WindowsPacketRouteRequest {
             WindowsPacketRouteRequest {
@@ -502,6 +722,70 @@ mod tests {
                     expires_at_ms: self.resolver_evidence.expires_at_ms,
                 },
             }
+        }
+    }
+
+    impl RouteConflictVector {
+        fn prepare_route(&self, policy: &RoutingPolicyTables) -> WindowsPacketRoutePlan {
+            let request = WindowsPacketRouteRequest {
+                policy: classify_route_policy(&self.route_host, policy),
+                destination: self.destination.clone(),
+                prefix_length: if self
+                    .destination
+                    .parse::<IpAddr>()
+                    .expect("conflict fixture destination must parse")
+                    .is_ipv4()
+                {
+                    32
+                } else {
+                    128
+                },
+                resolver_evidence: WindowsPacketResolverEvidence {
+                    source: WindowsPacketRouteEvidenceSource::OwnedResolverQuery,
+                    host: self.route_host.clone(),
+                    addresses: vec![self.destination.clone()],
+                    observed_at_ms: self.now_ms.saturating_sub(100),
+                    expires_at_ms: self.route_evidence_expires_at_ms,
+                },
+            };
+            prepare_windows_packet_route(&request, self.now_ms, policy)
+                .expect("conflict fixture route must prepare")
+        }
+
+        fn into_evidence(self) -> WindowsPacketRouteConflictEvidence {
+            WindowsPacketRouteConflictEvidence {
+                coverage: self.evidence.coverage,
+                collector_generation: self.evidence.collector_generation,
+                destination: self
+                    .evidence
+                    .destination
+                    .parse()
+                    .expect("conflict fixture evidence destination must parse"),
+                binding_hosts: self.evidence.binding_hosts,
+                snapshot_started_at_ms: self.evidence.snapshot_started_at_ms,
+                snapshot_completed_at_ms: self.evidence.snapshot_completed_at_ms,
+                expires_at_ms: self.evidence.expires_at_ms,
+            }
+        }
+    }
+
+    fn conflict_vector() -> RouteConflictVector {
+        RouteConflictVector {
+            name: "unit-fixture".to_owned(),
+            now_ms: 2_000,
+            route_host: "updates.discord.com".to_owned(),
+            destination: "104.16.58.5".to_owned(),
+            route_evidence_expires_at_ms: 20_000,
+            evidence: RouteConflictEvidenceFixture {
+                coverage: WindowsPacketRouteConflictCoverage::CompleteOwnedResolutionBoundary,
+                collector_generation: 1,
+                destination: "104.16.58.5".to_owned(),
+                binding_hosts: vec!["updates.discord.com".to_owned()],
+                snapshot_started_at_ms: 1_900,
+                snapshot_completed_at_ms: 1_950,
+                expires_at_ms: 10_000,
+            },
+            expected: "admitted".to_owned(),
         }
     }
 
@@ -533,5 +817,92 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn packet_route_conflicts_require_complete_fresh_compatible_bindings() {
+        let fixture: ContractFixture =
+            serde_json::from_str(CONTRACT).expect("Windows packet-adapter contract must parse");
+        let policy = bundled_policy_v1();
+
+        for vector in fixture.conflict_vectors {
+            let route = vector.prepare_route(&policy);
+            let destination = route.destination();
+            let route_expires_at_ms = route.expires_at_ms();
+            let collector_generation = vector.evidence.collector_generation;
+            let evidence_expires_at_ms = vector.evidence.expires_at_ms;
+            let name = vector.name.clone();
+            let expected = vector.expected.clone();
+            let now_ms = vector.now_ms;
+            let evidence = vector.into_evidence();
+            let result = admit_windows_packet_route_conflicts(route, evidence, now_ms, &policy);
+            let actual = match &result {
+                Ok(_) => "admitted",
+                Err(error) => error.as_str(),
+            };
+            assert_eq!(actual, expected.as_str(), "{name}");
+            if let Ok(admission) = result {
+                assert_eq!(admission.route().destination(), destination, "{name}");
+                assert_eq!(
+                    admission.collector_generation(),
+                    collector_generation,
+                    "{name}"
+                );
+                assert_eq!(
+                    admission.expires_at_ms(),
+                    route_expires_at_ms.min(evidence_expires_at_ms),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn packet_route_conflicts_reject_policy_change_and_unbounded_bindings() {
+        let policy = bundled_policy_v1();
+        let vector = conflict_vector();
+        let route = vector.prepare_route(&policy);
+        let mut changed_policy = policy.clone();
+        changed_policy
+            .static_routes
+            .retain(|entry| entry.service_group.as_str() != "discord");
+        assert!(matches!(
+            admit_windows_packet_route_conflicts(
+                route,
+                vector.into_evidence(),
+                2_000,
+                &changed_policy,
+            ),
+            Err(WindowsPacketRouteConflictErrorCode::RoutePolicyChanged)
+        ));
+
+        let vector = conflict_vector();
+        let route = vector.prepare_route(&policy);
+        assert!(matches!(
+            admit_windows_packet_route_conflicts(route, vector.into_evidence(), 20_000, &policy),
+            Err(WindowsPacketRouteConflictErrorCode::RouteEvidenceExpired)
+        ));
+
+        let mut vector = conflict_vector();
+        vector.evidence.collector_generation = 2;
+        vector.evidence.binding_hosts = (0..=MAX_PACKET_ROUTE_CONFLICT_HOSTS)
+            .map(|index| format!("{index:03}.updates.discord.com"))
+            .collect();
+        let route = vector.prepare_route(&policy);
+        assert!(matches!(
+            admit_windows_packet_route_conflicts(route, vector.into_evidence(), 2_000, &policy),
+            Err(WindowsPacketRouteConflictErrorCode::EvidenceBindingLimitExceeded)
+        ));
+
+        let mut vector = conflict_vector();
+        vector.evidence.binding_hosts = vec![format!(
+            "{}.example",
+            "a".repeat(MAX_PACKET_ROUTE_CONFLICT_HOST_BYTES)
+        )];
+        let route = vector.prepare_route(&policy);
+        assert!(matches!(
+            admit_windows_packet_route_conflicts(route, vector.into_evidence(), 2_000, &policy),
+            Err(WindowsPacketRouteConflictErrorCode::EvidenceHostNotCanonical)
+        ));
     }
 }

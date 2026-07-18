@@ -18,6 +18,15 @@
     "ipv6_global_unicast_registry_snapshot": "2025-10-10",
     "route_plan_is_native_authorization": false,
     "shared_destination_conflict_check_required": true,
+    "conflict_evidence_is_collector_issued": true,
+    "conflict_evidence_is_deserializable": false,
+    "complete_owned_resolution_boundary_required": true,
+    "partial_dns_observation_is_sufficient": false,
+    "conflict_binding_hosts_are_policy_hostnames": true,
+    "binding_changes_advance_collector_generation": true,
+    "native_route_effect_requires_atomic_generation_guard": true,
+    "route_lifetime_requires_collector_generation_lease": true,
+    "conflict_admission_is_native_authorization": false,
     "native_route_installation": false,
     "system_dns_mutation": false,
     "proxy_pac_vpn_mutation": false,
@@ -428,6 +437,280 @@
         }
       },
       "expected": "evidence_expired"
+    }
+  ],
+  "conflict_vectors": [
+    {
+      "name": "same-local-strategy-bindings-are-compatible",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 11,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com", "www.youtube.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "admitted"
+    },
+    {
+      "name": "same-geo-exit-strategy-bindings-are-compatible",
+      "now_ms": 2000,
+      "route_host": "chatgpt.com",
+      "destination": "104.18.33.45",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 12,
+        "destination": "104.18.33.45",
+        "binding_hosts": ["chatgpt.com", "claude.ai"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "admitted"
+    },
+    {
+      "name": "direct-binding-on-local-route-is-a-conflict",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 13,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com", "www.google.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "shared_destination_conflict"
+    },
+    {
+      "name": "geo-and-local-bindings-conflict",
+      "now_ms": 2000,
+      "route_host": "chatgpt.com",
+      "destination": "104.18.33.45",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 14,
+        "destination": "104.18.33.45",
+        "binding_hosts": ["chatgpt.com", "updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "shared_destination_conflict"
+    },
+    {
+      "name": "partial-dns-view-is-not-proof-of-safety",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "partial_observation",
+        "collector_generation": 15,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_coverage_incomplete"
+    },
+    {
+      "name": "candidate-host-must-be-present-in-complete-view",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 16,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["www.youtube.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_candidate_host_missing"
+    },
+    {
+      "name": "conflict-view-must-bind-the-route-destination",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 17,
+        "destination": "104.16.59.5",
+        "binding_hosts": ["updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_destination_mismatch"
+    },
+    {
+      "name": "collector-generation-zero-is-invalid",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 0,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_generation_invalid"
+    },
+    {
+      "name": "reversed-snapshot-window-is-invalid",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 18,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com"],
+        "snapshot_started_at_ms": 1980,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_window_invalid"
+    },
+    {
+      "name": "long-lived-conflict-proof-is-invalid",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 19,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com"],
+        "snapshot_started_at_ms": 1000,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 40000
+      },
+      "expected": "evidence_window_invalid"
+    },
+    {
+      "name": "expired-conflict-proof-is-rejected",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 20,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 2000
+      },
+      "expected": "evidence_expired"
+    },
+    {
+      "name": "binding-hosts-must-be-canonical",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 21,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["Updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_host_not_canonical"
+    },
+    {
+      "name": "binding-hosts-must-be-valid-policy-hostnames",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 22,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["bad..example"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_host_not_canonical"
+    },
+    {
+      "name": "binding-hosts-must-be-strictly-sorted",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 22,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["www.youtube.com", "updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_hosts_not_sorted_unique"
+    },
+    {
+      "name": "duplicate-binding-hosts-are-rejected",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 23,
+        "destination": "104.16.58.5",
+        "binding_hosts": ["updates.discord.com", "updates.discord.com"],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_hosts_not_sorted_unique"
+    },
+    {
+      "name": "empty-complete-view-is-invalid",
+      "now_ms": 2000,
+      "route_host": "updates.discord.com",
+      "destination": "104.16.58.5",
+      "route_evidence_expires_at_ms": 20000,
+      "evidence": {
+        "coverage": "complete_owned_resolution_boundary",
+        "collector_generation": 24,
+        "destination": "104.16.58.5",
+        "binding_hosts": [],
+        "snapshot_started_at_ms": 1900,
+        "snapshot_completed_at_ms": 1950,
+        "expires_at_ms": 10000
+      },
+      "expected": "evidence_binding_limit_exceeded"
     }
   ]
 }

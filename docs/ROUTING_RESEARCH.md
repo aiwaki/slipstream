@@ -9,9 +9,10 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
-| 2026-07-18 | Native Wintun artifact evidence | Implemented read-only; Windows qualification required | The native collector hashes bounded non-reparse archive, license, and DLL handles, parses the exact PE machine, and gives `WinVerifyTrust` the same held DLL handle. It performs no UI or network retrieval, extracts the exact certificate organization and SHA-256, requires a trusted timestamp countersigner, and retains the DLL handle in an opaque admission. It cannot load Wintun or create adapters/routes. | Qualify both official AMD64 and ARM64 DLLs in Windows CI, including exact admission and tamper rejection; only then move to shared-destination conflict admission. |
-| 2026-07-18 | Windows packet-route evidence review | Fixed before merge | A policy result and a caller-labeled DNS source did not prove that the selected destination came from resolving the policy host; reserved IPv6 such as `::2` could also pass the former denylist. Route requests now consume an opaque, non-deserializable resolver evidence capability binding the canonical host to the complete observed address set, require the selected destination to occur in that set, and conservatively admit only reviewed global-unicast IPv6 space outside IANA special-purpose ranges. The future native collector is the only allowed issuer; the plan remains non-authorizing. | Keep evidence issuance inside the native collector and require a separate shared-destination conflict gate before any route-table effect. |
-| 2026-07-18 | Windows production signing and packet-adapter pivot | Pure artifact/route-plan admission implemented; native effects absent | Do not ship a Slipstream-owned kernel driver. Use only the unmodified official signed Wintun 0.14.1 AMD64/ARM64 package after exact archive, license, DLL, PE-machine, Authenticode publisher, signer, and timestamp verification. Wintun is L3 rather than an accepted-stream source, so old WFP contracts remain dormant research. Candidate `/32` and `/128` plans are not native authorization and cannot mutate default routes or external DNS/proxy/PAC/VPN. | Implement a read-only native artifact collector with `WinVerifyTrust`, then qualify both architectures. Keep DLL loading, adapter creation, routes, and production composition disabled. |
+| 2026-07-18 | Windows shared-destination conflict admission | Pure gate implemented; native issuer absent | An exact IP route can capture unrelated domains on the same CDN address. A partial resolver cache or absence of a known conflict is insufficient. The pure gate now requires opaque complete-boundary evidence for one exact destination, at most 256 canonical sorted unique hosts, a nonzero generation, and at most 30 seconds of validity. The candidate must be present and every binding must select the same route class and strategy. The admission is not route authorization. | Build a read-only complete-boundary issuer whose generation changes on every binding change; any future route must retain that generation lease for its entire lifetime and be removed before release. |
+| 2026-07-18 | Native Wintun artifact evidence | Implemented and qualified read-only | The native collector hashes bounded non-reparse archive, license, and DLL handles, parses the exact PE machine, and gives `WinVerifyTrust` the same held DLL handle. It performs no UI or network retrieval, extracts the exact certificate organization and SHA-256, requires a trusted timestamp countersigner, and retains the DLL handle in an opaque admission. Windows CI admitted both official AMD64 and ARM64 DLLs and rejected a tampered copy without loading Wintun or creating adapters/routes. | Keep the collector frozen and offline. Next implement only the complete-boundary conflict-evidence issuer; DLL loading remains disabled. |
+| 2026-07-18 | Windows packet-route evidence review | Pure host/address binding fixed | A policy result and a caller-labeled DNS source did not prove that the selected destination came from resolving the policy host; reserved IPv6 such as `::2` could also pass the former denylist. Route requests now consume an opaque, non-deserializable resolver evidence capability binding the canonical host to the complete observed address set, require the selected destination to occur in that set, and conservatively admit only reviewed global-unicast IPv6 space outside IANA special-purpose ranges. The future native collector is the only allowed issuer; the plan remains non-authorizing. | Implement native resolver-evidence issuance together with the complete-boundary generation lease; do not infer safety from a partial cache. |
+| 2026-07-18 | Windows production signing and packet-adapter pivot | Artifact collection and pure route gates implemented; native effects absent | Do not ship a Slipstream-owned kernel driver. Use only the unmodified official signed Wintun 0.14.1 AMD64/ARM64 package after exact archive, license, DLL, PE-machine, Authenticode publisher, signer, and timestamp verification. Wintun is L3 rather than an accepted-stream source, so old WFP contracts remain dormant research. Candidate `/32` and `/128` plans plus conflict admissions are not native authorization and cannot mutate default routes or external DNS/proxy/PAC/VPN. | Implement the complete-boundary conflict issuer and lifetime generation lease. Keep DLL loading, adapter creation, routes, and production composition disabled. |
 | 2026-07-18 | Native Windows TCP capture mechanism | Superseded shipping path; frozen research contracts remain | The WFP wire, runtime, and management-session contracts still document a safe connect-redirect lifecycle, but implementing it requires a separately signed Slipstream kernel driver. Do not build or package that driver. | Preserve v1 fixtures without composing them. Continue through the no-own-driver Wintun packet boundary. |
 | 2026-07-17 | Python signed-policy activation adapter | Implemented with parity and effect-failure coverage | The daemon's verified candidate apply, health gate, persistence, rejection restore, startup load, and single-slot rollback now execute behind activation contract v1 under one lock. Current and previous policy files are updated as one compensating transaction; corrupt rollback slots, candidate-write failure, and runtime activation failure preserve the prior files and active manifest. Every consumed generation is written to an owner-only activation sidecar before candidate activation, so rejection followed by daemon restart cannot reuse it; successful policy files also retain backward-compatible generation metadata. Persisted signed provenance remains signed even when a legacy bundle contains the exact bundled manifest. A new signed envelope with the already-active canonical SHA-256 is intentionally the frozen v1 content-addressed `no_change` case and is not persisted. The old direct signed apply/save entry points are removed, while the remote URL remains opt-in and no production trust material is present. | Keep the Python adapter and reducer contract frozen under failure injection. Build the first no-network Windows adapter harness against `slipstream-core` before adding any platform networking effects. |
 | 2026-07-17 | Cross-language signed policy activation | Implemented in shared Python/Rust contract v1 | The existing daemon temporarily applied a verified candidate, ran a health callback, then restored or persisted it through one imperative path. That path did not give future adapters a shared transition model or explicit stale-event guard. `route-policy-activation-v1.json` now binds trial start and rollback to the expected active SHA-256 and binds health to both the exact candidate SHA-256 and a reducer-issued monotonic trial generation. The generation persists after abort or rejection, so a delayed result cannot commit a later retry of identical policy content. Only one verified signed candidate may be in trial. A completed gate commits only with at least one success and no degraded or blocked checks; every rejection restores the stable active identity. One previous identity is retained per successful commit, rollback consumes it before falling back to bundled policy, and rollback during trial aborts only that candidate. The reducer emits ordered data-only actions and performs no fetch, signature verification, persistence, runtime apply, PF, DNS, proxy, PAC, VPN, or routing work. | Keep activation contract v1 frozen; the Python runtime migration is recorded in the adapter finding above. |
@@ -160,13 +161,16 @@ qualification; an expired leaf can remain valid only when Windows accepts its
 trusted timestamp.
 
 `contracts/windows-packet-adapter-v1.json` and pure Rust
-`packet_adapter::v1` currently do only two things:
+`packet_adapter::v1` currently do only three things:
 
 - admit caller-provided artifact evidence when every pinned package, DLL,
   architecture, Authenticode publisher, signer, and timestamp field matches;
 - prepare a non-authorizing candidate only when fresh resolver evidence binds
   the canonical policy host to an observed public exact `/32` or `/128`
-  destination whose active classification is `local_bypass` or `geo_exit`.
+  destination whose active classification is `local_bypass` or `geo_exit`;
+- reject that candidate unless opaque, complete, generation-bound evidence for
+  the destination contains only canonical hosts with the same active route
+  class and strategy.
 
 IPv6 admission is frozen against the
 [IANA IPv6 Global Unicast Address Space](https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml)
@@ -208,18 +212,37 @@ length and SHA-256 before extraction, then asks the collector to admit both the
 AMD64 and ARM64 DLLs and reject a changed copy. Adapter creation, exact-route
 ownership, packet processing, and production composition remain absent.
 
+### Shared-destination conflict admission
+
+A system exact route is wider than the hostname that motivated it. The same
+CDN address can concurrently serve Discord, OpenAI, Google, or an unrelated
+direct destination, so one successful DNS answer cannot authorize capture.
+The pure conflict gate accepts only an opaque snapshot claiming a complete
+owned resolution boundary for that exact address. A partial observation fails
+closed. The snapshot is limited to 256 canonical policy hostnames, must be
+strictly sorted and unique, must contain the candidate host, and may live for no
+more than 30 seconds. Every host is reclassified against the active policy and
+must select the same route class and strategy set.
+
+The resulting admission carries the collector generation and expires at the
+earlier route or conflict-evidence deadline. It is intentionally not native
+authorization. A future issuer must advance its generation on every binding
+change, and a native route must retain that generation lease for its entire
+lifetime and be removed before release. No such issuer, lifetime lease, or route
+effect exists yet.
+
 ### Remaining safety gates
 
 An exact IP route is still broader than a hostname because CDN destinations
 can be shared. A candidate plan is therefore not sufficient authorization for
 a route-table mutation. Native work remains ordered as follows:
 
-1. Collect archive/DLL hash, PE machine, and Authenticode/timestamp evidence
-   through read-only Windows APIs and feed the pure admission function.
-2. Qualify the official package on disposable AMD64 and ARM64 Windows without
-   loading the DLL or creating an adapter.
+1. Completed: collect artifact evidence through read-only Windows APIs and
+   qualify the official package plus tamper rejection on disposable AMD64 and
+   ARM64 Windows without loading the DLL or creating an adapter.
+2. Implement the complete-boundary evidence issuer and lifetime generation lease.
 3. Define owned adapter and exact-route transactions with crash-safe rollback,
-   shared-destination conflict rejection, stale-evidence expiry, and explicit
+   immediate generation-change revocation, stale-evidence expiry, and explicit
    coexistence behavior for an already-active external VPN.
 4. Select and bound a userspace IPv4/IPv6 and TCP/UDP stack. Prove that direct,
    local-bypass, and geo-exit packet flows retain the shared policy invariants;
