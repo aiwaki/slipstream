@@ -59,14 +59,28 @@ plan before `StartSession`, restores both if native worker startup fails, and
 owns the relay until close precedes outcome. Client and backend reads, both
 queues, retained state, and backpressure intervals are bounded. A client EOF or
 write stall cancels without manufacturing a backend failure; an upstream stall
-is an explicit backend reset. Native loopback qualification covers a 10 MiB
-upload and 10 MiB response through slow peers, a slow-but-progressing client,
-both backpressure deadlines, no first-payload proof before client delivery,
-client-first close, reset after delivered payload, cancellation, and shutdown.
-Closed cancellation bookkeeping is bounded and drops first-payload markers. The
-production SCM host remains no-network until a separate reviewed Windows
-interception adapter can create the owned stream and original-destination
-evidence; this module performs no DNS lookup or route selection.
+is an explicit backend reset. Deterministic relay-state tests qualify the exact
+first-delivery and no-progress deadlines without depending on Windows TCP
+buffer sizing or autotuning. Native loopback qualification covers the actual
+owned relay, client-first close, reset after delivered payload, cancellation,
+first-payload delivery, and shutdown. Closed cancellation bookkeeping is
+bounded and drops first-payload markers.
+
+`capture_source::v1` freezes the separate ownership lifecycle above direct
+ingress without choosing a Windows interception technology. One staged native
+stream is represented by an opaque one-shot resource ID. The source reports a
+fresh canonical numeric original destination to an external admission
+authority, retains ownership while admission is pending, and hands the stream
+to direct ingress only after the exact direct request is independently granted
+and revalidated. It does not derive hostnames or select routes or backends.
+
+Invalid, rejected, expired, startup-racing, and shutdown-racing captures close
+exactly once. A failed handoff retains source ownership for retry or explicit
+compensation. Stop prevents new admission before bounded drain; startup and
+shutdown have force-stop paths, effect batches resume from exact cursors, and
+terminal history is bounded. `RecordingWindowsCaptureSourceEffects` proves
+these rules without a socket or native API. The production SCM host does not
+compose this module and remains no-network.
 
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM
@@ -201,5 +215,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-data-plane-v1.json`, `contracts/windows-worker-host-v1.json`,
 `contracts/windows-direct-connector-v1.json`,
 `contracts/windows-direct-ingress-v1.json`,
+`contracts/windows-capture-source-v1.json`,
 and the existing routing, recovery, StatusV2, manifest, signed-bundle, and
 activation contracts.

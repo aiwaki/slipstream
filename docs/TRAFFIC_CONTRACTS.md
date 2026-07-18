@@ -148,12 +148,31 @@ Both relay directions use fixed-size reads, bounded channels and internal
 queues, bounded closed-cancellation bookkeeping, and explicit no-progress
 backpressure deadlines. A client-first EOF, read failure, or downstream write
 stall becomes cancellation and records no invented backend failure. An upstream
-write stall is a normalized backend reset. Native loopback qualification covers
-slow but progressing peers, both terminal backpressure deadlines, reset after
-delivered payload, cancellation, first-payload delivery deadline, and shutdown.
-The production SCM host remains no-network: a later reviewed
-source must still create the owned stream and original-destination evidence,
-without moving DNS or route selection into this relay.
+write stall is a normalized backend reset. Deterministic relay-state tests
+qualify the exact first-delivery and no-progress boundaries without depending
+on platform TCP buffers; native loopback qualification proves the actual owned
+relay, reset, cancellation, first-payload delivery, and shutdown paths.
+
+`contracts/windows-capture-source-v1.json` freezes the separate source above
+that relay without selecting WFP, WinDivert, or any other interception
+technology. A native adapter stages one accepted stream under an opaque
+one-shot resource ID and reports only its canonical numeric original
+destination. The reducer allocates a monotonic connection ID and offers that
+evidence to an external admission authority; it does not derive a hostname,
+classify policy, or select a backend. Only a separately granted direct
+connector request can be rebound to the fresh evidence and handed to direct
+ingress.
+
+The source owns every stream until the handoff effect succeeds. A failed
+handoff is failure-atomic and leaves the exact resource available for retry or
+explicit compensation. Invalid, rejected, expired, startup-racing, and
+shutdown-racing captures close exactly once. Stop first prevents new admission,
+then closes all unhanded streams and reaches terminal state through a bounded
+source-stop deadline. Effect batches expose an exact resume cursor, IDs are
+monotonic, retained terminal evidence is bounded, and late events cannot
+resurrect the source. The production SCM host does not compose this module and
+therefore remains no-network while a native capture implementation is still
+absent.
 
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete

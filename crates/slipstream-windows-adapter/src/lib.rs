@@ -9,6 +9,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod capture_source;
 pub mod data_plane;
 pub mod direct_connector;
 pub mod direct_ingress;
