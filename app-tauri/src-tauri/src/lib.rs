@@ -845,11 +845,15 @@ fn uninstall_shell_for_paths(
         app_bundle.to_string_lossy()
     ));
     let ready = uninstall_ready_path(tray_pid);
+    let job_label = format!("dev.slipstream.uninstall.{tray_pid}");
     let app_bundle = shell_quote(&app_bundle.to_string_lossy());
     let staged_bundle = shell_quote(&staged_bundle.to_string_lossy());
     let ready = shell_quote(&ready.to_string_lossy());
+    let job_label = shell_quote(&job_label);
     let remove_app = format!(
-        "pid={tray_pid}; original={app_bundle}; staged={staged_bundle}; ready={ready}; i=0; \
+        "label={job_label}; cleanup_job() {{ /bin/launchctl remove \"$label\" \
+         >/dev/null 2>&1 || true; }}; trap cleanup_job EXIT HUP INT TERM; \
+         pid={tray_pid}; original={app_bundle}; staged={staged_bundle}; ready={ready}; i=0; \
          while [ ! -f \"$ready\" ] && [ \"$i\" -lt 600 ]; do /bin/sleep 0.1; i=$((i + 1)); done; \
          [ -f \"$ready\" ] || exit 0; /bin/rm -f -- \"$ready\"; \
          bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
@@ -876,7 +880,8 @@ fn uninstall_shell_for_paths(
          [ \"$bundle_id\" = 'dev.slipstream.tray' ] || exit 1; \
          [ ! -e {staged_bundle} ] && [ ! -L {staged_bundle} ] || exit 1; \
          [ ! -e {ready} ] && [ ! -L {ready} ] || exit 1; \
-         /usr/bin/nohup /bin/sh -c {remove_app} </dev/null >/dev/null 2>&1 &"
+         /bin/launchctl submit -l {job_label} -o /dev/null -e /dev/null -- \
+         /bin/sh -c {remove_app}"
     )
 }
 
@@ -2890,7 +2895,10 @@ mod tests {
         assert!(shell.contains(
             "'/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd' --uninstall"
         ));
-        assert!(shell.contains("/usr/bin/nohup /bin/sh -c"));
+        assert!(shell.contains("/bin/launchctl submit -l 'dev.slipstream.uninstall.4242'"));
+        assert!(shell.contains("/bin/launchctl remove \"$label\""));
+        assert!(shell.contains("trap cleanup_job EXIT HUP INT TERM"));
+        assert!(!shell.contains("/usr/bin/nohup"));
         assert!(shell.contains("/bin/ps -p \"$pid\" -o command="));
         assert!(shell.contains("pid=4242"));
         assert!(shell.contains("Slipstream.app.removing-4242"));
@@ -2947,6 +2955,7 @@ mod tests {
             "slipstream uninstall test-{}-{unique}",
             std::process::id()
         ));
+        let tray_pid = std::process::id().wrapping_add(unique as u32 | 0x4000_0000);
         let app = root.join("Slipstream.app");
         let contents = app.join("Contents");
         let bundled = contents.join("Resources/slipstreamd/slipstreamd");
@@ -2970,20 +2979,30 @@ mod tests {
             &root.join("missing-installed-daemon"),
             &bundled,
             &app,
-            u32::MAX,
+            tray_pid,
         );
         let staged =
-            std::path::PathBuf::from(format!("{}.removing-{}", app.to_string_lossy(), u32::MAX));
-        let ready = uninstall_ready_path(u32::MAX);
+            std::path::PathBuf::from(format!("{}.removing-{tray_pid}", app.to_string_lossy()));
+        let ready = uninstall_ready_path(tray_pid);
+        let job_label = format!("dev.slipstream.uninstall.{tray_pid}");
+        let job_exists = || {
+            std::process::Command::new("/bin/launchctl")
+                .args(["list", &job_label])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        };
         let _ = std::fs::remove_file(&ready);
         assert!(std::process::Command::new("/bin/sh")
             .args(["-c", &shell])
             .status()
             .unwrap()
             .success());
-        assert!(signal_uninstall_ready(u32::MAX));
+        assert!(signal_uninstall_ready(tray_pid));
         for _ in 0..40 {
-            if !app.exists() && !staged.exists() {
+            if !app.exists() && !staged.exists() && !job_exists() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2992,6 +3011,7 @@ mod tests {
         assert!(!app.exists());
         assert!(!staged.exists());
         assert!(!ready.exists());
+        assert!(!job_exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
