@@ -84,6 +84,27 @@ terminal history is bounded. `RecordingWindowsCaptureSourceEffects` proves
 these rules without a socket or native API. The production SCM host does not
 compose this module and remains no-network.
 
+`wfp_capture::v1` freezes the selected WFP driver/service data boundary while
+remaining pure Rust. Its fixed 128-byte context is manually encoded with an
+explicit version, lengths, byte order, TCP family, original remote/local
+endpoints, service generation, exact target PID, capture-instance ID, and
+service executable SHA-256. IPv4 padding and reserved bytes must be zero;
+unsafe original destinations, stale identity, ordinary loopback connections
+without context, non-owned listeners, and missing or oversized redirect
+records are rejected with stable error codes.
+
+The validated capture and redirect-record plan are non-cloneable. Each capture
+carries the monotonic connection ID issued by capture-source v1. Handoff
+revalidates a complete direct-ingress request against active policy, then
+requires its exact connection ID and endpoint; a concurrent connection to the
+same address cannot borrow that admission. A mismatch returns the capture
+intact, while success exposes the opaque records first and produces the opaque
+ingress/connect plan only after the caller marks those records applied. This
+models the required
+`SIO_SET_WFP_CONNECTION_REDIRECT_RECORDS`-before-bind/connect ordering without
+calling Winsock. Direct connector v1 is unchanged, and the production service
+host does not compose this module.
+
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM
 `RUNNING`; startup failure produces a nonzero `STOPPED`; and host-owned stop or
@@ -218,5 +239,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-direct-connector-v1.json`,
 `contracts/windows-direct-ingress-v1.json`,
 `contracts/windows-capture-source-v1.json`,
+`contracts/windows-wfp-capture-v1.json`,
 and the existing routing, recovery, StatusV2, manifest, signed-bundle, and
 activation contracts.

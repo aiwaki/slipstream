@@ -357,17 +357,31 @@ context, inspect redirect state to prevent self-loops, and preserve opaque
 redirect records so another WFP proxy can coexist. WinDivert, system proxy/PAC,
 and TUN are not capture-v1 implementations.
 
-Implementation remains phased and closed to production traffic:
+The first implementation phase is now frozen as
+`contracts/windows-wfp-capture-v1.json` and pure `wfp_capture::v1`. The fixed
+128-byte driver/service context binds original IPv4/IPv6 endpoints to the exact
+active service generation, PID, instance and executable hash. The service-side
+validator requires an exact owned loopback listener and bounded opaque redirect
+records. Each validated capture carries the monotonic source-issued connection
+ID; handoff revalidates a complete direct-ingress request and requires the same
+connection identity and endpoint. Admission mismatch preserves the
+non-cloneable capture, while the opaque ingress/connect plan appears only after
+the redirect-record plan is marked applied. This phase calls no WFP or socket
+API, does not change direct connector v1, and is not composed into the
+production host.
 
-1. Freeze a bounded versioned WFP driver/service wire contract and deterministic
-   vectors with no WFP or socket effects.
+Remaining implementation stays phased and closed to production traffic:
+
+1. Freeze an effect-injected runtime lifecycle reducer for kernel registration,
+   listener readiness, the atomic dynamic-session transaction, first-fail-safe
+   session close, filter-absence proof, callout unregister, and bounded drain.
 2. Implement the minimal V4/V6 callout and dynamic-session controller behind
    injected effects; qualify kernel-registration-before-transaction,
    listener-before-filter, management-callout/filter atomicity, and
    filter-removal-before-drain/unregister ordering.
-3. Add a direct-connector v2 or WFP-specific socket-preparation boundary that
-   applies accepted redirect records before outbound bind/connect. Keep direct
-   connector v1 frozen.
+3. Implement the native WFP-specific socket effect that consumes the frozen
+   one-shot record plan, applies accepted redirect records, and only then binds
+   or connects. Keep direct connector v1 frozen.
 4. Qualify exact ownership, loop prevention, another redirector, crash, reboot,
    bounded shutdown, update, uninstall, and external VPN/DNS/proxy coexistence
    on disposable x64 and ARM64 Windows.

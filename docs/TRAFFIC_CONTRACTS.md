@@ -176,14 +176,29 @@ resurrect the source. The production SCM host does not compose this module and
 therefore remains no-network while a native capture implementation is still
 absent.
 
-The selected native implementation is a separate WFP
-`ALE_CONNECT_REDIRECT_V4/V6` adapter. It must query bounded versioned redirect
-context and opaque redirect records from the accepted socket, reject ordinary
-loopback connections without that evidence, and preserve the records on the
-outbound socket before bind/connect. Direct connector v1 has no such input and
-remains frozen; redirect-record propagation belongs to a new contract version
-or a WFP-specific preparation boundary. None of these native effects are part
-of capture-source v1 itself.
+`contracts/windows-wfp-capture-v1.json` now freezes the data boundary for the
+selected WFP `ALE_CONNECT_REDIRECT_V4/V6` adapter. A manually encoded 128-byte
+context carries explicit magic, version and lengths; TCP family; original
+remote and local endpoints; service generation; exact target PID; nonzero
+capture-instance ID; and executable SHA-256. IPv4 address slots have mandatory
+zero padding, reserved bytes and flags are zero, and unsafe original
+destinations are rejected. Wire v1 is append-only; a layout change requires
+v2.
+
+The accepted socket must match one exact owned loopback listener and supply
+both that context and nonempty bounded opaque redirect records. Generation,
+PID, instance and nonzero executable hash must still match the active service
+identity, and IPv4-mapped IPv6 destinations receive the same safety checks as
+native IPv4. A validated capture also receives the monotonic connection ID
+allocated by capture-source v1. Handoff revalidates the complete direct-ingress
+request against active policy and requires its exact connection ID and endpoint,
+preventing two concurrent connections to one address from exchanging an
+admission. The non-cloneable capture preserves ownership after a mismatch. Its
+one-shot socket-preparation boundary exposes redirect records before it exposes
+the opaque ingress/connect plan, modeling the required records-before-bind or
+connect order without invoking Winsock. Direct connector v1 remains frozen. The
+production host still imports none of this module, and the WFP engine, callout,
+filters, driver and sockets remain future native effects.
 
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete
