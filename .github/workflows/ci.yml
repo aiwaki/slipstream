@@ -237,7 +237,12 @@ jobs:
           SLIPSTREAM_WINDOWS_DIRECT_CONNECTOR_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test direct_connector_windows native_direct_connector_loopback_contract_is_bounded_and_owned -- --exact --test-threads=1
 
-      - name: Lint Windows contracts, worker host, ownership, lifecycle state, and SCM effects
+      - name: Qualify owned-client direct ingress and bounded relay backpressure
+        env:
+          SLIPSTREAM_WINDOWS_DIRECT_INGRESS_CI: "1"
+        run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test direct_ingress_windows native_direct_ingress_loopback_contract_is_bounded_and_owned -- --exact --test-threads=1
+
+      - name: Lint Windows contracts, ingress, worker host, ownership, lifecycle state, and SCM effects
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings
 
   packaged-app-lifecycle:

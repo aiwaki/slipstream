@@ -25,10 +25,11 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const OUTBOUND_QUEUE_CAPACITY: usize = 64;
 const EVENT_QUEUE_CAPACITY: usize = 128;
 const MAX_STAGED_DIRECT_CONNECTOR_PLANS: usize = 1_024;
+const MAX_RETAINED_DIRECT_CONNECTOR_CLOSED_SESSIONS: usize = 1_024;
 const MAX_RETAINED_DIRECT_CONNECTOR_OUTCOMES: usize = 1_024;
 const CONTROL_RUNNING: u8 = 0;
 const CONTROL_CANCEL: u8 = 1;
@@ -98,6 +99,13 @@ impl WindowsDirectConnectorHandle {
             Ok(event) => Ok(Some(event)),
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => Ok(None),
         }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.worker
+            .as_ref()
+            .map(JoinHandle::is_finished)
+            .unwrap_or(true)
     }
 
     pub fn finish(mut self) -> Result<(), WindowsDirectConnectorNativeError> {
@@ -331,7 +339,13 @@ impl WindowsDataPlaneEffects for WindowsDirectDataPlaneEffects {
                 connector.shutdown();
                 let _ = connector.finish();
                 self.request_ids.remove(session_id);
-                self.closed.insert(*session_id, request_id.clone());
+                retain_bounded_closed_session(
+                    &mut self.closed,
+                    &mut self.first_payloads,
+                    *session_id,
+                    request_id,
+                    MAX_RETAINED_DIRECT_CONNECTOR_CLOSED_SESSIONS,
+                );
             }
             WindowsDataPlaneCommand::RecordOutcome {
                 request_id,
@@ -375,6 +389,23 @@ impl WindowsDataPlaneEffects for WindowsDirectDataPlaneEffects {
     }
 }
 
+fn retain_bounded_closed_session(
+    closed: &mut BTreeMap<u64, String>,
+    first_payloads: &mut BTreeSet<u64>,
+    session_id: u64,
+    request_id: &str,
+    capacity: usize,
+) {
+    first_payloads.remove(&session_id);
+    while closed.len() >= capacity {
+        let Some(oldest_session_id) = closed.first_key_value().map(|(id, _)| *id) else {
+            break;
+        };
+        closed.remove(&oldest_session_id);
+    }
+    closed.insert(session_id, request_id.to_owned());
+}
+
 fn validate_plan_identity(
     plan: &WindowsDirectConnectorPlan,
     session_id: u64,
@@ -408,10 +439,7 @@ fn run_connector(
         .set_nodelay(true)
         .map_err(|_| WindowsDirectConnectorNativeError::SocketConfigurationFailed)?;
     stream
-        .set_read_timeout(Some(STREAM_POLL_INTERVAL))
-        .map_err(|_| WindowsDirectConnectorNativeError::SocketConfigurationFailed)?;
-    stream
-        .set_write_timeout(Some(STREAM_POLL_INTERVAL))
+        .set_nonblocking(true)
         .map_err(|_| WindowsDirectConnectorNativeError::SocketConfigurationFailed)?;
     if emit_cancel_if_requested(&plan, &control, &events)? {
         return Ok(());
@@ -472,14 +500,18 @@ fn run_connector(
                     return Ok(());
                 }
                 first_payload_observed = true;
-                emit(
+                if !emit_payload(
                     &events,
                     WindowsDirectConnectorEvent::Payload {
                         request_id: plan.request_id.clone(),
                         session_id: plan.session_id,
                         bytes: read_buffer[..bytes].to_vec(),
                     },
-                )?;
+                    &plan,
+                    &control,
+                )? {
+                    return Ok(());
+                }
             }
             Err(error) if is_transient(&error) => {}
             Err(_) => {
@@ -498,6 +530,7 @@ fn run_connector(
             )?;
             return Ok(());
         }
+        thread::sleep(STREAM_POLL_INTERVAL);
     }
 }
 
@@ -539,7 +572,7 @@ fn connect_numeric(
 }
 
 fn drain_outbound(receiver: &Receiver<Vec<u8>>, queue: &mut VecDeque<(Vec<u8>, usize)>) {
-    loop {
+    while queue.len() < OUTBOUND_QUEUE_CAPACITY {
         match receiver.try_recv() {
             Ok(payload) => queue.push_back((payload, 0)),
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => return,
@@ -609,6 +642,31 @@ fn emit(
         TrySendError::Full(_) => WindowsDirectConnectorNativeError::EventQueueFull,
         TrySendError::Disconnected(_) => WindowsDirectConnectorNativeError::EventSinkClosed,
     })
+}
+
+fn emit_payload(
+    events: &SyncSender<WindowsDirectConnectorEvent>,
+    event: WindowsDirectConnectorEvent,
+    plan: &WindowsDirectConnectorPlan,
+    control: &AtomicU8,
+) -> Result<bool, WindowsDirectConnectorNativeError> {
+    let mut pending = event;
+    loop {
+        if control.load(Ordering::Acquire) != CONTROL_RUNNING {
+            emit_cancel_if_requested(plan, control, events)?;
+            return Ok(false);
+        }
+        match events.try_send(pending) {
+            Ok(()) => return Ok(true),
+            Err(TrySendError::Full(event)) => {
+                pending = event;
+                thread::sleep(STREAM_POLL_INTERVAL);
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                return Err(WindowsDirectConnectorNativeError::EventSinkClosed);
+            }
+        }
+    }
 }
 
 fn is_transient(error: &io::Error) -> bool {
@@ -724,5 +782,30 @@ impl std::error::Error for WindowsDirectDataPlaneEffectError {}
 impl From<WindowsDirectConnectorNativeError> for WindowsDirectDataPlaneEffectError {
     fn from(value: WindowsDirectConnectorNativeError) -> Self {
         Self::Native(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_connector_bookkeeping_is_bounded_and_drops_payload_markers() {
+        let mut closed = BTreeMap::new();
+        let mut first_payloads = BTreeSet::new();
+        for session_id in 1..=4 {
+            first_payloads.insert(session_id);
+            retain_bounded_closed_session(
+                &mut closed,
+                &mut first_payloads,
+                session_id,
+                &format!("request-{session_id}"),
+                2,
+            );
+        }
+
+        assert_eq!(closed.len(), 2);
+        assert_eq!(closed.keys().copied().collect::<Vec<_>>(), vec![3, 4]);
+        assert!(first_payloads.is_empty());
     }
 }

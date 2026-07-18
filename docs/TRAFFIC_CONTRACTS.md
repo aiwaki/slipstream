@@ -134,6 +134,27 @@ The production host remains no-network until a later ingress boundary can
 supply both trusted numeric endpoint evidence and an adapter-owned client
 stream.
 
+`contracts/windows-direct-ingress-v1.json` freezes that ownership boundary
+without choosing a Windows interception technology. One non-cloneable accepted
+client stream is bound to fresh `original_destination` evidence, the exact
+reducer-issued session and request IDs, and the same numeric endpoint admitted
+by connector v1. Preloaded connector bytes are rejected: every upstream byte
+must be read from the owned client. A backend payload event is withheld until
+the complete chunk has been written to the client, so first-payload health
+cannot be proven by bytes that are only queued inside the adapter. The
+first-payload deadline remains active until that delivery completes.
+
+Both relay directions use fixed-size reads, bounded channels and internal
+queues, bounded closed-cancellation bookkeeping, and explicit no-progress
+backpressure deadlines. A client-first EOF, read failure, or downstream write
+stall becomes cancellation and records no invented backend failure. An upstream
+write stall is a normalized backend reset. Native loopback qualification covers
+slow but progressing peers, both terminal backpressure deadlines, reset after
+delivered payload, cancellation, first-payload delivery deadline, and shutdown.
+The production SCM host remains no-network: a later reviewed
+source must still create the owned stream and original-destination evidence,
+without moving DNS or route selection into this relay.
+
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete
 protected local ladder, a proven Smart DNS attempt, or a verified owned Geph
