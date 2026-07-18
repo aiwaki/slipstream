@@ -7313,8 +7313,12 @@ def _installed_daemon_readiness(port):
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
         return False, "status pid is not the installed daemon"
-    if not _tcp_listener_present(port):
-        return False, f"listener 127.0.0.1:{port} missing"
+    listener_pids = _listener_pids(port)
+    if listener_pids != [pid]:
+        return False, (
+            f"listener 127.0.0.1:{port} is not owned exclusively by "
+            "the status pid"
+        )
     rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
     if rules_loaded != (status.get("state") == "active"):
         return False, "PF state does not match daemon state"

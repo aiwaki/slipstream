@@ -1760,6 +1760,39 @@ def test_pf_startup_keeps_local_routing_active_without_geph(monkeypatch):
     assert calls == [1080]
 
 
+def test_installed_daemon_readiness_uses_exact_listener_ownership(monkeypatch):
+    now = tproxy.time.time()
+    status = {"updated_at": now, "state": "active", "pid": 321}
+    monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: status)
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda pid: f"owned:{pid}")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda command: True)
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _port: [321])
+    monkeypatch.setattr(tproxy, "pf_state_snapshot", lambda _port: {"rules_loaded": True})
+    monkeypatch.setattr(
+        tproxy,
+        "_tcp_listener_present",
+        lambda _port: pytest.fail("readiness must not open a data-plane connection"),
+    )
+
+    assert tproxy._installed_daemon_readiness(1080) == (True, "ready")
+
+
+def test_installed_daemon_readiness_rejects_foreign_or_shared_listener(monkeypatch):
+    now = tproxy.time.time()
+    status = {"updated_at": now, "state": "active", "pid": 321}
+    monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: status)
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda pid: f"owned:{pid}")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda command: True)
+    monkeypatch.setattr(tproxy, "_listener_pids", lambda _port: [321, 654])
+
+    ready, reason = tproxy._installed_daemon_readiness(1080)
+
+    assert not ready
+    assert reason == (
+        "listener 127.0.0.1:1080 is not owned exclusively by the status pid"
+    )
+
+
 def test_pf_arm_refuses_to_touch_pf_after_shutdown_starts(monkeypatch):
     calls = []
     tproxy._shutdown_started.set()
