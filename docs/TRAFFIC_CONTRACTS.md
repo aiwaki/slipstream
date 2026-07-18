@@ -112,6 +112,15 @@ after the entire command batch succeeds; an interrupted batch returns the exact
 cursor needed to resume without replaying a completed start or close. These
 vectors contain no socket, native API, or host mutation.
 
+`contracts/windows-worker-host-v1.json` composes this reducer with the pure SCM
+host lifecycle. Worker readiness is recorded before `RUNNING`; `STOP_PENDING`
+precedes cancellation; and `ReportWorkerStopped` precedes `STOPPED`.
+Deterministic vectors cover startup failure, cancellation acknowledgement,
+forced shutdown deadline, late backend completion after forced close, repeated
+stop, and effect recovery without replaying the completed command prefix. The
+production Windows host consumes the same composition with a no-network effect,
+so this step still admits no socket implementation.
+
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete
 protected local ladder, a proven Smart DNS attempt, or a verified owned Geph

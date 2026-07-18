@@ -154,7 +154,12 @@ fn production_windows_service_host_is_scm_scoped_and_has_no_network_surface() {
         "SERVICE_ACCEPT_SHUTDOWN",
         "SERVICE_CONTROL_STOP",
         "SERVICE_CONTROL_SHUTDOWN",
-        "WindowsServiceHostRuntimeV1",
+        "WindowsWorkerHostState",
+        "reduce_windows_worker_host",
+        "execute_windows_worker_host_transition",
+        "WindowsDataPlaneEvent::WorkerReady",
+        "NoNetworkWindowsWorkerHostEffects",
+        "bundled_policy_v1",
         "WindowsServiceController::new",
         "std::env::current_exe",
     ] {

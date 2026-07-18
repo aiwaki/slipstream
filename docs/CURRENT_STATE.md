@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through main commit
-`6774340de8cc12c9e4874ba24a7ebe8c1f4295d4` after merged
-[PR #154](https://github.com/aiwaki/slipstream/pull/154) and its successful
+`a537749727fb79d73ec2d7da2ea87e1a31191382` after merged
+[PR #155](https://github.com/aiwaki/slipstream/pull/155) and its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows production host CI-qualified; pure data-plane contract implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, and pure data-plane boundaries. The same no-network binary enters SCM mode only through exact `--service`; explicit management processes install its current content-addressed executable and produce versioned JSON results. Disposable Windows CI has qualified install, idempotent reinstall, stop, idempotent restop, start with PID replacement, idempotent restart, exact uninstall, bounded crash recovery, terminal cleanup, and post-commit compensation against a real service. Data-plane v1 now freezes active-table host reclassification, request/session validation, first-payload versus terminal outcome semantics, failure-atomic effect commands with exact resume cursors, adapter-owned resource closure, bounded cancellation, monotonic session identity, and bounded terminal retention through deterministic fake effects. Service-host/worker composition, native Windows networking, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows production host CI-qualified; worker-host composition implemented | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, data-plane, and worker-host boundaries. Disposable Windows CI has qualified the real service install/restart/uninstall lifecycle. Data-plane v1 freezes active-table host reclassification, failure-atomic effects with exact resume cursors, adapter-owned closure, bounded cancellation, monotonic session identity, and bounded terminal retention. Worker-host v1 now gates SCM `RUNNING` on worker readiness, orders `STOP_PENDING` before bounded drain, permits `STOPPED` only after worker termination, and covers startup failure, deadline force-close, late completion, and mixed-effect recovery through deterministic vectors. The production host consumes it through an injected no-network effect. Native Windows networking, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -114,16 +114,22 @@ The exact merged PR #154 commit passed again on main in
 [CI run 29620781624](https://github.com/aiwaki/slipstream/actions/runs/29620781624),
 and its dependency and vendored-Geph audits passed in
 [run 29620781600](https://github.com/aiwaki/slipstream/actions/runs/29620781600).
+The active-table request admission, protected-host reclassification, and exact
+data-plane effect recovery cursors passed in
+[PR #155 CI run 29623740312](https://github.com/aiwaki/slipstream/actions/runs/29623740312).
+The exact merged PR #155 commit passed all required jobs in that same main run,
+and its dependency and vendored-Geph audits passed in
+[run 29623740325](https://github.com/aiwaki/slipstream/actions/runs/29623740325).
 
 ## Next Verified Action
 
-Compose the production Windows service host with an injected no-network worker
-through the frozen data-plane contract. SCM `RUNNING` must be reported only
-after worker readiness, and stop or system shutdown must drive bounded session
-cancellation before `STOPPED`. Prove startup failure, normal stop, forced
-deadline, and late-completion behavior through deterministic effects and the
-Windows SCM fixture. Do not add a native network API in that composition PR;
-the first connector belongs only after host/worker lifecycle is qualified.
+Qualify the worker-host composition in disposable Windows CI, including the
+real production SCM host. After that gate, define the first bounded native
+Windows connector behind the frozen data-plane effect boundary. It must retain
+exact resource ownership, cancellation deadlines, active-policy admission, and
+the Discord/YouTube no-Geph invariant; it must not mutate external DNS, proxy,
+PAC, or VPN state. Do not broaden into installer UI or multiple backends before
+one connector passes deterministic failure and shutdown tests.
 
 ## External Gates
 

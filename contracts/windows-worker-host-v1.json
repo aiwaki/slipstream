@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_worker_host",
+  "contract_version": 1,
+  "initial_service_status": "start_pending",
+  "invariants": {
+    "network_effects": false,
+    "native_api_effects": false,
+    "running_requires_worker_readiness": true,
+    "startup_failure_reports_nonzero_stopped": true,
+    "shutdown_is_host_owned": true,
+    "stop_pending_precedes_worker_cancellation": true,
+    "stopped_requires_worker_stopped": true,
+    "inconsistent_composition_is_rejected": true,
+    "forced_shutdown_is_bounded": true,
+    "late_completion_cannot_resurrect_service": true,
+    "effect_batches_expose_recoverable_partial_progress": true
+  },
+  "config": {
+    "max_active_sessions": 4,
+    "max_retained_terminal_sessions": 4,
+    "cancel_timeout_ms": 50,
+    "shutdown_timeout_ms": 100
+  },
+  "vectors": [
+    {
+      "name": "worker-readiness-gates-running",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "worker",
+          "event": {"kind": "worker_ready", "now_ms": 1}
+        }
+      ],
+      "expected": {
+        "service_phase": "running",
+        "worker_phase": "ready",
+        "sessions": [],
+        "effects": ["worker_ready", "service:running:0"]
+      }
+    },
+    {
+      "name": "worker-startup-failure-stops-service",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "worker",
+          "event": {
+            "kind": "worker_startup_failed",
+            "now_ms": 1,
+            "reason": "worker unavailable"
+          }
+        }
+      ],
+      "expected": {
+        "service_phase": "stopped",
+        "worker_phase": "failed",
+        "sessions": [],
+        "effects": [
+          "worker_startup_failed:worker unavailable",
+          "service:stopped:1"
+        ]
+      }
+    },
+    {
+      "name": "normal-stop-without-sessions",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "worker",
+          "event": {"kind": "worker_ready", "now_ms": 1}
+        },
+        {"kind": "stop_requested", "now_ms": 2},
+        {"kind": "stop_requested", "now_ms": 3}
+      ],
+      "expected": {
+        "service_phase": "stopped",
+        "worker_phase": "stopped",
+        "sessions": [],
+        "effects": [
+          "worker_ready",
+          "service:running:0",
+          "service:stop_pending:0",
+          "worker_stopped",
+          "service:stopped:0"
+        ]
+      }
+    },
+    {
+      "name": "stop-waits-for-cancellation-acknowledgement",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "worker",
+          "event": {"kind": "worker_ready", "now_ms": 1}
+        },
+        {
+          "kind": "worker",
+          "event": {
+            "kind": "request_accepted",
+            "now_ms": 2,
+            "request": {
+              "request_id": "graceful",
+              "policy": {
+                "host": "github.com",
+                "route_class": "direct_passthrough",
+                "service_group": "github",
+                "strategy_set": "direct"
+              },
+              "backend": "direct",
+              "started_at_ms": 2,
+              "first_payload_deadline_at_ms": 200
+            }
+          }
+        },
+        {"kind": "shutdown_requested", "now_ms": 10},
+        {
+          "kind": "worker",
+          "event": {
+            "kind": "session_cancelled",
+            "now_ms": 20,
+            "request_id": "graceful",
+            "session_id": 1
+          }
+        }
+      ],
+      "expected": {
+        "service_phase": "stopped",
+        "worker_phase": "stopped",
+        "sessions": ["graceful#1:cancelled:true:false"],
+        "effects": [
+          "worker_ready",
+          "service:running:0",
+          "start:graceful:direct",
+          "first_deadline:graceful@200",
+          "service:stop_pending:0",
+          "cancel:graceful",
+          "shutdown_deadline@110",
+          "close:graceful",
+          "worker_stopped",
+          "service:stopped:0"
+        ]
+      }
+    },
+    {
+      "name": "shutdown-deadline-forces-close",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "worker",
+          "event": {"kind": "worker_ready", "now_ms": 1}
+        },
+        {
+          "kind": "worker",
+          "event": {
+            "kind": "request_accepted",
+            "now_ms": 2,
+            "request": {
+              "request_id": "forced",
+              "policy": {
+                "host": "github.com",
+                "route_class": "direct_passthrough",
+                "service_group": "github",
+                "strategy_set": "direct"
+              },
+              "backend": "direct",
+              "started_at_ms": 2,
+              "first_payload_deadline_at_ms": 200
+            }
+          }
+        },
+        {"kind": "stop_requested", "now_ms": 10},
+        {
+          "kind": "worker",
+          "event": {"kind": "shutdown_deadline", "now_ms": 110}
+        }
+      ],
+      "expected": {
+        "service_phase": "stopped",
+        "worker_phase": "stopped",
+        "sessions": ["forced#1:cancelled:true:false"],
+        "effects": [
+          "worker_ready",
+          "service:running:0",
+          "start:forced:direct",
+          "first_deadline:forced@200",
+          "service:stop_pending:0",
+          "cancel:forced",
+          "shutdown_deadline@110",
+          "close:forced",
+          "worker_stopped",
+          "service:stopped:0"
+        ]
+      }
+    },
+    {
+      "name": "late-completion-after-forced-stop-is-ignored",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "worker",
+          "event": {"kind": "worker_ready", "now_ms": 1}
+        },
+        {
+          "kind": "worker",
+          "event": {
+            "kind": "request_accepted",
+            "now_ms": 2,
+            "request": {
+              "request_id": "late",
+              "policy": {
+                "host": "github.com",
+                "route_class": "direct_passthrough",
+                "service_group": "github",
+                "strategy_set": "direct"
+              },
+              "backend": "direct",
+              "started_at_ms": 2,
+              "first_payload_deadline_at_ms": 200
+            }
+          }
+        },
+        {"kind": "stop_requested", "now_ms": 10},
+        {
+          "kind": "worker",
+          "event": {"kind": "shutdown_deadline", "now_ms": 110}
+        },
+        {
+          "kind": "worker",
+          "event": {
+            "kind": "backend_closed",
+            "now_ms": 120,
+            "request_id": "late",
+            "session_id": 1
+          }
+        }
+      ],
+      "expected": {
+        "service_phase": "stopped",
+        "worker_phase": "stopped",
+        "sessions": ["late#1:cancelled:true:false"],
+        "effects": [
+          "worker_ready",
+          "service:running:0",
+          "start:late:direct",
+          "first_deadline:late@200",
+          "service:stop_pending:0",
+          "cancel:late",
+          "shutdown_deadline@110",
+          "close:late",
+          "worker_stopped",
+          "service:stopped:0"
+        ]
+      }
+    }
+  ],
+  "effect_recovery_vectors": [
+    {
+      "name": "running-report-resumes-after-worker-ready",
+      "vector": "worker-readiness-gates-running",
+      "event_index": 0,
+      "fail_command": "report_service_running",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    },
+    {
+      "name": "worker-stop-resumes-after-stop-pending",
+      "vector": "normal-stop-without-sessions",
+      "event_index": 1,
+      "fail_command": "report_worker_stopped",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    }
+  ]
+}

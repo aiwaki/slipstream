@@ -190,7 +190,7 @@ jobs:
         with:
           components: clippy
 
-      - name: Test Windows contracts, ownership, payload, lifecycle state, and SCM gates
+      - name: Test Windows contracts, worker host, ownership, lifecycle state, and SCM gates
         env:
           SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
@@ -232,7 +232,7 @@ jobs:
           $env:SLIPSTREAM_WINDOWS_PRODUCTION_HOST = $serviceHost.Path
           cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_host::windows::tests::production_host_is_self_managing_idempotent_and_stops_through_scm -- --exact --test-threads=1
 
-      - name: Lint Windows contracts, ownership, payload, lifecycle state, and SCM effects
+      - name: Lint Windows contracts, worker host, ownership, lifecycle state, and SCM effects
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings
 
   packaged-app-lifecycle:

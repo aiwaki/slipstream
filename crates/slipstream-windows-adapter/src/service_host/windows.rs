@@ -1,15 +1,21 @@
 //! Native Windows service dispatcher and self-managing controller entry point.
 
 use super::{
-    WindowsServiceHostContractError, WindowsServiceHostEvent, WindowsServiceHostFailureCode,
-    WindowsServiceHostInvocation, WindowsServiceHostRuntimeV1, WindowsServiceHostStatus,
-    WindowsServiceManagementCommand, WindowsServiceManagementResultV1,
+    WindowsServiceHostContractError, WindowsServiceHostFailureCode, WindowsServiceHostInvocation,
+    WindowsServiceHostPhase, WindowsServiceHostStatus, WindowsServiceManagementCommand,
+    WindowsServiceManagementResultV1,
 };
+use crate::data_plane::{WindowsDataPlaneCommand, WindowsDataPlaneConfig, WindowsDataPlaneEvent};
 use crate::service_controller::{WindowsServiceController, WindowsServiceControllerError};
 use crate::service_lifecycle::{
     WindowsServiceCommand, WindowsServiceIdentity, WINDOWS_SERVICE_NAME,
 };
+use crate::worker_host::{
+    execute_windows_worker_host_transition, reduce_windows_worker_host, WindowsWorkerHostCommand,
+    WindowsWorkerHostEffects, WindowsWorkerHostEvent, WindowsWorkerHostState,
+};
 use sha2::{Digest, Sha256};
+use slipstream_core::routing_policy::{bundled_policy_v1, RoutingPolicyTables};
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -17,7 +23,7 @@ use std::path::Path;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::GetLastError;
 use windows_sys::Win32::System::Services::{
     RegisterServiceCtrlHandlerW, SetServiceStatus, StartServiceCtrlDispatcherW,
@@ -30,6 +36,9 @@ const SOURCE_READ_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 const STATUS_WAIT_HINT_MILLIS: u32 = 5_000;
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const WORKER_CANCEL_TIMEOUT_MILLIS: u64 = 1_000;
+const WORKER_SHUTDOWN_TIMEOUT_MILLIS: u64 = 4_000;
+const WORKER_SESSION_LIMIT: usize = 1_024;
 const CONTROL_NONE: u32 = 0;
 
 static REQUESTED_CONTROL: AtomicU32 = AtomicU32::new(CONTROL_NONE);
@@ -140,26 +149,37 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
         return;
     }
 
-    let mut runtime = WindowsServiceHostRuntimeV1::new();
-    if !report_status(status_handle, runtime.initial_status(), 0) {
+    let started = Instant::now();
+    let mut state = WindowsWorkerHostState::new(0);
+    let config = production_worker_config();
+    let policy_tables = bundled_policy_v1();
+    let mut effects = NoNetworkWindowsWorkerHostEffects::new(status_handle);
+    if !report_status(status_handle, state.initial_service_status(), 0) {
         return;
     }
-    let ready = match runtime.transition(WindowsServiceHostEvent::Ready) {
-        Ok(transition) => transition,
-        Err(_) => {
-            let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
-            return;
-        }
-    };
-    if !report_transition(status_handle, ready, 0) {
+    if apply_worker_host_event(
+        &mut state,
+        WindowsWorkerHostEvent::Worker {
+            event: WindowsDataPlaneEvent::WorkerReady {
+                now_ms: elapsed_ms(started),
+            },
+        },
+        &config,
+        &policy_tables,
+        &mut effects,
+    )
+    .is_err()
+    {
+        let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
         return;
     }
 
     loop {
         let control = REQUESTED_CONTROL.load(Ordering::Acquire);
+        let now_ms = elapsed_ms(started);
         let event = match control {
-            SERVICE_CONTROL_STOP => Some(WindowsServiceHostEvent::StopRequested),
-            SERVICE_CONTROL_SHUTDOWN => Some(WindowsServiceHostEvent::ShutdownRequested),
+            SERVICE_CONTROL_STOP => Some(WindowsWorkerHostEvent::StopRequested { now_ms }),
+            SERVICE_CONTROL_SHUTDOWN => Some(WindowsWorkerHostEvent::ShutdownRequested { now_ms }),
             _ => None,
         };
         let Some(event) = event else {
@@ -167,25 +187,15 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
             continue;
         };
 
-        let stopping = match runtime.transition(event) {
-            Ok(transition) => transition,
-            Err(_) => {
-                let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
-                return;
-            }
-        };
-        if !report_transition(status_handle, stopping, 0) {
+        if apply_worker_host_event(&mut state, event, &config, &policy_tables, &mut effects)
+            .is_err()
+        {
+            let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
             return;
         }
-        let stopped = match runtime.transition(WindowsServiceHostEvent::WorkerStopped) {
-            Ok(transition) => transition,
-            Err(_) => {
-                let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
-                return;
-            }
-        };
-        let _ = report_transition(status_handle, stopped, 0);
-        return;
+        if state.service_host.phase() == WindowsServiceHostPhase::Stopped {
+            return;
+        }
     }
 }
 
@@ -200,14 +210,94 @@ unsafe extern "system" fn service_control_handler(control: u32) {
     }
 }
 
-fn report_transition(
+fn production_worker_config() -> WindowsDataPlaneConfig {
+    WindowsDataPlaneConfig {
+        max_active_sessions: WORKER_SESSION_LIMIT,
+        max_retained_terminal_sessions: WORKER_SESSION_LIMIT,
+        cancel_timeout_ms: WORKER_CANCEL_TIMEOUT_MILLIS,
+        shutdown_timeout_ms: WORKER_SHUTDOWN_TIMEOUT_MILLIS,
+    }
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn apply_worker_host_event(
+    state: &mut WindowsWorkerHostState,
+    event: WindowsWorkerHostEvent,
+    config: &WindowsDataPlaneConfig,
+    policy_tables: &RoutingPolicyTables,
+    effects: &mut NoNetworkWindowsWorkerHostEffects,
+) -> Result<(), WindowsProductionWorkerHostError> {
+    let transition = reduce_windows_worker_host(state, &event, config, policy_tables)
+        .map_err(|error| WindowsProductionWorkerHostError::Contract(error.to_string()))?;
+    execute_windows_worker_host_transition(&transition, effects)
+        .map_err(|error| WindowsProductionWorkerHostError::Effect(error.to_string()))?;
+    *state = transition.state;
+    Ok(())
+}
+
+struct NoNetworkWindowsWorkerHostEffects {
     status_handle: SERVICE_STATUS_HANDLE,
-    transition: super::WindowsServiceHostTransition,
-    win32_exit_code: u32,
-) -> bool {
-    match transition.report {
-        Some(status) => report_status(status_handle, status, win32_exit_code),
-        None => true,
+}
+
+impl NoNetworkWindowsWorkerHostEffects {
+    const fn new(status_handle: SERVICE_STATUS_HANDLE) -> Self {
+        Self { status_handle }
+    }
+}
+
+impl WindowsWorkerHostEffects for NoNetworkWindowsWorkerHostEffects {
+    type Error = WindowsProductionWorkerHostError;
+
+    fn execute(&mut self, command: &WindowsWorkerHostCommand) -> Result<(), Self::Error> {
+        match command {
+            WindowsWorkerHostCommand::DataPlane {
+                command:
+                    WindowsDataPlaneCommand::ReportWorkerReady
+                    | WindowsDataPlaneCommand::ReportWorkerStartupFailed { .. }
+                    | WindowsDataPlaneCommand::ReportWorkerStopped,
+            } => Ok(()),
+            WindowsWorkerHostCommand::DataPlane { command } => {
+                Err(WindowsProductionWorkerHostError::UnexpectedNoNetworkCommand(command.kind()))
+            }
+            WindowsWorkerHostCommand::ReportServiceStatus {
+                status,
+                win32_exit_code,
+            } => {
+                if report_status(self.status_handle, *status, *win32_exit_code) {
+                    Ok(())
+                } else {
+                    Err(WindowsProductionWorkerHostError::StatusReportFailed(
+                        unsafe { GetLastError() },
+                    ))
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum WindowsProductionWorkerHostError {
+    Contract(String),
+    Effect(String),
+    UnexpectedNoNetworkCommand(&'static str),
+    StatusReportFailed(u32),
+}
+
+impl fmt::Display for WindowsProductionWorkerHostError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Contract(message) => write!(formatter, "worker-host contract failed: {message}"),
+            Self::Effect(message) => write!(formatter, "worker-host effect failed: {message}"),
+            Self::UnexpectedNoNetworkCommand(command) => {
+                write!(formatter, "no-network worker rejected {command}")
+            }
+            Self::StatusReportFailed(code) => {
+                write!(formatter, "SetServiceStatus failed with {code}")
+            }
+        }
     }
 }
 
