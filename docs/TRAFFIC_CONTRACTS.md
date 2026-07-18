@@ -180,10 +180,15 @@ absent.
 packet boundary. It admits only exact evidence for the pinned official signed
 Wintun 0.14.1 AMD64/ARM64 artifacts and prepares only fresh policy-bound public
 exact `/32` or `/128` candidates for `local_bypass` or `geo_exit`. Protected
-hosts are reclassified through the active tables. A candidate is not native
-route authorization and still requires shared-destination conflict evidence.
-The pure contract cannot load a DLL, create an adapter, install a route, change
-the default route, or touch system DNS, proxy, PAC, VPN, or production traffic.
+hosts are reclassified through the active tables. Resolver evidence binds one
+canonical host to its observed address set, and the selected destination must
+belong to that set. The evidence type is opaque and non-deserializable so only
+the future native collector can issue it. IPv6 candidates are conservatively limited to reviewed
+global-unicast space and exclude IANA special-purpose ranges. A candidate is
+not native route authorization and still requires shared-destination conflict
+evidence. The pure contract cannot load a DLL, create an adapter, install a
+route, change the default route, or touch system DNS, proxy, PAC, VPN, or
+production traffic.
 
 Wintun exposes L3 packets rather than the accepted TCP stream expected by
 direct-ingress and capture-source v1. A separately reviewed userspace packet

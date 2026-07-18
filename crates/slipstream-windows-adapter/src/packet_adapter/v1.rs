@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use slipstream_core::routing_policy::{
-    classify_route_policy, RouteClass, RoutePolicyResult, RoutingPolicyTables,
+    classify_route_policy, normalize_host, RouteClass, RoutePolicyResult, RoutingPolicyTables,
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -137,6 +137,9 @@ pub enum WindowsPacketAdapterErrorCode {
     TimestampMissing,
     PolicyMismatch,
     RouteClassNotCaptured,
+    EvidenceHostNotCanonical,
+    EvidenceHostMismatch,
+    DestinationNotObserved,
     DestinationNotCanonical,
     UnsafeDestination,
     RouteNotExact,
@@ -162,6 +165,9 @@ impl WindowsPacketAdapterErrorCode {
             Self::TimestampMissing => "timestamp_missing",
             Self::PolicyMismatch => "policy_mismatch",
             Self::RouteClassNotCaptured => "route_class_not_captured",
+            Self::EvidenceHostNotCanonical => "evidence_host_not_canonical",
+            Self::EvidenceHostMismatch => "evidence_host_mismatch",
+            Self::DestinationNotObserved => "destination_not_observed",
             Self::DestinationNotCanonical => "destination_not_canonical",
             Self::UnsafeDestination => "unsafe_destination",
             Self::RouteNotExact => "route_not_exact",
@@ -232,14 +238,21 @@ pub enum WindowsPacketRouteEvidenceSource {
     OwnedResolverQuery,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WindowsPacketResolverEvidence {
+    source: WindowsPacketRouteEvidenceSource,
+    host: String,
+    addresses: Vec<String>,
+    observed_at_ms: u64,
+    expires_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct WindowsPacketRouteRequest {
     pub policy: RoutePolicyResult,
     pub destination: String,
     pub prefix_length: u8,
-    pub evidence_source: WindowsPacketRouteEvidenceSource,
-    pub observed_at_ms: u64,
-    pub expires_at_ms: u64,
+    resolver_evidence: WindowsPacketResolverEvidence,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -301,6 +314,21 @@ pub fn prepare_windows_packet_route(
             return Err(WindowsPacketAdapterErrorCode::RouteClassNotCaptured)
         }
     };
+    let evidence = &request.resolver_evidence;
+    let evidence_host = normalize_host(&evidence.host);
+    if evidence_host != evidence.host {
+        return Err(WindowsPacketAdapterErrorCode::EvidenceHostNotCanonical);
+    }
+    if evidence_host != classified.host {
+        return Err(WindowsPacketAdapterErrorCode::EvidenceHostMismatch);
+    }
+    if !evidence
+        .addresses
+        .iter()
+        .any(|address| address == &request.destination)
+    {
+        return Err(WindowsPacketAdapterErrorCode::DestinationNotObserved);
+    }
     let destination: IpAddr = request
         .destination
         .parse()
@@ -315,14 +343,16 @@ pub fn prepare_windows_packet_route(
     if request.prefix_length != required_prefix {
         return Err(WindowsPacketAdapterErrorCode::RouteNotExact);
     }
-    if request.observed_at_ms >= request.expires_at_ms
-        || request.expires_at_ms.saturating_sub(request.observed_at_ms)
+    if evidence.observed_at_ms >= evidence.expires_at_ms
+        || evidence
+            .expires_at_ms
+            .saturating_sub(evidence.observed_at_ms)
             > MAX_PACKET_ROUTE_EVIDENCE_LIFETIME_MS
-        || now_ms < request.observed_at_ms
+        || now_ms < evidence.observed_at_ms
     {
         return Err(WindowsPacketAdapterErrorCode::InvalidEvidenceWindow);
     }
-    if now_ms >= request.expires_at_ms {
+    if now_ms >= evidence.expires_at_ms {
         return Err(WindowsPacketAdapterErrorCode::EvidenceExpired);
     }
 
@@ -330,8 +360,8 @@ pub fn prepare_windows_packet_route(
         policy: classified,
         destination,
         prefix_length: required_prefix,
-        evidence_source: request.evidence_source,
-        expires_at_ms: request.expires_at_ms,
+        evidence_source: evidence.source,
+        expires_at_ms: evidence.expires_at_ms,
         purpose,
     })
 }
@@ -361,13 +391,147 @@ fn is_safe_public_ipv4(address: Ipv4Addr) -> bool {
 }
 
 fn is_safe_public_ipv6(address: Ipv6Addr) -> bool {
-    let segments = address.segments();
-    let prohibited = address.is_unspecified()
-        || address.is_loopback()
-        || address.is_multicast()
-        || (segments[0] & 0xffc0) == 0xfe80
-        || (segments[0] & 0xfe00) == 0xfc00
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
-        || address.to_ipv4_mapped().is_some();
-    !prohibited
+    if ipv6_in_prefix(address, Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32) {
+        return false;
+    }
+
+    // Frozen from the IANA IPv6 Global Unicast Address Space registry dated
+    // 2025-10-10. Unlisted space inside 2000::/3 is reserved and must fail
+    // closed until a new contract version reviews a later registry snapshot.
+    [
+        (Ipv6Addr::new(0x2001, 0x0001, 0, 0, 0, 0, 0, 1), 128),
+        (Ipv6Addr::new(0x2001, 0x0001, 0, 0, 0, 0, 0, 2), 128),
+        (Ipv6Addr::new(0x2001, 0x0001, 0, 0, 0, 0, 0, 3), 128),
+        (Ipv6Addr::new(0x2001, 0x0003, 0, 0, 0, 0, 0, 0), 32),
+        (Ipv6Addr::new(0x2001, 0x0004, 0x0112, 0, 0, 0, 0, 0), 48),
+        (Ipv6Addr::new(0x2001, 0x0020, 0, 0, 0, 0, 0, 0), 28),
+        (Ipv6Addr::new(0x2001, 0x0030, 0, 0, 0, 0, 0, 0), 28),
+        (Ipv6Addr::new(0x2001, 0x0200, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0400, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0600, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0800, 0, 0, 0, 0, 0, 0), 22),
+        (Ipv6Addr::new(0x2001, 0x0c00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0e00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1200, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1400, 0, 0, 0, 0, 0, 0), 22),
+        (Ipv6Addr::new(0x2001, 0x1800, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1a00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1c00, 0, 0, 0, 0, 0, 0), 22),
+        (Ipv6Addr::new(0x2001, 0x2000, 0, 0, 0, 0, 0, 0), 19),
+        (Ipv6Addr::new(0x2001, 0x4000, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4200, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4400, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4600, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4800, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4a00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4c00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x5000, 0, 0, 0, 0, 0, 0), 20),
+        (Ipv6Addr::new(0x2001, 0x8000, 0, 0, 0, 0, 0, 0), 19),
+        (Ipv6Addr::new(0x2001, 0xa000, 0, 0, 0, 0, 0, 0), 20),
+        (Ipv6Addr::new(0x2001, 0xb000, 0, 0, 0, 0, 0, 0), 20),
+        (Ipv6Addr::new(0x2003, 0, 0, 0, 0, 0, 0, 0), 18),
+        (Ipv6Addr::new(0x2400, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2410, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2600, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2610, 0, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2620, 0, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2630, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2800, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2a00, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2a10, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2c00, 0, 0, 0, 0, 0, 0, 0), 12),
+    ]
+    .into_iter()
+    .any(|(network, prefix_length)| ipv6_in_prefix(address, network, prefix_length))
+}
+
+fn ipv6_in_prefix(address: Ipv6Addr, network: Ipv6Addr, prefix_length: u32) -> bool {
+    let mask = u128::MAX << (128 - prefix_length);
+    (u128::from(address) & mask) == (u128::from(network) & mask)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+    use slipstream_core::routing_policy::bundled_policy_v1;
+
+    const CONTRACT: &str = include_str!("../../../../contracts/windows-packet-adapter-v1.json");
+
+    #[derive(Debug, Deserialize)]
+    struct ContractFixture {
+        route_vectors: Vec<RouteVector>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RouteVector {
+        name: String,
+        now_ms: u64,
+        request: RouteRequestFixture,
+        expected: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RouteRequestFixture {
+        policy: RoutePolicyResult,
+        destination: String,
+        prefix_length: u8,
+        resolver_evidence: ResolverEvidenceFixture,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ResolverEvidenceFixture {
+        source: WindowsPacketRouteEvidenceSource,
+        host: String,
+        addresses: Vec<String>,
+        observed_at_ms: u64,
+        expires_at_ms: u64,
+    }
+
+    impl RouteRequestFixture {
+        fn into_request(self) -> WindowsPacketRouteRequest {
+            WindowsPacketRouteRequest {
+                policy: self.policy,
+                destination: self.destination,
+                prefix_length: self.prefix_length,
+                resolver_evidence: WindowsPacketResolverEvidence {
+                    source: self.resolver_evidence.source,
+                    host: self.resolver_evidence.host,
+                    addresses: self.resolver_evidence.addresses,
+                    observed_at_ms: self.resolver_evidence.observed_at_ms,
+                    expires_at_ms: self.resolver_evidence.expires_at_ms,
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn packet_routes_are_resolver_bound_public_exact_and_fresh() {
+        let fixture: ContractFixture =
+            serde_json::from_str(CONTRACT).expect("Windows packet-adapter contract must parse");
+        let policy = bundled_policy_v1();
+
+        for vector in fixture.route_vectors {
+            let request = vector.request.into_request();
+            let result = prepare_windows_packet_route(&request, vector.now_ms, &policy);
+            let actual = match &result {
+                Ok(plan) => match plan.purpose() {
+                    WindowsPacketRoutePurpose::LocalBypass => "local_bypass",
+                    WindowsPacketRoutePurpose::GeoExit => "geo_exit",
+                },
+                Err(error) => error.as_str(),
+            };
+            assert_eq!(actual, vector.expected, "{}", vector.name);
+            if let Ok(plan) = result {
+                assert_eq!(plan.policy(), &request.policy);
+                assert_eq!(plan.destination().to_string(), request.destination);
+                assert_eq!(plan.prefix_length(), request.prefix_length);
+                assert_eq!(plan.evidence_source(), request.resolver_evidence.source);
+                assert_eq!(
+                    plan.expires_at_ms(),
+                    request.resolver_evidence.expires_at_ms
+                );
+            }
+        }
+    }
 }

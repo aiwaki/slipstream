@@ -357,7 +357,10 @@ archive plus AMD64/ARM64 DLL identity, and
 `contracts/windows-packet-adapter-v1.json` with `packet_adapter::v1` freezes
 strict artifact admission. The same pure boundary reclassifies each protected
 host through the active policy and can prepare only fresh public exact `/32` or
-`/128` candidate plans for `local_bypass` or `geo_exit`. Those plans are not
+`/128` candidate plans for `local_bypass` or `geo_exit`. One resolver evidence
+object must bind the same canonical host to an address set containing the
+selected destination. The capability is opaque and non-deserializable so only
+the future native collector can issue it, and reserved IPv6 space is rejected. Those plans are not
 native route authorization: shared CDN destinations still require conflict
 evidence. The module loads no DLL, creates no adapter, installs no route, and
 does not touch the production service or external DNS/proxy/PAC/VPN state.

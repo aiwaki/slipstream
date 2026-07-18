@@ -89,8 +89,12 @@ Slipstream routing decisions and bounded recovery primitives.
 - `windows-packet-adapter-v1.json` freezes the no-own-driver Windows packet
   boundary. It admits only the pinned official Wintun AMD64/ARM64 binaries
   after exact package, DLL, PE-machine, Authenticode publisher, signer, and
-  timestamp evidence. Its candidate route plans are fresh policy-bound public
-  `/32` or `/128` destinations only; they are not native authorization and
+  timestamp evidence. Its candidate route plans require one canonical policy
+  host and a selected destination present in the same fresh resolver evidence.
+  That evidence is an opaque, non-deserializable capability reserved for the
+  future native collector; IPv6 candidates are limited to reviewed
+  global-unicast space. Plans are
+  public `/32` or `/128` destinations only, are not native authorization, and
   still require shared-destination conflict checks. Default routes and system
   DNS/proxy/PAC/VPN mutation are impossible. It does not load the DLL, install
   a route, or compose production traffic.

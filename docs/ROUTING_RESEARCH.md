@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-18 | Windows packet-route evidence review | Fixed before merge | A policy result and a caller-labeled DNS source did not prove that the selected destination came from resolving the policy host; reserved IPv6 such as `::2` could also pass the former denylist. Route requests now consume an opaque, non-deserializable resolver evidence capability binding the canonical host to the complete observed address set, require the selected destination to occur in that set, and conservatively admit only reviewed global-unicast IPv6 space outside IANA special-purpose ranges. The future native collector is the only allowed issuer; the plan remains non-authorizing. | Keep evidence issuance inside the native collector and require a separate shared-destination conflict gate before any route-table effect. |
 | 2026-07-18 | Windows production signing and packet-adapter pivot | Pure artifact/route-plan admission implemented; native effects absent | Do not ship a Slipstream-owned kernel driver. Use only the unmodified official signed Wintun 0.14.1 AMD64/ARM64 package after exact archive, license, DLL, PE-machine, Authenticode publisher, signer, and timestamp verification. Wintun is L3 rather than an accepted-stream source, so old WFP contracts remain dormant research. Candidate `/32` and `/128` plans are not native authorization and cannot mutate default routes or external DNS/proxy/PAC/VPN. | Implement a read-only native artifact collector with `WinVerifyTrust`, then qualify both architectures. Keep DLL loading, adapter creation, routes, and production composition disabled. |
 | 2026-07-18 | Native Windows TCP capture mechanism | Superseded shipping path; frozen research contracts remain | The WFP wire, runtime, and management-session contracts still document a safe connect-redirect lifecycle, but implementing it requires a separately signed Slipstream kernel driver. Do not build or package that driver. | Preserve v1 fixtures without composing them. Continue through the no-own-driver Wintun packet boundary. |
 | 2026-07-17 | Python signed-policy activation adapter | Implemented with parity and effect-failure coverage | The daemon's verified candidate apply, health gate, persistence, rejection restore, startup load, and single-slot rollback now execute behind activation contract v1 under one lock. Current and previous policy files are updated as one compensating transaction; corrupt rollback slots, candidate-write failure, and runtime activation failure preserve the prior files and active manifest. Every consumed generation is written to an owner-only activation sidecar before candidate activation, so rejection followed by daemon restart cannot reuse it; successful policy files also retain backward-compatible generation metadata. Persisted signed provenance remains signed even when a legacy bundle contains the exact bundled manifest. A new signed envelope with the already-active canonical SHA-256 is intentionally the frozen v1 content-addressed `no_change` case and is not persisted. The old direct signed apply/save entry points are removed, while the remote URL remains opt-in and no production trust material is present. | Keep the Python adapter and reducer contract frozen under failure injection. Build the first no-network Windows adapter harness against `slipstream-core` before adding any platform networking effects. |
@@ -160,9 +161,17 @@ trusted timestamp.
 
 - admit caller-provided artifact evidence when every pinned package, DLL,
   architecture, Authenticode publisher, signer, and timestamp field matches;
-- prepare a non-authorizing candidate only for a fresh policy-bound public
-  exact `/32` or `/128` destination whose active classification is
-  `local_bypass` or `geo_exit`.
+- prepare a non-authorizing candidate only when fresh resolver evidence binds
+  the canonical policy host to an observed public exact `/32` or `/128`
+  destination whose active classification is `local_bypass` or `geo_exit`.
+
+IPv6 admission is frozen against the
+[IANA IPv6 Global Unicast Address Space](https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml)
+snapshot dated 2025-10-10. IANA states that unlisted space within `2000::/3`
+is reserved; the contract therefore uses the allocated-prefix list rather than
+treating the whole assignable block as globally routable. Special-purpose
+exceptions also follow the
+[IANA IPv6 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml).
 
 No current code downloads or loads `wintun.dll`, creates an adapter, installs a
 route, handles a packet, changes the default route, or composes network effects

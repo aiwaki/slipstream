@@ -1,10 +1,8 @@
 use serde::Deserialize;
 use serde_json::Value;
-use slipstream_core::routing_policy::bundled_policy_v1;
 use slipstream_windows_adapter::packet_adapter::{
-    admit_windows_packet_adapter_artifact, prepare_windows_packet_route,
-    WindowsPacketAdapterArtifactEvidence, WindowsPacketAdapterErrorCode,
-    WindowsPacketAdapterSignatureStatus, WindowsPacketRoutePurpose, WindowsPacketRouteRequest,
+    admit_windows_packet_adapter_artifact, WindowsPacketAdapterArtifactEvidence,
+    WindowsPacketAdapterErrorCode, WindowsPacketAdapterSignatureStatus,
     WINDOWS_PACKET_ADAPTER_CONTRACT_VERSION, WINTUN_AMD64_DLL_LENGTH, WINTUN_AMD64_DLL_PATH,
     WINTUN_AMD64_DLL_SHA256, WINTUN_AMD64_PE_MACHINE, WINTUN_ARCHIVE_LENGTH, WINTUN_ARCHIVE_SHA256,
     WINTUN_ARM64_DLL_LENGTH, WINTUN_ARM64_DLL_PATH, WINTUN_ARM64_DLL_SHA256,
@@ -26,7 +24,6 @@ struct ContractFixture {
     upstream: UpstreamFixture,
     architectures: BTreeMap<String, ArchitectureFixture>,
     artifact_vectors: Vec<ArtifactVector>,
-    route_vectors: Vec<RouteVector>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,14 +51,6 @@ struct ArtifactVector {
     name: String,
     architecture: String,
     evidence: WindowsPacketAdapterArtifactEvidence,
-    expected: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RouteVector {
-    name: String,
-    now_ms: u64,
-    request: WindowsPacketRouteRequest,
     expected: String,
 }
 
@@ -143,6 +132,18 @@ fn source_record_and_contract_freeze_the_same_official_artifacts() {
         false
     );
     assert_eq!(
+        fixture.invariants["resolver_evidence_is_collector_issued"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["resolver_evidence_binds_host_and_destination"],
+        true
+    );
+    assert_eq!(
+        fixture.invariants["ipv6_global_unicast_registry_snapshot"],
+        "2025-10-10"
+    );
+    assert_eq!(
         fixture.invariants["shared_destination_conflict_check_required"],
         true
     );
@@ -169,29 +170,6 @@ fn exact_artifact_evidence_is_required_for_every_supported_architecture() {
             Err(error) => error.as_str(),
         };
         assert_eq!(actual, vector.expected, "{}", vector.name);
-    }
-}
-
-#[test]
-fn packet_routes_are_policy_bound_public_exact_and_fresh() {
-    let policy = bundled_policy_v1();
-    for vector in contract().route_vectors {
-        let result = prepare_windows_packet_route(&vector.request, vector.now_ms, &policy);
-        let actual = match &result {
-            Ok(plan) => match plan.purpose() {
-                WindowsPacketRoutePurpose::LocalBypass => "local_bypass",
-                WindowsPacketRoutePurpose::GeoExit => "geo_exit",
-            },
-            Err(error) => error.as_str(),
-        };
-        assert_eq!(actual, vector.expected, "{}", vector.name);
-        if let Ok(plan) = result {
-            assert_eq!(plan.policy(), &vector.request.policy);
-            assert_eq!(plan.destination().to_string(), vector.request.destination);
-            assert_eq!(plan.prefix_length(), vector.request.prefix_length);
-            assert_eq!(plan.evidence_source(), vector.request.evidence_source);
-            assert_eq!(plan.expires_at_ms(), vector.request.expires_at_ms);
-        }
     }
 }
 

@@ -89,12 +89,16 @@ only the pinned official Wintun 0.14.1 AMD64 or ARM64 artifact after exact
 archive, license, DLL, PE-machine, Authenticode publisher, signer, and
 timestamp evidence. It can prepare only fresh policy-bound public `/32` or
 `/128` candidate routes for `local_bypass` or `geo_exit`; protected hosts are
-reclassified through the active tables before a plan is returned. A plan is
-not permission to mutate the route table: shared-destination conflict checks,
-native artifact collection, DLL loading, adapter/route ownership, packet-stack
-integration, and rollback remain later gates. This module cannot load a DLL,
-create an adapter, install a route, or touch system DNS, proxy, PAC, VPN, or the
-production service host.
+reclassified through the active tables, the resolver evidence must name that
+canonical host, and the selected address must occur in the same answer set.
+Resolver evidence is opaque and cannot be deserialized or constructed outside
+the adapter boundary; only a future native collector may issue it. IPv6
+admission is conservative global-unicast only and rejects IANA
+special-purpose space. A plan is not permission to mutate the route table:
+shared-destination conflict checks, native artifact collection, DLL loading,
+adapter/route ownership, packet-stack integration, and rollback remain later
+gates. This module cannot load a DLL, create an adapter, install a route, or
+touch system DNS, proxy, PAC, VPN, or the production service host.
 
 The `wfp_*::v1` modules preserve a now-superseded own-driver research path for
 compatibility and future reference; they are not the Windows shipping plan.

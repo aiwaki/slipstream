@@ -13,6 +13,9 @@
     "default_route_mutation": false,
     "exact_destination_routes_only": true,
     "route_requires_fresh_policy_bound_ip_evidence": true,
+    "resolver_evidence_is_collector_issued": true,
+    "resolver_evidence_binds_host_and_destination": true,
+    "ipv6_global_unicast_registry_snapshot": "2025-10-10",
     "route_plan_is_native_authorization": false,
     "shared_destination_conflict_check_required": true,
     "native_route_installation": false,
@@ -174,9 +177,13 @@
         },
         "destination": "203.0.113.41",
         "prefix_length": 32,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["203.0.113.41"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "unsafe_destination"
     },
@@ -192,9 +199,13 @@
         },
         "destination": "104.16.58.5",
         "prefix_length": 32,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["104.16.58.5", "104.16.59.5"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "local_bypass"
     },
@@ -210,9 +221,13 @@
         },
         "destination": "2606:4700:4400::ac40:9b4c",
         "prefix_length": 128,
-        "evidence_source": "owned_resolver_query",
-        "observed_at_ms": 4000,
-        "expires_at_ms": 64000
+        "resolver_evidence": {
+          "source": "owned_resolver_query",
+          "host": "chatgpt.com",
+          "addresses": ["2606:4700:4400::ac40:9b4c"],
+          "observed_at_ms": 4000,
+          "expires_at_ms": 64000
+        }
       },
       "expected": "geo_exit"
     },
@@ -228,9 +243,13 @@
         },
         "destination": "104.16.58.5",
         "prefix_length": 0,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["104.16.58.5"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "route_not_exact"
     },
@@ -246,9 +265,13 @@
         },
         "destination": "142.250.74.196",
         "prefix_length": 32,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "www.google.com",
+          "addresses": ["142.250.74.196"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "route_class_not_captured"
     },
@@ -264,11 +287,59 @@
         },
         "destination": "104.16.58.5",
         "prefix_length": 32,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["104.16.58.5"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "policy_mismatch"
+    },
+    {
+      "name": "destination-must-come-from-the-same-resolver-evidence",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "8.8.8.8",
+        "prefix_length": 32,
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["104.16.58.5", "104.16.59.5"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
+      },
+      "expected": "destination_not_observed"
+    },
+    {
+      "name": "resolver-evidence-must-name-the-policy-host",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "104.16.58.5",
+        "prefix_length": 32,
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "chatgpt.com",
+          "addresses": ["104.16.58.5"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
+      },
+      "expected": "evidence_host_mismatch"
     },
     {
       "name": "ipv6-link-local-destination-is-rejected",
@@ -282,9 +353,57 @@
         },
         "destination": "fe80::1",
         "prefix_length": 128,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["fe80::1"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
+      },
+      "expected": "unsafe_destination"
+    },
+    {
+      "name": "ipv6-reserved-destination-is-rejected",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "::2",
+        "prefix_length": 128,
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["::2"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
+      },
+      "expected": "unsafe_destination"
+    },
+    {
+      "name": "ipv6-unallocated-global-block-is-rejected",
+      "now_ms": 1200,
+      "request": {
+        "policy": {
+          "host": "updates.discord.com",
+          "route_class": "local_bypass",
+          "service_group": "discord",
+          "strategy_set": "fake_only"
+        },
+        "destination": "3000::1",
+        "prefix_length": 128,
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["3000::1"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "unsafe_destination"
     },
@@ -300,9 +419,13 @@
         },
         "destination": "104.16.58.5",
         "prefix_length": 32,
-        "evidence_source": "system_dns_observation",
-        "observed_at_ms": 1000,
-        "expires_at_ms": 61000
+        "resolver_evidence": {
+          "source": "system_dns_observation",
+          "host": "updates.discord.com",
+          "addresses": ["104.16.58.5"],
+          "observed_at_ms": 1000,
+          "expires_at_ms": 61000
+        }
       },
       "expected": "evidence_expired"
     }
