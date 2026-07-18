@@ -6393,9 +6393,12 @@ async def dial_via_geph(host, port, first_flight):
 
 
 async def dial_plain(ip, port, first_flight):
-    """Plain direct dial (no desync, no tunnel) for traffic we must not tamper
-    with — Telegram MTProto. Sends the buffered first flight verbatim; returns
-    (reader, writer) or None."""
+    """Open an exact direct stream with no DNS rewrite, desync, or tunnel.
+
+    The buffered first flight is sent verbatim. This is used for transparent
+    system-route preservation as well as Telegram MTProto safety passthrough.
+    Returns ``(reader, writer)`` or ``None``.
+    """
     w = None
     connected = False
     try:
@@ -6530,35 +6533,91 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
     return raced
 
 
+async def _try_exact_system_passthrough(
+    host,
+    dst_ip,
+    port,
+    first_flight,
+    reader,
+    writer,
+    *,
+    track_unknown=False,
+):
+    """Relay the PF-selected destination without changing route semantics.
+
+    This is the transparent baseline for direct, unknown, and no-SNI traffic:
+    no alternate DNS lookup, no desync strategy, and no first-payload gate.
+    Unknown-host recovery is learned only after this stream has finished; the
+    already-sent first flight is never replayed through another route.
+    """
+    direct = await dial_plain(dst_ip, port, first_flight)
+    if not direct:
+        return False
+    up_r, up_w = direct
+    started_at = time.monotonic()
+    activity = _RelayActivity(last_downstream_at=started_at)
+    result = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    duration = time.monotonic() - started_at
+    if track_unknown and host:
+        if _local_stream_stalled(activity, now=started_at + duration):
+            note_local_stream_stall(host, "plain")
+        elif _clean_eof_stream_stalled(activity, now=started_at + duration):
+            note_clean_eof_stream_stall(
+                host,
+                "plain",
+                activity,
+                now=started_at + duration,
+            )
+        elif activity.server_ended_first:
+            _clear_clean_eof_stalls(host)
+        note_local_result(host, result[1] or 0, duration)
+    return True
+
+
 async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writer):
     """Keep the system-selected route usable when no app-owned exit is ready.
 
     ``dst_ip`` is the destination selected before PF redirected the socket, so
-    this preserves the user's DNS, VPN, and routing decisions. It is a bounded
-    plain TLS probe, never a local desync strategy and never an alternate DNS
-    lookup.
+    this preserves the user's DNS, VPN, and routing decisions. It relays as
+    soon as the exact destination accepts the connection; long-lived streams
+    must not be gated on a server-first payload.
     """
-    direct = await dial_and_probe(dst_ip, port, first_flight)
-    if not direct:
+    direct = await dial_plain(dst_ip, port, first_flight)
+    if direct is None:
         return False
-    up_r, up_w, server_first = direct
-    route_health_event(
-        route_policy(host)["service_group"],
-        ROUTE_GEO_EXIT,
-        host,
-        True,
-        backend=BACKEND_DIRECT,
-    )
+    up_r, up_w = direct
+    policy = route_policy(host)
+    payload_recorded = False
+
+    def record_first_payload():
+        nonlocal payload_recorded
+        if payload_recorded:
+            return
+        route_health_event(
+            policy["service_group"],
+            ROUTE_GEO_EXIT,
+            host,
+            True,
+            backend=BACKEND_DIRECT,
+        )
+        payload_recorded = True
+
     if VERBOSE:
         print(f"OK {host}:{port} via system route {dst_ip}", file=sys.stderr)
-    try:
-        writer.write(server_first)
-        await writer.drain()
-    except OSError:
-        await _close_stream_writer(up_w)
-        writer.close()
-        return True
-    await relay_local_stream(reader, up_w, up_r, writer)
+    activity = _RelayActivity(
+        last_downstream_at=time.monotonic(),
+        on_first_downstream=record_first_payload,
+    )
+    result = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    if not payload_recorded and not (result[1] or 0):
+        route_health_event(
+            policy["service_group"],
+            ROUTE_GEO_EXIT,
+            host,
+            False,
+            "system route closed before payload",
+            backend=BACKEND_DIRECT,
+        )
     return True
 
 
@@ -6802,9 +6861,37 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
+    policy = route_policy(host)
+    route_class = policy["route_class"]
+    unknown_recovery_ready = bool(
+        is_tls
+        and host
+        and route_class == ROUTE_UNKNOWN
+        and _xbox_dns_candidate_active(host)
+    )
+    preserve_system_route = (
+        not is_tls
+        or route_class == ROUTE_DIRECT
+        or (route_class == ROUTE_UNKNOWN and not unknown_recovery_ready)
+    )
+    if preserve_system_route:
+        if await _try_exact_system_passthrough(
+            host,
+            dst_ip,
+            dst_port,
+            head + body,
+            reader,
+            writer,
+            track_unknown=bool(is_tls and host and route_class == ROUTE_UNKNOWN),
+        ):
+            return
+        if is_tls and host and route_class == ROUTE_UNKNOWN:
+            _mark_xbox_dns_candidate(host)
+        writer.close()
+        return
+
     # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
     # (fallback dst_ip). Some CDN edges are bad while neighbors work.
-    policy = route_policy(host)
     if not runtime_route_circuit_allows(policy, BACKEND_LOCAL_ENGINE):
         if VERBOSE:
             print(

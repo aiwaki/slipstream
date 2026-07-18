@@ -294,6 +294,13 @@ quiesce the listener and PF first, drain accepted TCP streams within a deadline,
 and stop Geph only afterward. Slipstream must not rewrite the user's DNS or add
 a global QUIC block to hide an application or Smart-DNS transport fallback.
 
+The user observed `Reconnecting 5/5` again on 2026-07-19 after confirming that
+the Slipstream launchd job, listener, private PF rules, token, and processes
+were absent and no system proxy was active. That symptom alone therefore does
+not prove an active Slipstream interception path. Installing the affected build
+still reproducibly triggered a separate broad HTTPS outage, so both facts must
+remain visible instead of assigning every later reconnect to one cause.
+
 The 2026-07-19 clean-install incident exposed a separate lifecycle defect.
 Exact-main `0.1.8` installed a healthy listener but kept the daemon `dormant`
 because the whole private PF anchor was gated on an owned Geph listener. With
@@ -301,6 +308,18 @@ no Geph account configured, Discord and YouTube therefore received no local
 bypass at all. The packaged smoke had masked this by injecting `SLIP_GEPH=0`
 after installation. Clean install and reinstall now have to become `active`
 without that patch and without any Geph account or listener.
+
+The repaired artifact then exposed a data-plane baseline defect on the primary
+workstation. PF correctly redirected TCP/443 into the daemon, but direct,
+unknown, non-TLS, and TLS-without-SNI connections still entered the generic
+local engine. That engine could replace the original destination with a DoH
+answer, select desync for an unclassified host, and wait for a first server
+payload before relaying. Installing Slipstream therefore changed ordinary HTTPS
+even when no policy requested a bypass. The transparent baseline now opens the
+exact pre-PF numeric destination, sends the buffered bytes unchanged, and starts
+bidirectional relay immediately. If an unknown connection fails, local recovery
+is deferred to a later client retry so a consumed TLS first flight is not
+replayed.
 
 Required behavior:
 
@@ -313,6 +332,9 @@ Required behavior:
   original destination selected by the user's DNS/VPN/system route;
 - never move a geo-exit host into the local desync ladder merely because an
   app-owned backend is absent;
+- preserve direct, unknown, non-TLS, and no-SNI traffic on the exact pre-PF
+  destination without alternate DNS, desync, or first-payload probing; an
+  unknown-host recovery may begin only on a later client retry;
 - do not let tray polling restart a live Geph process from endpoint failures;
 - on uninstall, clear the listener/PF path before a bounded accepted-stream
   drain, and keep the verified owned Geph backend alive until that drain ends;

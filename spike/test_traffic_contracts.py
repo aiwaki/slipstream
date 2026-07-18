@@ -92,14 +92,25 @@ CORE_TRAFFIC_CONTRACTS = (
         response=b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nsteam",
     ),
     TrafficContract(
-        name="generic-local",
+        name="github-direct",
+        policy_host="github.com",
+        tls_host="github.com",
+        destination_ip="203.0.113.14",
+        resolved_ip=None,
+        route_class=tproxy.ROUTE_DIRECT,
+        service_group=tproxy.SERVICE_GITHUB,
+        backend="direct",
+        response=b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\ngithub",
+    ),
+    TrafficContract(
+        name="generic-baseline-direct",
         policy_host="example.invalid",
         tls_host="example.invalid",
-        destination_ip="203.0.113.14",
-        resolved_ip="198.51.100.14",
+        destination_ip="203.0.113.15",
+        resolved_ip=None,
         route_class=tproxy.ROUTE_UNKNOWN,
         service_group=tproxy.SERVICE_GENERIC,
-        backend="local",
+        backend="direct",
         response=b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\ngeneric",
     ),
 )
@@ -241,7 +252,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
 
     client, expected_first_flight = tls_client(
         contract.tls_host,
-        block_after_hello=contract.backend == "local",
+        block_after_hello=contract.backend in ("local", "direct"),
     )
     writer = CaptureWriter()
     calls = []
@@ -279,6 +290,26 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         monkeypatch.setattr(tproxy, "dial_strategy", fake_local)
         monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
         monkeypatch.setattr(tproxy, "dial_plain", no_direct)
+        monkeypatch.setattr(tproxy, "_geph_up", False)
+    elif contract.backend == "direct":
+        async def fake_direct(ip, port, first_flight):
+            assert first_flight == expected_first_flight
+            calls.append(("direct", ip, port, first_flight))
+            return streaming_upstream_response(contract.response)
+
+        async def no_geph(*args, **kwargs):
+            await forbidden_backend("Geph", *args, **kwargs)
+
+        async def no_local(*args, **kwargs):
+            await forbidden_backend("local desync", *args, **kwargs)
+
+        async def no_dns(*args, **kwargs):
+            await forbidden_backend("DNS resolution", *args, **kwargs)
+
+        monkeypatch.setattr(tproxy, "dial_plain", fake_direct)
+        monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+        monkeypatch.setattr(tproxy, "dial_strategy", no_local)
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", no_dns)
         monkeypatch.setattr(tproxy, "_geph_up", False)
     elif contract.backend == "smart_dns":
         async def fake_smart_dns(host, port, first_flight):
@@ -346,6 +377,10 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         )
         if contract.route_class == tproxy.ROUTE_LOCAL_BYPASS:
             assert backend_calls[0][5] is True
+    elif contract.backend == "direct":
+        assert [call[:3] for call in calls if call[0] == "direct"] == [
+            ("direct", contract.destination_ip, 443)
+        ]
     elif contract.backend == "smart_dns":
         assert [call[:3] for call in calls if call[0] == "smart_dns"] == [
             ("smart_dns", contract.tls_host, 443)
@@ -354,6 +389,89 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
         assert [call[:3] for call in calls if call[0] == "geph"] == [
             ("geph", contract.tls_host, 443)
         ]
+
+
+def test_tls_without_sni_preserves_exact_system_destination(monkeypatch):
+    """ECH/no-SNI traffic must not be guessed, re-resolved, or desynchronized."""
+    isolate_runtime_state(monkeypatch)
+    body = b"\x00" * 64
+    head = b"\x16\x03\x01" + struct.pack("!H", len(body))
+    first_flight = head + body
+    assert tproxy.parse_sni(body) is None
+    client = ScriptedReader(exact=(head, body), block_when_empty=True)
+    writer = CaptureWriter()
+    calls = []
+    response = b"opaque tls response"
+
+    async def exact_direct(ip, port, payload):
+        calls.append((ip, port, payload))
+        return streaming_upstream_response(response)
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.30", 443))
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("DNS resolution", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert calls == [("203.0.113.30", 443, first_flight)]
+    assert bytes(writer.payload) == response
+
+
+def test_unknown_direct_connect_failure_defers_recovery_to_next_retry(monkeypatch):
+    """Never replay a possibly consumed TLS first flight through another route."""
+    isolate_runtime_state(monkeypatch)
+    host = "temporarily-blocked.example"
+    client, _first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    calls = []
+
+    async def failed_direct(ip, port, first_flight):
+        calls.append((ip, port, first_flight))
+        return None
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.31", 443))
+    monkeypatch.setattr(tproxy, "dial_plain", failed_direct)
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("same-stream DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("same-stream retry", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert len(calls) == 1
+    assert writer.closed is True
+    assert tproxy._xbox_dns_candidate_active(host)
 
 
 def test_local_handler_races_addresses_inside_one_strategy_without_geph(
@@ -635,15 +753,14 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
         smart_dns_misses.append(actual_host)
         return None
 
-    async def system_route(ip, port, first_flight, probe_timeout=2.5):
-        assert (ip, port, first_flight, probe_timeout) == (
+    async def system_route(ip, port, first_flight):
+        assert (ip, port, first_flight) == (
             "203.0.113.15",
             443,
             expected_first_flight,
-            2.5,
         )
         direct_calls.append(ip)
-        return probed_upstream_response(response)
+        return streaming_upstream_response(response)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.15", 443))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", geph_enabled)
@@ -655,7 +772,12 @@ def test_geo_exit_without_app_backend_uses_original_system_destination(
     monkeypatch.setattr(tproxy, "_smart_dns_mark_failure", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "dial_via_geph", lambda *args, **kwargs: no_backend("Geph", *args, **kwargs))
     monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
-    monkeypatch.setattr(tproxy, "dial_and_probe", system_route)
+    monkeypatch.setattr(tproxy, "dial_plain", system_route)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_and_probe",
+        lambda *args, **kwargs: no_backend("first-payload probe", *args, **kwargs),
+    )
     monkeypatch.setattr(tproxy, "resolve_connection_ips", lambda *args, **kwargs: no_backend("DNS", *args, **kwargs))
     monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspensions.append)
@@ -681,15 +803,14 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
     async def no_backend(name, *args, **kwargs):
         await forbidden_backend(name, *args, **kwargs)
 
-    async def system_route(ip, port, first_flight, probe_timeout=2.5):
-        assert (ip, port, first_flight, probe_timeout) == (
+    async def system_route(ip, port, first_flight):
+        assert (ip, port, first_flight) == (
             "203.0.113.19",
             443,
             expected_first_flight,
-            2.5,
         )
         direct_calls.append(ip)
-        return probed_upstream_response(response)
+        return streaming_upstream_response(response)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
@@ -715,7 +836,12 @@ def test_geo_exit_backend_hold_uses_system_route_without_geph_redial(monkeypatch
         "dial_strategy",
         lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
     )
-    monkeypatch.setattr(tproxy, "dial_and_probe", system_route)
+    monkeypatch.setattr(tproxy, "dial_plain", system_route)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_and_probe",
+        lambda *args, **kwargs: no_backend("first-payload probe", *args, **kwargs),
+    )
     monkeypatch.setattr(
         tproxy,
         "resolve_connection_ips",
@@ -970,7 +1096,7 @@ def test_geph_half_open_recovers_on_first_payload_before_long_relay_ends(
 
 
 def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
-    """Unclassified sites keep trying their local ladder independently."""
+    """Unknown recovery starts on a later retry and never promotes to Geph."""
     isolate_runtime_state(monkeypatch)
     host = "unclassified.example"
     calls = []
@@ -978,6 +1104,10 @@ def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
     async def fake_dns(actual_host, _fallback_ip):
         calls.append(("dns", actual_host))
         return ["198.51.100.42"]
+
+    async def failed_direct(_ip, _port, _first_flight):
+        calls.append(("direct", host))
+        return None
 
     async def failed_strategy(_ip, _port, _head, _body, actual_host, _strategy):
         calls.append(("local", actual_host))
@@ -987,6 +1117,7 @@ def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
         await forbidden_backend("Geph", *args, **kwargs)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.42", 443))
+    monkeypatch.setattr(tproxy, "dial_plain", failed_direct)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_dns)
     monkeypatch.setattr(
         tproxy,
@@ -1003,8 +1134,9 @@ def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
         writer = CaptureWriter()
         asyncio.run(run_handler(client, writer))
 
-    assert [call[0] for call in calls].count("dns") == 2
-    assert [call[0] for call in calls].count("local") == 2
+    assert [call[0] for call in calls].count("direct") == 1
+    assert [call[0] for call in calls].count("dns") == 1
+    assert [call[0] for call in calls].count("local") == 1
     assert tproxy.runtime_route_circuit_snapshot() == ()
 
 
