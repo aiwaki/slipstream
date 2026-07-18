@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through merged
-[PR #166](https://github.com/aiwaki/slipstream/pull/166) at main commit
-`1d7f6fc15e9210e6d03de2c5ae08487f6f55d133`, including its successful
+[PR #167](https://github.com/aiwaki/slipstream/pull/167) at main commit
+`7eeeaf3e00a98bab325d2ebb869530a184bf23ee`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -194,6 +194,12 @@ The PR #166 checkpoint commit passed all required jobs again on main in
 [CI run 29640104120](https://github.com/aiwaki/slipstream/actions/runs/29640104120),
 and its dependency and vendored-Geph audits passed in
 [run 29640104123](https://github.com/aiwaki/slipstream/actions/runs/29640104123).
+The official signed Wintun artifact admission, opaque resolver-evidence
+binding, frozen IANA IPv6 allocation snapshot, and non-authorizing exact-route
+contract in PR #167 passed all required jobs again on the exact merge commit in
+[CI run 29646370056](https://github.com/aiwaki/slipstream/actions/runs/29646370056),
+and its dependency and vendored-Geph audits passed in
+[run 29646370093](https://github.com/aiwaki/slipstream/actions/runs/29646370093).
 
 ## Next Verified Action
 
