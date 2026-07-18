@@ -161,6 +161,10 @@ fn rust_executes_windows_capture_source_v1_contract() {
         Value::Bool(true)
     );
     assert_eq!(
+        fixture.invariants["absolute_connector_deadlines_are_not_rebased"],
+        Value::Bool(true)
+    );
+    assert_eq!(
         fixture.invariants["failed_handoff_retains_source_ownership"],
         Value::Bool(true)
     );
@@ -377,6 +381,56 @@ fn terminal_capture_history_is_bounded_without_reusing_connection_ids() {
         [2, 3]
     );
     assert!(effects.open_resources().is_empty());
+}
+
+#[test]
+fn duplicate_resource_id_does_not_close_or_replace_the_tracked_stream() {
+    let fixture = contract();
+    let mut state = WindowsCaptureSourceState::new(0);
+    let mut effects = RecordingWindowsCaptureSourceEffects::default();
+    run_event(
+        &mut state,
+        &WindowsCaptureSourceEvent::StartRequested { now_ms: 0 },
+        &fixture.config,
+        &mut effects,
+    );
+    run_event(
+        &mut state,
+        &WindowsCaptureSourceEvent::SourceReady { now_ms: 1 },
+        &fixture.config,
+        &mut effects,
+    );
+    run_event(
+        &mut state,
+        &WindowsCaptureSourceEvent::ConnectionCaptured {
+            now_ms: 10,
+            resource_id: 301,
+            original_destination:
+                slipstream_windows_adapter::direct_connector::WindowsDirectConnectorEndpoint {
+                    address: "127.0.0.1".to_owned(),
+                    port: 443,
+                },
+        },
+        &fixture.config,
+        &mut effects,
+    );
+
+    let duplicate = WindowsCaptureSourceEvent::ConnectionCaptured {
+        now_ms: 11,
+        resource_id: 301,
+        original_destination:
+            slipstream_windows_adapter::direct_connector::WindowsDirectConnectorEndpoint {
+                address: "127.0.0.1".to_owned(),
+                port: 443,
+            },
+    };
+    let error =
+        reduce_windows_capture_source(&state, &duplicate, &fixture.config, &bundled_policy_v1())
+            .expect_err("duplicate resource token must fail closed");
+    assert_eq!(error.to_string(), "duplicate capture resource 301");
+    assert!(effects.open_resources().contains(&301));
+    assert!(effects.closed_resources().is_empty());
+    assert!(state.connections.get(&1).unwrap().resource_owned);
 }
 
 #[test]

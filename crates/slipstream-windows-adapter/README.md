@@ -76,7 +76,9 @@ and revalidated. It does not derive hostnames or select routes or backends.
 
 Invalid, rejected, expired, startup-racing, and shutdown-racing captures close
 exactly once. A failed handoff retains source ownership for retry or explicit
-compensation. Stop prevents new admission before bounded drain; startup and
+compensation. Absolute connector deadlines cannot be rebased by late admission,
+and a duplicate token cannot close the existing tracked stream. Stop prevents
+new admission before bounded drain; startup and
 shutdown have force-stop paths, effect batches resume from exact cursors, and
 terminal history is bounded. `RecordingWindowsCaptureSourceEffects` proves
 these rules without a socket or native API. The production SCM host does not

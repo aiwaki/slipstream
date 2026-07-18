@@ -11,8 +11,10 @@
     "name_resolution": false,
     "one_stream_per_resource": true,
     "monotonic_connection_ids": true,
+    "duplicate_resource_id_preserves_existing_ownership": true,
     "endpoint_evidence_source": "original_destination",
     "endpoint_evidence_max_age_ms": 1000,
+    "absolute_connector_deadlines_are_not_rebased": true,
     "handoff_is_failure_atomic": true,
     "failed_handoff_retains_source_ownership": true,
     "stop_admission_precedes_resource_close": true,
@@ -177,6 +179,49 @@
           "offer:1#108:127.0.0.1:443@10..510",
           "admission_deadline:1@510",
           "close:1#108:invalid_admission:invalid_connector_request"
+        ]
+      }
+    },
+    {
+      "name": "expired-connector-deadline-cannot-be-rebased",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 109, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {
+          "kind": "admission_granted",
+          "now_ms": 120,
+          "connection_id": 1,
+          "connector_request": {
+            "session_id": 10,
+            "data_plane_request": {
+              "request_id": "expired-connector",
+              "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+              "backend": "direct",
+              "started_at_ms": 10,
+              "first_payload_deadline_at_ms": 1000
+            },
+            "endpoint": {"address": "127.0.0.1", "port": 443},
+            "issued_at_ms": 20,
+            "connect_deadline_at_ms": 120,
+            "initial_payload": [],
+            "max_read_chunk_bytes": 4096
+          },
+          "max_client_read_chunk_bytes": 4096,
+          "backpressure_timeout_ms": 500
+        }
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 2,
+        "connections": ["1#109:closed:false:127.0.0.1:443:expired_connector_deadline"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#109:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "close:1#109:expired_connector_deadline"
         ]
       }
     },

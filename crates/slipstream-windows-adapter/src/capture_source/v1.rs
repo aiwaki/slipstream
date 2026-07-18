@@ -314,13 +314,14 @@ pub fn reduce_windows_capture_source(
                 close_untracked(*resource_id, "source_not_ready", &mut commands);
             } else if !valid_numeric_endpoint(original_destination) {
                 close_untracked(*resource_id, "invalid_original_destination", &mut commands);
-            } else if *resource_id == 0
-                || next
-                    .connections
-                    .values()
-                    .any(|connection| connection.resource_id == *resource_id)
-            {
+            } else if *resource_id == 0 {
                 close_untracked(*resource_id, "invalid_resource_id", &mut commands);
+            } else if next
+                .connections
+                .values()
+                .any(|connection| connection.resource_id == *resource_id)
+            {
+                return Err(WindowsCaptureSourceError::DuplicateResourceId(*resource_id));
             } else if next.staged_connection_count() >= config.max_staged_connections {
                 close_untracked(*resource_id, "capture_limit", &mut commands);
             } else {
@@ -378,6 +379,18 @@ pub fn reduce_windows_capture_source(
                     &mut next,
                     *connection_id,
                     "admission_deadline",
+                    &mut commands,
+                )?;
+            } else if now_ms >= connector_request.connect_deadline_at_ms
+                || now_ms
+                    >= connector_request
+                        .data_plane_request
+                        .first_payload_deadline_at_ms
+            {
+                close_connection(
+                    &mut next,
+                    *connection_id,
+                    "expired_connector_deadline",
                     &mut commands,
                 )?;
             } else {
@@ -910,6 +923,7 @@ pub enum WindowsCaptureSourceError {
     TimeOverflow,
     DeadlineBeforeDue,
     UnknownConnection(u64),
+    DuplicateResourceId(u64),
     InvalidState(&'static str),
 }
 
@@ -923,6 +937,9 @@ impl fmt::Display for WindowsCaptureSourceError {
             Self::DeadlineBeforeDue => formatter.write_str("capture deadline fired before due"),
             Self::UnknownConnection(connection_id) => {
                 write!(formatter, "unknown capture connection {connection_id}")
+            }
+            Self::DuplicateResourceId(resource_id) => {
+                write!(formatter, "duplicate capture resource {resource_id}")
             }
             Self::InvalidState(message) => write!(formatter, "invalid capture state: {message}"),
         }

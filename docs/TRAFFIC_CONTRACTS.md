@@ -165,7 +165,9 @@ ingress.
 
 The source owns every stream until the handoff effect succeeds. A failed
 handoff is failure-atomic and leaves the exact resource available for retry or
-explicit compensation. Invalid, rejected, expired, startup-racing, and
+explicit compensation. Admission cannot rebase an already-expired connector or
+first-payload deadline, and a duplicate resource token cannot close or replace
+the tracked stream. Invalid, rejected, expired, startup-racing, and
 shutdown-racing captures close exactly once. Stop first prevents new admission,
 then closes all unhanded streams and reaches terminal state through a bounded
 source-stop deadline. Effect batches expose an exact resume cursor, IDs are
