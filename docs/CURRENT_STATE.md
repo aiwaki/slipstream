@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through merged
-[PR #167](https://github.com/aiwaki/slipstream/pull/167) at main commit
-`7eeeaf3e00a98bab325d2ebb869530a184bf23ee`, including its successful
+[PR #168](https://github.com/aiwaki/slipstream/pull/168) at main commit
+`b131e8e768f91430052569393708c13153f4c613`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Signed packet-adapter admission implemented; native packet effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, but the shipping path no longer includes a Slipstream-owned kernel driver because production signing requires an organization-backed certificate workflow. The active `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and admits only exact package, DLL, PE, publisher, signer, and timestamp evidence. It prepares only non-authorizing fresh public `/32` or `/128` candidates after active-policy reclassification and an opaque collector-issued resolver capability binding the canonical host to the selected address; reserved IPv6 is rejected. Shared-destination conflict admission, native evidence collection, DLL loading, owned adapter/routes, userspace packet stack, local/geo backends, disposable coexistence qualification, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Native signed-artifact collection implemented; packet effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, but the shipping path no longer includes a Slipstream-owned kernel driver because production signing requires an organization-backed certificate workflow. The active `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and admits only exact package, DLL, PE, publisher, signer, and timestamp evidence. A native read-only collector now hashes bounded non-reparse handles, parses the PE machine, validates Authenticode against the same held DLL handle without network retrieval, extracts exact signer evidence, and retains that handle in an opaque admission. It prepares only non-authorizing fresh public `/32` or `/128` candidates after active-policy reclassification and an opaque collector-issued resolver capability binding the canonical host to the selected address; reserved IPv6 is rejected. Shared-destination conflict admission, DLL loading, owned adapter/routes, userspace packet stack, local/geo backends, disposable coexistence qualification, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -200,14 +200,20 @@ contract in PR #167 passed all required jobs again on the exact merge commit in
 [CI run 29646370056](https://github.com/aiwaki/slipstream/actions/runs/29646370056),
 and its dependency and vendored-Geph audits passed in
 [run 29646370093](https://github.com/aiwaki/slipstream/actions/runs/29646370093).
+The PR #168 checkpoint merge passed all required jobs again on the exact main
+commit in
+[CI run 29646801180](https://github.com/aiwaki/slipstream/actions/runs/29646801180),
+and its dependency and vendored-Geph audits passed in
+[run 29646801183](https://github.com/aiwaki/slipstream/actions/runs/29646801183).
 
 ## Next Verified Action
 
-Implement a read-only Windows collector for the pinned official Wintun package:
-verify archive/DLL SHA-256, exact PE machine, Authenticode trust, publisher,
-signer, and timestamp, then feed only that evidence into the pure admission
-contract. Qualify AMD64 and ARM64 without loading the DLL, creating an adapter,
-installing a route, or composing packet effects into the production SCM host.
+Define a pure shared-destination conflict admission before any exact-route
+effect exists. One resolved IP may serve both a protected route and unrelated
+direct traffic, so a candidate must fail closed unless fresh policy-bound
+evidence proves that capturing its exact `/32` or `/128` cannot steal another
+route class. Keep DLL loading, adapter creation, route mutation, packet
+processing, and production SCM composition outside that change.
 
 ## External Gates
 

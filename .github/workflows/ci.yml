@@ -242,6 +242,48 @@ jobs:
           SLIPSTREAM_WINDOWS_DIRECT_INGRESS_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test direct_ingress_windows native_direct_ingress_loopback_contract_is_bounded_and_owned -- --exact --test-threads=1
 
+      - name: Qualify the pinned signed Wintun artifacts without loading them
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw "vendor/wintun/SOURCE.json" | ConvertFrom-Json
+          $expectedUrl = "https://www.wintun.net/builds/wintun-0.14.1.zip"
+          if ($source.source_url -ne $expectedUrl) {
+            throw "Wintun fixture URL is not the reviewed official source"
+          }
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP "slipstream-wintun-$($source.version)"
+          $archive = Join-Path $fixtureRoot "wintun-$($source.version).zip"
+          $expanded = Join-Path $fixtureRoot "expanded"
+          Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+          Invoke-WebRequest -Uri $source.source_url -OutFile $archive
+
+          $archiveFile = Get-Item -LiteralPath $archive
+          if ($archiveFile.Length -ne [long]$source.archive_length) {
+            throw "Wintun archive length mismatch before extraction"
+          }
+          $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($archiveHash -ne $source.archive_sha256) {
+            throw "Wintun archive SHA-256 mismatch before extraction"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+
+          $env:SLIPSTREAM_WINDOWS_WINTUN_CI = "1"
+          $env:SLIPSTREAM_WINTUN_ARCHIVE = $archive
+          $env:SLIPSTREAM_WINTUN_LICENSE = Join-Path $expanded $source.license.path
+          $env:SLIPSTREAM_WINTUN_AMD64_DLL = Join-Path $expanded $source.architectures.x86_64.path
+          $env:SLIPSTREAM_WINTUN_ARM64_DLL = Join-Path $expanded $source.architectures.aarch64.path
+          $testName = "packet_adapter::windows::tests::official_amd64_and_arm64_artifacts_are_admitted_without_loading"
+          $output = & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --lib $testName -- --exact --test-threads=1 2>&1
+          $exitCode = $LASTEXITCODE
+          $lines = @($output | ForEach-Object { $_.ToString() })
+          $lines | Write-Output
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+          if ($lines -notcontains "test $testName ... ok") {
+            throw "Expected exact Wintun qualification test did not execute"
+          }
+
       - name: Qualify empty WFP dynamic-session rollback without live filters
         shell: pwsh
         env:
