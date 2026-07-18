@@ -32,13 +32,122 @@ fn native_direct_ingress_loopback_contract_is_bounded_and_owned() {
     }
 
     qualifies_bidirectional_backpressure_and_clean_close();
+    qualifies_slow_progressing_downstream();
     qualifies_upstream_backpressure_deadline();
     qualifies_downstream_backpressure_deadline();
+    qualifies_first_payload_delivery_deadline();
     qualifies_client_close_cancellation();
     qualifies_backend_reset_after_delivered_payload();
     qualifies_caller_cancellation();
     qualifies_first_payload_deadline();
     qualifies_shutdown();
+}
+
+fn qualifies_slow_progressing_downstream() {
+    let backend_listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind slow backend");
+    let endpoint = backend_listener
+        .local_addr()
+        .expect("slow backend endpoint");
+    let response_payload = patterned_bytes(512 * 1024, 29);
+    let backend_payload = response_payload.clone();
+    let backend = thread::spawn(move || {
+        let (mut stream, _) = backend_listener.accept().expect("accept slow backend");
+        stream
+            .write_all(&backend_payload)
+            .expect("write slow response");
+        stream
+            .shutdown(Shutdown::Write)
+            .expect("close slow response");
+    });
+
+    let mut running = RunningIngress::start_with_client_socket_buffer(
+        endpoint,
+        "slow-progress",
+        5_000,
+        150,
+        Some(1_024),
+    );
+    let expected_response = response_payload.clone();
+    let mut external = running.take_external();
+    let client = thread::spawn(move || {
+        let mut response = Vec::with_capacity(expected_response.len());
+        let mut buffer = [0u8; 4 * 1024];
+        while response.len() < expected_response.len() {
+            thread::sleep(Duration::from_millis(20));
+            let bytes = external.read(&mut buffer).expect("read slow response");
+            assert!(bytes > 0, "slow response closed before completion");
+            response.extend_from_slice(&buffer[..bytes]);
+        }
+        assert_eq!(response, expected_response);
+    });
+
+    let mut delivered = 0u64;
+    let mut now_ms = 10;
+    loop {
+        let event = running.next_event();
+        match &event {
+            WindowsDirectIngressEvent::Connected { .. } => {}
+            WindowsDirectIngressEvent::PayloadDelivered { bytes, .. } => delivered += bytes,
+            WindowsDirectIngressEvent::BackendClosed { .. } => {
+                running.apply_ingress(event, now_ms);
+                break;
+            }
+            event => panic!("unexpected slow-progress event: {event:?}"),
+        }
+        running.apply_ingress(event, now_ms);
+        now_ms += 1;
+    }
+
+    assert_eq!(delivered, response_payload.len() as u64);
+    assert!(running.effects.outcomes().next().expect("slow outcome").ok);
+    client.join().expect("join slow client");
+    backend.join().expect("join slow backend");
+}
+
+fn qualifies_first_payload_delivery_deadline() {
+    let backend_listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind deadline backend");
+    let endpoint = backend_listener
+        .local_addr()
+        .expect("delivery deadline endpoint");
+    let backend = thread::spawn(move || {
+        let (mut stream, _) = backend_listener
+            .accept()
+            .expect("accept delivery deadline backend");
+        stream
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .expect("bound deadline backend write");
+        let payload = patterned_bytes(2 * 1024 * 1024, 43);
+        let _ = stream.write_all(&payload);
+    });
+
+    let mut running = RunningIngress::start_with_client_socket_buffer(
+        endpoint,
+        "delivery-deadline",
+        120,
+        1_000,
+        Some(1_024),
+    );
+    let connected = running.next_event();
+    assert!(matches!(
+        connected,
+        WindowsDirectIngressEvent::Connected { .. }
+    ));
+    running.apply_ingress(connected, 10);
+
+    let deadline = running.next_event();
+    assert!(matches!(
+        deadline,
+        WindowsDirectIngressEvent::FirstPayloadDeadline { .. }
+    ));
+    running.apply_ingress(deadline, 122);
+    let outcome = running
+        .effects
+        .outcomes()
+        .next()
+        .expect("delivery deadline outcome");
+    assert!(!outcome.ok);
+    assert_eq!(outcome.failure_phase, "first_payload");
+    backend.join().expect("join delivery deadline backend");
 }
 
 fn qualifies_upstream_backpressure_deadline() {
@@ -386,9 +495,30 @@ impl RunningIngress {
         first_payload_timeout_ms: u64,
         backpressure_timeout_ms: u64,
     ) -> Self {
+        Self::start_with_client_socket_buffer(
+            endpoint,
+            request_id,
+            first_payload_timeout_ms,
+            backpressure_timeout_ms,
+            None,
+        )
+    }
+
+    fn start_with_client_socket_buffer(
+        endpoint: SocketAddr,
+        request_id: &str,
+        first_payload_timeout_ms: u64,
+        backpressure_timeout_ms: u64,
+        client_socket_buffer_bytes: Option<usize>,
+    ) -> Self {
         let client_listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind client ingress");
         let external = TcpStream::connect(client_listener.local_addr().unwrap())
             .expect("connect external client");
+        if let Some(bytes) = client_socket_buffer_bytes {
+            SockRef::from(&external)
+                .set_recv_buffer_size(bytes)
+                .expect("bound external receive buffer");
+        }
         external
             .set_read_timeout(Some(EVENT_TIMEOUT))
             .expect("set client read timeout");
@@ -396,6 +526,11 @@ impl RunningIngress {
             .set_write_timeout(Some(EVENT_TIMEOUT))
             .expect("set client write timeout");
         let (accepted, _) = client_listener.accept().expect("accept owned client");
+        if let Some(bytes) = client_socket_buffer_bytes {
+            SockRef::from(&accepted)
+                .set_send_buffer_size(bytes)
+                .expect("bound owned-client send buffer");
+        }
 
         let policy_tables = bundled_policy_v1();
         let data_plane_request = WindowsDataPlaneRequest {

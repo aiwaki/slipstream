@@ -60,12 +60,13 @@ owns the relay until close precedes outcome. Client and backend reads, both
 queues, retained state, and backpressure intervals are bounded. A client EOF or
 write stall cancels without manufacturing a backend failure; an upstream stall
 is an explicit backend reset. Native loopback qualification covers a 10 MiB
-upload and 10 MiB response through slow peers, both backpressure deadlines,
-client-first close, reset after delivered payload, cancellation, first-payload
-deadline, and shutdown. The production SCM host remains no-network until a
-separate reviewed Windows interception adapter can create the owned stream and
-original-destination evidence; this module performs no DNS lookup or route
-selection.
+upload and 10 MiB response through slow peers, a slow-but-progressing client,
+both backpressure deadlines, no first-payload proof before client delivery,
+client-first close, reset after delivered payload, cancellation, and shutdown.
+Closed cancellation bookkeeping is bounded and drops first-payload markers. The
+production SCM host remains no-network until a separate reviewed Windows
+interception adapter can create the owned stream and original-destination
+evidence; this module performs no DNS lookup or route selection.
 
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM

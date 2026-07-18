@@ -33,6 +33,7 @@ const RELAY_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const WORKER_FAILURE_REPORT_TIMEOUT: Duration = Duration::from_millis(250);
 const INGRESS_EVENT_QUEUE_CAPACITY: usize = 128;
 const MAX_STAGED_DIRECT_INGRESSES: usize = 1_024;
+const MAX_RETAINED_DIRECT_INGRESS_CLOSED_SESSIONS: usize = 1_024;
 const MAX_RETAINED_DIRECT_INGRESS_OUTCOMES: usize = 1_024;
 const CONTROL_RUNNING: u8 = 0;
 const CONTROL_CANCEL: u8 = 1;
@@ -454,7 +455,13 @@ impl WindowsDataPlaneEffects for WindowsDirectIngressDataPlaneEffects {
                 relay.shutdown();
                 let _ = relay.finish();
                 self.request_ids.remove(session_id);
-                self.closed.insert(*session_id, request_id.clone());
+                retain_bounded_closed_session(
+                    &mut self.closed,
+                    &mut self.first_payloads,
+                    *session_id,
+                    request_id,
+                    MAX_RETAINED_DIRECT_INGRESS_CLOSED_SESSIONS,
+                );
             }
             WindowsDataPlaneCommand::RecordOutcome {
                 request_id,
@@ -531,6 +538,8 @@ fn run_ingress(
     let session_id = plan.session_id();
     let connection_id = plan.connection_id();
     let backpressure_timeout = Duration::from_millis(plan.backpressure_timeout_ms());
+    let first_payload_deadline =
+        Instant::now() + Duration::from_millis(plan.connector_plan.first_payload_timeout_ms());
     let connector = match spawn_windows_direct_connector(plan.connector_plan) {
         Ok(connector) => connector,
         Err(_) => {
@@ -551,6 +560,7 @@ fn run_ingress(
     let mut client_read_buffer = vec![0u8; plan.max_client_read_chunk_bytes];
     let mut pending_upstream: Option<(Vec<u8>, Instant)> = None;
     let mut pending_downstream: Option<(Vec<u8>, usize, Instant)> = None;
+    let mut first_payload_delivered = false;
     let mut client_closed = false;
     let mut control_forwarded = CONTROL_RUNNING;
 
@@ -567,6 +577,24 @@ fn run_ingress(
             pending_downstream = None;
             client_closed = true;
             let _ = client.stream.shutdown(Shutdown::Both);
+        }
+
+        if control_forwarded == CONTROL_RUNNING
+            && !client_closed
+            && !first_payload_delivered
+            && Instant::now() >= first_payload_deadline
+        {
+            emit_ingress(
+                &events,
+                WindowsDirectIngressEvent::FirstPayloadDeadline {
+                    request_id,
+                    session_id,
+                    connection_id,
+                },
+            )?;
+            connector.shutdown();
+            let _ = client.stream.shutdown(Shutdown::Both);
+            return Ok(());
         }
 
         if pending_downstream.is_none() {
@@ -639,7 +667,7 @@ fn run_ingress(
             }
         }
 
-        if let Some((payload, written, stalled_at)) = pending_downstream.as_mut() {
+        if let Some((payload, written, last_progress_at)) = pending_downstream.as_mut() {
             match client.stream.write(&payload[*written..]) {
                 Ok(0) => {
                     close_client(
@@ -656,9 +684,24 @@ fn run_ingress(
                 }
                 Ok(bytes) => {
                     *written += bytes;
+                    *last_progress_at = Instant::now();
                     if *written == payload.len() {
+                        if !first_payload_delivered && Instant::now() >= first_payload_deadline {
+                            emit_ingress(
+                                &events,
+                                WindowsDirectIngressEvent::FirstPayloadDeadline {
+                                    request_id,
+                                    session_id,
+                                    connection_id,
+                                },
+                            )?;
+                            connector.shutdown();
+                            let _ = client.stream.shutdown(Shutdown::Both);
+                            return Ok(());
+                        }
                         let delivered = payload.len() as u64;
                         pending_downstream = None;
+                        first_payload_delivered = true;
                         emit_ingress(
                             &events,
                             WindowsDirectIngressEvent::PayloadDelivered {
@@ -671,7 +714,7 @@ fn run_ingress(
                     }
                 }
                 Err(error) if is_transient(&error) => {
-                    if stalled_at.elapsed() >= backpressure_timeout {
+                    if last_progress_at.elapsed() >= backpressure_timeout {
                         close_client(
                             &events,
                             &request_id,
@@ -778,6 +821,23 @@ fn run_ingress(
         }
         thread::sleep(RELAY_POLL_INTERVAL);
     }
+}
+
+fn retain_bounded_closed_session(
+    closed: &mut BTreeMap<u64, String>,
+    first_payloads: &mut BTreeSet<u64>,
+    session_id: u64,
+    request_id: &str,
+    capacity: usize,
+) {
+    first_payloads.remove(&session_id);
+    while closed.len() >= capacity {
+        let Some(oldest_session_id) = closed.first_key_value().map(|(id, _)| *id) else {
+            break;
+        };
+        closed.remove(&oldest_session_id);
+    }
+    closed.insert(session_id, request_id.to_owned());
 }
 
 fn close_client(
@@ -930,5 +990,30 @@ impl std::error::Error for WindowsDirectIngressDataPlaneEffectError {}
 impl From<WindowsDirectIngressNativeError> for WindowsDirectIngressDataPlaneEffectError {
     fn from(value: WindowsDirectIngressNativeError) -> Self {
         Self::Native(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_ingress_bookkeeping_is_bounded_and_drops_payload_markers() {
+        let mut closed = BTreeMap::new();
+        let mut first_payloads = BTreeSet::new();
+        for session_id in 1..=4 {
+            first_payloads.insert(session_id);
+            retain_bounded_closed_session(
+                &mut closed,
+                &mut first_payloads,
+                session_id,
+                &format!("request-{session_id}"),
+                2,
+            );
+        }
+
+        assert_eq!(closed.len(), 2);
+        assert_eq!(closed.keys().copied().collect::<Vec<_>>(), vec![3, 4]);
+        assert!(first_payloads.is_empty());
     }
 }

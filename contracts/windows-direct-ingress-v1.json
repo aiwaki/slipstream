@@ -10,8 +10,11 @@
     "endpoint_evidence_max_age_ms": 1000,
     "preloaded_payload_forbidden": true,
     "payload_counted_after_client_delivery": true,
+    "first_payload_deadline_requires_client_delivery": true,
     "bidirectional_backpressure_is_bounded": true,
+    "backpressure_timeout_measures_no_progress": true,
     "client_close_cancels_without_backend_failure": true,
+    "cancelled_session_bookkeeping_is_bounded": true,
     "name_resolution": false,
     "external_dns_proxy_pac_vpn_read_only": true
   },

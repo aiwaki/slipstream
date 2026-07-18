@@ -60,6 +60,18 @@ fn rust_executes_windows_direct_ingress_v1_contract() {
     );
     assert_eq!(fixture.invariants["name_resolution"], Value::Bool(false));
     assert_eq!(fixture.invariants["endpoint_evidence_max_age_ms"], 1000);
+    assert_eq!(
+        fixture.invariants["first_payload_deadline_requires_client_delivery"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        fixture.invariants["backpressure_timeout_measures_no_progress"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        fixture.invariants["cancelled_session_bookkeeping_is_bounded"],
+        Value::Bool(true)
+    );
 
     let policy_tables = bundled_policy_v1();
     for vector in fixture.vectors {

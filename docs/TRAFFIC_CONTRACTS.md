@@ -141,15 +141,17 @@ reducer-issued session and request IDs, and the same numeric endpoint admitted
 by connector v1. Preloaded connector bytes are rejected: every upstream byte
 must be read from the owned client. A backend payload event is withheld until
 the complete chunk has been written to the client, so first-payload health
-cannot be proven by bytes that are only queued inside the adapter.
+cannot be proven by bytes that are only queued inside the adapter. The
+first-payload deadline remains active until that delivery completes.
 
 Both relay directions use fixed-size reads, bounded channels and internal
-queues, and explicit backpressure deadlines. A client-first EOF, read failure,
-or downstream write stall becomes cancellation and records no invented backend
-failure. An upstream write stall is a normalized backend reset. Native loopback
-qualification covers slow but progressing peers, both terminal backpressure
-deadlines, reset after delivered payload, cancellation, first-payload deadline,
-and shutdown. The production SCM host remains no-network: a later reviewed
+queues, bounded closed-cancellation bookkeeping, and explicit no-progress
+backpressure deadlines. A client-first EOF, read failure, or downstream write
+stall becomes cancellation and records no invented backend failure. An upstream
+write stall is a normalized backend reset. Native loopback qualification covers
+slow but progressing peers, both terminal backpressure deadlines, reset after
+delivered payload, cancellation, first-payload delivery deadline, and shutdown.
+The production SCM host remains no-network: a later reviewed
 source must still create the owned stream and original-destination evidence,
 without moving DNS or route selection into this relay.
 
