@@ -285,9 +285,19 @@ executable and consume the qualified controller. The host reports bounded
 start, running, stop-pending, and stopped states, accepts stop and shutdown, and
 emits versioned management results. Separate-process Windows CI proves
 idempotent install, stop, start, and uninstall against the real SCM, including
-PID replacement after restart. The next boundary is a pure Windows data-plane
-request/session and worker-lifecycle contract with deterministic fake effects;
-no native network API is admitted until that contract is frozen.
+PID replacement after restart. Windows data-plane contract v1 now freezes the
+request/session and worker lifecycle as pure commands and events. Deterministic
+fake effects cover readiness, first-payload stalls, reset before payload,
+partial-payload stream failure, caller cancellation, shutdown cancellation,
+bounded forced close, resource ownership, and late completion. Route, strategy,
+service group, and backend must agree before a session starts; Discord and
+YouTube have no Geph edge, and external DNS, proxy, PAC, and VPN state remains
+untouched. Monotonic session IDs and bounded terminal retention also prevent a
+stale completion from targeting a reused request ID without allowing service
+state to grow forever. The next boundary composes the service host with an
+injected no-network worker so SCM readiness and bounded shutdown are proven
+together. Native Windows sockets remain a later PR after that composition is
+qualified.
 
 ## M5 - Packet-Level Capabilities
 

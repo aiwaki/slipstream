@@ -1,0 +1,687 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_data_plane",
+  "contract_version": 1,
+  "invariants": {
+    "network_effects": false,
+    "native_api_effects": false,
+    "external_dns_proxy_pac_vpn_read_only": true,
+    "protected_local_bypass_never_uses_geph": true,
+    "first_payload_deadline_does_not_end_relaying_sessions": true,
+    "partial_payload_failure_is_stream_failure": true,
+    "caller_and_shutdown_cancellation_are_not_backend_failures": true,
+    "resources_close_exactly_once_before_outcome": true,
+    "late_completion_cannot_resurrect_terminal_session": true,
+    "shutdown_is_bounded": true,
+    "terminal_history_is_bounded_and_aba_safe": true
+  },
+  "config": {
+    "max_active_sessions": 4,
+    "max_retained_terminal_sessions": 2,
+    "cancel_timeout_ms": 50,
+    "shutdown_timeout_ms": 100
+  },
+  "vectors": [
+    {
+      "name": "request-before-readiness-is-rejected",
+      "started_at_ms": 0,
+      "events": [
+        {
+          "kind": "request_accepted",
+          "now_ms": 1,
+          "request": {
+            "request_id": "early",
+            "policy": {
+              "host": "github.com",
+              "route_class": "direct_passthrough",
+              "service_group": "github",
+              "strategy_set": "direct"
+            },
+            "backend": "direct",
+            "started_at_ms": 1,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "worker_ready", "now_ms": 2}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": [],
+        "open_resources": [],
+        "effects": [
+          "reject:early:worker_not_ready",
+          "worker_ready"
+        ],
+        "outcomes": []
+      }
+    },
+    {
+      "name": "invalid-route-is-rejected-without-stopping-worker",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "bad-route",
+            "policy": {
+              "host": "gateway.discord.gg",
+              "route_class": "geo_exit",
+              "service_group": "discord",
+              "strategy_set": "geph"
+            },
+            "backend": "geph",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        }
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": [],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "reject:bad-route:invalid_request:protected_route_mismatch"
+        ],
+        "outcomes": []
+      }
+    },
+    {
+      "name": "first-payload-deadline-does-not-close-live-stream",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "stream",
+            "policy": {
+              "host": "chatgpt.com",
+              "route_class": "geo_exit",
+              "service_group": "openai",
+              "strategy_set": "geph"
+            },
+            "backend": "geph",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "backend_connected", "now_ms": 5, "request_id": "stream", "session_id": 1},
+        {"kind": "payload_received", "now_ms": 10, "request_id": "stream", "session_id": 1, "bytes": 12},
+        {"kind": "payload_received", "now_ms": 15, "request_id": "stream", "session_id": 1, "bytes": 8},
+        {"kind": "first_payload_deadline", "now_ms": 100, "request_id": "stream", "session_id": 1},
+        {"kind": "backend_closed", "now_ms": 120, "request_id": "stream", "session_id": 1}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": ["stream#1:succeeded:20:true:false:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:stream:geph",
+          "first_deadline:stream@100",
+          "first_payload:stream:12",
+          "close:stream",
+          "outcome:stream:true::geph:20:0.118:"
+        ],
+        "outcomes": ["true::geph:20:0.118:"]
+      }
+    },
+    {
+      "name": "reset-before-first-payload-is-normalized",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "reset",
+            "policy": {
+              "host": "chatgpt.com",
+              "route_class": "geo_exit",
+              "service_group": "openai",
+              "strategy_set": "geph"
+            },
+            "backend": "geph",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "backend_connected", "now_ms": 5, "request_id": "reset", "session_id": 1},
+        {"kind": "backend_reset", "now_ms": 20, "request_id": "reset", "session_id": 1, "reason": "connection reset"}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": ["reset#1:failed:0:false:false:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:reset:geph",
+          "first_deadline:reset@100",
+          "close:reset",
+          "outcome:reset:false:first_payload:geph:0:0.018:connection reset"
+        ],
+        "outcomes": ["false:first_payload:geph:0:0.018:connection reset"]
+      }
+    },
+    {
+      "name": "partial-payload-reset-remains-a-stream-failure",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "partial",
+            "policy": {
+              "host": "chatgpt.com",
+              "route_class": "geo_exit",
+              "service_group": "openai",
+              "strategy_set": "geph"
+            },
+            "backend": "geph",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "backend_connected", "now_ms": 5, "request_id": "partial", "session_id": 1},
+        {"kind": "payload_received", "now_ms": 10, "request_id": "partial", "session_id": 1, "bytes": 4096},
+        {"kind": "backend_reset", "now_ms": 40, "request_id": "partial", "session_id": 1, "reason": "peer reset"}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": ["partial#1:failed:4096:true:false:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:partial:geph",
+          "first_deadline:partial@100",
+          "first_payload:partial:4096",
+          "close:partial",
+          "outcome:partial:false:stream:geph:4096:0.038:peer reset"
+        ],
+        "outcomes": ["false:stream:geph:4096:0.038:peer reset"]
+      }
+    },
+    {
+      "name": "stalled-first-payload-is-cancelled-and-closed",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "stall",
+            "policy": {
+              "host": "crystalidea.com",
+              "route_class": "unknown",
+              "service_group": "generic",
+              "strategy_set": "general"
+            },
+            "backend": "local_engine",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 50
+          }
+        },
+        {"kind": "first_payload_deadline", "now_ms": 50, "request_id": "stall", "session_id": 1},
+        {"kind": "backend_closed", "now_ms": 60, "request_id": "stall", "session_id": 1}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": ["stall#1:failed:0:false:true:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:stall:local_engine",
+          "first_deadline:stall@50",
+          "cancel:stall",
+          "close:stall",
+          "outcome:stall:false:first_payload:local_engine:0:0.048:first payload deadline exceeded"
+        ],
+        "outcomes": ["false:first_payload:local_engine:0:0.048:first payload deadline exceeded"]
+      }
+    },
+    {
+      "name": "caller-cancellation-is-not-a-backend-failure",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "cancel",
+            "policy": {
+              "host": "chatgpt.com",
+              "route_class": "geo_exit",
+              "service_group": "openai",
+              "strategy_set": "geph"
+            },
+            "backend": "geph",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "payload_received", "now_ms": 10, "request_id": "cancel", "session_id": 1, "bytes": 16},
+        {"kind": "cancel_requested", "now_ms": 20, "request_id": "cancel", "session_id": 1},
+        {"kind": "payload_received", "now_ms": 25, "request_id": "cancel", "session_id": 1, "bytes": 32},
+        {"kind": "session_cancelled", "now_ms": 30, "request_id": "cancel", "session_id": 1},
+        {"kind": "backend_closed", "now_ms": 40, "request_id": "cancel", "session_id": 1},
+        {"kind": "first_payload_deadline", "now_ms": 100, "request_id": "cancel", "session_id": 1}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": ["cancel#1:cancelled:16:true:true:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:cancel:geph",
+          "first_deadline:cancel@100",
+          "first_payload:cancel:16",
+          "cancel:cancel",
+          "cancel_deadline:cancel@70",
+          "close:cancel"
+        ],
+        "outcomes": []
+      }
+    },
+    {
+      "name": "shutdown-waits-for-owned-cancellation-acknowledgements",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "a-local",
+            "policy": {
+              "host": "gateway.discord.gg",
+              "route_class": "local_bypass",
+              "service_group": "discord",
+              "strategy_set": "fake_only"
+            },
+            "backend": "local_engine",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 200
+          }
+        },
+        {
+          "kind": "request_accepted",
+          "now_ms": 3,
+          "request": {
+            "request_id": "b-geo",
+            "policy": {
+              "host": "chatgpt.com",
+              "route_class": "geo_exit",
+              "service_group": "openai",
+              "strategy_set": "geph"
+            },
+            "backend": "geph",
+            "started_at_ms": 3,
+            "first_payload_deadline_at_ms": 200
+          }
+        },
+        {"kind": "payload_received", "now_ms": 10, "request_id": "b-geo", "session_id": 2, "bytes": 8},
+        {"kind": "shutdown_requested", "now_ms": 20},
+        {"kind": "session_cancelled", "now_ms": 30, "request_id": "a-local", "session_id": 1},
+        {"kind": "backend_closed", "now_ms": 35, "request_id": "b-geo", "session_id": 2}
+      ],
+      "expected": {
+        "worker_phase": "stopped",
+        "sessions": [
+          "a-local#1:cancelled:0:false:true:false",
+          "b-geo#2:cancelled:8:true:true:false"
+        ],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:a-local:local_engine",
+          "first_deadline:a-local@200",
+          "start:b-geo:geph",
+          "first_deadline:b-geo@200",
+          "first_payload:b-geo:8",
+          "cancel:a-local",
+          "cancel:b-geo",
+          "shutdown_deadline@120",
+          "close:a-local",
+          "close:b-geo",
+          "worker_stopped"
+        ],
+        "outcomes": []
+      }
+    },
+    {
+      "name": "shutdown-deadline-forces-close-and-ignores-late-completion",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "stuck",
+            "policy": {
+              "host": "crystalidea.com",
+              "route_class": "unknown",
+              "service_group": "generic",
+              "strategy_set": "general"
+            },
+            "backend": "local_engine",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 500
+          }
+        },
+        {"kind": "shutdown_requested", "now_ms": 20},
+        {"kind": "backend_connected", "now_ms": 25, "request_id": "stuck", "session_id": 1},
+        {"kind": "payload_received", "now_ms": 30, "request_id": "stuck", "session_id": 1, "bytes": 32},
+        {"kind": "shutdown_deadline", "now_ms": 120},
+        {"kind": "backend_reset", "now_ms": 130, "request_id": "stuck", "session_id": 1, "reason": "late reset"}
+      ],
+      "expected": {
+        "worker_phase": "stopped",
+        "sessions": ["stuck#1:cancelled:0:false:true:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:stuck:local_engine",
+          "first_deadline:stuck@500",
+          "cancel:stuck",
+          "shutdown_deadline@120",
+          "close:stuck",
+          "worker_stopped"
+        ],
+        "outcomes": []
+      }
+    },
+    {
+      "name": "caller-cancellation-has-a-bounded-force-close",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "cancel-stuck",
+            "policy": {
+              "host": "github.com",
+              "route_class": "direct_passthrough",
+              "service_group": "github",
+              "strategy_set": "direct"
+            },
+            "backend": "direct",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 200
+          }
+        },
+        {"kind": "cancel_requested", "now_ms": 20, "request_id": "cancel-stuck", "session_id": 1},
+        {"kind": "cancellation_deadline", "now_ms": 70, "request_id": "cancel-stuck", "session_id": 1},
+        {"kind": "session_cancelled", "now_ms": 80, "request_id": "cancel-stuck", "session_id": 1}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": ["cancel-stuck#1:cancelled:0:false:true:false"],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:cancel-stuck:direct",
+          "first_deadline:cancel-stuck@200",
+          "cancel:cancel-stuck",
+          "cancel_deadline:cancel-stuck@70",
+          "close:cancel-stuck"
+        ],
+        "outcomes": []
+      }
+    },
+    {
+      "name": "terminal-history-is-bounded-and-stale-session-id-is-ignored",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_ready", "now_ms": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "reused",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "payload_received", "now_ms": 3, "request_id": "reused", "session_id": 1, "bytes": 1},
+        {"kind": "backend_closed", "now_ms": 4, "request_id": "reused", "session_id": 1},
+        {
+          "kind": "request_accepted",
+          "now_ms": 5,
+          "request": {
+            "request_id": "b",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 5,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "payload_received", "now_ms": 6, "request_id": "b", "session_id": 2, "bytes": 1},
+        {"kind": "backend_closed", "now_ms": 7, "request_id": "b", "session_id": 2},
+        {
+          "kind": "request_accepted",
+          "now_ms": 8,
+          "request": {
+            "request_id": "c",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 8,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "payload_received", "now_ms": 9, "request_id": "c", "session_id": 3, "bytes": 1},
+        {"kind": "backend_closed", "now_ms": 10, "request_id": "c", "session_id": 3},
+        {"kind": "backend_reset", "now_ms": 11, "request_id": "reused", "session_id": 1, "reason": "stale"},
+        {
+          "kind": "request_accepted",
+          "now_ms": 12,
+          "request": {
+            "request_id": "reused",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 12,
+            "first_payload_deadline_at_ms": 100
+          }
+        },
+        {"kind": "backend_reset", "now_ms": 13, "request_id": "reused", "session_id": 1, "reason": "stale after reuse"},
+        {"kind": "payload_received", "now_ms": 14, "request_id": "reused", "session_id": 4, "bytes": 2},
+        {"kind": "backend_closed", "now_ms": 15, "request_id": "reused", "session_id": 4}
+      ],
+      "expected": {
+        "worker_phase": "ready",
+        "sessions": [
+          "c#3:succeeded:1:true:false:false",
+          "reused#4:succeeded:2:true:false:false"
+        ],
+        "open_resources": [],
+        "effects": [
+          "worker_ready",
+          "start:reused:direct",
+          "first_deadline:reused@100",
+          "first_payload:reused:1",
+          "close:reused",
+          "outcome:reused:true::direct:1:0.002:",
+          "start:b:direct",
+          "first_deadline:b@100",
+          "first_payload:b:1",
+          "close:b",
+          "outcome:b:true::direct:1:0.002:",
+          "start:c:direct",
+          "first_deadline:c@100",
+          "first_payload:c:1",
+          "close:c",
+          "outcome:c:true::direct:1:0.002:",
+          "start:reused:direct",
+          "first_deadline:reused@100",
+          "first_payload:reused:2",
+          "close:reused",
+          "outcome:reused:true::direct:2:0.003:"
+        ],
+        "outcomes": [
+          "true::direct:1:0.002:",
+          "true::direct:1:0.002:",
+          "true::direct:1:0.002:",
+          "true::direct:2:0.003:"
+        ]
+      }
+    },
+    {
+      "name": "startup-failure-never-admits-a-session",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "worker_startup_failed", "now_ms": 1, "reason": "worker bootstrap failed"},
+        {
+          "kind": "request_accepted",
+          "now_ms": 2,
+          "request": {
+            "request_id": "after-failure",
+            "policy": {
+              "host": "github.com",
+              "route_class": "direct_passthrough",
+              "service_group": "github",
+              "strategy_set": "direct"
+            },
+            "backend": "direct",
+            "started_at_ms": 2,
+            "first_payload_deadline_at_ms": 100
+          }
+        }
+      ],
+      "expected": {
+        "worker_phase": "failed",
+        "sessions": [],
+        "open_resources": [],
+        "effects": [
+          "worker_startup_failed:worker bootstrap failed",
+          "reject:after-failure:worker_not_ready"
+        ],
+        "outcomes": []
+      }
+    }
+  ],
+  "invalid_requests": [
+    {
+      "name": "discord-has-no-geph-edge",
+      "request": {
+        "request_id": "discord-geph",
+        "policy": {"host": "gateway.discord.gg", "route_class": "geo_exit", "service_group": "discord", "strategy_set": "geph"},
+        "backend": "geph",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "protected_route_mismatch"
+    },
+    {
+      "name": "youtube-has-no-smart-dns-edge",
+      "request": {
+        "request_id": "youtube-dns",
+        "policy": {"host": "www.youtube.com", "route_class": "geo_exit", "service_group": "youtube_video", "strategy_set": "geph"},
+        "backend": "smart_dns",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "protected_route_mismatch"
+    },
+    {
+      "name": "local-bypass-cannot-use-direct",
+      "request": {
+        "request_id": "local-direct",
+        "policy": {"host": "example.com", "route_class": "local_bypass", "service_group": "generic", "strategy_set": "fake_only"},
+        "backend": "direct",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "backend_route_mismatch"
+    },
+    {
+      "name": "geo-exit-cannot-use-direct",
+      "request": {
+        "request_id": "geo-direct",
+        "policy": {"host": "chatgpt.com", "route_class": "geo_exit", "service_group": "openai", "strategy_set": "geph"},
+        "backend": "direct",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "backend_route_mismatch"
+    },
+    {
+      "name": "route-class-and-strategy-must-agree",
+      "request": {
+        "request_id": "bad-policy-tuple",
+        "policy": {"host": "chatgpt.com", "route_class": "geo_exit", "service_group": "openai", "strategy_set": "general"},
+        "backend": "geph",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "policy_route_mismatch"
+    },
+    {
+      "name": "direct-passthrough-cannot-use-geph",
+      "request": {
+        "request_id": "direct-geph",
+        "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+        "backend": "geph",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "backend_route_mismatch"
+    },
+    {
+      "name": "host-must-already-be-normalized",
+      "request": {
+        "request_id": "bad-host",
+        "policy": {"host": "ChatGPT.Com.", "route_class": "geo_exit", "service_group": "openai", "strategy_set": "geph"},
+        "backend": "geph",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "invalid_host"
+    },
+    {
+      "name": "host-labels-must-be-valid",
+      "request": {
+        "request_id": "bad-label",
+        "policy": {"host": "bad..example.com", "route_class": "unknown", "service_group": "generic", "strategy_set": "general"},
+        "backend": "local_engine",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "invalid_host"
+    },
+    {
+      "name": "deadline-must-follow-start",
+      "request": {
+        "request_id": "bad-deadline",
+        "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+        "backend": "direct",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 1
+      },
+      "error": "invalid_deadline"
+    },
+    {
+      "name": "request-id-cannot-contain-whitespace",
+      "request": {
+        "request_id": "bad id",
+        "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+        "backend": "direct",
+        "started_at_ms": 1,
+        "first_payload_deadline_at_ms": 100
+      },
+      "error": "invalid_request_id"
+    }
+  ]
+}

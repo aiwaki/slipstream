@@ -6,6 +6,27 @@ policies, executes activation and recovery reducers through injected effects,
 consumes StatusV2, and classifies traffic without touching the host.
 
 `RecordingWindowsEffects` is the deterministic fake used by contract tests.
+The separate `data_plane::v1` module freezes the worker/request/session boundary
+before any native Windows network API is admitted. It validates the complete
+`slipstream-core` policy result against the chosen backend, so Discord and
+YouTube accept only local-bypass/local-engine requests and cannot acquire a
+Geph edge. Requests, first-payload deadlines, cancellation acknowledgements,
+shutdown, resets, and late completions are pure events that emit ordered
+commands through an injected effect boundary.
+
+`RecordingWindowsDataPlaneEffects` owns deterministic fake resources and
+rejects duplicate opens, closes, first-payload marks, and outcomes. First
+payload proves that the selected backend became usable; it does not declare a
+long-lived relay successful. A later reset after partial payload is therefore
+recorded as a stream failure, while caller or shutdown cancellation records no
+backend failure. Cancellation and worker shutdown are bounded, resources close
+exactly once before a terminal outcome, and a late completion cannot resurrect
+a cancelled or stopped session. Monotonic session IDs keep stale events from
+targeting a later request that reuses an external request ID, while a bounded,
+deterministically pruned terminal history prevents a long-running service from
+growing state without limit. The reducer itself opens no socket and reads or
+mutates no DNS, proxy, PAC, or VPN state.
+
 The isolated `service_lifecycle::v1` module adds transactional install, explicit
 start/stop, bounded crash recovery, and fail-forward uninstall semantics behind
 `WindowsServiceEffects`. Durable stop or uninstall intent is written before
@@ -102,10 +123,13 @@ process, and performs no DNS, proxy, PAC, VPN, or packet operation. A separate
 Windows CI process exercises repeatable install, stop, restart, and uninstall
 through the real SCM.
 
-Windows networking and installer integration remain later steps and must keep
-every v1 recording harness available for regression tests. Policy rollback
-remains explicitly atomic: durable commit and runtime activation must either
-both succeed or leave the current policy active.
+The next Windows step composes the production service host with an injected
+no-network worker through this data-plane contract. SCM `RUNNING` must follow
+worker readiness, and stop/shutdown must preserve bounded cancellation before
+the host reports `STOPPED`. Native networking and installer integration remain
+later steps and must keep every v1 recording harness available for regression
+tests. Policy rollback remains explicitly atomic: durable commit and runtime
+activation must either both succeed or leave the current policy active.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
@@ -119,5 +143,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-ownership-v1.json`,
 `contracts/windows-service-lifecycle-state-v1.json`,
 `contracts/windows-service-scm-gate-v1.json`,
-`contracts/windows-service-host-v1.json`, and the existing routing, recovery,
+`contracts/windows-service-host-v1.json`,
+`contracts/windows-data-plane-v1.json`, and the existing routing, recovery,
 StatusV2, manifest, signed-bundle, and activation contracts.
