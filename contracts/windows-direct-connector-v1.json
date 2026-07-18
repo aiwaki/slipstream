@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_direct_connector",
+  "contract_version": 1,
+  "invariants": {
+    "active_policy_admission_required": true,
+    "backend_is_direct_only": true,
+    "endpoint_is_numeric_only": true,
+    "name_resolution": false,
+    "external_dns_proxy_pac_vpn_read_only": true,
+    "protected_local_bypass_never_uses_direct_connector": true,
+    "deadlines_and_buffers_are_bounded": true,
+    "connect_timeout_ceiling_ms": 750,
+    "connector_events_preserve_session_identity": true
+  },
+  "vectors": [
+    {
+      "name": "admit-direct-ipv4-endpoint",
+      "request": {
+        "session_id": 7,
+        "data_plane_request": {
+          "request_id": "github-v4",
+          "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+          "backend": "direct",
+          "started_at_ms": 10,
+          "first_payload_deadline_at_ms": 1010
+        },
+        "endpoint": {"address": "127.0.0.1", "port": 443},
+        "issued_at_ms": 20,
+        "connect_deadline_at_ms": 520,
+        "initial_payload": [112, 105, 110, 103],
+        "max_read_chunk_bytes": 4096
+      },
+      "expected": {"accepted": true, "endpoint": "127.0.0.1:443", "connect_timeout_ms": 500, "first_payload_timeout_ms": 990, "error": ""}
+    },
+    {
+      "name": "admit-direct-ipv6-endpoint",
+      "request": {
+        "session_id": 8,
+        "data_plane_request": {
+          "request_id": "github-v6",
+          "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+          "backend": "direct",
+          "started_at_ms": 100,
+          "first_payload_deadline_at_ms": 2100
+        },
+        "endpoint": {"address": "::1", "port": 8443},
+        "issued_at_ms": 150,
+        "connect_deadline_at_ms": 650,
+        "initial_payload": [],
+        "max_read_chunk_bytes": 1024
+      },
+      "expected": {"accepted": true, "endpoint": "[::1]:8443", "connect_timeout_ms": 500, "first_payload_timeout_ms": 1950, "error": ""}
+    },
+    {
+      "name": "reject-hostname-endpoint",
+      "request": {
+        "session_id": 9,
+        "data_plane_request": {
+          "request_id": "hostname",
+          "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+          "backend": "direct",
+          "started_at_ms": 10,
+          "first_payload_deadline_at_ms": 1010
+        },
+        "endpoint": {"address": "github.com", "port": 443},
+        "issued_at_ms": 20,
+        "connect_deadline_at_ms": 520,
+        "initial_payload": [],
+        "max_read_chunk_bytes": 4096
+      },
+      "expected": {"accepted": false, "endpoint": "", "connect_timeout_ms": 0, "first_payload_timeout_ms": 0, "error": "endpoint_not_numeric"}
+    },
+    {
+      "name": "reject-protected-host-disguised-as-direct",
+      "request": {
+        "session_id": 10,
+        "data_plane_request": {
+          "request_id": "discord-direct",
+          "policy": {"host": "gateway.discord.gg", "route_class": "direct_passthrough", "service_group": "discord", "strategy_set": "direct"},
+          "backend": "direct",
+          "started_at_ms": 10,
+          "first_payload_deadline_at_ms": 1010
+        },
+        "endpoint": {"address": "127.0.0.1", "port": 443},
+        "issued_at_ms": 20,
+        "connect_deadline_at_ms": 520,
+        "initial_payload": [],
+        "max_read_chunk_bytes": 4096
+      },
+      "expected": {"accepted": false, "endpoint": "", "connect_timeout_ms": 0, "first_payload_timeout_ms": 0, "error": "invalid_data_plane_request"}
+    },
+    {
+      "name": "reject-geph-backend",
+      "request": {
+        "session_id": 11,
+        "data_plane_request": {
+          "request_id": "openai-geph",
+          "policy": {"host": "chatgpt.com", "route_class": "geo_exit", "service_group": "openai", "strategy_set": "geph"},
+          "backend": "geph",
+          "started_at_ms": 10,
+          "first_payload_deadline_at_ms": 1010
+        },
+        "endpoint": {"address": "127.0.0.1", "port": 9954},
+        "issued_at_ms": 20,
+        "connect_deadline_at_ms": 520,
+        "initial_payload": [],
+        "max_read_chunk_bytes": 4096
+      },
+      "expected": {"accepted": false, "endpoint": "", "connect_timeout_ms": 0, "first_payload_timeout_ms": 0, "error": "backend_not_direct"}
+    },
+    {
+      "name": "reject-connect-deadline-after-first-payload-deadline",
+      "request": {
+        "session_id": 12,
+        "data_plane_request": {
+          "request_id": "late-connect",
+          "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+          "backend": "direct",
+          "started_at_ms": 10,
+          "first_payload_deadline_at_ms": 1010
+        },
+        "endpoint": {"address": "127.0.0.1", "port": 443},
+        "issued_at_ms": 20,
+        "connect_deadline_at_ms": 1011,
+        "initial_payload": [],
+        "max_read_chunk_bytes": 4096
+      },
+      "expected": {"accepted": false, "endpoint": "", "connect_timeout_ms": 0, "first_payload_timeout_ms": 0, "error": "invalid_connect_deadline"}
+    }
+  ],
+  "event_vectors": [
+    {
+      "name": "connected",
+      "event": {"kind": "connected", "request_id": "direct", "session_id": 3},
+      "now_ms": 20,
+      "expected": {"kind": "backend_connected", "now_ms": 20, "request_id": "direct", "session_id": 3}
+    },
+    {
+      "name": "first-payload",
+      "event": {"kind": "payload", "request_id": "direct", "session_id": 3, "bytes": [1, 2, 3, 4]},
+      "now_ms": 25,
+      "expected": {"kind": "payload_received", "now_ms": 25, "request_id": "direct", "session_id": 3, "bytes": 4}
+    },
+    {
+      "name": "stream-reset",
+      "event": {"kind": "stream_reset", "request_id": "direct", "session_id": 3, "reason": "stream read failed"},
+      "now_ms": 30,
+      "expected": {"kind": "backend_reset", "now_ms": 30, "request_id": "direct", "session_id": 3, "reason": "stream read failed"}
+    },
+    {
+      "name": "cancellation",
+      "event": {"kind": "cancelled", "request_id": "direct", "session_id": 3, "reason": "caller"},
+      "now_ms": 35,
+      "expected": {"kind": "session_cancelled", "now_ms": 35, "request_id": "direct", "session_id": 3}
+    },
+    {
+      "name": "first-payload-deadline",
+      "event": {"kind": "first_payload_deadline", "request_id": "direct", "session_id": 3},
+      "now_ms": 40,
+      "expected": {"kind": "first_payload_deadline", "now_ms": 40, "request_id": "direct", "session_id": 3}
+    },
+    {
+      "name": "clean-close",
+      "event": {"kind": "backend_closed", "request_id": "direct", "session_id": 3},
+      "now_ms": 45,
+      "expected": {"kind": "backend_closed", "now_ms": 45, "request_id": "direct", "session_id": 3}
+    }
+  ]
+}

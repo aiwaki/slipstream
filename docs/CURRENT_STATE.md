@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows worker-host composition CI-qualified | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, data-plane, and worker-host boundaries. Disposable Windows CI has qualified the real service install/restart/uninstall lifecycle. Data-plane v1 freezes active-table host reclassification, failure-atomic effects with exact resume cursors, adapter-owned closure, bounded cancellation, monotonic session identity, and bounded terminal retention. Worker-host v1 gates SCM `RUNNING` on worker readiness, orders `STOP_PENDING` before bounded drain, permits `STOPPED` only after worker termination, and covers startup failure, deadline force-close, late completion, and mixed-effect recovery through deterministic vectors. The production host consumes it through an injected no-network effect, and PR #156 compiled and exercised that path against the real Windows SCM. Native Windows networking, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | First Windows connector implemented; Windows CI pending | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, data-plane, and worker-host boundaries. Disposable Windows CI has qualified the real service install/restart/uninstall lifecycle. Data-plane v1 freezes active-table host reclassification, failure-atomic effects with exact resume cursors, adapter-owned closure, bounded cancellation, monotonic session identity, and bounded terminal retention. Worker-host v1 gates SCM `RUNNING` on worker readiness, orders `STOP_PENDING` before bounded drain, permits `STOPPED` only after worker termination, and covers startup failure, deadline force-close, late completion, and mixed-effect recovery through deterministic vectors. The production host consumes it through an injected no-network effect, and PR #156 compiled and exercised that path against the real Windows SCM. Direct connector v1 now admits only an active-policy-validated direct session plus a canonical numeric endpoint, bounds socket ownership and all queues/deadlines, and maps connect/payload/reset/close/cancel/shutdown into the frozen reducer. Its native effect is qualified locally through loopback; required Windows CI is pending. Production request ingress, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -126,13 +126,13 @@ startup/drain/deadline vectors, and real SCM stop path passed in
 
 ## Next Verified Action
 
-Define the first bounded native Windows connector behind the frozen data-plane
-effect boundary. It must retain exact resource ownership, cancellation
-deadlines, active-policy admission, and the Discord/YouTube no-Geph invariant;
-it must not mutate external DNS, proxy, PAC, or VPN state. Do not broaden into
-installer UI or multiple backends before one connector passes deterministic
-connect, first-payload, stream-reset, cancellation, deadline, and shutdown
-tests.
+Qualify direct connector v1 on Windows CI, then define the bounded production
+ingress that supplies an adapter-owned client stream and already-resolved
+numeric endpoint evidence to that connector. Keep route selection and DNS
+outside the connector, retain active-policy admission and exact session
+ownership, and do not add local/geo backends or installer UI until the direct
+relay path passes deterministic bidirectional backpressure, cancellation,
+deadline, reset, and shutdown tests.
 
 ## External Gates
 

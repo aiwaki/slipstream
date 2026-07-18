@@ -303,10 +303,18 @@ gates `RUNNING`, startup failure is terminal, `STOP_PENDING` precedes bounded
 cancellation, and `STOPPED` follows only worker termination. The production
 host consumes the same contract through an injected no-network effect.
 Deterministic vectors cover normal stop, forced deadline, late completion, and
-interrupted mixed effect batches. Native Windows sockets remain a later PR
-after this composition, now qualified in disposable Windows CI. The next
-boundary is one bounded connector behind the frozen effect interface, not a
-multi-backend transport implementation.
+interrupted mixed effect batches. The first native socket primitive is direct
+connector v1: it accepts only an opaque, active-policy-validated direct plan
+with a canonical numeric endpoint, bounds every buffer,
+queue, connect, and first-payload interval, and maps connect, payload, reset,
+close, cancellation, deadline, and shutdown back into the frozen data-plane
+events. A native effect stages the plan before `StartSession`, owns the socket
+until `CloseSession`, retains bounded terminal evidence, and rejects every
+non-direct backend. Loopback CI exercises the real reducer/effect chain plus a
+reset after partial payload. The production SCM host deliberately remains
+no-network until a separate ingress can provide trusted numeric endpoint
+evidence and an adapter-owned client stream; no resolver or multi-backend
+transport was added.
 
 ## M5 - Packet-Level Capabilities
 

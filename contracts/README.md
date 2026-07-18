@@ -70,6 +70,11 @@ Slipstream routing decisions and bounded recovery primitives.
   cancellation and cannot report `STOPPED` until the worker is terminal.
   Startup failure, graceful drain, forced deadline, late completion, repeated
   stop, and interrupted effect batches are language-neutral vectors.
+- `windows-direct-connector-v1.json` admits the first Windows native networking
+  primitive. It accepts only an already-authorized direct session plus a
+  numeric endpoint, freezes bounded buffer and deadline validation, and maps
+  connector events back to the data-plane reducer without resolving names or
+  selecting another route.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
