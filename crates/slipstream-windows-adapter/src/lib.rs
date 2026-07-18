@@ -10,6 +10,7 @@
 #![deny(unsafe_code)]
 
 pub mod data_plane;
+pub mod direct_connector;
 pub mod service_controller;
 pub mod service_host;
 pub mod service_lifecycle;

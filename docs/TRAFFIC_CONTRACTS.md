@@ -90,7 +90,7 @@ in the local case.
 ## Windows Data Plane V1
 
 `contracts/windows-data-plane-v1.json` freezes the equivalent Windows boundary
-before a native connector exists. A request already contains the normalized
+around native connectors. A request already contains the normalized
 policy result and selected backend, but that metadata is not trusted. The worker
 reclassifies the host through the active validated policy tables and validates
 the complete tuple before emitting `StartSession`, so a caller cannot hide a
@@ -119,7 +119,20 @@ Deterministic vectors cover startup failure, cancellation acknowledgement,
 forced shutdown deadline, late backend completion after forced close, repeated
 stop, and effect recovery without replaying the completed command prefix. The
 production Windows host consumes the same composition with a no-network effect,
-so this step still admits no socket implementation.
+so SCM lifecycle qualification still admits no user traffic by itself.
+
+`contracts/windows-direct-connector-v1.json` admits exactly one socket class:
+direct TCP to an already-selected numeric IPv4 or IPv6 endpoint. Creation of
+its opaque plan repeats active-policy admission and rejects non-direct backends,
+including protected local-bypass and geo-exit traffic. It cannot resolve a
+hostname, select another route, or inspect or mutate DNS, proxy, PAC, or VPN
+state. Buffers, queues, connect time, and first-payload time are bounded; every
+event retains the reducer-issued session identity. Disposable loopback tests
+cover real connect, first payload through the reducer/effect chain, reset after
+partial payload, caller cancellation, first-payload deadline, and shutdown.
+The production host remains no-network until a later ingress boundary can
+supply both trusted numeric endpoint evidence and an adapter-owned client
+stream.
 
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete

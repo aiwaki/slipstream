@@ -27,6 +27,25 @@ deterministically pruned terminal history prevents a long-running service from
 growing state without limit. The reducer itself opens no socket and reads or
 mutates no DNS, proxy, PAC, or VPN state.
 
+`direct_connector::v1` is the first native networking primitive admitted behind
+that boundary. Its opaque plan can be created only after the complete direct
+request is revalidated against the active policy tables. The endpoint must be
+an already-selected canonical IPv4 or IPv6 address; the connector never resolves
+a hostname or chooses a route. Initial and subsequent client payloads, read
+chunks, queues, connect time, and first-payload time are bounded. The worker
+thread owns the TCP stream until clean close, reset, caller cancellation,
+deadline, or shutdown, and maps each result back to the existing data-plane
+event with the exact request/session identity.
+
+`WindowsDirectDataPlaneEffects` stages one validated opaque plan before
+`StartSession`, rejects every non-direct backend, and owns the connector until
+`CloseSession` precedes the normalized outcome. Its retained plans and outcomes
+are bounded. A loopback fixture qualifies connect, first payload, partial-payload
+reset, cancellation, deadline, shutdown, and the real reducer/effect chain on
+Windows CI. The production SCM host still has no request ingress and retains its
+no-network effect until a later composition supplies numeric endpoint evidence
+and an adapter-owned client stream.
+
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM
 `RUNNING`; startup failure produces a nonzero `STOPPED`; and host-owned stop or
@@ -133,8 +152,9 @@ through the real SCM. In service mode it consumes the pure worker-host
 composition through an injected no-network effect, so worker readiness gates
 `RUNNING` and both stop controls preserve the bounded data-plane shutdown order.
 
-Native networking and installer integration remain later steps and must keep
-every v1 recording harness available for regression tests. The worker
+Additional backends, production request ingress, and installer integration
+remain later steps and must keep every v1 recording harness available for
+regression tests. The worker
 reclassifies normalized hosts through the active validated
 policy tables instead of trusting caller-supplied route metadata. Every effect
 command must fail before mutation or complete fully; reducer state is committed
@@ -157,5 +177,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-scm-gate-v1.json`,
 `contracts/windows-service-host-v1.json`,
 `contracts/windows-data-plane-v1.json`, `contracts/windows-worker-host-v1.json`,
+`contracts/windows-direct-connector-v1.json`,
 and the existing routing, recovery, StatusV2, manifest, signed-bundle, and
 activation contracts.
