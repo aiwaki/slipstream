@@ -27,6 +27,7 @@ pub mod service_payload;
 pub mod service_scm;
 mod v1;
 pub mod wfp_capture;
+pub mod wfp_runtime;
 pub mod worker_host;
 
 pub use v1::*;

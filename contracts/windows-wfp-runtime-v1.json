@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_wfp_runtime",
+  "contract_version": 1,
+  "invariants": {
+    "native_wfp_effects": false,
+    "production_service_host_network_effects": false,
+    "kernel_callouts_register_before_listeners": true,
+    "listeners_ready_before_dynamic_transaction": true,
+    "provider_sublayer_management_callouts_context_and_filters_commit_atomically": true,
+    "dynamic_session_is_non_persistent": true,
+    "dynamic_session_close_is_first_stop_effect": true,
+    "exact_owned_filter_absence_precedes_listener_stop": true,
+    "filter_presence_retains_listener_and_kernel_callouts": true,
+    "accepted_stream_drain_is_bounded": true,
+    "over_capacity_accept_is_closed": true,
+    "exact_owned_filter_absence_precedes_kernel_unregister": true,
+    "monotonic_runtime_generations_prevent_completion_aba": true,
+    "stale_runtime_events_are_rejected": true,
+    "effect_batches_expose_recoverable_partial_progress": true,
+    "direct_connector_v1_is_unchanged": true,
+    "dns_proxy_pac_vpn_mutation": false
+  },
+  "identity": {
+    "service": {
+      "service_name": "dev.slipstream.service",
+      "executable_sha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "generation": 72623859790382856
+    },
+    "target_pid": 12345,
+    "capture_instance_id": "00112233445566778899aabbccddeeff",
+    "listeners": [
+      {"address": "127.0.0.1", "port": 1443},
+      {"address": "::1", "port": 1443}
+    ]
+  },
+  "config": {
+    "max_active_connections": 4,
+    "drain_timeout_ms": 100,
+    "filter_absence_recheck_ms": 25
+  },
+  "vectors": [
+    {
+      "name": "startup-orders-callouts-listeners-and-atomic-session",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1}
+      ],
+      "expected": {
+        "phase": "ready",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": true,
+        "listeners_ready": true,
+        "active_session_generation": 1,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": false,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": null,
+        "terminal_reason": "",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready"]
+      }
+    },
+    {
+      "name": "graceful-stop-closes-session-before-proof-and-drain",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "connection_accepted", "now_ms": 4, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 41},
+        {"kind": "stop_requested", "now_ms": 5},
+        {"kind": "dynamic_session_closed", "now_ms": 6, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 7, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "owned_listeners_stopped", "now_ms": 8, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "connection_released", "now_ms": 9, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 41},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 10, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "requested",
+        "terminal_reason": "stop_requested",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready", "close_dynamic_session:1", "inspect_owned_filters:1", "stop_owned_listeners", "schedule_drain_deadline@108", "unregister_kernel_callouts", "report_runtime_terminal:stopped:requested:stop_requested"]
+      }
+    },
+    {
+      "name": "drain-deadline-force-closes-before-kernel-unregister",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "connection_accepted", "now_ms": 4, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 51},
+        {"kind": "connection_accepted", "now_ms": 5, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 52},
+        {"kind": "stop_requested", "now_ms": 6},
+        {"kind": "dynamic_session_closed", "now_ms": 7, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 8, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "owned_listeners_stopped", "now_ms": 9, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "drain_deadline", "now_ms": 109, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 110, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "requested",
+        "terminal_reason": "stop_requested",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready", "close_dynamic_session:1", "inspect_owned_filters:1", "stop_owned_listeners", "schedule_drain_deadline@109", "force_close_accepted_streams:51,52", "unregister_kernel_callouts", "report_runtime_terminal:stopped:requested:stop_requested"]
+      }
+    },
+    {
+      "name": "observed-filter-presence-retains-safety-resources",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "stop_requested", "now_ms": 4},
+        {"kind": "dynamic_session_closed", "now_ms": 5, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 6, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": true, "ipv6_present": false}}
+      ],
+      "expected": {
+        "phase": "proving_filter_absence",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": true,
+        "listeners_ready": true,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": false,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": 31,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": true,
+        "shutdown_cause": "requested",
+        "terminal_reason": "stop_requested",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready", "close_dynamic_session:1", "inspect_owned_filters:1", "report_filter_removal_blocked:v4", "schedule_filter_absence_recheck@31"]
+      }
+    },
+    {
+      "name": "filter-recheck-completes-safe-teardown",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "stop_requested", "now_ms": 4},
+        {"kind": "dynamic_session_closed", "now_ms": 5, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 6, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": true, "ipv6_present": true}},
+        {"kind": "filter_absence_recheck_due", "now_ms": 31, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 32, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "owned_listeners_stopped", "now_ms": 33, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 34, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "requested",
+        "terminal_reason": "stop_requested",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready", "close_dynamic_session:1", "inspect_owned_filters:1", "report_filter_removal_blocked:v4+v6", "schedule_filter_absence_recheck@31", "inspect_owned_filters:1", "stop_owned_listeners", "unregister_kernel_callouts", "report_runtime_terminal:stopped:requested:stop_requested"]
+      }
+    },
+    {
+      "name": "stop-during-session-activation-closes-before-any-ready-report",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "stop_requested", "now_ms": 3},
+        {"kind": "dynamic_session_activated", "now_ms": 4, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "dynamic_session_closed", "now_ms": 5, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 6, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "owned_listeners_stopped", "now_ms": 7, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 8, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "requested",
+        "terminal_reason": "stop_requested",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "close_dynamic_session:1", "inspect_owned_filters:1", "stop_owned_listeners", "unregister_kernel_callouts", "report_runtime_terminal:stopped:requested:stop_requested"]
+      }
+    },
+    {
+      "name": "atomic-session-failure-proves-absence-before-cleanup",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activation_failed", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "reason": "transaction_aborted"},
+        {"kind": "owned_filters_inspected", "now_ms": 4, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "owned_listeners_stopped", "now_ms": 5, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 6, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "failed",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "startup_failure",
+        "terminal_reason": "transaction_aborted",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "inspect_owned_filters:1", "stop_owned_listeners", "unregister_kernel_callouts", "report_runtime_terminal:failed:startup_failure:transaction_aborted"]
+      }
+    },
+    {
+      "name": "unexpected-session-loss-fails-safe-without-reclosing",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "dynamic_session_closed", "now_ms": 4, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "owned_filters_inspected", "now_ms": 5, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "owned_listeners_stopped", "now_ms": 6, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 7, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "failed",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "runtime_failure",
+        "terminal_reason": "dynamic_session_closed",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready", "inspect_owned_filters:1", "stop_owned_listeners", "unregister_kernel_callouts", "report_runtime_terminal:failed:runtime_failure:dynamic_session_closed"]
+      }
+    },
+    {
+      "name": "over-capacity-accept-closes-only-unadmitted-stream",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "kernel_callouts_registered", "now_ms": 1, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_listeners_ready", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "listeners": [{"address": "127.0.0.1", "port": 1443}, {"address": "::1", "port": 1443}]},
+        {"kind": "dynamic_session_activated", "now_ms": 3, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": 1},
+        {"kind": "connection_accepted", "now_ms": 4, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 61},
+        {"kind": "connection_accepted", "now_ms": 5, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 62},
+        {"kind": "connection_accepted", "now_ms": 6, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 63},
+        {"kind": "connection_accepted", "now_ms": 7, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 64},
+        {"kind": "connection_accepted", "now_ms": 8, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "connection_id": 65}
+      ],
+      "expected": {
+        "phase": "ready",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": true,
+        "listeners_ready": true,
+        "active_session_generation": 1,
+        "last_session_generation": 1,
+        "next_session_generation": 2,
+        "filters_absent": false,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [61, 62, 63, 64],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": null,
+        "terminal_reason": "",
+        "effects": ["register_kernel_callouts", "start_owned_listeners", "commit_atomic_dynamic_session:1", "report_runtime_ready", "reject_accepted_stream:65"]
+      }
+    },
+    {
+      "name": "stop-during-kernel-registration-never-opens-listener",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "stop_requested", "now_ms": 1},
+        {"kind": "kernel_callouts_registered", "now_ms": 2, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}},
+        {"kind": "owned_filters_inspected", "now_ms": 3, "inspection": {"binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}, "session_generation": null, "ipv4_present": false, "ipv6_present": false}},
+        {"kind": "kernel_callouts_unregistered", "now_ms": 4, "binding": {"service_generation": 72623859790382856, "capture_instance_id": "00112233445566778899aabbccddeeff", "runtime_generation": 1}}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "runtime_generation": 1,
+        "next_runtime_generation": 2,
+        "kernel_callouts_registered": false,
+        "listeners_ready": false,
+        "active_session_generation": null,
+        "last_session_generation": null,
+        "next_session_generation": 1,
+        "filters_absent": true,
+        "filter_inspection_pending": false,
+        "filter_recheck_at_ms": null,
+        "active_connections": [],
+        "drain_deadline_at_ms": null,
+        "stop_requested": false,
+        "shutdown_cause": "requested",
+        "terminal_reason": "stop_requested",
+        "effects": ["register_kernel_callouts", "inspect_owned_filters:none", "unregister_kernel_callouts", "report_runtime_terminal:stopped:requested:stop_requested"]
+      }
+    }
+  ],
+  "effect_recovery_vectors": [
+    {
+      "name": "forced-stream-close-is-not-replayed-when-unregister-retries",
+      "vector": "drain-deadline-force-closes-before-kernel-unregister",
+      "event_index": 10,
+      "fail_command": "unregister_kernel_callouts",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    },
+    {
+      "name": "blocked-report-is-not-replayed-when-recheck-scheduling-retries",
+      "vector": "observed-filter-presence-retains-safety-resources",
+      "event_index": 6,
+      "fail_command": "schedule_filter_absence_recheck",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    },
+    {
+      "name": "over-capacity-close-retries-without-admitting-the-stream",
+      "vector": "over-capacity-accept-closes-only-unadmitted-stream",
+      "event_index": 8,
+      "fail_command": "reject_accepted_stream",
+      "failed_command_index": 0,
+      "next_command_index": 0
+    }
+  ]
+}

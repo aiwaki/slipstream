@@ -94,6 +94,13 @@ Slipstream routing decisions and bounded recovery primitives.
   one-shot type-state handoff consumes an active-policy-validated direct-ingress
   request with the same connection identity and exposes its outbound endpoint
   only after those records are marked applied.
+- `windows-wfp-runtime-v1.json` freezes the pure lifecycle immediately above
+  those future effects. Kernel callouts precede exact listener readiness and
+  one atomic dynamic-session transaction. Session close is the first stop
+  action; listener stop, bounded stream drain, and kernel unregister remain
+  blocked until exact owned-filter absence is observed. Filter presence keeps
+  the safety listener and callouts alive and schedules another proof instead of
+  tearing down underneath a terminating filter.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust

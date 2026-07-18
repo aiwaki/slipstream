@@ -200,6 +200,27 @@ connect order without invoking Winsock. Direct connector v1 remains frozen. The
 production host still imports none of this module, and the WFP engine, callout,
 filters, driver and sockets remain future native effects.
 
+`contracts/windows-wfp-runtime-v1.json` freezes the ordering around those
+future effects without implementing them. One exact service/capture identity
+and reducer-issued monotonic runtime generation own each attempt. Kernel
+classify callouts register first, exact V4/V6 loopback listeners become ready
+second, and a single failure-atomic command may then commit the non-persistent
+provider, sublayer, management callouts, provider context and filters in one
+dynamic engine transaction.
+
+An ordinary stop or runtime fault emits dynamic-session close as its only first
+effect. Exact filter inspection follows the close acknowledgement. Listener
+stop, accepted-stream drain and kernel-callout unregister cannot be reached
+until both owned filters are absent. If either remains, the safety listener and
+kernel callouts stay live and only a bounded recheck is scheduled. Once filters
+are absent, listeners stop before a bounded stream drain; a drain deadline
+force-closes the exact retained stream IDs before unregister. A stream accepted
+above the configured bound receives an exact retryable reject effect and never
+enters reducer state. Multi-command effects resume from an exact cursor. Stale
+service generations, capture instances, runtime attempts, session generations
+and timers are rejected. The module calls no WFP, Winsock, driver, DNS, proxy,
+PAC or VPN API and remains absent from the production SCM host.
+
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete
 protected local ladder, a proven Smart DNS attempt, or a verified owned Geph

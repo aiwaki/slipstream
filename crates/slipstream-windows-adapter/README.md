@@ -105,6 +105,25 @@ models the required
 calling Winsock. Direct connector v1 is unchanged, and the production service
 host does not compose this module.
 
+`wfp_runtime::v1` freezes the surrounding lifecycle as another pure reducer.
+It registers kernel callouts before starting the exact owned listeners, then
+admits provider, sublayer, management callouts, provider context, and V4/V6
+filters only as one failure-atomic dynamic-session command. A stop or runtime
+fault emits dynamic-session close as its sole first action. After closure, an
+exact service/capture identity, reducer-issued monotonic runtime generation,
+and session generation gate the owned-filter inspection.
+
+Listener stop, bounded accepted-stream drain, and kernel-callout unregister are
+unreachable until both filters are proven absent. If either filter is still
+visible, the reducer retains the listener and callouts and schedules another
+inspection; it never creates the unavailable-callout blackhole that motivated
+this ordering. Drain deadline force-close and unregister form one resumable
+effect batch, so a later failure cannot replay an already committed stream
+close. An accepted stream above the configured bound receives its own exact,
+retryable reject effect and never enters runtime state. The recording effect
+validates resource order and stale-event binding for each exact runtime attempt
+without WFP, Winsock, a driver, or production-host composition.
+
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM
 `RUNNING`; startup failure produces a nonzero `STOPPED`; and host-owned stop or
@@ -240,5 +259,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-direct-ingress-v1.json`,
 `contracts/windows-capture-source-v1.json`,
 `contracts/windows-wfp-capture-v1.json`,
+`contracts/windows-wfp-runtime-v1.json`,
 and the existing routing, recovery, StatusV2, manifest, signed-bundle, and
 activation contracts.
