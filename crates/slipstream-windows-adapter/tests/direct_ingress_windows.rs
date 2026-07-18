@@ -156,13 +156,16 @@ fn qualifies_upstream_backpressure_deadline() {
         .local_addr()
         .expect("stalled backend endpoint");
     let backend = thread::spawn(move || {
-        let (_stream, _) = backend_listener.accept().expect("accept stalled backend");
-        thread::sleep(Duration::from_millis(700));
+        let (stream, _) = backend_listener.accept().expect("accept stalled backend");
+        SockRef::from(&stream)
+            .set_recv_buffer_size(1_024)
+            .expect("bound stalled backend receive buffer");
+        thread::sleep(Duration::from_secs(2));
     });
-    let mut running = RunningIngress::start(endpoint, "upstream-stall", 5_000, 100);
+    let mut running = RunningIngress::start(endpoint, "upstream-stall", 5_000, 500);
     let mut external = running.take_external();
     let writer = thread::spawn(move || {
-        let payload = patterned_bytes(32 * 1024 * 1024, 51);
+        let payload = patterned_bytes(64 * 1024 * 1024, 51);
         let _ = external.write_all(&payload);
     });
 
@@ -173,12 +176,15 @@ fn qualifies_upstream_backpressure_deadline() {
     ));
     running.apply_ingress(connected, 10);
     let reset = running.next_event();
-    assert!(matches!(
-        &reset,
-        WindowsDirectIngressEvent::BackendReset { reason, .. }
-            if reason == "backend write backpressure deadline exceeded"
-    ));
-    running.apply_ingress(reset, 120);
+    assert!(
+        matches!(
+            &reset,
+            WindowsDirectIngressEvent::BackendReset { reason, .. }
+                if reason == "backend write backpressure deadline exceeded"
+        ),
+        "unexpected upstream stall event: {reset:?}"
+    );
+    running.apply_ingress(reset, 520);
     let outcome = running
         .effects
         .outcomes()
