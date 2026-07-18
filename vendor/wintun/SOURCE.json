@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "Wintun",
+  "version": "0.14.1",
+  "source_url": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+  "archive_sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+  "archive_length": 750540,
+  "license": {
+    "path": "wintun/LICENSE.txt",
+    "sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2"
+  },
+  "signature": {
+    "publisher": "WireGuard LLC",
+    "leaf_certificate_sha256": "c9e1b3127c2f1312056d49a93ac4bd700393fd323d2bf3b2235aff52bea8d136",
+    "authenticode_required": true,
+    "timestamp_required": true
+  },
+  "architectures": {
+    "x86_64": {
+      "path": "wintun/bin/amd64/wintun.dll",
+      "sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+      "length": 427552,
+      "pe_machine": 34404
+    },
+    "aarch64": {
+      "path": "wintun/bin/arm64/wintun.dll",
+      "sha256": "f7ba89005544be9d85231a9e0d5f23b2d15b3311667e2dad0debd344918a3f80",
+      "length": 222488,
+      "pe_machine": 43620
+    }
+  }
+}

@@ -13,6 +13,7 @@ pub mod capture_source;
 pub mod data_plane;
 pub mod direct_connector;
 pub mod direct_ingress;
+pub mod packet_adapter;
 pub mod service_controller;
 pub mod service_host;
 pub mod service_lifecycle;

@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through merged
-[PR #165](https://github.com/aiwaki/slipstream/pull/165) at main commit
-`3e1195a16c0f44dd6a1faeb2d9ea8c8f5f938322`, including its successful
+[PR #166](https://github.com/aiwaki/slipstream/pull/166) at main commit
+`1d7f6fc15e9210e6d03de2c5ae08487f6f55d133`, including its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows WFP wire/handoff, runtime lifecycle, and management-session v1 implemented; kernel driver absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. [PR #162](https://github.com/aiwaki/slipstream/pull/162) selected WFP `ALE_CONNECT_REDIRECT_V4/V6`; [PR #163](https://github.com/aiwaki/slipstream/pull/163) froze the fixed 128-byte service/driver context, exact identity and records-before-connect handoff; [PR #164](https://github.com/aiwaki/slipstream/pull/164) froze kernel-before-listener-before-atomic-session startup and filter-absence-first teardown; [PR #165](https://github.com/aiwaki/slipstream/pull/165) added the proof-gated dynamic management-session controller and native `Fwpm*` boundary. `windows-wfp-session-v1` fixes the seven owned management keys, a separate 128-byte provider context, non-replaceable kernel/listener proofs, one failure-atomic dynamic transaction, and an exact same-generation post-close filter inspection. The native boundary remains disconnected from the production no-network SCM host; disposable CI exercises only an empty dynamic begin/abort/close until a real kernel callout is registered. The kernel callout/driver, redirect-record socket effect, local/geo backends, Android/Linux adapters, and iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Signed packet-adapter admission implemented; native packet effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, but the shipping path no longer includes a Slipstream-owned kernel driver because production signing requires an organization-backed certificate workflow. The active `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and admits only exact package, DLL, PE, publisher, signer, and timestamp evidence. It prepares only non-authorizing fresh public `/32` or `/128` candidates after active-policy reclassification and an opaque collector-issued resolver capability binding the canonical host to the selected address; reserved IPv6 is rejected. Shared-destination conflict admission, native evidence collection, DLL loading, owned adapter/routes, userspace packet stack, local/geo backends, disposable coexistence qualification, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -190,15 +190,18 @@ The exact merged PR #165 commit passed again on main in
 including one explicitly asserted WFP qualification test, and its dependency
 and vendored-Geph audits passed in
 [run 29639553086](https://github.com/aiwaki/slipstream/actions/runs/29639553086).
+The PR #166 checkpoint commit passed all required jobs again on main in
+[CI run 29640104120](https://github.com/aiwaki/slipstream/actions/runs/29640104120),
+and its dependency and vendored-Geph audits passed in
+[run 29640104123](https://github.com/aiwaki/slipstream/actions/runs/29640104123).
 
 ## Next Verified Action
 
-Implement the minimal kernel V4/V6 WFP connect-redirect callout and disposable
-registrar, then use the frozen management-session controller to qualify one
-real full object/filter transaction. Prove registration before transaction,
-listener readiness before filters, self-loop prevention, session-close/filter
-absence before drain and unregister, and crash fail-open behavior. Do not
-mutate direct connector v1 or compose capture into the production SCM host yet.
+Implement a read-only Windows collector for the pinned official Wintun package:
+verify archive/DLL SHA-256, exact PE machine, Authenticode trust, publisher,
+signer, and timestamp, then feed only that evidence into the pure admission
+contract. Qualify AMD64 and ARM64 without loading the DLL, creating an adapter,
+installing a route, or composing packet effects into the production SCM host.
 
 ## External Gates
 
@@ -210,8 +213,9 @@ mutate direct connector v1 or compose capture into the production SCM host yet.
   custody, and cross-version rollback before opening the stable channel.
 - The local Parallels Windows 11 ARM64 VM has minimal Rust 1.97.1 but no Windows
   SDK or Visual Studio Build Tools; native compilation therefore remains a CI
-  gate until that disposable VM is provisioned deliberately. A Fedora VM is
-  also available for the later Linux adapter.
+  gate until that disposable VM is provisioned deliberately. The official
+  ARM64 Wintun DLL hash and embedded signature were inspected there without
+  loading it. A Fedora VM is also available for the later Linux adapter.
 
 ## Update Rule
 

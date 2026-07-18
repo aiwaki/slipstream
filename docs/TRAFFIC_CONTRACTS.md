@@ -176,8 +176,28 @@ resurrect the source. The production SCM host does not compose this module and
 therefore remains no-network while a native capture implementation is still
 absent.
 
-`contracts/windows-wfp-capture-v1.json` now freezes the data boundary for the
-selected WFP `ALE_CONNECT_REDIRECT_V4/V6` adapter. A manually encoded 128-byte
+`contracts/windows-packet-adapter-v1.json` freezes the active no-own-driver
+packet boundary. It admits only exact evidence for the pinned official signed
+Wintun 0.14.1 AMD64/ARM64 artifacts and prepares only fresh policy-bound public
+exact `/32` or `/128` candidates for `local_bypass` or `geo_exit`. Protected
+hosts are reclassified through the active tables. Resolver evidence binds one
+canonical host to its observed address set, and the selected destination must
+belong to that set. The evidence type is opaque and non-deserializable so only
+the future native collector can issue it. IPv6 candidates are conservatively limited to reviewed
+global-unicast space and exclude IANA special-purpose ranges. A candidate is
+not native route authorization and still requires shared-destination conflict
+evidence. The pure contract cannot load a DLL, create an adapter, install a
+route, change the default route, or touch system DNS, proxy, PAC, VPN, or
+production traffic.
+
+Wintun exposes L3 packets rather than the accepted TCP stream expected by
+direct-ingress and capture-source v1. A separately reviewed userspace packet
+stack and backend bridge must satisfy the same policy and recovery invariants;
+the stream contracts are not silently reused as packet ownership proof.
+
+The remaining `windows-wfp-*` contracts preserve the superseded own-driver
+research path only. `contracts/windows-wfp-capture-v1.json` freezes that WFP
+`ALE_CONNECT_REDIRECT_V4/V6` data boundary. A manually encoded 128-byte
 context carries explicit magic, version and lengths; TCP family; original
 remote and local endpoints; service generation; exact target PID; nonzero
 capture-instance ID; and executable SHA-256. IPv4 address slots have mandatory

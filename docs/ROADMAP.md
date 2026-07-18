@@ -344,76 +344,49 @@ cannot resurrect the source. The pure recording harness has no resolver,
 backend selection, native interception API, or system-network mutation. The
 production SCM host still does not compose it and remains no-network.
 
-Native TCP capture v1 now selects a minimal WFP callout at
-`ALE_CONNECT_REDIRECT_V4/V6` plus the exact owned Rust service. The driver
-registers the kernel classify callout first. Runtime provider, sublayer,
-`FWPM_CALLOUT` management object, provider context, and filters must then be
-non-persistent, non-boot objects committed together in one dynamic engine
-transaction only after listener and service/driver identity are ready. Closing
-that session is the first stop and crash fail-safe; kernel callout unregister
-and driver unload follow only after exact filter absence. The callout must
-target the exact listener PID, preserve strict versioned original-destination
-context, inspect redirect state to prevent self-loops, and preserve opaque
-redirect records so another WFP proxy can coexist. WinDivert, system proxy/PAC,
-and TUN are not capture-v1 implementations.
+The original WFP connect-redirect design is now a frozen research branch, not
+the shipping plan. Its wire, runtime, and management-session v1 contracts
+remain useful compatibility records, but a production implementation would
+require Slipstream to own and submit a kernel driver. Microsoft requires the
+Hardware Dev Center and an EV certificate for that path; test-signing is not a
+user-safe substitute. No native callout will be implemented or packaged.
 
-The first implementation phase is now frozen as
-`contracts/windows-wfp-capture-v1.json` and pure `wfp_capture::v1`. The fixed
-128-byte driver/service context binds original IPv4/IPv6 endpoints to the exact
-active service generation, PID, instance and executable hash. The service-side
-validator requires an exact owned loopback listener and bounded opaque redirect
-records. Each validated capture carries the monotonic source-issued connection
-ID; handoff revalidates a complete direct-ingress request and requires the same
-connection identity and endpoint. Admission mismatch preserves the
-non-cloneable capture, while the opaque ingress/connect plan appears only after
-the redirect-record plan is marked applied. This phase calls no WFP or socket
-API, does not change direct connector v1, and is not composed into the
-production host.
+The active packet-adapter direction uses the official unmodified, prebuilt and
+signed Wintun 0.14.1 package. `vendor/wintun/SOURCE.json` pins its official
+archive plus AMD64/ARM64 DLL identity, and
+`contracts/windows-packet-adapter-v1.json` with `packet_adapter::v1` freezes
+strict artifact admission. The same pure boundary reclassifies each protected
+host through the active policy and can prepare only fresh public exact `/32` or
+`/128` candidate plans for `local_bypass` or `geo_exit`. One resolver evidence
+object must bind the same canonical host to an address set containing the
+selected destination. The capability is opaque and non-deserializable so only
+the future native collector can issue it, and reserved IPv6 space is rejected. Those plans are not
+native route authorization: shared CDN destinations still require conflict
+evidence. The module loads no DLL, creates no adapter, installs no route, and
+does not touch the production service or external DNS/proxy/PAC/VPN state.
 
-The second pure phase is now frozen as
-`contracts/windows-wfp-runtime-v1.json` and `wfp_runtime::v1`. The lifecycle
-binds every completion and timer to the exact service/capture identity,
-reducer-issued monotonic runtime attempt, and session generation. Kernel
-callouts precede listener readiness and one atomic dynamic-session commit.
-Session close is the sole first stop effect. Exact filter absence gates
-listener stop, bounded stream drain and kernel unregister; observed filter
-presence retains the listener and callouts while scheduling a recheck. Effect
-batches resume from exact cursors. This phase still invokes no WFP, Winsock or
-driver API and remains disconnected from the production host.
+Wintun changes the data-plane shape: it exposes L3 packets rather than the
+accepted TCP streams expected by direct-ingress v1. Remaining implementation
+therefore stays phased and closed to production traffic:
 
-The management-session phase is now frozen as
-`contracts/windows-wfp-session-v1.json` and `wfp_session::v1`. Seven fixed
-owned keys identify the provider, sublayer, V4/V6 management callouts,
-provider context, and filters. A separate 128-byte provider context binds the
-exact service/runtime/session identity, target PID, executable hash,
-dual-stack loopback listeners, and TCP/443 scope. The controller requires
-same-binding kernel-registration and listener-readiness proofs before calling
-the transaction and refuses teardown until both filter keys are proven absent.
-The native Windows effect uses one dynamic engine transaction and compensates
-every partial failure with transaction abort and session close; it never uses
-broad delete-by-key recovery. Disposable CI opens an empty dynamic session,
-begins and aborts an empty transaction, closes it, and proves both filter keys
-absent. It does not commit live filters without a registered disposable kernel
-callout, and the production host remains disconnected.
+1. Add a read-only native collector for archive/DLL SHA-256, PE machine, and
+   Authenticode publisher, signer, and timestamp evidence. Qualify the exact
+   pinned artifact on disposable AMD64 and ARM64 Windows without loading it.
+2. Add owned Wintun adapter lifecycle and exact-route transactions with
+   crash-safe rollback, stale-evidence expiry, shared-destination conflict
+   rejection, and explicit external-VPN coexistence. Never add a default route
+   or change system DNS, proxy, PAC, or VPN settings.
+3. Select a bounded userspace IPv4/IPv6 and TCP/UDP stack and bridge its flows
+   to local-bypass, direct, and geo-exit backends through the shared policy and
+   recovery contracts. Discord and YouTube remain local-only.
+4. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
+   external network-tool coexistence on disposable AMD64 and ARM64 Windows.
+5. Compose packet effects into the production SCM host only after every earlier
+   gate is green and teardown proves no adapter, route, process, or durable
+   ownership residue.
 
-Remaining implementation stays phased and closed to production traffic:
-
-1. Implement the minimal kernel V4/V6 connect-redirect callout and disposable
-   registrar, then qualify the already-frozen controller with a real full
-   management-object/filter commit. Prove kernel registration before the
-   transaction, listener readiness before filters, loop prevention, and exact
-   filter removal before listener drain or kernel unregister.
-2. Implement the native WFP-specific socket effect that consumes the frozen
-   one-shot record plan, applies accepted redirect records, and only then binds
-   or connects. Keep direct connector v1 frozen.
-3. Qualify exact ownership, loop prevention, another redirector, crash, reboot,
-   bounded shutdown, update, uninstall, and external VPN/DNS/proxy coexistence
-   on disposable x64 and ARM64 Windows.
-4. Add architecture-complete signed-driver packaging. Only then may the capture
-   source be composed into the production SCM host.
-
-Resolver choice, local/geo backends, and installer UI remain outside this
-sequence.
+Resolver choice, local/geo backend implementation, and installer UI remain
+outside the current admission PR.
 
 ## M5 - Packet-Level Capabilities
 
