@@ -154,14 +154,14 @@ on platform TCP buffers; native loopback qualification proves the actual owned
 relay, reset, cancellation, first-payload delivery, and shutdown paths.
 
 `contracts/windows-capture-source-v1.json` freezes the separate source above
-that relay without selecting WFP, WinDivert, or any other interception
-technology. A native adapter stages one accepted stream under an opaque
-one-shot resource ID and reports only its canonical numeric original
-destination. The reducer allocates a monotonic connection ID and offers that
-evidence to an external admission authority; it does not derive a hostname,
-classify policy, or select a backend. Only a separately granted direct
-connector request can be rebound to the fresh evidence and handed to direct
-ingress.
+that relay without embedding WFP, WinDivert, or any other interception
+technology in the frozen reducer. A native adapter stages one accepted stream
+under an opaque one-shot resource ID and reports only its canonical numeric
+original destination. The reducer allocates a monotonic connection ID and
+offers that evidence to an external admission authority; it does not derive a
+hostname, classify policy, or select a backend. Only a separately granted
+direct connector request can be rebound to the fresh evidence and handed to
+direct ingress.
 
 The source owns every stream until the handoff effect succeeds. A failed
 handoff is failure-atomic and leaves the exact resource available for retry or
@@ -175,6 +175,15 @@ monotonic, retained terminal evidence is bounded, and late events cannot
 resurrect the source. The production SCM host does not compose this module and
 therefore remains no-network while a native capture implementation is still
 absent.
+
+The selected native implementation is a separate WFP
+`ALE_CONNECT_REDIRECT_V4/V6` adapter. It must query bounded versioned redirect
+context and opaque redirect records from the accepted socket, reject ordinary
+loopback connections without that evidence, and preserve the records on the
+outbound socket before bind/connect. Direct connector v1 has no such input and
+remains frozen; redirect-record propagation belongs to a new contract version
+or a WFP-specific preparation boundary. None of these native effects are part
+of capture-source v1 itself.
 
 `contracts/route-circuit-registry-v1.json` covers the bounded state above those
 request-local races. Production records one result only after a complete
