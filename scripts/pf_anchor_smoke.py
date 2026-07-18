@@ -269,8 +269,8 @@ def _configure_tproxy_for_smoke(tproxy, runner: PfctlRunner, rules: str) -> None
     tproxy._pf_applied = False
     tproxy._geph_up = False
     tproxy._geph_port = None
-    tproxy._pf_backend_hold_until = 0.0
-    tproxy._pf_backend_hold_reason = ""
+    tproxy._geph_backend_hold_until = 0.0
+    tproxy._geph_backend_hold_reason = ""
 
 
 def _preflight(runner: PfctlRunner) -> tuple[PfSnapshot, int, int]:
@@ -326,16 +326,10 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
 
         tproxy = _import_tproxy()
         _configure_tproxy_for_smoke(tproxy, runner, rules)
-        if tproxy.arm_private_pf_if_ready(proxy_port):
-            raise SmokeError("cold-start gate armed PF without a verified backend")
-        _assert_empty_anchor(runner, SLIPSTREAM_ANCHOR)
-        if SMOKE_TOKEN_PATH.exists():
-            raise SmokeError("cold-start gate acquired a PF token")
-
-        tproxy._geph_up = True
-        tproxy._geph_port = tproxy.GEPH_OWNED_PORT
         if not tproxy.arm_private_pf_if_ready(proxy_port):
-            raise SmokeError("verified backend did not arm the private PF anchor")
+            raise SmokeError("local routing did not arm without Geph")
+        if tproxy.geo_exit_backend_ready():
+            raise SmokeError("absent Geph was reported as ready")
         mode = stat.S_IMODE(SMOKE_TOKEN_PATH.stat().st_mode)
         if mode != 0o600:
             raise SmokeError(f"PF token mode is {mode:o}, expected 600")
@@ -354,8 +348,12 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             uid=uid,
             gid=gid,
         )
-        if not tproxy.suspend_transparent_routing("pf smoke runtime failure"):
-            raise SmokeError("runtime failure did not pause the private anchor")
+        if not tproxy.suspend_geo_exit_backend("pf smoke runtime failure"):
+            raise SmokeError("runtime failure did not cool down Geph")
+        if _anchor_snapshot(runner, SLIPSTREAM_ANCHOR) != (nat, filters):
+            raise SmokeError("Geph cooldown changed the private anchor")
+        if not tproxy.pause_private_pf():
+            raise SmokeError("explicit private PF pause failed")
         _assert_empty_anchor(runner, SLIPSTREAM_ANCHOR)
         if _anchor_snapshot(runner, SENTINEL_ANCHOR) != sentinel_before:
             raise SmokeError("runtime suspension changed the sentinel anchor")

@@ -2537,6 +2537,12 @@ pub fn run() {
                         }
                         ID_GEPH_ENABLE => {
                             let new_on = !geph_enabled(app);
+                            if new_on && geph_secret(app).is_none() {
+                                geph_config_set(app, "enabled", "0");
+                                let _ = enable_h.set_checked(false);
+                                notify(app, "Set the Geph account first");
+                                return;
+                            }
                             geph_config_set(app, "enabled", if new_on { "1" } else { "0" });
                             let _ = enable_h.set_checked(new_on);
                             if new_on {

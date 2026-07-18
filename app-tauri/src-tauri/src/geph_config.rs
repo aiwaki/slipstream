@@ -158,7 +158,7 @@ fn resolve_geph_enabled_state(
     secret_present: bool,
 ) -> (bool, bool) {
     if let Some(value) = explicit {
-        return (value != "0", false);
+        return (value != "0" && secret_present, false);
     }
     let migrate_legacy_opt_in = legacy_config_present && secret_present;
     (migrate_legacy_opt_in, migrate_legacy_opt_in)
@@ -173,7 +173,7 @@ pub(super) fn geph_enabled(app: &AppHandle) -> bool {
         .and_then(|path| fs::read_to_string(path).ok())
         .and_then(|text| config_map(&text))
         .is_some();
-    let secret_present = explicit.is_none() && legacy_config_present && geph_secret(app).is_some();
+    let secret_present = geph_secret(app).is_some();
     let (enabled, migrate) =
         resolve_geph_enabled_state(explicit.as_deref(), legacy_config_present, secret_present);
     if migrate {
@@ -217,6 +217,10 @@ mod tests {
         assert_eq!(
             resolve_geph_enabled_state(Some("1"), true, true),
             (true, false)
+        );
+        assert_eq!(
+            resolve_geph_enabled_state(Some("1"), true, false),
+            (false, false)
         );
         assert_eq!(resolve_geph_enabled_state(None, true, true), (true, true));
         assert_eq!(
