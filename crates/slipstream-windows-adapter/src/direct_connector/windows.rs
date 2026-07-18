@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const OUTBOUND_QUEUE_CAPACITY: usize = 64;
 const EVENT_QUEUE_CAPACITY: usize = 128;
 const MAX_STAGED_DIRECT_CONNECTOR_PLANS: usize = 1_024;
@@ -98,6 +98,13 @@ impl WindowsDirectConnectorHandle {
             Ok(event) => Ok(Some(event)),
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => Ok(None),
         }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.worker
+            .as_ref()
+            .map(JoinHandle::is_finished)
+            .unwrap_or(true)
     }
 
     pub fn finish(mut self) -> Result<(), WindowsDirectConnectorNativeError> {
@@ -408,10 +415,7 @@ fn run_connector(
         .set_nodelay(true)
         .map_err(|_| WindowsDirectConnectorNativeError::SocketConfigurationFailed)?;
     stream
-        .set_read_timeout(Some(STREAM_POLL_INTERVAL))
-        .map_err(|_| WindowsDirectConnectorNativeError::SocketConfigurationFailed)?;
-    stream
-        .set_write_timeout(Some(STREAM_POLL_INTERVAL))
+        .set_nonblocking(true)
         .map_err(|_| WindowsDirectConnectorNativeError::SocketConfigurationFailed)?;
     if emit_cancel_if_requested(&plan, &control, &events)? {
         return Ok(());
@@ -472,14 +476,18 @@ fn run_connector(
                     return Ok(());
                 }
                 first_payload_observed = true;
-                emit(
+                if !emit_payload(
                     &events,
                     WindowsDirectConnectorEvent::Payload {
                         request_id: plan.request_id.clone(),
                         session_id: plan.session_id,
                         bytes: read_buffer[..bytes].to_vec(),
                     },
-                )?;
+                    &plan,
+                    &control,
+                )? {
+                    return Ok(());
+                }
             }
             Err(error) if is_transient(&error) => {}
             Err(_) => {
@@ -498,6 +506,7 @@ fn run_connector(
             )?;
             return Ok(());
         }
+        thread::sleep(STREAM_POLL_INTERVAL);
     }
 }
 
@@ -539,7 +548,7 @@ fn connect_numeric(
 }
 
 fn drain_outbound(receiver: &Receiver<Vec<u8>>, queue: &mut VecDeque<(Vec<u8>, usize)>) {
-    loop {
+    while queue.len() < OUTBOUND_QUEUE_CAPACITY {
         match receiver.try_recv() {
             Ok(payload) => queue.push_back((payload, 0)),
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => return,
@@ -609,6 +618,31 @@ fn emit(
         TrySendError::Full(_) => WindowsDirectConnectorNativeError::EventQueueFull,
         TrySendError::Disconnected(_) => WindowsDirectConnectorNativeError::EventSinkClosed,
     })
+}
+
+fn emit_payload(
+    events: &SyncSender<WindowsDirectConnectorEvent>,
+    event: WindowsDirectConnectorEvent,
+    plan: &WindowsDirectConnectorPlan,
+    control: &AtomicU8,
+) -> Result<bool, WindowsDirectConnectorNativeError> {
+    let mut pending = event;
+    loop {
+        if control.load(Ordering::Acquire) != CONTROL_RUNNING {
+            emit_cancel_if_requested(plan, control, events)?;
+            return Ok(false);
+        }
+        match events.try_send(pending) {
+            Ok(()) => return Ok(true),
+            Err(TrySendError::Full(event)) => {
+                pending = event;
+                thread::sleep(STREAM_POLL_INTERVAL);
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                return Err(WindowsDirectConnectorNativeError::EventSinkClosed);
+            }
+        }
+    }
 }
 
 fn is_transient(error: &io::Error) -> bool {

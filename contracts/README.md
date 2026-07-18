@@ -75,6 +75,11 @@ Slipstream routing decisions and bounded recovery primitives.
   numeric endpoint, freezes bounded buffer and deadline validation, and maps
   connector events back to the data-plane reducer without resolving names or
   selecting another route.
+- `windows-direct-ingress-v1.json` binds that connector to one adapter-owned
+  client stream and fresh original-destination evidence. It forbids preloaded
+  bytes, counts backend payload only after client delivery, bounds both relay
+  directions, and maps client close to cancellation rather than a fabricated
+  backend failure.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust

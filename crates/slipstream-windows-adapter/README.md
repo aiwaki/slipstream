@@ -46,6 +46,27 @@ Windows CI. The production SCM host still has no request ingress and retains its
 no-network effect until a later composition supplies numeric endpoint evidence
 and an adapter-owned client stream.
 
+`direct_ingress::v1` is that ownership and relay boundary, but not an OS packet
+capture source. It accepts only fresh `original_destination` evidence bound to
+the exact reducer-issued session, request ID, numeric endpoint, and one
+non-cloneable owned client `TcpStream`. Connector preload is forbidden: every
+upstream byte must come from that stream. Backend bytes reach the data-plane
+reducer only after the full chunk has been written to the client, so a queued
+or stalled response cannot falsely prove first payload.
+
+`WindowsDirectIngressDataPlaneEffects` stages the client and opaque connector
+plan before `StartSession`, restores both if native worker startup fails, and
+owns the relay until close precedes outcome. Client and backend reads, both
+queues, retained state, and backpressure intervals are bounded. A client EOF or
+write stall cancels without manufacturing a backend failure; an upstream stall
+is an explicit backend reset. Native loopback qualification covers a 10 MiB
+upload and 10 MiB response through slow peers, both backpressure deadlines,
+client-first close, reset after delivered payload, cancellation, first-payload
+deadline, and shutdown. The production SCM host remains no-network until a
+separate reviewed Windows interception adapter can create the owned stream and
+original-destination evidence; this module performs no DNS lookup or route
+selection.
+
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM
 `RUNNING`; startup failure produces a nonzero `STOPPED`; and host-owned stop or
@@ -152,7 +173,7 @@ through the real SCM. In service mode it consumes the pure worker-host
 composition through an injected no-network effect, so worker readiness gates
 `RUNNING` and both stop controls preserve the bounded data-plane shutdown order.
 
-Additional backends, production request ingress, and installer integration
+An OS interception source, additional backends, and installer integration
 remain later steps and must keep every v1 recording harness available for
 regression tests. The worker
 reclassifies normalized hosts through the active validated
@@ -178,5 +199,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-service-host-v1.json`,
 `contracts/windows-data-plane-v1.json`, `contracts/windows-worker-host-v1.json`,
 `contracts/windows-direct-connector-v1.json`,
+`contracts/windows-direct-ingress-v1.json`,
 and the existing routing, recovery, StatusV2, manifest, signed-bundle, and
 activation contracts.

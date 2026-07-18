@@ -315,6 +315,19 @@ reset after partial payload. The production SCM host deliberately remains
 no-network until a separate ingress can provide trusted numeric endpoint
 evidence and an adapter-owned client stream; no resolver or multi-backend
 transport was added.
+Windows direct ingress v1 now binds that numeric endpoint to fresh
+`original_destination` evidence, the reducer-issued request/session identity,
+and one non-cloneable accepted client stream. Preloaded bytes are rejected and
+backend payload is reported only after client delivery. The relay bounds client
+and backend reads, channels, connector buffering, retained state, and both
+backpressure intervals. Client-first close cancels without fabricating a
+backend failure; upstream stall is an explicit reset. A native loopback gate
+drives slow multi-megabyte traffic in both directions plus terminal
+backpressure, reset, cancellation, deadline, and shutdown paths. This still
+does not activate production traffic: the SCM host stays no-network until an
+independently reviewed Windows interception source can provide the owned stream
+and original-destination evidence without adding DNS or route selection to the
+relay.
 
 ## M5 - Packet-Level Capabilities
 

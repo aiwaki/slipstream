@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_direct_ingress",
+  "contract_version": 1,
+  "invariants": {
+    "active_policy_admission_required": true,
+    "backend_is_direct_only": true,
+    "adapter_owned_client_stream_required": true,
+    "endpoint_evidence_source": "original_destination",
+    "endpoint_evidence_max_age_ms": 1000,
+    "preloaded_payload_forbidden": true,
+    "payload_counted_after_client_delivery": true,
+    "bidirectional_backpressure_is_bounded": true,
+    "client_close_cancels_without_backend_failure": true,
+    "name_resolution": false,
+    "external_dns_proxy_pac_vpn_read_only": true
+  },
+  "vectors": [
+    {
+      "name": "admit-owned-direct-stream",
+      "request": {
+        "connector_request": {
+          "session_id": 7,
+          "data_plane_request": {
+            "request_id": "github-owned",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1010
+          },
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 520,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 11,
+          "request_id": "github-owned",
+          "session_id": 7,
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 1010
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected": {"accepted": true, "connection_id": 11, "endpoint": "127.0.0.1:443", "client_read_chunk_bytes": 4096, "backpressure_timeout_ms": 500, "error": ""}
+    },
+    {
+      "name": "reject-preloaded-unowned-payload",
+      "request": {
+        "connector_request": {
+          "session_id": 7,
+          "data_plane_request": {
+            "request_id": "preloaded",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1010
+          },
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 520,
+          "initial_payload": [1, 2, 3],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 12,
+          "request_id": "preloaded",
+          "session_id": 7,
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 1010
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected": {"accepted": false, "connection_id": 0, "endpoint": "", "client_read_chunk_bytes": 0, "backpressure_timeout_ms": 0, "error": "preloaded_payload_forbidden"}
+    },
+    {
+      "name": "reject-endpoint-evidence-mismatch",
+      "request": {
+        "connector_request": {
+          "session_id": 8,
+          "data_plane_request": {
+            "request_id": "endpoint-mismatch",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1010
+          },
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 520,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 13,
+          "request_id": "endpoint-mismatch",
+          "session_id": 8,
+          "endpoint": {"address": "127.0.0.1", "port": 8443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 1010
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected": {"accepted": false, "connection_id": 0, "endpoint": "", "client_read_chunk_bytes": 0, "backpressure_timeout_ms": 0, "error": "evidence_endpoint_mismatch"}
+    },
+    {
+      "name": "reject-stale-endpoint-evidence",
+      "request": {
+        "connector_request": {
+          "session_id": 9,
+          "data_plane_request": {
+            "request_id": "stale-evidence",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 0,
+            "first_payload_deadline_at_ms": 2000
+          },
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "issued_at_ms": 1001,
+          "connect_deadline_at_ms": 1500,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 14,
+          "request_id": "stale-evidence",
+          "session_id": 9,
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "observed_at_ms": 0,
+          "valid_until_ms": 2000
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected": {"accepted": false, "connection_id": 0, "endpoint": "", "client_read_chunk_bytes": 0, "backpressure_timeout_ms": 0, "error": "stale_endpoint_evidence"}
+    },
+    {
+      "name": "reject-evidence-identity-mismatch",
+      "request": {
+        "connector_request": {
+          "session_id": 10,
+          "data_plane_request": {
+            "request_id": "identity",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1010
+          },
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 520,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 15,
+          "request_id": "different",
+          "session_id": 10,
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 1010
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 500
+      },
+      "expected": {"accepted": false, "connection_id": 0, "endpoint": "", "client_read_chunk_bytes": 0, "backpressure_timeout_ms": 0, "error": "evidence_identity_mismatch"}
+    },
+    {
+      "name": "reject-unbounded-backpressure",
+      "request": {
+        "connector_request": {
+          "session_id": 11,
+          "data_plane_request": {
+            "request_id": "unbounded-backpressure",
+            "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+            "backend": "direct",
+            "started_at_ms": 10,
+            "first_payload_deadline_at_ms": 1010
+          },
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "issued_at_ms": 20,
+          "connect_deadline_at_ms": 520,
+          "initial_payload": [],
+          "max_read_chunk_bytes": 4096
+        },
+        "endpoint_evidence": {
+          "source": "original_destination",
+          "connection_id": 16,
+          "request_id": "unbounded-backpressure",
+          "session_id": 11,
+          "endpoint": {"address": "127.0.0.1", "port": 443},
+          "observed_at_ms": 10,
+          "valid_until_ms": 1010
+        },
+        "max_client_read_chunk_bytes": 4096,
+        "backpressure_timeout_ms": 5001
+      },
+      "expected": {"accepted": false, "connection_id": 0, "endpoint": "", "client_read_chunk_bytes": 0, "backpressure_timeout_ms": 0, "error": "invalid_backpressure_timeout"}
+    }
+  ],
+  "event_vectors": [
+    {
+      "name": "connected",
+      "event": {"kind": "connected", "request_id": "direct", "session_id": 3, "connection_id": 9},
+      "now_ms": 20,
+      "expected": {"kind": "backend_connected", "now_ms": 20, "request_id": "direct", "session_id": 3}
+    },
+    {
+      "name": "payload-counted-after-delivery",
+      "event": {"kind": "payload_delivered", "request_id": "direct", "session_id": 3, "connection_id": 9, "bytes": 4096},
+      "now_ms": 25,
+      "expected": {"kind": "payload_received", "now_ms": 25, "request_id": "direct", "session_id": 3, "bytes": 4096}
+    },
+    {
+      "name": "client-close-requests-cancellation",
+      "event": {"kind": "client_closed", "request_id": "direct", "session_id": 3, "connection_id": 9, "reason": "eof"},
+      "now_ms": 30,
+      "expected": {"kind": "cancel_requested", "now_ms": 30, "request_id": "direct", "session_id": 3}
+    },
+    {
+      "name": "backend-reset",
+      "event": {"kind": "backend_reset", "request_id": "direct", "session_id": 3, "connection_id": 9, "reason": "stream read failed"},
+      "now_ms": 35,
+      "expected": {"kind": "backend_reset", "now_ms": 35, "request_id": "direct", "session_id": 3, "reason": "stream read failed"}
+    },
+    {
+      "name": "cancelled",
+      "event": {"kind": "cancelled", "request_id": "direct", "session_id": 3, "connection_id": 9, "reason": "caller"},
+      "now_ms": 40,
+      "expected": {"kind": "session_cancelled", "now_ms": 40, "request_id": "direct", "session_id": 3}
+    }
+  ]
+}
