@@ -328,6 +328,14 @@ pub fn encode_windows_wfp_redirect_context_v1(
     .encode())
 }
 
+/// Validates the exact service/listener identity shared by the WFP wire and
+/// runtime lifecycle contracts without exposing decoded secret-bearing bytes.
+pub fn validate_windows_wfp_capture_identity(
+    identity: &WindowsWfpCaptureIdentity,
+) -> Result<(), WindowsWfpCaptureErrorCode> {
+    validate_identity(identity).map(|_| ())
+}
+
 pub fn decode_windows_wfp_redirect_context_v1(
     encoded: &[u8],
 ) -> Result<WindowsWfpRedirectContextV1, WindowsWfpCaptureErrorCode> {

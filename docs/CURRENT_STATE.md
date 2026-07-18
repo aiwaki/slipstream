@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through main commit
-`f18033b12554992e61a5f25e45a47254c0f1ba88` after merged
-[PR #162](https://github.com/aiwaki/slipstream/pull/162) and its successful
+`d5fa6f1c8e14f37344681a16e4bcaf1ab1bc1f33` after merged
+[PR #163](https://github.com/aiwaki/slipstream/pull/163) and its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows WFP wire/handoff v1 implemented; native effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. [PR #162](https://github.com/aiwaki/slipstream/pull/162) selected WFP `ALE_CONNECT_REDIRECT_V4/V6` with dynamic management-callout/filter ownership, exact target identity, redirect-loop protection, and filter-first teardown. `windows-wfp-capture-v1` now freezes a fixed 128-byte service/driver context, native and IPv4-mapped destination safety, stale-identity rejection, bounded opaque redirect records, source-issued connection identity, failure-atomic admission, and a records-before-connect type-state handoff that consumes a fully revalidated direct-ingress request. Direct connector v1 and the production no-network SCM host remain unchanged. The WFP runtime lifecycle/native implementation, local/geo backends, Android/Linux adapters, and iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows WFP wire/handoff and pure runtime lifecycle v1 implemented; native effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. [PR #162](https://github.com/aiwaki/slipstream/pull/162) selected WFP `ALE_CONNECT_REDIRECT_V4/V6`; [PR #163](https://github.com/aiwaki/slipstream/pull/163) froze the fixed 128-byte service/driver context, exact identity and records-before-connect handoff. `windows-wfp-runtime-v1` now freezes kernel-before-listener-before-atomic-session startup, session-close-first teardown, exact filter-absence gating, per-attempt monotonic event binding, retained safety resources while a filter remains, bounded stream drain, and non-replaying effect recovery. Direct connector v1 and the production no-network SCM host remain unchanged. Native WFP/WinSock/driver effects, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -164,15 +164,20 @@ main in
 [CI run 29633994824](https://github.com/aiwaki/slipstream/actions/runs/29633994824),
 and its dependency and vendored-Geph audits passed in
 [run 29633994821](https://github.com/aiwaki/slipstream/actions/runs/29633994821).
+The exact WFP wire/handoff merge in PR #163 passed all required jobs again on
+main in
+[CI run 29635704622](https://github.com/aiwaki/slipstream/actions/runs/29635704622),
+and its dependency and vendored-Geph audits passed in
+[run 29635704616](https://github.com/aiwaki/slipstream/actions/runs/29635704616).
 
 ## Next Verified Action
 
-Freeze an effect-injected WFP runtime lifecycle reducer that orders kernel
-callout registration, exact listener readiness, the atomic dynamic-session
-transaction, first-fail-safe session close, exact filter-absence proof,
-bounded stream drain, and kernel callout unregister. Keep it pure and
-deterministic first: do not load a driver, add a filter, mutate direct connector
-v1, or compose capture into the production SCM host in that change.
+Implement the minimal native V4/V6 WFP callout and dynamic-session controller
+behind the frozen lifecycle effects. First qualify kernel registration before
+the transaction, listener readiness before filters, all management objects in
+one dynamic-session transaction, session-close/filter-absence ordering, and
+failure-atomic compensation on disposable Windows. Do not mutate direct
+connector v1 or compose capture into the production SCM host yet.
 
 ## External Gates
 

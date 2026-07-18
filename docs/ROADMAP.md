@@ -370,22 +370,30 @@ the redirect-record plan is marked applied. This phase calls no WFP or socket
 API, does not change direct connector v1, and is not composed into the
 production host.
 
+The second pure phase is now frozen as
+`contracts/windows-wfp-runtime-v1.json` and `wfp_runtime::v1`. The lifecycle
+binds every completion and timer to the exact service/capture identity,
+reducer-issued monotonic runtime attempt, and session generation. Kernel
+callouts precede listener readiness and one atomic dynamic-session commit.
+Session close is the sole first stop effect. Exact filter absence gates
+listener stop, bounded stream drain and kernel unregister; observed filter
+presence retains the listener and callouts while scheduling a recheck. Effect
+batches resume from exact cursors. This phase still invokes no WFP, Winsock or
+driver API and remains disconnected from the production host.
+
 Remaining implementation stays phased and closed to production traffic:
 
-1. Freeze an effect-injected runtime lifecycle reducer for kernel registration,
-   listener readiness, the atomic dynamic-session transaction, first-fail-safe
-   session close, filter-absence proof, callout unregister, and bounded drain.
-2. Implement the minimal V4/V6 callout and dynamic-session controller behind
+1. Implement the minimal V4/V6 callout and dynamic-session controller behind
    injected effects; qualify kernel-registration-before-transaction,
    listener-before-filter, management-callout/filter atomicity, and
    filter-removal-before-drain/unregister ordering.
-3. Implement the native WFP-specific socket effect that consumes the frozen
+2. Implement the native WFP-specific socket effect that consumes the frozen
    one-shot record plan, applies accepted redirect records, and only then binds
    or connects. Keep direct connector v1 frozen.
-4. Qualify exact ownership, loop prevention, another redirector, crash, reboot,
+3. Qualify exact ownership, loop prevention, another redirector, crash, reboot,
    bounded shutdown, update, uninstall, and external VPN/DNS/proxy coexistence
    on disposable x64 and ARM64 Windows.
-5. Add architecture-complete signed-driver packaging. Only then may the capture
+4. Add architecture-complete signed-driver packaging. Only then may the capture
    source be composed into the production SCM host.
 
 Resolver choice, local/geo backends, and installer UI remain outside this
