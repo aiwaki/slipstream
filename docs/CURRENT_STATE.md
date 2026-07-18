@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through main commit
-`d5fa6f1c8e14f37344681a16e4bcaf1ab1bc1f33` after merged
-[PR #163](https://github.com/aiwaki/slipstream/pull/163) and its successful
+`d4f12de7cf91ef1897ae24b194ff76e84386c681` after merged
+[PR #164](https://github.com/aiwaki/slipstream/pull/164) and its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows WFP wire/handoff and pure runtime lifecycle v1 implemented; native effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. [PR #162](https://github.com/aiwaki/slipstream/pull/162) selected WFP `ALE_CONNECT_REDIRECT_V4/V6`; [PR #163](https://github.com/aiwaki/slipstream/pull/163) froze the fixed 128-byte service/driver context, exact identity and records-before-connect handoff. `windows-wfp-runtime-v1` now freezes kernel-before-listener-before-atomic-session startup, session-close-first teardown, exact filter-absence gating, per-attempt monotonic event binding, retained safety resources while a filter remains, bounded stream drain, and non-replaying effect recovery. Direct connector v1 and the production no-network SCM host remain unchanged. Native WFP/WinSock/driver effects, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows WFP wire/handoff, runtime lifecycle, and management-session v1 implemented; kernel driver absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. [PR #162](https://github.com/aiwaki/slipstream/pull/162) selected WFP `ALE_CONNECT_REDIRECT_V4/V6`; [PR #163](https://github.com/aiwaki/slipstream/pull/163) froze the fixed 128-byte service/driver context, exact identity and records-before-connect handoff; [PR #164](https://github.com/aiwaki/slipstream/pull/164) froze kernel-before-listener-before-atomic-session startup and filter-absence-first teardown. `windows-wfp-session-v1` now fixes the seven owned management keys, a separate 128-byte provider context, non-replaceable kernel/listener proofs, one failure-atomic dynamic transaction, and an exact same-generation post-close filter inspection. The native `Fwpm*` boundary remains disconnected from the production no-network SCM host; disposable CI exercises only an empty dynamic begin/abort/close until a real kernel callout is registered. The kernel callout/driver, redirect-record socket effect, local/geo backends, Android/Linux adapters, and iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -169,15 +169,25 @@ main in
 [CI run 29635704622](https://github.com/aiwaki/slipstream/actions/runs/29635704622),
 and its dependency and vendored-Geph audits passed in
 [run 29635704616](https://github.com/aiwaki/slipstream/actions/runs/29635704616).
+The pure WFP runtime lifecycle, monotonic attempt binding, over-capacity stream
+rejection, retained-resource teardown, and non-replaying effect recovery in
+PR #164 passed all required jobs in
+[CI run 29637212615](https://github.com/aiwaki/slipstream/actions/runs/29637212615),
+and its dependency and vendored-Geph audits passed in
+[run 29637212612](https://github.com/aiwaki/slipstream/actions/runs/29637212612).
+The exact merged PR #164 commit passed again on main in
+[CI run 29637402421](https://github.com/aiwaki/slipstream/actions/runs/29637402421),
+and its dependency and vendored-Geph audits passed in
+[run 29637402397](https://github.com/aiwaki/slipstream/actions/runs/29637402397).
 
 ## Next Verified Action
 
-Implement the minimal native V4/V6 WFP callout and dynamic-session controller
-behind the frozen lifecycle effects. First qualify kernel registration before
-the transaction, listener readiness before filters, all management objects in
-one dynamic-session transaction, session-close/filter-absence ordering, and
-failure-atomic compensation on disposable Windows. Do not mutate direct
-connector v1 or compose capture into the production SCM host yet.
+Implement the minimal kernel V4/V6 WFP connect-redirect callout and disposable
+registrar, then use the frozen management-session controller to qualify one
+real full object/filter transaction. Prove registration before transaction,
+listener readiness before filters, self-loop prevention, session-close/filter
+absence before drain and unregister, and crash fail-open behavior. Do not
+mutate direct connector v1 or compose capture into the production SCM host yet.
 
 ## External Gates
 

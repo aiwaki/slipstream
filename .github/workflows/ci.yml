@@ -242,6 +242,11 @@ jobs:
           SLIPSTREAM_WINDOWS_DIRECT_INGRESS_CI: "1"
         run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test direct_ingress_windows native_direct_ingress_loopback_contract_is_bounded_and_owned -- --exact --test-threads=1
 
+      - name: Qualify empty WFP dynamic-session rollback without live filters
+        env:
+          SLIPSTREAM_WINDOWS_WFP_SESSION_CI: "1"
+        run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml wfp_session::windows::tests::empty_dynamic_session_transaction_is_disposable_and_filter_free -- --exact --test-threads=1
+
       - name: Lint Windows contracts, ingress, worker host, ownership, lifecycle state, and SCM effects
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --all-features -- -D warnings
 

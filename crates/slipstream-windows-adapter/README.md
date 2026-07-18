@@ -124,6 +124,26 @@ retryable reject effect and never enters runtime state. The recording effect
 validates resource order and stale-event binding for each exact runtime attempt
 without WFP, Winsock, a driver, or production-host composition.
 
+`wfp_session::v1` is the first native WFP management boundary behind that
+reducer. It freezes seven fixed owned object keys and a separate 128-byte
+provider context that binds the exact service, runtime, session, target PID,
+dual-stack loopback listeners, executable hash, and TCP/443 capture scope. The
+controller refuses an atomic session command until the same runtime binding has
+successful kernel-registration and listener-readiness proofs; those proofs
+cannot be replaced in place. It also refuses listener stop or kernel unregister
+until an inspection bound to the last attempted session generation proves both
+exact filter keys absent.
+
+On Windows, `WindowsFwpmManagementApi` opens an ephemeral dynamic engine
+session and can add the provider, sublayer, V4/V6 management callouts, general
+provider context, and terminating V4/V6 filters in one transaction. Every
+partial failure aborts the transaction and closes the session; there is no
+delete-by-key recovery. CI currently qualifies only an empty begin/abort/close
+cycle and exact filter absence. It intentionally does not commit live filters
+until a disposable driver has registered both matching kernel callouts, because
+an unavailable terminating callout can block matching traffic. The production
+SCM host does not import this module.
+
 `worker_host::v1` composes that reducer with `WindowsServiceHostRuntimeV1`
 without changing either frozen contract. Worker readiness precedes SCM
 `RUNNING`; startup failure produces a nonzero `STOPPED`; and host-owned stop or
@@ -260,5 +280,6 @@ The adapter executes `contracts/platform-adapter-v1.json`,
 `contracts/windows-capture-source-v1.json`,
 `contracts/windows-wfp-capture-v1.json`,
 `contracts/windows-wfp-runtime-v1.json`,
+`contracts/windows-wfp-session-v1.json`,
 and the existing routing, recovery, StatusV2, manifest, signed-bundle, and
 activation contracts.
