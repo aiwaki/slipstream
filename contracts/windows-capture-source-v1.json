@@ -1,0 +1,369 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_capture_source",
+  "contract_version": 1,
+  "invariants": {
+    "interception_technology": "unspecified",
+    "production_service_host_network_effects": false,
+    "external_admission_required": true,
+    "backend_is_direct_only": true,
+    "route_selection": false,
+    "name_resolution": false,
+    "one_stream_per_resource": true,
+    "monotonic_connection_ids": true,
+    "duplicate_resource_id_preserves_existing_ownership": true,
+    "endpoint_evidence_source": "original_destination",
+    "endpoint_evidence_max_age_ms": 1000,
+    "absolute_connector_deadlines_are_not_rebased": true,
+    "handoff_is_failure_atomic": true,
+    "failed_handoff_retains_source_ownership": true,
+    "stop_admission_precedes_resource_close": true,
+    "shutdown_is_bounded": true,
+    "terminal_retention_is_bounded": true,
+    "late_events_cannot_resurrect_source": true,
+    "effect_batches_expose_recoverable_partial_progress": true,
+    "external_dns_proxy_pac_vpn_read_only": true
+  },
+  "config": {
+    "max_staged_connections": 2,
+    "max_retained_terminal_connections": 4,
+    "admission_timeout_ms": 500,
+    "shutdown_timeout_ms": 100
+  },
+  "vectors": [
+    {
+      "name": "captured-stream-hands-off-after-external-admission",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 101, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {
+          "kind": "admission_granted",
+          "now_ms": 20,
+          "connection_id": 1,
+          "connector_request": {
+            "session_id": 7,
+            "data_plane_request": {
+              "request_id": "github-captured",
+              "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+              "backend": "direct",
+              "started_at_ms": 10,
+              "first_payload_deadline_at_ms": 1000
+            },
+            "endpoint": {"address": "127.0.0.1", "port": 443},
+            "issued_at_ms": 20,
+            "connect_deadline_at_ms": 120,
+            "initial_payload": [],
+            "max_read_chunk_bytes": 4096
+          },
+          "max_client_read_chunk_bytes": 4096,
+          "backpressure_timeout_ms": 500
+        }
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 2,
+        "connections": ["1#101:handed_off:false:127.0.0.1:443:handed_off"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#101:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "handoff:1#101:github-captured#7"
+        ]
+      }
+    },
+    {
+      "name": "mismatched-admission-closes-captured-stream",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 102, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {
+          "kind": "admission_granted",
+          "now_ms": 20,
+          "connection_id": 1,
+          "connector_request": {
+            "session_id": 8,
+            "data_plane_request": {
+              "request_id": "endpoint-mismatch",
+              "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+              "backend": "direct",
+              "started_at_ms": 10,
+              "first_payload_deadline_at_ms": 1000
+            },
+            "endpoint": {"address": "127.0.0.1", "port": 8443},
+            "issued_at_ms": 20,
+            "connect_deadline_at_ms": 120,
+            "initial_payload": [],
+            "max_read_chunk_bytes": 4096
+          },
+          "max_client_read_chunk_bytes": 4096,
+          "backpressure_timeout_ms": 500
+        }
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 2,
+        "connections": ["1#102:closed:false:127.0.0.1:443:invalid_admission:evidence_endpoint_mismatch"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#102:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "close:1#102:invalid_admission:evidence_endpoint_mismatch"
+        ]
+      }
+    },
+    {
+      "name": "admission-deadline-closes-unhanded-stream",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 103, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {"kind": "admission_deadline", "now_ms": 510, "connection_id": 1}
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 2,
+        "connections": ["1#103:closed:false:127.0.0.1:443:admission_deadline"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#103:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "close:1#103:admission_deadline"
+        ]
+      }
+    },
+    {
+      "name": "protected-local-bypass-cannot-enter-direct-ingress",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 108, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {
+          "kind": "admission_granted",
+          "now_ms": 20,
+          "connection_id": 1,
+          "connector_request": {
+            "session_id": 9,
+            "data_plane_request": {
+              "request_id": "discord-protected",
+              "policy": {"host": "updates.discord.com", "route_class": "local_bypass", "service_group": "discord", "strategy_set": "fake_only"},
+              "backend": "local_engine",
+              "started_at_ms": 10,
+              "first_payload_deadline_at_ms": 1000
+            },
+            "endpoint": {"address": "127.0.0.1", "port": 443},
+            "issued_at_ms": 20,
+            "connect_deadline_at_ms": 120,
+            "initial_payload": [],
+            "max_read_chunk_bytes": 4096
+          },
+          "max_client_read_chunk_bytes": 4096,
+          "backpressure_timeout_ms": 500
+        }
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 2,
+        "connections": ["1#108:closed:false:127.0.0.1:443:invalid_admission:invalid_connector_request"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#108:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "close:1#108:invalid_admission:invalid_connector_request"
+        ]
+      }
+    },
+    {
+      "name": "expired-connector-deadline-cannot-be-rebased",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 109, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {
+          "kind": "admission_granted",
+          "now_ms": 120,
+          "connection_id": 1,
+          "connector_request": {
+            "session_id": 10,
+            "data_plane_request": {
+              "request_id": "expired-connector",
+              "policy": {"host": "github.com", "route_class": "direct_passthrough", "service_group": "github", "strategy_set": "direct"},
+              "backend": "direct",
+              "started_at_ms": 10,
+              "first_payload_deadline_at_ms": 1000
+            },
+            "endpoint": {"address": "127.0.0.1", "port": 443},
+            "issued_at_ms": 20,
+            "connect_deadline_at_ms": 120,
+            "initial_payload": [],
+            "max_read_chunk_bytes": 4096
+          },
+          "max_client_read_chunk_bytes": 4096,
+          "backpressure_timeout_ms": 500
+        }
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 2,
+        "connections": ["1#109:closed:false:127.0.0.1:443:expired_connector_deadline"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#109:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "close:1#109:expired_connector_deadline"
+        ]
+      }
+    },
+    {
+      "name": "invalid-resource-token-is-closed-without-state",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 0, "original_destination": {"address": "127.0.0.1", "port": 443}}
+      ],
+      "expected": {
+        "phase": "ready",
+        "next_connection_id": 1,
+        "connections": [],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "close:none#0:invalid_resource_id"
+        ]
+      }
+    },
+    {
+      "name": "stop-refuses-new-admission-and-closes-owned-stream",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "connection_captured", "now_ms": 10, "resource_id": 104, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {"kind": "stop_requested", "now_ms": 20},
+        {"kind": "source_stopped", "now_ms": 30}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "next_connection_id": 2,
+        "connections": ["1#104:closed:false:127.0.0.1:443:source_shutdown"],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "offer:1#104:127.0.0.1:443@10..510",
+          "admission_deadline:1@510",
+          "stop_accepting",
+          "close:1#104:source_shutdown",
+          "shutdown_deadline@120",
+          "report_source_stopped"
+        ]
+      }
+    },
+    {
+      "name": "shutdown-deadline-force-stops-source",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "stop_requested", "now_ms": 10},
+        {"kind": "shutdown_deadline", "now_ms": 110}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "next_connection_id": 1,
+        "connections": [],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "stop_accepting",
+          "shutdown_deadline@110",
+          "force_stop_source",
+          "report_source_stopped"
+        ]
+      }
+    },
+    {
+      "name": "late-capture-and-readiness-cannot-resurrect-stopped-source",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "source_ready", "now_ms": 1},
+        {"kind": "stop_requested", "now_ms": 10},
+        {"kind": "source_stopped", "now_ms": 20},
+        {"kind": "connection_captured", "now_ms": 30, "resource_id": 106, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {"kind": "source_ready", "now_ms": 40}
+      ],
+      "expected": {
+        "phase": "stopped",
+        "next_connection_id": 1,
+        "connections": [],
+        "effects": [
+          "start_source",
+          "report_source_ready",
+          "stop_accepting",
+          "shutdown_deadline@110",
+          "report_source_stopped",
+          "close:none#106:source_not_ready"
+        ]
+      }
+    },
+    {
+      "name": "startup-failure-cleans-racing-stream-and-stays-terminal",
+      "started_at_ms": 0,
+      "events": [
+        {"kind": "start_requested", "now_ms": 0},
+        {"kind": "connection_captured", "now_ms": 1, "resource_id": 107, "original_destination": {"address": "127.0.0.1", "port": 443}},
+        {"kind": "source_startup_failed", "now_ms": 2, "reason": "driver unavailable"},
+        {"kind": "source_ready", "now_ms": 3}
+      ],
+      "expected": {
+        "phase": "failed",
+        "next_connection_id": 1,
+        "connections": [],
+        "effects": [
+          "start_source",
+          "close:none#107:source_not_ready",
+          "force_stop_source",
+          "report_source_startup_failed:driver unavailable"
+        ]
+      }
+    }
+  ],
+  "effect_recovery_vectors": [
+    {
+      "name": "resume-admission-schedule-without-reoffering",
+      "vector": "captured-stream-hands-off-after-external-admission",
+      "event_index": 2,
+      "fail_command": "schedule_admission_deadline",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    },
+    {
+      "name": "retry-failure-atomic-handoff",
+      "vector": "captured-stream-hands-off-after-external-admission",
+      "event_index": 3,
+      "fail_command": "handoff_ingress",
+      "failed_command_index": 0,
+      "next_command_index": 0
+    },
+    {
+      "name": "resume-shutdown-after-admission-stopped",
+      "vector": "stop-refuses-new-admission-and-closes-owned-stream",
+      "event_index": 3,
+      "fail_command": "close_captured_stream",
+      "failed_command_index": 1,
+      "next_command_index": 1
+    }
+  ]
+}

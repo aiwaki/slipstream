@@ -330,6 +330,27 @@ the SCM host stays no-network until an independently reviewed Windows
 interception source can provide the owned stream and original-destination
 evidence without adding DNS or route selection to the relay.
 
+Windows capture source v1 now freezes the lifecycle immediately above that
+ingress without choosing an interception technology. A native adapter may
+stage one accepted stream under an opaque one-shot resource ID and expose only
+fresh canonical numeric original-destination evidence to an external admission
+authority. The source allocates monotonic connection IDs, retains every stream
+until an independently admitted direct request is handed off, and closes
+invalid, rejected, expired, startup-racing, or shutdown-racing resources. A
+failed handoff is failure-atomic and keeps source ownership for retry or
+explicit compensation. Admission stop precedes bounded drain, effect batches
+resume from exact cursors, terminal retention is bounded, and late events
+cannot resurrect the source. The pure recording harness has no resolver,
+backend selection, native interception API, or system-network mutation. The
+production SCM host still does not compose it and remains no-network.
+
+The next Windows step is a separate, reviewed selection and disposable
+qualification of a native capture mechanism behind this contract. It must prove
+exact ownership, fail-safe disable/uninstall, reboot and crash compensation,
+bounded shutdown, and coexistence with external VPN/DNS/proxy state before it
+may be wired into the production host. Resolver choice, local/geo backends, and
+installer UI remain outside that change.
+
 ## M5 - Packet-Level Capabilities
 
 Only after adapters stabilize:

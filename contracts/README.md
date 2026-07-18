@@ -80,6 +80,12 @@ Slipstream routing decisions and bounded recovery primitives.
   bytes, counts backend payload only after client delivery, bounds both relay
   directions, and maps client close to cancellation rather than a fabricated
   backend failure.
+- `windows-capture-source-v1.json` freezes the technology-neutral source above
+  direct ingress. It owns each accepted stream under a one-shot resource token,
+  offers only fresh numeric original-destination evidence to an external
+  admission authority, hands off only a separately admitted direct request,
+  and closes every unhanded stream under bounded startup, admission, and
+  shutdown paths. It does not choose an interception API.
 
 Python's pure implementations live in `spike/routing_policy.py` and
 `spike/routing_recovery.py`, with address and circuit models beside them. Rust
