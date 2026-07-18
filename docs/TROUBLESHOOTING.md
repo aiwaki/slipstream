@@ -142,6 +142,17 @@ readiness succeeds. Uninstall keeps the owned Geph process alive only while the
 root daemon clears PF and drains accepted streams, then removes that exact user
 job before the tray exits.
 
+The 2026-07-19 primary smoke exposed a separate final-step failure: privileged
+daemon/PF cleanup completed, but `/Applications/Slipstream.app` remained. The
+tray had attempted to detach its app-removal shell through macOS
+`/usr/bin/nohup`; in the administrator AppleScript execution context that
+process could fail before the worker started, while all output was discarded.
+App self-removal now uses a one-shot PID-scoped `launchctl submit` worker. The
+worker waits for the tray's post-Geph-cleanup ready marker, validates the bundle
+and exact tray PID, removes the staged bundle, and removes its own launchd label
+on every exit path. The regression test must prove that the app, staged bundle,
+ready marker, and submitted worker are all gone.
+
 ## Geph Exit Locations
 
 The Geph submenu normally lists city-level exits such as `CA / Montreal`. On a
