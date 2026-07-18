@@ -344,12 +344,38 @@ cannot resurrect the source. The pure recording harness has no resolver,
 backend selection, native interception API, or system-network mutation. The
 production SCM host still does not compose it and remains no-network.
 
-The next Windows step is a separate, reviewed selection and disposable
-qualification of a native capture mechanism behind this contract. It must prove
-exact ownership, fail-safe disable/uninstall, reboot and crash compensation,
-bounded shutdown, and coexistence with external VPN/DNS/proxy state before it
-may be wired into the production host. Resolver choice, local/geo backends, and
-installer UI remain outside that change.
+Native TCP capture v1 now selects a minimal WFP callout at
+`ALE_CONNECT_REDIRECT_V4/V6` plus the exact owned Rust service. The driver
+registers the kernel classify callout first. Runtime provider, sublayer,
+`FWPM_CALLOUT` management object, provider context, and filters must then be
+non-persistent, non-boot objects committed together in one dynamic engine
+transaction only after listener and service/driver identity are ready. Closing
+that session is the first stop and crash fail-safe; kernel callout unregister
+and driver unload follow only after exact filter absence. The callout must
+target the exact listener PID, preserve strict versioned original-destination
+context, inspect redirect state to prevent self-loops, and preserve opaque
+redirect records so another WFP proxy can coexist. WinDivert, system proxy/PAC,
+and TUN are not capture-v1 implementations.
+
+Implementation remains phased and closed to production traffic:
+
+1. Freeze a bounded versioned WFP driver/service wire contract and deterministic
+   vectors with no WFP or socket effects.
+2. Implement the minimal V4/V6 callout and dynamic-session controller behind
+   injected effects; qualify kernel-registration-before-transaction,
+   listener-before-filter, management-callout/filter atomicity, and
+   filter-removal-before-drain/unregister ordering.
+3. Add a direct-connector v2 or WFP-specific socket-preparation boundary that
+   applies accepted redirect records before outbound bind/connect. Keep direct
+   connector v1 frozen.
+4. Qualify exact ownership, loop prevention, another redirector, crash, reboot,
+   bounded shutdown, update, uninstall, and external VPN/DNS/proxy coexistence
+   on disposable x64 and ARM64 Windows.
+5. Add architecture-complete signed-driver packaging. Only then may the capture
+   source be composed into the production SCM host.
+
+Resolver choice, local/geo backends, and installer UI remain outside this
+sequence.
 
 ## M5 - Packet-Level Capabilities
 

@@ -9,8 +9,8 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-18, through main commit
-`22f699690f2d40f8953acc52acab096c64183d33` after merged
-[PR #160](https://github.com/aiwaki/slipstream/pull/160) and its successful
+`faefb153e683b162280eeaa46b2718e10157e5b1` after merged
+[PR #161](https://github.com/aiwaki/slipstream/pull/161) and its successful
 exact-main CI and dependency-audit runs linked below.
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
@@ -41,7 +41,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows capture-source v1 contract CI-qualified | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, data-plane, and worker-host boundaries. Disposable Windows CI has qualified the real service install/restart/uninstall lifecycle. Data-plane v1 freezes active-table host reclassification, failure-atomic effects with exact resume cursors, adapter-owned closure, bounded cancellation, monotonic session identity, and bounded terminal retention. Worker-host v1 gates SCM `RUNNING` on worker readiness, orders `STOP_PENDING` before bounded drain, permits `STOPPED` only after worker termination, and covers startup failure, deadline force-close, late completion, and mixed-effect recovery through deterministic vectors. The production host consumes it through an injected no-network effect, and PR #156 compiled and exercised that path against the real Windows SCM. Direct connector v1 in [PR #157](https://github.com/aiwaki/slipstream/pull/157) admits only an active-policy-validated direct session plus a canonical numeric endpoint. Direct ingress v1 in [PR #158](https://github.com/aiwaki/slipstream/pull/158) binds fresh original-destination evidence and a non-cloneable owned client stream, reports payload only after delivery, and applies deterministic bounded backpressure. Capture-source v1 in [PR #160](https://github.com/aiwaki/slipstream/pull/160) freezes the technology-neutral lifecycle above that relay: external admission, one-shot resource ownership, failure-atomic handoff, explicit compensation, absolute connector deadlines, admission timeout, stop-before-close ordering, bounded shutdown, late-event suppression, duplicate-resource rejection, and bounded terminal retention. It contains no native interception API and is not composed by the production SCM host, which remains no-network. Native Windows capture, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. |
+| M4 - Cross-Platform Core | Windows capture-source v1 CI-qualified; WFP selected | `crates/slipstream-core` owns the pure routing, recovery, StatusV2, signed-policy, and activation models. `crates/slipstream-windows-adapter` executes every frozen routing/recovery vector and owns separate service-lifecycle, query-only observer, ownership-proof, payload, durable-state, action-specific SCM, single-lock native composition, command-wide controller, production host, data-plane, and worker-host boundaries. Disposable Windows CI has qualified the real service install/restart/uninstall lifecycle. Data-plane v1 freezes active-table host reclassification, failure-atomic effects with exact resume cursors, adapter-owned closure, bounded cancellation, monotonic session identity, and bounded terminal retention. Worker-host v1 gates SCM `RUNNING` on worker readiness, orders `STOP_PENDING` before bounded drain, permits `STOPPED` only after worker termination, and covers startup failure, deadline force-close, late completion, and mixed-effect recovery through deterministic vectors. The production host consumes it through an injected no-network effect, and PR #156 compiled and exercised that path against the real Windows SCM. Direct connector v1 in [PR #157](https://github.com/aiwaki/slipstream/pull/157) admits only an active-policy-validated direct session plus a canonical numeric endpoint. Direct ingress v1 in [PR #158](https://github.com/aiwaki/slipstream/pull/158) binds fresh original-destination evidence and a non-cloneable owned client stream, reports payload only after delivery, and applies deterministic bounded backpressure. Capture-source v1 in [PR #160](https://github.com/aiwaki/slipstream/pull/160) freezes the technology-neutral lifecycle above that relay: external admission, one-shot resource ownership, failure-atomic handoff, explicit compensation, absolute connector deadlines, admission timeout, stop-before-close ordering, bounded shutdown, late-event suppression, duplicate-resource rejection, and bounded terminal retention. Native capture v1 selects WFP `ALE_CONNECT_REDIRECT_V4/V6` with a dynamic non-persistent `FWPM_CALLOUT` management object and filters committed after kernel registration and listener readiness, exact target identity, redirect-loop protection, filter-first teardown, and required outbound redirect-record propagation. The production SCM host remains no-network. The WFP wire contract and native implementation, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -154,14 +154,18 @@ The exact merged PR #160 commit passed all required jobs again on main in
 [CI run 29632468996](https://github.com/aiwaki/slipstream/actions/runs/29632468996),
 and its dependency and vendored-Geph audits passed in
 [run 29632468994](https://github.com/aiwaki/slipstream/actions/runs/29632468994).
+The checkpoint commit in PR #161 passed all required jobs again on main in
+[CI run 29632983193](https://github.com/aiwaki/slipstream/actions/runs/29632983193),
+and its dependency and vendored-Geph audits passed in
+[run 29632983199](https://github.com/aiwaki/slipstream/actions/runs/29632983199).
 
 ## Next Verified Action
 
-Review and select a native Windows capture mechanism behind capture-source v1,
-then qualify it on disposable Windows for exact ownership, bounded shutdown,
-crash/reboot compensation, and fail-safe disable/uninstall. Keep the production
-SCM host no-network until those gates pass. Do not add a resolver, local/geo
-backends, or installer UI inside the capture/relay boundary.
+Freeze the bounded versioned WFP driver/service context and redirect-record
+handoff as pure data and deterministic vectors. Do not load a driver, add a WFP
+filter, mutate direct connector v1, or compose capture into the production SCM
+host in that change. Native effects follow only after the contract proves exact
+identity, stale-generation rejection, bounds, and non-replaying ownership.
 
 ## External Gates
 
