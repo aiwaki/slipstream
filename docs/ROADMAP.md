@@ -381,12 +381,28 @@ presence retains the listener and callouts while scheduling a recheck. Effect
 batches resume from exact cursors. This phase still invokes no WFP, Winsock or
 driver API and remains disconnected from the production host.
 
+The management-session phase is now frozen as
+`contracts/windows-wfp-session-v1.json` and `wfp_session::v1`. Seven fixed
+owned keys identify the provider, sublayer, V4/V6 management callouts,
+provider context, and filters. A separate 128-byte provider context binds the
+exact service/runtime/session identity, target PID, executable hash,
+dual-stack loopback listeners, and TCP/443 scope. The controller requires
+same-binding kernel-registration and listener-readiness proofs before calling
+the transaction and refuses teardown until both filter keys are proven absent.
+The native Windows effect uses one dynamic engine transaction and compensates
+every partial failure with transaction abort and session close; it never uses
+broad delete-by-key recovery. Disposable CI opens an empty dynamic session,
+begins and aborts an empty transaction, closes it, and proves both filter keys
+absent. It does not commit live filters without a registered disposable kernel
+callout, and the production host remains disconnected.
+
 Remaining implementation stays phased and closed to production traffic:
 
-1. Implement the minimal V4/V6 callout and dynamic-session controller behind
-   injected effects; qualify kernel-registration-before-transaction,
-   listener-before-filter, management-callout/filter atomicity, and
-   filter-removal-before-drain/unregister ordering.
+1. Implement the minimal kernel V4/V6 connect-redirect callout and disposable
+   registrar, then qualify the already-frozen controller with a real full
+   management-object/filter commit. Prove kernel registration before the
+   transaction, listener readiness before filters, loop prevention, and exact
+   filter removal before listener drain or kernel unregister.
 2. Implement the native WFP-specific socket effect that consumes the frozen
    one-shot record plan, applies accepted redirect records, and only then binds
    or connects. Keep direct connector v1 frozen.

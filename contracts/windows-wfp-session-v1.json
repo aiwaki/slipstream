@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_wfp_session",
+  "contract_version": 1,
+  "invariants": {
+    "exact_owned_object_keys": true,
+    "kernel_registration_proof_before_session": true,
+    "kernel_registration_proof_non_replaceable": true,
+    "dual_stack_listener_proof_before_session": true,
+    "dynamic_session": true,
+    "persistent_objects": false,
+    "boot_time_filters": false,
+    "single_atomic_transaction": true,
+    "abort_and_close_on_partial_failure": true,
+    "session_close_precedes_filter_absence_proof": true,
+    "filter_absence_bound_to_last_session_generation": true,
+    "teardown_requires_exact_retained_proofs": true,
+    "filter_absence_precedes_listener_stop": true,
+    "filter_absence_precedes_kernel_unregister": true,
+    "capture_scope": "tcp/443",
+    "live_filter_commit_in_ci": false,
+    "production_service_host_composition": false,
+    "dns_proxy_pac_vpn_mutation": false
+  },
+  "object_keys": {
+    "provider": "e5d75aab-4599-476c-8ed2-3b6ac022548c",
+    "sublayer": "758ba833-c351-49ff-8117-91481625b9bc",
+    "callout_v4": "fb100fc4-40e4-41fd-aaff-29e0d8342f40",
+    "callout_v6": "2857c4c8-504e-472f-bbe8-4c26e038cab2",
+    "provider_context": "b4f2547a-286b-494a-9fa4-6c1c0ef1b9e5",
+    "filter_v4": "3f72d2bc-8378-4df7-abca-fb2e96f7310e",
+    "filter_v6": "45c9891e-5beb-481e-99c7-b0fe3a20921a"
+  },
+  "transaction_order": [
+    "provider",
+    "sublayer",
+    "callout_v4",
+    "callout_v6",
+    "provider_context",
+    "filter_v4",
+    "filter_v6"
+  ],
+  "provider_context": {
+    "version": 1,
+    "length": 128,
+    "magic": "SLPWFPMS",
+    "protocol": 6,
+    "remote_port": 443,
+    "reserved_offset": 123
+  },
+  "identity": {
+    "service": {
+      "service_name": "dev.slipstream.service",
+      "executable_sha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "generation": 72623859790382856
+    },
+    "target_pid": 12345,
+    "capture_instance_id": "00112233445566778899aabbccddeeff",
+    "listeners": [
+      {"address": "127.0.0.1", "port": 1443},
+      {"address": "::1", "port": 1443}
+    ]
+  },
+  "binding": {
+    "service_generation": 72623859790382856,
+    "capture_instance_id": "00112233445566778899aabbccddeeff",
+    "runtime_generation": 9
+  },
+  "session_generation": 11
+}
