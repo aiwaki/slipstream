@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import plistlib
 import re
 import signal
@@ -1342,7 +1343,6 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
-    monkeypatch.setattr(tproxy, "system_resolve", lambda host: ["142.250.186.46"])
     tproxy._strat_cache.clear()
     tproxy._strat_cache["example.com"] = "split64+fake"
     tproxy._record_strategy_result("discord.com", "split64+fake", True, now=100.0)
@@ -1389,7 +1389,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "state": "xbox_dns",
         "providers": "xbox_dns",
         "managed_by_slipstream": False,
-        "resolution_state": "ok",
+        "resolution_state": "unknown",
     }
     assert status["environment"]["pf"] == {
         "state": "off",
@@ -1414,6 +1414,38 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "en0",
     ):
         assert private_value not in public_text
+
+
+def test_write_startup_status_never_runs_external_probes(monkeypatch, tmp_path):
+    status_path = tmp_path / "slipstream.status"
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("startup status attempted external I/O")
+
+    for name in (
+        "status_v2_snapshot",
+        "current_system_proxy_status",
+        "current_system_dns_status",
+        "pf_state_snapshot",
+        "tgws_status",
+        "probe_geph",
+        "system_resolve",
+        "_run",
+    ):
+        monkeypatch.setattr(tproxy, name, unexpected)
+
+    tproxy.write_startup_status()
+
+    status = json.loads(status_path.read_text())
+    assert status["schema_version"] == tproxy.STATUS_SCHEMA_VERSION
+    assert status["daemon"]["state"] == "dormant"
+    assert status["daemon"]["pid"] == os.getpid()
+    assert status["backends"]["local_engine"]["state"] == "inactive"
+    assert status["environment"]["proxy"]["state"] == "unknown"
+    assert status["environment"]["dns"]["state"] == "unknown"
+    assert status["environment"]["pf"]["rules_loaded"] is False
+    assert status_path.stat().st_mode & 0o777 == tproxy.STATUS_PUBLIC_MODE
 
 
 def test_status_v2_reports_baseline_pause_without_target_details(monkeypatch):
@@ -2672,6 +2704,11 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     )
     monkeypatch.setattr(
         tproxy,
+        "write_startup_status",
+        lambda: calls.append(("startup_status",)),
+    )
+    monkeypatch.setattr(
+        tproxy,
         "pf_setup_if_ready",
         lambda port: calls.append(("pf_gate", port)) or False,
     )
@@ -2679,8 +2716,9 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     with pytest.raises(RuntimeError, match="stop test server"):
         asyncio.run(tproxy.amain(1080, voice=False))
 
-    assert calls[0] == ("pf_gate", 1080)
-    assert calls[1] == ("status", "dormant", "en0", None)
+    assert calls[0] == ("startup_status",)
+    assert calls[1] == ("pf_gate", 1080)
+    assert calls[2] == ("status", "dormant", "en0", None)
     assert ("monitor", 1080, False) in calls
 
 
@@ -2719,13 +2757,21 @@ def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
             ("status", state, iface, voice_iface)
         ),
     )
+    monkeypatch.setattr(
+        tproxy,
+        "write_startup_status",
+        lambda: calls.append(("startup_status",)),
+    )
     monkeypatch.setattr(tproxy, "_start_network_monitor", lambda *_args: None)
 
     with pytest.raises(RuntimeError, match="stop test server"):
         asyncio.run(tproxy.amain(1080, voice=False))
 
     assert "pf_arm_attempt" not in calls
-    assert calls == [("status", "dormant", "utun7", None)]
+    assert calls == [
+        ("startup_status",),
+        ("status", "dormant", "utun7", None),
+    ]
 
 
 def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
@@ -4917,7 +4963,6 @@ def test_system_dns_resolution_checks_report_unknown_without_mutating():
 
 def test_current_system_dns_status_is_cached(monkeypatch):
     calls = []
-    resolves = []
 
     def fake_run(*args):
         calls.append(args)
@@ -4927,20 +4972,20 @@ def test_current_system_dns_status_is_cached(monkeypatch):
             "stderr": "",
         })()
 
-    def fake_resolve(host):
-        resolves.append(host)
-        return ["142.250.186.46"]
-
     original = dict(tproxy._system_dns_cache)
     try:
         tproxy._system_dns_cache.update({
             "ts": 0.0,
             "status": None,
-            "resolution_ts": 0.0,
-            "resolution_checks": None,
+            "resolution_ts": 100.0,
+            "resolution_checks": {"state": "ok", "checks": []},
         })
         monkeypatch.setattr(tproxy, "_run", fake_run)
-        monkeypatch.setattr(tproxy, "system_resolve", fake_resolve)
+        monkeypatch.setattr(
+            tproxy,
+            "system_resolve",
+            lambda _host: pytest.fail("status publication attempted DNS"),
+        )
 
         first = tproxy.current_system_dns_status(now=100.0)
         second = tproxy.current_system_dns_status(now=110.0)
@@ -4949,7 +4994,40 @@ def test_current_system_dns_status_is_cached(monkeypatch):
         assert first["resolution_checks"]["state"] == "ok"
         assert second["state"] == "xbox_dns"
         assert calls == [("scutil", "--dns")]
-        assert resolves == [host for host, _group in tproxy.DNS_DIAGNOSTIC_HOSTS]
+    finally:
+        tproxy._system_dns_cache.clear()
+        tproxy._system_dns_cache.update(original)
+
+
+def test_current_system_dns_status_reports_unknown_until_background_refresh(
+    monkeypatch,
+):
+    original = dict(tproxy._system_dns_cache)
+    try:
+        tproxy._system_dns_cache.update({
+            "ts": 0.0,
+            "status": None,
+            "resolution_ts": 0.0,
+            "resolution_checks": None,
+        })
+        monkeypatch.setattr(
+            tproxy,
+            "_run",
+            lambda *_args: type("Result", (), {
+                "returncode": 0,
+                "stdout": "nameserver[0] : 1.1.1.1\n",
+                "stderr": "",
+            })(),
+        )
+        monkeypatch.setattr(
+            tproxy,
+            "system_resolve",
+            lambda _host: pytest.fail("status publication attempted DNS"),
+        )
+
+        status = tproxy.current_system_dns_status(now=100.0)
+
+        assert status["resolution_checks"] == {"state": "unknown", "checks": []}
     finally:
         tproxy._system_dns_cache.clear()
         tproxy._system_dns_cache.update(original)

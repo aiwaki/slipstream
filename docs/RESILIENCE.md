@@ -29,6 +29,7 @@ YouTube/googlevideo.
 | Area | Current state | Remaining work |
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
+| Startup qualification | publishes a probe-free `dormant` snapshot before network probes; system-DNS lookups run in killable console-user child processes under per-host and total preflight deadlines; packaged CI blackholes the first neutral resolver target and requires a later target to activate | require the exact packaged gate to pass before the next workstation install |
 | Crash restart | launchd `KeepAlive` | none |
 | PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | keep both privileged sentinel jobs required in CI and add cross-version rollback after the first safety-qualified release |
 | Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
@@ -83,6 +84,19 @@ evidence rather than blocked. Neither probe changes system DNS, proxy, PAC, or
 VPN configuration. The script refuses to run unless GitHub Actions and
 `SLIPSTREAM_DISPOSABLE_CI=1` are both present. The packaged job uploads only the
 exact `.app` that passed this qualification.
+
+The startup path is independently bounded before either lifecycle gate can arm
+PF. A fresh `dormant` status is written as soon as the exact local listener is
+owned. Baseline system-DNS resolution then occurs in short-lived child
+processes under the console user's identity; a stuck resolver is killed and the
+next neutral target is attempted within one total preflight budget. Status
+rendering consumes cached DNS diagnostics, while the background refresh uses
+the same bounded child mechanism. Tests use a real sleeping child and prove both
+bounded return and process disappearance. The packaged disposable gate also
+creates a scoped `/etc/resolver` blackhole for the first neutral target, observes
+the safe status at the incoming DNS query, requires a later target to activate,
+checks that no resolver helper survived, and restores the resolver configuration
+before continuing the browser and uninstall lifecycle.
 
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`

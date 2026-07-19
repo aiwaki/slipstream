@@ -27,6 +27,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 from contextlib import contextmanager
@@ -107,6 +108,9 @@ SAFARI_PROCESS_START_TIMEOUT = 10.0
 SAFARI_PROCESS_STOP_TIMEOUT = 3.0
 WEBDRIVER_RESPONSE_LIMIT = 1_048_576
 TRAY_START_TIMEOUT = 15.0
+RESOLVER_DIRECTORY = Path("/etc/resolver")
+STALLED_RESOLVER_DOMAIN = "example.com"
+STALLED_RESOLVER_QUERY_TIMEOUT = 10.0
 
 
 class LifecycleError(RuntimeError):
@@ -138,6 +142,193 @@ class LifecycleTarget:
     installed_program_prefix: tuple[str, ...]
     required_installed_paths: tuple[Path, ...]
     tray_executable: Path | None = None
+
+
+def _refresh_system_resolver_cache() -> None:
+    commands = (
+        ("/usr/bin/dscacheutil", "-flushcache"),
+        ("/usr/bin/killall", "-HUP", "mDNSResponder"),
+    )
+    for command in commands:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "unknown error").strip()
+            raise LifecycleError(
+                f"resolver cache refresh failed ({result.returncode}): "
+                f"{' '.join(command)}: {detail}"
+            )
+
+
+class StalledSystemResolver:
+    """Scoped DNS blackhole for one baseline host on a disposable runner."""
+
+    def __init__(
+        self,
+        resolver_directory: Path = RESOLVER_DIRECTORY,
+        domain: str = STALLED_RESOLVER_DOMAIN,
+    ) -> None:
+        self.resolver_directory = resolver_directory
+        self.domain = domain
+        self.path = resolver_directory / domain
+        self.listener: socket.socket | None = None
+        self.thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.query_event = threading.Event()
+        self.status_at_query: dict | None = None
+        self.original: tuple[bytes, int, int, int] | None = None
+        self.created_directory = False
+        self.configured = False
+
+    @property
+    def port(self) -> int:
+        if self.listener is None:
+            raise LifecycleError("stalled resolver listener is not running")
+        return int(self.listener.getsockname()[1])
+
+    def _replace_config(
+        self,
+        data: bytes,
+        mode: int,
+        owner: tuple[int, int] | None = None,
+    ) -> None:
+        fd, raw_path = tempfile.mkstemp(
+            dir=self.resolver_directory,
+            prefix=f".{self.domain}.slipstream-",
+        )
+        temp_path = Path(raw_path)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temp_path, mode)
+            if owner is not None and os.geteuid() == 0:
+                os.chown(temp_path, *owner)
+            os.replace(temp_path, self.path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def _serve(self) -> None:
+        assert self.listener is not None
+        self.listener.settimeout(0.2)
+        while not self.stop_event.is_set():
+            try:
+                self.listener.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if not self.query_event.is_set():
+                self.status_at_query = _read_status()
+                self.query_event.set()
+
+    def start(self) -> None:
+        if self.listener is not None:
+            raise LifecycleError("stalled resolver fixture is already running")
+        if self.resolver_directory.exists():
+            directory_stat = self.resolver_directory.lstat()
+            if not stat.S_ISDIR(directory_stat.st_mode):
+                raise LifecycleError(
+                    f"resolver directory is not a real directory: "
+                    f"{self.resolver_directory}"
+                )
+        else:
+            self.resolver_directory.mkdir(mode=0o755)
+            self.created_directory = True
+        if os.path.lexists(self.path):
+            path_stat = self.path.lstat()
+            if not stat.S_ISREG(path_stat.st_mode):
+                raise LifecycleError(
+                    f"resolver fixture refuses non-regular path: {self.path}"
+                )
+            self.original = (
+                self.path.read_bytes(),
+                stat.S_IMODE(path_stat.st_mode),
+                path_stat.st_uid,
+                path_stat.st_gid,
+            )
+
+        try:
+            self.listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.listener.bind(("127.0.0.1", 0))
+            self.thread = threading.Thread(
+                target=self._serve,
+                name="slipstream-dns-blackhole",
+                daemon=True,
+            )
+            self.thread.start()
+            config = (
+                f"nameserver 127.0.0.1\nport {self.port}\ntimeout 30\n"
+            ).encode("ascii")
+            self._replace_config(config, 0o644)
+            self.configured = True
+            _refresh_system_resolver_cache()
+        except BaseException:
+            self.stop()
+            raise
+
+    def assert_observed(self, timeout: float = STALLED_RESOLVER_QUERY_TIMEOUT) -> None:
+        if not self.query_event.wait(timeout):
+            raise LifecycleError(
+                f"system resolver never queried the stalled {self.domain} fixture"
+            )
+        daemon = _daemon_status(self.status_at_query)
+        if not daemon or daemon.get("state") != "dormant":
+            raise LifecycleError(
+                "daemon did not publish safe dormant status before system DNS: "
+                f"{self.status_at_query!r}"
+            )
+        if int(daemon.get("pid") or 0) <= 0:
+            raise LifecycleError("startup status omitted the daemon pid")
+
+    def stop(self) -> None:
+        restore_error: BaseException | None = None
+        try:
+            if self.configured:
+                if self.original is None:
+                    self.path.unlink(missing_ok=True)
+                else:
+                    data, mode, uid, gid = self.original
+                    self._replace_config(data, mode, (uid, gid))
+                _refresh_system_resolver_cache()
+        except BaseException as exc:
+            restore_error = exc
+        finally:
+            self.stop_event.set()
+            if self.listener is not None:
+                self.listener.close()
+            if self.thread is not None:
+                self.thread.join(timeout=2)
+            self.listener = None
+            self.thread = None
+            self.configured = False
+            if self.created_directory:
+                try:
+                    self.resolver_directory.rmdir()
+                except OSError:
+                    pass
+        if restore_error is not None:
+            raise restore_error
+
+
+@contextmanager
+def stalled_system_resolver(enabled: bool) -> Iterator[StalledSystemResolver | None]:
+    if not enabled:
+        yield None
+        return
+    _require_disposable_ci()
+    fixture = StalledSystemResolver()
+    fixture.start()
+    try:
+        yield fixture
+    finally:
+        fixture.stop()
 
 
 def script_target() -> LifecycleTarget:
@@ -1474,6 +1665,41 @@ def _assert_owned_daemon_pid(target: LifecycleTarget, pid: int) -> None:
         )
 
 
+def _assert_no_baseline_resolver_helpers(target: LifecycleTarget) -> None:
+    result = subprocess.run(
+        ("/bin/ps", "-axo", "pid=,command="),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise LifecycleError("cannot inspect baseline resolver helper processes")
+    expected = target.installed_program_prefix
+    survivors = []
+    for raw_line in result.stdout.splitlines():
+        raw_pid, separator, command = raw_line.strip().partition(" ")
+        if not separator or not raw_pid.isdigit():
+            continue
+        try:
+            arguments = tuple(shlex.split(command.strip()))
+        except ValueError:
+            continue
+        if "--baseline-resolve" not in arguments or not arguments or not expected:
+            continue
+        executable_matches = _same_executable(arguments[0], expected[0])
+        prefix_matches = (
+            len(arguments) >= len(expected)
+            and arguments[1:len(expected)] == expected[1:]
+        )
+        if executable_matches and prefix_matches:
+            survivors.append(int(raw_pid))
+    if survivors:
+        raise LifecycleError(
+            f"baseline resolver helper survived its timeout: pids={survivors}"
+        )
+
+
 def _signal_owned_daemon(
     target: LifecycleTarget,
     pid: int,
@@ -1840,6 +2066,7 @@ def run_lifecycle(
     https_client_probes: list[str] = []
     chrome_probes: list[str] = []
     safari_probes: list[str] = []
+    stalled_resolver_result = "not_applicable"
     stage = "acquire-pf-reference"
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -1882,8 +2109,16 @@ def run_lifecycle(
         sentinel_states = _assert_sentinel_state(runner)
 
         stage = "cold-install"
-        system.run(target.install_command)
-        cold = _wait_for_status("active", timeout=90)
+        with stalled_system_resolver(target.name == "packaged-app") as resolver:
+            system.run(target.install_command)
+            if resolver is not None:
+                stage = "cold-install:stalled-resolver-status"
+                resolver.assert_observed()
+            stage = "cold-install:active"
+            cold = _wait_for_status("active", timeout=90)
+            if resolver is not None:
+                _assert_no_baseline_resolver_helpers(target)
+                stalled_resolver_result = "dormant_before_query_then_active"
         _assert_anchor_active(runner)
         _assert_local_routing_without_geph()
         _assert_installed_payload(target)
@@ -2095,6 +2330,7 @@ def run_lifecycle(
         "https_client_probes": https_client_probes or ["not_applicable"],
         "chrome_probes": chrome_probes or ["not_applicable"],
         "safari_probes": safari_probes or ["not_applicable"],
+        "stalled_system_resolver": stalled_resolver_result,
         "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
@@ -2130,6 +2366,11 @@ def dry_run(target_name: str = "script") -> dict:
         "safari_probes": (
             "fresh Safari process with an isolated WebDriver session before and "
             "after tray crash"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
+        "stalled_system_resolver": (
+            "first neutral DNS target stalls after safe status; a later target activates"
             if target_name == "packaged-app"
             else "not applicable"
         ),

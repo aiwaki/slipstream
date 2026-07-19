@@ -115,6 +115,7 @@ jobs:
             spike/test_install_guard.py \
             spike/test_routing_contract_vectors.py \
             spike/test_traffic_contracts.py \
+            spike/test_baseline_startup.py \
             spike/test_tproxy_doh.py \
             spike/test_xbox_dns.py \
             scripts/pf_anchor_smoke.py \

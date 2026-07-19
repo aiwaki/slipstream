@@ -299,6 +299,9 @@ class BuildConfigTests(unittest.TestCase):
         wrapper = (ROOT / "scripts/run_packaged_lifecycle_smoke.sh").read_text(
             encoding="utf-8"
         )
+        lifecycle = (ROOT / "scripts/pf_installed_lifecycle_smoke.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("Qualify the release app lifecycle", workflow)
         self.assertIn('SLIPSTREAM_DISPOSABLE_CI: "1"', workflow)
@@ -312,6 +315,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("for attempt in 1 2", wrapper)
         self.assertIn("Unable to start the server:", wrapper)
         self.assertIn("retrying once on a fresh loopback port", wrapper)
+        self.assertIn("stalled_system_resolver", lifecycle)
+        self.assertIn("dormant_before_query_then_active", lifecycle)
 
         syntax = subprocess.run(
             ("/bin/bash", "-n", str(ROOT / "scripts/run_packaged_lifecycle_smoke.sh")),
