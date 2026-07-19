@@ -113,14 +113,15 @@ the exact tray PID before deleting the staged bundle.
 Cancelling the administrator prompt or failing owned-Geph cleanup does not
 commit application removal.
 
-The root uninstaller disables the launchd label before stopping any detached
-listener, and signals a PID only after verifying the installed daemon command.
-It reports failure if a verified daemon PID survives the bounded stop, even when
-the listener has already disappeared. It then removes the plist, owned runtime,
-status, and private PF rules, and releases the owned PF token. The token record
-is removed only after a successful release. If the installed uninstaller was
-already deleted, the tray uses the copy inside the application bundle. A
-partial install follows the same rollback.
+The root uninstaller disables the launchd label, clears only the private PF
+anchor, and then boots out the launchd `KeepAlive` job before signalling any
+surviving process. A PID is signalled only after revalidating the installed
+daemon command; an old PID that disappeared during `bootout` is already clean.
+It reports failure if a verified surviving daemon PID resists the bounded stop.
+Only then does it remove the plist, owned runtime, and status, and release the
+owned PF token. The token record is removed only after a successful release. If
+the installed uninstaller was already deleted, the tray uses the copy inside
+the application bundle. A partial install follows the same rollback.
 
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
@@ -339,6 +340,15 @@ real wake or network change. If PF cleanup is temporarily unavailable, the
 listener and runtime stay alive while cleanup is retried; install, uninstall,
 and force-stop paths must not create a redirect to a dead listener. Public
 status exposes only the generic recovery reason, not probe hosts or addresses.
+
+The first packaged run of this guard found an uninstall ordering regression in
+disposable CI: the daemon was signalled while its loaded `KeepAlive` job could
+still supervise it, and `bootout` happened only after waiting on the old PID.
+The command then reported incomplete cleanup even though the private anchor had
+been cleared. The lifecycle is now ordered as private-anchor clear, launchd
+`bootout`, then exact-identity cleanup of any surviving PID. This prevents a
+replacement process from appearing during removal and treats a process already
+terminated by `bootout` as a successful outcome.
 
 Required behavior:
 

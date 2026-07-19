@@ -629,6 +629,8 @@ def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_
         lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
     monkeypatch.setattr(
         tproxy,
         "_stop_owned_daemon_pid",
@@ -662,6 +664,8 @@ def test_uninstall_reports_owned_daemon_that_did_not_stop(monkeypatch, tmp_path)
     )
     stopped = []
     monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242, 4343])
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
     monkeypatch.setattr(
         tproxy,
         "_stop_owned_daemon_pid",
@@ -703,6 +707,107 @@ def test_uninstall_reports_incomplete_pf_token_release(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
 
     assert not tproxy.do_uninstall()
+
+
+def test_uninstall_clears_pf_and_boots_out_before_stopping_survivor(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    events = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"state": "active", "pid": 4242},
+    )
+
+    def fake_run(*args):
+        if args[1:2] == ("disable",):
+            events.append("disable")
+        elif args[1:2] == ("bootout",):
+            events.append("bootout")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: events.append("pf_cleared") or True,
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda _pid: events.append("stopped") or True,
+    )
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert tproxy.do_uninstall()
+    assert events[:4] == ["disable", "pf_cleared", "bootout", "stopped"]
+
+
+def test_uninstall_accepts_daemon_exit_caused_by_bootout(monkeypatch, tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    alive = {"value": True}
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"state": "active", "pid": 4242},
+    )
+
+    def fake_run(*args):
+        if args[1:2] == ("bootout",):
+            alive["value"] = False
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_listener_pids",
+        lambda _port: [4242] if alive["value"] else [],
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_process_command_for_pid",
+        lambda _pid: "owned" if alive["value"] else None,
+    )
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda cmd: bool(cmd))
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda _pid: pytest.fail("bootout already stopped the daemon"),
+    )
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert tproxy.do_uninstall()
 
 
 def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tmp_path):

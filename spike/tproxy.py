@@ -7755,21 +7755,27 @@ def _remove_install_runtime_artifacts():
             pass
 
 
+def _cleanup_install_incomplete(reason):
+    print(f"cleanup incomplete: {reason}", file=sys.stderr)
+    return False
+
+
 def _disable_and_cleanup_install(port=PROXY_PORT):
     status = _daemon_status_record() or {}
-    recovery = _daemon_recovery_record() or {}
     pid = status.get("pid")
     disable_result = _run("/bin/launchctl", "disable", _launchd_target())
     if disable_result.returncode != 0:
-        return False
-    if (
-        recovery.get("reason") == BASELINE_GUARD_ROLLBACK_REASON
-        and not _flush_private_pf_with_retry(attempts=10, delay=0.2)
-    ):
+        return _cleanup_install_incomplete("launchd label could not be disabled")
+    if not _flush_private_pf_with_retry(attempts=10, delay=0.2):
         # Keep the already-running listener and its runtime in place. Removing
         # either while our anchor still redirects HTTPS would be less safe than
         # returning an explicit incomplete rollback.
-        return False
+        return _cleanup_install_incomplete("private PF anchor could not be cleared")
+
+    # KeepAlive must be quiesced before signalling the process. Stopping the
+    # daemon first leaves a window where launchd can replace it while uninstall
+    # is still inspecting the old PID, which presents as a process that keeps
+    # coming back and can leave the listener behind.
     owned_pids = set(_owned_listener_pids(port))
     if (
         isinstance(pid, int)
@@ -7777,26 +7783,34 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         and _installed_daemon_command_owned(_process_command_for_pid(pid))
     ):
         owned_pids.add(pid)
-    process_results = [
-        _stop_owned_daemon_pid(owned_pid)
-        for owned_pid in sorted(owned_pids)
-    ]
+    bootout_result = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+    owned_pids.update(_owned_listener_pids(port))
+    process_results = []
+    for owned_pid in sorted(owned_pids):
+        command = _process_command_for_pid(owned_pid)
+        if command is None:
+            continue
+        if not _installed_daemon_command_owned(command):
+            continue
+        process_results.append(_stop_owned_daemon_pid(owned_pid))
     processes_clean = all(process_results)
     if not processes_clean:
-        return False
-    _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
-    pf_flush_clean = _flush_private_pf_with_retry(attempts=10, delay=0.2)
-    if not pf_flush_clean:
-        return False
+        return _cleanup_install_incomplete("owned daemon process did not stop")
+    if bootout_result.returncode != 0:
+        retry = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+        if retry.returncode != 0:
+            loaded = _run("/bin/launchctl", "print", _launchd_target())
+            if loaded.returncode == 0:
+                return _cleanup_install_incomplete("launchd job remains loaded")
     pf_release_result = _pf_release_enable_token()
     if pf_release_result is not None and pf_release_result.returncode != 0:
-        return False
+        return _cleanup_install_incomplete("owned PF enable token was not released")
     try:
         os.remove(LAUNCHD_PLIST)
     except FileNotFoundError:
         pass
     except OSError:
-        return False
+        return _cleanup_install_incomplete("LaunchDaemon plist could not be removed")
     remove_obsolete_newsyslog_config()
     _remove_install_runtime_artifacts()
     listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
@@ -7807,12 +7821,20 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         STATUS_PATH,
         TGWS_LINK_PATH,
     ))
-    return all((
+    clean = all((
         disable_result.returncode == 0,
         processes_clean,
         listener_clean,
         runtime_clean,
     ))
+    if not clean:
+        reason = (
+            "listener remains on TCP/1080"
+            if not listener_clean
+            else "installed runtime artifacts remain"
+        )
+        return _cleanup_install_incomplete(reason)
+    return True
 
 
 def do_install(port):
