@@ -5884,6 +5884,7 @@ class _RelayActivity:
     client_end_at: float = 0.0
     server_end_at: float = 0.0
     client_eof: bool = False
+    client_half_closed: bool = False
     client_read_failed: bool = False
     downstream_write_failed: bool = False
     client_ended_first: bool = False
@@ -6089,6 +6090,24 @@ async def _close_stream_writer(writer):
         pass
 
 
+async def _half_close_stream_writer(writer):
+    """Propagate an orderly read EOF without discarding the peer response."""
+    can_write_eof = getattr(writer, "can_write_eof", None)
+    write_eof = getattr(writer, "write_eof", None)
+    if not callable(can_write_eof) or not callable(write_eof):
+        return False
+    try:
+        if not can_write_eof():
+            return False
+        write_eof()
+        drain = getattr(writer, "drain", None)
+        if callable(drain):
+            await drain()
+        return True
+    except (ConnectionError, NotImplementedError, OSError, RuntimeError, TypeError):
+        return False
+
+
 async def splice(src, dst, activity=None):
     total = 0
     try:
@@ -6122,6 +6141,7 @@ async def splice(src, dst, activity=None):
 
 async def pump(reader, up_w, activity=None):
     total = 0
+    half_closed = False
     try:
         while True:
             try:
@@ -6133,6 +6153,9 @@ async def pump(reader, up_w, activity=None):
             if not data:
                 if activity is not None:
                     activity.client_eof = True
+                half_closed = await _half_close_stream_writer(up_w)
+                if activity is not None:
+                    activity.client_half_closed = half_closed
                 break
             total += len(data)
             try:
@@ -6143,34 +6166,41 @@ async def pump(reader, up_w, activity=None):
     finally:
         if activity is not None:
             activity.client_end_at = time.monotonic()
-        await _close_stream_writer(up_w)
+        if not half_closed:
+            await _close_stream_writer(up_w)
     return total
 
 
 async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
-    """Relay a stream until either direction finishes, then close both sides.
+    """Relay both directions with bounded support for an orderly half-close.
 
-    When the client closes first, no later upstream payload can reach it.  Do
-    not wait indefinitely for that upstream read. The same rule applies when
-    the upstream closes first: a half-open client task must not retain two FDs
-    forever. This lifecycle is shared by direct, local, Smart DNS, and Geph
-    backends; route selection remains unchanged.
+    A client EOF is propagated upstream when the transport supports TCP
+    half-close, preserving delayed responses for request-then-EOF protocols.
+    The server direction then gets one downstream-idle interval to finish.
+    Unsupported half-close, transport errors, and server-first completion keep
+    the bounded cancellation behavior so no pair of FDs remains indefinitely.
     """
-    client_task = asyncio.create_task(pump(reader, up_w, activity))
-    server_task = asyncio.create_task(splice(up_r, writer, activity))
+    relay_activity = activity or _RelayActivity(last_downstream_at=time.monotonic())
+    client_task = asyncio.create_task(pump(reader, up_w, relay_activity))
+    server_task = asyncio.create_task(splice(up_r, writer, relay_activity))
     tasks = (client_task, server_task)
     try:
         done, pending = await asyncio.wait(
             tasks,
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if activity is not None:
-            activity.client_ended_first = (
-                client_task in done and server_task not in done
-            )
-            activity.server_ended_first = (
-                server_task in done and client_task not in done
-            )
+        relay_activity.client_ended_first = (
+            client_task in done and server_task not in done
+        )
+        relay_activity.server_ended_first = (
+            server_task in done and client_task not in done
+        )
+        if relay_activity.client_ended_first and relay_activity.client_half_closed:
+            try:
+                await asyncio.wait_for(server_task, timeout=LOCAL_STREAM_IDLE)
+            except asyncio.TimeoutError:
+                server_task.cancel()
+            pending = {task for task in tasks if not task.done()}
         for task in pending:
             task.cancel()
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -6189,6 +6219,9 @@ async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
+    finally:
+        if relay_activity.client_half_closed:
+            await _close_stream_writer(up_w)
 
 
 # Control-RPC port paired with each SOCKS port. The external mapping is used only
@@ -6570,6 +6603,8 @@ async def _try_exact_system_passthrough(
             )
         elif activity.server_ended_first:
             _clear_clean_eof_stalls(host)
+            if not activity.first_downstream_seen and not (result[1] or 0):
+                note_local_stream_stall(host, "plain")
         note_local_result(host, result[1] or 0, duration)
     return True
 

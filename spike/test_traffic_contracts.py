@@ -474,6 +474,38 @@ def test_unknown_direct_connect_failure_defers_recovery_to_next_retry(monkeypatc
     assert tproxy._xbox_dns_candidate_active(host)
 
 
+def test_unknown_zero_byte_server_close_arms_next_retry_recovery(monkeypatch):
+    """A successful TCP handshake is not a healthy transparent route."""
+    note_local_stream_stall = tproxy.note_local_stream_stall
+    isolate_runtime_state(monkeypatch)
+    host = "early-close.example"
+
+    async def exact_direct(_ip, _port, _first_flight):
+        return object(), object()
+
+    async def zero_byte_close(_reader, _up_w, _up_r, _writer, activity):
+        activity.server_ended_first = True
+        activity.server_end_at = activity.last_downstream_at
+        return 0, 0
+
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+    monkeypatch.setattr(tproxy, "relay_local_stream", zero_byte_close)
+    monkeypatch.setattr(tproxy, "note_local_stream_stall", note_local_stream_stall)
+
+    assert asyncio.run(
+        tproxy._try_exact_system_passthrough(
+            host,
+            "203.0.113.32",
+            443,
+            b"client hello",
+            object(),
+            object(),
+            track_unknown=True,
+        )
+    )
+    assert tproxy._xbox_dns_candidate_active(host)
+
+
 def test_local_handler_races_addresses_inside_one_strategy_without_geph(
     monkeypatch,
 ):

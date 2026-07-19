@@ -319,7 +319,9 @@ even when no policy requested a bypass. The transparent baseline now opens the
 exact pre-PF numeric destination, sends the buffered bytes unchanged, and starts
 bidirectional relay immediately. If an unknown connection fails, local recovery
 is deferred to a later client retry so a consumed TLS first flight is not
-replayed.
+replayed. A server-first close with zero downstream bytes arms that next retry;
+an orderly client EOF is propagated as a bounded TCP half-close so a delayed
+server response is still delivered.
 
 A later doc-only CI rerun reproduced the broad outage before this repair was
 merged: packaged Safari reported `You Are Not Connected to the Internet` at
