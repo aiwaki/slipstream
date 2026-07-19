@@ -8,12 +8,12 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-19, through merged
-[PR #177](https://github.com/aiwaki/slipstream/pull/177) at main commit
-`f5541a04be9ca066112966a5251af173aa639d4d`, including its successful
-[exact-main CI run 29671459890](https://github.com/aiwaki/slipstream/actions/runs/29671459890)
+Last evidence audit: 2026-07-20, through merged
+[PR #178](https://github.com/aiwaki/slipstream/pull/178) at main commit
+`162cc8ee4ea440118479869429790211006c7d62`, including its successful
+[exact-main CI run 29703122886](https://github.com/aiwaki/slipstream/actions/runs/29703122886)
 and
-[dependency-audit run 29671459889](https://github.com/aiwaki/slipstream/actions/runs/29671459889).
+[dependency-audit run 29703122893](https://github.com/aiwaki/slipstream/actions/runs/29703122893).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -39,7 +39,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Primary-Mac PF delivery root cause proven; implementation and packaged gate pending | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PR #174 fixed app-bundle removal, PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling, and PR #177 merged pre/post-arm qualification plus failure-atomic install/uninstall ordering. The exact main artifact passed disposable Safari/Chrome/PF-sentinel CI, but the primary Mac's post-arm probes failed because live kernel state contained `lo0 (skip)` even though `/etc/pf.conf` did not declare it. A scoped privileged high-port smoke proved the native `DIOCCLRIFFLAG` path and four-rule private-anchor topology, recovered the original destination, and restored `lo0 (skip)` with both owned anchors empty, global PF and the sentinel unchanged, no token/lease/status residue, and no listener. The current branch adds a durable `0600` skip lease, restore-before-token-release ordering, daemon-owned recovery, and strict `KeepAlive` install/reinstall/uninstall quiescence. The workstation remains dormant and must not receive this build until a focused PR passes the full disposable script and packaged lifecycle gates and is merged. |
+| M0 - Safe Base | PF loopback implementation merged and exact-main packaged gate passed; controlled workstation validation pending | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PR #174 fixed app-bundle removal, PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling, and PR #177 merged pre/post-arm qualification plus failure-atomic install/uninstall ordering. PR #178 added a durable root-owned `0600` lease for the live `lo0 (skip)` flag, restore-before-token-release ordering, daemon-owned recovery, strict `KeepAlive` install/reinstall/uninstall quiescence, live loopback revalidation, and a `127.0.0.0/8` redirect exclusion. Both the PR and exact merge commit passed the disposable private-PF sentinel and packaged Safari/Chrome/tray-crash lifecycle. The smoke proved external high-port redirection, direct local loopback access, exact original-destination recovery, and cleanup with both owned anchors empty, global PF and the sibling sentinel unchanged, `lo0 (skip)` restored, and no token/lease/status/listener residue. The primary workstation remains intentionally dormant; deployment is a separate controlled validation, not implied by CI success. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
@@ -281,24 +281,39 @@ It has not been installed on the primary workstation.
 
 [PR #176](https://github.com/aiwaki/slipstream/pull/176) recorded that
 qualification boundary without changing runtime behavior and was merged as
-`1f4cdd0`; its exact main commit passed CI and dependency audit. The current
-`codex/macos-baseline-rollback-guard` branch starts from that commit. It keeps
-the primary workstation uninstalled, proves a small neutral HTTPS baseline
-through the console user's current system route before PF, and repeats only the
-same proven numeric destinations after PF. A failed post-arm proof rolls back
-only the private anchor. If PF cleanup itself fails, the daemon keeps its
-listener and runtime alive while retrying cleanup; install/uninstall may not
-force-stop it into a redirect-to-dead-listener state. Local validation is green,
-but disposable packaged CI and review are still required.
+`1f4cdd0`; its exact main commit passed CI and dependency audit.
+
+[PR #177](https://github.com/aiwaki/slipstream/pull/177) then added the
+automatic startup guard. It proves a small neutral HTTPS baseline through the
+console user's current system route before PF and repeats only the same proven
+numeric destinations after PF. A failed post-arm proof rolls back only
+Slipstream-owned state. If PF cleanup itself is temporarily unavailable, the
+daemon keeps its listener and runtime alive while retrying cleanup instead of
+leaving a redirect to a dead listener. Install, reinstall, and uninstall also
+use failure-atomic ordering. The exact merge commit `f5541a0` passed the full
+disposable Safari, Chrome, PF-sentinel, and packaged lifecycle gate.
+
+[PR #178](https://github.com/aiwaki/slipstream/pull/178) closed the remaining
+macOS loopback gap. It clears only `PFI_IFLAG_SKIP` under a durable root-owned
+`0600` lease, restores and verifies the original `lo0 (skip)` state before
+releasing the owned PF token, quiesces the `KeepAlive` daemon before signalling
+verified owned processes, and moves tray recovery behind the installed daemon
+ownership boundary. The redirect excludes `127.0.0.0/8`, and the active monitor
+revalidates loopback visibility if another PF reload changes it. Both the PR and
+the exact main commit `162cc8e` passed the disposable private-PF sentinel and
+packaged lifecycle. The primary workstation has remained uninstalled since the
+unsafe baseline incident.
 
 ## Next Verified Action
 
 Do not reinstall or re-arm Slipstream on the primary workstation unattended.
-Review and merge the automatic rollback guard, then qualify the exact packaged
-artifact on the disposable Safari/Chrome/PF-sentinel lifecycle. A primary smoke
-may follow only while the user is present and the exact reviewed artifact has
-proved that a failed baseline removes the whole owned path without touching
-external DNS, VPN, proxy, PAC, or unrelated PF state.
+The next M0 gate is a controlled validation of the exact merged artifact, with
+the user present and a rollback path prepared. Record a clean preflight, install
+once, verify neutral HTTPS plus Discord, YouTube, and OpenAI streaming, then
+exercise uninstall and prove that the app bundle, launchd jobs, owned Geph,
+listeners, private anchor, PF token, loopback lease, runtime files, and status
+are gone. Stop and roll back at the first failed baseline. External DNS, VPN,
+proxy, PAC, and unrelated PF state must remain unchanged throughout.
 
 ## External Gates
 
