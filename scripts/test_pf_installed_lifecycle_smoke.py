@@ -23,6 +23,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         accepted = (
             target.install_command,
             target.uninstall_command,
+            lifecycle.recovery_command(target),
+            ("/bin/launchctl", "disable", lifecycle.LAUNCHD_LABEL),
             (
                 "/bin/launchctl",
                 "bootout",
@@ -35,10 +37,229 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 "system",
                 str(lifecycle.LAUNCHD_PLIST),
             ),
+            ("/bin/launchctl", "bootout", lifecycle.LAUNCHD_LABEL),
             ("/bin/launchctl", "kickstart", "-k", lifecycle.LAUNCHD_LABEL),
+            ("/bin/launchctl", "print", lifecycle.LAUNCHD_LABEL),
         )
         for command in accepted:
             lifecycle.validate_system_command(command, target)
+
+    def test_fallback_uninstall_flushes_before_bootout_then_recovers_skip(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "install"
+            installed_daemon = install_dir / "slipstreamd"
+            installed_daemon.parent.mkdir(parents=True)
+            installed_daemon.write_text("daemon")
+            plist = root / "daemon.plist"
+            plist.write_text("plist")
+            status = root / "status"
+            status.write_text("status")
+            skip_lease = root / "skip-lease.json"
+            skip_lease.write_text("lease")
+            tgws_link = root / "tgws.link"
+            tgws_link.write_text("link")
+            target = lifecycle.LifecycleTarget(
+                name="test",
+                install_command=("/test/daemon", "--install"),
+                uninstall_command=("/test/daemon", "--uninstall"),
+                installed_program_prefix=("/test/daemon",),
+                required_installed_paths=(installed_daemon,),
+            )
+            events: list[object] = []
+
+            def run(command, *, check=True, timeout=180):
+                command = tuple(command)
+                events.append(command)
+                if command == ("/bin/launchctl", "print", lifecycle.LAUNCHD_LABEL):
+                    return subprocess.CompletedProcess(
+                        command, 1, "", "Could not find service in domain for system"
+                    )
+                if command == lifecycle.recovery_command(target):
+                    skip_lease.unlink()
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            system = mock.Mock()
+            system.run.side_effect = run
+            runner = mock.Mock()
+            with mock.patch.multiple(
+                lifecycle,
+                INSTALL_DIR=install_dir,
+                LAUNCHD_PLIST=plist,
+                STATUS_PATH=status,
+                PF_TOKEN_PATH=root / "pf.token",
+                PF_SKIP_LEASE_PATH=skip_lease,
+                TGWS_LINK_PATH=tgws_link,
+            ), mock.patch.object(
+                lifecycle.pf,
+                "_flush_anchor",
+                side_effect=lambda _runner, anchor: events.append(("flush", anchor)),
+            ):
+                errors = lifecycle._fallback_uninstall(system, runner, target)
+
+            install_removed = not install_dir.exists()
+
+        self.assertEqual(errors, [])
+        bootout = ("/bin/launchctl", "bootout", "system", str(plist))
+        recovery = lifecycle.recovery_command(target)
+        flushes = [
+            index
+            for index, event in enumerate(events)
+            if event == ("flush", lifecycle.pf.SLIPSTREAM_ANCHOR)
+        ]
+        self.assertEqual(len(flushes), 2)
+        self.assertLess(
+            flushes[0],
+            events.index(bootout),
+        )
+        self.assertLess(events.index(bootout), events.index(recovery))
+        self.assertLess(events.index(recovery), flushes[1])
+        self.assertTrue(install_removed)
+
+    def test_fallback_uninstall_preserves_recovery_material_when_skip_remains(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "install"
+            installed_daemon = install_dir / "slipstreamd"
+            installed_daemon.parent.mkdir(parents=True)
+            installed_daemon.write_text("daemon")
+            plist = root / "daemon.plist"
+            plist.write_text("plist")
+            token = root / "pf.token"
+            token.write_text("123")
+            skip_lease = root / "skip-lease.json"
+            skip_lease.write_text("lease")
+            target = lifecycle.LifecycleTarget(
+                name="test",
+                install_command=("/test/daemon", "--install"),
+                uninstall_command=("/test/daemon", "--uninstall"),
+                installed_program_prefix=("/test/daemon",),
+                required_installed_paths=(installed_daemon,),
+            )
+
+            def run(command, *, check=True, timeout=180):
+                command = tuple(command)
+                if command == target.uninstall_command:
+                    raise lifecycle.LifecycleError("uninstall failed")
+                if command[0:2] == ("/bin/launchctl", "disable"):
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[0:2] == ("/bin/launchctl", "bootout"):
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command == ("/bin/launchctl", "print", lifecycle.LAUNCHD_LABEL):
+                    return subprocess.CompletedProcess(
+                        command, 1, "", "Could not find service in domain for system"
+                    )
+                return subprocess.CompletedProcess(command, 1, "", "")
+
+            system = mock.Mock()
+            system.run.side_effect = run
+            runner = mock.Mock()
+            with mock.patch.multiple(
+                lifecycle,
+                INSTALL_DIR=install_dir,
+                LAUNCHD_PLIST=plist,
+                STATUS_PATH=root / "status",
+                PF_TOKEN_PATH=token,
+                PF_SKIP_LEASE_PATH=skip_lease,
+                TGWS_LINK_PATH=root / "tgws.link",
+            ), mock.patch.object(lifecycle.pf, "_flush_anchor"):
+                errors = lifecycle._fallback_uninstall(system, runner, target)
+
+            self.assertTrue(any("skip lease remains" in error for error in errors))
+            self.assertTrue(skip_lease.exists())
+            self.assertTrue(token.exists())
+            self.assertTrue(install_dir.exists())
+            runner.run.assert_not_called()
+
+    def test_fallback_uninstall_never_recovers_while_launchd_job_is_loaded(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "install"
+            installed_daemon = install_dir / "slipstreamd"
+            installed_daemon.parent.mkdir(parents=True)
+            installed_daemon.write_text("daemon")
+            skip_lease = root / "skip-lease.json"
+            skip_lease.write_text("lease")
+            token = root / "pf.token"
+            token.write_text("123")
+            target = lifecycle.LifecycleTarget(
+                name="test",
+                install_command=("/test/daemon", "--install"),
+                uninstall_command=("/test/daemon", "--uninstall"),
+                installed_program_prefix=("/test/daemon",),
+                required_installed_paths=(installed_daemon,),
+            )
+            commands = []
+
+            def run(command, *, check=True, timeout=180):
+                command = tuple(command)
+                commands.append(command)
+                if command == target.uninstall_command:
+                    raise lifecycle.LifecycleError("uninstall failed")
+                if command == ("/bin/launchctl", "print", lifecycle.LAUNCHD_LABEL):
+                    return subprocess.CompletedProcess(command, 0, "loaded", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            system = mock.Mock()
+            system.run.side_effect = run
+            runner = mock.Mock()
+            with mock.patch.multiple(
+                lifecycle,
+                INSTALL_DIR=install_dir,
+                LAUNCHD_PLIST=root / "daemon.plist",
+                STATUS_PATH=root / "status",
+                PF_TOKEN_PATH=token,
+                PF_SKIP_LEASE_PATH=skip_lease,
+                TGWS_LINK_PATH=root / "tgws.link",
+            ), mock.patch.object(lifecycle.pf, "_flush_anchor"):
+                errors = lifecycle._fallback_uninstall(system, runner, target)
+
+            self.assertTrue(any("job remains loaded" in error for error in errors))
+            self.assertNotIn(lifecycle.recovery_command(target), commands)
+            self.assertTrue(skip_lease.exists())
+            self.assertTrue(token.exists())
+            self.assertTrue(install_dir.exists())
+            runner.run.assert_not_called()
+
+    def test_recovery_command_requires_exact_uninstall_suffix(self) -> None:
+        target = lifecycle.LifecycleTarget(
+            name="invalid",
+            install_command=(),
+            uninstall_command=("/test/daemon", "--remove"),
+            installed_program_prefix=("/test/daemon",),
+            required_installed_paths=(Path("/test/daemon"),),
+        )
+
+        with self.assertRaisesRegex(lifecycle.LifecycleError, "exact owned"):
+            lifecycle.recovery_command(target)
+
+    def test_launchd_absence_requires_exact_not_found_evidence(self) -> None:
+        self.assertTrue(
+            lifecycle.launchd_job_absent(
+                subprocess.CompletedProcess(
+                    ("launchctl", "print"),
+                    113,
+                    "",
+                    "Could not find service dev.slipstream.tproxy in domain for system",
+                )
+            )
+        )
+        self.assertFalse(
+            lifecycle.launchd_job_absent(
+                subprocess.CompletedProcess(
+                    ("launchctl", "print"),
+                    1,
+                    "",
+                    "Operation not permitted",
+                )
+            )
+        )
 
     def test_command_guard_rejects_shell_and_unowned_paths(self) -> None:
         rejected = (

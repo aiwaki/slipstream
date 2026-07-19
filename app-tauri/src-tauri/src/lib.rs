@@ -78,8 +78,6 @@ const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
-const PF_ANCHOR: &str = "com.apple/slipstream";
-const PF_TOKEN_PATH: &str = "/var/run/slipstream-pf.token";
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
@@ -745,8 +743,6 @@ fn daemon_recovery_shell() -> String {
     let plist = shell_quote(LAUNCHD_PLIST);
     let daemon = shell_quote(INSTALLED_DAEMON);
     let recovery = shell_quote(DAEMON_RECOVERY_STATUS_PATH);
-    let anchor = shell_quote(PF_ANCHOR);
-    let pf_token_path = shell_quote(PF_TOKEN_PATH);
     format!(
         "recovery_status={recovery}; \
          write_recovery() {{ \
@@ -762,17 +758,19 @@ fn daemon_recovery_shell() -> String {
          if printf '%s\\n' \"$status\" \
             | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
          then write_recovery daemon_recovered; exit 0; fi; \
-         /sbin/pfctl -a {anchor} -F rules >/dev/null 2>&1 || true; \
-         /sbin/pfctl -a {anchor} -F nat >/dev/null 2>&1 || true; \
-         if [ -f {pf_token_path} ]; then \
-           pf_token=$(/bin/cat {pf_token_path} 2>/dev/null || true); \
-           case \"$pf_token\" in \
-             *[!0-9]*|'') ;; \
-             *) /sbin/pfctl -X \"$pf_token\" >/dev/null 2>&1 || true ;; \
-           esac; \
-           /bin/rm -f {pf_token_path}; \
-         fi; \
-         write_recovery anchor_cleared"
+         if ! /bin/launchctl disable {label} >/dev/null 2>&1; \
+         then write_recovery cleanup_incomplete; exit 1; fi; \
+         /bin/launchctl bootout system {plist} >/dev/null 2>&1 || true; \
+         launchd_probe=$(/bin/launchctl print {label} 2>&1); launchd_rc=$?; \
+         if [ \"$launchd_rc\" -eq 0 ]; \
+         then write_recovery cleanup_incomplete; exit 1; fi; \
+         case \"$launchd_probe\" in \
+           *'Could not find service'*) ;; \
+           *) write_recovery cleanup_incomplete; exit 1 ;; \
+         esac; \
+         if {daemon} --recover-network >/dev/null 2>&1; \
+         then write_recovery network_recovered; exit 0; fi; \
+         write_recovery cleanup_incomplete; exit 1"
     )
 }
 
@@ -2870,7 +2868,7 @@ mod tests {
         uninstall_ready_path, uninstall_shell_for_paths, valid_bundled_daemon,
         write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
         ExitCatalogAvailability, ExitMenuRefreshState, DAEMON_RECOVERY_STATUS_PATH,
-        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE, PF_TOKEN_PATH,
+        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -3727,23 +3725,32 @@ mod tests {
     }
 
     #[test]
-    fn daemon_recovery_shell_kickstarts_before_pf_cleanup() {
+    fn daemon_recovery_shell_quiesces_launchd_before_owned_network_cleanup() {
         let shell = daemon_recovery_shell();
 
         assert!(shell.contains("/bin/launchctl kickstart -k 'system/dev.slipstream.tproxy'"));
         assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
         assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
         assert!(shell.contains("daemon_recovered"));
-        assert!(shell.contains("anchor_cleared"));
-        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F rules"));
-        assert!(shell.contains("/sbin/pfctl -a 'com.apple/slipstream' -F nat"));
-        assert!(!shell.contains("-F all"));
-        assert!(!shell.contains("-F states"));
-        assert!(shell.contains(PF_TOKEN_PATH));
+        assert!(shell.contains("network_recovered"));
+        assert!(shell.contains("cleanup_incomplete"));
+        assert!(shell.contains("/bin/launchctl disable 'system/dev.slipstream.tproxy'"));
+        assert!(shell.contains("/bin/launchctl bootout system"));
+        assert!(shell.contains("Could not find service"));
+        assert!(shell.contains("/usr/local/slipstream/slipstreamd' --recover-network"));
+        assert!(!shell.contains("pfctl"));
         assert!(!shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(!shell.contains("/sbin/pfctl -d"));
-        assert!(shell.find("kickstart").unwrap() < shell.find("pfctl").unwrap());
-        assert!(shell.find("--status").unwrap() < shell.find("pfctl").unwrap());
+        assert!(shell.find("kickstart").unwrap() < shell.find("--status").unwrap());
+        assert!(shell.find("--status").unwrap() < shell.find("disable").unwrap());
+        assert!(shell.find("disable").unwrap() < shell.find("bootout").unwrap());
+        assert!(shell.find("bootout").unwrap() < shell.find("launchctl print").unwrap());
+        assert!(shell.find("launchctl print").unwrap() < shell.find("--recover-network").unwrap());
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-n", "-c", &shell])
+            .status()
+            .unwrap()
+            .success());
     }
 
     #[test]

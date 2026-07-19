@@ -53,6 +53,7 @@ LAUNCHD_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 LAUNCHD_LABEL = "system/dev.slipstream.tproxy"
 STATUS_PATH = Path("/var/run/slipstream.status")
 PF_TOKEN_PATH = Path("/var/run/slipstream-pf.token")
+PF_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
 TGWS_LINK_PATH = Path("/var/run/slipstream-tgws.link")
 LOG_PATH = Path("/var/log/slipstream.log")
 SENTINEL_TARGET_PORT = 18444
@@ -189,6 +190,19 @@ def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
     )
 
 
+def recovery_command(target: LifecycleTarget) -> tuple[str, ...]:
+    if not target.uninstall_command or target.uninstall_command[-1] != "--uninstall":
+        raise LifecycleError("target has no exact owned recovery command")
+    return (*target.uninstall_command[:-1], "--recover-network")
+
+
+def launchd_job_absent(result: subprocess.CompletedProcess[str]) -> bool:
+    if result.returncode == 0:
+        return False
+    detail = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return "could not find service" in detail
+
+
 def validate_system_command(
     command: Sequence[str],
     target: LifecycleTarget | None = None,
@@ -198,9 +212,13 @@ def validate_system_command(
     allowed = {
         target.install_command,
         target.uninstall_command,
+        recovery_command(target),
+        ("/bin/launchctl", "disable", LAUNCHD_LABEL),
         ("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)),
+        ("/bin/launchctl", "bootout", LAUNCHD_LABEL),
         ("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)),
         ("/bin/launchctl", "kickstart", "-k", LAUNCHD_LABEL),
+        ("/bin/launchctl", "print", LAUNCHD_LABEL),
     }
     if command not in allowed:
         raise LifecycleError("unsupported lifecycle command: " + " ".join(command))
@@ -1668,6 +1686,7 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
         LAUNCHD_PLIST,
         STATUS_PATH,
         PF_TOKEN_PATH,
+        PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
         INSTALLED_DAEMON,
         INSTALLED_PRIMES,
@@ -1682,7 +1701,13 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
 def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
     _require_disposable_ci()
     uid, gid = pf._original_user()
-    for path in (LAUNCHD_PLIST, STATUS_PATH, PF_TOKEN_PATH, TGWS_LINK_PATH):
+    for path in (
+        LAUNCHD_PLIST,
+        STATUS_PATH,
+        PF_TOKEN_PATH,
+        PF_SKIP_LEASE_PATH,
+        TGWS_LINK_PATH,
+    ):
         if path.exists():
             raise LifecycleError(f"refusing existing Slipstream state: {path}")
     if INSTALL_DIR.exists():
@@ -1703,26 +1728,89 @@ def _fallback_uninstall(
             system.run(target.uninstall_command)
         except Exception as exc:
             errors.append(f"product uninstall: {exc}")
-    if LAUNCHD_PLIST.exists():
-        try:
-            system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)), check=False)
-        except Exception as exc:
-            errors.append(f"launchctl bootout: {exc}")
+    disabled_ok = False
+    try:
+        disabled = system.run(
+            ("/bin/launchctl", "disable", LAUNCHD_LABEL),
+            check=False,
+        )
+        disabled_ok = disabled.returncode == 0
+        if not disabled_ok:
+            errors.append("launchctl disable: durable stop intent was not recorded")
+    except Exception as exc:
+        errors.append(f"launchctl disable: {exc}")
+    anchor_cleared = False
     try:
         pf._flush_anchor(runner, pf.SLIPSTREAM_ANCHOR)
+        anchor_cleared = True
+    except Exception as exc:
+        errors.append(f"production anchor cleanup before bootout: {exc}")
+    if not disabled_ok or not anchor_cleared:
+        return errors
+    try:
+        bootout = (
+            ("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST))
+            if LAUNCHD_PLIST.exists()
+            else ("/bin/launchctl", "bootout", LAUNCHD_LABEL)
+        )
+        system.run(bootout, check=False)
+    except Exception as exc:
+        errors.append(f"launchctl bootout: {exc}")
+    try:
+        loaded = system.run(
+            ("/bin/launchctl", "print", LAUNCHD_LABEL),
+            check=False,
+        )
+        launchd_quiesced = launchd_job_absent(loaded)
+    except Exception as exc:
+        errors.append(f"launchctl verification: {exc}")
+        launchd_quiesced = False
+    if not launchd_quiesced:
+        errors.append("launchctl verification: daemon job remains loaded")
+        try:
+            pf._flush_anchor(runner, pf.SLIPSTREAM_ANCHOR)
+        except Exception as exc:
+            errors.append(f"production anchor cleanup after failed bootout: {exc}")
+        return errors
+    if PF_SKIP_LEASE_PATH.exists() and launchd_quiesced:
+        try:
+            recovered = system.run(recovery_command(target), check=False)
+            if recovered.returncode != 0:
+                raise LifecycleError("owned network recovery returned an error")
+        except Exception as exc:
+            errors.append(f"PF loopback recovery: {exc}")
+    elif PF_SKIP_LEASE_PATH.exists():
+        errors.append("PF loopback recovery: launchd is not quiescent")
+    skip_restored = not PF_SKIP_LEASE_PATH.exists()
+    if not skip_restored:
+        errors.append("PF loopback recovery: skip lease remains")
+    anchor_cleared = False
+    try:
+        pf._flush_anchor(runner, pf.SLIPSTREAM_ANCHOR)
+        anchor_cleared = True
     except Exception as exc:
         errors.append(f"production anchor cleanup: {exc}")
-    if PF_TOKEN_PATH.exists():
+    token_released = not PF_TOKEN_PATH.exists()
+    if launchd_quiesced and anchor_cleared and skip_restored and PF_TOKEN_PATH.exists():
         try:
             token = PF_TOKEN_PATH.read_text(encoding="ascii").strip()
             if not token.isdigit():
                 raise LifecycleError("invalid production PF token")
             runner.run("-X", token, check=True)
+            PF_TOKEN_PATH.unlink()
+            token_released = True
         except Exception as exc:
             errors.append(f"production token cleanup: {exc}")
-    for path in (LAUNCHD_PLIST, STATUS_PATH, PF_TOKEN_PATH, TGWS_LINK_PATH):
-        path.unlink(missing_ok=True)
-    shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+    cleanup_proven = all((
+        launchd_quiesced,
+        anchor_cleared,
+        skip_restored,
+        token_released,
+    ))
+    if cleanup_proven:
+        for path in (LAUNCHD_PLIST, STATUS_PATH, TGWS_LINK_PATH):
+            path.unlink(missing_ok=True)
+        shutil.rmtree(INSTALL_DIR, ignore_errors=True)
     return errors
 
 

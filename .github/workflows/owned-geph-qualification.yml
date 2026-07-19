@@ -139,6 +139,7 @@ jobs:
           test -z "$(sudo pfctl -a com.apple/slipstream -sn 2>/dev/null)"
           test -z "$(sudo pfctl -a com.apple/slipstream -sr 2>/dev/null)"
           test ! -e /var/run/slipstream-pf.token
+          test ! -e /var/run/slipstream-pf-lo0-skip.json
           test ! -e /var/run/slipstream.status
           test -z "$(/usr/sbin/lsof -nP -t -iTCP@127.0.0.1:9954 -sTCP:LISTEN || true)"
           ! launchctl print "gui/$(id -u)/dev.slipstream.geph" >/dev/null 2>&1

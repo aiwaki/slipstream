@@ -1,8 +1,33 @@
 """Low-level macOS PF operations for Slipstream's private anchor."""
 
+import ctypes
+import fcntl
+import json
 import os
 import re
+import stat
 import tempfile
+
+
+PFI_IFLAG_SKIP = 0x0100
+DIOCSETIFFLAG = 0xC0284459
+DIOCCLRIFFLAG = 0xC028445A
+SKIP_LEASE_SCHEMA_VERSION = 1
+
+
+class PfiocIface(ctypes.Structure):
+    _fields_ = [
+        ("name", ctypes.c_char * 16),
+        ("buffer", ctypes.c_void_p),
+        ("esize", ctypes.c_int),
+        ("size", ctypes.c_int),
+        ("nzero", ctypes.c_int),
+        ("flags", ctypes.c_int),
+    ]
+
+
+if ctypes.sizeof(PfiocIface) != 40:
+    raise RuntimeError(f"unexpected macOS pfioc_iface size: {ctypes.sizeof(PfiocIface)}")
 
 
 def parent_declarations(text, parent_anchor):
@@ -160,6 +185,132 @@ def enabled_state(runner):
     if info.returncode != 0:
         return None
     return "Status: Enabled" in info.stdout
+
+
+def interface_skip_state(runner, interface):
+    """Return whether PF skips an interface, or None when not provable."""
+    result = runner("pfctl", "-v", "-s", "Interfaces")
+    if result.returncode != 0:
+        return None
+    plain = interface
+    skipped = f"{interface} (skip)"
+    for line in result.stdout.splitlines():
+        value = line.strip()
+        if value == skipped:
+            return True
+        if value == plain:
+            return False
+    return None
+
+
+def set_interface_skip(
+    runner,
+    interface,
+    enabled,
+    device_path="/dev/pf",
+    opener=None,
+    ioctl_fn=None,
+):
+    """Set only PFI_IFLAG_SKIP and prove the resulting kernel state."""
+    if not isinstance(enabled, bool):
+        raise ValueError("PF interface skip state must be boolean")
+    encoded = interface.encode("ascii")
+    if not encoded or len(encoded) >= 16:
+        raise ValueError(f"invalid PF interface name: {interface!r}")
+    request = PfiocIface()
+    request.name = encoded
+    request.flags = PFI_IFLAG_SKIP
+    payload = bytearray(
+        ctypes.string_at(ctypes.addressof(request), ctypes.sizeof(request))
+    )
+    command = DIOCSETIFFLAG if enabled else DIOCCLRIFFLAG
+    opener = open if opener is None else opener
+    ioctl_fn = fcntl.ioctl if ioctl_fn is None else ioctl_fn
+    with opener(device_path, "r+b", buffering=0) as device:
+        ioctl_fn(device.fileno(), command, payload, True)
+    return interface_skip_state(runner, interface) == enabled
+
+
+def _fsync_parent(path):
+    parent = os.path.dirname(os.fspath(path)) or "."
+    directory = os.open(parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def write_skip_lease(path, interface, owner_pid):
+    """Persist ownership before clearing an externally supplied skip flag."""
+    if interface != "lo0":
+        raise ValueError("PF skip lease may own only lo0")
+    if (
+        not isinstance(owner_pid, int)
+        or isinstance(owner_pid, bool)
+        or owner_pid <= 0
+    ):
+        raise ValueError("invalid PF skip lease owner")
+    payload = {
+        "interface": interface,
+        "owner_pid": owner_pid,
+        "restore_skip": True,
+        "schema_version": SKIP_LEASE_SCHEMA_VERSION,
+    }
+    parent = os.path.dirname(os.fspath(path)) or "."
+    prefix = f".{os.path.basename(os.fspath(path))}."
+    descriptor, tmp = tempfile.mkstemp(prefix=prefix, dir=parent, text=True)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+            descriptor = -1
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        _fsync_parent(path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def read_skip_lease(path):
+    try:
+        metadata = os.lstat(path)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.geteuid()
+        ):
+            raise ValueError("invalid PF skip lease")
+        with open(path, encoding="ascii") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("invalid PF skip lease")
+    if (
+        payload.get("schema_version") != SKIP_LEASE_SCHEMA_VERSION
+        or payload.get("interface") != "lo0"
+        or payload.get("restore_skip") is not True
+        or not isinstance(payload.get("owner_pid"), int)
+        or isinstance(payload.get("owner_pid"), bool)
+        or payload["owner_pid"] <= 0
+    ):
+        raise ValueError("invalid PF skip lease")
+    return payload
+
+
+def remove_skip_lease(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return
+    _fsync_parent(path)
 
 
 def flush_private_anchor(runner, anchor):
