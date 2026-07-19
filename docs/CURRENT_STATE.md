@@ -260,14 +260,29 @@ tray-uninstall defect by moving app-bundle removal into a validated one-shot
 launchd worker. Its complete CI, including `packaged-app-lifecycle`, passed in
 [run 29665174375](https://github.com/aiwaki/slipstream/actions/runs/29665174375).
 
+[PR #175](https://github.com/aiwaki/slipstream/pull/175) repaired the daemon
+baseline without changing protected routing policy. Direct, unknown, non-TLS,
+and no-SNI/ECH connections now relay the exact pre-PF destination without
+alternate DNS, desync, or a first-payload gate. Recovery is deferred to a later
+client retry and is armed only by an observed stall, repeated clean EOF, or
+server-first zero-byte close; healthy low-volume streams do not feed it.
+Orderly client EOF is preserved as a bounded TCP half-close. All required
+checks passed on the exact reviewed head, including the packaged Safari,
+Chrome, PF-sentinel, and lifecycle gate in
+[CI run 29667950857](https://github.com/aiwaki/slipstream/actions/runs/29667950857).
+The formerly failing `before-tray-start` Safari stage passed. The repair was
+squash-merged as `a26e467` and has not been installed on the primary
+workstation.
+
 ## Next Verified Action
 
-Do not reinstall or re-arm Slipstream on the primary workstation. The current
-repair gives direct, unknown, non-TLS, and no-SNI/ECH traffic an exact numeric
-destination, byte-transparent baseline path and defers unknown-host recovery to
-a later client retry. Qualify that change with the disposable packaged Safari,
-Chrome, PF-sentinel, and lifecycle gates. Only after those gates pass should a
-new versioned preview artifact be produced for a guarded primary smoke.
+Do not reinstall or re-arm Slipstream on the primary workstation unattended.
+Prepare a new versioned preview from merged `main`, qualify that exact artifact
+again on a disposable Mac, and define an automatic rollback guard that checks
+baseline HTTPS, daemon/listener ownership, the private PF anchor, token cleanup,
+and app-bundle removal. A primary smoke may follow only while the user is
+present and the guard can remove the whole owned path without touching external
+DNS, VPN, proxy, PAC, or PF state.
 
 ## External Gates
 
