@@ -55,11 +55,14 @@ reinstall, restart, and uninstall with a sibling anchor and a long-lived
 sentinel PF state. Cross-version rollback starts only after a safety-qualified
 release exists; stable distribution remains a separate M3 gate.
 
-The primary-Mac delivery failure is now explained by kernel `lo0 (skip)` state,
-not routing policy or DNS. A scoped high-port privileged smoke proved the leased
-ioctl path and exact rollback without installing Slipstream or touching
-TCP/443. The implementation still requires the full disposable packaged
-lifecycle gate before workstation installation.
+The primary-Mac delivery failures exposed both kernel `lo0 (skip)` state and an
+unbounded startup resolver call. PRs #178 and #180 now lease and restore the
+loopback state, publish safe dormant status before network qualification, and
+bound system-DNS helpers under one startup deadline. The exact `140598b`
+artifact passed the full disposable packaged lifecycle with an OS-level stalled
+resolver, independent PF sentinel, Safari, Chrome, restart, and residue-free
+uninstall. It remains unlaunched; the only remaining M0 gate is one short,
+prearranged workstation smoke with immediate rollback on the first failure.
 
 ## M1 - Autonomous Routing V1
 
