@@ -506,6 +506,41 @@ def test_unknown_zero_byte_server_close_arms_next_retry_recovery(monkeypatch):
     assert tproxy._xbox_dns_candidate_active(host)
 
 
+def test_healthy_low_volume_exact_stream_does_not_feed_recovery(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "quiet-websocket.example"
+
+    async def exact_direct(_ip, _port, _first_flight):
+        return object(), object()
+
+    async def healthy_quiet_stream(_reader, _up_w, _up_r, _writer, activity):
+        activity.first_downstream_seen = True
+        activity.last_downstream_at += 20.0
+        activity.server_ended_first = True
+        return 0, 1
+
+    def unexpected_recovery_sample(*_args, **_kwargs):
+        raise AssertionError("healthy exact streams must not feed recovery")
+
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+    monkeypatch.setattr(tproxy, "relay_local_stream", healthy_quiet_stream)
+    monkeypatch.setattr(tproxy, "note_local_result", unexpected_recovery_sample)
+
+    for _ in range(3):
+        assert asyncio.run(
+            tproxy._try_exact_system_passthrough(
+                host,
+                "203.0.113.33",
+                443,
+                b"client hello",
+                object(),
+                object(),
+                track_unknown=True,
+            )
+        )
+    assert not tproxy._xbox_dns_candidate_active(host)
+
+
 def test_local_handler_races_addresses_inside_one_strategy_without_geph(
     monkeypatch,
 ):

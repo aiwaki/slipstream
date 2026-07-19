@@ -6196,10 +6196,26 @@ async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
             server_task in done and client_task not in done
         )
         if relay_activity.client_ended_first and relay_activity.client_half_closed:
-            try:
-                await asyncio.wait_for(server_task, timeout=LOCAL_STREAM_IDLE)
-            except asyncio.TimeoutError:
-                server_task.cancel()
+            while not server_task.done():
+                last_progress_at = max(
+                    relay_activity.client_end_at,
+                    relay_activity.last_downstream_at,
+                )
+                idle_left = (
+                    last_progress_at
+                    + LOCAL_STREAM_IDLE
+                    - time.monotonic()
+                )
+                if idle_left <= 0:
+                    server_task.cancel()
+                    break
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(server_task),
+                        timeout=idle_left,
+                    )
+                except asyncio.TimeoutError:
+                    continue
             pending = {task for task in tasks if not task.done()}
         for task in pending:
             task.cancel()
@@ -6605,7 +6621,6 @@ async def _try_exact_system_passthrough(
             _clear_clean_eof_stalls(host)
             if not activity.first_downstream_seen and not (result[1] or 0):
                 note_local_stream_stall(host, "plain")
-        note_local_result(host, result[1] or 0, duration)
     return True
 
 
