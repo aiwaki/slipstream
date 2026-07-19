@@ -9,11 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-19, through merged
-[PR #175](https://github.com/aiwaki/slipstream/pull/175) at main commit
-`a26e467edff952139b9c156a5fa46818310db62b`, including its successful
-[exact-main CI run 29668308779](https://github.com/aiwaki/slipstream/actions/runs/29668308779)
+[PR #176](https://github.com/aiwaki/slipstream/pull/176) at main commit
+`1f4cdd01f76b852bc5a606fe68b151dfffb34977`, including its successful
+[exact-main CI run 29668926452](https://github.com/aiwaki/slipstream/actions/runs/29668926452)
 and
-[dependency-audit run 29668308760](https://github.com/aiwaki/slipstream/actions/runs/29668308760).
+[dependency-audit run 29668926441](https://github.com/aiwaki/slipstream/actions/runs/29668926441).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -39,7 +39,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | CI-qualified repair; primary reinstall gated | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. The PR #172 artifact's broad HTTPS regression was reproduced in the disposable packaged gate. PR #174 then fixed app-bundle removal, and PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling without changing protected routing policy. Both fixes passed their required checks and packaged lifecycle qualification; the exact PR #175 main commit passed CI and dependency audit. Remaining before another primary install: build a versioned preview from that main commit, qualify the exact artifact on a disposable Mac, and implement an automatic rollback guard. Do not reinstall unattended. |
+| M0 - Safe Base | Automatic rollback guard implemented; merge qualification required | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. The PR #172 artifact's broad HTTPS regression was reproduced in the disposable packaged gate. PR #174 fixed app-bundle removal, and PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling without changing protected routing policy. PR #177 adds pre/post-arm HTTPS qualification through the console user's unchanged system route, automatic private-anchor rollback, and listener-before-cleanup ordering when PF removal fails. Its first packaged run exposed a `KeepAlive` uninstall race; the branch now clears the private anchor and boots out launchd before handling any surviving verified PID. Local regression tests pass, but this is not release evidence until the disposable packaged Safari/Chrome/PF-sentinel lifecycle passes on the updated branch and merge commit. Do not reinstall unattended. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
@@ -279,15 +279,26 @@ and
 [dependency-audit run 29668308760](https://github.com/aiwaki/slipstream/actions/runs/29668308760).
 It has not been installed on the primary workstation.
 
+[PR #176](https://github.com/aiwaki/slipstream/pull/176) recorded that
+qualification boundary without changing runtime behavior and was merged as
+`1f4cdd0`; its exact main commit passed CI and dependency audit. The current
+`codex/macos-baseline-rollback-guard` branch starts from that commit. It keeps
+the primary workstation uninstalled, proves a small neutral HTTPS baseline
+through the console user's current system route before PF, and repeats only the
+same proven numeric destinations after PF. A failed post-arm proof rolls back
+only the private anchor. If PF cleanup itself fails, the daemon keeps its
+listener and runtime alive while retrying cleanup; install/uninstall may not
+force-stop it into a redirect-to-dead-listener state. Local validation is green,
+but disposable packaged CI and review are still required.
+
 ## Next Verified Action
 
 Do not reinstall or re-arm Slipstream on the primary workstation unattended.
-Prepare a new versioned preview from merged `main`, qualify that exact artifact
-again on a disposable Mac, and define an automatic rollback guard that checks
-baseline HTTPS, daemon/listener ownership, the private PF anchor, token cleanup,
-and app-bundle removal. A primary smoke may follow only while the user is
-present and the guard can remove the whole owned path without touching external
-DNS, VPN, proxy, PAC, or PF state.
+Review and merge the automatic rollback guard, then qualify the exact packaged
+artifact on the disposable Safari/Chrome/PF-sentinel lifecycle. A primary smoke
+may follow only while the user is present and the exact reviewed artifact has
+proved that a failed baseline removes the whole owned path without touching
+external DNS, VPN, proxy, PAC, or unrelated PF state.
 
 ## External Gates
 

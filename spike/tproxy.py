@@ -53,6 +53,7 @@ import urllib.request
 
 import connection_probe
 import geph_backend
+import install_guard
 import pf_adapter
 import route_circuit
 import route_circuit_registry
@@ -210,6 +211,19 @@ _fd_pressure_reason = ""
 _fd_pressure_at = 0.0
 _fd_pressure_lock = threading.Lock()
 _fd_reserve = []
+BASELINE_GUARD_RETRY_SECONDS = 30.0
+BASELINE_GUARD_BLOCK_REASON = "baseline_https_unavailable"
+BASELINE_GUARD_ROLLBACK_REASON = "baseline_rollback_incomplete"
+PF_FLUSH_ATTEMPTS = 3
+PF_FLUSH_RETRY_DELAY = 0.1
+_baseline_guard_lock = threading.Lock()
+_baseline_guard_state = {
+    "state": "pending",
+    "reason": "",
+    "updated_at": 0.0,
+    "retry_at": 0.0,
+    "failures": 0,
+}
 _system_dns_cache = {
     "ts": 0.0,
     "status": None,
@@ -4029,6 +4043,7 @@ def _apply_runtime_rearm(reason, *, now, iface="", gap=0.0):
     """Apply real and qualification lifecycle events through one path."""
     if reason not in _RUNTIME_REARM_REASONS:
         raise ValueError(f"unsupported runtime rearm reason: {reason}")
+    reset_baseline_guard(now=now)
     note_runtime_rearm(reason, gap=gap, iface=iface, now=now)
     if reason == "wake":
         note_geph_wake(now)
@@ -4120,6 +4135,12 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     geph_sessions = geph_active_session_count()
     auto_geo_exit = auto_geo_exit_status_snapshot(now)
     telegram = tgws_status(now)
+    baseline_guard = baseline_guard_snapshot(now)
+    public_daemon_state = (
+        "dormant"
+        if baseline_guard["state"] in {"blocked", "retry", "rollback_failed"}
+        else state
+    )
     geph_state = (
         "up"
         if _geph_up
@@ -4128,7 +4149,14 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
         else "off"
     )
 
-    if _fd_pressure:
+    if baseline_guard["state"] in {"blocked", "retry", "rollback_failed"}:
+        recovery_state = {
+            "blocked": "paused",
+            "retry": "waiting",
+            "rollback_failed": "recovering",
+        }[baseline_guard["state"]]
+        recovery_reason = baseline_guard["reason"]
+    elif _fd_pressure:
         recovery_state = "recovering"
         recovery_reason = "resource_pressure"
     elif geph_restart["recommended"]:
@@ -4149,7 +4177,7 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
         "schema_version": STATUS_SCHEMA_VERSION,
         "daemon": {
             "version": DAEMON_VERSION,
-            "state": state,
+            "state": public_daemon_state,
             "pid": os.getpid(),
             "updated_at": now,
             "connections": _conn_count,
@@ -4163,7 +4191,12 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
         "backends": {
             "local_engine": {
                 "state": (
-                    "ready" if pf_state.get("rules_loaded")
+                    "rollback"
+                    if baseline_guard["state"] == "rollback_failed"
+                    else "paused"
+                    if baseline_guard["state"] in {"blocked", "retry"}
+                    else "ready"
+                    if pf_state.get("rules_loaded")
                     else ("conflict" if pf_state.get("interceptor_conflicts") else "inactive")
                 ),
             },
@@ -4196,7 +4229,9 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
             "state": recovery_state,
             "last_action": (
                 "pause_private_pf"
-                if _fd_pressure
+                if baseline_guard["state"]
+                in {"blocked", "retry", "rollback_failed"}
+                or _fd_pressure
                 else rearm["last_reason"] or "none"
             ),
             "reason": recovery_reason,
@@ -4205,6 +4240,7 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
                 float(geph_restart["last_wake_at"] or 0.0),
                 float(geph_restart["last_failure_at"] or 0.0),
                 float(_fd_pressure_at or 0.0),
+                float(baseline_guard["updated_at"] or 0.0),
             ),
             "count": int(rearm["count"]),
         },
@@ -4399,6 +4435,20 @@ def _pf_flush():
     return pf_adapter.flush_private_anchor(_run, PF_ANCHOR)
 
 
+def _flush_private_pf_with_retry(
+    attempts=PF_FLUSH_ATTEMPTS,
+    delay=PF_FLUSH_RETRY_DELAY,
+):
+    """Clear only Slipstream's anchor, retrying bounded transient failures."""
+    for attempt in range(max(1, int(attempts))):
+        result = _pf_flush()
+        if result.returncode == 0:
+            return True
+        if attempt + 1 < attempts and delay > 0:
+            time.sleep(delay)
+    return False
+
+
 def fd_pressure_watermarks(soft_limit):
     """Return hysteresis bounds that preserve enough FDs for safe teardown."""
     try:
@@ -4518,23 +4568,178 @@ def geo_exit_backend_ready(now=None):
     return True
 
 
+def baseline_guard_snapshot(now=None):
+    now = time.time() if now is None else now
+    with _baseline_guard_lock:
+        snapshot = dict(_baseline_guard_state)
+    retry_at = float(snapshot.get("retry_at", 0.0) or 0.0)
+    snapshot["retry_in"] = int(max(0.0, retry_at - now)) if retry_at else 0
+    return snapshot
+
+
+def _set_baseline_guard(state, reason="", *, now=None, retry_at=0.0):
+    now = time.time() if now is None else now
+    with _baseline_guard_lock:
+        failures = int(_baseline_guard_state.get("failures", 0))
+        if state in {"blocked", "retry"}:
+            failures += 1
+        _baseline_guard_state.update({
+            "state": state,
+            "reason": str(reason or "")[:80],
+            "updated_at": now,
+            "retry_at": float(retry_at or 0.0),
+            "failures": failures,
+        })
+
+
+def reset_baseline_guard(now=None):
+    _set_baseline_guard("pending", now=now)
+
+
+def _baseline_guard_allows_attempt(now=None):
+    now = time.time() if now is None else now
+    snapshot = baseline_guard_snapshot(now)
+    if snapshot["state"] in {"blocked", "rollback_failed"}:
+        return False
+    return (
+        snapshot["state"] != "retry"
+        or now >= float(snapshot.get("retry_at", 0.0) or 0.0)
+    )
+
+
+def _console_probe_identity():
+    try:
+        uid = os.stat("/dev/console").st_uid
+        account = pwd.getpwuid(uid)
+    except (KeyError, OSError):
+        return None
+    if uid <= 0 or account.pw_name in {"loginwindow", "_mbsetupuser"}:
+        return None
+    return (uid, account.pw_gid, account.pw_dir)
+
+
+def _baseline_probe_command(candidate):
+    if getattr(sys, "frozen", False):
+        command = [sys.executable]
+    else:
+        command = [sys.executable, os.path.abspath(__file__)]
+    return command + [
+        "--baseline-probe",
+        "--baseline-host", candidate.host,
+        "--baseline-ip", candidate.ip,
+        "--baseline-path", candidate.path,
+    ]
+
+
+def _run_baseline_probe_candidate(candidate, identity):
+    uid, gid, home = identity
+    env = dict(_RUN_ENV)
+    env.update({"HOME": home, "TMPDIR": "/tmp"})
+    kwargs = {
+        "capture_output": True,
+        "text": True,
+        "timeout": install_guard.DEFAULT_TIMEOUT + 1.5,
+        "env": env,
+    }
+    if os.geteuid() == 0:
+        kwargs.update({"user": uid, "group": gid, "extra_groups": ()})
+    try:
+        result = subprocess.run(_baseline_probe_command(candidate), **kwargs)
+    except (OSError, subprocess.TimeoutExpired):
+        return install_guard.ProbeResult(False, "probe_process_unavailable")
+    if result.returncode == 0:
+        return install_guard.ProbeResult(True, "ok")
+    try:
+        reason = json.loads(result.stdout).get("reason", "probe_failed")
+    except (AttributeError, json.JSONDecodeError):
+        reason = "probe_failed"
+    return install_guard.ProbeResult(False, str(reason)[:80])
+
+
+def _baseline_preflight():
+    identity = _console_probe_identity()
+    if identity is None:
+        return (
+            install_guard.QualificationResult(False, "no_console_user"),
+            None,
+        )
+    result = install_guard.qualify_before_arm(
+        lambda candidate: _run_baseline_probe_candidate(candidate, identity)
+    )
+    return result, identity
+
+
+def _baseline_postflight(candidates, identity):
+    if identity is None:
+        return install_guard.QualificationResult(
+            False, BASELINE_GUARD_BLOCK_REASON, tuple(candidates)
+        )
+    candidates = tuple(candidates)
+    with ThreadPoolExecutor(
+        max_workers=max(1, len(candidates)),
+        thread_name_prefix="baseline-post",
+    ) as executor:
+        results = dict(zip(
+            candidates,
+            executor.map(
+                lambda candidate: _run_baseline_probe_candidate(candidate, identity),
+                candidates,
+            ),
+        ))
+    return install_guard.qualify_after_arm(
+        candidates,
+        results.__getitem__,
+    )
+
+
 def transparent_routing_ready():
     """Whether the local transparent engine can safely accept connections."""
-    return not _fd_pressure
+    return not _fd_pressure and _baseline_guard_allows_attempt()
 
 
 def pause_private_pf():
     global _pf_applied
     with _pf_state_lock:
-        result = _pf_flush()
-        if result.returncode != 0:
+        if not _flush_private_pf_with_retry():
             return False
         _pf_applied = False
     return True
 
 
+def retry_baseline_rollback():
+    """Finish a previously failed post-arm rollback without dropping traffic."""
+    snapshot = baseline_guard_snapshot()
+    if snapshot["state"] != "rollback_failed":
+        return False
+    if _pf_applied and not pause_private_pf():
+        return False
+    _pf_release_enable_token()
+    _set_baseline_guard("blocked", BASELINE_GUARD_BLOCK_REASON)
+    return True
+
+
 def arm_private_pf_if_ready(port):
     global _pf_applied
+    if (
+        _shutdown_started.is_set()
+        or not transparent_routing_ready()
+        or not pf_parent_anchor_loaded()
+    ):
+        return False
+    preflight, identity = _baseline_preflight()
+    if not preflight.ok:
+        now = time.time()
+        _set_baseline_guard(
+            "retry",
+            preflight.reason,
+            now=now,
+            retry_at=now + BASELINE_GUARD_RETRY_SECONDS,
+        )
+        print(
+            ">> system HTTPS baseline is not yet provable -> private PF remains dormant",
+            file=sys.stderr,
+        )
+        return False
     with _pf_state_lock:
         if (
             _shutdown_started.is_set()
@@ -4554,10 +4759,36 @@ def arm_private_pf_if_ready(port):
             and transparent_routing_ready()
         ):
             _pf_applied = True
-            return True
-        _pf_flush()
-        _pf_release_enable_token()
-        _pf_applied = False
+            postflight = _baseline_postflight(preflight.candidates, identity)
+            if postflight.ok and not _shutdown_started.is_set():
+                _set_baseline_guard("ready")
+                return True
+            if _flush_private_pf_with_retry():
+                _pf_release_enable_token()
+                _pf_applied = False
+                _set_baseline_guard("blocked", BASELINE_GUARD_BLOCK_REASON)
+                print(
+                    ">> private PF failed the HTTPS baseline -> rolled back and blocked",
+                    file=sys.stderr,
+                )
+            else:
+                # Keep the listener alive while the monitor retries only our
+                # anchor. Killing it here would turn a PF cleanup failure into
+                # a machine-wide HTTPS black hole.
+                _set_baseline_guard(
+                    "rollback_failed", BASELINE_GUARD_ROLLBACK_REASON
+                )
+                print(
+                    ">> private PF rollback is incomplete; listener remains alive",
+                    file=sys.stderr,
+                )
+            return False
+        if _flush_private_pf_with_retry():
+            _pf_release_enable_token()
+            _pf_applied = False
+        else:
+            _pf_applied = True
+            _set_baseline_guard("rollback_failed", BASELINE_GUARD_ROLLBACK_REASON)
         return False
 
 
@@ -4579,13 +4810,32 @@ def suspend_geo_exit_backend(reason, now=None):
 
 
 def pf_setup_if_ready(port, now=None):
+    global _pf_interceptor_conflicts
+    if _shutdown_started.is_set():
+        return False
     if not transparent_routing_ready():
         print(
             ">> local routing capacity unavailable -> leaving transparent routing dormant",
             file=sys.stderr,
         )
         return False
-    return pf_setup(port)
+    if not pf_parent_anchor_available() or not pf_parent_anchor_loaded():
+        print(
+            f">> pf parent anchor {PF_PARENT_ANCHOR} unavailable -> dormant",
+            file=sys.stderr,
+        )
+        return False
+    _pf_interceptor_conflicts = pf_preceding_https_interceptors()
+    if _pf_interceptor_conflicts:
+        if _pf_applied:
+            pause_private_pf()
+        print(
+            ">> another transparent HTTPS filter is active before Slipstream "
+            f"({', '.join(_pf_interceptor_conflicts)}) -> dormant",
+            file=sys.stderr,
+        )
+        return False
+    return arm_private_pf_if_ready(port)
 
 
 def _legacy_global_pf_conflict(port):
@@ -4610,47 +4860,8 @@ def _pf_load(port):
 
 
 def pf_setup(port):
-    global _pf_applied, _pf_interceptor_conflicts
-    with _pf_state_lock:
-        if _shutdown_started.is_set():
-            return False
-        if not pf_parent_anchor_available() or not pf_parent_anchor_loaded():
-            print(
-                f"pf parent anchor {PF_PARENT_ANCHOR} is unavailable; "
-                "refusing to replace the system ruleset",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        _pf_interceptor_conflicts = pf_preceding_https_interceptors()
-        if _pf_interceptor_conflicts:
-            _pf_applied = False
-            print(
-                ">> another transparent HTTPS filter is active before Slipstream "
-                f"({', '.join(_pf_interceptor_conflicts)}) -> paused; "
-                "external rules untouched",
-                file=sys.stderr,
-            )
-            return False
-        if not _pf_acquire_enable_token():
-            print("pfctl did not provide a releasable enable token", file=sys.stderr)
-            sys.exit(1)
-        result = _pf_load(port)
-        if result.returncode != 0:
-            _pf_flush()
-            _pf_release_enable_token()
-            print("pfctl load failed:\n" + result.stderr, file=sys.stderr)
-            sys.exit(1)
-        if _shutdown_started.is_set():
-            _pf_flush()
-            _pf_release_enable_token()
-            _pf_applied = False
-            return False
-        _pf_applied = True
-    print(
-        f">> pf anchor {PF_ANCHOR} active: TCP/443 -> 127.0.0.1:{port}; "
-        "QUIC untouched"
-    )
-    return True
+    """Backward-compatible entry point; every PF arm passes the baseline guard."""
+    return pf_setup_if_ready(port)
 
 
 def pf_has_rules(port):
@@ -4760,11 +4971,13 @@ async def serve_until_shutdown(server, shutdown, drain_timeout=SHUTDOWN_DRAIN_SE
             await serving
             return True
 
+        # Keep the listener alive until the private anchor is definitely gone.
+        # Closing it first turns a transient pfctl failure into a TCP/443 black
+        # hole for every redirected application.
+        while not pf_teardown():
+            await asyncio.sleep(0.1)
         server.close()
         await server.wait_closed()
-        if not pf_teardown():
-            await asyncio.sleep(0.1)
-            pf_teardown()
         drained = await wait_for_connections_to_drain(drain_timeout)
         if not drained:
             await cancel_active_connections()
@@ -4839,6 +5052,7 @@ def _script_runtime_payload(source_file):
         (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
         (os.path.join(source_dir, "connection_race_io.py"), "connection_race_io.py"),
         (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
+        (os.path.join(source_dir, "install_guard.py"), "install_guard.py"),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
         (os.path.join(source_dir, "route_circuit.py"), "route_circuit.py"),
@@ -5604,7 +5818,13 @@ def network_monitor(port, voice=True):
             if _pf_applied:
                 pause_private_pf()
         elif not backend_ready:
-            if _pf_applied:
+            if baseline_guard_snapshot(now)["state"] == "rollback_failed":
+                if retry_baseline_rollback():
+                    print(
+                        ">> private PF rollback completed; system connection restored",
+                        file=sys.stderr,
+                    )
+            elif _pf_applied:
                 print(
                     ">> local routing capacity unavailable -> Slipstream dormant",
                     file=sys.stderr,
@@ -7344,6 +7564,18 @@ def _daemon_status_record():
     return status if isinstance(status, dict) else None
 
 
+def _daemon_recovery_record():
+    try:
+        with open(STATUS_PATH) as handle:
+            status = json.load(handle)
+    except Exception:
+        return None
+    if not isinstance(status, dict) or status.get("schema_version") != STATUS_SCHEMA_VERSION:
+        return None
+    recovery = status.get("recovery")
+    return recovery if isinstance(recovery, dict) else None
+
+
 def _process_command_for_pid(pid):
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return None
@@ -7421,6 +7653,16 @@ def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
         if _process_command_for_pid(pid) is None:
             return True
         time.sleep(0.1)
+    # Never force-stop the only listener while our private anchor may still
+    # redirect HTTPS to it. The supervising root process can clear the same
+    # owned anchor, then give the daemon one last chance to finish naturally.
+    if not _flush_private_pf_with_retry(attempts=10, delay=0.2):
+        return False
+    grace_deadline = time.monotonic() + 1.0
+    while time.monotonic() < grace_deadline:
+        if _process_command_for_pid(pid) is None:
+            return True
+        time.sleep(0.1)
     # Revalidate immediately before SIGKILL so a recycled PID is never touched.
     if _installed_daemon_command_owned(_process_command_for_pid(pid)):
         try:
@@ -7450,6 +7692,11 @@ def _installed_daemon_readiness(port):
         return False, "status stale"
     if status.get("state") not in {"active", "dormant"}:
         return False, f"unexpected state {status.get('state')!r}"
+    recovery = _daemon_recovery_record() or {}
+    if recovery.get("reason") == BASELINE_GUARD_BLOCK_REASON:
+        return False, "daemon rolled back after baseline HTTPS qualification failed"
+    if recovery.get("reason") == BASELINE_GUARD_ROLLBACK_REASON:
+        return False, "daemon is still restoring the system HTTPS path"
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
         return False, "status pid is not the installed daemon"
@@ -7472,8 +7719,11 @@ def _installed_daemon_ready(port):
 def _wait_for_installed_daemon(port, timeout=30.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _installed_daemon_ready(port):
+        ready, reason = _installed_daemon_readiness(port)
+        if ready:
             return True
+        if "baseline HTTPS qualification failed" in reason:
+            return False
         time.sleep(0.25)
     return _installed_daemon_ready(port)
 
@@ -7505,11 +7755,27 @@ def _remove_install_runtime_artifacts():
             pass
 
 
+def _cleanup_install_incomplete(reason):
+    print(f"cleanup incomplete: {reason}", file=sys.stderr)
+    return False
+
+
 def _disable_and_cleanup_install(port=PROXY_PORT):
     status = _daemon_status_record() or {}
     pid = status.get("pid")
-    _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
     disable_result = _run("/bin/launchctl", "disable", _launchd_target())
+    if disable_result.returncode != 0:
+        return _cleanup_install_incomplete("launchd label could not be disabled")
+    if not _flush_private_pf_with_retry(attempts=10, delay=0.2):
+        # Keep the already-running listener and its runtime in place. Removing
+        # either while our anchor still redirects HTTPS would be less safe than
+        # returning an explicit incomplete rollback.
+        return _cleanup_install_incomplete("private PF anchor could not be cleared")
+
+    # KeepAlive must be quiesced before signalling the process. Stopping the
+    # daemon first leaves a window where launchd can replace it while uninstall
+    # is still inspecting the old PID, which presents as a process that keeps
+    # coming back and can leave the listener behind.
     owned_pids = set(_owned_listener_pids(port))
     if (
         isinstance(pid, int)
@@ -7517,20 +7783,35 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         and _installed_daemon_command_owned(_process_command_for_pid(pid))
     ):
         owned_pids.add(pid)
-    process_results = [
-        _stop_owned_daemon_pid(owned_pid)
-        for owned_pid in sorted(owned_pids)
-    ]
+    bootout_result = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+    owned_pids.update(_owned_listener_pids(port))
+    process_results = []
+    for owned_pid in sorted(owned_pids):
+        command = _process_command_for_pid(owned_pid)
+        if command is None:
+            continue
+        if not _installed_daemon_command_owned(command):
+            continue
+        process_results.append(_stop_owned_daemon_pid(owned_pid))
     processes_clean = all(process_results)
+    if not processes_clean:
+        return _cleanup_install_incomplete("owned daemon process did not stop")
+    if bootout_result.returncode != 0:
+        retry = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+        if retry.returncode != 0:
+            loaded = _run("/bin/launchctl", "print", _launchd_target())
+            if loaded.returncode == 0:
+                return _cleanup_install_incomplete("launchd job remains loaded")
+    pf_release_result = _pf_release_enable_token()
+    if pf_release_result is not None and pf_release_result.returncode != 0:
+        return _cleanup_install_incomplete("owned PF enable token was not released")
     try:
         os.remove(LAUNCHD_PLIST)
     except FileNotFoundError:
         pass
     except OSError:
-        pass
+        return _cleanup_install_incomplete("LaunchDaemon plist could not be removed")
     remove_obsolete_newsyslog_config()
-    pf_flush_result = _pf_flush()
-    pf_release_result = _pf_release_enable_token()
     _remove_install_runtime_artifacts()
     listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
     runtime_clean = not any(os.path.lexists(path) for path in (
@@ -7540,14 +7821,20 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         STATUS_PATH,
         TGWS_LINK_PATH,
     ))
-    return all((
+    clean = all((
         disable_result.returncode == 0,
-        pf_flush_result.returncode == 0,
-        pf_release_result is None or pf_release_result.returncode == 0,
         processes_clean,
         listener_clean,
         runtime_clean,
     ))
+    if not clean:
+        reason = (
+            "listener remains on TCP/1080"
+            if not listener_clean
+            else "installed runtime artifacts remain"
+        )
+        return _cleanup_install_incomplete(reason)
+    return True
 
 
 def do_install(port):
@@ -7672,6 +7959,15 @@ def do_uninstall():
     return clean
 
 
+def _start_network_monitor(port, voice):
+    threading.Thread(
+        target=network_monitor,
+        args=(port,),
+        kwargs={"voice": voice},
+        daemon=True,
+    ).start()
+
+
 async def amain(port, voice=True):
     global _geph_up
     loop = asyncio.get_running_loop()
@@ -7709,21 +8005,21 @@ async def amain(port, voice=True):
         port=_geph_port,
         conflict=_geph_port_conflict,
     )
-    pf_setup_if_ready(port)
+    startup_iface = default_iface()
+    # A user full-tunnel VPN already owns the route. Do not arm even briefly:
+    # the monitor will qualify Slipstream only after that default route leaves.
+    if not (startup_iface and startup_iface.startswith("utun")):
+        # The post-arm probe is redirected back into this asyncio server. Run
+        # the blocking transaction off-loop so the listener can service it.
+        await asyncio.to_thread(pf_setup_if_ready, port)
     startup_state = (
         "conflict" if _pf_interceptor_conflicts
         else "active" if _pf_applied
         else "dormant"
     )
-    startup_iface = default_iface()
     write_status(startup_state, startup_iface, None)
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
-    threading.Thread(
-        target=network_monitor,
-        args=(port,),
-        kwargs={"voice": voice},
-        daemon=True,
-    ).start()
+    _start_network_monitor(port, voice)
     print(f">> transparent tlsrec+DoH proxy on 127.0.0.1:{port}  (root)")
     print(">> quit + reopen Discord normally; its updater is captured too")
     print(">> Ctrl-C (or close terminal) to stop and restore pf")
@@ -7879,8 +8175,27 @@ def main():
                     help="remove the LaunchDaemon and clear private pf state")
     ap.add_argument("--status", action="store_true",
                     help="print daemon status JSON and exit (no root needed)")
+    ap.add_argument("--baseline-probe", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--baseline-host", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--baseline-ip", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--baseline-path", default="/", help=argparse.SUPPRESS)
     args = ap.parse_args()
     VERBOSE = args.verbose
+
+    if args.baseline_probe:
+        candidate = install_guard.BaselineCandidate(
+            host=args.baseline_host,
+            ip=args.baseline_ip,
+            path=args.baseline_path,
+        )
+        result = install_guard.probe_https(candidate)
+        print(json.dumps({
+            "ok": result.ok,
+            "reason": result.reason,
+            "status_code": result.status_code,
+            "bytes_received": result.bytes_received,
+        }))
+        sys.exit(0 if result.ok else 2)
 
     if args.status:
         try:

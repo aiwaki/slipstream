@@ -168,6 +168,13 @@
           "rules_loaded": true,
           "interceptor_conflict": false
         },
+        "recovery": {
+          "state": "idle",
+          "last_action": "none",
+          "reason": "",
+          "updated_at": 90.0,
+          "count": 1
+        },
         "rearm": {
           "last_at": 90.0,
           "last_reason": "none",
