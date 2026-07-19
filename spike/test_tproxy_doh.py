@@ -5515,6 +5515,76 @@ def test_relay_local_stream_stops_waiting_when_client_ends_first():
     assert activity.server_end_at
 
 
+def test_relay_local_stream_preserves_orderly_client_half_close(monkeypatch):
+    response = b"delayed response"
+
+    class EofReader:
+        async def read(self, _size):
+            return b""
+
+    class DelayedResponseReader:
+        def __init__(self):
+            self.reads = 0
+
+        async def read(self, _size):
+            self.reads += 1
+            if self.reads == 1:
+                await asyncio.sleep(0.01)
+                return response
+            return b""
+
+    class HalfCloseWriter:
+        def __init__(self):
+            self.eof = 0
+            self.closed = 0
+
+        def can_write_eof(self):
+            return True
+
+        def write_eof(self):
+            self.eof += 1
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            pass
+
+    class CaptureWriter(HalfCloseWriter):
+        def __init__(self):
+            super().__init__()
+            self.payload = bytearray()
+
+        def write(self, data):
+            self.payload.extend(data)
+
+    upstream = HalfCloseWriter()
+    downstream = CaptureWriter()
+    activity = tproxy._RelayActivity(last_downstream_at=100.0)
+    monkeypatch.setattr(tproxy, "LOCAL_STREAM_IDLE", 0.1)
+
+    result = asyncio.run(
+        tproxy.relay_local_stream(
+            EofReader(),
+            upstream,
+            DelayedResponseReader(),
+            downstream,
+            activity,
+        )
+    )
+
+    assert result == (0, len(response))
+    assert upstream.eof == 1
+    assert upstream.closed == 1
+    assert bytes(downstream.payload) == response
+    assert activity.client_eof
+    assert activity.client_ended_first
+    assert activity.first_downstream_seen
+
+
 def test_relay_local_stream_server_first_does_not_become_clean_eof_stall():
     class EofReader:
         async def read(self, _size):

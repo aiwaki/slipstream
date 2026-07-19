@@ -5884,6 +5884,7 @@ class _RelayActivity:
     client_end_at: float = 0.0
     server_end_at: float = 0.0
     client_eof: bool = False
+    client_half_closed: bool = False
     client_read_failed: bool = False
     downstream_write_failed: bool = False
     client_ended_first: bool = False
@@ -6089,6 +6090,24 @@ async def _close_stream_writer(writer):
         pass
 
 
+async def _half_close_stream_writer(writer):
+    """Propagate an orderly read EOF without discarding the peer response."""
+    can_write_eof = getattr(writer, "can_write_eof", None)
+    write_eof = getattr(writer, "write_eof", None)
+    if not callable(can_write_eof) or not callable(write_eof):
+        return False
+    try:
+        if not can_write_eof():
+            return False
+        write_eof()
+        drain = getattr(writer, "drain", None)
+        if callable(drain):
+            await drain()
+        return True
+    except (ConnectionError, NotImplementedError, OSError, RuntimeError, TypeError):
+        return False
+
+
 async def splice(src, dst, activity=None):
     total = 0
     try:
@@ -6122,6 +6141,7 @@ async def splice(src, dst, activity=None):
 
 async def pump(reader, up_w, activity=None):
     total = 0
+    half_closed = False
     try:
         while True:
             try:
@@ -6133,6 +6153,9 @@ async def pump(reader, up_w, activity=None):
             if not data:
                 if activity is not None:
                     activity.client_eof = True
+                half_closed = await _half_close_stream_writer(up_w)
+                if activity is not None:
+                    activity.client_half_closed = half_closed
                 break
             total += len(data)
             try:
@@ -6143,34 +6166,57 @@ async def pump(reader, up_w, activity=None):
     finally:
         if activity is not None:
             activity.client_end_at = time.monotonic()
-        await _close_stream_writer(up_w)
+        if not half_closed:
+            await _close_stream_writer(up_w)
     return total
 
 
 async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
-    """Relay a stream until either direction finishes, then close both sides.
+    """Relay both directions with bounded support for an orderly half-close.
 
-    When the client closes first, no later upstream payload can reach it.  Do
-    not wait indefinitely for that upstream read. The same rule applies when
-    the upstream closes first: a half-open client task must not retain two FDs
-    forever. This lifecycle is shared by direct, local, Smart DNS, and Geph
-    backends; route selection remains unchanged.
+    A client EOF is propagated upstream when the transport supports TCP
+    half-close, preserving delayed responses for request-then-EOF protocols.
+    The server direction then gets one downstream-idle interval to finish.
+    Unsupported half-close, transport errors, and server-first completion keep
+    the bounded cancellation behavior so no pair of FDs remains indefinitely.
     """
-    client_task = asyncio.create_task(pump(reader, up_w, activity))
-    server_task = asyncio.create_task(splice(up_r, writer, activity))
+    relay_activity = activity or _RelayActivity(last_downstream_at=time.monotonic())
+    client_task = asyncio.create_task(pump(reader, up_w, relay_activity))
+    server_task = asyncio.create_task(splice(up_r, writer, relay_activity))
     tasks = (client_task, server_task)
     try:
         done, pending = await asyncio.wait(
             tasks,
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if activity is not None:
-            activity.client_ended_first = (
-                client_task in done and server_task not in done
-            )
-            activity.server_ended_first = (
-                server_task in done and client_task not in done
-            )
+        relay_activity.client_ended_first = (
+            client_task in done and server_task not in done
+        )
+        relay_activity.server_ended_first = (
+            server_task in done and client_task not in done
+        )
+        if relay_activity.client_ended_first and relay_activity.client_half_closed:
+            while not server_task.done():
+                last_progress_at = max(
+                    relay_activity.client_end_at,
+                    relay_activity.last_downstream_at,
+                )
+                idle_left = (
+                    last_progress_at
+                    + LOCAL_STREAM_IDLE
+                    - time.monotonic()
+                )
+                if idle_left <= 0:
+                    server_task.cancel()
+                    break
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(server_task),
+                        timeout=idle_left,
+                    )
+                except asyncio.TimeoutError:
+                    continue
+            pending = {task for task in tasks if not task.done()}
         for task in pending:
             task.cancel()
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -6189,6 +6235,9 @@ async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
+    finally:
+        if relay_activity.client_half_closed:
+            await _close_stream_writer(up_w)
 
 
 # Control-RPC port paired with each SOCKS port. The external mapping is used only
@@ -6393,9 +6442,12 @@ async def dial_via_geph(host, port, first_flight):
 
 
 async def dial_plain(ip, port, first_flight):
-    """Plain direct dial (no desync, no tunnel) for traffic we must not tamper
-    with — Telegram MTProto. Sends the buffered first flight verbatim; returns
-    (reader, writer) or None."""
+    """Open an exact direct stream with no DNS rewrite, desync, or tunnel.
+
+    The buffered first flight is sent verbatim. This is used for transparent
+    system-route preservation as well as Telegram MTProto safety passthrough.
+    Returns ``(reader, writer)`` or ``None``.
+    """
     w = None
     connected = False
     try:
@@ -6530,35 +6582,92 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
     return raced
 
 
+async def _try_exact_system_passthrough(
+    host,
+    dst_ip,
+    port,
+    first_flight,
+    reader,
+    writer,
+    *,
+    track_unknown=False,
+):
+    """Relay the PF-selected destination without changing route semantics.
+
+    This is the transparent baseline for direct, unknown, and no-SNI traffic:
+    no alternate DNS lookup, no desync strategy, and no first-payload gate.
+    Unknown-host recovery is learned only after this stream has finished; the
+    already-sent first flight is never replayed through another route.
+    """
+    direct = await dial_plain(dst_ip, port, first_flight)
+    if not direct:
+        return False
+    up_r, up_w = direct
+    started_at = time.monotonic()
+    activity = _RelayActivity(last_downstream_at=started_at)
+    result = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    duration = time.monotonic() - started_at
+    if track_unknown and host:
+        if _local_stream_stalled(activity, now=started_at + duration):
+            note_local_stream_stall(host, "plain")
+        elif _clean_eof_stream_stalled(activity, now=started_at + duration):
+            note_clean_eof_stream_stall(
+                host,
+                "plain",
+                activity,
+                now=started_at + duration,
+            )
+        elif activity.server_ended_first:
+            _clear_clean_eof_stalls(host)
+            if not activity.first_downstream_seen and not (result[1] or 0):
+                note_local_stream_stall(host, "plain")
+    return True
+
+
 async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writer):
     """Keep the system-selected route usable when no app-owned exit is ready.
 
     ``dst_ip`` is the destination selected before PF redirected the socket, so
-    this preserves the user's DNS, VPN, and routing decisions. It is a bounded
-    plain TLS probe, never a local desync strategy and never an alternate DNS
-    lookup.
+    this preserves the user's DNS, VPN, and routing decisions. It relays as
+    soon as the exact destination accepts the connection; long-lived streams
+    must not be gated on a server-first payload.
     """
-    direct = await dial_and_probe(dst_ip, port, first_flight)
-    if not direct:
+    direct = await dial_plain(dst_ip, port, first_flight)
+    if direct is None:
         return False
-    up_r, up_w, server_first = direct
-    route_health_event(
-        route_policy(host)["service_group"],
-        ROUTE_GEO_EXIT,
-        host,
-        True,
-        backend=BACKEND_DIRECT,
-    )
+    up_r, up_w = direct
+    policy = route_policy(host)
+    payload_recorded = False
+
+    def record_first_payload():
+        nonlocal payload_recorded
+        if payload_recorded:
+            return
+        route_health_event(
+            policy["service_group"],
+            ROUTE_GEO_EXIT,
+            host,
+            True,
+            backend=BACKEND_DIRECT,
+        )
+        payload_recorded = True
+
     if VERBOSE:
         print(f"OK {host}:{port} via system route {dst_ip}", file=sys.stderr)
-    try:
-        writer.write(server_first)
-        await writer.drain()
-    except OSError:
-        await _close_stream_writer(up_w)
-        writer.close()
-        return True
-    await relay_local_stream(reader, up_w, up_r, writer)
+    activity = _RelayActivity(
+        last_downstream_at=time.monotonic(),
+        on_first_downstream=record_first_payload,
+    )
+    result = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    if not payload_recorded and not (result[1] or 0):
+        route_health_event(
+            policy["service_group"],
+            ROUTE_GEO_EXIT,
+            host,
+            False,
+            "system route closed before payload",
+            backend=BACKEND_DIRECT,
+        )
     return True
 
 
@@ -6802,9 +6911,37 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
+    policy = route_policy(host)
+    route_class = policy["route_class"]
+    unknown_recovery_ready = bool(
+        is_tls
+        and host
+        and route_class == ROUTE_UNKNOWN
+        and _xbox_dns_candidate_active(host)
+    )
+    preserve_system_route = (
+        not is_tls
+        or route_class == ROUTE_DIRECT
+        or (route_class == ROUTE_UNKNOWN and not unknown_recovery_ready)
+    )
+    if preserve_system_route:
+        if await _try_exact_system_passthrough(
+            host,
+            dst_ip,
+            dst_port,
+            head + body,
+            reader,
+            writer,
+            track_unknown=bool(is_tls and host and route_class == ROUTE_UNKNOWN),
+        ):
+            return
+        if is_tls and host and route_class == ROUTE_UNKNOWN:
+            _mark_xbox_dns_candidate(host)
+        writer.close()
+        return
+
     # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
     # (fallback dst_ip). Some CDN edges are bad while neighbors work.
-    policy = route_policy(host)
     if not runtime_route_circuit_allows(policy, BACKEND_LOCAL_ENGINE):
         if VERBOSE:
             print(
