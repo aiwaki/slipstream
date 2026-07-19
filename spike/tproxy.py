@@ -116,6 +116,11 @@ logging.getLogger("scapy.runtime").addFilter(_ScapyMacNoiseFilter())
 class LegacyGlobalPfConflict(RuntimeError):
     """A global HTTPS redirect targets our port but has no ownership proof."""
 
+
+class OwnedPfStateError(RuntimeError):
+    """Slipstream-owned PF state could not be recovered without global mutation."""
+
+
 PROXY_PORT = 1080
 DIOCNATLOOK = 0xC0544417
 PF_OUT = 2
@@ -130,6 +135,8 @@ PF_ANCHOR = "com.apple/slipstream"
 PF_PARENT_ANCHOR = "com.apple/*"
 PF_CONFIG_PATH = "/etc/pf.conf"
 PF_TOKEN_PATH = "/var/run/slipstream-pf.token"
+PF_SKIP_LEASE_PATH = "/var/run/slipstream-pf-lo0-skip.json"
+PF_LOOPBACK_INTERFACE = "lo0"
 PF_CONFLICT_CHECK_INTERVAL = 15.0
 try:
     RUNTIME_WAKE_GAP_SECONDS = max(
@@ -139,8 +146,10 @@ try:
 except (TypeError, ValueError):
     RUNTIME_WAKE_GAP_SECONDS = 30.0
 PF_RULES = """\
-rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
-pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
+rdr on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
+pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
+pass out quick on lo0 inet proto tcp from any to any port 443 no state
+pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp from any to 127.0.0.1 port {port}
 """
 # NOTE: QUIC (UDP/443) is intentionally NOT blocked. YouTube/googlevideo video runs
 # over QUIC/HTTP3, and QUIC to those hosts WORKS on this TSPU (verified 2026-07-07:
@@ -214,6 +223,7 @@ _fd_reserve = []
 BASELINE_GUARD_RETRY_SECONDS = 30.0
 BASELINE_GUARD_BLOCK_REASON = "baseline_https_unavailable"
 BASELINE_GUARD_ROLLBACK_REASON = "baseline_rollback_incomplete"
+PF_LOOPBACK_UNAVAILABLE_REASON = "pf_loopback_unavailable"
 PF_FLUSH_ATTEMPTS = 3
 PF_FLUSH_RETRY_DELAY = 0.1
 _baseline_guard_lock = threading.Lock()
@@ -4382,6 +4392,86 @@ def _remove_pf_token(path=None):
     pf_adapter.remove_token(path)
 
 
+def _read_pf_skip_lease(path=None):
+    path = PF_SKIP_LEASE_PATH if path is None else path
+    return pf_adapter.read_skip_lease(path)
+
+
+def _write_pf_skip_lease(path=None):
+    path = PF_SKIP_LEASE_PATH if path is None else path
+    pf_adapter.write_skip_lease(path, PF_LOOPBACK_INTERFACE, os.getpid())
+
+
+def _remove_pf_skip_lease(path=None):
+    path = PF_SKIP_LEASE_PATH if path is None else path
+    pf_adapter.remove_skip_lease(path)
+
+
+def _pf_loopback_skip_state():
+    return pf_adapter.interface_skip_state(_run, PF_LOOPBACK_INTERFACE)
+
+
+def _restore_pf_loopback_skip():
+    """Restore a skip flag that this daemon durably recorded before clearing."""
+    try:
+        lease = _read_pf_skip_lease()
+    except (OSError, ValueError) as error:
+        print(f">> invalid PF loopback lease: {error}", file=sys.stderr)
+        return False
+    if lease is None:
+        return True
+    state = _pf_loopback_skip_state()
+    if state is None:
+        return False
+    if not state:
+        try:
+            restored = pf_adapter.set_interface_skip(
+                _run,
+                PF_LOOPBACK_INTERFACE,
+                True,
+            )
+        except (OSError, ValueError):
+            restored = False
+        if not restored:
+            return False
+    try:
+        _remove_pf_skip_lease()
+    except OSError:
+        return False
+    return True
+
+
+def _claim_pf_loopback_skip():
+    """Make lo0 PF-visible while preserving external ownership for rollback."""
+    try:
+        if _read_pf_skip_lease() is not None:
+            # A stale lease must be recovered before a new arm. Never overwrite
+            # the only durable proof that the external skip flag must return.
+            return False
+    except (OSError, ValueError):
+        return False
+    state = _pf_loopback_skip_state()
+    if state is None:
+        return False
+    if not state:
+        # Another component already made lo0 PF-visible. Use that state without
+        # claiming it and leave it unchanged during teardown.
+        return True
+    try:
+        _write_pf_skip_lease()
+        cleared = pf_adapter.set_interface_skip(
+            _run,
+            PF_LOOPBACK_INTERFACE,
+            False,
+        )
+    except (OSError, ValueError):
+        cleared = False
+    if cleared:
+        return True
+    _restore_pf_loopback_skip()
+    return False
+
+
 def _pf_release_enable_token():
     global _pf_enable_token
     token = _pf_enable_token or _read_pf_token()
@@ -4631,6 +4721,17 @@ def _baseline_probe_command(candidate):
     ]
 
 
+def _log_baseline_probe_results(stage, results):
+    """Write bounded probe evidence to the private daemon log."""
+    for candidate, result in results:
+        outcome = "ok" if result.ok else str(result.reason)[:80]
+        print(
+            f">> HTTPS baseline {stage}: {candidate.host} "
+            f"({candidate.ip}) -> {outcome}",
+            file=sys.stderr,
+        )
+
+
 def _run_baseline_probe_candidate(candidate, identity):
     uid, gid, home = identity
     env = dict(_RUN_ENV)
@@ -4663,9 +4764,15 @@ def _baseline_preflight():
             install_guard.QualificationResult(False, "no_console_user"),
             None,
         )
-    result = install_guard.qualify_before_arm(
-        lambda candidate: _run_baseline_probe_candidate(candidate, identity)
-    )
+    observed = []
+
+    def probe(candidate):
+        result = _run_baseline_probe_candidate(candidate, identity)
+        observed.append((candidate, result))
+        return result
+
+    result = install_guard.qualify_before_arm(probe)
+    _log_baseline_probe_results("before PF", observed)
     return result, identity
 
 
@@ -4686,6 +4793,7 @@ def _baseline_postflight(candidates, identity):
                 candidates,
             ),
         ))
+    _log_baseline_probe_results("after PF", results.items())
     return install_guard.qualify_after_arm(
         candidates,
         results.__getitem__,
@@ -4703,6 +4811,12 @@ def pause_private_pf():
         if not _flush_private_pf_with_retry():
             return False
         _pf_applied = False
+        if not _restore_pf_loopback_skip():
+            _set_baseline_guard(
+                "rollback_failed",
+                BASELINE_GUARD_ROLLBACK_REASON,
+            )
+            return False
     return True
 
 
@@ -4711,7 +4825,7 @@ def retry_baseline_rollback():
     snapshot = baseline_guard_snapshot()
     if snapshot["state"] != "rollback_failed":
         return False
-    if _pf_applied and not pause_private_pf():
+    if not pause_private_pf():
         return False
     _pf_release_enable_token()
     _set_baseline_guard("blocked", BASELINE_GUARD_BLOCK_REASON)
@@ -4750,45 +4864,77 @@ def arm_private_pf_if_ready(port):
         if not _pf_acquire_enable_token():
             return False
         result = _pf_load(port)
-        # A handler may have marked the backend unavailable while pfctl was
-        # loading. Recheck under the same transition lock before publishing the
-        # active state.
-        if (
-            result.returncode == 0
-            and not _shutdown_started.is_set()
-            and transparent_routing_ready()
-        ):
+        loaded = result.returncode == 0
+        loopback_ready = False
+        postflight = None
+        if loaded:
+            # Treat a loaded anchor as potentially active until its private
+            # rules are flushed. With lo0 already PF-visible, no lease exists
+            # and traffic can start matching immediately.
             _pf_applied = True
-            postflight = _baseline_postflight(preflight.candidates, identity)
-            if postflight.ok and not _shutdown_started.is_set():
-                _set_baseline_guard("ready")
-                return True
-            if _flush_private_pf_with_retry():
+            if not _shutdown_started.is_set() and transparent_routing_ready():
+                # Load while the external skip is still intact, then clear only
+                # PFI_IFLAG_SKIP under a durable lease. This avoids a window
+                # where lo0 is globally visible but our rdr rule is absent.
+                loopback_ready = _claim_pf_loopback_skip()
+            if (
+                loopback_ready
+                and not _shutdown_started.is_set()
+                and transparent_routing_ready()
+            ):
+                postflight = _baseline_postflight(preflight.candidates, identity)
+                if postflight.ok and not _shutdown_started.is_set():
+                    _set_baseline_guard("ready")
+                    return True
+
+        if _flush_private_pf_with_retry():
+            _pf_applied = False
+            restored = _restore_pf_loopback_skip()
+            if restored:
                 _pf_release_enable_token()
-                _pf_applied = False
-                _set_baseline_guard("blocked", BASELINE_GUARD_BLOCK_REASON)
+            if postflight is not None:
+                state = "blocked" if restored else "rollback_failed"
+                reason = (
+                    BASELINE_GUARD_BLOCK_REASON
+                    if restored
+                    else BASELINE_GUARD_ROLLBACK_REASON
+                )
+                _set_baseline_guard(state, reason)
                 print(
                     ">> private PF failed the HTTPS baseline -> rolled back and blocked",
                     file=sys.stderr,
                 )
-            else:
-                # Keep the listener alive while the monitor retries only our
-                # anchor. Killing it here would turn a PF cleanup failure into
-                # a machine-wide HTTPS black hole.
+            elif loaded and not loopback_ready and not _shutdown_started.is_set():
+                now = time.time()
                 _set_baseline_guard(
-                    "rollback_failed", BASELINE_GUARD_ROLLBACK_REASON
+                    "retry" if restored else "rollback_failed",
+                    (
+                        PF_LOOPBACK_UNAVAILABLE_REASON
+                        if restored
+                        else BASELINE_GUARD_ROLLBACK_REASON
+                    ),
+                    now=now,
+                    retry_at=now + BASELINE_GUARD_RETRY_SECONDS,
                 )
                 print(
-                    ">> private PF rollback is incomplete; listener remains alive",
+                    ">> PF loopback qualification failed -> private PF remains dormant",
                     file=sys.stderr,
                 )
-            return False
-        if _flush_private_pf_with_retry():
-            _pf_release_enable_token()
-            _pf_applied = False
+            if not restored:
+                print(
+                    ">> PF loopback restoration is incomplete; lease remains recoverable",
+                    file=sys.stderr,
+                )
         else:
-            _pf_applied = True
+            # Keep the listener alive while the monitor retries only our
+            # anchor. Killing it here would turn a PF cleanup failure into a
+            # machine-wide HTTPS black hole.
+            _pf_applied = loaded or _pf_applied
             _set_baseline_guard("rollback_failed", BASELINE_GUARD_ROLLBACK_REASON)
+            print(
+                ">> private PF rollback is incomplete; listener remains alive",
+                file=sys.stderr,
+            )
         return False
 
 
@@ -4898,14 +5044,25 @@ def pf_teardown():
         if flush_result.returncode != 0:
             print(">> unable to clear Slipstream pf anchor; will retry", file=sys.stderr)
             return False
-        release_result = _pf_release_enable_token()
-        if release_result is not None and release_result.returncode != 0:
-            print(">> unable to release Slipstream pf token; will retry", file=sys.stderr)
-            return False
         _pf_applied = False
+        if not _restore_pf_loopback_skip():
+            print(">> unable to restore PF loopback skip; will retry", file=sys.stderr)
+            return False
+        release_result = _pf_release_enable_token()
+        token_release_failed = (
+            release_result is not None and release_result.returncode != 0
+        )
         _pf_interceptor_conflicts = []
         _pf_teardown_complete.set()
     print(">> Slipstream pf anchor cleared")
+    if token_release_failed:
+        # The network-safe boundary is the private anchor, not the enable
+        # reference. Keep the token file for a later uninstall/recovery, but do
+        # not keep the listener alive after interception has already stopped.
+        print(
+            ">> Slipstream pf token release deferred; token remains recoverable",
+            file=sys.stderr,
+        )
     return True
 
 
@@ -5131,13 +5288,27 @@ def cleanup_stale(port=PROXY_PORT):
     disable_error = ""
 
     if not installed:
-        _run("launchctl", "bootout", "system", LAUNCHD_PLIST)
+        # A foreground/dev daemon must quiesce an installed KeepAlive job while
+        # its listener is still available. Booting it out first can strand the
+        # private redirect until this new process reaches the later flush.
+        if not _disable_and_cleanup_install(port, remove_runtime=False):
+            raise OwnedPfStateError(
+                "the installed daemon could not be quiesced safely"
+            )
     elif legacy_global_conflict:
         result = _run("launchctl", "disable", _launchd_target())
         if result.returncode != 0:
             disable_error = (result.stderr or result.stdout or "unknown error").strip()
 
-    _pf_flush()
+    flush = _pf_flush()
+    if flush.returncode != 0:
+        raise OwnedPfStateError(
+            "Slipstream's private PF anchor could not be cleared"
+        )
+    if not _restore_pf_loopback_skip():
+        raise OwnedPfStateError(
+            "Slipstream's PF loopback state could not be restored"
+        )
     _pf_release_enable_token()
 
     if legacy_global_conflict:
@@ -5844,17 +6015,19 @@ def network_monitor(port, voice=True):
                 else:
                     print(">> routing backend changed before PF could be armed", file=sys.stderr)
             elif not pf_has_rules(port):
-                if pf_parent_anchor_loaded():
-                    print(">> Slipstream pf anchor vanished — re-applying", file=sys.stderr)
+                parent_loaded = pf_parent_anchor_loaded()
+                print(">> Slipstream pf anchor vanished — pausing", file=sys.stderr)
+                paused = pause_private_pf()
+                if parent_loaded and paused:
+                    print(">> private PF cleanup complete — re-applying", file=sys.stderr)
                     if arm_private_pf_if_ready(port):
                         start_canaries_if_due("pf_reapply", force=True)
-                else:
+                elif not parent_loaded:
                     print(
                         f">> pf parent anchor {PF_PARENT_ANCHOR} vanished; "
                         "leaving external rules untouched",
                         file=sys.stderr,
                     )
-                    _pf_applied = False
         if send is not None:                       # scapy available
             if iface and iface != cur_iface:
                 if sniffer is not None:
@@ -6678,7 +6851,13 @@ async def dial_plain(ip, port, first_flight):
         return r, w
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception as error:
+        if VERBOSE:
+            print(
+                f"  exact system dial {ip}:{port} failed: "
+                f"{type(error).__name__}: {str(error)[:160]}",
+                file=sys.stderr,
+            )
         return None
     finally:
         if w is not None and not connected:
@@ -6915,7 +7094,11 @@ async def _handle_impl(reader, writer):
             print(f"  DIOCNATLOOK failed: {e}", file=sys.stderr)
         writer.close()
         return
+    if VERBOSE:
+        print(f"  accepted PF stream -> {dst_ip}:{dst_port}", file=sys.stderr)
     if dst_port == PROXY_PORT and dst_ip.startswith("127."):
+        if VERBOSE:
+            print("  rejected recursive PF destination", file=sys.stderr)
         writer.close()
         return
 
@@ -7539,6 +7722,13 @@ def _launchd_target():
     return f"system/{LAUNCHD_LABEL}"
 
 
+def _launchd_job_absent(result):
+    if result.returncode == 0:
+        return False
+    detail = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return "could not find service" in detail
+
+
 def _command_failure(action, result):
     detail = (result.stderr or result.stdout or "command returned an error").strip()
     raise RuntimeError(f"{action}: {detail[:400]}")
@@ -7658,6 +7848,8 @@ def _stop_owned_daemon_pid(pid, timeout=SHUTDOWN_DRAIN_SECONDS + 2.0):
     # owned anchor, then give the daemon one last chance to finish naturally.
     if not _flush_private_pf_with_retry(attempts=10, delay=0.2):
         return False
+    if not _restore_pf_loopback_skip():
+        return False
     grace_deadline = time.monotonic() + 1.0
     while time.monotonic() < grace_deadline:
         if _process_command_for_pid(pid) is None:
@@ -7697,6 +7889,8 @@ def _installed_daemon_readiness(port):
         return False, "daemon rolled back after baseline HTTPS qualification failed"
     if recovery.get("reason") == BASELINE_GUARD_ROLLBACK_REASON:
         return False, "daemon is still restoring the system HTTPS path"
+    if recovery.get("reason") == PF_LOOPBACK_UNAVAILABLE_REASON:
+        return False, "daemon could not qualify the PF loopback path"
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
         return False, "status pid is not the installed daemon"
@@ -7760,7 +7954,18 @@ def _cleanup_install_incomplete(reason):
     return False
 
 
-def _disable_and_cleanup_install(port=PROXY_PORT):
+def _remove_daemon_status_artifacts():
+    for path in (STATUS_PATH + ".tmp", STATUS_PATH):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+    return True
+
+
+def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     status = _daemon_status_record() or {}
     pid = status.get("pid")
     disable_result = _run("/bin/launchctl", "disable", _launchd_target())
@@ -7771,10 +7976,12 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         # either while our anchor still redirects HTTPS would be less safe than
         # returning an explicit incomplete rollback.
         return _cleanup_install_incomplete("private PF anchor could not be cleared")
+    if not _restore_pf_loopback_skip():
+        return _cleanup_install_incomplete("PF loopback skip could not be restored")
 
     # KeepAlive must be quiesced before signalling the process. Stopping the
-    # daemon first leaves a window where launchd can replace it while uninstall
-    # is still inspecting the old PID, which presents as a process that keeps
+    # daemon first leaves a window where launchd can replace it while cleanup is
+    # still inspecting the old PID, which presents as a process that keeps
     # coming back and can leave the listener behind.
     owned_pids = set(_owned_listener_pids(port))
     if (
@@ -7784,6 +7991,22 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
     ):
         owned_pids.add(pid)
     bootout_result = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+    if bootout_result.returncode != 0:
+        retry = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
+        if retry.returncode != 0:
+            loaded = _run("/bin/launchctl", "print", _launchd_target())
+            if not _launchd_job_absent(loaded):
+                # The loaded KeepAlive job may have re-armed after the first
+                # cleanup. Restore the network boundary again, but do not
+                # signal its process until launchd is proven quiescent.
+                _flush_private_pf_with_retry(attempts=10, delay=0.2)
+                _restore_pf_loopback_skip()
+                reason = (
+                    "launchd job remains loaded"
+                    if loaded.returncode == 0
+                    else "launchd job absence could not be verified"
+                )
+                return _cleanup_install_incomplete(reason)
     owned_pids.update(_owned_listener_pids(port))
     process_results = []
     for owned_pid in sorted(owned_pids):
@@ -7794,17 +8017,25 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
             continue
         process_results.append(_stop_owned_daemon_pid(owned_pid))
     processes_clean = all(process_results)
+    # The first cleanup happens while the listener is still available. Repeat it
+    # after launchd and every verified survivor are quiescent so a final monitor
+    # tick cannot leave a re-armed anchor behind during uninstall.
+    if not _flush_private_pf_with_retry(attempts=10, delay=0.2):
+        return _cleanup_install_incomplete("private PF anchor reappeared during shutdown")
+    if not _restore_pf_loopback_skip():
+        return _cleanup_install_incomplete("PF loopback skip reappeared during shutdown")
     if not processes_clean:
         return _cleanup_install_incomplete("owned daemon process did not stop")
-    if bootout_result.returncode != 0:
-        retry = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
-        if retry.returncode != 0:
-            loaded = _run("/bin/launchctl", "print", _launchd_target())
-            if loaded.returncode == 0:
-                return _cleanup_install_incomplete("launchd job remains loaded")
     pf_release_result = _pf_release_enable_token()
     if pf_release_result is not None and pf_release_result.returncode != 0:
         return _cleanup_install_incomplete("owned PF enable token was not released")
+    if not _remove_daemon_status_artifacts():
+        return _cleanup_install_incomplete("daemon status could not be removed")
+    listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
+    if not listener_clean:
+        return _cleanup_install_incomplete("listener remains on TCP/1080")
+    if not remove_runtime:
+        return True
     try:
         os.remove(LAUNCHD_PLIST)
     except FileNotFoundError:
@@ -7813,27 +8044,21 @@ def _disable_and_cleanup_install(port=PROXY_PORT):
         return _cleanup_install_incomplete("LaunchDaemon plist could not be removed")
     remove_obsolete_newsyslog_config()
     _remove_install_runtime_artifacts()
-    listener_clean = _wait_for_listener_state(port, False, timeout=3.0)
     runtime_clean = not any(os.path.lexists(path) for path in (
         INSTALL_DIR,
         LAUNCHD_PLIST,
         _STRAT_PATH,
         STATUS_PATH,
         TGWS_LINK_PATH,
+        PF_SKIP_LEASE_PATH,
     ))
     clean = all((
         disable_result.returncode == 0,
         processes_clean,
-        listener_clean,
         runtime_clean,
     ))
     if not clean:
-        reason = (
-            "listener remains on TCP/1080"
-            if not listener_clean
-            else "installed runtime artifacts remain"
-        )
-        return _cleanup_install_incomplete(reason)
+        return _cleanup_install_incomplete("installed runtime artifacts remain")
     return True
 
 
@@ -7864,17 +8089,9 @@ def do_install(port):
                 tgws_secret_backup = handle.read()
         except Exception:
             tgws_secret_backup = None
-        old_status = _daemon_status_record() or {}
-        old_pid = old_status.get("pid")
-        _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
         mutated = True
-        owned_pids = set(_owned_listener_pids(port))
-        if isinstance(old_pid, int) and not isinstance(old_pid, bool):
-            owned_pids.add(old_pid)
-        for owned_pid in sorted(owned_pids):
-            _stop_owned_daemon_pid(owned_pid)
-        if not _wait_for_listener_state(port, False):
-            raise RuntimeError(f"listener 127.0.0.1:{port} is still occupied")
+        if not _disable_and_cleanup_install(port, remove_runtime=False):
+            raise RuntimeError("existing daemon could not be quiesced safely")
         if frozen:
             src = os.path.dirname(os.path.abspath(sys.executable))
             _replace_tree_resilient(src, INSTALL_DIR)
@@ -7957,6 +8174,20 @@ def do_uninstall():
         print("warning: Slipstream cleanup incomplete; inspect launchd, PF token, and TCP/1080",
               file=sys.stderr)
     return clean
+
+
+def recover_owned_network_state():
+    """Recover only durable PF state after launchd has been quiesced."""
+    if not _flush_private_pf_with_retry(attempts=10, delay=0.2):
+        return _cleanup_install_incomplete("private PF anchor could not be cleared")
+    if not _restore_pf_loopback_skip():
+        return _cleanup_install_incomplete("PF loopback skip could not be restored")
+    released = _pf_release_enable_token()
+    if released is not None and released.returncode != 0:
+        return _cleanup_install_incomplete("owned PF enable token was not released")
+    if not _remove_daemon_status_artifacts():
+        return _cleanup_install_incomplete("daemon status could not be removed")
+    return True
 
 
 def _start_network_monitor(port, voice):
@@ -8173,6 +8404,8 @@ def main():
                     help="install as a LaunchDaemon (starts at boot, auto-restarts)")
     ap.add_argument("--uninstall", action="store_true",
                     help="remove the LaunchDaemon and clear private pf state")
+    ap.add_argument("--recover-network", action="store_true",
+                    help=argparse.SUPPRESS)
     ap.add_argument("--status", action="store_true",
                     help="print daemon status JSON and exit (no root needed)")
     ap.add_argument("--baseline-probe", action="store_true", help=argparse.SUPPRESS)
@@ -8223,6 +8456,8 @@ def main():
         sys.exit(0 if do_install(args.port) else 1)
     if args.uninstall:
         sys.exit(0 if do_uninstall() else 1)
+    if args.recover_network:
+        sys.exit(0 if recover_owned_network_state() else 1)
 
     # A transparent proxy carries ALL system TCP/443 — hundreds of concurrent FDs.
     # The default 256-fd soft limit is far too low ("Too many open files"); raise it.
@@ -8241,7 +8476,7 @@ def main():
 
     try:
         cleanup_stale()    # release only state owned by the previous daemon
-    except LegacyGlobalPfConflict as exc:
+    except (LegacyGlobalPfConflict, OwnedPfStateError) as exc:
         write_status("conflict", "", "")
         print(f">> {exc}", file=sys.stderr)
         _release_fd_reserve()

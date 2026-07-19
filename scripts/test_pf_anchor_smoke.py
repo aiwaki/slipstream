@@ -17,6 +17,8 @@ class PfAnchorSmokeTests(unittest.TestCase):
 
         self.assertIn("port 18443", rules)
         self.assertIn("port 19443", rules)
+        self.assertIn("pass out quick on ! lo0 route-to", rules)
+        self.assertIn("pass in quick on lo0 reply-to", rules)
         self.assertNotIn("port 443 ", rules)
 
     def test_redirect_rules_reject_tcp_443(self) -> None:
@@ -28,6 +30,7 @@ class PfAnchorSmokeTests(unittest.TestCase):
             ("/sbin/pfctl", "-s", "info"),
             ("/sbin/pfctl", "-s", "states"),
             ("/sbin/pfctl", "-s", "References"),
+            ("/sbin/pfctl", "-v", "-s", "Interfaces"),
             ("pfctl", "-sn"),
             ("pfctl", "-sr"),
             ("pfctl", "-E"),
@@ -63,11 +66,40 @@ class PfAnchorSmokeTests(unittest.TestCase):
         self.assertIn("<redacted-token>", rendered)
 
     def test_snapshot_comparison_detects_global_changes(self) -> None:
-        before = pf_anchor_smoke.PfSnapshot(False, "nat", "filter")
-        after = pf_anchor_smoke.PfSnapshot(False, "changed", "filter")
+        before = pf_anchor_smoke.PfSnapshot(False, "nat", "filter", True)
+        after = pf_anchor_smoke.PfSnapshot(False, "changed", "filter", True)
 
         with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "global NAT"):
             pf_anchor_smoke._assert_same_snapshot(before, after)
+
+    def test_snapshot_comparison_detects_loopback_skip_changes(self) -> None:
+        before = pf_anchor_smoke.PfSnapshot(False, "nat", "filter", True)
+        after = pf_anchor_smoke.PfSnapshot(False, "nat", "filter", False)
+
+        with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "lo0 skip"):
+            pf_anchor_smoke._assert_same_snapshot(before, after)
+
+    def test_failed_loopback_restore_never_releases_pf_token(self) -> None:
+        calls = []
+
+        class Tproxy:
+            @staticmethod
+            def _restore_pf_loopback_skip():
+                calls.append("restore")
+                return False
+
+            @staticmethod
+            def _pf_release_enable_token():
+                calls.append("release")
+                return None
+
+        self.assertFalse(
+            pf_anchor_smoke._restore_loopback_before_token_release(
+                Tproxy(),
+                object(),
+            )
+        )
+        self.assertEqual(calls, ["restore"])
 
     def test_dry_run_is_non_privileged_and_explicit(self) -> None:
         output = io.StringIO()

@@ -16,12 +16,16 @@ large lifecycle modules, and a non-reproducible release pipeline.
 
 ## M0 - Safe Base
 
-Target: before `v0.1.5`.
+Target: before the next workstation-safe preview release.
 
 - Keep Slipstream rules in the private `com.apple/slipstream` anchor.
 - Never load Slipstream rules into the global PF ruleset, edit `/etc/pf.conf`,
   or call `pfctl -d`.
 - Pair `pfctl -E` with its owned token and `pfctl -X`.
+- Treat macOS `lo0 (skip)` as external kernel state. Clear only that interface
+  bit under a durable owner-only lease after private rules are loaded; restore
+  and prove it before releasing the PF token. Never reload the global ruleset
+  merely to make the loopback interface visible to PF.
 - Manage daemon and Geph by launchd label plus verified PID/executable identity;
   never use broad process-pattern kills.
 - Treat daemon install and upgrade as a transaction: a fresh owned status,
@@ -50,6 +54,12 @@ CI covers both script-mode and packaged-app cold install, same-artifact
 reinstall, restart, and uninstall with a sibling anchor and a long-lived
 sentinel PF state. Cross-version rollback starts only after a safety-qualified
 release exists; stable distribution remains a separate M3 gate.
+
+The primary-Mac delivery failure is now explained by kernel `lo0 (skip)` state,
+not routing policy or DNS. A scoped high-port privileged smoke proved the leased
+ioctl path and exact rollback without installing Slipstream or touching
+TCP/443. The implementation still requires the full disposable packaged
+lifecycle gate before workstation installation.
 
 ## M1 - Autonomous Routing V1
 

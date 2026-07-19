@@ -3,7 +3,9 @@
 
 The smoke test is intended for a disposable macOS runner. It never installs or
 starts Slipstream, never targets TCP/443, and refuses to run while Slipstream
-state already exists. All PF writes are restricted to two owned anchors.
+state already exists. All rule writes are restricted to two owned anchors. If
+PF initially skips lo0, the smoke uses Slipstream's durable lease + private
+ioctl path and requires the exact original flag state after cleanup.
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ SENTINEL_ANCHOR = "com.apple/slipstream-smoke-sentinel"
 OWNED_ANCHORS = frozenset({SLIPSTREAM_ANCHOR, SENTINEL_ANCHOR})
 PRODUCTION_TOKEN_PATH = Path("/var/run/slipstream-pf.token")
 SMOKE_TOKEN_PATH = Path("/var/run/slipstream-pf-smoke.token")
+PRODUCTION_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
+SMOKE_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-smoke-lo0-skip.json")
 STATUS_PATH = Path("/var/run/slipstream.status")
 TEST_DESTINATION = "198.51.100.1"
 DEFAULT_TARGET_PORT = 18443
@@ -47,6 +51,7 @@ class PfSnapshot:
     enabled: bool
     nat_rules: str
     filter_rules: str
+    loopback_skip: bool
 
 
 def validate_pfctl_args(args: Sequence[str]) -> None:
@@ -61,6 +66,7 @@ def validate_pfctl_args(args: Sequence[str]) -> None:
         ("-s", "info"),
         ("-s", "states"),
         ("-s", "References"),
+        ("-v", "-s", "Interfaces"),
         ("-sn",),
         ("-sr",),
         ("-E",),
@@ -119,10 +125,14 @@ def build_redirect_rules(*, target_port: int, proxy_port: int) -> str:
     if target_port == proxy_port:
         raise SmokeError("target and proxy ports must differ")
     return (
-        "rdr pass on lo0 inet proto tcp from any to any "
+        "rdr on lo0 inet proto tcp from any to any "
         f"port {target_port} -> 127.0.0.1 port {proxy_port}\n"
-        "pass out route-to (lo0 127.0.0.1) inet proto tcp from any to any "
-        f"port {target_port} user != root\n"
+        "pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp "
+        f"from any to any port {target_port} user != root\n"
+        "pass out quick on lo0 inet proto tcp from any to any "
+        f"port {target_port} no state\n"
+        "pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp "
+        f"from any to 127.0.0.1 port {proxy_port}\n"
     )
 
 
@@ -171,10 +181,19 @@ def _pf_snapshot(runner: PfctlRunner) -> PfSnapshot:
         enabled = False
     else:
         raise SmokeError("unable to determine PF enabled state")
+    interfaces = runner.run("-v", "-s", "Interfaces", check=True).stdout.splitlines()
+    values = {line.strip() for line in interfaces}
+    if "lo0 (skip)" in values:
+        loopback_skip = True
+    elif "lo0" in values:
+        loopback_skip = False
+    else:
+        raise SmokeError("unable to determine PF lo0 skip state")
     return PfSnapshot(
         enabled=enabled,
         nat_rules=runner.run("-sn", check=True).stdout.strip(),
         filter_rules=runner.run("-sr", check=True).stdout.strip(),
+        loopback_skip=loopback_skip,
     )
 
 
@@ -193,6 +212,8 @@ def _assert_same_snapshot(before: PfSnapshot, after: PfSnapshot) -> None:
             changed.append("global NAT rules")
         if before.filter_rules != after.filter_rules:
             changed.append("global filter rules")
+        if before.loopback_skip != after.loopback_skip:
+            changed.append("lo0 skip state")
         raise SmokeError("PF snapshot changed after cleanup: " + ", ".join(changed))
 
 
@@ -262,6 +283,7 @@ def _configure_tproxy_for_smoke(tproxy, runner: PfctlRunner, rules: str) -> None
     tproxy._run = scoped_run
     tproxy.PF_ANCHOR = SLIPSTREAM_ANCHOR
     tproxy.PF_TOKEN_PATH = str(SMOKE_TOKEN_PATH)
+    tproxy.PF_SKIP_LEASE_PATH = str(SMOKE_SKIP_LEASE_PATH)
     tproxy.PF_RULES = rules
     tproxy.GEPH_ENABLED = True
     tproxy.GEPH_PORTS = [tproxy.GEPH_OWNED_PORT]
@@ -281,7 +303,13 @@ def _preflight(runner: PfctlRunner) -> tuple[PfSnapshot, int, int]:
     if not PFCTL.is_file():
         raise SmokeError(f"pfctl not found at {PFCTL}")
     uid, gid = _original_user()
-    for path in (PRODUCTION_TOKEN_PATH, SMOKE_TOKEN_PATH, STATUS_PATH):
+    for path in (
+        PRODUCTION_TOKEN_PATH,
+        SMOKE_TOKEN_PATH,
+        PRODUCTION_SKIP_LEASE_PATH,
+        SMOKE_SKIP_LEASE_PATH,
+        STATUS_PATH,
+    ):
         if path.exists():
             raise SmokeError(f"refusing to run while Slipstream state exists: {path}")
     _assert_empty_anchor(runner, SLIPSTREAM_ANCHOR)
@@ -299,6 +327,13 @@ def _release_smoke_token(tproxy, runner: PfctlRunner) -> None:
         if token:
             runner.run("-X", token, check=True)
         SMOKE_TOKEN_PATH.unlink(missing_ok=True)
+
+
+def _restore_loopback_before_token_release(tproxy, runner: PfctlRunner) -> bool:
+    if tproxy is not None and not tproxy._restore_pf_loopback_skip():
+        return False
+    _release_smoke_token(tproxy, runner)
+    return True
 
 
 def run_smoke(*, target_port: int, proxy_port: int) -> dict:
@@ -333,6 +368,14 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         mode = stat.S_IMODE(SMOKE_TOKEN_PATH.stat().st_mode)
         if mode != 0o600:
             raise SmokeError(f"PF token mode is {mode:o}, expected 600")
+        if before.loopback_skip:
+            skip_mode = stat.S_IMODE(SMOKE_SKIP_LEASE_PATH.stat().st_mode)
+            if skip_mode != 0o600:
+                raise SmokeError(
+                    f"PF loopback lease mode is {skip_mode:o}, expected 600"
+                )
+        elif SMOKE_SKIP_LEASE_PATH.exists():
+            raise SmokeError("PF loopback lease was created without owning the skip flag")
 
         nat, filters = _anchor_snapshot(runner, SLIPSTREAM_ANCHOR)
         if str(target_port) not in nat or str(proxy_port) not in nat:
@@ -370,10 +413,10 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             except Exception as exc:  # cleanup must attempt every remaining step
                 cleanup_errors.append(f"flush {anchor}: {exc}")
         try:
-            _release_smoke_token(tproxy, runner)
+            if not _restore_loopback_before_token_release(tproxy, runner):
+                raise SmokeError("PF loopback skip restoration failed")
         except Exception as exc:
-            cleanup_errors.append(f"release PF token: {exc}")
-        SMOKE_TOKEN_PATH.unlink(missing_ok=True)
+            cleanup_errors.append(f"restore PF loopback before token release: {exc}")
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
@@ -381,6 +424,8 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         raise SmokeError("; ".join(cleanup_errors)) from failure
     _assert_empty_anchor(runner, SLIPSTREAM_ANCHOR)
     _assert_empty_anchor(runner, SENTINEL_ANCHOR)
+    if SMOKE_SKIP_LEASE_PATH.exists():
+        raise SmokeError("PF loopback lease remains after cleanup")
     after = _pf_snapshot(runner)
     _assert_same_snapshot(before, after)
     if failure is not None:
@@ -391,6 +436,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         "runtime_failure": "private_anchor_flushed",
         "sentinel": "unchanged",
         "global_pf": "unchanged",
+        "loopback_skip": "restored",
         "target_port": target_port,
         "proxy_port": proxy_port,
         "commands": runner.audit_log(),
@@ -407,6 +453,7 @@ def dry_run(*, target_port: int, proxy_port: int) -> dict:
         "target_port": target_port,
         "proxy_port": proxy_port,
         "intercepts_tcp_443": False,
+        "loopback_skip": "temporarily cleared only when present, then restored",
         "forbidden_operations": [
             "global ruleset reload",
             "pfctl -d",

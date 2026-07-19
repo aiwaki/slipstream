@@ -21,6 +21,10 @@ import tproxy
 from tproxy import _doh_request, _doh_ssl_context
 
 
+_REAL_CLAIM_PF_LOOPBACK_SKIP = tproxy._claim_pf_loopback_skip
+_REAL_RESTORE_PF_LOOPBACK_SKIP = tproxy._restore_pf_loopback_skip
+
+
 @pytest.fixture(autouse=True)
 def reset_smart_dns_state(monkeypatch):
     shutdown_started = tproxy._shutdown_started.is_set()
@@ -83,6 +87,8 @@ def reset_smart_dns_state(monkeypatch):
             True, "ok", tuple(candidates)
         ),
     )
+    monkeypatch.setattr(tproxy, "_claim_pf_loopback_skip", lambda: True)
+    monkeypatch.setattr(tproxy, "_restore_pf_loopback_skip", lambda: True)
     monkeypatch.setattr(tproxy, "_daemon_recovery_record", lambda: None)
     try:
         tproxy._shutdown_started.clear()
@@ -573,7 +579,11 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
-    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: None,
+    )
     monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
     monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
@@ -637,7 +647,11 @@ def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_
         lambda pid: stopped.append(pid) or True,
     )
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
-    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: None,
+    )
     monkeypatch.setattr(tproxy, "_remove_pf_token", lambda: None)
     monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
@@ -742,6 +756,11 @@ def test_uninstall_clears_pf_and_boots_out_before_stopping_survivor(
         "_flush_private_pf_with_retry",
         lambda **_kwargs: events.append("pf_cleared") or True,
     )
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: events.append("skip_restored") or True,
+    )
     monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
     monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
     monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
@@ -750,12 +769,109 @@ def test_uninstall_clears_pf_and_boots_out_before_stopping_survivor(
         "_stop_owned_daemon_pid",
         lambda _pid: events.append("stopped") or True,
     )
-    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: events.append("token_released") or None,
+    )
     monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
 
     assert tproxy.do_uninstall()
-    assert events[:4] == ["disable", "pf_cleared", "bootout", "stopped"]
+    assert events == [
+        "disable",
+        "pf_cleared",
+        "skip_restored",
+        "bootout",
+        "stopped",
+        "pf_cleared",
+        "skip_restored",
+        "token_released",
+    ]
+
+
+def test_uninstall_never_signals_daemon_while_launchd_remains_loaded(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    events = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"state": "active", "pid": 4242},
+    )
+
+    def fake_run(*args):
+        action = args[1] if len(args) > 1 else ""
+        if action == "disable":
+            events.append("disable")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if action == "bootout":
+            events.append("bootout")
+            return SimpleNamespace(returncode=1, stdout="", stderr="busy")
+        if action == "print":
+            events.append("print")
+            return SimpleNamespace(returncode=0, stdout="loaded", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: events.append("pf_cleared") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: events.append("skip_restored") or True,
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda _pid: events.append("stopped") or True,
+    )
+
+    assert not tproxy.do_uninstall()
+    assert events == [
+        "disable",
+        "pf_cleared",
+        "skip_restored",
+        "bootout",
+        "bootout",
+        "print",
+        "pf_cleared",
+        "skip_restored",
+    ]
+
+
+def test_launchd_absence_requires_exact_not_found_evidence():
+    missing = SimpleNamespace(
+        returncode=113,
+        stdout="",
+        stderr='Could not find service "dev.slipstream.tproxy" in domain for system',
+    )
+    indeterminate = SimpleNamespace(
+        returncode=1,
+        stdout="",
+        stderr="Operation not permitted",
+    )
+    loaded = SimpleNamespace(returncode=0, stdout="loaded", stderr="")
+
+    assert tproxy._launchd_job_absent(missing)
+    assert not tproxy._launchd_job_absent(indeterminate)
+    assert not tproxy._launchd_job_absent(loaded)
 
 
 def test_uninstall_accepts_daemon_exit_caused_by_bootout(monkeypatch, tmp_path):
@@ -810,6 +926,37 @@ def test_uninstall_accepts_daemon_exit_caused_by_bootout(monkeypatch, tmp_path):
     assert tproxy.do_uninstall()
 
 
+def test_owned_network_recovery_restores_skip_before_releasing_token(
+    monkeypatch,
+    tmp_path,
+):
+    events = []
+    status = tmp_path / "status.json"
+    status.write_text("{}")
+    (tmp_path / "status.json.tmp").write_text("{}")
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: events.append("anchor-cleared") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: events.append("skip-restored") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: events.append("token-released") or SimpleNamespace(returncode=0),
+    )
+
+    assert tproxy.recover_owned_network_state()
+    assert events == ["anchor-cleared", "skip-restored", "token-released"]
+    assert not status.exists()
+    assert not (tmp_path / "status.json.tmp").exists()
+
+
 def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tmp_path):
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -852,6 +999,156 @@ def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tm
         "system/dev.slipstream.tproxy",
     ) in commands
     assert not any(command[1:3] == ("load", "-w") for command in commands)
+
+
+def test_reinstall_quiesces_owned_daemon_before_replacing_runtime(
+    monkeypatch, tmp_path
+):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_text("new binary")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    install.mkdir(parents=True)
+    (install / "old").write_text("old runtime")
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("old plist")
+    events = []
+    original_replace = tproxy._replace_tree_resilient
+
+    def quiesce(port, remove_runtime=True):
+        events.append(("quiesce", port, remove_runtime))
+        return True
+
+    def replace(src, dst, *args, **kwargs):
+        events.append(("replace", src, dst))
+        return original_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "_disable_and_cleanup_install", quiesce)
+    monkeypatch.setattr(tproxy, "_replace_tree_resilient", replace)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda *_args: True)
+
+    assert tproxy.do_install(1080)
+    assert events[:2] == [
+        ("quiesce", 1080, False),
+        ("replace", str(bundle), str(install)),
+    ]
+
+
+def test_install_never_replaces_runtime_when_quiescence_is_unproven(
+    monkeypatch, tmp_path
+):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_text("new binary")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    install.mkdir(parents=True)
+    marker = install / "old"
+    marker.write_text("old runtime")
+    calls = []
+
+    def cleanup(_port, remove_runtime=True):
+        calls.append(remove_runtime)
+        return False
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "_disable_and_cleanup_install", cleanup)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_replace_tree_resilient",
+        lambda *_args, **_kwargs: pytest.fail(
+            "runtime replacement requires proven launchd quiescence"
+        ),
+    )
+
+    assert not tproxy.do_install(1080)
+    assert calls == [False, True]
+    assert marker.read_text() == "old runtime"
+
+
+def test_reinstall_quiescence_preserves_runtime_but_removes_stale_status(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    status = tmp_path / "status.json"
+    status.write_text("{}")
+    events = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"state": "active", "pid": 4242},
+    )
+
+    def fake_run(*args):
+        events.append(args[1])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: events.append("pf_cleared") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: events.append("skip_restored") or True,
+    )
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
+    monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_stop_owned_daemon_pid",
+        lambda _pid: events.append("stopped") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: events.append("token_released") or None,
+    )
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+
+    assert tproxy._disable_and_cleanup_install(1080, remove_runtime=False)
+    assert install.exists()
+    assert plist.exists()
+    assert not status.exists()
+    assert events == [
+        "disable",
+        "pf_cleared",
+        "skip_restored",
+        "bootout",
+        "stopped",
+        "pf_cleared",
+        "skip_restored",
+        "token_released",
+    ]
 
 
 def test_incomplete_baseline_rollback_preserves_live_runtime_when_pf_will_not_clear(
@@ -1479,6 +1776,65 @@ def test_pf_token_file_is_private_and_token_parser_is_strict(tmp_path):
     assert tproxy._read_pf_token(str(token_path)) is None
 
 
+def test_pf_loopback_claim_persists_lease_before_clearing_skip(monkeypatch):
+    events = []
+    monkeypatch.setattr(tproxy, "_read_pf_skip_lease", lambda path=None: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_write_pf_skip_lease",
+        lambda path=None: events.append("lease-written"),
+    )
+    monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: True)
+    monkeypatch.setattr(
+        tproxy.pf_adapter,
+        "set_interface_skip",
+        lambda _runner, interface, enabled: events.append(
+            ("ioctl", interface, enabled)
+        )
+        or True,
+    )
+
+    assert _REAL_CLAIM_PF_LOOPBACK_SKIP()
+    assert events == [
+        "lease-written",
+        ("ioctl", tproxy.PF_LOOPBACK_INTERFACE, False),
+    ]
+
+
+def test_pf_loopback_restore_removes_lease_only_after_readback(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        tproxy,
+        "_read_pf_skip_lease",
+        lambda path=None: {
+            "interface": "lo0",
+            "owner_pid": 123,
+            "restore_skip": True,
+            "schema_version": 1,
+        },
+    )
+    monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: False)
+    monkeypatch.setattr(
+        tproxy.pf_adapter,
+        "set_interface_skip",
+        lambda _runner, interface, enabled: events.append(
+            ("ioctl", interface, enabled)
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_remove_pf_skip_lease",
+        lambda path=None: events.append("lease-removed"),
+    )
+
+    assert _REAL_RESTORE_PF_LOOPBACK_SKIP()
+    assert events == [
+        ("ioctl", tproxy.PF_LOOPBACK_INTERFACE, True),
+        "lease-removed",
+    ]
+
+
 def test_pf_load_targets_only_private_anchor(monkeypatch):
     calls = []
 
@@ -1486,7 +1842,11 @@ def test_pf_load_targets_only_private_anchor(monkeypatch):
         calls.append(args)
         if args[:4] == ("pfctl", "-a", tproxy.PF_ANCHOR, "-f"):
             rules = open(args[4]).read()
-            assert "proto tcp" in rules
+            assert "rdr on lo0 inet proto tcp" in rules
+            assert "pass out quick on ! lo0 route-to (lo0 127.0.0.1)" in rules
+            assert "pass out quick on lo0" in rules
+            assert "no state" in rules
+            assert "pass in quick on lo0 reply-to (lo0 127.0.0.1)" in rules
             assert "proto udp" not in rules
             return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
         raise AssertionError(args)
@@ -1511,6 +1871,11 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
     monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status_path))
     monkeypatch.setattr(tproxy, "_remove_pf_token", lambda path=None: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: calls.append(("restore-loopback",)) or True,
+    )
     monkeypatch.setattr(tproxy, "_pf_enable_token", "123456")
     monkeypatch.setattr(tproxy, "_pf_applied", True)
 
@@ -1519,6 +1884,7 @@ def test_pf_teardown_flushes_anchor_and_releases_own_token(monkeypatch, tmp_path
     assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "rules") in calls
     assert ("pfctl", "-a", tproxy.PF_ANCHOR, "-F", "nat") in calls
     assert ("pfctl", "-X", "123456") in calls
+    assert calls.index(("restore-loopback",)) < calls.index(("pfctl", "-X", "123456"))
     assert not any("states" in args or "all" in args for args in calls)
     assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
@@ -1660,6 +2026,58 @@ def test_pf_teardown_retries_without_releasing_token_after_failed_flush(
     assert tproxy._pf_teardown_complete.is_set()
     assert not tproxy._pf_applied
     assert releases == [True]
+
+
+def test_pf_teardown_retries_skip_restore_before_releasing_token(
+    monkeypatch,
+    tmp_path,
+):
+    restores = iter((False, True))
+    releases = []
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status"))
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_restore_pf_loopback_skip", lambda: next(restores))
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: releases.append(True),
+    )
+
+    assert not tproxy.pf_teardown()
+    assert not tproxy._pf_teardown_complete.is_set()
+    assert not tproxy._pf_applied
+    assert releases == []
+
+    assert tproxy.pf_teardown()
+    assert tproxy._pf_teardown_complete.is_set()
+    assert releases == [True]
+
+
+def test_pf_teardown_stops_interception_when_token_release_is_deferred(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status"))
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: SimpleNamespace(returncode=1, stdout="", stderr="busy"),
+    )
+
+    assert tproxy.pf_teardown()
+    assert tproxy._pf_teardown_complete.is_set()
+    assert not tproxy._pf_applied
 
 
 def test_pf_release_failure_preserves_token_for_recovery(monkeypatch):
@@ -1875,6 +2293,52 @@ def test_cleanup_stale_never_uses_process_pattern_or_global_pf_disable(monkeypat
     assert not any(args[0] in {"pgrep", "pkill", "kill"} for args in calls)
     assert not any(args[:2] == ("pfctl", "-d") for args in calls)
     assert not any(args[:3] == ("pfctl", "-f", "/etc/pf.conf") for args in calls)
+
+
+def test_foreground_start_quiesces_installed_daemon_before_stale_cleanup(
+    monkeypatch,
+):
+    quiescence = []
+    monkeypatch.setattr(tproxy, "running_from_install_dir", lambda: False)
+    monkeypatch.setattr(tproxy, "_legacy_global_pf_conflict", lambda _port: False)
+    monkeypatch.setattr(
+        tproxy,
+        "_disable_and_cleanup_install",
+        lambda port, remove_runtime=True: quiescence.append(
+            (port, remove_runtime)
+        ) or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_restore_pf_loopback_skip", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+
+    tproxy.cleanup_stale(1080)
+
+    assert quiescence == [(1080, False)]
+
+
+def test_foreground_start_aborts_when_installed_daemon_is_not_quiescent(
+    monkeypatch,
+):
+    monkeypatch.setattr(tproxy, "running_from_install_dir", lambda: False)
+    monkeypatch.setattr(tproxy, "_legacy_global_pf_conflict", lambda _port: False)
+    monkeypatch.setattr(
+        tproxy,
+        "_disable_and_cleanup_install",
+        lambda _port, remove_runtime=True: False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: pytest.fail("stale cleanup requires launchd quiescence first"),
+    )
+
+    with pytest.raises(tproxy.OwnedPfStateError, match="quiesced safely"):
+        tproxy.cleanup_stale(1080)
 
 
 def test_geph_ownership_requires_pid_executable_and_config_match():
@@ -2400,12 +2864,18 @@ def test_geo_exit_backend_hold_requires_fresh_probe_after_cooldown(monkeypatch):
 
 def test_network_monitor_keeps_local_routing_active_when_geph_is_not_ready(monkeypatch):
     pauses = []
+    arms = []
     states = []
     rearms = []
 
     def pause():
         pauses.append(True)
         tproxy._pf_applied = False
+        return True
+
+    def arm(pf_port):
+        arms.append(pf_port)
+        tproxy._pf_applied = True
         return True
 
     def write_status_and_stop(state, iface, voice_iface):
@@ -2423,7 +2893,7 @@ def test_network_monitor_keeps_local_routing_active_when_geph_is_not_ready(monke
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "pause_private_pf", pause)
     monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
-    monkeypatch.setattr(tproxy, "arm_private_pf_if_ready", lambda _port: True)
+    monkeypatch.setattr(tproxy, "arm_private_pf_if_ready", arm)
     monkeypatch.setattr(
         tproxy,
         "write_status",
@@ -2444,7 +2914,8 @@ def test_network_monitor_keeps_local_routing_active_when_geph_is_not_ready(monke
 
     tproxy.network_monitor(1080, voice=False)
 
-    assert pauses == []
+    assert pauses == [True]
+    assert arms == [1080]
     assert states == [("active", "en0", None)]
     assert rearms == [("network_change", "en0")]
 
@@ -2537,6 +3008,11 @@ def test_runtime_pf_arm_does_not_depend_on_geph_after_loading_rules(monkeypatch)
     monkeypatch.setattr(tproxy, "_pf_load", load)
     monkeypatch.setattr(
         tproxy,
+        "_claim_pf_loopback_skip",
+        lambda: calls.append("claim-loopback") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
         "_pf_flush",
         lambda: calls.append("flush") or SimpleNamespace(returncode=0),
     )
@@ -2547,8 +3023,59 @@ def test_runtime_pf_arm_does_not_depend_on_geph_after_loading_rules(monkeypatch)
     )
 
     assert tproxy.arm_private_pf_if_ready(1080)
-    assert calls == ["load"]
+    assert calls == ["load", "claim-loopback"]
     assert tproxy._pf_applied is True
+
+
+def test_pf_arm_rolls_back_if_loopback_skip_cannot_be_claimed(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy.time, "time", lambda: 100.0)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_acquire_enable_token",
+        lambda: calls.append("token") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_load",
+        lambda _port: calls.append("load") or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_claim_pf_loopback_skip",
+        lambda: calls.append("claim-loopback") or False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append("flush") or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: calls.append("restore-loopback") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: calls.append("release") or SimpleNamespace(returncode=0),
+    )
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert calls == [
+        "token",
+        "load",
+        "claim-loopback",
+        "flush",
+        "restore-loopback",
+        "release",
+    ]
+    assert not tproxy._pf_applied
+    snapshot = tproxy.baseline_guard_snapshot(now=100.0)
+    assert snapshot["state"] == "retry"
+    assert snapshot["reason"] == tproxy.PF_LOOPBACK_UNAVAILABLE_REASON
 
 
 def test_baseline_guard_rolls_back_private_pf_and_blocks_repeat_arm(monkeypatch):
@@ -2592,15 +3119,38 @@ def test_baseline_guard_rolls_back_private_pf_and_blocks_repeat_arm(monkeypatch)
         "_pf_release_enable_token",
         lambda: calls.append("release") or SimpleNamespace(returncode=0),
     )
+    monkeypatch.setattr(
+        tproxy,
+        "_restore_pf_loopback_skip",
+        lambda: calls.append("restore-loopback") or True,
+    )
 
     assert not tproxy.arm_private_pf_if_ready(1080)
-    assert calls == ["token", "load", "flush", "release"]
+    assert calls == ["token", "load", "flush", "restore-loopback", "release"]
     assert tproxy._pf_applied is False
     assert tproxy.baseline_guard_snapshot()["state"] == "blocked"
     assert not tproxy.transparent_routing_ready()
 
     assert not tproxy.arm_private_pf_if_ready(1080)
-    assert calls == ["token", "load", "flush", "release"]
+    assert calls == ["token", "load", "flush", "restore-loopback", "release"]
+
+
+def test_baseline_probe_log_records_bounded_private_evidence(capsys):
+    candidate = tproxy.install_guard.BaselineCandidate(
+        "example.com", "203.0.113.10", "/"
+    )
+    result = tproxy.install_guard.ProbeResult(
+        False,
+        "x" * 120,
+    )
+
+    tproxy._log_baseline_probe_results("after PF", ((candidate, result),))
+
+    line = capsys.readouterr().err.strip()
+    assert line.startswith(
+        ">> HTTPS baseline after PF: example.com (203.0.113.10) -> "
+    )
+    assert line.endswith("x" * 80)
 
 
 def test_baseline_guard_keeps_listener_owned_until_pf_rollback_succeeds(monkeypatch):

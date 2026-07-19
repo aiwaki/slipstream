@@ -117,11 +117,18 @@ The root uninstaller disables the launchd label, clears only the private PF
 anchor, and then boots out the launchd `KeepAlive` job before signalling any
 surviving process. A PID is signalled only after revalidating the installed
 daemon command; an old PID that disappeared during `bootout` is already clean.
-It reports failure if a verified surviving daemon PID resists the bounded stop.
-Only then does it remove the plist, owned runtime, and status, and release the
-owned PF token. The token record is removed only after a successful release. If
-the installed uninstaller was already deleted, the tray uses the copy inside
-the application bundle. A partial install follows the same rollback.
+Install and reinstall use the same quiescence transaction and do not replace
+the existing runtime until launchd absence, listener shutdown, private-anchor
+cleanup, leased `lo0` restoration, and owned-token release are all proven.
+If `bootout` fails and launchd still reports the job loaded, no process is
+signalled. After launchd and every verified survivor are quiescent, cleanup
+flushes the private anchor and restores the leased `lo0` state a second time so
+a final monitor tick cannot re-arm during removal. It reports failure if a
+verified surviving daemon PID resists the bounded stop. Only then does it remove
+the plist, owned runtime, and status, and release the owned PF token. The token
+record is removed only after a successful release. If the installed uninstaller
+was already deleted, the tray uses the copy inside the application bundle. A
+partial install follows the same rollback.
 
 Do not delete the app first or use broad `pkill`, `pfctl -F states`, or DNS
 changes as normal removal steps. External Geph, DNS, proxy, PAC, VPN, and PF
@@ -175,6 +182,21 @@ Slipstream owns only `com.apple/slipstream`. Normal lifecycle and recovery do
 not load Slipstream rules into the global PF ruleset, edit `/etc/pf.conf`, or
 disable PF. This preserves macOS rules and external anchors such as `zapret`.
 
+macOS may show `lo0 (skip)` in the live kernel PF interface table even when no
+corresponding `set skip on lo0` line exists in `/etc/pf.conf`:
+
+```bash
+sudo pfctl -v -s Interfaces
+```
+
+That flag prevents a private `route-to`/`rdr on lo0` path from reaching the
+listener. Slipstream loads its private rules first, atomically records a
+root-owned `0600` lease, clears only `PFI_IFLAG_SKIP` with the native PF ioctl,
+and verifies the result. Every rollback flushes the private anchor, restores
+and verifies the original skip flag, removes the lease, and only then releases
+the owned PF token. Do not clear the flag manually or use Control-D/global PF
+reload as a workaround.
+
 Inspect the private anchor:
 
 ```bash
@@ -209,8 +231,9 @@ installed workstation. Its local no-root preflight is:
 python3 scripts/pf_anchor_smoke.py --dry-run
 ```
 
-Real mode refuses to start if Slipstream status, token, or private-anchor state
-already exists. It targets a high test port and never TCP/443.
+Real mode refuses to start if Slipstream status, token, loopback lease, or
+private-anchor state already exists. It targets a high test port and never
+TCP/443.
 
 If the required `com.apple/*` parent anchor is absent from the host PF setup,
 Slipstream exits safely instead of taking ownership of global PF configuration.
@@ -349,6 +372,15 @@ been cleared. The lifecycle is now ordered as private-anchor clear, launchd
 `bootout`, then exact-identity cleanup of any surviving PID. This prevents a
 replacement process from appearing during removal and treats a process already
 terminated by `bootout` as a successful outcome.
+
+The primary-Mac post-arm failure had a lower-level cause: the kernel reported
+`lo0 (skip)`, so loaded private rules could not receive the traffic redirected
+back to loopback. A high-port probe, separate from installation and TCP/443,
+proved that clearing only the skip bit made the exact redirect topology work
+and that rollback restored the original bit, global PF rules, external
+sentinel, anchors, token, lease, status, and listener state. Until the matching
+packaged lifecycle gate passes, this proof is not permission to install an
+unqualified build on a workstation.
 
 Required behavior:
 

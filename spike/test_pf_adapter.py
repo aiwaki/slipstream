@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pf_adapter
+import pytest
 
 
 def result(returncode=0, stdout="", stderr=""):
@@ -62,6 +63,81 @@ def test_token_file_is_private_and_parser_is_strict(tmp_path):
     path.write_text("123abc\n", encoding="ascii")
     assert pf_adapter.read_token(path) is None
     pf_adapter.remove_token(path)
+    assert not path.exists()
+
+
+def test_interface_skip_state_requires_explicit_kernel_evidence():
+    outputs = iter(("lo0 (skip)\nen0\n", "lo0\nen0\n", "en0\n"))
+
+    def runner(*args):
+        assert args == ("pfctl", "-v", "-s", "Interfaces")
+        return result(stdout=next(outputs))
+
+    assert pf_adapter.interface_skip_state(runner, "lo0") is True
+    assert pf_adapter.interface_skip_state(runner, "lo0") is False
+    assert pf_adapter.interface_skip_state(runner, "lo0") is None
+
+
+def test_interface_skip_ioctl_changes_only_the_requested_flag():
+    state = {"skip": True}
+    calls = []
+
+    class Device:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def fileno(self):
+            return 42
+
+    def opener(path, mode, buffering):
+        assert (path, mode, buffering) == ("/dev/pf", "r+b", 0)
+        return Device()
+
+    def runner(*args):
+        assert args == ("pfctl", "-v", "-s", "Interfaces")
+        suffix = " (skip)" if state["skip"] else ""
+        return result(stdout=f"lo0{suffix}\n")
+
+    def ioctl_fn(fd, command, payload, mutate):
+        request = pf_adapter.PfiocIface.from_buffer_copy(payload)
+        calls.append((fd, command, request.name, request.flags, mutate))
+        state["skip"] = command == pf_adapter.DIOCSETIFFLAG
+
+    assert pf_adapter.set_interface_skip(
+        runner,
+        "lo0",
+        False,
+        opener=opener,
+        ioctl_fn=ioctl_fn,
+    )
+    assert calls == [(
+        42,
+        pf_adapter.DIOCCLRIFFLAG,
+        b"lo0",
+        pf_adapter.PFI_IFLAG_SKIP,
+        True,
+    )]
+
+
+def test_skip_lease_is_private_atomic_and_strict(tmp_path):
+    path = tmp_path / "pf-skip.json"
+
+    pf_adapter.write_skip_lease(path, "lo0", 123)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert pf_adapter.read_skip_lease(path) == {
+        "interface": "lo0",
+        "owner_pid": 123,
+        "restore_skip": True,
+        "schema_version": 1,
+    }
+    path.write_text('{"interface":"en0"}\n', encoding="ascii")
+    with pytest.raises(ValueError, match="invalid PF skip lease"):
+        pf_adapter.read_skip_lease(path)
+    pf_adapter.remove_skip_lease(path)
     assert not path.exists()
 
 

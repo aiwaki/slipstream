@@ -9,11 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-19, through merged
-[PR #176](https://github.com/aiwaki/slipstream/pull/176) at main commit
-`1f4cdd01f76b852bc5a606fe68b151dfffb34977`, including its successful
-[exact-main CI run 29668926452](https://github.com/aiwaki/slipstream/actions/runs/29668926452)
+[PR #177](https://github.com/aiwaki/slipstream/pull/177) at main commit
+`f5541a04be9ca066112966a5251af173aa639d4d`, including its successful
+[exact-main CI run 29671459890](https://github.com/aiwaki/slipstream/actions/runs/29671459890)
 and
-[dependency-audit run 29668926441](https://github.com/aiwaki/slipstream/actions/runs/29668926441).
+[dependency-audit run 29671459889](https://github.com/aiwaki/slipstream/actions/runs/29671459889).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -39,7 +39,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Automatic rollback guard implemented; merge qualification required | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. The PR #172 artifact's broad HTTPS regression was reproduced in the disposable packaged gate. PR #174 fixed app-bundle removal, and PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling without changing protected routing policy. PR #177 adds pre/post-arm HTTPS qualification through the console user's unchanged system route, automatic private-anchor rollback, and listener-before-cleanup ordering when PF removal fails. Its first packaged run exposed a `KeepAlive` uninstall race; the branch now clears the private anchor and boots out launchd before handling any surviving verified PID. Local regression tests pass, but this is not release evidence until the disposable packaged Safari/Chrome/PF-sentinel lifecycle passes on the updated branch and merge commit. Do not reinstall unattended. |
+| M0 - Safe Base | Primary-Mac PF delivery root cause proven; implementation and packaged gate pending | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PR #174 fixed app-bundle removal, PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling, and PR #177 merged pre/post-arm qualification plus failure-atomic install/uninstall ordering. The exact main artifact passed disposable Safari/Chrome/PF-sentinel CI, but the primary Mac's post-arm probes failed because live kernel state contained `lo0 (skip)` even though `/etc/pf.conf` did not declare it. A scoped privileged high-port smoke proved the native `DIOCCLRIFFLAG` path and four-rule private-anchor topology, recovered the original destination, and restored `lo0 (skip)` with both owned anchors empty, global PF and the sentinel unchanged, no token/lease/status residue, and no listener. The current branch adds a durable `0600` skip lease, restore-before-token-release ordering, daemon-owned recovery, and strict `KeepAlive` install/reinstall/uninstall quiescence. The workstation remains dormant and must not receive this build until a focused PR passes the full disposable script and packaged lifecycle gates and is merged. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
