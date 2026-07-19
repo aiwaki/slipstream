@@ -242,6 +242,9 @@ _system_dns_cache = {
 }
 SYSTEM_DNS_STATUS_TTL = 30.0
 SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
+SYSTEM_DNS_DIAGNOSTIC_BUDGET = 5.0
+BASELINE_RESOLVE_TIMEOUT = 1.5
+BASELINE_PREFLIGHT_BUDGET = 10.0
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
@@ -2548,12 +2551,9 @@ def current_system_dns_resolution_checks(now=None):
         and now - _system_dns_cache.get("resolution_ts", 0.0) < SYSTEM_DNS_RESOLUTION_TTL
     ):
         return dict(cached)
-    checks = system_dns_resolution_checks()
-    _system_dns_cache.update({
-        "resolution_ts": now,
-        "resolution_checks": dict(checks),
-    })
-    return checks
+    # Status publication is a lifecycle signal and must never initiate DNS.
+    # The canary worker refreshes this cache through killable resolver children.
+    return {"state": "unknown", "checks": []}
 
 
 def current_system_dns_status(now=None):
@@ -3966,6 +3966,10 @@ def _canary_thread_main(reason):
         asyncio.run(run_route_canaries(reason))
     except Exception as e:
         print(f">> route canaries error: {e}", file=sys.stderr)
+    try:
+        _refresh_system_dns_resolution_checks()
+    except Exception as e:
+        print(f">> system DNS diagnostics error: {e}", file=sys.stderr)
     finally:
         finish_canaries()
 
@@ -4266,6 +4270,84 @@ def status_v2_snapshot(state, iface, voice_iface, now=None):
     }
 
 
+def startup_status_v2_snapshot(now=None):
+    """Build the first lifecycle snapshot without external I/O or probes."""
+    now = time.time() if now is None else now
+    unknown_route = {"state": HEALTH_UNKNOWN, "updated_at": 0.0}
+    return {
+        "schema_version": STATUS_SCHEMA_VERSION,
+        "daemon": {
+            "version": DAEMON_VERSION,
+            "state": "dormant",
+            "pid": os.getpid(),
+            "updated_at": now,
+            "connections": _conn_count,
+            "hosts_learned": len(_strat_cache),
+            "dead_hosts": len(_dead),
+        },
+        "routes": {
+            ROUTE_LOCAL_BYPASS: dict(unknown_route),
+            ROUTE_GEO_EXIT: dict(unknown_route),
+            ROUTE_DIRECT: dict(unknown_route),
+        },
+        "backends": {
+            "local_engine": {"state": "inactive"},
+            "geph": {
+                "state": "off",
+                "owned": False,
+                "port_conflict": False,
+                "external_detected": False,
+                "restart_recommended": False,
+                "active_sessions": 0,
+                "auto_geo_exit": {
+                    "enabled": False,
+                    "learned": 0,
+                    "pending": 0,
+                    "last_state": "idle",
+                    "updated_at": 0.0,
+                },
+            },
+            "telegram": {"state": "unknown", "suggested": False},
+        },
+        "environment": {
+            "pf": {
+                "state": "off",
+                "applied": False,
+                "enabled": False,
+                "rules_loaded": False,
+                "interceptor_conflict": False,
+            },
+            "proxy": {
+                "state": "unknown",
+                "kind": "",
+                "managed_by_slipstream": False,
+            },
+            "dns": {
+                "state": "unknown",
+                "providers": "",
+                "managed_by_slipstream": False,
+                "resolution_state": "unknown",
+            },
+        },
+        "recovery": {
+            "state": "idle",
+            "last_action": "none",
+            "reason": "",
+            "updated_at": 0.0,
+            "count": 0,
+        },
+        "canaries": {
+            "running": False,
+            "total": 0,
+            "ok": 0,
+            "warnings": 0,
+            "degraded": 0,
+            "unknown": 0,
+            "next_due_in": 0,
+        },
+    }
+
+
 def status_snapshot_updated_at(status):
     """Return the write timestamp from either supported status schema."""
     if not isinstance(status, dict):
@@ -4292,6 +4374,26 @@ def status_snapshot_is_terminal_conflict(status):
     return status.get("state") == "conflict"
 
 
+def _write_status_snapshot(snapshot):
+    with _status_write_lock:
+        if _shutdown_started.is_set():
+            return
+        tmp = STATUS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(snapshot, f)
+        os.chmod(tmp, STATUS_PUBLIC_MODE)
+        os.replace(tmp, STATUS_PATH)
+
+
+def write_startup_status():
+    if _shutdown_started.is_set():
+        return
+    try:
+        _write_status_snapshot(startup_status_v2_snapshot())
+    except Exception:
+        pass
+
+
 def write_status(state, iface, voice_iface):
     if _shutdown_started.is_set():
         return
@@ -4301,14 +4403,7 @@ def write_status(state, iface, voice_iface):
         prune_auto_geph(now)
         consume_telegram_proxy_acceptance()
         st = status_v2_snapshot(state, iface, voice_iface, now)
-        with _status_write_lock:
-            if _shutdown_started.is_set():
-                return
-            tmp = STATUS_PATH + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(st, f)
-            os.chmod(tmp, STATUS_PUBLIC_MODE)
-            os.replace(tmp, STATUS_PATH)
+        _write_status_snapshot(st)
     except Exception:
         pass
 
@@ -4721,6 +4816,82 @@ def _baseline_probe_command(candidate):
     ]
 
 
+def _baseline_resolver_command(host):
+    if getattr(sys, "frozen", False):
+        command = [sys.executable]
+    else:
+        command = [sys.executable, os.path.abspath(__file__)]
+    return command + [
+        "--baseline-resolve",
+        "--baseline-host", host,
+    ]
+
+
+def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIMEOUT):
+    """Resolve through system DNS in a killable, time-bounded child process."""
+    if timeout <= 0:
+        return ()
+    uid, gid, home = identity
+    env = dict(_RUN_ENV)
+    env.update({"HOME": home, "TMPDIR": "/tmp"})
+    kwargs = {
+        "capture_output": True,
+        "text": True,
+        "timeout": timeout,
+        "env": env,
+    }
+    if os.geteuid() == 0:
+        kwargs.update({"user": uid, "group": gid, "extra_groups": ()})
+    try:
+        result = subprocess.run(_baseline_resolver_command(host), **kwargs)
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    if result.returncode != 0:
+        return ()
+    try:
+        addresses = json.loads(result.stdout).get("addresses", ())
+    except (AttributeError, json.JSONDecodeError):
+        return ()
+    if not isinstance(addresses, list):
+        return ()
+    answers = []
+    for address in addresses[: install_guard.MAX_CANDIDATES]:
+        if not isinstance(address, str):
+            continue
+        answers.append((
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "",
+            (address, port),
+        ))
+    return tuple(answers)
+
+
+def _refresh_system_dns_resolution_checks():
+    """Refresh diagnostics without allowing system DNS to occupy a worker."""
+    identity = _console_probe_identity()
+    if identity is None:
+        checks = {"state": "unknown", "checks": []}
+    else:
+        deadline = time.monotonic() + SYSTEM_DNS_DIAGNOSTIC_BUDGET
+
+        def resolver(host):
+            timeout = max(
+                0.0,
+                min(BASELINE_RESOLVE_TIMEOUT, deadline - time.monotonic()),
+            )
+            answers = _run_baseline_resolver(host, 443, identity, timeout=timeout)
+            return [answer[4][0] for answer in answers]
+
+        checks = system_dns_resolution_checks(resolver)
+    _system_dns_cache.update({
+        "resolution_ts": time.monotonic(),
+        "resolution_checks": dict(checks),
+    })
+    return checks
+
+
 def _log_baseline_probe_results(stage, results):
     """Write bounded probe evidence to the private daemon log."""
     for candidate, result in results:
@@ -4732,14 +4903,21 @@ def _log_baseline_probe_results(stage, results):
         )
 
 
-def _run_baseline_probe_candidate(candidate, identity):
+def _run_baseline_probe_candidate(
+    candidate,
+    identity,
+    *,
+    timeout=install_guard.DEFAULT_TIMEOUT + 1.5,
+):
+    if timeout <= 0:
+        return install_guard.ProbeResult(False, "preflight_budget_exhausted")
     uid, gid, home = identity
     env = dict(_RUN_ENV)
     env.update({"HOME": home, "TMPDIR": "/tmp"})
     kwargs = {
         "capture_output": True,
         "text": True,
-        "timeout": install_guard.DEFAULT_TIMEOUT + 1.5,
+        "timeout": timeout,
         "env": env,
     }
     if os.geteuid() == 0:
@@ -4765,13 +4943,29 @@ def _baseline_preflight():
             None,
         )
     observed = []
+    deadline = time.monotonic() + BASELINE_PREFLIGHT_BUDGET
+
+    def remaining(cap):
+        return max(0.0, min(cap, deadline - time.monotonic()))
+
+    def resolver(host, port, **_kwargs):
+        return _run_baseline_resolver(
+            host,
+            port,
+            identity,
+            timeout=remaining(BASELINE_RESOLVE_TIMEOUT),
+        )
 
     def probe(candidate):
-        result = _run_baseline_probe_candidate(candidate, identity)
+        result = _run_baseline_probe_candidate(
+            candidate,
+            identity,
+            timeout=remaining(install_guard.DEFAULT_TIMEOUT + 1.5),
+        )
         observed.append((candidate, result))
         return result
 
-    result = install_guard.qualify_before_arm(probe)
+    result = install_guard.qualify_before_arm(probe, resolver=resolver)
     _log_baseline_probe_results("before PF", observed)
     return result, identity
 
@@ -8243,6 +8437,10 @@ async def amain(port, voice=True):
                   f"kill it and retry:\n  sudo lsof -ti tcp:{port} | xargs sudo kill\n",
                   file=sys.stderr)
         raise
+    # Publishing a safe state must not depend on DNS, Geph, or PF. This also
+    # gives the installer an exact listener/status ownership proof while the
+    # bounded startup qualification is still running.
+    write_startup_status()
     # Local routing is independent of the optional Geph backend. A clean install
     # must activate Discord/YouTube bypass even before Geph is configured.
     probe_ok = probe_geph()
@@ -8425,12 +8623,21 @@ def main():
                     help=argparse.SUPPRESS)
     ap.add_argument("--status", action="store_true",
                     help="print daemon status JSON and exit (no root needed)")
+    ap.add_argument("--baseline-resolve", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-probe", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-host", default="", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-ip", default="", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-path", default="/", help=argparse.SUPPRESS)
     args = ap.parse_args()
     VERBOSE = args.verbose
+
+    if args.baseline_resolve:
+        candidates = install_guard.resolve_candidates(
+            ((args.baseline_host, "/"),),
+        )
+        addresses = list(dict.fromkeys(candidate.ip for candidate in candidates))
+        print(json.dumps({"addresses": addresses}))
+        sys.exit(0 if addresses else 2)
 
     if args.baseline_probe:
         candidate = install_guard.BaselineCandidate(

@@ -5,6 +5,7 @@ import json
 import os
 import plistlib
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,93 @@ import pf_installed_lifecycle_smoke as lifecycle
 
 
 class PfInstalledLifecycleSmokeTests(unittest.TestCase):
+    def test_stalled_resolver_restores_existing_config_and_captures_status(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            resolver_directory = root / "resolver"
+            resolver_directory.mkdir()
+            resolver_path = resolver_directory / lifecycle.STALLED_RESOLVER_DOMAIN
+            resolver_path.write_bytes(b"nameserver 192.0.2.53\n")
+            resolver_path.chmod(0o640)
+            status_path = root / "status"
+            status_path.write_text(json.dumps({
+                "schema_version": 2,
+                "daemon": {
+                    "state": "dormant",
+                    "pid": 42,
+                    "updated_at": time.time(),
+                },
+            }))
+            refreshes = []
+            fixture = lifecycle.StalledSystemResolver(resolver_directory)
+
+            with mock.patch.object(
+                lifecycle,
+                "STATUS_PATH",
+                status_path,
+            ), mock.patch.object(
+                lifecycle,
+                "_refresh_system_resolver_cache",
+                side_effect=lambda: refreshes.append("refresh"),
+            ):
+                fixture.start()
+                config = resolver_path.read_text()
+                self.assertIn("nameserver 127.0.0.1", config)
+                self.assertIn(f"port {fixture.port}", config)
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+                    client.sendto(b"dns-query", ("127.0.0.1", fixture.port))
+                fixture.assert_observed(timeout=1)
+                fixture.stop()
+                fixture.stop()
+
+            self.assertEqual(resolver_path.read_bytes(), b"nameserver 192.0.2.53\n")
+            self.assertEqual(resolver_path.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(refreshes, ["refresh", "refresh"])
+            self.assertIsNone(fixture.listener)
+            self.assertIsNone(fixture.thread)
+
+    def test_stalled_resolver_context_is_disabled_for_source_lifecycle(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "_require_disposable_ci",
+            side_effect=AssertionError("guard should not run"),
+        ):
+            with lifecycle.stalled_system_resolver(False) as fixture:
+                self.assertIsNone(fixture)
+
+    def test_baseline_resolver_survivor_check_matches_exact_installed_binary(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "slipstreamd"
+            executable.write_bytes(b"daemon")
+            executable.chmod(0o755)
+            target = lifecycle.LifecycleTarget(
+                name="packaged-app",
+                install_command=(),
+                uninstall_command=(),
+                installed_program_prefix=(str(executable),),
+                required_installed_paths=(executable,),
+            )
+            output = (
+                f"42 {executable} --baseline-resolve "
+                "--baseline-host example.com\n"
+            )
+            completed = subprocess.CompletedProcess((), 0, output, "")
+
+            with mock.patch.object(
+                lifecycle.subprocess,
+                "run",
+                return_value=completed,
+            ):
+                with self.assertRaisesRegex(
+                    lifecycle.LifecycleError,
+                    "survived its timeout",
+                ):
+                    lifecycle._assert_no_baseline_resolver_helpers(target)
+
     def test_command_guard_accepts_only_exact_lifecycle_commands(self) -> None:
         target = lifecycle.script_target()
         accepted = (

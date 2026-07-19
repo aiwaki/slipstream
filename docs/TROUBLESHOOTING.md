@@ -34,6 +34,28 @@ The watchdog runs only when launchd reports the Slipstream label explicitly
 enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
 is the explicit action that may reinstall or re-enable it.
 
+### Install rolls back with `status missing`
+
+The 2026-07-20 controlled workstation validation found a startup ordering bug.
+The exact packaged daemon started its owned listener and reached the standalone
+Telegram-proxy check, then blocked in the first synchronous system-DNS lookup
+for the neutral HTTPS baseline. Because StatusV2 was published only after that
+qualification, the installer timed out with `status missing` and invoked its
+normal rollback. The rollback removed the launchd job, installed runtime,
+listener, status, PF token, loopback lease, and private-anchor state without
+changing the user's DNS or proxy settings.
+
+Current required behavior is different: publish a probe-free `dormant` snapshot
+as soon as the listener is owned, resolve each baseline target in a separate
+killable console-user child with a short timeout, continue to later targets,
+and enforce one total preflight deadline. Regular status publication uses only
+cached DNS diagnostics; their background refresh is bounded separately. A
+timeout must leave PF absent and may only schedule a later qualification
+attempt. Do not repeatedly reinstall on a workstation to diagnose this symptom;
+the disposable packaged lifecycle blackholes the first neutral macOS resolver
+target and must prove status-before-query, later-target activation, helper exit,
+and cleanup first.
+
 After the daemon stops, `/var/run/slipstream.status` must disappear. A former
 shutdown race allowed the monitor thread to recreate that file after PF cleanup,
 so the tray could display stale state even though the private anchor was gone.
