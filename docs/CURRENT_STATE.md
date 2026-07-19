@@ -9,9 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-19, through merged
-[PR #172](https://github.com/aiwaki/slipstream/pull/172) at main commit
-`e4249ffeacc6906034fdb319339353dd5e8897fb`, including its successful
-exact-main CI and dependency-audit runs linked below.
+[PR #175](https://github.com/aiwaki/slipstream/pull/175) at main commit
+`a26e467edff952139b9c156a5fa46818310db62b`, including its successful
+[exact-main CI run 29668308779](https://github.com/aiwaki/slipstream/actions/runs/29668308779)
+and
+[dependency-audit run 29668308760](https://github.com/aiwaki/slipstream/actions/runs/29668308760).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -37,7 +39,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Blocked after primary install regression | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented, but the exact PR #172 artifact failed the primary workstation smoke twice. Installing its daemon immediately coincided with broad HTTPS failures in ChatGPT/Codex and Discord while app-owned Geph was disabled. Uninstall removed the daemon, listener, runtime install, and PF token without changing user DNS or system proxy state, but left `/Applications/Slipstream.app` behind. The active transparent path and tray self-removal must be repaired and qualified before another primary install. |
+| M0 - Safe Base | CI-qualified repair; primary reinstall gated | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. The PR #172 artifact's broad HTTPS regression was reproduced in the disposable packaged gate. PR #174 then fixed app-bundle removal, and PR #175 repaired exact-system HTTPS passthrough and bounded half-close handling without changing protected routing policy. Both fixes passed their required checks and packaged lifecycle qualification; the exact PR #175 main commit passed CI and dependency audit. Remaining before another primary install: build a versioned preview from that main commit, qualify the exact artifact on a disposable Mac, and implement an automatic rollback guard. Do not reinstall unattended. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
@@ -260,14 +262,32 @@ tray-uninstall defect by moving app-bundle removal into a validated one-shot
 launchd worker. Its complete CI, including `packaged-app-lifecycle`, passed in
 [run 29665174375](https://github.com/aiwaki/slipstream/actions/runs/29665174375).
 
+[PR #175](https://github.com/aiwaki/slipstream/pull/175) repaired the daemon
+baseline without changing protected routing policy. Direct, unknown, non-TLS,
+and no-SNI/ECH connections now relay the exact pre-PF destination without
+alternate DNS, desync, or a first-payload gate. Recovery is deferred to a later
+client retry and is armed only by an observed stall, repeated clean EOF, or
+server-first zero-byte close; healthy low-volume streams do not feed it.
+Orderly client EOF is preserved as a bounded TCP half-close. All required
+checks passed on the exact reviewed head, including the packaged Safari,
+Chrome, PF-sentinel, and lifecycle gate in
+[CI run 29667950857](https://github.com/aiwaki/slipstream/actions/runs/29667950857).
+The formerly failing `before-tray-start` Safari stage passed. The repair was
+squash-merged as `a26e467`; that exact main commit passed
+[CI run 29668308779](https://github.com/aiwaki/slipstream/actions/runs/29668308779)
+and
+[dependency-audit run 29668308760](https://github.com/aiwaki/slipstream/actions/runs/29668308760).
+It has not been installed on the primary workstation.
+
 ## Next Verified Action
 
-Do not reinstall or re-arm Slipstream on the primary workstation. The current
-repair gives direct, unknown, non-TLS, and no-SNI/ECH traffic an exact numeric
-destination, byte-transparent baseline path and defers unknown-host recovery to
-a later client retry. Qualify that change with the disposable packaged Safari,
-Chrome, PF-sentinel, and lifecycle gates. Only after those gates pass should a
-new versioned preview artifact be produced for a guarded primary smoke.
+Do not reinstall or re-arm Slipstream on the primary workstation unattended.
+Prepare a new versioned preview from merged `main`, qualify that exact artifact
+again on a disposable Mac, and define an automatic rollback guard that checks
+baseline HTTPS, daemon/listener ownership, the private PF anchor, token cleanup,
+and app-bundle removal. A primary smoke may follow only while the user is
+present and the guard can remove the whole owned path without touching external
+DNS, VPN, proxy, PAC, or PF state.
 
 ## External Gates
 
