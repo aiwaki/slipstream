@@ -237,7 +237,14 @@ def _open_listener(proxy_port: int) -> socket.socket:
     return listener
 
 
-def _probe_redirect(*, listener: socket.socket, target_port: int, uid: int, gid: int) -> None:
+def _probe_redirect(
+    *,
+    listener: socket.socket,
+    target_port: int,
+    uid: int,
+    gid: int,
+    destination: str = TEST_DESTINATION,
+) -> None:
 
     pid = os.fork()
     if pid == 0:
@@ -246,7 +253,7 @@ def _probe_redirect(*, listener: socket.socket, target_port: int, uid: int, gid:
             os.setgroups([])
             os.setgid(gid)
             os.setuid(uid)
-            with socket.create_connection((TEST_DESTINATION, target_port), timeout=4) as client:
+            with socket.create_connection((destination, target_port), timeout=4) as client:
                 received = client.recv(len(MARKER))
             os._exit(0 if received == MARKER else 2)
         except BaseException:
@@ -386,6 +393,13 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             raise SmokeError("arming Slipstream changed the sentinel anchor")
 
         _probe_redirect(
+            listener=_open_listener(target_port),
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination="127.0.0.1",
+        )
+        _probe_redirect(
             listener=listener,
             target_port=target_port,
             uid=uid,
@@ -436,6 +450,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         "runtime_failure": "private_anchor_flushed",
         "sentinel": "unchanged",
         "global_pf": "unchanged",
+        "loopback_target": "excluded",
         "loopback_skip": "restored",
         "target_port": target_port,
         "proxy_port": proxy_port,
