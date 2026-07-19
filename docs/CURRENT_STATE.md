@@ -281,24 +281,39 @@ It has not been installed on the primary workstation.
 
 [PR #176](https://github.com/aiwaki/slipstream/pull/176) recorded that
 qualification boundary without changing runtime behavior and was merged as
-`1f4cdd0`; its exact main commit passed CI and dependency audit. The current
-`codex/macos-baseline-rollback-guard` branch starts from that commit. It keeps
-the primary workstation uninstalled, proves a small neutral HTTPS baseline
-through the console user's current system route before PF, and repeats only the
-same proven numeric destinations after PF. A failed post-arm proof rolls back
-only the private anchor. If PF cleanup itself fails, the daemon keeps its
-listener and runtime alive while retrying cleanup; install/uninstall may not
-force-stop it into a redirect-to-dead-listener state. Local validation is green,
-but disposable packaged CI and review are still required.
+`1f4cdd0`; its exact main commit passed CI and dependency audit.
+
+[PR #177](https://github.com/aiwaki/slipstream/pull/177) then added the
+automatic startup guard. It proves a small neutral HTTPS baseline through the
+console user's current system route before PF and repeats only the same proven
+numeric destinations after PF. A failed post-arm proof rolls back only
+Slipstream-owned state. If PF cleanup itself is temporarily unavailable, the
+daemon keeps its listener and runtime alive while retrying cleanup instead of
+leaving a redirect to a dead listener. Install, reinstall, and uninstall also
+use failure-atomic ordering. The exact merge commit `f5541a0` passed the full
+disposable Safari, Chrome, PF-sentinel, and packaged lifecycle gate.
+
+[PR #178](https://github.com/aiwaki/slipstream/pull/178) closed the remaining
+macOS loopback gap. It clears only `PFI_IFLAG_SKIP` under a durable root-owned
+`0600` lease, restores and verifies the original `lo0 (skip)` state before
+releasing the owned PF token, quiesces the `KeepAlive` daemon before signalling
+verified owned processes, and moves tray recovery behind the installed daemon
+ownership boundary. The redirect excludes `127.0.0.0/8`, and the active monitor
+revalidates loopback visibility if another PF reload changes it. Both the PR and
+the exact main commit `162cc8e` passed the disposable private-PF sentinel and
+packaged lifecycle. The primary workstation has remained uninstalled since the
+unsafe baseline incident.
 
 ## Next Verified Action
 
 Do not reinstall or re-arm Slipstream on the primary workstation unattended.
-Review and merge the automatic rollback guard, then qualify the exact packaged
-artifact on the disposable Safari/Chrome/PF-sentinel lifecycle. A primary smoke
-may follow only while the user is present and the exact reviewed artifact has
-proved that a failed baseline removes the whole owned path without touching
-external DNS, VPN, proxy, PAC, or unrelated PF state.
+The next M0 gate is a controlled validation of the exact merged artifact, with
+the user present and a rollback path prepared. Record a clean preflight, install
+once, verify neutral HTTPS plus Discord, YouTube, and OpenAI streaming, then
+exercise uninstall and prove that the app bundle, launchd jobs, owned Geph,
+listeners, private anchor, PF token, loopback lease, runtime files, and status
+are gone. Stop and roll back at the first failed baseline. External DNS, VPN,
+proxy, PAC, and unrelated PF state must remain unchanged throughout.
 
 ## External Gates
 
