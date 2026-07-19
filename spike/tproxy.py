@@ -8632,10 +8632,10 @@ def main():
     VERBOSE = args.verbose
 
     if args.baseline_resolve:
-        candidates = install_guard.resolve_candidates(
-            ((args.baseline_host, "/"),),
-        )
-        addresses = list(dict.fromkeys(candidate.ip for candidate in candidates))
+        # Preserve suspicious IPv4 answers for the diagnostic caller. Startup
+        # qualification applies install_guard's stricter candidate validation
+        # after this bounded child returns.
+        addresses = system_resolve(args.baseline_host)[: install_guard.MAX_CANDIDATES]
         print(json.dumps({"addresses": addresses}))
         sys.exit(0 if addresses else 2)
 

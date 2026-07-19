@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import os
 import subprocess
 import sys
@@ -45,8 +46,8 @@ def test_baseline_resolver_parses_bounded_child_output(monkeypatch, tmp_path):
     child = (
         "import json; "
         "print(json.dumps({'addresses': "
-        "['203.0.113.10', '203.0.113.11', '203.0.113.12', "
-        "'203.0.113.13', '203.0.113.14']}))"
+        "['0.0.0.0', '127.0.0.1', '203.0.113.10', "
+        "'203.0.113.11', '203.0.113.12']}))"
     )
     monkeypatch.setattr(
         tproxy,
@@ -62,14 +63,14 @@ def test_baseline_resolver_parses_bounded_child_output(monkeypatch, tmp_path):
     )
 
     assert [answer[4] for answer in answers] == [
+        ("0.0.0.0", 443),
+        ("127.0.0.1", 443),
         ("203.0.113.10", 443),
         ("203.0.113.11", 443),
-        ("203.0.113.12", 443),
-        ("203.0.113.13", 443),
     ]
 
 
-def test_baseline_resolve_cli_runs_without_root_or_network():
+def test_baseline_resolve_cli_preserves_local_answers_without_root_or_network():
     result = subprocess.run(
         [
             sys.executable,
@@ -84,8 +85,11 @@ def test_baseline_resolve_cli_runs_without_root_or_network():
         check=False,
     )
 
-    assert result.returncode == 2
-    assert json.loads(result.stdout) == {"addresses": []}
+    assert result.returncode == 0
+    addresses = json.loads(result.stdout)["addresses"]
+    assert addresses
+    assert len(addresses) <= tproxy.install_guard.MAX_CANDIDATES
+    assert all(ipaddress.ip_address(address).is_loopback for address in addresses)
 
 
 def test_baseline_preflight_has_one_total_budget(monkeypatch):
