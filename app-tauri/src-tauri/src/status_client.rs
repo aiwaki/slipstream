@@ -122,6 +122,7 @@ fn v2_status_for_tray(status: &StatusV2) -> Value {
         "system_proxy": environment.and_then(|environment| environment.proxy.as_ref()).map(|proxy| serde_json::to_value(proxy).expect("StatusV2 proxy must serialize")).unwrap_or_else(|| json!({"state": "unknown", "kind": ""})),
         "system_dns": system_dns,
         "pf_state": environment.and_then(|environment| environment.pf.as_ref()).map(|pf| serde_json::to_value(pf).expect("StatusV2 PF must serialize")).unwrap_or_else(|| json!({"applied": false, "enabled": false, "rules_loaded": false})),
+        "recovery": recovery.map(|recovery| serde_json::to_value(recovery).expect("StatusV2 recovery must serialize")).unwrap_or_else(|| json!({})),
         "rearm": {
             "last_at": recovery.and_then(|recovery| recovery.updated_at).unwrap_or(0.0),
             "last_reason": recovery.and_then(|recovery| recovery.last_action.as_deref()).unwrap_or(""),

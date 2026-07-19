@@ -1156,6 +1156,39 @@ fn routing_health_summary(st: Option<&Value>, geph: &str, ru: bool) -> Option<St
     }
 }
 
+fn baseline_recovery_detail(st: Option<&Value>, ru: bool) -> Option<String> {
+    let reason = st?.get("recovery")?.get("reason")?.as_str()?;
+    match reason {
+        "baseline_https_unavailable" => Some(
+            if ru {
+                "Slipstream приостановлен; используется системное подключение"
+            } else {
+                "Slipstream is paused; traffic stays on the system connection"
+            }
+            .to_string(),
+        ),
+        "baseline_rollback_incomplete" => Some(
+            if ru {
+                "Восстановление системного подключения"
+            } else {
+                "Restoring the system connection"
+            }
+            .to_string(),
+        ),
+        "no_console_user"
+        | "baseline_resolution_unavailable"
+        | "baseline_preflight_unavailable" => Some(
+            if ru {
+                "Ожидание проверки системного подключения"
+            } else {
+                "Waiting to verify the system connection"
+            }
+            .to_string(),
+        ),
+        _ => None,
+    }
+}
+
 fn daemon_state_text(state: &str, conns: i64, learned: i64, ru: bool) -> (String, String) {
     match state {
         "active" => {
@@ -1251,9 +1284,19 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
 
     let ru = ui_ru();
     let (title, mut detail) = daemon_state_text(&state, conns, learned, ru);
+    let recovery_detail = if matches!(state.as_str(), "active" | "dormant") {
+        baseline_recovery_detail(st.as_ref(), ru)
+    } else {
+        None
+    };
+    if let Some(recovery) = recovery_detail.as_ref() {
+        detail.clone_from(recovery);
+    }
     if matches!(state.as_str(), "active" | "dormant") {
-        if let Some(routing) = routing_health_summary(st.as_ref(), &geph, ru) {
-            push_detail_part(&mut detail, &routing);
+        if recovery_detail.is_none() {
+            if let Some(routing) = routing_health_summary(st.as_ref(), &geph, ru) {
+                push_detail_part(&mut detail, &routing);
+            }
         }
         if let Some(tg) = telegram_proxy_detail(&telegram_proxy, telegram_proxy_suggested, ru) {
             push_detail_part(&mut detail, tg);
@@ -2810,13 +2853,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_shell_script, app_bundle_for_bundled_daemon, begin_exit_menu_refresh,
-        command_matches_geph, copy_log_snapshot_direct, daemon_binary_format,
-        daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
-        diagnostic_log_tail, diagnostic_log_tail_from_path, diagnostic_snapshot_value,
-        diagnostic_summary_value, exit_catalog, exit_catalog_availability,
-        finish_exit_menu_refresh, geph_launch_agent_paths, geph_launch_agent_plist,
-        geph_launch_domain, geph_launch_target, geph_launcher_script,
+        admin_shell_script, app_bundle_for_bundled_daemon, baseline_recovery_detail,
+        begin_exit_menu_refresh, command_matches_geph, copy_log_snapshot_direct,
+        daemon_binary_format, daemon_recovery_shell, daemon_recovery_status_value,
+        daemon_state_text, diagnostic_log_tail, diagnostic_log_tail_from_path,
+        diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
+        exit_catalog_availability, finish_exit_menu_refresh, geph_launch_agent_paths,
+        geph_launch_agent_plist, geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_launcher_script_with_log_limits, geph_lifecycle_diagnostic_value, harden_geph_dir,
         install_diagnostic_value, launchd_label_disabled_from_output,
         launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
@@ -4145,6 +4188,38 @@ mod tests {
                 "Slipstream — Paused".to_string(),
                 "Another traffic filter is active".to_string(),
             )
+        );
+    }
+
+    #[test]
+    fn baseline_guard_pause_explains_that_system_connectivity_remains_available() {
+        let status = json!({
+            "recovery": {
+                "state": "paused",
+                "last_action": "pause_private_pf",
+                "reason": "baseline_https_unavailable"
+            }
+        });
+
+        assert_eq!(
+            baseline_recovery_detail(Some(&status), false),
+            Some("Slipstream is paused; traffic stays on the system connection".to_string())
+        );
+    }
+
+    #[test]
+    fn incomplete_baseline_rollback_reports_recovery_without_claiming_pause() {
+        let status = json!({
+            "recovery": {
+                "state": "recovering",
+                "last_action": "pause_private_pf",
+                "reason": "baseline_rollback_incomplete"
+            }
+        });
+
+        assert_eq!(
+            baseline_recovery_detail(Some(&status), false),
+            Some("Restoring the system connection".to_string())
         );
     }
 

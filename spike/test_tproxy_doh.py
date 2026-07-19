@@ -22,7 +22,7 @@ from tproxy import _doh_request, _doh_ssl_context
 
 
 @pytest.fixture(autouse=True)
-def reset_smart_dns_state():
+def reset_smart_dns_state(monkeypatch):
     shutdown_started = tproxy._shutdown_started.is_set()
     pf_teardown_complete = tproxy._pf_teardown_complete.is_set()
     route_policy_trial_generation = tproxy._route_policy_trial_generation
@@ -62,6 +62,28 @@ def reset_smart_dns_state():
         tproxy._fd_pressure_reason,
         tproxy._fd_pressure_at,
     )
+    baseline_guard = dict(tproxy._baseline_guard_state)
+    baseline_candidate = tproxy.install_guard.BaselineCandidate(
+        "example.com", "203.0.113.10", "/"
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_preflight",
+        lambda: (
+            tproxy.install_guard.QualificationResult(
+                True, "ok", (baseline_candidate,)
+            ),
+            (501, 20, "/Users/fixture"),
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_postflight",
+        lambda candidates, _identity: tproxy.install_guard.QualificationResult(
+            True, "ok", tuple(candidates)
+        ),
+    )
+    monkeypatch.setattr(tproxy, "_daemon_recovery_record", lambda: None)
     try:
         tproxy._shutdown_started.clear()
         tproxy._pf_teardown_complete.clear()
@@ -119,6 +141,13 @@ def reset_smart_dns_state():
         tproxy._fd_pressure = False
         tproxy._fd_pressure_reason = ""
         tproxy._fd_pressure_at = 0.0
+        tproxy._baseline_guard_state.update({
+            "state": "pending",
+            "reason": "",
+            "updated_at": 0.0,
+            "retry_at": 0.0,
+            "failures": 0,
+        })
         yield
     finally:
         if shutdown_started:
@@ -178,6 +207,8 @@ def reset_smart_dns_state():
             tproxy._fd_pressure_reason,
             tproxy._fd_pressure_at,
         ) = fd_pressure
+        tproxy._baseline_guard_state.clear()
+        tproxy._baseline_guard_state.update(baseline_guard)
 
 
 def test_doh_ssl_context_verifies_resolver_certificate():
@@ -372,17 +403,18 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "connection_race.py": "VALUE = 3\n",
     "connection_race_io.py": "VALUE = 4\n",
     "geph_backend.py": "VALUE = 5\n",
-    "pf_adapter.py": "VALUE = 6\n",
-    "primes.py": "VALUE = 7\n",
-    "route_circuit.py": "VALUE = 8\n",
-    "route_circuit_registry.py": "VALUE = 9\n",
-    "route_policy_activation.py": "VALUE = 10\n",
-    "route_policy_activation_adapter.py": "VALUE = 11\n",
-    "route_policy_bundle.py": "VALUE = 12\n",
-    "route_policy_manifest.py": "VALUE = 13\n",
-    "routing_policy.py": "VALUE = 14\n",
-    "routing_recovery.py": "VALUE = 15\n",
-    "xbox_dns.py": "VALUE = 16\n",
+    "install_guard.py": "VALUE = 6\n",
+    "pf_adapter.py": "VALUE = 7\n",
+    "primes.py": "VALUE = 8\n",
+    "route_circuit.py": "VALUE = 9\n",
+    "route_circuit_registry.py": "VALUE = 10\n",
+    "route_policy_activation.py": "VALUE = 11\n",
+    "route_policy_activation_adapter.py": "VALUE = 12\n",
+    "route_policy_bundle.py": "VALUE = 13\n",
+    "route_policy_manifest.py": "VALUE = 14\n",
+    "routing_policy.py": "VALUE = 15\n",
+    "routing_recovery.py": "VALUE = 16\n",
+    "xbox_dns.py": "VALUE = 17\n",
 }
 
 
@@ -717,6 +749,75 @@ def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tm
     assert not any(command[1:3] == ("load", "-w") for command in commands)
 
 
+def test_incomplete_baseline_rollback_preserves_live_runtime_when_pf_will_not_clear(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "runtime" / "slipstream"
+    install.mkdir(parents=True)
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    commands = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"state": "active", "pid": 4242},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_recovery_record",
+        lambda: {"reason": tproxy.BASELINE_GUARD_ROLLBACK_REASON},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *args: (
+            commands.append(args)
+            or SimpleNamespace(returncode=0, stdout="", stderr="")
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_listener_pids",
+        lambda _port: pytest.fail("listener must remain alive"),
+    )
+
+    assert not tproxy._disable_and_cleanup_install(1080)
+    assert install.exists()
+    assert plist.exists()
+    assert not any(command[1:2] == ("bootout",) for command in commands)
+
+
+def test_force_stop_refuses_to_kill_listener_until_private_pf_is_clear(monkeypatch):
+    signals = []
+    monkeypatch.setattr(
+        tproxy,
+        "_process_command_for_pid",
+        lambda _pid: "/usr/local/slipstream/slipstreamd --port 1080",
+    )
+    monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
+    monkeypatch.setattr(
+        tproxy.os,
+        "kill",
+        lambda _pid, sig: signals.append(sig),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_flush_private_pf_with_retry",
+        lambda **_kwargs: False,
+    )
+
+    assert not tproxy._stop_owned_daemon_pid(4242, timeout=0.0)
+    assert signals == [signal.SIGTERM]
+
+
 def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -910,6 +1011,102 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         "en0",
     ):
         assert private_value not in public_text
+
+
+def test_status_v2_reports_baseline_pause_without_target_details(monkeypatch):
+    monkeypatch.setattr(tproxy, "route_health_snapshot", lambda _now: {})
+    monkeypatch.setattr(
+        tproxy,
+        "pf_state_snapshot",
+        lambda _port: {
+            "applied": False,
+            "enabled": False,
+            "rules_loaded": False,
+            "interceptor_conflicts": [],
+        },
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "current_system_proxy_status",
+        lambda: {"state": "off", "kind": "", "managed_by_slipstream": False},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "current_system_dns_status",
+        lambda: {"state": "custom", "providers": "custom"},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "canary_status_snapshot",
+        lambda: {
+            "running": False,
+            "total": 0,
+            "ok": 0,
+            "warnings": 0,
+            "degraded": 0,
+            "unknown": 0,
+            "next_due_in": 0,
+        },
+    )
+    monkeypatch.setattr(tproxy, "rearm_status_snapshot", lambda _now: {
+        "last_at": 0.0,
+        "last_reason": "",
+        "count": 0,
+    })
+    monkeypatch.setattr(tproxy, "geph_restart_hint_snapshot", lambda _now: {
+        "recommended": False,
+        "last_wake_at": 0.0,
+        "last_failure_at": 0.0,
+    })
+    monkeypatch.setattr(tproxy, "geph_active_session_count", lambda: 0)
+    monkeypatch.setattr(tproxy, "auto_geo_exit_status_snapshot", lambda _now: {
+        "enabled": False,
+        "learned": 0,
+        "pending": 0,
+        "last_state": "idle",
+        "last_at": 0.0,
+    })
+    monkeypatch.setattr(
+        tproxy,
+        "tgws_status",
+        lambda _now: {"telegram_proxy": "unknown"},
+    )
+    tproxy._set_baseline_guard(
+        "blocked", tproxy.BASELINE_GUARD_BLOCK_REASON, now=100.0
+    )
+
+    status = tproxy.status_v2_snapshot("dormant", "en0", None, now=101.0)
+
+    assert status["backends"]["local_engine"]["state"] == "paused"
+    assert status["recovery"] == {
+        "state": "paused",
+        "last_action": "pause_private_pf",
+        "reason": tproxy.BASELINE_GUARD_BLOCK_REASON,
+        "updated_at": 100.0,
+        "count": 0,
+    }
+    assert "example.com" not in json.dumps(status)
+
+    monkeypatch.setattr(
+        tproxy,
+        "pf_state_snapshot",
+        lambda _port: {
+            "applied": True,
+            "enabled": True,
+            "rules_loaded": True,
+            "interceptor_conflicts": [],
+        },
+    )
+    tproxy._set_baseline_guard(
+        "rollback_failed", tproxy.BASELINE_GUARD_ROLLBACK_REASON, now=102.0
+    )
+
+    recovering = tproxy.status_v2_snapshot("active", "en0", None, now=103.0)
+
+    assert recovering["daemon"]["state"] == "dormant"
+    assert recovering["backends"]["local_engine"]["state"] == "rollback"
+    assert recovering["recovery"]["state"] == "recovering"
+    assert recovering["recovery"]["reason"] == tproxy.BASELINE_GUARD_ROLLBACK_REASON
 
 
 @pytest.mark.parametrize(
@@ -1132,11 +1329,16 @@ def test_pf_setup_pauses_without_mutating_prior_interceptor(monkeypatch):
     monkeypatch.setattr(tproxy, "pf_preceding_https_interceptors", lambda: ["zapret"])
     monkeypatch.setattr(tproxy, "_pf_acquire_enable_token", lambda: calls.append("token"))
     monkeypatch.setattr(tproxy, "_pf_load", lambda _port: calls.append("load"))
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append("flush") or type("Result", (), {"returncode": 0})(),
+    )
     monkeypatch.setattr(tproxy, "_pf_applied", True)
     monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
 
     assert not tproxy.pf_setup(1080)
-    assert calls == []
+    assert calls == ["flush"]
     assert not tproxy._pf_applied
     assert tproxy._pf_interceptor_conflicts == ["zapret"]
 
@@ -1749,9 +1951,12 @@ def test_pf_startup_keeps_local_routing_active_without_geph(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_port", None)
     monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
     monkeypatch.setattr(tproxy, "_fd_pressure", False)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_available", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_preceding_https_interceptors", lambda: [])
     monkeypatch.setattr(
         tproxy,
-        "pf_setup",
+        "arm_private_pf_if_ready",
         lambda port: calls.append(port) or True,
     )
 
@@ -1793,6 +1998,48 @@ def test_installed_daemon_readiness_rejects_foreign_or_shared_listener(monkeypat
     )
 
 
+def test_installed_daemon_readiness_rejects_baseline_guard_rollback(monkeypatch):
+    now = tproxy.time.time()
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"updated_at": now, "state": "dormant", "pid": 321},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_recovery_record",
+        lambda: {
+            "state": "paused",
+            "last_action": "pause_private_pf",
+            "reason": tproxy.BASELINE_GUARD_BLOCK_REASON,
+        },
+    )
+
+    ready, reason = tproxy._installed_daemon_readiness(1080)
+
+    assert not ready
+    assert reason == "daemon rolled back after baseline HTTPS qualification failed"
+
+
+def test_installed_daemon_readiness_waits_for_incomplete_pf_rollback(monkeypatch):
+    now = tproxy.time.time()
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_status_record",
+        lambda: {"updated_at": now, "state": "active", "pid": 321},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_daemon_recovery_record",
+        lambda: {"reason": tproxy.BASELINE_GUARD_ROLLBACK_REASON},
+    )
+
+    ready, reason = tproxy._installed_daemon_readiness(1080)
+
+    assert not ready
+    assert reason == "daemon is still restoring the system HTTPS path"
+
+
 def test_pf_arm_refuses_to_touch_pf_after_shutdown_starts(monkeypatch):
     calls = []
     tproxy._shutdown_started.set()
@@ -1830,18 +2077,15 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
         async def serve_forever(self):
             raise RuntimeError("stop test server")
 
-    class Thread:
-        def __init__(self, *args, **kwargs):
-            calls.append(("thread", args, kwargs))
-
-        def start(self):
-            calls.append(("thread_start",))
-
     async def start_server(*_args, **_kwargs):
         return Server()
 
     monkeypatch.setattr(tproxy.asyncio, "start_server", start_server)
-    monkeypatch.setattr(tproxy.threading, "Thread", Thread)
+    monkeypatch.setattr(
+        tproxy,
+        "_start_network_monitor",
+        lambda port, voice: calls.append(("monitor", port, voice)),
+    )
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
@@ -1866,7 +2110,51 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
 
     assert calls[0] == ("pf_gate", 1080)
     assert calls[1] == ("status", "dormant", "en0", None)
-    assert ("thread_start",) in calls
+    assert ("monitor", 1080, False) in calls
+
+
+def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
+    calls = []
+
+    class Server:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def serve_forever(self):
+            raise RuntimeError("stop test server")
+
+    async def start_server(*_args, **_kwargs):
+        return Server()
+
+    monkeypatch.setattr(tproxy.asyncio, "start_server", start_server)
+    monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "utun7")
+    monkeypatch.setattr(
+        tproxy,
+        "pf_setup_if_ready",
+        lambda _port: calls.append("pf_arm_attempt"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "write_status",
+        lambda state, iface, voice_iface: calls.append(
+            ("status", state, iface, voice_iface)
+        ),
+    )
+    monkeypatch.setattr(tproxy, "_start_network_monitor", lambda *_args: None)
+
+    with pytest.raises(RuntimeError, match="stop test server"):
+        asyncio.run(tproxy.amain(1080, voice=False))
+
+    assert "pf_arm_attempt" not in calls
+    assert calls == [("status", "dormant", "utun7", None)]
 
 
 def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
@@ -1914,9 +2202,9 @@ def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
     assert not asyncio.run(exercise())
     assert calls == [
         "enter",
+        "pf_cleared",
         "listener_closed",
         "listener_waited",
-        "pf_cleared",
         ("drain", 3.5),
         "connections_closed",
         "exit",
@@ -2156,6 +2444,165 @@ def test_runtime_pf_arm_does_not_depend_on_geph_after_loading_rules(monkeypatch)
     assert tproxy.arm_private_pf_if_ready(1080)
     assert calls == ["load"]
     assert tproxy._pf_applied is True
+
+
+def test_baseline_guard_rolls_back_private_pf_and_blocks_repeat_arm(monkeypatch):
+    calls = []
+    candidate = tproxy.install_guard.BaselineCandidate(
+        "example.com", "203.0.113.10", "/"
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_preflight",
+        lambda: (
+            tproxy.install_guard.QualificationResult(True, "ok", (candidate,)),
+            (501, 20, "/Users/fixture"),
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_postflight",
+        lambda *_args: tproxy.install_guard.QualificationResult(
+            False, tproxy.BASELINE_GUARD_BLOCK_REASON, (candidate,)
+        ),
+    )
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_acquire_enable_token",
+        lambda: calls.append("token") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_load",
+        lambda _port: calls.append("load") or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append("flush") or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: calls.append("release") or SimpleNamespace(returncode=0),
+    )
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert calls == ["token", "load", "flush", "release"]
+    assert tproxy._pf_applied is False
+    assert tproxy.baseline_guard_snapshot()["state"] == "blocked"
+    assert not tproxy.transparent_routing_ready()
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert calls == ["token", "load", "flush", "release"]
+
+
+def test_baseline_guard_keeps_listener_owned_until_pf_rollback_succeeds(monkeypatch):
+    calls = []
+    candidate = tproxy.install_guard.BaselineCandidate(
+        "example.com", "203.0.113.10", "/"
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_preflight",
+        lambda: (
+            tproxy.install_guard.QualificationResult(True, "ok", (candidate,)),
+            (501, 20, "/Users/fixture"),
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_postflight",
+        lambda *_args: tproxy.install_guard.QualificationResult(
+            False, tproxy.BASELINE_GUARD_BLOCK_REASON, (candidate,)
+        ),
+    )
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_acquire_enable_token",
+        lambda: calls.append("token") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_load",
+        lambda _port: calls.append("load") or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append("flush") or SimpleNamespace(returncode=1),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_release_enable_token",
+        lambda: calls.append("release") or None,
+    )
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert calls == ["token", "load", "flush", "flush", "flush"]
+    assert tproxy._pf_applied is True
+    snapshot = tproxy.baseline_guard_snapshot()
+    assert snapshot["state"] == "rollback_failed"
+    assert snapshot["reason"] == tproxy.BASELINE_GUARD_ROLLBACK_REASON
+
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_flush",
+        lambda: calls.append("flush_ok") or SimpleNamespace(returncode=0),
+    )
+    assert tproxy.retry_baseline_rollback()
+    assert calls[-2:] == ["flush_ok", "release"]
+    assert tproxy._pf_applied is False
+    assert tproxy.baseline_guard_snapshot()["state"] == "blocked"
+
+
+def test_baseline_preflight_failure_never_loads_pf_and_retries_later(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy.time, "time", lambda: 100.0)
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_preflight",
+        lambda: (
+            tproxy.install_guard.QualificationResult(
+                False, "baseline_preflight_unavailable"
+            ),
+            (501, 20, "/Users/fixture"),
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_acquire_enable_token",
+        lambda: calls.append("token") or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_pf_load",
+        lambda _port: calls.append("load") or SimpleNamespace(returncode=0),
+    )
+
+    assert not tproxy.arm_private_pf_if_ready(1080)
+    assert calls == []
+    snapshot = tproxy.baseline_guard_snapshot(now=100.0)
+    assert snapshot["state"] == "retry"
+    assert snapshot["retry_at"] == 100.0 + tproxy.BASELINE_GUARD_RETRY_SECONDS
+    assert not tproxy._baseline_guard_allows_attempt(now=129.99)
+    assert tproxy._baseline_guard_allows_attempt(now=130.0)
+
+
+def test_runtime_network_change_resets_a_blocked_baseline_guard(monkeypatch):
+    tproxy._set_baseline_guard(
+        "blocked", tproxy.BASELINE_GUARD_BLOCK_REASON, now=90.0
+    )
+    monkeypatch.setattr(tproxy, "note_runtime_rearm", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
+
+    tproxy._apply_runtime_rearm("network_change", now=100.0, iface="en0")
+
+    assert tproxy.baseline_guard_snapshot(now=100.0)["state"] == "pending"
+    assert tproxy.transparent_routing_ready()
 
 
 def test_suspend_geo_exit_backend_keeps_private_anchor_active(monkeypatch):
