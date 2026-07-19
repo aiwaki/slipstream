@@ -89,6 +89,7 @@ def reset_smart_dns_state(monkeypatch):
     )
     monkeypatch.setattr(tproxy, "_claim_pf_loopback_skip", lambda: True)
     monkeypatch.setattr(tproxy, "_restore_pf_loopback_skip", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: False)
     monkeypatch.setattr(tproxy, "_daemon_recovery_record", lambda: None)
     try:
         tproxy._shutdown_started.clear()
@@ -1843,6 +1844,7 @@ def test_pf_load_targets_only_private_anchor(monkeypatch):
         if args[:4] == ("pfctl", "-a", tproxy.PF_ANCHOR, "-f"):
             rules = open(args[4]).read()
             assert "rdr on lo0 inet proto tcp" in rules
+            assert "to ! 127.0.0.0/8 port 443" in rules
             assert "pass out quick on ! lo0 route-to (lo0 127.0.0.1)" in rules
             assert "pass out quick on lo0" in rules
             assert "no state" in rules
@@ -2963,6 +2965,53 @@ def test_network_monitor_yields_to_user_full_tunnel_vpn_without_geph(monkeypatch
     assert pauses == [tproxy.PF_ANCHOR]
     assert arms == []
     assert states == [("dormant", "utun7", None)]
+
+
+def test_network_monitor_reclaims_reasserted_loopback_skip(monkeypatch):
+    events = []
+    states = []
+
+    def pause():
+        events.append("pause")
+        tproxy._pf_applied = False
+        return True
+
+    def arm(port):
+        events.append(("arm", port))
+        tproxy._pf_applied = True
+        return True
+
+    def write_status_and_stop(state, iface, voice_iface):
+        states.append((state, iface, voice_iface))
+        tproxy._shutdown_started.set()
+
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", False)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
+    monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
+    monkeypatch.setattr(tproxy, "refresh_fd_pressure", lambda: False)
+    monkeypatch.setattr(tproxy, "pf_preceding_https_interceptors", lambda: [])
+    monkeypatch.setattr(tproxy, "pf_parent_anchor_loaded", lambda: True)
+    monkeypatch.setattr(tproxy, "pf_has_rules", lambda _port: True)
+    monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: True)
+    monkeypatch.setattr(tproxy, "pause_private_pf", pause)
+    monkeypatch.setattr(tproxy, "arm_private_pf_if_ready", arm)
+    monkeypatch.setattr(tproxy, "write_status", write_status_and_stop)
+    monkeypatch.setattr(tproxy, "start_canaries_if_due", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        tproxy,
+        "start_route_policy_remote_update_if_due",
+        lambda *_args, **_kwargs: None,
+    )
+
+    tproxy.network_monitor(1080, voice=False)
+
+    assert events == ["pause", ("arm", 1080)]
+    assert states == [("active", "en0", None)]
 
 
 def test_network_monitor_does_not_rearm_after_shutdown_starts(monkeypatch):

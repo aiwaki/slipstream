@@ -146,7 +146,7 @@ try:
 except (TypeError, ValueError):
     RUNTIME_WAKE_GAP_SECONDS = 30.0
 PF_RULES = """\
-rdr on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port {port}
+rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 port 443 -> 127.0.0.1 port {port}
 pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp from any to any port 443 user != root
 pass out quick on lo0 inet proto tcp from any to any port 443 no state
 pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp from any to 127.0.0.1 port {port}
@@ -6014,6 +6014,23 @@ def network_monitor(port, voice=True):
                     )
                 else:
                     print(">> routing backend changed before PF could be armed", file=sys.stderr)
+            elif _pf_loopback_skip_state() is not False:
+                parent_loaded = pf_parent_anchor_loaded()
+                print(
+                    ">> PF loopback visibility changed — pausing",
+                    file=sys.stderr,
+                )
+                paused = pause_private_pf()
+                if parent_loaded and paused:
+                    print(">> PF loopback cleanup complete — re-applying", file=sys.stderr)
+                    if arm_private_pf_if_ready(port):
+                        start_canaries_if_due("pf_reapply", force=True)
+                elif not parent_loaded:
+                    print(
+                        f">> pf parent anchor {PF_PARENT_ANCHOR} vanished; "
+                        "leaving external rules untouched",
+                        file=sys.stderr,
+                    )
             elif not pf_has_rules(port):
                 parent_loaded = pf_parent_anchor_loaded()
                 print(">> Slipstream pf anchor vanished — pausing", file=sys.stderr)

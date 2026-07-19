@@ -125,7 +125,7 @@ def build_redirect_rules(*, target_port: int, proxy_port: int) -> str:
     if target_port == proxy_port:
         raise SmokeError("target and proxy ports must differ")
     return (
-        "rdr on lo0 inet proto tcp from any to any "
+        "rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 "
         f"port {target_port} -> 127.0.0.1 port {proxy_port}\n"
         "pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp "
         f"from any to any port {target_port} user != root\n"

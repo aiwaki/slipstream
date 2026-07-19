@@ -17,6 +17,7 @@ class PfAnchorSmokeTests(unittest.TestCase):
 
         self.assertIn("port 18443", rules)
         self.assertIn("port 19443", rules)
+        self.assertIn("to ! 127.0.0.0/8", rules)
         self.assertIn("pass out quick on ! lo0 route-to", rules)
         self.assertIn("pass in quick on lo0 reply-to", rules)
         self.assertNotIn("port 443 ", rules)
