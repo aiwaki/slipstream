@@ -359,3 +359,81 @@ fn owned_route_transition_issuer_is_opaque_pure_and_not_composed() {
     assert!(!production_host.contains("WindowsOwnedRouteTransitionIssuer"));
     assert!(!production_host.contains("WindowsOwnedCaptureRouteActivation"));
 }
+
+#[test]
+fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
+    let owner =
+        include_str!("../src/packet_egress/disposable_route_owner_v1.rs").replace("\r\n", "\n");
+    for required in [
+        "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
+        "CreateIpForwardEntry2",
+        "GetIpForwardEntry2",
+        "DeleteIpForwardEntry2",
+        "InitializeIpForwardEntry",
+        "MIB_IPPROTO_NETMGMT",
+        "attest_exact_host_route_created",
+        "require_current_activation",
+        "record_route_change",
+        "ROUTE_REMOVAL_TIMEOUT",
+        "self.row",
+        "PrefixLength = prefix_length",
+    ] {
+        assert!(
+            owner.contains(required),
+            "route owner is missing {required}"
+        );
+    }
+    for forbidden in [
+        "SetIpForwardEntry2",
+        "NotifyRouteChange2",
+        "CreateUnicastIpAddressEntry",
+        "SetUnicastIpAddressEntry",
+        "DeleteUnicastIpAddressEntry",
+        "GetIpForwardTable2",
+        "WintunDeleteDriver",
+        "TcpStream",
+        "UdpSocket",
+        "DnsQuery",
+        "Set-DnsClientServerAddress",
+        "WinHttp",
+        "Command::new",
+    ] {
+        assert!(
+            !owner.contains(forbidden),
+            "route owner contains {forbidden}"
+        );
+    }
+
+    let module = include_str!("../src/packet_egress/mod.rs").replace("\r\n", "\n");
+    assert!(module.contains(
+        "#[cfg(all(windows, feature = \"disposable-windows-packet-fixture\"))]\n#[allow(unsafe_code)]\nmod disposable_route_owner_v1;"
+    ));
+
+    let fixture = include_str!("wintun_exact_route_windows.rs");
+    for required in [
+        "disposable-windows-packet-fixture",
+        "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
+        "WintunGetAdapterLUID",
+        "ConvertInterfaceLuidToIndex",
+        "ConvertInterfaceIndexToLuid",
+        "qualify_disposable_exact_host_route",
+        "require_adapter_absent",
+    ] {
+        assert!(
+            fixture.contains(required),
+            "route fixture is missing {required}"
+        );
+    }
+
+    let workflow =
+        include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml");
+    assert!(workflow.contains("Qualify owned exact-route transition and cleanup"));
+    assert!(workflow.contains("-TestTarget wintun_exact_route_windows"));
+    assert!(workflow.contains("-TimeoutSeconds 120"));
+
+    let production_host = include_str!("../src/service_host/windows.rs");
+    assert!(!production_host.contains("disposable_route_owner_v1"));
+    assert!(!production_host.contains("qualify_disposable_exact_host_route"));
+}

@@ -428,10 +428,13 @@ therefore stays phased and closed to production traffic:
    evidence. The next isolated contract consumes that opaque baseline, allows
    one pending transition, and issues an opaque current activation only after a
    second observation selects the exact host route through the owned capture
-   identity. It still has no route effect or production composition. Next bind
-   its crate-private attestation to one disposable exact-route owner with
-   bounded removal, then qualify actual IPv4/IPv6 socket binding under a
-   competing capture route, followed by
+   identity. A separate feature-gated disposable owner now creates one exact
+   `/32` or `/128`, retains the exact `MIB_IPFORWARD_ROW2` key, invokes the
+   crate-private attestation after a fresh `GetBestRoute2` observation, removes
+   only that row, invalidates the activation, and requires the original route
+   and source to return. It is absent from production composition and cannot
+   create an address or default route. Next qualify actual IPv4/IPv6 socket
+   binding under a competing capture route, followed by
    activation safety for pre-existing flows, bounded capture expiry/removal,
    and explicit external-VPN coexistence on disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
