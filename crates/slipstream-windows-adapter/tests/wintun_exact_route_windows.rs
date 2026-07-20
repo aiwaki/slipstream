@@ -51,7 +51,7 @@ const BASELINE_ROUTE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
 const IPV6_BASELINE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 2);
 const IPV6_CAPTURE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 3);
-const IPV6_DESTINATION: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0x1111);
+const IPV6_DESTINATION: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111);
 const IPV6_BASELINE_PREFIX_LENGTH: u8 = 64;
 const IPV6_HOST_PREFIX_LENGTH: u8 = 128;
 
@@ -843,15 +843,18 @@ impl OwnedFixtureBaselineRoute {
             ));
         }
         let mut owned = Self { row, present: true };
-        match lookup_fixture_baseline_route(row) {
-            Ok(Some(observed)) if same_fixture_baseline_route_key(observed, row) => Ok(owned),
-            verification => {
-                let cleanup_result = owned.remove_and_verify();
-                Err(format!(
-                    "fixture IPv6 baseline route verification failed: {verification:?}; cleanup={cleanup_result:?}"
-                ))
+        let verification_error = match lookup_fixture_baseline_route(row) {
+            Ok(Some(observed)) if same_fixture_baseline_route_key(observed, row) => {
+                return Ok(owned);
             }
-        }
+            Ok(Some(_)) => "created route identity changed during verification".to_owned(),
+            Ok(None) => "created route was absent during verification".to_owned(),
+            Err(error) => format!("created route lookup failed: {error}"),
+        };
+        let cleanup_result = owned.remove_and_verify();
+        Err(format!(
+            "fixture IPv6 baseline route verification failed: {verification_error}; cleanup={cleanup_result:?}"
+        ))
     }
 
     fn remove_and_verify(&mut self) -> Result<(), String> {
