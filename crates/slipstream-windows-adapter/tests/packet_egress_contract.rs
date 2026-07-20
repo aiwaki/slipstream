@@ -376,6 +376,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "require_current_activation",
         "record_route_change",
         "cleanup_after",
+        "secondary_after",
+        "error.win32_code()",
         "prior failure: {prior}; cleanup failure: {cleanup}",
         "ROUTE_REMOVAL_TIMEOUT",
         "self.row",

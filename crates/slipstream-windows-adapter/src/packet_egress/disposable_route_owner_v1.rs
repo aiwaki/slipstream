@@ -5,7 +5,9 @@
 //! that effect to two opaque kernel observations, and proves exact removal.
 
 use super::transition_v1::{WindowsOwnedRouteTransitionError, WindowsOwnedRouteTransitionIssuer};
-use super::windows::{observe_windows_packet_route, sockaddr_from_ip};
+use super::windows::{
+    observe_windows_packet_route, sockaddr_from_ip, WindowsPacketRouteObserverError,
+};
 use super::WindowsPacketInterfaceIdentity;
 use std::error::Error;
 use std::fmt;
@@ -100,6 +102,18 @@ impl WindowsDisposableExactRouteError {
         }
     }
 
+    fn detail_with_win32(
+        code: WindowsDisposableExactRouteErrorCode,
+        win32_code: Option<u32>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            win32_code,
+            detail: Some(detail.into()),
+        }
+    }
+
     fn cleanup_after(prior: Self, cleanup: Self) -> Self {
         let code = cleanup.code;
         let win32_code = cleanup.win32_code;
@@ -109,6 +123,15 @@ impl WindowsDisposableExactRouteError {
             win32_code,
             detail: Some(detail),
         }
+    }
+
+    fn secondary_after(mut prior: Self, secondary: Self) -> Self {
+        let secondary_detail = format!("secondary failure: {secondary}");
+        prior.detail = Some(match prior.detail.take() {
+            Some(detail) => format!("{detail}; {secondary_detail}"),
+            None => secondary_detail,
+        });
+        prior
     }
 
     pub const fn code(&self) -> WindowsDisposableExactRouteErrorCode {
@@ -183,9 +206,8 @@ pub fn qualify_disposable_exact_host_route(
     use WindowsDisposableExactRouteErrorCode as Code;
 
     require_disposable_gate()?;
-    let baseline = observe_windows_packet_route(destination).map_err(|error| {
-        WindowsDisposableExactRouteError::detail(Code::BaselineObservationFailed, error.to_string())
-    })?;
+    let baseline = observe_windows_packet_route(destination)
+        .map_err(|error| observation_error(Code::BaselineObservationFailed, error))?;
     let baseline_egress_interface = baseline.egress_interface();
     let baseline_source_address = baseline.source_address();
     let baseline_route_prefix = baseline.route_prefix().to_owned();
@@ -211,12 +233,8 @@ pub fn qualify_disposable_exact_host_route(
 
     let activation_result = (|| {
         owned_route.verify_present()?;
-        let post_activation = observe_windows_packet_route(destination).map_err(|error| {
-            WindowsDisposableExactRouteError::detail(
-                Code::PostActivationObservationFailed,
-                error.to_string(),
-            )
-        })?;
+        let post_activation = observe_windows_packet_route(destination)
+            .map_err(|error| observation_error(Code::PostActivationObservationFailed, error))?;
         let activation = issuer
             .attest_exact_host_route_created(intent, post_activation)
             .map_err(|error| transition_error(Code::TransitionAttestationFailed, error))?;
@@ -226,35 +244,67 @@ pub fn qualify_disposable_exact_host_route(
         Ok::<_, WindowsDisposableExactRouteError>(activation)
     })();
 
-    if activation_result.is_err() {
-        let _ = issuer.record_route_change();
-    }
+    let activation_epoch_error = if activation_result.is_err() {
+        issuer
+            .record_route_change()
+            .err()
+            .map(|error| transition_error(Code::RouteEpochUpdateFailed, error))
+    } else {
+        None
+    };
 
     let cleanup_result = owned_route.remove_and_verify();
     if let Err(cleanup_error) = cleanup_result {
-        let _ = issuer.record_route_change();
-        return match activation_result {
-            Ok(_) => Err(cleanup_error),
-            Err(activation_error) => Err(WindowsDisposableExactRouteError::cleanup_after(
-                activation_error,
-                cleanup_error,
-            )),
+        let recovery_epoch_error = issuer
+            .record_route_change()
+            .err()
+            .map(|error| transition_error(Code::RouteEpochUpdateFailed, error));
+        let mut combined = match activation_result {
+            Ok(_) => cleanup_error,
+            Err(activation_error) => {
+                let prior = match activation_epoch_error {
+                    Some(epoch_error) => WindowsDisposableExactRouteError::secondary_after(
+                        activation_error,
+                        epoch_error,
+                    ),
+                    None => activation_error,
+                };
+                WindowsDisposableExactRouteError::cleanup_after(prior, cleanup_error)
+            }
         };
+        if let Some(epoch_error) = recovery_epoch_error {
+            combined = WindowsDisposableExactRouteError::secondary_after(combined, epoch_error);
+        }
+        return Err(combined);
     }
     let route_epoch_after_removal = issuer
         .record_route_change()
-        .map_err(|error| transition_error(Code::RouteEpochUpdateFailed, error))?;
+        .map_err(|error| transition_error(Code::RouteEpochUpdateFailed, error));
 
-    let activation = activation_result?;
+    let activation = match activation_result {
+        Ok(activation) => activation,
+        Err(activation_error) => {
+            let mut combined = match activation_epoch_error {
+                Some(epoch_error) => {
+                    WindowsDisposableExactRouteError::secondary_after(activation_error, epoch_error)
+                }
+                None => activation_error,
+            };
+            if let Err(epoch_error) = route_epoch_after_removal {
+                combined = WindowsDisposableExactRouteError::secondary_after(combined, epoch_error);
+            }
+            return Err(combined);
+        }
+    };
+    let route_epoch_after_removal = route_epoch_after_removal?;
     if issuer.require_current_activation(&activation).is_ok() {
         return Err(WindowsDisposableExactRouteError::new(
             Code::ActivationNotCurrent,
         ));
     }
 
-    let recovered = observe_windows_packet_route(destination).map_err(|error| {
-        WindowsDisposableExactRouteError::detail(Code::RecoveryObservationFailed, error.to_string())
-    })?;
+    let recovered = observe_windows_packet_route(destination)
+        .map_err(|error| observation_error(Code::RecoveryObservationFailed, error))?;
     if recovered.egress_interface() != baseline_egress_interface
         || recovered.source_address() != baseline_source_address
         || recovered.route_prefix() != baseline_route_prefix
@@ -291,6 +341,17 @@ fn transition_error(
     error: WindowsOwnedRouteTransitionError,
 ) -> WindowsDisposableExactRouteError {
     WindowsDisposableExactRouteError::detail(code, error.to_string())
+}
+
+fn observation_error(
+    code: WindowsDisposableExactRouteErrorCode,
+    error: WindowsPacketRouteObserverError,
+) -> WindowsDisposableExactRouteError {
+    WindowsDisposableExactRouteError::detail_with_win32(
+        code,
+        error.win32_code(),
+        error.code().as_str(),
+    )
 }
 
 fn exact_route_row(
@@ -457,5 +518,43 @@ mod tests {
         assert!(rendered.contains("route_query_failed"));
         assert!(rendered.contains("cleanup failure: exact_route_delete_failed"));
         assert!(rendered.contains("Win32 error 5"));
+    }
+
+    #[test]
+    fn observation_failure_retains_outer_phase_and_win32_code() {
+        let error = WindowsDisposableExactRouteError::detail_with_win32(
+            Code::PostActivationObservationFailed,
+            Some(1232),
+            "route_query_failed",
+        );
+
+        assert_eq!(error.code(), Code::PostActivationObservationFailed);
+        assert_eq!(error.win32_code(), Some(1232));
+        assert_eq!(
+            error.to_string(),
+            "post_activation_observation_failed (Win32 error 1232): route_query_failed"
+        );
+    }
+
+    #[test]
+    fn secondary_epoch_failure_does_not_mask_activation_failure() {
+        let activation = WindowsDisposableExactRouteError::detail_with_win32(
+            Code::PostActivationObservationFailed,
+            Some(1232),
+            "route_query_failed",
+        );
+        let epoch = WindowsDisposableExactRouteError::detail(
+            Code::RouteEpochUpdateFailed,
+            "route_epoch_exhausted",
+        );
+
+        let combined = WindowsDisposableExactRouteError::secondary_after(activation, epoch);
+
+        assert_eq!(combined.code(), Code::PostActivationObservationFailed);
+        assert_eq!(combined.win32_code(), Some(1232));
+        let rendered = combined.to_string();
+        assert!(rendered.contains("route_query_failed"));
+        assert!(rendered.contains("secondary failure: route_epoch_update_failed"));
+        assert!(rendered.contains("route_epoch_exhausted"));
     }
 }
