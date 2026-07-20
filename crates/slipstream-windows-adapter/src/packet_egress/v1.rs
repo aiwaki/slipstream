@@ -498,7 +498,17 @@ fn is_safe_public_ipv4(address: Ipv4Addr) -> bool {
 }
 
 fn is_safe_public_ipv6(address: Ipv6Addr) -> bool {
-    if ipv6_in_prefix(address, Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32) {
+    // The positive allocation registry is not enough by itself: these assigned
+    // prefixes are explicitly not globally reachable in the IANA
+    // special-purpose registry frozen alongside this contract.
+    if [
+        (Ipv6Addr::new(0x2001, 0x0020, 0, 0, 0, 0, 0, 0), 28),
+        (Ipv6Addr::new(0x2001, 0x0030, 0, 0, 0, 0, 0, 0), 28),
+        (Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32),
+    ]
+    .into_iter()
+    .any(|(network, prefix_length)| ipv6_in_prefix(address, network, prefix_length))
+    {
         return false;
     }
 

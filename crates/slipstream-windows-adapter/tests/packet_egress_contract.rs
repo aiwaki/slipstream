@@ -67,6 +67,10 @@ fn contract_keeps_native_socket_route_and_adapter_effects_closed() {
         fixture.invariants["ipv6_global_unicast_registry_snapshot"],
         "2025-10-10"
     );
+    assert_eq!(
+        fixture.invariants["ipv6_special_purpose_registry_snapshot"],
+        "2025-10-09"
+    );
     assert_eq!(fixture.invariants["backend_selection"], false);
     assert_eq!(fixture.invariants["native_route_query"], false);
     assert_eq!(fixture.invariants["native_socket_effect"], false);

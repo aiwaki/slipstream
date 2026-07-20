@@ -280,9 +280,11 @@ system, including an external VPN, and contains no interface-type allowlist.
 IPv4 special-purpose ranges, including the deprecated `192.88.99.0/24` 6to4
 relay block, fail closed. Public IPv6 destinations are frozen against the
 [IANA IPv6 Global Unicast Address Space](https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml)
-snapshot dated 2025-10-10 and cross-checked against the
+snapshot dated 2025-10-10 and cross-checked against the 2025-10-09
 [IPv6 Special-Purpose Address Space](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml);
-unlisted and non-global ranges such as discard-only `100::/64` fail closed. The
+the positive allocation table is not sufficient by itself. Assigned but
+non-global ORCHIDv2 `2001:20::/28` and DET `2001:30::/28`, plus unlisted,
+documentation, and discard-only ranges, fail closed. The
 plan records the platform-specific socket-option value but does not call the
 option. Therefore its vectors prove stale-, special-purpose-, and
 self-interface rejection, not that real packets avoid a competing capture
