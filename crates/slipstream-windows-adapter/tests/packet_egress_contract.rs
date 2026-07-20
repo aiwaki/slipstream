@@ -375,6 +375,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "attest_exact_host_route_created",
         "require_current_activation",
         "record_route_change",
+        "cleanup_after",
+        "prior failure: {prior}; cleanup failure: {cleanup}",
         "ROUTE_REMOVAL_TIMEOUT",
         "self.row",
         "PrefixLength = prefix_length",

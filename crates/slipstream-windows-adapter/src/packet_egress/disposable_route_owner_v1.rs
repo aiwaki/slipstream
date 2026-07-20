@@ -100,6 +100,17 @@ impl WindowsDisposableExactRouteError {
         }
     }
 
+    fn cleanup_after(prior: Self, cleanup: Self) -> Self {
+        let code = cleanup.code;
+        let win32_code = cleanup.win32_code;
+        let detail = format!("prior failure: {prior}; cleanup failure: {cleanup}");
+        Self {
+            code,
+            win32_code,
+            detail: Some(detail),
+        }
+    }
+
     pub const fn code(&self) -> WindowsDisposableExactRouteErrorCode {
         self.code
     }
@@ -222,7 +233,13 @@ pub fn qualify_disposable_exact_host_route(
     let cleanup_result = owned_route.remove_and_verify();
     if let Err(cleanup_error) = cleanup_result {
         let _ = issuer.record_route_change();
-        return Err(cleanup_error);
+        return match activation_result {
+            Ok(_) => Err(cleanup_error),
+            Err(activation_error) => Err(WindowsDisposableExactRouteError::cleanup_after(
+                activation_error,
+                cleanup_error,
+            )),
+        };
     }
     let route_epoch_after_removal = issuer
         .record_route_change()
@@ -416,5 +433,29 @@ fn lookup_exact_route(
         0 => Ok(ExactRoutePresence::Present(observed)),
         ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND => Ok(ExactRoutePresence::Absent),
         error => Err(WindowsDisposableExactRouteError::win32(error_code, error)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WindowsDisposableExactRouteError, WindowsDisposableExactRouteErrorCode as Code};
+
+    #[test]
+    fn combined_cleanup_failure_retains_both_errors_and_structured_cleanup_code() {
+        let prior = WindowsDisposableExactRouteError::detail(
+            Code::PostActivationObservationFailed,
+            "route_query_failed",
+        );
+        let cleanup = WindowsDisposableExactRouteError::win32(Code::ExactRouteDeleteFailed, 5);
+
+        let combined = WindowsDisposableExactRouteError::cleanup_after(prior, cleanup);
+
+        assert_eq!(combined.code(), Code::ExactRouteDeleteFailed);
+        assert_eq!(combined.win32_code(), Some(5));
+        let rendered = combined.to_string();
+        assert!(rendered.contains("prior failure: post_activation_observation_failed"));
+        assert!(rendered.contains("route_query_failed"));
+        assert!(rendered.contains("cleanup failure: exact_route_delete_failed"));
+        assert!(rendered.contains("Win32 error 5"));
     }
 }
