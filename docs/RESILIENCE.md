@@ -112,7 +112,10 @@ Geph PID, and requires `KeepAlive` to replace that PID and carry another
 payload. A test-owned listener on external port `:9909` must remain alive
 throughout. Cleanup removes only the disposable user-level state; the workflow
 verifies that no daemon, private PF rule, token, status file, listener,
-LaunchAgent, or Keychain item remains.
+LaunchAgent, or Keychain item remains. Cleanup stages are independent: failure
+to delete or verify one resource is recorded but cannot skip the remaining
+tray, LaunchAgent, listener, Keychain, runtime, sentinel, and root-boundary
+checks.
 
 ## Priority Order
 
