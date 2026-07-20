@@ -192,6 +192,54 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             check=False,
         )
 
+    def test_cleanup_continues_after_keychain_delete_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "runner"
+            app_bundle = Path(tmp) / "Slipstream.app"
+            app_bundle.mkdir()
+            paths = smoke.geph_paths(home)
+            sentinel = mock.Mock()
+            tray = mock.Mock()
+            tray.start.side_effect = smoke.QualificationError("startup failed")
+
+            with mock.patch.object(smoke, "_require_disposable_ci"), mock.patch.object(
+                smoke, "_take_secret", return_value="secret"
+            ), mock.patch.object(smoke.Path, "home", return_value=home), mock.patch.object(
+                smoke.os, "getuid", return_value=501
+            ), mock.patch.object(
+                smoke, "_preflight", return_value=Path(tmp) / "slipstream"
+            ), mock.patch.object(
+                smoke, "ExternalListenerSentinel", return_value=sentinel
+            ), mock.patch.object(
+                smoke, "PackagedTray", return_value=tray
+            ), mock.patch.object(
+                smoke, "_keychain_add"
+            ), mock.patch.object(
+                smoke, "_bootout_owned_geph"
+            ), mock.patch.object(
+                smoke, "_wait_for_listener_gone"
+            ), mock.patch.object(
+                smoke, "_keychain_delete", side_effect=RuntimeError("security timeout")
+            ) as keychain_delete, mock.patch.object(
+                smoke, "_keychain_exists", return_value=False
+            ), mock.patch.object(
+                smoke, "_listener_pids", return_value=()
+            ), mock.patch.object(
+                smoke, "_daemon_is_disabled", return_value=True
+            ), mock.patch.object(
+                smoke, "DAEMON_PLIST", Path(tmp) / "daemon.plist"
+            ):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "Keychain cleanup: security timeout",
+                ):
+                    smoke.run_qualification(app_bundle)
+
+            keychain_delete.assert_called_once_with()
+            tray.close.assert_called_once_with()
+            sentinel.close.assert_called_once_with()
+            self.assertFalse(paths.config_dir.exists())
+
     def test_dry_run_is_non_mutating_and_describes_the_real_gate(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

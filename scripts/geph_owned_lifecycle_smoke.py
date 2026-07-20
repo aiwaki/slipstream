@@ -672,7 +672,10 @@ def run_qualification(app_bundle: Path) -> dict[str, object]:
         except Exception as exc:
             cleanup_errors.append(f"owned Geph cleanup: {exc}")
         if keychain_created:
-            _keychain_delete()
+            try:
+                _keychain_delete()
+            except Exception as exc:
+                cleanup_errors.append(f"Keychain cleanup: {exc}")
         try:
             if paths.config_dir.exists():
                 shutil.rmtree(paths.config_dir)
@@ -683,18 +686,34 @@ def run_qualification(app_bundle: Path) -> dict[str, object]:
             sentinel.check()
         except Exception as exc:
             cleanup_errors.append(f"external listener cleanup check: {exc}")
-        sentinel.close()
+        try:
+            sentinel.close()
+        except Exception as exc:
+            cleanup_errors.append(f"external listener close: {exc}")
 
+    if keychain_created:
+        try:
+            if _keychain_exists():
+                cleanup_errors.append("owned Geph Keychain item survived cleanup")
+        except Exception as exc:
+            cleanup_errors.append(f"Keychain cleanup verification: {exc}")
+    try:
+        if paths.config_dir.exists() or paths.plist.exists():
+            cleanup_errors.append("owned Geph artifacts survived cleanup")
+    except Exception as exc:
+        cleanup_errors.append(f"private runtime cleanup verification: {exc}")
+    try:
+        if _listener_pids(GEPH_SOCKS_PORT):
+            cleanup_errors.append("owned Geph listener survived cleanup")
+    except Exception as exc:
+        cleanup_errors.append(f"owned Geph listener cleanup verification: {exc}")
+    try:
+        if not _daemon_is_disabled() or DAEMON_PLIST.exists():
+            cleanup_errors.append("root daemon boundary changed during qualification")
+    except Exception as exc:
+        cleanup_errors.append(f"root daemon boundary verification: {exc}")
     if cleanup_errors:
         raise QualificationError("; ".join(cleanup_errors)) from failure
-    if keychain_created and _keychain_exists():
-        raise QualificationError("owned Geph Keychain item survived cleanup") from failure
-    if paths.config_dir.exists() or paths.plist.exists():
-        raise QualificationError("owned Geph artifacts survived cleanup") from failure
-    if _listener_pids(GEPH_SOCKS_PORT):
-        raise QualificationError("owned Geph listener survived cleanup") from failure
-    if not _daemon_is_disabled() or DAEMON_PLIST.exists():
-        raise QualificationError("root daemon boundary changed during qualification") from failure
     if failure is not None:
         raise failure
     return result
