@@ -538,15 +538,30 @@ fn wait_for_child_ready(
 }
 
 fn write_ready_marker(path: &Path, contents: &str) -> Result<(), String> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| format!("create {}: {error}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|error| format!("write {}: {error}", path.display()))?;
-    file.sync_all()
-        .map_err(|error| format!("sync {}: {error}", path.display()))
+    let temporary = path.with_extension("pending");
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("create {}: {error}", temporary.display()))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|error| format!("write {}: {error}", temporary.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("sync {}: {error}", temporary.display()))?;
+        drop(file);
+        fs::rename(&temporary, path).map_err(|error| {
+            format!(
+                "publish {} as {}: {error}",
+                temporary.display(),
+                path.display()
+            )
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn last_error() -> u32 {

@@ -452,6 +452,7 @@ fn native_wintun_lifecycle_is_disposable_route_free_and_not_composed() {
         "child.kill()",
         "child.wait()",
         "create_new(true)",
+        "fs::rename(&temporary, path)",
     ] {
         assert!(
             fixture.contains(required),
