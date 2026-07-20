@@ -436,10 +436,10 @@ therefore stays phased and closed to production traffic:
    create an address or default route. Native qualification separately owns one
    exact `192.0.2.1/32` address on its unique disposable Wintun adapter because
    a bare adapter cannot produce a post-route source observation; that fixture
-   must wait for the exact `/32` to become DAD-preferred and usable as a source,
-   then explicitly delete and prove absence of both its route and address.
-   After that passes on both architectures, qualify actual IPv4/IPv6 socket
-   binding under a competing capture route, followed by
+   waits for the exact `/32` to become DAD-preferred and usable as a source,
+   then explicitly deletes and proves absence of both its route and address.
+   PR #192 passed that gate on native AMD64 and ARM64. Next qualify actual
+   IPv4/IPv6 socket binding under a competing capture route, followed by
    activation safety for pre-existing flows, bounded capture expiry/removal,
    and explicit external-VPN coexistence on disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
