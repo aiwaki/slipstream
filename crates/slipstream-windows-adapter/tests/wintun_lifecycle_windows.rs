@@ -8,7 +8,9 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use windows_sys::core::GUID;
-use windows_sys::Win32::Foundation::{FreeLibrary, GetLastError, ERROR_FILE_NOT_FOUND, HMODULE};
+use windows_sys::Win32::Foundation::{
+    FreeLibrary, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND, HMODULE,
+};
 use windows_sys::Win32::System::LibraryLoader::{
     GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
 };
@@ -169,7 +171,7 @@ impl LoadedWintun {
         let adapter = unsafe { (self.open_adapter)(name.as_ptr()) };
         if adapter.is_null() {
             let error = last_error();
-            return if error == ERROR_FILE_NOT_FOUND {
+            return if matches!(error, ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND) {
                 Ok(())
             } else {
                 Err(format!(
