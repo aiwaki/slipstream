@@ -748,6 +748,31 @@ done
             self.assertEqual(result.returncode, 1)
             self.assertIn("still unavailable: protoc", result.stderr)
 
+    def test_wintun_crash_gate_retains_one_bounded_process_handle(self) -> None:
+        workflow = (
+            ROOT / ".github/workflows/windows-packet-adapter-qualification.yml"
+        ).read_text(encoding="utf-8")
+        runner = (
+            ROOT / "scripts/run_bounded_windows_cargo_test.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("scripts/run_bounded_windows_cargo_test.ps1", workflow)
+        self.assertIn("-TimeoutSeconds 120", workflow)
+        self.assertNotIn("Tee-Object -Variable output", workflow)
+        self.assertIn("Start-Process", runner)
+        self.assertIn("$process.WaitForExit(250)", runner)
+        self.assertIn("$process.Kill($true)", runner)
+        self.assertIn("RedirectStandardOutput", runner)
+        self.assertIn("RedirectStandardError", runner)
+        for forbidden in (
+            "Get-Process",
+            "Stop-Process",
+            "taskkill",
+            "Win32_Process",
+            "ProcessName",
+        ):
+            self.assertNotIn(forbidden, runner)
+
 
 if __name__ == "__main__":
     unittest.main()
