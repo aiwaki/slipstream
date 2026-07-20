@@ -433,7 +433,11 @@ therefore stays phased and closed to production traffic:
    crate-private attestation after a fresh `GetBestRoute2` observation, removes
    only that row, invalidates the activation, and requires the original route
    and source to return. It is absent from production composition and cannot
-   create an address or default route. Next qualify actual IPv4/IPv6 socket
+   create an address or default route. Native qualification separately owns one
+   exact `192.0.2.1/32` address on its unique disposable Wintun adapter because
+   a bare adapter cannot produce a post-route source observation; that fixture
+   must explicitly delete and prove absence of both its route and address.
+   After that passes on both architectures, qualify actual IPv4/IPv6 socket
    binding under a competing capture route, followed by
    activation safety for pre-existing flows, bounded capture expiry/removal,
    and explicit external-VPN coexistence on disposable AMD64 and ARM64 Windows.

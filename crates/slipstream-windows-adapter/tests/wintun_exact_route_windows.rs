@@ -13,14 +13,21 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::thread;
+use std::time::{Duration, Instant};
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::{
     FreeLibrary, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND, HMODULE,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToIndex,
+    ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToIndex, CreateUnicastIpAddressEntry,
+    DeleteUnicastIpAddressEntry, GetUnicastIpAddressEntry, InitializeUnicastIpAddressEntry,
+    MIB_UNICASTIPADDRESS_ROW,
 };
 use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
+use windows_sys::Win32::Networking::WinSock::{
+    IpDadStatePreferred, AF_INET, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, SOCKADDR_IN, SOCKADDR_INET,
+};
 use windows_sys::Win32::System::LibraryLoader::{
     GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
 };
@@ -28,6 +35,8 @@ use windows_sys::Win32::System::LibraryLoader::{
 const DISPOSABLE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_DISPOSABLE_CI";
 const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
+const ADDRESS_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
+const ADDRESS_PROBE_INTERVAL: Duration = Duration::from_millis(25);
 
 type WintunAdapterHandle = *mut c_void;
 type WintunSessionHandle = *mut c_void;
@@ -66,9 +75,18 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
         let capture_interface = adapter.interface_identity()?;
         let mut issuer = WindowsOwnedRouteTransitionIssuer::new(1, capture_interface, 1)
             .map_err(|error| format!("construct exact-route issuer: {error}"))?;
+        let mut address =
+            OwnedUnicastAddress::create(capture_interface, Ipv4Addr::new(192, 0, 2, 1))?;
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
-        let qualification = qualify_disposable_exact_host_route(&mut issuer, destination)
-            .map_err(|error| format!("qualify exact-route owner: {error}"))?;
+        let route_result = qualify_disposable_exact_host_route(&mut issuer, destination)
+            .map_err(|error| format!("qualify exact-route owner: {error}"));
+        let address_cleanup = address.remove_and_verify();
+        if let Err(cleanup_error) = address_cleanup {
+            return Err(format!(
+                "owned Wintun address cleanup failed: {cleanup_error}; route result: {route_result:?}"
+            ));
+        }
+        let qualification = route_result?;
 
         if WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION != 1
             || qualification.destination() != destination
@@ -328,6 +346,103 @@ impl Drop for OwnedWintunAdapter<'_> {
     fn drop(&mut self) {
         self.end_session();
         self.close_adapter();
+    }
+}
+
+struct OwnedUnicastAddress {
+    row: MIB_UNICASTIPADDRESS_ROW,
+    present: bool,
+}
+
+impl OwnedUnicastAddress {
+    fn create(
+        interface: WindowsPacketInterfaceIdentity,
+        address: Ipv4Addr,
+    ) -> Result<Self, String> {
+        let mut row = MIB_UNICASTIPADDRESS_ROW::default();
+        unsafe {
+            InitializeUnicastIpAddressEntry(&mut row);
+        }
+        row.InterfaceLuid = NET_LUID_LH {
+            Value: interface.luid,
+        };
+        row.InterfaceIndex = interface.index;
+        row.Address = ipv4_sockaddr(address);
+        row.OnLinkPrefixLength = 32;
+        row.DadState = IpDadStatePreferred;
+
+        if lookup_unicast_address(row)? {
+            return Err("owned Wintun address already exists before creation".to_owned());
+        }
+        let result = unsafe { CreateUnicastIpAddressEntry(&row) };
+        if result != 0 {
+            return Err(format!("CreateUnicastIpAddressEntry failed with {result}"));
+        }
+        let owned = Self { row, present: true };
+        if !lookup_unicast_address(owned.row)? {
+            return Err("owned Wintun address could not be verified after creation".to_owned());
+        }
+        Ok(owned)
+    }
+
+    fn remove_and_verify(&mut self) -> Result<(), String> {
+        let result = unsafe { DeleteUnicastIpAddressEntry(&self.row) };
+        if result != 0 {
+            return Err(format!("DeleteUnicastIpAddressEntry failed with {result}"));
+        }
+
+        let deadline = Instant::now() + ADDRESS_REMOVAL_TIMEOUT;
+        loop {
+            if !lookup_unicast_address(self.row)? {
+                self.present = false;
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err("owned Wintun address remained after bounded deletion".to_owned());
+            }
+            thread::sleep(ADDRESS_PROBE_INTERVAL);
+        }
+    }
+}
+
+impl Drop for OwnedUnicastAddress {
+    fn drop(&mut self) {
+        if self.present {
+            unsafe {
+                DeleteUnicastIpAddressEntry(&self.row);
+            }
+        }
+    }
+}
+
+fn lookup_unicast_address(row: MIB_UNICASTIPADDRESS_ROW) -> Result<bool, String> {
+    let mut observed = row;
+    let result = unsafe { GetUnicastIpAddressEntry(&mut observed) };
+    match result {
+        0 => Ok(true),
+        ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND => Ok(false),
+        error => Err(format!("GetUnicastIpAddressEntry failed with {error}")),
+    }
+}
+
+fn ipv4_sockaddr(address: Ipv4Addr) -> SOCKADDR_INET {
+    let [s_b1, s_b2, s_b3, s_b4] = address.octets();
+    SOCKADDR_INET {
+        Ipv4: SOCKADDR_IN {
+            sin_family: AF_INET,
+            sin_port: 0,
+            sin_addr: IN_ADDR {
+                S_un: IN_ADDR_0 {
+                    S_un_b: IN_ADDR_0_0 {
+                        s_b1,
+                        s_b2,
+                        s_b3,
+                        s_b4,
+                    },
+                },
+            },
+            sin_zero: [0; 8],
+        },
     }
 }
 

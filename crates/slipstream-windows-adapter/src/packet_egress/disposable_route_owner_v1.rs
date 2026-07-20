@@ -4,10 +4,7 @@
 //! is not a production route manager: it creates one exact host route, binds
 //! that effect to two opaque kernel observations, and proves exact removal.
 
-use super::transition_v1::{
-    WindowsOwnedRouteTransitionError, WindowsOwnedRouteTransitionIssuer,
-    WindowsPacketRouteObservation,
-};
+use super::transition_v1::{WindowsOwnedRouteTransitionError, WindowsOwnedRouteTransitionIssuer};
 use super::windows::{observe_windows_packet_route, sockaddr_from_ip};
 use super::WindowsPacketInterfaceIdentity;
 use std::error::Error;

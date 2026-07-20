@@ -418,12 +418,30 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
+        "InitializeUnicastIpAddressEntry",
+        "CreateUnicastIpAddressEntry",
+        "GetUnicastIpAddressEntry",
+        "DeleteUnicastIpAddressEntry",
+        "OwnedUnicastAddress",
+        "ADDRESS_REMOVAL_TIMEOUT",
+        "remove_and_verify",
         "qualify_disposable_exact_host_route",
         "require_adapter_absent",
     ] {
         assert!(
             fixture.contains(required),
             "route fixture is missing {required}"
+        );
+    }
+    for forbidden in [
+        "SetUnicastIpAddressEntry",
+        "GetUnicastIpAddressTable",
+        "Set-DnsClientServerAddress",
+        "WintunDeleteDriver",
+    ] {
+        assert!(
+            !fixture.contains(forbidden),
+            "route fixture contains {forbidden}"
         );
     }
 
