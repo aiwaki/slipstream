@@ -748,6 +748,40 @@ done
             self.assertEqual(result.returncode, 1)
             self.assertIn("still unavailable: protoc", result.stderr)
 
+    def test_wintun_crash_gate_retains_one_bounded_process_handle(self) -> None:
+        workflow = (
+            ROOT / ".github/workflows/windows-packet-adapter-qualification.yml"
+        ).read_text(encoding="utf-8")
+        runner = (
+            ROOT / "scripts/run_bounded_windows_cargo_test.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("scripts/run_bounded_windows_cargo_test.ps1", workflow)
+        self.assertIn("-TimeoutSeconds 120", workflow)
+        self.assertNotIn("Tee-Object -Variable output", workflow)
+        self.assertIn("Start-Process", runner)
+        self.assertIn("function Stop-RetainedProcessTree", runner)
+        self.assertIn("$process.WaitForExit(250)", runner)
+        self.assertNotIn("$process.WaitForExit()", runner)
+        self.assertIn("$drainTimer.ElapsedMilliseconds -lt 2000", runner)
+        self.assertNotIn("$stableSamples", runner)
+        self.assertIn("$Process.Kill($true)", runner)
+        self.assertIn(
+            "if (-not $Process.WaitForExit($WaitMilliseconds))", runner
+        )
+        self.assertIn("throw $cleanupFailure", runner)
+        self.assertNotIn("[void]$process.WaitForExit", runner)
+        self.assertIn("RedirectStandardOutput", runner)
+        self.assertIn("RedirectStandardError", runner)
+        for forbidden in (
+            "Get-Process",
+            "Stop-Process",
+            "taskkill",
+            "Win32_Process",
+            "ProcessName",
+        ):
+            self.assertNotIn(forbidden, runner)
+
 
 if __name__ == "__main__":
     unittest.main()

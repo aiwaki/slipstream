@@ -6,12 +6,14 @@ on:
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
       - "crates/slipstream-windows-adapter/**"
+      - "scripts/run_bounded_windows_cargo_test.ps1"
       - "vendor/wintun/**"
   push:
     branches: ["main"]
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
       - "crates/slipstream-windows-adapter/**"
+      - "scripts/run_bounded_windows_cargo_test.ps1"
       - "vendor/wintun/**"
 
 permissions:
@@ -166,24 +168,20 @@ jobs:
           }
 
       - name: Qualify exact child-process termination cleanup
-        timeout-minutes: 4
+        timeout-minutes: 3
         shell: pwsh
         env:
           CARGO_TERM_COLOR: never
           SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
           SLIPSTREAM_WINDOWS_WINTUN_CRASH_CI: "1"
         run: |
-          $testName = "native_wintun_child_termination_removes_owned_adapter_and_session"
-          $output = @()
-          & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-packet-fixture --test wintun_lifecycle_windows $testName -- --exact --nocapture --test-threads=1 2>&1 | Tee-Object -Variable output
-          $exitCode = $LASTEXITCODE
-          $lines = @($output | ForEach-Object { $_.ToString() })
-          if ($exitCode -ne 0) {
-            exit $exitCode
-          }
-          if ($lines -notcontains "test $testName ... ok") {
-            throw "Expected exact child-process Wintun cleanup test did not execute"
-          }
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_lifecycle_windows `
+            -TestName native_wintun_child_termination_removes_owned_adapter_and_session `
+            -TimeoutSeconds 120 `
+            -NoCapture
 
       - name: Lint the disposable packet fixture
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --features disposable-windows-packet-fixture -- -D warnings

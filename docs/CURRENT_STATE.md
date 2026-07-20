@@ -9,12 +9,12 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-20, through merged
-[PR #189](https://github.com/aiwaki/slipstream/pull/189) at main commit
-`b71042bbdc4d0ed7da852395f5a54d4b241ea02e`, including its successful
-[native AMD64/ARM64 run 29721672134](https://github.com/aiwaki/slipstream/actions/runs/29721672134),
-[required CI run 29721672179](https://github.com/aiwaki/slipstream/actions/runs/29721672179),
+[PR #190](https://github.com/aiwaki/slipstream/pull/190) at main commit
+`44afffc8fb0fd035fc53f1e358896cc23b1a8f8d`, including its successful
+[native AMD64/ARM64 run 29726460677](https://github.com/aiwaki/slipstream/actions/runs/29726460677),
+[required CI run 29726460692](https://github.com/aiwaki/slipstream/actions/runs/29726460692),
 and
-[dependency-audit run 29721672104](https://github.com/aiwaki/slipstream/actions/runs/29721672104).
+[dependency-audit run 29726460674](https://github.com/aiwaki/slipstream/actions/runs/29726460674).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -44,7 +44,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Native Wintun cleanup and read-only route/source observation qualified; sealed transition issuer implemented pending checks | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. PRs #185 and #186 qualified ordinary and abrupt-owner adapter/session cleanup on native AMD64 and ARM64, including exact-main reruns. The pure `windows-packet-egress-v1` contract rejects the capture interface and admits only fresh pre-capture route evidence paired with an exact owned capture-route activation from the baseline route epoch to the current route epoch. It binds that transition to one capture generation, destination, exact host prefix, an unchanged selected source address, and stable interface LUID/index pairs; any later route-epoch change invalidates the plan. It preserves any system-selected non-capture interface, including an external VPN, without classifying or mutating it. PR #189 qualified a separate Windows-only observer that reads `GetBestRoute2`, canonicalizes the selected source and prefix, and round-trips LUID/index identity without route, socket, adapter, DNS, proxy, PAC, or VPN effects. It is not composed into production and cannot issue route epochs or activation evidence. The current branch adds an in-memory issuer contract that consumes one opaque pre-route observation, serializes one pending exact-host transition, requires a matching opaque post-route observation through the owned capture identity, and issues a non-deserializable activation token invalidated by every later route epoch. A dedicated native matrix step executes this state machine on x64 and ARM64. It performs no native effect and remains pending review and CI. Actual route ownership, source revalidation, socket binding, competing-route loop avoidance, pre-existing-flow activation safety, bounded removal, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Native Wintun cleanup, route/source observation, and sealed transition issuer qualified | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. PRs #185 and #186 qualified ordinary and abrupt-owner adapter/session cleanup on native AMD64 and ARM64, including exact-main reruns. The pure `windows-packet-egress-v1` contract rejects the capture interface and admits only fresh pre-capture route evidence paired with an exact owned capture-route activation from the baseline route epoch to the current route epoch. It binds that transition to one capture generation, destination, exact host prefix, an unchanged selected source address, and stable interface LUID/index pairs; any later route-epoch change invalidates the plan. It preserves any system-selected non-capture interface, including an external VPN, without classifying or mutating it. PR #189 qualified a separate Windows-only observer that reads `GetBestRoute2`, canonicalizes the selected source and prefix, and round-trips LUID/index identity without route, socket, adapter, DNS, proxy, PAC, or VPN effects. PR #190 qualified an in-memory issuer that consumes one opaque pre-route observation, serializes one pending exact-host transition, requires a fresh matching opaque post-route observation through the owned capture identity, and issues a non-deserializable activation token invalidated by every later route epoch. Its trusted clock is collected inside the native boundary. Neither component performs a route, socket, adapter, DNS, proxy, PAC, or VPN effect, and neither is composed into production. Actual route ownership, source revalidation, socket binding, competing-route loop avoidance, pre-existing-flow activation safety, bounded removal, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -437,6 +437,24 @@ all required checks and packaged lifecycle in
 and dependency audit in
 [run 29721672104](https://github.com/aiwaki/slipstream/actions/runs/29721672104).
 
+[PR #190](https://github.com/aiwaki/slipstream/pull/190) sealed the
+Windows route-transition issuer behind opaque, native-timestamped route
+observations. Its exact merge commit `44afffc` passed the issuer and existing
+Wintun lifecycle gates on native x64 and ARM64 in
+[run 29726460677](https://github.com/aiwaki/slipstream/actions/runs/29726460677),
+all required checks and packaged lifecycle in
+[run 29726460692](https://github.com/aiwaki/slipstream/actions/runs/29726460692),
+and dependency audit in
+[run 29726460674](https://github.com/aiwaki/slipstream/actions/runs/29726460674).
+The first ARM64 attempt for the PR in
+[run 29725545540](https://github.com/aiwaki/slipstream/actions/runs/29725545540)
+printed the exact crash-cleanup test's passing result, then remained inside the
+PowerShell `Tee-Object` pipeline until the four-minute step timeout. Attempt 2
+and exact-main both passed. This is a repeated qualification-harness failure,
+not packet-runtime evidence; the current follow-up replaces that object
+pipeline with a retained exact process handle, file-backed live output, and an
+inner monotonic deadline before route-owner work resumes.
+
 ## Next Verified Action
 
 Do not reinstall or re-arm Slipstream on the primary workstation while the user
@@ -448,13 +466,15 @@ rollback prepared in advance. No repeated administrator prompts are acceptable.
 If the smoke fails, uninstall immediately and preserve the first failing
 evidence; do not improvise another install in the same session.
 
-Continue M4 on disposable systems. Qualify the current sealed transition-issuer
-contract, then implement a disposable exact-route owner that alone can invoke
-its crate-private post-route attestation. The owner must apply and remove only
-one exact `/32` or `/128`, prove both transitions through fresh read-only kernel
-observations, and never expose a public constructor for activation tokens. After
-that, add a disposable socket-binding fixture that proves outbound loop
-avoidance with a competing capture route on native AMD64 and ARM64. Fresh
+Continue M4 on disposable systems. First qualify the retained-process crash
+gate on native x64 and ARM64 so another output-pipeline hang cannot consume the
+broad workflow timeout. Then implement a disposable exact-route owner that
+alone can invoke the issuer's crate-private post-route attestation. The owner
+must apply and remove only one exact `/32` or `/128`, prove both transitions
+through fresh read-only kernel observations, and never expose a public
+constructor for activation tokens. After that, add a disposable socket-binding
+fixture that proves outbound loop avoidance with a competing capture route on
+native AMD64 and ARM64. Fresh
 source/LUID revalidation, pre-existing-flow activation safety, bounded
 capture removal, and explicit
 external-VPN coexistence remain separate gates before any exact-route
