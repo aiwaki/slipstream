@@ -398,10 +398,12 @@ therefore stays phased and closed to production traffic:
    signer, and timestamp evidence read-only, then qualify both exact pinned DLLs
    and tamper rejection on disposable AMD64 and ARM64 Windows without loading
    them.
-2. Specify and qualify a separate capture-only v2 contract before any DLL load
-   or route mutation. An exact route may widen capture but cannot authorize a
-   backend. Every captured flow must be reclassified from bounded in-band
-   evidence; missing, encrypted, or ambiguous hostname evidence stays direct.
+2. Completed as a pure contract: `windows-packet-capture-v2` reclassifies every
+   observed flow from transport-matched TLS SNI or QUIC Initial evidence bounded
+   to five seconds. An exact route may widen capture but cannot authorize a
+   backend. Direct, unknown, missing, encrypted, ambiguous, malformed, stale,
+   unsafe, or mismatched evidence stays direct. The production host does not
+   compose v2 and no native API is present.
 3. Prove outbound loop avoidance, activation safety for pre-existing flows,
    bounded capture expiry/removal, crash-safe rollback, and explicit
    coexistence with an active external VPN on disposable AMD64 and ARM64

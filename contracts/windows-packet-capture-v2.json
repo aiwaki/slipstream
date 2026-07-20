@@ -1,0 +1,377 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_packet_capture",
+  "contract_version": 2,
+  "invariants": {
+    "capture_only": true,
+    "exact_route_may_widen_capture_only": true,
+    "backend_authorization": false,
+    "per_flow_reclassification_required": true,
+    "hostname_evidence_is_in_band": true,
+    "opaque_hostname_is_direct_passthrough": true,
+    "direct_policy_is_direct_passthrough": true,
+    "capture_generation_required": true,
+    "flow_identity_required": true,
+    "maximum_evidence_lifetime_ms": 5000,
+    "native_dll_loading": false,
+    "native_adapter_creation": false,
+    "native_route_effect": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "production_service_host_composition": false
+  },
+  "native_effect_gates": {
+    "outbound_loop_avoidance": "required",
+    "pre_existing_flow_activation_safety": "required",
+    "bounded_capture_expiry_and_removal": "required",
+    "crash_safe_rollback": "required",
+    "external_vpn_coexistence": "required",
+    "disposable_amd64_qualification": "required",
+    "disposable_arm64_qualification": "required"
+  },
+  "vectors": [
+    {
+      "name": "discord-tls-is-local-bypass-policy-only",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 7,
+        "flow_id": 41,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "policy_classified",
+        "route_class": "local_bypass",
+        "service_group": "discord",
+        "normalized_host": "gateway.discord.gg"
+      }
+    },
+    {
+      "name": "youtube-quic-is-local-bypass-policy-only",
+      "now_ms": 2200,
+      "observation": {
+        "capture_generation": 7,
+        "flow_id": 42,
+        "transport": "udp_quic",
+        "destination": "142.250.74.110",
+        "observed_at_ms": 2000,
+        "expires_at_ms": 6000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "quic_initial_sni",
+          "host": "rr1---sn-ab5szn7s.googlevideo.com"
+        }
+      },
+      "expected": {
+        "disposition": "policy_classified",
+        "route_class": "local_bypass",
+        "service_group": "youtube_video",
+        "normalized_host": "rr1---sn-ab5szn7s.googlevideo.com"
+      }
+    },
+    {
+      "name": "openai-hostname-is-normalized-before-geo-policy",
+      "now_ms": 3200,
+      "observation": {
+        "capture_generation": 8,
+        "flow_id": 51,
+        "transport": "tcp_tls",
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "observed_at_ms": 3000,
+        "expires_at_ms": 7000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "CHATGPT.COM."
+        }
+      },
+      "expected": {
+        "disposition": "policy_classified",
+        "route_class": "geo_exit",
+        "service_group": "openai",
+        "normalized_host": "chatgpt.com"
+      }
+    },
+    {
+      "name": "google-direct-first-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 9,
+        "flow_id": 61,
+        "transport": "tcp_tls",
+        "destination": "142.250.74.196",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "www.google.com"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "direct_policy"
+      }
+    },
+    {
+      "name": "spotify-direct-first-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 9,
+        "flow_id": 62,
+        "transport": "tcp_tls",
+        "destination": "35.186.224.25",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "open.spotify.com"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "direct_policy"
+      }
+    },
+    {
+      "name": "unknown-host-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 9,
+        "flow_id": 63,
+        "transport": "tcp_tls",
+        "destination": "93.184.216.34",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "example.net"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unknown_policy"
+      }
+    },
+    {
+      "name": "encrypted-client-hello-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 71,
+        "transport": "tcp_tls",
+        "destination": "1.1.1.1",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "opaque",
+          "reason": "encrypted_client_hello"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "opaque_hostname",
+        "opaque_reason": "encrypted_client_hello"
+      }
+    },
+    {
+      "name": "missing-hostname-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 72,
+        "transport": "udp_quic",
+        "destination": "1.0.0.1",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "opaque",
+          "reason": "hostname_missing"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "opaque_hostname",
+        "opaque_reason": "hostname_missing"
+      }
+    },
+    {
+      "name": "malformed-hostname-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 11,
+        "flow_id": 81,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway_discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "invalid_hostname"
+      }
+    },
+    {
+      "name": "transport-evidence-mismatch-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 11,
+        "flow_id": 82,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "quic_initial_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "evidence_transport_mismatch"
+      }
+    },
+    {
+      "name": "expired-evidence-stays-direct",
+      "now_ms": 5000,
+      "observation": {
+        "capture_generation": 12,
+        "flow_id": 91,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "evidence_expired"
+      }
+    },
+    {
+      "name": "unbounded-evidence-window-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 12,
+        "flow_id": 92,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 7000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "invalid_evidence_window"
+      }
+    },
+    {
+      "name": "zero-capture-generation-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 0,
+        "flow_id": 93,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "invalid_capture_generation"
+      }
+    },
+    {
+      "name": "zero-flow-identity-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 13,
+        "flow_id": 0,
+        "transport": "tcp_tls",
+        "destination": "104.16.58.5",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "invalid_flow_id"
+      }
+    },
+    {
+      "name": "loopback-destination-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 13,
+        "flow_id": 101,
+        "transport": "tcp_tls",
+        "destination": "127.0.0.1",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unsafe_destination"
+      }
+    },
+    {
+      "name": "unsupported-transport-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 13,
+        "flow_id": 102,
+        "transport": "other",
+        "destination": "1.1.1.1",
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "opaque",
+          "reason": "unsupported_transport"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "opaque_hostname",
+        "opaque_reason": "unsupported_transport"
+      }
+    }
+  ]
+}
