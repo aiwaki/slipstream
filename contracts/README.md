@@ -111,6 +111,16 @@ Slipstream routing decisions and bounded recovery primitives.
   route, socket, DNS, proxy, PAC, VPN, or production-host effect, and keeps all
   native loop, activation, expiry, rollback, coexistence, and architecture
   qualification gates closed.
+- `windows-packet-egress-v1.json` freezes the pure outbound loop-avoidance
+  admission below that capture boundary. A plan requires short-lived route
+  evidence observed before capture, the same capture generation and live route
+  epoch, stable interface LUID-to-index identity, a matching destination,
+  source family, and containing route prefix. The capture interface is always
+  rejected. IPv4 records the `IP_UNICAST_IF` value in network byte order while
+  IPv6 records the `IPV6_UNICAST_IF` value in host byte order. This does not
+  call either socket option, trust JSON as native evidence, query or mutate a
+  route, classify an external VPN, or compose the production host; those remain
+  separate disposable AMD64/ARM64 gates.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service

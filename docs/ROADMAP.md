@@ -410,13 +410,19 @@ therefore stays phased and closed to production traffic:
    adapter, and leaves addresses, routes, DNS, proxy, PAC, VPN, and the driver
    itself untouched. This is a compatibility subgate, not capture or routing
    authorization.
-4. Abrupt-owner cleanup passed in disposable AMD64/ARM64 PR CI and must repeat
-   on the exact merged commit: terminating the exact child process while its
-   unique adapter and session remain live removes that adapter without Rust
-   cleanup. Next prove outbound loop avoidance, activation safety for
-   pre-existing flows, bounded capture expiry/removal, and explicit coexistence
-   with an active external VPN on disposable AMD64 and ARM64 Windows. Never add
-   a default route or change system DNS, proxy, PAC, or VPN settings.
+4. Completed on the exact merged commit: terminating the exact child process
+   while its unique adapter and session remain live removes that adapter
+   without Rust cleanup on native AMD64 and ARM64. A separate pure
+   `windows-packet-egress-v1` contract now admits only short-lived pre-capture
+   route evidence bound to the capture generation, live route epoch, stable
+   LUID/index identities, destination, source family, and containing prefix;
+   it always rejects the capture interface and preserves any system-selected
+   non-capture interface without classifying an external VPN. This is not
+   native loop-avoidance evidence: next qualify actual IPv4/IPv6 socket binding
+   under a competing capture route, then activation safety for pre-existing
+   flows, bounded capture expiry/removal, and explicit external-VPN coexistence
+   on disposable AMD64 and ARM64 Windows. Never add a default route or change
+   system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
