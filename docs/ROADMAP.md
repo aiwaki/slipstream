@@ -375,8 +375,8 @@ strict artifact admission. The same pure boundary reclassifies each protected
 host through the active policy and can prepare only fresh public exact `/32` or
 `/128` candidate plans for `local_bypass` or `geo_exit`. One resolver evidence
 object must bind the same canonical host to an address set containing the
-selected destination. The capability is opaque and non-deserializable so only
-the future native collector can issue it, and reserved IPv6 space is rejected.
+selected destination. The capability is opaque and non-deserializable, and
+reserved IPv6 space is rejected.
 A separate pure v1 gate requires complete, fresh, generation-bound evidence
 for every hostname claimed to be bound to the same destination and admits only
 one shared route class and strategy. A partial cache is never safety evidence.

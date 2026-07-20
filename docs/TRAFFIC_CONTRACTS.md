@@ -182,24 +182,27 @@ Wintun 0.14.1 AMD64/ARM64 artifacts and prepares only fresh policy-bound public
 exact `/32` or `/128` candidates for `local_bypass` or `geo_exit`. Protected
 hosts are reclassified through the active tables. Resolver evidence binds one
 canonical host to its observed address set, and the selected destination must
-belong to that set. The evidence type is opaque and non-deserializable so only
-the future native collector can issue it. IPv6 candidates are conservatively limited to reviewed
+belong to that set. The evidence type is opaque and non-deserializable. IPv6
+candidates are conservatively limited to reviewed
 global-unicast space and exclude IANA special-purpose ranges. A separate pure
 admission requires a complete collector-owned binding snapshot for the exact
 destination. The candidate host must occur in a bounded canonical sorted set,
 and every host in that set must reclassify to the same route class and strategy.
 Partial DNS observations, stale evidence, and shared direct/local/geo
 destinations fail closed. The admission is generation-bound and expires at the
-earlier evidence deadline. It is still not native route authorization: a future
-effect must retain the same collector-generation lease for the route's entire
-lifetime and remove the route before releasing it. The pure contract cannot load
-a DLL, create an adapter, install a route, change the default route, or touch
-system DNS, proxy, PAC, VPN, or production traffic.
+earlier evidence deadline. It is not native route authorization. The complete-
+DNS premise was rejected after feasibility review, so v1 is frozen and no
+native issuer or route effect may be built from it. The pure contract cannot
+load a DLL, create an adapter, install a route, change the default route, or
+touch system DNS, proxy, PAC, VPN, or production traffic.
 
 Wintun exposes L3 packets rather than the accepted TCP stream expected by
-direct-ingress and capture-source v1. A separately reviewed userspace packet
-stack and backend bridge must satisfy the same policy and recovery invariants;
-the stream contracts are not silently reused as packet ownership proof.
+direct-ingress and capture-source v1. A separately versioned capture-only
+contract must reclassify each flow from bounded in-band evidence and preserve
+direct passthrough when hostname evidence is missing or opaque. Only after its
+loop, activation, expiry, and coexistence gates pass may a reviewed userspace
+packet stack and backend bridge be considered; the stream contracts are not
+silently reused as packet ownership proof.
 
 The remaining `windows-wfp-*` contracts preserve the superseded own-driver
 research path only. `contracts/windows-wfp-capture-v1.json` freezes that WFP
