@@ -426,3 +426,50 @@ fn shared_destination_admission_is_opaque_pure_and_not_composed() {
     assert!(!production_host.contains("admit_windows_packet_route_conflicts"));
     assert!(!production_host.contains("WindowsPacketRouteConflictAdmission"));
 }
+
+#[test]
+fn native_wintun_lifecycle_is_disposable_route_free_and_not_composed() {
+    let fixture = include_str!("wintun_lifecycle_windows.rs");
+    for required in [
+        "disposable-windows-packet-fixture",
+        "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_LIFECYCLE_CI",
+        "collect_windows_packet_adapter_artifact",
+        "LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR",
+        "LOAD_LIBRARY_SEARCH_SYSTEM32",
+        "WintunCreateAdapter",
+        "WintunStartSession",
+        "WintunEndSession",
+        "WintunCloseAdapter",
+        "require_adapter_absent",
+    ] {
+        assert!(
+            fixture.contains(required),
+            "disposable Wintun lifecycle fixture must retain {required}"
+        );
+    }
+    for forbidden in [
+        "WintunDeleteDriver",
+        "CreateIpForwardEntry",
+        "SetIpForwardEntry",
+        "DeleteIpForwardEntry",
+        "Set-DnsClientServerAddress",
+        "DnsQuery",
+        "WinHttp",
+        "TcpStream",
+        "UdpSocket",
+    ] {
+        assert!(
+            !fixture.contains(forbidden),
+            "disposable Wintun lifecycle fixture contains forbidden effect {forbidden}"
+        );
+    }
+
+    let library = include_str!("../src/lib.rs");
+    let packet_adapter = include_str!("../src/packet_adapter/mod.rs");
+    let production_host = include_str!("../src/service_host/windows.rs");
+    assert!(!library.contains("wintun_lifecycle"));
+    assert!(!packet_adapter.contains("wintun_lifecycle"));
+    assert!(!production_host.contains("Wintun"));
+    assert!(!production_host.contains("packet_adapter"));
+}

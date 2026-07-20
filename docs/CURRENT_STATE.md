@@ -9,11 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-20, through merged
-[PR #181](https://github.com/aiwaki/slipstream/pull/181) at main commit
-`27363cd3460d1c7a368c718c1012a7cfa93d4716`, including its successful
-[exact-main CI run 29709766877](https://github.com/aiwaki/slipstream/actions/runs/29709766877)
+[PR #184](https://github.com/aiwaki/slipstream/pull/184) at main commit
+`56c37ccb680ce771ca16f7564be8cf0d37aa34b3`, including its successful
+[exact-main CI run 29711400231](https://github.com/aiwaki/slipstream/actions/runs/29711400231)
 and
-[dependency-audit run 29709766891](https://github.com/aiwaki/slipstream/actions/runs/29709766891).
+[dependency-audit run 29711400215](https://github.com/aiwaki/slipstream/actions/runs/29711400215).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -43,7 +43,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Pure capture-only v2 implemented; native feasibility gates remain | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract now reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend, performs no native effect, and is not composed into production. Loop avoidance, pre-existing-flow activation safety, bounded removal, crash rollback, external-VPN coexistence, AMD64/ARM64 qualification, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Pure capture-only v2 implemented; first native lifecycle subgate under qualification | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract now reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. The next subgate loads only the exact admitted DLL on disposable native AMD64/ARM64 runners, creates one unique test adapter, starts and ends one minimum-size session, and proves that adapter is removed without adding an address or route. It does not authorize packet capture. Loop avoidance, pre-existing-flow activation safety, bounded removal, child-process crash rollback, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -348,27 +348,52 @@ and its dependency and vendored-Geph audits passed in
 [run 29709766891](https://github.com/aiwaki/slipstream/actions/runs/29709766891).
 No application or privileged component was launched on the primary workstation.
 
+[PR #182](https://github.com/aiwaki/slipstream/pull/182) refreshed this
+checkpoint after the revisioned artifact correction. [PR
+#183](https://github.com/aiwaki/slipstream/pull/183) added the pure capture-only
+Windows v2 classifier, and its exact merge commit passed all required jobs in
+[CI run 29710542922](https://github.com/aiwaki/slipstream/actions/runs/29710542922)
+plus dependency audit in
+[run 29710542945](https://github.com/aiwaki/slipstream/actions/runs/29710542945).
+[PR #184](https://github.com/aiwaki/slipstream/pull/184) made every owned-Geph
+cleanup stage independent so a Keychain error cannot skip later runtime,
+listener, sentinel, or root-boundary cleanup. Its exact main commit passed all
+required jobs in
+[CI run 29711400231](https://github.com/aiwaki/slipstream/actions/runs/29711400231)
+and dependency audit in
+[run 29711400215](https://github.com/aiwaki/slipstream/actions/runs/29711400215).
+The protected `geph-qualification` environment now exists and is limited to
+protected branches, but it has no `SLIPSTREAM_GEPH_ACCOUNT_SECRET`; the manual
+account-backed gate must not be triggered until the user supplies that secret.
+
 ## Next Verified Action
 
 Do not reinstall or re-arm Slipstream on the primary workstation while the user
 is away. The downloaded `140598b` app used a superseded Geph artifact and must
-not be launched. The exact revisioned artifact is now eligible to be downloaded
-and signature-verified without launching it. Actual installation still waits
-for one short, user-scheduled smoke with preflight and rollback prepared in
-advance. No repeated administrator prompts are acceptable. If the smoke fails,
-uninstall immediately and preserve the first failing evidence; do not improvise
-another install in the same session.
-In parallel, M4 may continue with disposable specifications and tests for
+not be launched. The exact revisioned `f22e475` packaged app has been downloaded,
+signature-verified, and inspected without launching any component. Actual
+installation still waits for one short, user-scheduled smoke with preflight and
+rollback prepared in advance. No repeated administrator prompts are acceptable.
+If the smoke fails, uninstall immediately and preserve the first failing
+evidence; do not improvise another install in the same session.
+
+Continue M4 on disposable systems. First qualify the exact admitted Wintun DLL
+on native AMD64 and ARM64 runners by creating and removing one unique adapter
+and minimum-size session without an address or route. This proves only native
+lifecycle compatibility. Follow it with separate child-process crash cleanup,
 outbound loop avoidance, pre-existing-flow activation safety, bounded capture
-removal, crash rollback, and external-VPN coexistence on AMD64 and ARM64.
-Native packet or route effects remain blocked until those gates pass; a partial
-DNS cache is never treated as complete attribution.
+removal, and external-VPN coexistence gates before any exact-route transaction
+or production composition. A partial DNS cache is never treated as complete
+attribution.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
 ## External Gates
 
-- Run the protected account-backed owned-Geph qualification successfully from
-  `main`.
+- Add `SLIPSTREAM_GEPH_ACCOUNT_SECRET` to the protected
+  `geph-qualification` environment, then run the account-backed owned-Geph
+  qualification successfully from `main`.
+- Pass the native Wintun adapter/session lifecycle fixture on both disposable
+  AMD64 and ARM64 Windows runners without adapter residue.
 - Qualify a physical default-route change and lid-close/wake cycle on a
   disposable Mac.
 - Add Developer ID signing, hardened runtime, notarization, stapling, policy-key
