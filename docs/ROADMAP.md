@@ -404,10 +404,11 @@ therefore stays phased and closed to production traffic:
    backend. Direct, unknown, missing, encrypted, ambiguous, malformed, stale,
    unsafe, or mismatched evidence stays direct. The production host does not
    compose v2 and no native API is present.
-3. Qualify the smallest native lifecycle on disposable AMD64 and ARM64 Windows:
-   load only the exact admitted DLL, create one uniquely named adapter, start
-   and end the minimum-size session, remove that adapter, and leave addresses,
-   routes, DNS, proxy, PAC, VPN, and the driver itself untouched. This is a
+3. Completed in disposable PR CI; repeat on the exact merged commit: qualify
+   the smallest native lifecycle on AMD64 and ARM64 Windows. It loads only the
+   exact admitted DLL, creates one uniquely named adapter, starts and ends the
+   minimum-size session, removes that adapter, and leaves addresses, routes,
+   DNS, proxy, PAC, VPN, and the driver itself untouched. This is a
    compatibility subgate, not capture or routing authorization.
 4. Prove outbound loop avoidance, activation safety for pre-existing flows,
    bounded capture expiry/removal, child-process crash cleanup, and explicit
