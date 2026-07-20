@@ -59,6 +59,10 @@ fn contract_keeps_native_socket_route_and_adapter_effects_closed() {
     assert_eq!(fixture.invariants["route_epoch_bound"], true);
     assert_eq!(fixture.invariants["luid_and_live_index_bound"], true);
     assert_eq!(fixture.invariants["capture_interface_rejected"], true);
+    assert_eq!(
+        fixture.invariants["ipv6_global_unicast_registry_snapshot"],
+        "2025-10-10"
+    );
     assert_eq!(fixture.invariants["backend_selection"], false);
     assert_eq!(fixture.invariants["native_route_query"], false);
     assert_eq!(fixture.invariants["native_socket_effect"], false);

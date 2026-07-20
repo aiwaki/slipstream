@@ -374,20 +374,21 @@ fn same_family(left: IpAddr, right: IpAddr) -> bool {
 
 fn is_usable_source_address(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(address) => {
-            !(address.is_unspecified()
-                || address.is_loopback()
-                || address.is_multicast()
-                || address.is_broadcast()
-                || address.is_link_local())
-        }
+        IpAddr::V4(address) => is_usable_source_ipv4(address),
         IpAddr::V6(address) => {
-            !(address.is_unspecified()
-                || address.is_loopback()
-                || address.is_multicast()
-                || (address.segments()[0] & 0xffc0) == 0xfe80)
+            let segments = address.segments();
+            (segments[0] & 0xfe00) == 0xfc00 || is_safe_public_ipv6(address)
         }
     }
+}
+
+fn is_usable_source_ipv4(address: Ipv4Addr) -> bool {
+    let [a, b, _, _] = address.octets();
+    is_safe_public_ipv4(address)
+        || a == 10
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
 }
 
 fn is_safe_public_destination(destination: IpAddr) -> bool {
@@ -415,14 +416,61 @@ fn is_safe_public_ipv4(address: Ipv4Addr) -> bool {
 }
 
 fn is_safe_public_ipv6(address: Ipv6Addr) -> bool {
-    if let Some(mapped) = address.to_ipv4() {
-        return is_safe_public_ipv4(mapped);
+    if ipv6_in_prefix(address, Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32) {
+        return false;
     }
-    let segments = address.segments();
-    !(address.is_unspecified()
-        || address.is_loopback()
-        || address.is_multicast()
-        || (segments[0] & 0xfe00) == 0xfc00
-        || (segments[0] & 0xffc0) == 0xfe80
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+
+    // Frozen from the IANA IPv6 Global Unicast Address Space registry dated
+    // 2025-10-10. Unlisted space inside 2000::/3 is reserved and must fail
+    // closed until a new contract version reviews a later registry snapshot.
+    [
+        (Ipv6Addr::new(0x2001, 0x0001, 0, 0, 0, 0, 0, 1), 128),
+        (Ipv6Addr::new(0x2001, 0x0001, 0, 0, 0, 0, 0, 2), 128),
+        (Ipv6Addr::new(0x2001, 0x0001, 0, 0, 0, 0, 0, 3), 128),
+        (Ipv6Addr::new(0x2001, 0x0003, 0, 0, 0, 0, 0, 0), 32),
+        (Ipv6Addr::new(0x2001, 0x0004, 0x0112, 0, 0, 0, 0, 0), 48),
+        (Ipv6Addr::new(0x2001, 0x0020, 0, 0, 0, 0, 0, 0), 28),
+        (Ipv6Addr::new(0x2001, 0x0030, 0, 0, 0, 0, 0, 0), 28),
+        (Ipv6Addr::new(0x2001, 0x0200, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0400, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0600, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0800, 0, 0, 0, 0, 0, 0), 22),
+        (Ipv6Addr::new(0x2001, 0x0c00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x0e00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1200, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1400, 0, 0, 0, 0, 0, 0), 22),
+        (Ipv6Addr::new(0x2001, 0x1800, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1a00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x1c00, 0, 0, 0, 0, 0, 0), 22),
+        (Ipv6Addr::new(0x2001, 0x2000, 0, 0, 0, 0, 0, 0), 19),
+        (Ipv6Addr::new(0x2001, 0x4000, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4200, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4400, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4600, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4800, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4a00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x4c00, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2001, 0x5000, 0, 0, 0, 0, 0, 0), 20),
+        (Ipv6Addr::new(0x2001, 0x8000, 0, 0, 0, 0, 0, 0), 19),
+        (Ipv6Addr::new(0x2001, 0xa000, 0, 0, 0, 0, 0, 0), 20),
+        (Ipv6Addr::new(0x2001, 0xb000, 0, 0, 0, 0, 0, 0), 20),
+        (Ipv6Addr::new(0x2003, 0, 0, 0, 0, 0, 0, 0), 18),
+        (Ipv6Addr::new(0x2400, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2410, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2600, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2610, 0, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2620, 0, 0, 0, 0, 0, 0, 0), 23),
+        (Ipv6Addr::new(0x2630, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2800, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2a00, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2a10, 0, 0, 0, 0, 0, 0, 0), 12),
+        (Ipv6Addr::new(0x2c00, 0, 0, 0, 0, 0, 0, 0), 12),
+    ]
+    .into_iter()
+    .any(|(network, prefix_length)| ipv6_in_prefix(address, network, prefix_length))
+}
+
+fn ipv6_in_prefix(address: Ipv6Addr, network: Ipv6Addr, prefix_length: u8) -> bool {
+    let mask = u128::MAX << (128 - prefix_length);
+    u128::from(address) & mask == u128::from(network) & mask
 }

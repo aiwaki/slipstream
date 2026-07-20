@@ -274,10 +274,15 @@ advances the route epoch.
 `windows-packet-egress-v1` freezes only the pure admission produced from that
 future trusted evidence. It permits any non-capture egress selected by the
 system, including an external VPN, and contains no interface-type allowlist.
-It records the platform-specific socket-option value but does not call the
-option. Therefore its vectors prove stale- and self-interface rejection, not
-that real packets avoid a competing capture route; that remains a disposable
-native AMD64/ARM64 gate.
+Public IPv6 destinations are frozen against the
+[IANA IPv6 Global Unicast Address Space](https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml)
+snapshot dated 2025-10-10 and cross-checked against the
+[IPv6 Special-Purpose Address Space](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml);
+unlisted and non-global ranges such as discard-only `100::/64` fail closed. The
+plan records the platform-specific socket-option value but does not call the
+option. Therefore its vectors prove stale-, special-purpose-, and
+self-interface rejection, not that real packets avoid a competing capture
+route; that remains a disposable native AMD64/ARM64 gate.
 
 ### Remaining safety gates
 
