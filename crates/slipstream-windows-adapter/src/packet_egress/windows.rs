@@ -18,6 +18,7 @@ use windows_sys::Win32::Networking::WinSock::{
     AF_INET, AF_INET6, IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, SOCKADDR_IN,
     SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
+use windows_sys::Win32::System::SystemInformation::GetTickCount64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WindowsPacketRouteObserverErrorCode {
@@ -109,6 +110,7 @@ pub fn observe_windows_packet_route(
         ));
     }
 
+    let observed_at_ms = windows_uptime_ms();
     let destination_address = sockaddr_from_ip(destination);
     let mut best_route = MIB_IPFORWARD_ROW2::default();
     let mut best_source_address = SOCKADDR_INET::default();
@@ -158,12 +160,17 @@ pub fn observe_windows_packet_route(
     revalidate_interface_identity(interface)?;
 
     Ok(WindowsPacketRouteObservation::from_kernel(
+        observed_at_ms,
         destination,
         interface,
         source_address,
         route_prefix,
         best_route.Loopback,
     ))
+}
+
+pub(super) fn windows_uptime_ms() -> u64 {
+    unsafe { GetTickCount64() }
 }
 
 fn revalidate_interface_identity(

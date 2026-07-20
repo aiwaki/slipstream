@@ -22,6 +22,7 @@ pub const WINDOWS_OWNED_ROUTE_TRANSITION_CONTRACT_VERSION: u32 = 1;
 /// between observation and staging.
 #[derive(Debug, Eq, PartialEq)]
 pub struct WindowsPacketRouteObservation {
+    observed_at_ms: u64,
     destination: IpAddr,
     egress_interface: WindowsPacketInterfaceIdentity,
     source_address: IpAddr,
@@ -32,6 +33,7 @@ pub struct WindowsPacketRouteObservation {
 impl WindowsPacketRouteObservation {
     #[cfg(windows)]
     pub(super) fn from_kernel(
+        observed_at_ms: u64,
         destination: IpAddr,
         egress_interface: WindowsPacketInterfaceIdentity,
         source_address: IpAddr,
@@ -39,12 +41,17 @@ impl WindowsPacketRouteObservation {
         route_is_loopback: bool,
     ) -> Self {
         Self {
+            observed_at_ms,
             destination,
             egress_interface,
             source_address,
             route_prefix,
             route_is_loopback,
         }
+    }
+
+    pub const fn observed_at_ms(&self) -> u64 {
+        self.observed_at_ms
     }
 
     pub const fn destination(&self) -> IpAddr {
@@ -290,11 +297,17 @@ impl WindowsOwnedRouteTransitionIssuer {
         }
     }
 
+    #[cfg(windows)]
     pub fn begin_exact_host_activation(
         &mut self,
         observation: WindowsPacketRouteObservation,
-        observed_at_ms: u64,
-        expires_at_ms: u64,
+    ) -> Result<WindowsOwnedCaptureRouteIntent, WindowsOwnedRouteTransitionError> {
+        self.begin_exact_host_activation_at(observation, super::windows::windows_uptime_ms())
+    }
+
+    fn begin_exact_host_activation_at(
+        &mut self,
+        observation: WindowsPacketRouteObservation,
         now_ms: u64,
     ) -> Result<WindowsOwnedCaptureRouteIntent, WindowsOwnedRouteTransitionError> {
         use WindowsOwnedRouteTransitionErrorCode as Code;
@@ -318,10 +331,15 @@ impl WindowsOwnedRouteTransitionIssuer {
             }
         }
 
-        if observed_at_ms >= expires_at_ms
-            || expires_at_ms.saturating_sub(observed_at_ms) > MAX_PACKET_EGRESS_EVIDENCE_LIFETIME_MS
-            || now_ms < observed_at_ms
-        {
+        let observed_at_ms = observation.observed_at_ms;
+        let Some(expires_at_ms) =
+            observed_at_ms.checked_add(MAX_PACKET_EGRESS_EVIDENCE_LIFETIME_MS)
+        else {
+            return Err(WindowsOwnedRouteTransitionError::new(
+                Code::InvalidObservationWindow,
+            ));
+        };
+        if now_ms < observed_at_ms {
             return Err(WindowsOwnedRouteTransitionError::new(
                 Code::InvalidObservationWindow,
             ));
@@ -438,12 +456,25 @@ impl WindowsOwnedRouteTransitionIssuer {
 
     // This method stays crate-internal until a later disposable route owner can
     // apply and remove the exact route around the two kernel observations.
+    #[cfg(windows)]
     #[allow(dead_code)]
     pub(super) fn attest_exact_host_route_created(
         &mut self,
         intent: WindowsOwnedCaptureRouteIntent,
         post_activation: WindowsPacketRouteObservation,
-        activated_at_ms: u64,
+    ) -> Result<WindowsOwnedCaptureRouteActivation, WindowsOwnedRouteTransitionError> {
+        self.attest_exact_host_route_created_at(
+            intent,
+            post_activation,
+            super::windows::windows_uptime_ms(),
+        )
+    }
+
+    fn attest_exact_host_route_created_at(
+        &mut self,
+        intent: WindowsOwnedCaptureRouteIntent,
+        post_activation: WindowsPacketRouteObservation,
+        now_ms: u64,
     ) -> Result<WindowsOwnedCaptureRouteActivation, WindowsOwnedRouteTransitionError> {
         use WindowsOwnedRouteTransitionErrorCode as Code;
 
@@ -451,7 +482,10 @@ impl WindowsOwnedRouteTransitionIssuer {
             self.invalidate_after_possible_effect()?;
             return Err(error);
         }
-        if activated_at_ms < intent.baseline.observed_at_ms
+        let activated_at_ms = post_activation.observed_at_ms;
+        if now_ms < activated_at_ms
+            || now_ms >= intent.baseline.expires_at_ms
+            || activated_at_ms < intent.baseline.observed_at_ms
             || activated_at_ms >= intent.baseline.expires_at_ms
         {
             self.invalidate_after_possible_effect()?;
@@ -574,7 +608,24 @@ mod tests {
         source_address: IpAddr,
         route_prefix: &str,
     ) -> WindowsPacketRouteObservation {
+        observation_at(
+            destination,
+            egress_interface,
+            source_address,
+            route_prefix,
+            1_000,
+        )
+    }
+
+    fn observation_at(
+        destination: IpAddr,
+        egress_interface: WindowsPacketInterfaceIdentity,
+        source_address: IpAddr,
+        route_prefix: &str,
+        observed_at_ms: u64,
+    ) -> WindowsPacketRouteObservation {
         WindowsPacketRouteObservation {
+            observed_at_ms,
             destination,
             egress_interface,
             source_address,
@@ -592,15 +643,13 @@ mod tests {
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
         let mut issuer = issuer();
         let intent = issuer
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_001,
             )
             .expect("stage transition");
@@ -609,19 +658,19 @@ mod tests {
         assert_eq!(intent.destination(), destination);
         assert_eq!(intent.exact_route_prefix(), "1.1.1.1/32");
         assert_eq!(intent.baseline().route_epoch, 5);
+        assert_eq!(intent.baseline().observed_at_ms, 1_000);
+        assert_eq!(intent.baseline().expires_at_ms, 6_000);
         assert_eq!(intent.baseline().egress_interface, EGRESS);
         assert_eq!(intent.baseline().source_address, "10.0.0.2");
 
         let error = issuer
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_001,
-                6_001,
                 1_002,
             )
             .expect_err("a second pending transition must fail");
@@ -645,15 +694,13 @@ mod tests {
         assert_eq!(issuer.record_route_change(), Ok(6));
         assert_eq!(issuer.state(), WindowsOwnedRouteTransitionState::Ready);
         let intent = issuer
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_001,
             )
             .expect("stage transition after a harmless epoch change");
@@ -676,26 +723,26 @@ mod tests {
         );
         let mut issuer = issuer();
         let intent = issuer
-            .begin_exact_host_activation(
-                observation(
+            .begin_exact_host_activation_at(
+                observation_at(
                     destination,
                     EGRESS,
                     IpAddr::V6("fd00::2".parse().expect("source")),
                     "::/0",
+                    2_000,
                 ),
-                2_000,
-                7_000,
                 2_010,
             )
             .expect("stage transition");
         let activation = issuer
-            .attest_exact_host_route_created(
+            .attest_exact_host_route_created_at(
                 intent,
-                observation(
+                observation_at(
                     destination,
                     CAPTURE,
                     IpAddr::V6("fd00::9".parse().expect("capture source")),
                     "2606:4700:4700::1111/128",
+                    2_020,
                 ),
                 2_020,
             )
@@ -714,30 +761,69 @@ mod tests {
     }
 
     #[test]
-    fn any_later_route_change_invalidates_the_activation_token() {
+    fn delayed_post_activation_observation_cannot_issue_a_token() {
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
         let mut issuer = issuer();
         let intent = issuer
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_100,
             )
             .expect("stage transition");
-        let activation = issuer
-            .attest_exact_host_route_created(
+        let error = issuer
+            .attest_exact_host_route_created_at(
                 intent,
-                observation(
+                observation_at(
                     destination,
                     CAPTURE,
                     IpAddr::V4(Ipv4Addr::new(198, 18, 0, 2)),
                     "1.1.1.1/32",
+                    1_200,
+                ),
+                6_000,
+            )
+            .expect_err("a retained post-route fact must expire before token issuance");
+
+        assert_eq!(
+            error.code(),
+            WindowsOwnedRouteTransitionErrorCode::InvalidActivationWindow
+        );
+        assert_eq!(issuer.route_epoch(), 6);
+        assert_eq!(
+            issuer.state(),
+            WindowsOwnedRouteTransitionState::Invalidated
+        );
+    }
+
+    #[test]
+    fn any_later_route_change_invalidates_the_activation_token() {
+        let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
+        let mut issuer = issuer();
+        let intent = issuer
+            .begin_exact_host_activation_at(
+                observation(
+                    destination,
+                    EGRESS,
+                    IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                    "0.0.0.0/0",
+                ),
+                1_100,
+            )
+            .expect("stage transition");
+        let activation = issuer
+            .attest_exact_host_route_created_at(
+                intent,
+                observation_at(
+                    destination,
+                    CAPTURE,
+                    IpAddr::V4(Ipv4Addr::new(198, 18, 0, 2)),
+                    "1.1.1.1/32",
+                    1_200,
                 ),
                 1_200,
             )
@@ -762,26 +848,25 @@ mod tests {
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
         let mut issuer = issuer();
         let intent = issuer
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_100,
             )
             .expect("stage transition");
         let error = issuer
-            .attest_exact_host_route_created(
+            .attest_exact_host_route_created_at(
                 intent,
-                observation(
+                observation_at(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
+                    1_200,
                 ),
                 1_200,
             )
@@ -804,40 +889,37 @@ mod tests {
         let mut primary = issuer();
         let mut other = issuer();
         let _current_intent = primary
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_100,
             )
             .expect("stage current transition");
         let foreign_intent = other
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_100,
             )
             .expect("stage foreign transition");
 
         let error = primary
-            .attest_exact_host_route_created(
+            .attest_exact_host_route_created_at(
                 foreign_intent,
-                observation(
+                observation_at(
                     destination,
                     CAPTURE,
                     IpAddr::V4(Ipv4Addr::new(198, 18, 0, 2)),
                     "1.1.1.1/32",
+                    1_200,
                 ),
                 1_200,
             )
@@ -859,26 +941,25 @@ mod tests {
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
         let mut first = issuer();
         let intent = first
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 1_100,
             )
             .expect("stage transition");
         let activation = first
-            .attest_exact_host_route_created(
+            .attest_exact_host_route_created_at(
                 intent,
-                observation(
+                observation_at(
                     destination,
                     CAPTURE,
                     IpAddr::V4(Ipv4Addr::new(198, 18, 0, 2)),
                     "1.1.1.1/32",
+                    1_200,
                 ),
                 1_200,
             )
@@ -897,16 +978,31 @@ mod tests {
     #[test]
     fn staging_rejects_expired_loopback_and_capture_selected_facts() {
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
+        let overflow = issuer()
+            .begin_exact_host_activation_at(
+                observation_at(
+                    destination,
+                    EGRESS,
+                    IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                    "0.0.0.0/0",
+                    u64::MAX - 1_000,
+                ),
+                u64::MAX - 1_000,
+            )
+            .expect_err("an observation window that cannot be represented must fail");
+        assert_eq!(
+            overflow.code(),
+            WindowsOwnedRouteTransitionErrorCode::InvalidObservationWindow
+        );
+
         let expired = issuer()
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     EGRESS,
                     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     "0.0.0.0/0",
                 ),
-                1_000,
-                6_000,
                 6_000,
             )
             .expect_err("expired observation");
@@ -916,15 +1012,13 @@ mod tests {
         );
 
         let selected = issuer()
-            .begin_exact_host_activation(
+            .begin_exact_host_activation_at(
                 observation(
                     destination,
                     CAPTURE,
                     IpAddr::V4(Ipv4Addr::new(198, 18, 0, 2)),
                     "1.1.1.1/32",
                 ),
-                1_000,
-                6_000,
                 1_001,
             )
             .expect_err("capture-selected baseline");
@@ -941,7 +1035,7 @@ mod tests {
         );
         loopback.route_is_loopback = true;
         let loopback = issuer()
-            .begin_exact_host_activation(loopback, 1_000, 6_000, 1_001)
+            .begin_exact_host_activation_at(loopback, 1_001)
             .expect_err("loopback route");
         assert_eq!(
             loopback.code(),
