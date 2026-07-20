@@ -489,13 +489,14 @@ IPv4 UDP fixture proves that ordinary route selection points at the competing
 Wintun `/32`, then sets `IP_UNICAST_IF` to the retained baseline interface,
 reads the same host-order index back, binds the retained baseline source, and
 connects without calling a send or receive API. Probe failure still runs the
-owned exact-route cleanup. The exact PR head passed the selected fixture and
+owned exact-route cleanup and baseline recovery observation before it is
+returned. The exact PR head passed the selected fixture and
 all existing packet gates on native AMD64 and ARM64 in
-[run 29737598585](https://github.com/aiwaki/slipstream/actions/runs/29737598585),
+[run 29739433700](https://github.com/aiwaki/slipstream/actions/runs/29739433700),
 all required checks and packaged lifecycle in
-[run 29737598570](https://github.com/aiwaki/slipstream/actions/runs/29737598570),
+[run 29739433665](https://github.com/aiwaki/slipstream/actions/runs/29739433665),
 and dependency audit in
-[run 29737598748](https://github.com/aiwaki/slipstream/actions/runs/29737598748).
+[run 29739433660](https://github.com/aiwaki/slipstream/actions/runs/29739433660).
 
 ## Next Verified Action
 
