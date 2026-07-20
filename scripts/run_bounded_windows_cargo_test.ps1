@@ -133,7 +133,7 @@ try {
             } catch {
                 throw "Exact cargo process $rootPid timed out and its retained-tree termination failed: $($_.Exception.Message)"
             }
-            if (-not $process.WaitForExit(10_000)) {
+            if (-not $process.WaitForExit(10000)) {
                 throw "Exact cargo process $rootPid remained alive after retained-tree termination"
             }
             throw "Exact cargo process $rootPid exceeded the $TimeoutSeconds-second qualification deadline"
@@ -158,7 +158,7 @@ try {
         if (-not $process.HasExited) {
             try {
                 $process.Kill($true)
-                [void]$process.WaitForExit(10_000)
+                [void]$process.WaitForExit(10000)
             } catch {
                 Write-Warning "Final exact-process cleanup failed: $($_.Exception.Message)"
             }
