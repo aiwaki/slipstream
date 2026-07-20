@@ -410,9 +410,10 @@ therefore stays phased and closed to production traffic:
    adapter, and leaves addresses, routes, DNS, proxy, PAC, VPN, and the driver
    itself untouched. This is a compatibility subgate, not capture or routing
    authorization.
-4. In progress: first prove that terminating the exact child process while its
+4. Abrupt-owner cleanup passed in disposable AMD64/ARM64 PR CI and must repeat
+   on the exact merged commit: terminating the exact child process while its
    unique adapter and session remain live removes that adapter without Rust
-   cleanup. Then prove outbound loop avoidance, activation safety for
+   cleanup. Next prove outbound loop avoidance, activation safety for
    pre-existing flows, bounded capture expiry/removal, and explicit coexistence
    with an active external VPN on disposable AMD64 and ARM64 Windows. Never add
    a default route or change system DNS, proxy, PAC, or VPN settings.
