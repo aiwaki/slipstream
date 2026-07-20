@@ -438,10 +438,14 @@ therefore stays phased and closed to production traffic:
    a bare adapter cannot produce a post-route source observation; that fixture
    waits for the exact `/32` to become DAD-preferred and usable as a source,
    then explicitly deletes and proves absence of both its route and address.
-   PR #192 passed that gate on native AMD64 and ARM64. Next qualify actual
-   IPv4/IPv6 socket binding under a competing capture route, followed by
-   activation safety for pre-existing flows, bounded capture expiry/removal,
-   and explicit external-VPN coexistence on disposable AMD64 and ARM64 Windows.
+   PR #192 passed that gate on native AMD64 and ARM64. The next isolated subgate
+   qualifies no-payload IPv4 socket selection: set `IP_UNICAST_IF` in network
+   byte order, read back the exact host-order interface index, bind the retained
+   baseline source, connect without sending, and then prove the owned route,
+   address, and adapter absent. IPv6 selection and actual packet delivery stay
+   closed to later gates, followed by activation safety for pre-existing flows,
+   bounded capture expiry/removal, and explicit external-VPN coexistence on
+   disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows

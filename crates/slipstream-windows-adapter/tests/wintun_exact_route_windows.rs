@@ -5,12 +5,15 @@ use slipstream_windows_adapter::packet_adapter::{
     WindowsPacketAdapterArchitecture,
 };
 use slipstream_windows_adapter::packet_egress::{
-    qualify_disposable_exact_host_route, WindowsOwnedRouteTransitionIssuer,
+    qualify_disposable_exact_host_route, qualify_disposable_exact_host_route_with_active_probe,
+    WindowsDisposableExactRouteActiveProbe, WindowsOwnedRouteTransitionIssuer,
     WindowsPacketInterfaceIdentity, WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
 };
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::thread;
@@ -26,7 +29,8 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
 };
 use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 use windows_sys::Win32::Networking::WinSock::{
-    IpDadStatePreferred, AF_INET, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, SOCKADDR_IN, SOCKADDR_INET,
+    getsockopt, setsockopt, IpDadStatePreferred, WSAGetLastError, AF_INET, IN_ADDR, IN_ADDR_0,
+    IN_ADDR_0_0, IPPROTO_IP, IP_UNICAST_IF, SOCKADDR_IN, SOCKADDR_INET, SOCKET,
 };
 use windows_sys::Win32::System::LibraryLoader::{
     GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
@@ -34,6 +38,7 @@ use windows_sys::Win32::System::LibraryLoader::{
 
 const DISPOSABLE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_DISPOSABLE_CI";
 const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
+const SOCKET_BINDING_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -65,7 +70,7 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
 
     let (admission, api) = load_admitted_wintun()
         .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
-    let adapter_name = wide(&unique_adapter_name());
+    let adapter_name = wide(&unique_adapter_name("Route"));
     let tunnel_type = wide("Slipstream CI Route");
     api.require_adapter_absent(&adapter_name, "before exact-route fixture")
         .unwrap_or_else(|error| panic!("Wintun exact-route preflight: {error}"));
@@ -125,6 +130,179 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
     );
 }
 
+#[test]
+fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let adapter_name = wide(&unique_adapter_name("Socket"));
+    let tunnel_type = wide("Slipstream CI Socket");
+    api.require_adapter_absent(&adapter_name, "before socket-binding fixture")
+        .unwrap_or_else(|error| panic!("Wintun socket-binding preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut adapter = OwnedWintunAdapter::create(&api, &adapter_name, &tunnel_type)?;
+        adapter.start_session()?;
+        let capture_interface = adapter.interface_identity()?;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(2, capture_interface, 1)
+            .map_err(|error| format!("construct socket-binding issuer: {error}"))?;
+        let capture_source = Ipv4Addr::new(192, 0, 2, 2);
+        let mut address = OwnedUnicastAddress::create(capture_interface, capture_source)?;
+        let destination = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 1));
+        let route_result = qualify_disposable_exact_host_route_with_active_probe(
+            &mut issuer,
+            destination,
+            |active| prove_ipv4_socket_binding(active, capture_source),
+        )
+        .map_err(|error| format!("qualify IPv4 socket binding: {error}"));
+        let address_cleanup = address.remove_and_verify();
+        if let Err(cleanup_error) = address_cleanup {
+            return Err(format!(
+                "owned Wintun address cleanup failed: {cleanup_error}; socket result: {route_result:?}"
+            ));
+        }
+        let qualification = route_result?;
+
+        if qualification.destination() != destination
+            || qualification.exact_route_prefix() != "1.0.0.1/32"
+            || qualification.capture_interface() != capture_interface
+            || qualification.baseline_egress_interface() == capture_interface
+            || qualification.recovered_egress_interface()
+                != qualification.baseline_egress_interface()
+            || qualification.route_epoch_after_removal() != 3
+        {
+            return Err("socket-binding qualification returned inconsistent evidence".to_owned());
+        }
+
+        adapter.end_session();
+        adapter.close_adapter();
+        Ok::<(), String>(())
+    })();
+
+    let cleanup_result = api.require_adapter_absent(&adapter_name, "after socket-binding fixture");
+    if let Err(cleanup_error) = cleanup_result {
+        panic!(
+            "Wintun socket-binding cleanup proof failed: {cleanup_error}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable socket-binding qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+fn prove_ipv4_socket_binding(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    expected_capture_source: Ipv4Addr,
+) -> Result<(), String> {
+    let destination = match active.destination() {
+        IpAddr::V4(destination) => destination,
+        IpAddr::V6(_) => return Err("IPv4 socket probe received an IPv6 destination".to_owned()),
+    };
+    let baseline_source = match active.baseline_source_address() {
+        IpAddr::V4(source) => source,
+        IpAddr::V6(_) => return Err("IPv4 socket probe received an IPv6 source".to_owned()),
+    };
+    if active.exact_route_prefix() != format!("{destination}/32")
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.capture_source_address() != IpAddr::V4(expected_capture_source)
+        || baseline_source == expected_capture_source
+    {
+        return Err("active route facts do not prove a competing capture route".to_owned());
+    }
+
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+        .map_err(|error| format!("create IPv4 UDP socket: {error}"))?;
+    let interface_index = active.baseline_egress_interface().index;
+    set_and_verify_ipv4_unicast_interface(&socket, interface_index)?;
+    socket
+        .bind(&SockAddr::from(SocketAddrV4::new(baseline_source, 0)))
+        .map_err(|error| format!("bind baseline source {baseline_source}: {error}"))?;
+    let peer = SocketAddrV4::new(destination, 9);
+    socket
+        .connect(&SockAddr::from(peer))
+        .map_err(|error| format!("connect no-payload IPv4 UDP socket: {error}"))?;
+
+    let local = socket
+        .local_addr()
+        .map_err(|error| format!("read bound local address: {error}"))?
+        .as_socket_ipv4()
+        .ok_or_else(|| "bound socket did not retain an IPv4 local address".to_owned())?;
+    let observed_peer = socket
+        .peer_addr()
+        .map_err(|error| format!("read connected peer address: {error}"))?
+        .as_socket_ipv4()
+        .ok_or_else(|| "connected socket did not retain an IPv4 peer".to_owned())?;
+    if *local.ip() != baseline_source || local.port() == 0 || observed_peer != peer {
+        return Err(format!(
+            "socket binding mismatch: local={local}, peer={observed_peer}, expected_source={baseline_source}, expected_peer={peer}"
+        ));
+    }
+    Ok(())
+}
+
+fn set_and_verify_ipv4_unicast_interface(
+    socket: &Socket,
+    interface_index: u32,
+) -> Result<(), String> {
+    let raw_socket = socket.as_raw_socket() as SOCKET;
+    let network_order_index = interface_index.to_be();
+    let set_result = unsafe {
+        setsockopt(
+            raw_socket,
+            IPPROTO_IP,
+            IP_UNICAST_IF,
+            &network_order_index as *const u32 as *const u8,
+            std::mem::size_of::<u32>() as i32,
+        )
+    };
+    if set_result != 0 {
+        return Err(format!(
+            "set IP_UNICAST_IF to interface {interface_index}: Winsock error {}",
+            unsafe { WSAGetLastError() }
+        ));
+    }
+
+    let mut observed_index = 0u32;
+    let mut observed_length = std::mem::size_of::<u32>() as i32;
+    let get_result = unsafe {
+        getsockopt(
+            raw_socket,
+            IPPROTO_IP,
+            IP_UNICAST_IF,
+            &mut observed_index as *mut u32 as *mut u8,
+            &mut observed_length,
+        )
+    };
+    if get_result != 0 {
+        return Err(format!(
+            "read IP_UNICAST_IF for interface {interface_index}: Winsock error {}",
+            unsafe { WSAGetLastError() }
+        ));
+    }
+    if observed_length != std::mem::size_of::<u32>() as i32 || observed_index != interface_index {
+        return Err(format!(
+            "IP_UNICAST_IF round-trip mismatch: value={observed_index}, length={observed_length}, expected={interface_index}"
+        ));
+    }
+    Ok(())
+}
+
 fn load_admitted_wintun() -> Result<(WindowsCollectedPacketAdapterAdmission, LoadedWintun), String>
 {
     let architecture = current_architecture();
@@ -160,11 +338,11 @@ fn required_path(name: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{name} must point to the pinned Wintun fixture"))
 }
 
-fn unique_adapter_name() -> String {
+fn unique_adapter_name(purpose: &str) -> String {
     let run_id = std::env::var("GITHUB_RUN_ID").unwrap_or_else(|_| "local".to_owned());
     let attempt = std::env::var("GITHUB_RUN_ATTEMPT").unwrap_or_else(|_| "0".to_owned());
     format!(
-        "SlipstreamCI-Route-{run_id}-{attempt}-{}",
+        "SlipstreamCI-{purpose}-{run_id}-{attempt}-{}",
         std::process::id()
     )
 }

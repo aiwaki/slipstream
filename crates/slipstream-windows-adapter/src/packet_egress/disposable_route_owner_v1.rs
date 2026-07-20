@@ -41,6 +41,7 @@ pub enum WindowsDisposableExactRouteErrorCode {
     PostActivationObservationFailed,
     TransitionAttestationFailed,
     ActivationNotCurrent,
+    ActiveProbeFailed,
     ExactRouteDeleteFailed,
     ExactRouteRemovalUnproven,
     RouteEpochUpdateFailed,
@@ -61,6 +62,7 @@ impl WindowsDisposableExactRouteErrorCode {
             Self::PostActivationObservationFailed => "post_activation_observation_failed",
             Self::TransitionAttestationFailed => "transition_attestation_failed",
             Self::ActivationNotCurrent => "activation_not_current",
+            Self::ActiveProbeFailed => "active_probe_failed",
             Self::ExactRouteDeleteFailed => "exact_route_delete_failed",
             Self::ExactRouteRemovalUnproven => "exact_route_removal_unproven",
             Self::RouteEpochUpdateFailed => "route_epoch_update_failed",
@@ -168,6 +170,42 @@ pub struct WindowsDisposableExactRouteQualification {
     route_epoch_after_removal: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowsDisposableExactRouteActiveProbe<'a> {
+    destination: IpAddr,
+    exact_route_prefix: &'a str,
+    capture_interface: WindowsPacketInterfaceIdentity,
+    capture_source_address: IpAddr,
+    baseline_egress_interface: WindowsPacketInterfaceIdentity,
+    baseline_source_address: IpAddr,
+}
+
+impl WindowsDisposableExactRouteActiveProbe<'_> {
+    pub const fn destination(&self) -> IpAddr {
+        self.destination
+    }
+
+    pub fn exact_route_prefix(&self) -> &str {
+        self.exact_route_prefix
+    }
+
+    pub const fn capture_interface(&self) -> WindowsPacketInterfaceIdentity {
+        self.capture_interface
+    }
+
+    pub const fn capture_source_address(&self) -> IpAddr {
+        self.capture_source_address
+    }
+
+    pub const fn baseline_egress_interface(&self) -> WindowsPacketInterfaceIdentity {
+        self.baseline_egress_interface
+    }
+
+    pub const fn baseline_source_address(&self) -> IpAddr {
+        self.baseline_source_address
+    }
+}
+
 impl WindowsDisposableExactRouteQualification {
     pub const fn destination(&self) -> IpAddr {
         self.destination
@@ -203,6 +241,21 @@ pub fn qualify_disposable_exact_host_route(
     issuer: &mut WindowsOwnedRouteTransitionIssuer,
     destination: IpAddr,
 ) -> Result<WindowsDisposableExactRouteQualification, WindowsDisposableExactRouteError> {
+    qualify_disposable_exact_host_route_with_active_probe(issuer, destination, |_| Ok(()))
+}
+
+/// Run one disposable probe while the exact route is active and attested.
+///
+/// The probe receives read-only route facts and cannot retain the activation.
+/// Returning an error still performs exact route removal and recovery proof.
+pub fn qualify_disposable_exact_host_route_with_active_probe<F>(
+    issuer: &mut WindowsOwnedRouteTransitionIssuer,
+    destination: IpAddr,
+    active_probe: F,
+) -> Result<WindowsDisposableExactRouteQualification, WindowsDisposableExactRouteError>
+where
+    F: FnOnce(&WindowsDisposableExactRouteActiveProbe<'_>) -> Result<(), String>,
+{
     use WindowsDisposableExactRouteErrorCode as Code;
 
     require_disposable_gate()?;
@@ -235,12 +288,24 @@ pub fn qualify_disposable_exact_host_route(
         owned_route.verify_present()?;
         let post_activation = observe_windows_packet_route(destination)
             .map_err(|error| observation_error(Code::PostActivationObservationFailed, error))?;
+        let capture_source_address = post_activation.source_address();
         let activation = issuer
             .attest_exact_host_route_created(intent, post_activation)
             .map_err(|error| transition_error(Code::TransitionAttestationFailed, error))?;
         issuer
             .require_current_activation(&activation)
             .map_err(|error| transition_error(Code::ActivationNotCurrent, error))?;
+        active_probe(&WindowsDisposableExactRouteActiveProbe {
+            destination,
+            exact_route_prefix: &exact_route_prefix,
+            capture_interface,
+            capture_source_address,
+            baseline_egress_interface,
+            baseline_source_address,
+        })
+        .map_err(|error| {
+            WindowsDisposableExactRouteError::detail(Code::ActiveProbeFailed, error)
+        })?;
         Ok::<_, WindowsDisposableExactRouteError>(activation)
     })();
 
