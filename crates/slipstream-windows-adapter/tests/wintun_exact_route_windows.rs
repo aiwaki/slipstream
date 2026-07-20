@@ -380,8 +380,18 @@ impl OwnedUnicastAddress {
         if result != 0 {
             return Err(format!("CreateUnicastIpAddressEntry failed with {result}"));
         }
-        let owned = Self { row, present: true };
-        owned.wait_until_preferred()?;
+        let mut owned = Self { row, present: true };
+        if let Err(readiness_error) = owned.wait_until_preferred() {
+            let cleanup_result = owned.remove_and_verify();
+            return match cleanup_result {
+                Ok(()) => Err(format!(
+                    "owned Wintun address readiness failed after verified cleanup: {readiness_error}"
+                )),
+                Err(cleanup_error) => Err(format!(
+                    "owned Wintun address readiness failed: {readiness_error}; exact cleanup failed: {cleanup_error}"
+                )),
+            };
+        }
         Ok(owned)
     }
 
@@ -409,7 +419,7 @@ impl OwnedUnicastAddress {
 
     fn remove_and_verify(&mut self) -> Result<(), String> {
         let result = unsafe { DeleteUnicastIpAddressEntry(&self.row) };
-        if result != 0 {
+        if result != 0 && !matches!(result, ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND) {
             return Err(format!("DeleteUnicastIpAddressEntry failed with {result}"));
         }
 

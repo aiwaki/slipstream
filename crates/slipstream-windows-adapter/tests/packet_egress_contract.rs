@@ -429,6 +429,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "IpDadStatePreferred",
         "OnLinkPrefixLength != 32",
         "SkipAsSource",
+        "readiness failed after verified cleanup",
+        "exact cleanup failed",
         "remove_and_verify",
         "qualify_disposable_exact_host_route",
         "require_adapter_absent",
