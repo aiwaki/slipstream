@@ -55,11 +55,16 @@ reinstall, restart, and uninstall with a sibling anchor and a long-lived
 sentinel PF state. Cross-version rollback starts only after a safety-qualified
 release exists; stable distribution remains a separate M3 gate.
 
-The primary-Mac delivery failure is now explained by kernel `lo0 (skip)` state,
-not routing policy or DNS. A scoped high-port privileged smoke proved the leased
-ioctl path and exact rollback without installing Slipstream or touching
-TCP/443. The implementation still requires the full disposable packaged
-lifecycle gate before workstation installation.
+The primary-Mac delivery failures exposed both kernel `lo0 (skip)` state and an
+unbounded startup resolver call. PRs #178 and #180 now lease and restore the
+loopback state, publish safe dormant status before network qualification, and
+bound system-DNS helpers under one startup deadline. The `140598b` disposable
+gate proved the stalled-resolver, PF-sentinel, browser, restart, and cleanup
+behavior, but it packaged superseded `geph-vendor-0.3.0` while the recorded
+release input is `geph-vendor-0.3.0-r1`. The unlaunched artifact is therefore
+not a workstation candidate. M0 next requires the revisioned artifact to pass
+the same gate on the exact merge commit; only then may one short, prearranged
+workstation smoke run with immediate rollback on the first failure.
 
 ## M1 - Autonomous Routing V1
 
@@ -372,14 +377,16 @@ strict artifact admission. The same pure boundary reclassifies each protected
 host through the active policy and can prepare only fresh public exact `/32` or
 `/128` candidate plans for `local_bypass` or `geo_exit`. One resolver evidence
 object must bind the same canonical host to an address set containing the
-selected destination. The capability is opaque and non-deserializable so only
-the future native collector can issue it, and reserved IPv6 space is rejected.
-A separate pure gate now requires complete, fresh, generation-bound evidence
-for every hostname bound to the same destination and admits only one shared
-route class and strategy. A partial cache is never safety evidence. Neither
-result is native route authorization: the future issuer must retain its
-generation lease for the entire route lifetime and remove the route before
-release.
+selected destination. The capability is opaque and non-deserializable, and
+reserved IPv6 space is rejected.
+A separate pure v1 gate requires complete, fresh, generation-bound evidence
+for every hostname claimed to be bound to the same destination and admits only
+one shared route class and strategy. A partial cache is never safety evidence.
+A feasibility review established that read-only system DNS cannot produce the
+claimed complete boundary: suffix policy is unbounded, applications may use
+encrypted DNS, and Wintun has no trusted hostname context. The v1 route plan is
+therefore frozen as non-authorizing research; no native issuer will be built
+from that premise.
 The module loads no DLL, creates no adapter, installs no route, and does not
 touch the production service or external DNS/proxy/PAC/VPN state.
 
@@ -391,17 +398,23 @@ therefore stays phased and closed to production traffic:
    signer, and timestamp evidence read-only, then qualify both exact pinned DLLs
    and tamper rejection on disposable AMD64 and ARM64 Windows without loading
    them.
-2. Implement the native issuer for a complete destination-binding generation,
-   then add owned Wintun adapter lifecycle and exact-route transactions under
-   the same lifetime generation lease. Prove crash-safe rollback, stale-evidence
-   expiry, removal-before-lease-release, and explicit external-VPN coexistence.
-   Never add a default route or change system DNS, proxy, PAC, or VPN settings.
-3. Select a bounded userspace IPv4/IPv6 and TCP/UDP stack and bridge its flows
+2. Specify and qualify a separate capture-only v2 contract before any DLL load
+   or route mutation. An exact route may widen capture but cannot authorize a
+   backend. Every captured flow must be reclassified from bounded in-band
+   evidence; missing, encrypted, or ambiguous hostname evidence stays direct.
+3. Prove outbound loop avoidance, activation safety for pre-existing flows,
+   bounded capture expiry/removal, crash-safe rollback, and explicit
+   coexistence with an active external VPN on disposable AMD64 and ARM64
+   Windows. Never add a default route or change system DNS, proxy, PAC, or VPN
+   settings.
+4. Only after that feasibility gate passes, add owned Wintun adapter and exact-
+   route transactions, select a bounded userspace IPv4/IPv6 and TCP/UDP stack,
+   and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.
-4. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
+5. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
-5. Compose packet effects into the production SCM host only after every earlier
+6. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
 

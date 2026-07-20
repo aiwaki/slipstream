@@ -153,8 +153,11 @@ jobs:
           tag="geph-vendor-$version-r$release_revision"
           echo "using geph vendor tag: $tag"
           rm -rf /tmp/geph
-          mkdir -p app-tauri/src-tauri/binaries /tmp/geph
-          gh release download "$tag" --repo "${{ github.repository }}" \
+          mkdir -p app-tauri/src-tauri/binaries
+          python3 scripts/download_github_release_assets.py \
+            --repo "${{ github.repository }}" \
+            --tag "$tag" \
+            --output /tmp/geph \
             --pattern 'geph5-client' \
             --pattern 'geph5-client.VERSION' \
             --pattern 'geph5-client.LICENSE' \
@@ -162,8 +165,7 @@ jobs:
             --pattern 'geph5-client.Cargo.lock' \
             --pattern 'geph5-client.spdx.json' \
             --pattern 'geph5-client-dependency-audit.json' \
-            --pattern 'SHA256SUMS' \
-            --dir /tmp/geph
+            --pattern 'SHA256SUMS'
           asset_version="$(tr -d '[:space:]' < /tmp/geph/geph5-client.VERSION)"
           [ "$asset_version" = "$version" ] || {
             echo "vendored Geph version mismatch: expected $version, got $asset_version"

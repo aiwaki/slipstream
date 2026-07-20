@@ -195,6 +195,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('version="$(tr -d \'[:space:]\' < vendor/geph/VERSION)"', workflow)
         self.assertIn('json.load(open("vendor/geph/SOURCE.json"))["release_revision"]', workflow)
         self.assertIn('tag="geph-vendor-$version-r$release_revision"', workflow)
+        self.assertIn("scripts/download_github_release_assets.py", workflow)
         self.assertIn("--pattern 'geph5-client.VERSION'", workflow)
         self.assertIn("--pattern 'geph5-client.LICENSE'", workflow)
         self.assertIn("--pattern 'geph5-client.SOURCE.json'", workflow)
@@ -216,6 +217,39 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("geph5-client-current-audit.json", workflow)
         self.assertIn('--evaluation-date "$(date -u +%F)"', workflow)
         self.assertNotIn("select(startswith(\"geph-vendor-\"))", workflow)
+
+    def test_packaged_qualification_uses_the_same_revisioned_geph_release(self) -> None:
+        for name in ("ci.yml", "owned-geph-qualification.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertIn(
+                'json.load(open("vendor/geph/SOURCE.json"))["release_revision"]',
+                workflow,
+            )
+            self.assertIn('tag="geph-vendor-$version-r$release_revision"', workflow)
+            self.assertIn("scripts/download_github_release_assets.py", workflow)
+            self.assertNotIn('tag="geph-vendor-$version"', workflow)
+
+    def test_every_geph_release_download_uses_the_bounded_helper(self) -> None:
+        workflows = tuple((ROOT / ".github/workflows").glob("*.yml"))
+        direct_downloads = []
+        helper_users = []
+        for path in workflows:
+            text = path.read_text(encoding="utf-8")
+            if "gh release download" in text:
+                direct_downloads.append(path.name)
+            if "scripts/download_github_release_assets.py" in text:
+                helper_users.append(path.name)
+
+        self.assertEqual(direct_downloads, [])
+        self.assertEqual(
+            sorted(helper_users),
+            [
+                "build-app.yml",
+                "build-geph.yml",
+                "ci.yml",
+                "owned-geph-qualification.yml",
+            ],
+        )
 
     def test_release_workflow_keeps_manual_previews_off_the_stable_feed(self) -> None:
         workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")

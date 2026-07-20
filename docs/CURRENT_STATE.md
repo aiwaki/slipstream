@@ -9,11 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-20, through merged
-[PR #179](https://github.com/aiwaki/slipstream/pull/179) at main commit
-`c07ade34d82953feeeddfde70e8ea36522344339`, including its successful
-[exact-main CI run 29703891752](https://github.com/aiwaki/slipstream/actions/runs/29703891752)
+[PR #180](https://github.com/aiwaki/slipstream/pull/180) at main commit
+`140598bfb278274066d5cf329258e42c962278cd`, including its successful
+[exact-main CI run 29707822352](https://github.com/aiwaki/slipstream/actions/runs/29707822352)
 and
-[dependency-audit run 29703891718](https://github.com/aiwaki/slipstream/actions/runs/29703891718).
+[dependency-audit run 29707822353](https://github.com/aiwaki/slipstream/actions/runs/29707822353).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -39,11 +39,11 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Controlled validation found a pre-PF startup regression and rolled back cleanly; bounded resolver fix in progress | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and script/packaged lifecycle CI are implemented. PRs #174-#178 cover app removal, exact-system passthrough, baseline qualification, loopback leasing, and failure-atomic lifecycle. The exact `c07ade34` artifact passed CI but its first workstation install exposed a gap the disposable environment did not: synchronous system DNS for the first neutral baseline target could hang before StatusV2 publication. The installer failed with `status missing` and removed the daemon job, runtime, listener, status, token, lease, and private-anchor state without changing external DNS/proxy/PAC/VPN. The exact app bundle remains inert in `/Applications`; no Slipstream daemon, Geph sidecar, listener, or PF state is active. M0 is not complete until resolver work is bounded, safe status is observable before network qualification, and an OS-level stalled-resolver packaged gate passes away from the primary workstation. |
+| M0 - Safe Base | Current Geph artifact requalification required; workstation smoke blocked | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and failure-atomic install/uninstall are implemented. PRs #174-#180 cover app removal, exact-system passthrough, baseline qualification, loopback leasing, failure-atomic lifecycle, probe-free startup status, killable console-user DNS helpers, and one total preflight budget. The `140598b` packaged gate proved those lifecycle properties, but its workflow downloaded superseded `geph-vendor-0.3.0` instead of the `geph-vendor-0.3.0-r1` recorded in `vendor/geph/SOURCE.json` and used by release builds. Those binaries have different SHA-256 identities, so the downloaded app is not eligible for workstation smoke. M0 remains open until the revisioned artifact passes the same disposable gate on the exact merge commit; only then may one short, user-scheduled smoke be considered. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Pure packet-route safety gates implemented; packet effects absent | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, but the shipping path no longer includes a Slipstream-owned kernel driver because production signing requires an organization-backed certificate workflow. The active `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and admits only exact package, DLL, PE, publisher, signer, and timestamp evidence. Its native read-only collector hashes bounded non-reparse handles, validates Authenticode against the same held DLL handle without network retrieval, and retains that handle in an opaque admission. The pure route boundary prepares only non-authorizing fresh public `/32` or `/128` candidates after active-policy reclassification and host/address binding, rejects reserved IPv6, and now rejects partial, stale, malformed, oversized, or policy-incompatible shared-destination snapshots. A conflict admission is short-lived and generation-bound but still cannot authorize a native route. The complete-boundary native issuer, lifetime generation lease, DLL loading, owned adapter/routes, userspace packet stack, local/geo backends, disposable coexistence qualification, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Pure packet-route v1 frozen; capture-only v2 feasibility next | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate rejects partial, stale, malformed, oversized, or policy-incompatible evidence but cannot become native authorization: read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. V1 is therefore frozen with no DLL loading, adapter, or route effect. M4 next specifies a capture-only v2 feasibility contract with per-flow reclassification, direct fallback for opaque traffic, loop avoidance, pre-existing-flow safety, bounded removal, and external-VPN coexistence before any native effect. Userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -319,21 +319,36 @@ root runtime artifact and listener without a connection outage. The app bundle
 remains present but unlaunched and inert; the root daemon is absent and
 disabled, owned Geph is absent, and Slipstream PF is not active.
 
+[PR #180](https://github.com/aiwaki/slipstream/pull/180) bounded that startup
+path and merged as `140598b`. The daemon now publishes an atomic, probe-free
+`dormant` StatusV2 snapshot after binding its listener and before Geph, DNS, or
+PF qualification. System-DNS lookups run as the console user in killable child
+processes under one total preflight budget; diagnostic refresh uses the same
+bounded helper. The packaged lifecycle installs a scoped resolver blackhole for
+the first neutral target and proves that status precedes the stalled query, a
+later target can activate routing, no helper survives, and cleanup preserves
+the independent PF sentinel. The exact main commit passed all required jobs in
+[CI run 29707822352](https://github.com/aiwaki/slipstream/actions/runs/29707822352)
+and dependency audit in
+[run 29707822353](https://github.com/aiwaki/slipstream/actions/runs/29707822353).
+That exact artifact is downloaded and signature-verified, but it has not been
+launched or installed on the primary workstation.
+
 ## Next Verified Action
 
-Do not reinstall or re-arm Slipstream on the primary workstation. First land
-the bounded startup change: publish a probe-free `dormant` ownership snapshot
-before network qualification, run every system-DNS baseline lookup in a
-killable console-user child, and enforce one total preflight budget. Status
-publication must consume only cached DNS diagnostics; its background refresh
-uses the same bounded helper. The required process test uses a real stalled
-child and proves that it is gone. The disposable packaged lifecycle now installs
-an OS-level resolver blackhole for the first neutral target and requires status
-to exist before that query, a later target to activate PF, no helper survivor,
-and residue-free cleanup. Only an exact artifact that passes those gates may
-receive one short, user-scheduled workstation smoke. Builds and ordinary tests
-must complete before that window; the user is not expected to remain present
-or answer repeated administrator prompts.
+Do not reinstall or re-arm Slipstream on the primary workstation while the user
+is away. The downloaded `140598b` app used a superseded Geph artifact and must
+not be launched. First merge the workflow correction, then require the exact
+main commit to pass the disposable packaged lifecycle with the revisioned tag
+from `vendor/geph/SOURCE.json`. Downloading that newly qualified artifact is
+safe, but launching it still waits for one short, user-scheduled smoke with
+preflight and rollback prepared in advance. No repeated administrator prompts
+are acceptable. If the smoke fails, uninstall immediately and preserve the
+first failing evidence; do not improvise another install in the same session.
+In parallel, M4 may continue only through pure contracts and disposable Windows
+CI. Native route effects remain blocked until destination attribution and
+coexistence can be proved without pretending that a partial DNS cache is
+complete.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
 ## External Gates
