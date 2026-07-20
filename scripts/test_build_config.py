@@ -764,6 +764,7 @@ done
         self.assertIn("$process.WaitForExit(250)", runner)
         self.assertNotIn("$process.WaitForExit()", runner)
         self.assertIn("$drainTimer.ElapsedMilliseconds -lt 2000", runner)
+        self.assertNotIn("$stableSamples", runner)
         self.assertIn("$Process.Kill($true)", runner)
         self.assertIn(
             "if (-not $Process.WaitForExit($WaitMilliseconds))", runner
