@@ -72,6 +72,24 @@ jobs:
             throw "Expected exact read-only route observer test did not execute"
           }
 
+      - name: Qualify sealed owned-route transition issuer
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          $testFilter = "packet_egress::transition_v1::tests"
+          $output = & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --lib $testFilter -- --test-threads=1 2>&1
+          $exitCode = $LASTEXITCODE
+          $lines = @($output | ForEach-Object { $_.ToString() })
+          $lines | Write-Output
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+          $executed = @($lines | Where-Object { $_ -match '^test packet_egress::transition_v1::tests::.+ \.\.\. ok$' })
+          if ($executed.Count -eq 0) {
+            throw "Expected sealed owned-route transition tests did not execute"
+          }
+
       - name: Fetch and verify the pinned Wintun package
         shell: pwsh
         env:
