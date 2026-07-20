@@ -762,6 +762,8 @@ done
         self.assertIn("Start-Process", runner)
         self.assertIn("function Stop-RetainedProcessTree", runner)
         self.assertIn("$process.WaitForExit(250)", runner)
+        self.assertNotIn("$process.WaitForExit()", runner)
+        self.assertIn("$drainTimer.ElapsedMilliseconds -lt 2000", runner)
         self.assertIn("$Process.Kill($true)", runner)
         self.assertIn(
             "if (-not $Process.WaitForExit($WaitMilliseconds))", runner

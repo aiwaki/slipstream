@@ -160,7 +160,29 @@ try {
         }
     }
     $timer.Stop()
-    $process.WaitForExit()
+
+    # The retained root handle has exited, but a descendant can still inherit a
+    # redirected file handle. Drain only newly published bytes for a bounded
+    # window instead of using parameterless WaitForExit(), which waits for EOF.
+    $drainTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastPublishedLength = -1
+    $stableSamples = 0
+    while ($drainTimer.ElapsedMilliseconds -lt 2000) {
+        Publish-NewOutput $stdoutPath ([ref]$stdoutCursor) $false
+        Publish-NewOutput $stderrPath ([ref]$stderrCursor) $true
+        $publishedLength = $stdoutCursor + $stderrCursor
+        if ($publishedLength -eq $lastPublishedLength) {
+            $stableSamples += 1
+            if ($stableSamples -ge 2) {
+                break
+            }
+        } else {
+            $lastPublishedLength = $publishedLength
+            $stableSamples = 0
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    $drainTimer.Stop()
     Publish-NewOutput $stdoutPath ([ref]$stdoutCursor) $false
     Publish-NewOutput $stderrPath ([ref]$stderrCursor) $true
 
