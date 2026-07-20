@@ -12,7 +12,7 @@ use slipstream_windows_adapter::packet_egress::{
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
@@ -24,14 +24,17 @@ use windows_sys::Win32::Foundation::{
     FreeLibrary, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND, HMODULE,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToIndex, CreateUnicastIpAddressEntry,
-    DeleteUnicastIpAddressEntry, GetUnicastIpAddressEntry, InitializeUnicastIpAddressEntry,
-    MIB_UNICASTIPADDRESS_ROW,
+    ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2,
+    CreateUnicastIpAddressEntry, DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry,
+    GetIpForwardEntry2, GetUnicastIpAddressEntry, InitializeIpForwardEntry,
+    InitializeUnicastIpAddressEntry, MIB_IPFORWARD_ROW2, MIB_UNICASTIPADDRESS_ROW,
 };
 use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 use windows_sys::Win32::Networking::WinSock::{
-    getsockopt, setsockopt, IpDadStatePreferred, WSAGetLastError, AF_INET, IN_ADDR, IN_ADDR_0,
-    IN_ADDR_0_0, IPPROTO_IP, IP_UNICAST_IF, SOCKADDR_IN, SOCKADDR_INET, SOCKET,
+    getsockopt, setsockopt, IpDadStatePreferred, WSAGetLastError, AF_INET, AF_INET6, IN6_ADDR,
+    IN6_ADDR_0, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, IPPROTO_IP, IPPROTO_IPV6, IPV6_UNICAST_IF,
+    IP_UNICAST_IF, MIB_IPPROTO_NETMGMT, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
+    SOCKET,
 };
 use windows_sys::Win32::System::LibraryLoader::{
     GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
@@ -44,6 +47,13 @@ const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_PROBE_INTERVAL: Duration = Duration::from_millis(25);
+const BASELINE_ROUTE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
+const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
+const IPV6_BASELINE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 2);
+const IPV6_CAPTURE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 3);
+const IPV6_DESTINATION: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111);
+const IPV6_BASELINE_PREFIX_LENGTH: u8 = 64;
+const IPV6_HOST_PREFIX_LENGTH: u8 = 128;
 
 type WintunAdapterHandle = *mut c_void;
 type WintunSessionHandle = *mut c_void;
@@ -82,8 +92,11 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
         let capture_interface = adapter.interface_identity()?;
         let mut issuer = WindowsOwnedRouteTransitionIssuer::new(1, capture_interface, 1)
             .map_err(|error| format!("construct exact-route issuer: {error}"))?;
-        let mut address =
-            OwnedUnicastAddress::create(capture_interface, Ipv4Addr::new(192, 0, 2, 1))?;
+        let mut address = OwnedUnicastAddress::create(
+            capture_interface,
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            32,
+        )?;
         let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
         let route_result = qualify_disposable_exact_host_route(&mut issuer, destination)
             .map_err(|error| format!("qualify exact-route owner: {error}"));
@@ -152,7 +165,8 @@ fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route() {
         adapter.start_session()?;
         let capture_interface = adapter.interface_identity()?;
         let capture_source = Ipv4Addr::new(192, 0, 2, 2);
-        let mut address = OwnedUnicastAddress::create(capture_interface, capture_source)?;
+        let mut address =
+            OwnedUnicastAddress::create(capture_interface, IpAddr::V4(capture_source), 32)?;
         let destination = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 1));
         let mut failure_issuer = WindowsOwnedRouteTransitionIssuer::new(2, capture_interface, 1)
             .map_err(|error| format!("construct probe-failure issuer: {error}"))?;
@@ -230,6 +244,137 @@ fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route() {
     );
 }
 
+#[test]
+fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let baseline_name = wide(&unique_adapter_name("Socket6Baseline"));
+    let capture_name = wide(&unique_adapter_name("Socket6Capture"));
+    let baseline_tunnel_type = wide("Slipstream CI IPv6 Baseline");
+    let capture_tunnel_type = wide("Slipstream CI IPv6 Capture");
+    api.require_adapter_absent(&baseline_name, "before IPv6 baseline fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv6 baseline preflight: {error}"));
+    api.require_adapter_absent(&capture_name, "before IPv6 capture fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv6 capture preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut baseline_adapter =
+            OwnedWintunAdapter::create(&api, &baseline_name, &baseline_tunnel_type)?;
+        baseline_adapter.start_session()?;
+        let baseline_interface = baseline_adapter.interface_identity()?;
+        let mut capture_adapter =
+            OwnedWintunAdapter::create(&api, &capture_name, &capture_tunnel_type)?;
+        capture_adapter.start_session()?;
+        let capture_interface = capture_adapter.interface_identity()?;
+        if capture_interface == baseline_interface {
+            return Err("IPv6 fixture adapters resolved to the same interface".to_owned());
+        }
+
+        let baseline_source = IPV6_BASELINE_SOURCE;
+        let capture_source = IPV6_CAPTURE_SOURCE;
+        let destination = IpAddr::V6(IPV6_DESTINATION);
+        let mut baseline_address = OwnedUnicastAddress::create(
+            baseline_interface,
+            IpAddr::V6(baseline_source),
+            IPV6_HOST_PREFIX_LENGTH,
+        )?;
+        let mut capture_address = OwnedUnicastAddress::create(
+            capture_interface,
+            IpAddr::V6(capture_source),
+            IPV6_HOST_PREFIX_LENGTH,
+        )?;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(4, capture_interface, 1)
+            .map_err(|error| format!("construct IPv6 socket-binding issuer: {error}"))?;
+        let mut baseline_route = OwnedFixtureBaselineRoute::create(
+            baseline_interface,
+            IPV6_BASELINE_NETWORK,
+            IPV6_BASELINE_PREFIX_LENGTH,
+        )?;
+
+        let route_result = qualify_disposable_exact_host_route_with_active_probe(
+            &mut issuer,
+            destination,
+            |active| {
+                prove_ipv6_socket_binding(
+                    active,
+                    capture_source,
+                    baseline_interface,
+                    baseline_source,
+                )
+            },
+        )
+        .map_err(|error| format!("qualify IPv6 socket binding: {error}"));
+
+        let baseline_route_cleanup = baseline_route.remove_and_verify();
+        let capture_address_cleanup = capture_address.remove_and_verify();
+        let baseline_address_cleanup = baseline_address.remove_and_verify();
+        let mut cleanup_errors = Vec::new();
+        if let Err(error) = baseline_route_cleanup {
+            cleanup_errors.push(format!("baseline route: {error}"));
+        }
+        if let Err(error) = capture_address_cleanup {
+            cleanup_errors.push(format!("capture address: {error}"));
+        }
+        if let Err(error) = baseline_address_cleanup {
+            cleanup_errors.push(format!("baseline address: {error}"));
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(format!(
+                "IPv6 fixture cleanup failed: {}; socket result: {route_result:?}",
+                cleanup_errors.join("; ")
+            ));
+        }
+        let qualification = route_result?;
+
+        if qualification.destination() != destination
+            || qualification.exact_route_prefix() != "2606:4700:4700::1111/128"
+            || qualification.capture_interface() != capture_interface
+            || qualification.baseline_egress_interface() != baseline_interface
+            || qualification.recovered_egress_interface() != baseline_interface
+            || qualification.route_epoch_after_removal() != 3
+        {
+            return Err(
+                "IPv6 socket-binding qualification returned inconsistent evidence".to_owned(),
+            );
+        }
+
+        capture_adapter.end_session();
+        capture_adapter.close_adapter();
+        baseline_adapter.end_session();
+        baseline_adapter.close_adapter();
+        Ok::<(), String>(())
+    })();
+
+    let baseline_cleanup =
+        api.require_adapter_absent(&baseline_name, "after IPv6 baseline fixture");
+    let capture_cleanup = api.require_adapter_absent(&capture_name, "after IPv6 capture fixture");
+    if baseline_cleanup.is_err() || capture_cleanup.is_err() {
+        panic!(
+            "Wintun IPv6 adapter cleanup proof failed: baseline={baseline_cleanup:?}, capture={capture_cleanup:?}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable IPv6 socket-binding qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
 fn prove_ipv4_socket_binding(
     active: &WindowsDisposableExactRouteActiveProbe<'_>,
     expected_capture_source: Ipv4Addr,
@@ -280,6 +425,62 @@ fn prove_ipv4_socket_binding(
     Ok(())
 }
 
+fn prove_ipv6_socket_binding(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    expected_capture_source: Ipv6Addr,
+    expected_baseline_interface: WindowsPacketInterfaceIdentity,
+    expected_baseline_source: Ipv6Addr,
+) -> Result<(), String> {
+    let destination = match active.destination() {
+        IpAddr::V6(destination) => destination,
+        IpAddr::V4(_) => return Err("IPv6 socket probe received an IPv4 destination".to_owned()),
+    };
+    let baseline_source = match active.baseline_source_address() {
+        IpAddr::V6(source) => source,
+        IpAddr::V4(_) => return Err("IPv6 socket probe received an IPv4 source".to_owned()),
+    };
+    if active.exact_route_prefix() != format!("{destination}/128")
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.baseline_egress_interface() != expected_baseline_interface
+        || active.capture_source_address() != IpAddr::V6(expected_capture_source)
+        || baseline_source != expected_baseline_source
+        || baseline_source == expected_capture_source
+    {
+        return Err(
+            "active IPv6 route facts do not prove the controlled competing route".to_owned(),
+        );
+    }
+
+    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))
+        .map_err(|error| format!("create IPv6 UDP socket: {error}"))?;
+    let interface_index = active.baseline_egress_interface().index;
+    set_and_verify_ipv6_unicast_interface(&socket, interface_index)?;
+    socket
+        .bind(&SockAddr::from(SocketAddrV6::new(baseline_source, 0, 0, 0)))
+        .map_err(|error| format!("bind IPv6 baseline source {baseline_source}: {error}"))?;
+    let peer = SocketAddrV6::new(destination, 9, 0, 0);
+    socket
+        .connect(&SockAddr::from(peer))
+        .map_err(|error| format!("connect no-payload IPv6 UDP socket: {error}"))?;
+
+    let local = socket
+        .local_addr()
+        .map_err(|error| format!("read bound IPv6 local address: {error}"))?
+        .as_socket_ipv6()
+        .ok_or_else(|| "bound socket did not retain an IPv6 local address".to_owned())?;
+    let observed_peer = socket
+        .peer_addr()
+        .map_err(|error| format!("read connected IPv6 peer address: {error}"))?
+        .as_socket_ipv6()
+        .ok_or_else(|| "connected socket did not retain an IPv6 peer".to_owned())?;
+    if *local.ip() != baseline_source || local.port() == 0 || observed_peer != peer {
+        return Err(format!(
+            "IPv6 socket binding mismatch: local={local}, peer={observed_peer}, expected_source={baseline_source}, expected_peer={peer}"
+        ));
+    }
+    Ok(())
+}
+
 fn set_and_verify_ipv4_unicast_interface(
     socket: &Socket,
     interface_index: u32,
@@ -322,6 +523,52 @@ fn set_and_verify_ipv4_unicast_interface(
     if observed_length != std::mem::size_of::<u32>() as i32 || observed_index != interface_index {
         return Err(format!(
             "IP_UNICAST_IF round-trip mismatch: value={observed_index}, length={observed_length}, expected={interface_index}"
+        ));
+    }
+    Ok(())
+}
+
+fn set_and_verify_ipv6_unicast_interface(
+    socket: &Socket,
+    interface_index: u32,
+) -> Result<(), String> {
+    let raw_socket = socket.as_raw_socket() as SOCKET;
+    let set_result = unsafe {
+        setsockopt(
+            raw_socket,
+            IPPROTO_IPV6,
+            IPV6_UNICAST_IF,
+            &interface_index as *const u32 as *const u8,
+            std::mem::size_of::<u32>() as i32,
+        )
+    };
+    if set_result != 0 {
+        return Err(format!(
+            "set IPV6_UNICAST_IF to interface {interface_index}: Winsock error {}",
+            unsafe { WSAGetLastError() }
+        ));
+    }
+
+    let mut observed_index = 0u32;
+    let mut observed_length = std::mem::size_of::<u32>() as i32;
+    let get_result = unsafe {
+        getsockopt(
+            raw_socket,
+            IPPROTO_IPV6,
+            IPV6_UNICAST_IF,
+            &mut observed_index as *mut u32 as *mut u8,
+            &mut observed_length,
+        )
+    };
+    if get_result != 0 {
+        return Err(format!(
+            "read IPV6_UNICAST_IF for interface {interface_index}: Winsock error {}",
+            unsafe { WSAGetLastError() }
+        ));
+    }
+    if observed_length != std::mem::size_of::<u32>() as i32 || observed_index != interface_index {
+        return Err(format!(
+            "IPV6_UNICAST_IF host-order round-trip mismatch: value={observed_index}, length={observed_length}, expected={interface_index}"
         ));
     }
     Ok(())
@@ -552,6 +799,119 @@ impl Drop for OwnedWintunAdapter<'_> {
     }
 }
 
+struct OwnedFixtureBaselineRoute {
+    row: MIB_IPFORWARD_ROW2,
+    present: bool,
+}
+
+impl OwnedFixtureBaselineRoute {
+    fn create(
+        interface: WindowsPacketInterfaceIdentity,
+        network: Ipv6Addr,
+        prefix_length: u8,
+    ) -> Result<Self, String> {
+        if prefix_length != IPV6_BASELINE_PREFIX_LENGTH || network != IPV6_BASELINE_NETWORK {
+            return Err("fixture baseline route must remain the fixed IPv6 /64".to_owned());
+        }
+
+        let mut row = MIB_IPFORWARD_ROW2::default();
+        unsafe {
+            InitializeIpForwardEntry(&mut row);
+        }
+        row.InterfaceLuid = NET_LUID_LH {
+            Value: interface.luid,
+        };
+        row.InterfaceIndex = interface.index;
+        row.DestinationPrefix.Prefix = sockaddr_from_ip(IpAddr::V6(network));
+        row.DestinationPrefix.PrefixLength = prefix_length;
+        row.NextHop = sockaddr_from_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        row.SitePrefixLength = prefix_length;
+        row.Metric = 5;
+        row.Protocol = MIB_IPPROTO_NETMGMT;
+        row.Loopback = false;
+        row.AutoconfigureAddress = false;
+        row.Publish = false;
+        row.Immortal = false;
+
+        if lookup_fixture_baseline_route(row)?.is_some() {
+            return Err("fixture IPv6 baseline route already exists before creation".to_owned());
+        }
+        let result = unsafe { CreateIpForwardEntry2(&row) };
+        if result != 0 {
+            return Err(format!(
+                "CreateIpForwardEntry2 baseline failed with {result}"
+            ));
+        }
+        let mut owned = Self { row, present: true };
+        let verification_error = match lookup_fixture_baseline_route(row) {
+            Ok(Some(observed)) if same_fixture_baseline_route_key(observed, row) => {
+                return Ok(owned);
+            }
+            Ok(Some(_)) => "created route identity changed during verification".to_owned(),
+            Ok(None) => "created route was absent during verification".to_owned(),
+            Err(error) => format!("created route lookup failed: {error}"),
+        };
+        let cleanup_result = owned.remove_and_verify();
+        Err(format!(
+            "fixture IPv6 baseline route verification failed: {verification_error}; cleanup={cleanup_result:?}"
+        ))
+    }
+
+    fn remove_and_verify(&mut self) -> Result<(), String> {
+        let result = unsafe { DeleteIpForwardEntry2(&self.row) };
+        if result != 0 && !matches!(result, ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND) {
+            return Err(format!(
+                "DeleteIpForwardEntry2 baseline failed with {result}"
+            ));
+        }
+
+        let deadline = Instant::now() + BASELINE_ROUTE_REMOVAL_TIMEOUT;
+        loop {
+            if lookup_fixture_baseline_route(self.row)?.is_none() {
+                self.present = false;
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(
+                    "fixture IPv6 baseline route remained after bounded deletion".to_owned(),
+                );
+            }
+            thread::sleep(ADDRESS_PROBE_INTERVAL);
+        }
+    }
+}
+
+impl Drop for OwnedFixtureBaselineRoute {
+    fn drop(&mut self) {
+        if self.present {
+            unsafe {
+                DeleteIpForwardEntry2(&self.row);
+            }
+        }
+    }
+}
+
+fn lookup_fixture_baseline_route(
+    row: MIB_IPFORWARD_ROW2,
+) -> Result<Option<MIB_IPFORWARD_ROW2>, String> {
+    let mut observed = row;
+    let result = unsafe { GetIpForwardEntry2(&mut observed) };
+    match result {
+        0 => Ok(Some(observed)),
+        ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND => Ok(None),
+        error => Err(format!("GetIpForwardEntry2 baseline failed with {error}")),
+    }
+}
+
+fn same_fixture_baseline_route_key(left: MIB_IPFORWARD_ROW2, right: MIB_IPFORWARD_ROW2) -> bool {
+    (unsafe { left.InterfaceLuid.Value }) == (unsafe { right.InterfaceLuid.Value })
+        && left.InterfaceIndex == right.InterfaceIndex
+        && left.DestinationPrefix.PrefixLength == right.DestinationPrefix.PrefixLength
+        && ip_from_sockaddr(left.DestinationPrefix.Prefix)
+            == ip_from_sockaddr(right.DestinationPrefix.Prefix)
+        && ip_from_sockaddr(left.NextHop) == ip_from_sockaddr(right.NextHop)
+}
+
 struct OwnedUnicastAddress {
     row: MIB_UNICASTIPADDRESS_ROW,
     present: bool,
@@ -560,7 +920,8 @@ struct OwnedUnicastAddress {
 impl OwnedUnicastAddress {
     fn create(
         interface: WindowsPacketInterfaceIdentity,
-        address: Ipv4Addr,
+        address: IpAddr,
+        prefix_length: u8,
     ) -> Result<Self, String> {
         let mut row = MIB_UNICASTIPADDRESS_ROW::default();
         unsafe {
@@ -570,8 +931,8 @@ impl OwnedUnicastAddress {
             Value: interface.luid,
         };
         row.InterfaceIndex = interface.index;
-        row.Address = ipv4_sockaddr(address);
-        row.OnLinkPrefixLength = 32;
+        row.Address = sockaddr_from_ip(address);
+        row.OnLinkPrefixLength = prefix_length;
         row.SkipAsSource = false;
         row.DadState = IpDadStatePreferred;
 
@@ -603,8 +964,13 @@ impl OwnedUnicastAddress {
             let Some(observed) = lookup_unicast_address(self.row)? else {
                 return Err("owned Wintun address disappeared before becoming ready".to_owned());
             };
-            if !same_unicast_address_key(observed, self.row) || observed.OnLinkPrefixLength != 32 {
-                return Err("owned Wintun address identity or /32 prefix changed".to_owned());
+            if !same_unicast_address_key(observed, self.row)
+                || observed.OnLinkPrefixLength != self.row.OnLinkPrefixLength
+            {
+                return Err(format!(
+                    "owned Wintun address identity or /{} prefix changed",
+                    self.row.OnLinkPrefixLength
+                ));
             }
             if observed.DadState == IpDadStatePreferred && !observed.SkipAsSource {
                 return Ok(());
@@ -667,40 +1033,62 @@ fn same_unicast_address_key(
 ) -> bool {
     (unsafe { left.InterfaceLuid.Value }) == (unsafe { right.InterfaceLuid.Value })
         && left.InterfaceIndex == right.InterfaceIndex
-        && ipv4_from_sockaddr(left.Address) == ipv4_from_sockaddr(right.Address)
+        && ip_from_sockaddr(left.Address) == ip_from_sockaddr(right.Address)
 }
 
-fn ipv4_from_sockaddr(address: SOCKADDR_INET) -> Option<Ipv4Addr> {
-    let address = unsafe { address.Ipv4 };
-    if address.sin_family != AF_INET {
-        return None;
+fn ip_from_sockaddr(address: SOCKADDR_INET) -> Option<IpAddr> {
+    match unsafe { address.si_family } {
+        AF_INET => {
+            let octets = unsafe { address.Ipv4.sin_addr.S_un.S_un_b };
+            Some(IpAddr::V4(Ipv4Addr::new(
+                octets.s_b1,
+                octets.s_b2,
+                octets.s_b3,
+                octets.s_b4,
+            )))
+        }
+        AF_INET6 => {
+            let octets = unsafe { address.Ipv6.sin6_addr.u.Byte };
+            Some(IpAddr::V6(Ipv6Addr::from(octets)))
+        }
+        _ => None,
     }
-    let octets = unsafe { address.sin_addr.S_un.S_un_b };
-    Some(Ipv4Addr::new(
-        octets.s_b1,
-        octets.s_b2,
-        octets.s_b3,
-        octets.s_b4,
-    ))
 }
 
-fn ipv4_sockaddr(address: Ipv4Addr) -> SOCKADDR_INET {
-    let [s_b1, s_b2, s_b3, s_b4] = address.octets();
-    SOCKADDR_INET {
-        Ipv4: SOCKADDR_IN {
-            sin_family: AF_INET,
-            sin_port: 0,
-            sin_addr: IN_ADDR {
-                S_un: IN_ADDR_0 {
-                    S_un_b: IN_ADDR_0_0 {
-                        s_b1,
-                        s_b2,
-                        s_b3,
-                        s_b4,
+fn sockaddr_from_ip(address: IpAddr) -> SOCKADDR_INET {
+    match address {
+        IpAddr::V4(address) => {
+            let [s_b1, s_b2, s_b3, s_b4] = address.octets();
+            SOCKADDR_INET {
+                Ipv4: SOCKADDR_IN {
+                    sin_family: AF_INET,
+                    sin_port: 0,
+                    sin_addr: IN_ADDR {
+                        S_un: IN_ADDR_0 {
+                            S_un_b: IN_ADDR_0_0 {
+                                s_b1,
+                                s_b2,
+                                s_b3,
+                                s_b4,
+                            },
+                        },
+                    },
+                    sin_zero: [0; 8],
+                },
+            }
+        }
+        IpAddr::V6(address) => SOCKADDR_INET {
+            Ipv6: SOCKADDR_IN6 {
+                sin6_family: AF_INET6,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: IN6_ADDR {
+                    u: IN6_ADDR_0 {
+                        Byte: address.octets(),
                     },
                 },
+                Anonymous: SOCKADDR_IN6_0 { sin6_scope_id: 0 },
             },
-            sin_zero: [0; 8],
         },
     }
 }

@@ -464,7 +464,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "ADDRESS_REMOVAL_TIMEOUT",
         "wait_until_preferred",
         "IpDadStatePreferred",
-        "OnLinkPrefixLength != 32",
+        "observed.OnLinkPrefixLength != self.row.OnLinkPrefixLength",
         "SkipAsSource",
         "readiness failed after verified cleanup",
         "exact cleanup failed",
@@ -472,15 +472,27 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "qualify_disposable_exact_host_route",
         "qualify_disposable_exact_host_route_with_active_probe",
         "native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route",
+        "native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
         "interface_index.to_be()",
+        "IPV6_UNICAST_IF",
+        "set_and_verify_ipv6_unicast_interface",
+        "OwnedFixtureBaselineRoute",
+        "CreateIpForwardEntry2",
+        "GetIpForwardEntry2",
+        "DeleteIpForwardEntry2",
+        "fixture baseline route must remain the fixed IPv6 /64",
+        "const IPV6_BASELINE_PREFIX_LENGTH: u8 = 64;",
+        "const IPV6_HOST_PREFIX_LENGTH: u8 = 128;",
+        "BASELINE_ROUTE_REMOVAL_TIMEOUT",
         "getsockopt",
         "setsockopt",
         "Socket::new",
         ".local_addr()",
         ".peer_addr()",
         "connect no-payload IPv4 UDP socket",
+        "connect no-payload IPv6 UDP socket",
         "require_adapter_absent",
     ] {
         assert!(
@@ -513,6 +525,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow.contains("Qualify no-payload IPv4 socket selection under exact route"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route"));
+    assert!(workflow.contains("Qualify no-payload IPv6 socket selection under exact route"));
+    assert!(workflow
+        .contains("-TestName native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route"));
 
     let production_host = include_str!("../src/service_host/windows.rs");
     assert!(!production_host.contains("disposable_route_owner_v1"));
