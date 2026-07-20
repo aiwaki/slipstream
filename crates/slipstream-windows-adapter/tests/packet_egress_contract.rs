@@ -56,6 +56,10 @@ fn contract_keeps_native_socket_route_and_adapter_effects_closed() {
         true
     );
     assert_eq!(fixture.invariants["capture_generation_bound"], true);
+    assert_eq!(
+        fixture.invariants["owned_capture_route_transition_bound"],
+        true
+    );
     assert_eq!(fixture.invariants["route_epoch_bound"], true);
     assert_eq!(fixture.invariants["luid_and_live_index_bound"], true);
     assert_eq!(fixture.invariants["capture_interface_rejected"], true);
@@ -85,6 +89,10 @@ fn contract_keeps_native_socket_route_and_adapter_effects_closed() {
         .expect("native gates must be an object")
         .values()
         .all(|value| value == "required"));
+    assert_eq!(
+        fixture.remaining_native_gates["trusted_owned_route_transition_issuer"],
+        "required"
+    );
 }
 
 #[test]
@@ -173,23 +181,68 @@ fn language_neutral_vectors_admit_only_fresh_non_capture_egress() {
 }
 
 #[test]
+fn owned_capture_route_transition_is_exact_and_later_changes_invalidate_it() {
+    let mut request = contract()
+        .vectors
+        .into_iter()
+        .find(|vector| vector.name == "ipv4-system-egress-is-generation-and-route-bound")
+        .expect("IPv4 admission vector must exist")
+        .request;
+
+    assert!(prepare_windows_packet_egress(&request).is_ok());
+
+    request.capture_route.previous_route_epoch = request.baseline.route_epoch + 1;
+    assert_eq!(
+        prepare_windows_packet_egress(&request)
+            .expect_err("owned transition must begin at the baseline epoch")
+            .code(),
+        WindowsPacketEgressErrorCode::CaptureRoutePreviousEpochMismatch
+    );
+
+    request.capture_route.previous_route_epoch = request.baseline.route_epoch;
+    request.capture_route.active_route_epoch = request.baseline.route_epoch;
+    assert_eq!(
+        prepare_windows_packet_egress(&request)
+            .expect_err("owned transition must advance the route epoch")
+            .code(),
+        WindowsPacketEgressErrorCode::InvalidCaptureRouteEpochTransition
+    );
+
+    request.capture_route.active_route_epoch = request.current_route_epoch;
+    request.current_route_epoch += 1;
+    assert_eq!(
+        prepare_windows_packet_egress(&request)
+            .expect_err("a later route change must invalidate the admission")
+            .code(),
+        WindowsPacketEgressErrorCode::RouteEpochMismatch
+    );
+}
+
+#[test]
 fn every_egress_failure_has_a_stable_machine_code() {
     let codes = [
         WindowsPacketEgressErrorCode::InvalidCaptureGeneration,
         WindowsPacketEgressErrorCode::InvalidFlowId,
         WindowsPacketEgressErrorCode::InvalidRouteEpoch,
         WindowsPacketEgressErrorCode::CaptureGenerationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRouteGenerationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRoutePreviousEpochMismatch,
+        WindowsPacketEgressErrorCode::InvalidCaptureRouteEpochTransition,
         WindowsPacketEgressErrorCode::RouteEpochMismatch,
         WindowsPacketEgressErrorCode::InvalidActivationWindow,
         WindowsPacketEgressErrorCode::RouteObservedAfterCapture,
+        WindowsPacketEgressErrorCode::InvalidCaptureRouteActivationWindow,
         WindowsPacketEgressErrorCode::InvalidEvidenceWindow,
         WindowsPacketEgressErrorCode::EvidenceExpired,
         WindowsPacketEgressErrorCode::DestinationNotCanonical,
         WindowsPacketEgressErrorCode::BaselineDestinationNotCanonical,
         WindowsPacketEgressErrorCode::UnsafeDestination,
         WindowsPacketEgressErrorCode::DestinationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRouteDestinationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRoutePrefixMismatch,
         WindowsPacketEgressErrorCode::InvalidInterfaceIdentity,
         WindowsPacketEgressErrorCode::CaptureInterfaceIdentityChanged,
+        WindowsPacketEgressErrorCode::CaptureRouteInterfaceMismatch,
         WindowsPacketEgressErrorCode::EgressInterfaceIdentityChanged,
         WindowsPacketEgressErrorCode::CaptureInterfaceSelected,
         WindowsPacketEgressErrorCode::SourceAddressNotCanonical,

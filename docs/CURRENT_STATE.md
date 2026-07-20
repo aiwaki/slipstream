@@ -44,7 +44,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Abrupt-owner Wintun cleanup qualified on exact main; pure packet-egress admission implemented | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. PRs #185 and #186 qualified ordinary and abrupt-owner adapter/session cleanup on native AMD64 and ARM64, including exact-main reruns. The pure `windows-packet-egress-v1` contract now rejects the capture interface and admits only fresh pre-capture route evidence bound to one capture generation, route epoch, destination, source family, and stable interface LUID/index pair. It preserves any system-selected non-capture interface, including an external VPN, without classifying or mutating it. No native route collector or socket binding is composed yet. Actual competing-route loop avoidance, pre-existing-flow activation safety, bounded removal, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Abrupt-owner Wintun cleanup qualified on exact main; pure packet-egress admission implemented | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. PRs #185 and #186 qualified ordinary and abrupt-owner adapter/session cleanup on native AMD64 and ARM64, including exact-main reruns. The pure `windows-packet-egress-v1` contract now rejects the capture interface and admits only fresh pre-capture route evidence paired with an exact owned capture-route activation from the baseline route epoch to the current route epoch. It binds that transition to one capture generation, destination, exact host prefix, source family, and stable interface LUID/index pairs; any later route-epoch change invalidates the plan. It preserves any system-selected non-capture interface, including an external VPN, without classifying or mutating it. No trusted native route collector, owned-transition issuer, or socket binding is composed yet. Actual competing-route loop avoidance, pre-existing-flow activation safety, bounded removal, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -396,10 +396,13 @@ and dependency audit in
 
 The pure Windows packet-egress v1 contract now freezes the admission boundary
 needed before a native loop-avoidance fixture. A plan requires short-lived
-route evidence collected before capture, the same capture generation and live
-route epoch, unchanged capture and egress LUID/index identities, a matching
-public destination and source family, and a containing route prefix. The
-capture interface is rejected. The plan records the Windows IPv4/IPv6
+route evidence collected before capture plus an exact owned capture-route
+activation from that baseline epoch to the current epoch. The transition must
+retain the capture generation, destination, exact host prefix, and capture
+interface identity; any later route-epoch change invalidates the plan. The
+egress LUID/index identity, matching public destination and source family, and
+containing baseline route prefix must also remain stable. The capture interface
+is rejected. The plan records the Windows IPv4/IPv6
 per-socket interface value but performs no route query, socket operation,
 adapter effect, route mutation, backend choice, or production composition.
 
@@ -415,11 +418,13 @@ If the smoke fails, uninstall immediately and preserve the first failing
 evidence; do not improvise another install in the same session.
 
 Continue M4 on disposable systems. Implement a read-only native route-evidence
-collector and a disposable socket-binding fixture that proves outbound loop
+collector, a trusted issuer that serializes and attests the exact owned route
+activation, and a disposable socket-binding fixture that proves outbound loop
 avoidance with a competing capture route on native AMD64 and ARM64. It must
-revalidate LUID-to-index identity, invalidate evidence on route-epoch changes,
-and preserve an already-selected external VPN without classifying or mutating
-it. Pre-existing-flow activation safety, bounded capture removal, and explicit
+revalidate LUID-to-index identity, invalidate evidence on every later
+route-epoch change, and preserve an already-selected external VPN without
+classifying or mutating it. Pre-existing-flow activation safety, bounded
+capture removal, and explicit
 external-VPN coexistence remain separate gates before any exact-route
 transaction or production composition. A partial DNS cache is never treated
 as complete attribution.

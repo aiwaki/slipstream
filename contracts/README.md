@@ -113,10 +113,14 @@ Slipstream routing decisions and bounded recovery primitives.
   qualification gates closed.
 - `windows-packet-egress-v1.json` freezes the pure outbound loop-avoidance
   admission below that capture boundary. A plan requires short-lived route
-  evidence observed before capture, the same capture generation and live route
-  epoch, stable interface LUID-to-index identity, a matching destination,
-  source family, and containing route prefix. The capture interface is always
-  rejected. IPv6 destinations fail closed against the frozen 2025-10-10 IANA
+  evidence observed before capture plus an exact owned capture-route activation
+  that moves the baseline epoch to the active epoch. The activation, plan, and
+  current state must retain the same capture generation, destination, exact
+  host prefix, and capture-interface LUID/index; a later route change
+  invalidates the plan. Stable egress LUID-to-index identity, source family,
+  and a containing baseline route prefix are also required. The capture
+  interface is always rejected. IPv6 destinations fail closed against the
+  frozen 2025-10-10 IANA
   global-unicast allocation snapshot, including unallocated and special-purpose
   space. IPv4 records the `IP_UNICAST_IF` value in network byte order while IPv6
   records the `IPV6_UNICAST_IF` value in host byte order. This does not

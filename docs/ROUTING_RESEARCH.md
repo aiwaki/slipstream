@@ -9,7 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
-| 2026-07-20 | Windows packet egress and loop-avoidance boundary | Pure v1 contract implemented; native proof still closed | Windows exposes separate IPv4 and IPv6 per-socket interface selection, while Wintun exposes a stable adapter LUID that can be converted back to the current index. The contract accepts only fresh route evidence observed before capture and bound to the exact capture generation, live route epoch, destination, source family, route prefix, and unchanged LUID/index identities. It always rejects the capture interface and preserves any other system-selected interface, including an external VPN, without classifying or mutating it. IPv4 stores the interface index in network byte order and IPv6 in host byte order. The module has no route query, notification, socket, adapter, route, backend, or production effect. | Build a trusted read-only `GetBestRoute2`/LUID collector and qualify actual IPv4/IPv6 binding with a competing capture route on native AMD64/ARM64. A route-change epoch, pre-existing flows, bounded removal, and external-VPN coexistence remain required. |
+| 2026-07-20 | Windows packet egress and loop-avoidance boundary | Pure v1 contract implemented; native proof still closed | Windows exposes separate IPv4 and IPv6 per-socket interface selection, while Wintun exposes a stable adapter LUID that can be converted back to the current index. Installing the owned capture route is itself an expected route-epoch transition, so equality between the pre-capture and active epochs would reject every valid plan. The corrected contract pairs fresh pre-capture route evidence with an exact owned activation from that baseline epoch to the current epoch and binds both to the capture generation, destination, exact host prefix, source family, and unchanged LUID/index identities. Every later route change invalidates the plan. It always rejects the capture interface and preserves any other system-selected interface, including an external VPN, without classifying or mutating it. IPv4 stores the interface index in network byte order and IPv6 in host byte order. The module has no route query, notification, socket, adapter, route, backend, or production effect. | Build a trusted read-only `GetBestRoute2`/LUID collector plus an owned-transition issuer, then qualify actual IPv4/IPv6 binding with a competing capture route on native AMD64/ARM64. Pre-existing flows, bounded removal, and external-VPN coexistence remain required. |
 | 2026-07-20 | Abrupt Wintun owner-process termination | Qualified on exact-main native AMD64/ARM64 runners | The fixture spawns only its exact integration-test executable. The child independently admits the pinned DLL, creates one unique `SlipstreamCI-Crash-*` adapter and minimum session, and atomically publishes its exact adapter name and PID. The parent proves that name is live, terminates only the retained child handle without running Rust destructors, waits for that exact process, and accepts success only after `WintunOpenAdapter` reports the unique name absent within 30 seconds. A 90-second child fail-safe exits without destructors if the parent itself fails. The gate performs no process-name search, adapter/driver deletion, route or address configuration, or DNS/proxy/PAC/VPN mutation. Both native architectures passed in PR [run 29713791755](https://github.com/aiwaki/slipstream/actions/runs/29713791755) and exact-main [run 29714575179](https://github.com/aiwaki/slipstream/actions/runs/29714575179). | Keep the cleanup subgate required. Continue with separate loop, activation, removal, and VPN-coexistence proofs. |
 | 2026-07-20 | Wintun native lifecycle and partial artifact delivery | Qualified on exact-main native AMD64/ARM64 runners | A direct download of the pinned 750,540-byte Wintun archive exited successfully after writing only 16,366 bytes and produced no ZIP central directory. The existing artifact admission would reject it, but transport exit status alone is therefore not download evidence. The native fixture retains the exact read-only admission while loading only the matching-architecture DLL, creates one unique adapter, starts/ends a 128 KiB session, and removes only that adapter. Its workflow retries boundedly and accepts the archive and DLL only after exact length and SHA-256 checks. It never calls `WintunDeleteDriver` or configures routes, addresses, DNS, proxy, PAC, or VPN. The first native run proved that Wintun 0.14.1 reports an absent adapter as `ERROR_NOT_FOUND (1168)` on both x64 and ARM64; the pre/post proof accepts only that code or `ERROR_FILE_NOT_FOUND`, and every other open failure remains fatal. The corrected fixture passed in PR [run 29712583287](https://github.com/aiwaki/slipstream/actions/runs/29712583287) and exact-main [run 29713033740](https://github.com/aiwaki/slipstream/actions/runs/29713033740). | Keep this compatibility subgate required. Do not infer capture or routing readiness from it. |
 | 2026-07-20 | Packaged qualification used a superseded Geph release | Root cause proven; workflow fix under CI | `ci.yml` and `owned-geph-qualification.yml` derived only `geph-vendor-0.3.0`, while `vendor/geph/SOURCE.json` records revision `1` and `build-app.yml` correctly uses `geph-vendor-0.3.0-r1`. GitHub labels the unrevisioned release superseded; its `geph5-client` SHA-256 is `a1df14cb...`, while r1 is `3299d20f...`. The previous packaged lifecycle therefore qualified the macOS/PF lifecycle around a different Geph binary than the release path. A coincident GitHub `503` exposed the mismatch. Every workflow download now derives the immutable revisioned tag and uses one bounded retry helper that publishes no partial output. | Disqualify the downloaded `140598b` app from workstation testing. Require the exact corrected merge commit to pass packaged lifecycle with r1, then download that artifact without launching it. |
@@ -267,9 +267,12 @@ API. A future read-only collector must obtain the pre-capture route through
 [`GetBestRoute2`](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/getbestroute2),
 revalidate its current interface index through
 [`ConvertInterfaceLuidToIndex`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoindex),
-and invalidate the evidence when
+and record the baseline route epoch. Installing the exact owned capture route
+is itself an expected epoch transition, so a separate trusted issuer must
+serialize that operation and attest its destination, exact host prefix,
+capture interface, previous epoch, and active epoch. Every later
 [`NotifyRouteChange2`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyroutechange2)
-advances the route epoch.
+epoch advance invalidates the admission.
 
 `windows-packet-egress-v1` freezes only the pure admission produced from that
 future trusted evidence. It permits any non-capture egress selected by the
@@ -282,7 +285,11 @@ unlisted and non-global ranges such as discard-only `100::/64` fail closed. The
 plan records the platform-specific socket-option value but does not call the
 option. Therefore its vectors prove stale-, special-purpose-, and
 self-interface rejection, not that real packets avoid a competing capture
-route; that remains a disposable native AMD64/ARM64 gate.
+route; that remains a disposable native AMD64/ARM64 gate. The serializable
+activation record is deliberately not authorization to mutate the route table.
+The native issuer remains closed until it can prove that the record describes
+Slipstream's exact serialized transition rather than hiding an unrelated
+concurrent route change.
 
 ### Remaining safety gates
 
@@ -301,7 +308,8 @@ a route-table mutation. Native work remains ordered as follows:
    after both ordinary close and abrupt termination of the exact owner process.
    These gates configure no address or route.
 4. Current: keep `windows-packet-egress-v1` pure while adding a trusted
-   read-only route collector and disposable IPv4/IPv6 socket fixture. Prove
+   read-only route collector, an exact owned-transition issuer, and a
+   disposable IPv4/IPv6 socket fixture. Prove
    actual outbound loop avoidance under a competing capture route, activation
    safety for existing flows, bounded capture expiry/removal, and explicit
    coexistence with an already-active external VPN on both native

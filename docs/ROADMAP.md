@@ -414,8 +414,11 @@ therefore stays phased and closed to production traffic:
    while its unique adapter and session remain live removes that adapter
    without Rust cleanup on native AMD64 and ARM64. A separate pure
    `windows-packet-egress-v1` contract now admits only short-lived pre-capture
-   route evidence bound to the capture generation, live route epoch, stable
-   LUID/index identities, destination, source family, and containing prefix;
+   route evidence paired with an exact owned capture-route activation from the
+   baseline epoch to the current epoch. The transition is bound to the capture
+   generation, exact host prefix, stable LUID/index identities, destination,
+   source family, and containing baseline prefix; every later route change
+   invalidates it;
    it always rejects the capture interface and preserves any system-selected
    non-capture interface without classifying an external VPN. This is not
    native loop-avoidance evidence: next qualify actual IPv4/IPv6 socket binding

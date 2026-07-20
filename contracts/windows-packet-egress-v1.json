@@ -6,6 +6,7 @@
     "pure_admission_only": true,
     "pre_capture_route_evidence_required": true,
     "capture_generation_bound": true,
+    "owned_capture_route_transition_bound": true,
     "route_epoch_bound": true,
     "luid_and_live_index_bound": true,
     "capture_interface_rejected": true,
@@ -26,6 +27,7 @@
   },
   "remaining_native_gates": {
     "trusted_route_collector": "required",
+    "trusted_owned_route_transition_issuer": "required",
     "live_luid_to_index_revalidation": "required",
     "actual_ipv4_socket_binding": "required",
     "actual_ipv6_socket_binding": "required",
@@ -45,9 +47,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -79,9 +90,18 @@
         "destination": "2606:4700:4400::ac40:9b4c",
         "capture_started_at_ms": 2100,
         "now_ms": 2200,
-        "current_route_epoch": 11,
+        "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "route_prefix": "2606:4700:4400::ac40:9b4c/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
         "baseline": {
           "capture_generation": 8,
           "route_epoch": 11,
@@ -113,9 +133,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 6,
           "route_epoch": 9,
@@ -132,16 +161,25 @@
       "expected": { "result": "error", "error": "capture_generation_mismatch" }
     },
     {
-      "name": "route-change-invalidates-the-baseline",
+      "name": "post-activation-route-change-invalidates-the-plan",
       "request": {
         "capture_generation": 7,
         "flow_id": 44,
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 10,
+        "current_route_epoch": 11,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -165,9 +203,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1250,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -191,9 +238,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 5000,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -217,9 +273,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -243,9 +308,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 121, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -269,9 +343,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 900, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -295,9 +378,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -321,9 +413,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -347,9 +448,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -373,9 +483,18 @@
         "destination": "104.16.58.5",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -399,9 +518,18 @@
         "destination": "192.0.2.1",
         "capture_started_at_ms": 1100,
         "now_ms": 1200,
-        "current_route_epoch": 9,
+        "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "192.0.2.1",
+          "route_prefix": "192.0.2.1/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
         "baseline": {
           "capture_generation": 7,
           "route_epoch": 9,
@@ -425,9 +553,18 @@
         "destination": "100::1",
         "capture_started_at_ms": 2100,
         "now_ms": 2200,
-        "current_route_epoch": 11,
+        "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "100::1",
+          "route_prefix": "100::1/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
         "baseline": {
           "capture_generation": 8,
           "route_epoch": 11,
@@ -451,9 +588,18 @@
         "destination": "2606:4700:4400::ac40:9b4c",
         "capture_started_at_ms": 2100,
         "now_ms": 2200,
-        "current_route_epoch": 11,
+        "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "route_prefix": "2606:4700:4400::ac40:9b4c/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
         "baseline": {
           "capture_generation": 8,
           "route_epoch": 11,

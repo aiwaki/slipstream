@@ -31,6 +31,19 @@ pub struct WindowsPacketBaselineRouteEvidence {
     pub route_is_loopback: bool,
 }
 
+/// Exact route activation evidence that a future trusted native issuer must
+/// produce while it owns and serializes the capture-route transition.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WindowsPacketCaptureRouteActivationEvidence {
+    pub capture_generation: u64,
+    pub destination: String,
+    pub route_prefix: String,
+    pub previous_route_epoch: u64,
+    pub active_route_epoch: u64,
+    pub activated_at_ms: u64,
+    pub capture_interface: WindowsPacketInterfaceIdentity,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WindowsPacketEgressRequest {
     pub capture_generation: u64,
@@ -41,6 +54,7 @@ pub struct WindowsPacketEgressRequest {
     pub current_route_epoch: u64,
     pub current_capture_interface: WindowsPacketInterfaceIdentity,
     pub current_egress_interface: WindowsPacketInterfaceIdentity,
+    pub capture_route: WindowsPacketCaptureRouteActivationEvidence,
     pub baseline: WindowsPacketBaselineRouteEvidence,
 }
 
@@ -103,17 +117,24 @@ pub enum WindowsPacketEgressErrorCode {
     InvalidFlowId,
     InvalidRouteEpoch,
     CaptureGenerationMismatch,
+    CaptureRouteGenerationMismatch,
+    CaptureRoutePreviousEpochMismatch,
+    InvalidCaptureRouteEpochTransition,
     RouteEpochMismatch,
     InvalidActivationWindow,
     RouteObservedAfterCapture,
+    InvalidCaptureRouteActivationWindow,
     InvalidEvidenceWindow,
     EvidenceExpired,
     DestinationNotCanonical,
     BaselineDestinationNotCanonical,
     UnsafeDestination,
     DestinationMismatch,
+    CaptureRouteDestinationMismatch,
+    CaptureRoutePrefixMismatch,
     InvalidInterfaceIdentity,
     CaptureInterfaceIdentityChanged,
+    CaptureRouteInterfaceMismatch,
     EgressInterfaceIdentityChanged,
     CaptureInterfaceSelected,
     SourceAddressNotCanonical,
@@ -132,17 +153,24 @@ impl WindowsPacketEgressErrorCode {
             Self::InvalidFlowId => "invalid_flow_id",
             Self::InvalidRouteEpoch => "invalid_route_epoch",
             Self::CaptureGenerationMismatch => "capture_generation_mismatch",
+            Self::CaptureRouteGenerationMismatch => "capture_route_generation_mismatch",
+            Self::CaptureRoutePreviousEpochMismatch => "capture_route_previous_epoch_mismatch",
+            Self::InvalidCaptureRouteEpochTransition => "invalid_capture_route_epoch_transition",
             Self::RouteEpochMismatch => "route_epoch_mismatch",
             Self::InvalidActivationWindow => "invalid_activation_window",
             Self::RouteObservedAfterCapture => "route_observed_after_capture",
+            Self::InvalidCaptureRouteActivationWindow => "invalid_capture_route_activation_window",
             Self::InvalidEvidenceWindow => "invalid_evidence_window",
             Self::EvidenceExpired => "evidence_expired",
             Self::DestinationNotCanonical => "destination_not_canonical",
             Self::BaselineDestinationNotCanonical => "baseline_destination_not_canonical",
             Self::UnsafeDestination => "unsafe_destination",
             Self::DestinationMismatch => "destination_mismatch",
+            Self::CaptureRouteDestinationMismatch => "capture_route_destination_mismatch",
+            Self::CaptureRoutePrefixMismatch => "capture_route_prefix_mismatch",
             Self::InvalidInterfaceIdentity => "invalid_interface_identity",
             Self::CaptureInterfaceIdentityChanged => "capture_interface_identity_changed",
+            Self::CaptureRouteInterfaceMismatch => "capture_route_interface_mismatch",
             Self::EgressInterfaceIdentityChanged => "egress_interface_identity_changed",
             Self::CaptureInterfaceSelected => "capture_interface_selected",
             Self::SourceAddressNotCanonical => "source_address_not_canonical",
@@ -184,7 +212,11 @@ pub fn prepare_windows_packet_egress(
     if request.flow_id == 0 {
         return Err(WindowsPacketEgressError::new(Code::InvalidFlowId));
     }
-    if request.current_route_epoch == 0 || request.baseline.route_epoch == 0 {
+    if request.current_route_epoch == 0
+        || request.baseline.route_epoch == 0
+        || request.capture_route.previous_route_epoch == 0
+        || request.capture_route.active_route_epoch == 0
+    {
         return Err(WindowsPacketEgressError::new(Code::InvalidRouteEpoch));
     }
     if request.baseline.capture_generation != request.capture_generation {
@@ -192,7 +224,22 @@ pub fn prepare_windows_packet_egress(
             Code::CaptureGenerationMismatch,
         ));
     }
-    if request.baseline.route_epoch != request.current_route_epoch {
+    if request.capture_route.capture_generation != request.capture_generation {
+        return Err(WindowsPacketEgressError::new(
+            Code::CaptureRouteGenerationMismatch,
+        ));
+    }
+    if request.capture_route.previous_route_epoch != request.baseline.route_epoch {
+        return Err(WindowsPacketEgressError::new(
+            Code::CaptureRoutePreviousEpochMismatch,
+        ));
+    }
+    if request.capture_route.active_route_epoch <= request.capture_route.previous_route_epoch {
+        return Err(WindowsPacketEgressError::new(
+            Code::InvalidCaptureRouteEpochTransition,
+        ));
+    }
+    if request.capture_route.active_route_epoch != request.current_route_epoch {
         return Err(WindowsPacketEgressError::new(Code::RouteEpochMismatch));
     }
     if request.now_ms < request.capture_started_at_ms {
@@ -201,6 +248,13 @@ pub fn prepare_windows_packet_egress(
     if request.baseline.observed_at_ms > request.capture_started_at_ms {
         return Err(WindowsPacketEgressError::new(
             Code::RouteObservedAfterCapture,
+        ));
+    }
+    if request.capture_route.activated_at_ms < request.baseline.observed_at_ms
+        || request.capture_route.activated_at_ms > request.capture_started_at_ms
+    {
+        return Err(WindowsPacketEgressError::new(
+            Code::InvalidCaptureRouteActivationWindow,
         ));
     }
     if request.baseline.observed_at_ms >= request.baseline.expires_at_ms
@@ -228,10 +282,18 @@ pub fn prepare_windows_packet_egress(
     if baseline_destination != destination {
         return Err(WindowsPacketEgressError::new(Code::DestinationMismatch));
     }
+    let capture_route_destination = parse_canonical_ip(&request.capture_route.destination)
+        .ok_or_else(|| WindowsPacketEgressError::new(Code::CaptureRouteDestinationMismatch))?;
+    if capture_route_destination != destination {
+        return Err(WindowsPacketEgressError::new(
+            Code::CaptureRouteDestinationMismatch,
+        ));
+    }
 
     for identity in [
         request.baseline.capture_interface,
         request.baseline.egress_interface,
+        request.capture_route.capture_interface,
         request.current_capture_interface,
         request.current_egress_interface,
     ] {
@@ -244,6 +306,11 @@ pub fn prepare_windows_packet_egress(
     if request.current_capture_interface != request.baseline.capture_interface {
         return Err(WindowsPacketEgressError::new(
             Code::CaptureInterfaceIdentityChanged,
+        ));
+    }
+    if request.capture_route.capture_interface != request.baseline.capture_interface {
+        return Err(WindowsPacketEgressError::new(
+            Code::CaptureRouteInterfaceMismatch,
         ));
     }
     if request.current_egress_interface != request.baseline.egress_interface {
@@ -283,6 +350,20 @@ pub fn prepare_windows_packet_egress(
     if !prefix_contains(route_network, prefix_length, destination) {
         return Err(WindowsPacketEgressError::new(
             Code::DestinationOutsideRoutePrefix,
+        ));
+    }
+    let (capture_route_network, capture_route_prefix_length) =
+        parse_canonical_prefix(&request.capture_route.route_prefix)
+            .ok_or_else(|| WindowsPacketEgressError::new(Code::CaptureRoutePrefixMismatch))?;
+    let expected_capture_prefix_length = match destination {
+        IpAddr::V4(_) => 32,
+        IpAddr::V6(_) => 128,
+    };
+    if capture_route_network != destination
+        || capture_route_prefix_length != expected_capture_prefix_length
+    {
+        return Err(WindowsPacketEgressError::new(
+            Code::CaptureRoutePrefixMismatch,
         ));
     }
 
