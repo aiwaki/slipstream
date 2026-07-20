@@ -434,7 +434,7 @@ fn parse_canonical_prefix(value: &str) -> Option<(IpAddr, u8)> {
     valid.then_some((network, prefix))
 }
 
-fn prefix_contains(network: IpAddr, prefix: u8, destination: IpAddr) -> bool {
+pub(super) fn prefix_contains(network: IpAddr, prefix: u8, destination: IpAddr) -> bool {
     match (network, destination) {
         (IpAddr::V4(network), IpAddr::V4(destination)) => {
             let mask = if prefix == 0 {
@@ -456,7 +456,7 @@ fn prefix_contains(network: IpAddr, prefix: u8, destination: IpAddr) -> bool {
     }
 }
 
-fn same_family(left: IpAddr, right: IpAddr) -> bool {
+pub(super) fn same_family(left: IpAddr, right: IpAddr) -> bool {
     matches!(
         (left, right),
         (IpAddr::V4(_), IpAddr::V4(_)) | (IpAddr::V6(_), IpAddr::V6(_))
@@ -482,7 +482,7 @@ fn is_usable_source_ipv4(address: Ipv4Addr) -> bool {
         || (a == 192 && b == 168)
 }
 
-fn is_safe_public_destination(destination: IpAddr) -> bool {
+pub(super) fn is_safe_public_destination(destination: IpAddr) -> bool {
     match destination {
         IpAddr::V4(address) => is_safe_public_ipv4(address),
         IpAddr::V6(address) => is_safe_public_ipv6(address),
