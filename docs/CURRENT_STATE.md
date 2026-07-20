@@ -9,12 +9,12 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-20, through merged
-[PR #186](https://github.com/aiwaki/slipstream/pull/186) at main commit
-`6c3759e79d3931fa5c5f1f65d13573bd90d7d339`, including its successful
-[native AMD64/ARM64 run 29714575179](https://github.com/aiwaki/slipstream/actions/runs/29714575179),
-[required CI run 29714575187](https://github.com/aiwaki/slipstream/actions/runs/29714575187),
+[PR #187](https://github.com/aiwaki/slipstream/pull/187) at main commit
+`1765398d634cd931d6f7b7494509aad8b323b3a5`, including its successful
+[native AMD64/ARM64 run 29718757015](https://github.com/aiwaki/slipstream/actions/runs/29718757015),
+[required CI run 29718757005](https://github.com/aiwaki/slipstream/actions/runs/29718757005),
 and
-[dependency-audit run 29714575209](https://github.com/aiwaki/slipstream/actions/runs/29714575209).
+[dependency-audit run 29718756994](https://github.com/aiwaki/slipstream/actions/runs/29718756994).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -406,6 +406,22 @@ containing baseline route prefix. The capture interface is rejected. The plan
 records the Windows IPv4/IPv6
 per-socket interface value but performs no route query, socket operation,
 adapter effect, route mutation, backend choice, or production composition.
+The exact merge commit `1765398` passed the native x64 and ARM64 lifecycle gate
+in
+[run 29718757015](https://github.com/aiwaki/slipstream/actions/runs/29718757015),
+all required checks and packaged lifecycle in
+[run 29718757005](https://github.com/aiwaki/slipstream/actions/runs/29718757005),
+and dependency audit in
+[run 29718756994](https://github.com/aiwaki/slipstream/actions/runs/29718756994).
+
+One earlier ARM64 attempt in
+[run 29715892426](https://github.com/aiwaki/slipstream/actions/runs/29715892426)
+reached the broad 20-minute job timeout inside the abrupt-owner cleanup step
+without phase output. Later exact-head and exact-main runs passed, so this is
+recorded as a flaky, insufficiently bounded qualification gate rather than
+routing-runtime evidence. The follow-up bounds the exact-child wait, removes
+blocking cleanup from `Drop`, streams phase output, and gives that step its own
+four-minute ceiling.
 
 ## Next Verified Action
 
