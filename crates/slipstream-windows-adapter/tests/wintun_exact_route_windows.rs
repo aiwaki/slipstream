@@ -35,6 +35,7 @@ use windows_sys::Win32::System::LibraryLoader::{
 const DISPOSABLE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_DISPOSABLE_CI";
 const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
+const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_PROBE_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -369,9 +370,10 @@ impl OwnedUnicastAddress {
         row.InterfaceIndex = interface.index;
         row.Address = ipv4_sockaddr(address);
         row.OnLinkPrefixLength = 32;
+        row.SkipAsSource = false;
         row.DadState = IpDadStatePreferred;
 
-        if lookup_unicast_address(row)? {
+        if lookup_unicast_address(row)?.is_some() {
             return Err("owned Wintun address already exists before creation".to_owned());
         }
         let result = unsafe { CreateUnicastIpAddressEntry(&row) };
@@ -379,10 +381,30 @@ impl OwnedUnicastAddress {
             return Err(format!("CreateUnicastIpAddressEntry failed with {result}"));
         }
         let owned = Self { row, present: true };
-        if !lookup_unicast_address(owned.row)? {
-            return Err("owned Wintun address could not be verified after creation".to_owned());
-        }
+        owned.wait_until_preferred()?;
         Ok(owned)
+    }
+
+    fn wait_until_preferred(&self) -> Result<(), String> {
+        let deadline = Instant::now() + ADDRESS_READY_TIMEOUT;
+        loop {
+            let Some(observed) = lookup_unicast_address(self.row)? else {
+                return Err("owned Wintun address disappeared before becoming ready".to_owned());
+            };
+            if !same_unicast_address_key(observed, self.row) || observed.OnLinkPrefixLength != 32 {
+                return Err("owned Wintun address identity or /32 prefix changed".to_owned());
+            }
+            if observed.DadState == IpDadStatePreferred && !observed.SkipAsSource {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "owned Wintun address did not become preferred within the bounded wait (dad_state={}, skip_as_source={})",
+                    observed.DadState, observed.SkipAsSource
+                ));
+            }
+            thread::sleep(ADDRESS_PROBE_INTERVAL);
+        }
     }
 
     fn remove_and_verify(&mut self) -> Result<(), String> {
@@ -393,7 +415,7 @@ impl OwnedUnicastAddress {
 
         let deadline = Instant::now() + ADDRESS_REMOVAL_TIMEOUT;
         loop {
-            if !lookup_unicast_address(self.row)? {
+            if lookup_unicast_address(self.row)?.is_none() {
                 self.present = false;
                 return Ok(());
             }
@@ -415,14 +437,39 @@ impl Drop for OwnedUnicastAddress {
     }
 }
 
-fn lookup_unicast_address(row: MIB_UNICASTIPADDRESS_ROW) -> Result<bool, String> {
+fn lookup_unicast_address(
+    row: MIB_UNICASTIPADDRESS_ROW,
+) -> Result<Option<MIB_UNICASTIPADDRESS_ROW>, String> {
     let mut observed = row;
     let result = unsafe { GetUnicastIpAddressEntry(&mut observed) };
     match result {
-        0 => Ok(true),
-        ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND => Ok(false),
+        0 => Ok(Some(observed)),
+        ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND => Ok(None),
         error => Err(format!("GetUnicastIpAddressEntry failed with {error}")),
     }
+}
+
+fn same_unicast_address_key(
+    left: MIB_UNICASTIPADDRESS_ROW,
+    right: MIB_UNICASTIPADDRESS_ROW,
+) -> bool {
+    (unsafe { left.InterfaceLuid.Value }) == (unsafe { right.InterfaceLuid.Value })
+        && left.InterfaceIndex == right.InterfaceIndex
+        && ipv4_from_sockaddr(left.Address) == ipv4_from_sockaddr(right.Address)
+}
+
+fn ipv4_from_sockaddr(address: SOCKADDR_INET) -> Option<Ipv4Addr> {
+    let address = unsafe { address.Ipv4 };
+    if address.sin_family != AF_INET {
+        return None;
+    }
+    let octets = unsafe { address.sin_addr.S_un.S_un_b };
+    Some(Ipv4Addr::new(
+        octets.s_b1,
+        octets.s_b2,
+        octets.s_b3,
+        octets.s_b4,
+    ))
 }
 
 fn ipv4_sockaddr(address: Ipv4Addr) -> SOCKADDR_INET {

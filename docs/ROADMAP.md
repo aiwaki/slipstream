@@ -436,7 +436,8 @@ therefore stays phased and closed to production traffic:
    create an address or default route. Native qualification separately owns one
    exact `192.0.2.1/32` address on its unique disposable Wintun adapter because
    a bare adapter cannot produce a post-route source observation; that fixture
-   must explicitly delete and prove absence of both its route and address.
+   must wait for the exact `/32` to become DAD-preferred and usable as a source,
+   then explicitly delete and prove absence of both its route and address.
    After that passes on both architectures, qualify actual IPv4/IPv6 socket
    binding under a competing capture route, followed by
    activation safety for pre-existing flows, bounded capture expiry/removal,

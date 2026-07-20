@@ -471,9 +471,11 @@ created the retained route on both AMD64 and ARM64, but the fresh
 `GetBestRoute2` observation then failed with Win32 code `1232`: the unique bare
 Wintun adapter had no usable source address. The correction keeps address
 ownership outside the route owner and production host. The native fixture now
-creates only `192.0.2.1/32` on its unique disposable adapter, verifies that
-exact row, runs the route qualification, explicitly removes the address, and
-requires bounded absence before accepting the route result. This remains under
+creates only `192.0.2.1/32` on its unique disposable adapter and polls the exact
+row until its DAD state is `Preferred`, its `/32` and interface/address key are
+unchanged, and `SkipAsSource` is false. It then runs the route qualification,
+explicitly removes the address, and requires bounded absence before accepting
+the route result. This remains under
 qualification until both architectures prove route, address, adapter, and
 session cleanup.
 
