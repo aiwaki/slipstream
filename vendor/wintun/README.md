@@ -14,7 +14,10 @@ The source record is not permission to activate a production TUN adapter. A
 feature-gated disposable-CI fixture may load only the already-admitted DLL,
 create one uniquely named test adapter, start and end the minimum-size Wintun
 session, and prove that closing its creation handle removes that exact adapter.
-It does not configure an address or route, delete the Wintun driver, inspect or
-change DNS/proxy/PAC/VPN state, or enter the production service host. Runtime
-route installation, packet-stack integration, crash rollback, and coexistence
-qualification remain separate reviewed gates.
+A separate disposable fixture terminates only an exact child-process handle
+while its unique adapter and session remain live, then requires bounded absence
+of that exact name. Neither fixture configures an address or route, deletes the
+Wintun driver, inspects or changes DNS/proxy/PAC/VPN state, or enters the
+production service host. Runtime route installation, packet-stack integration,
+loop avoidance, activation/removal safety, and coexistence qualification remain
+separate reviewed gates.

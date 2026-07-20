@@ -43,7 +43,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Native Wintun lifecycle qualified in PR CI; exact-main rerun pending | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. PR #185 loaded only the exact admitted DLL on disposable native AMD64 and ARM64 runners, created one unique test adapter, started and ended one minimum-size session, and proved that adapter was absent afterward without adding an address or route. This proves only native lifecycle compatibility and does not authorize capture or routing. Loop avoidance, pre-existing-flow activation safety, bounded removal, child-process crash rollback, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Abrupt-owner Wintun cleanup qualified in PR CI; exact-main rerun pending | `slipstream-core` owns pure routing, recovery, StatusV2, signed-policy, and activation models. The Windows adapter has CI-qualified service lifecycle, ownership, SCM, production host, data-plane, direct connector, owned direct ingress, and technology-neutral capture-source contracts. The WFP wire/runtime/session v1 work from PRs #162-#165 remains frozen research, and the shipping path does not include a Slipstream-owned kernel driver. The `windows-packet-adapter-v1` boundary pins official signed Wintun 0.14.1 AMD64/ARM64 artifacts and has qualified read-only package, DLL, PE, publisher, signer, and timestamp admission. Its pure exact-route gate remains frozen as non-authorizing because read-only system DNS cannot enumerate unbounded policy suffixes or application-owned DoH, and Wintun exposes no trusted hostname context. The separate `windows-packet-capture-v2` contract reclassifies each flow from bounded TLS SNI or QUIC Initial evidence and preserves direct passthrough for direct, unknown, ECH, missing, malformed, stale, unsafe, or mismatched observations. It selects no backend and is not composed into production. PR #185 qualified the ordinary adapter and minimum-session lifecycle on native AMD64 and ARM64. PR #186 keeps one unique adapter and session live in an exact child process, proves the adapter is present, terminates only that process handle without Rust cleanup, and requires bounded name disappearance; this passed on both native architectures in PR CI. Neither gate adds an address or route or authorizes capture or routing. Loop avoidance, pre-existing-flow activation safety, bounded removal, external-VPN coexistence, userspace packet processing, local/geo backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -372,7 +372,21 @@ Wintun lifecycle subgate. The exact admitted 0.14.1 DLL, unique adapter, minimum
 Windows runners in
 [run 29712583287](https://github.com/aiwaki/slipstream/actions/runs/29712583287).
 The fixture configured no address or route and did not touch DNS, proxy, PAC,
-VPN, or the Wintun driver. Exact-main evidence still waits for merge.
+VPN, or the Wintun driver. Its exact merge commit `d35ab35` passed the same
+native x64 and ARM64 gate in
+[run 29713033740](https://github.com/aiwaki/slipstream/actions/runs/29713033740),
+all required checks and packaged lifecycle in
+[run 29713033745](https://github.com/aiwaki/slipstream/actions/runs/29713033745),
+and dependency audit in
+[run 29713033754](https://github.com/aiwaki/slipstream/actions/runs/29713033754).
+
+[PR #186](https://github.com/aiwaki/slipstream/pull/186) added the separate
+abrupt-owner cleanup proof. The exact child-process adapter/session fixture
+passed on native x64 and ARM64 runners in
+[run 29713791755](https://github.com/aiwaki/slipstream/actions/runs/29713791755).
+It used no process-name search, adapter or driver deletion, address, route, DNS,
+proxy, PAC, VPN, or production-host composition. Exact-main evidence still
+waits for merge.
 
 ## Next Verified Action
 
@@ -385,9 +399,8 @@ rollback prepared in advance. No repeated administrator prompts are acceptable.
 If the smoke fails, uninstall immediately and preserve the first failing
 evidence; do not improvise another install in the same session.
 
-Continue M4 on disposable systems. After the native lifecycle fixture passes
-again on the exact merge commit, add a separate child-process crash-cleanup gate
-for one uniquely owned adapter. Follow it with outbound loop avoidance,
+Continue M4 on disposable systems. After the abrupt-owner fixture passes again
+on the exact merge commit, add separate outbound loop avoidance,
 pre-existing-flow activation safety, bounded capture removal, and external-VPN
 coexistence gates before any exact-route transaction or production composition.
 A partial DNS cache is never treated as complete attribution.
@@ -398,8 +411,8 @@ External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 - Add `SLIPSTREAM_GEPH_ACCOUNT_SECRET` to the protected
   `geph-qualification` environment, then run the account-backed owned-Geph
   qualification successfully from `main`.
-- Pass the native Wintun adapter/session lifecycle fixture again on the exact
-  merged `main` commit on both AMD64 and ARM64 Windows runners.
+- Pass the abrupt child-process Wintun cleanup fixture again on the exact merged
+  `main` commit on both native AMD64 and ARM64 Windows runners.
 - Qualify a physical default-route change and lid-close/wake cycle on a
   disposable Mac.
 - Add Developer ID signing, hardened runtime, notarization, stapling, policy-key
