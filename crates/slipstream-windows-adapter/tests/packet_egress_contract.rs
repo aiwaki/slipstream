@@ -62,6 +62,10 @@ fn contract_keeps_native_socket_route_and_adapter_effects_closed() {
     );
     assert_eq!(fixture.invariants["route_epoch_bound"], true);
     assert_eq!(fixture.invariants["luid_and_live_index_bound"], true);
+    assert_eq!(
+        fixture.invariants["source_address_revalidation_bound"],
+        true
+    );
     assert_eq!(fixture.invariants["capture_interface_rejected"], true);
     assert_eq!(
         fixture.invariants["ipv6_global_unicast_registry_snapshot"],
@@ -250,6 +254,8 @@ fn every_egress_failure_has_a_stable_machine_code() {
         WindowsPacketEgressErrorCode::EgressInterfaceIdentityChanged,
         WindowsPacketEgressErrorCode::CaptureInterfaceSelected,
         WindowsPacketEgressErrorCode::SourceAddressNotCanonical,
+        WindowsPacketEgressErrorCode::CurrentSourceAddressNotCanonical,
+        WindowsPacketEgressErrorCode::SourceAddressChanged,
         WindowsPacketEgressErrorCode::SourceAddressFamilyMismatch,
         WindowsPacketEgressErrorCode::UnsafeSourceAddress,
         WindowsPacketEgressErrorCode::InvalidRoutePrefix,

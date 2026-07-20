@@ -9,6 +9,7 @@
     "owned_capture_route_transition_bound": true,
     "route_epoch_bound": true,
     "luid_and_live_index_bound": true,
+    "source_address_revalidation_bound": true,
     "capture_interface_rejected": true,
     "ipv6_global_unicast_registry_snapshot": "2025-10-10",
     "ipv6_special_purpose_registry_snapshot": "2025-10-09",
@@ -30,6 +31,7 @@
     "trusted_route_collector": "required",
     "trusted_owned_route_transition_issuer": "required",
     "live_luid_to_index_revalidation": "required",
+    "live_source_address_revalidation": "required",
     "actual_ipv4_socket_binding": "required",
     "actual_ipv6_socket_binding": "required",
     "competing_capture_route_qualification": "required",
@@ -51,6 +53,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -94,6 +97,7 @@
         "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "fd00::24",
         "capture_route": {
           "capture_generation": 8,
           "destination": "2606:4700:4400::ac40:9b4c",
@@ -137,6 +141,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -172,6 +177,7 @@
         "current_route_epoch": 11,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -207,6 +213,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -242,6 +249,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -277,6 +285,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -312,6 +321,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 121, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -347,6 +357,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 900, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -382,6 +393,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "fd00::24",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -417,6 +429,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -452,6 +465,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -487,6 +501,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "104.16.58.5",
@@ -522,6 +537,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "192.0.2.1",
@@ -557,6 +573,7 @@
         "current_route_epoch": 10,
         "current_capture_interface": { "luid": 900, "index": 90 },
         "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
         "capture_route": {
           "capture_generation": 7,
           "destination": "192.88.99.1",
@@ -592,6 +609,7 @@
         "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "fd00::24",
         "capture_route": {
           "capture_generation": 8,
           "destination": "2001:20::1",
@@ -627,6 +645,7 @@
         "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "2001:30::1",
         "capture_route": {
           "capture_generation": 8,
           "destination": "2606:4700:4400::ac40:9b4c",
@@ -662,6 +681,7 @@
         "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "fd00::24",
         "capture_route": {
           "capture_generation": 8,
           "destination": "100::1",
@@ -697,6 +717,7 @@
         "current_route_epoch": 12,
         "current_capture_interface": { "luid": 901, "index": 91 },
         "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "100::1",
         "capture_route": {
           "capture_generation": 8,
           "destination": "2606:4700:4400::ac40:9b4c",
@@ -720,6 +741,42 @@
         }
       },
       "expected": { "result": "error", "error": "unsafe_source_address" }
+    },
+    {
+      "name": "source-address-change-invalidates-the-plan",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 60,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.5",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "source_address_changed" }
     }
   ]
 }

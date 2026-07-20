@@ -54,6 +54,7 @@ pub struct WindowsPacketEgressRequest {
     pub current_route_epoch: u64,
     pub current_capture_interface: WindowsPacketInterfaceIdentity,
     pub current_egress_interface: WindowsPacketInterfaceIdentity,
+    pub current_source_address: String,
     pub capture_route: WindowsPacketCaptureRouteActivationEvidence,
     pub baseline: WindowsPacketBaselineRouteEvidence,
 }
@@ -138,6 +139,8 @@ pub enum WindowsPacketEgressErrorCode {
     EgressInterfaceIdentityChanged,
     CaptureInterfaceSelected,
     SourceAddressNotCanonical,
+    CurrentSourceAddressNotCanonical,
+    SourceAddressChanged,
     SourceAddressFamilyMismatch,
     UnsafeSourceAddress,
     InvalidRoutePrefix,
@@ -174,6 +177,8 @@ impl WindowsPacketEgressErrorCode {
             Self::EgressInterfaceIdentityChanged => "egress_interface_identity_changed",
             Self::CaptureInterfaceSelected => "capture_interface_selected",
             Self::SourceAddressNotCanonical => "source_address_not_canonical",
+            Self::CurrentSourceAddressNotCanonical => "current_source_address_not_canonical",
+            Self::SourceAddressChanged => "source_address_changed",
             Self::SourceAddressFamilyMismatch => "source_address_family_mismatch",
             Self::UnsafeSourceAddress => "unsafe_source_address",
             Self::InvalidRoutePrefix => "invalid_route_prefix",
@@ -331,6 +336,11 @@ pub fn prepare_windows_packet_egress(
 
     let source_address = parse_canonical_ip(&request.baseline.source_address)
         .ok_or_else(|| WindowsPacketEgressError::new(Code::SourceAddressNotCanonical))?;
+    let current_source_address = parse_canonical_ip(&request.current_source_address)
+        .ok_or_else(|| WindowsPacketEgressError::new(Code::CurrentSourceAddressNotCanonical))?;
+    if current_source_address != source_address {
+        return Err(WindowsPacketEgressError::new(Code::SourceAddressChanged));
+    }
     if !same_family(destination, source_address) {
         return Err(WindowsPacketEgressError::new(
             Code::SourceAddressFamilyMismatch,

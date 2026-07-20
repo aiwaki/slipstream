@@ -125,8 +125,9 @@ Slipstream routing decisions and bounded recovery primitives.
   global-unicast allocation snapshot, including unallocated and special-purpose
   space. The positive allocation list is intersected with the frozen 2025-10-09
   special-purpose registry, so assigned but non-global ORCHIDv2 and DET
-  prefixes also fail closed. IPv4 records the `IP_UNICAST_IF` value in network
-  byte order while IPv6
+  prefixes also fail closed. The currently selected source address must still
+  exactly match the baseline before a plan is emitted. IPv4 records the
+  `IP_UNICAST_IF` value in network byte order while IPv6
   records the `IPV6_UNICAST_IF` value in host byte order. This does not
   call either socket option, trust JSON as native evidence, query or mutate a
   route, classify an external VPN, or compose the production host; those remain

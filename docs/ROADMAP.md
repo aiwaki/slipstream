@@ -417,8 +417,8 @@ therefore stays phased and closed to production traffic:
    route evidence paired with an exact owned capture-route activation from the
    baseline epoch to the current epoch. The transition is bound to the capture
    generation, exact host prefix, stable LUID/index identities, destination,
-   source family, and containing baseline prefix; every later route change
-   invalidates it;
+   and an unchanged currently selected source address with the expected family
+   and containing baseline prefix; every later route change invalidates it;
    it always rejects the capture interface and preserves any system-selected
    non-capture interface without classifying an external VPN. This is not
    native loop-avoidance evidence: next qualify actual IPv4/IPv6 socket binding
