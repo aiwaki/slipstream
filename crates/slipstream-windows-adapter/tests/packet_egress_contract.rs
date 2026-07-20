@@ -367,6 +367,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     for required in [
         "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI",
         "CreateIpForwardEntry2",
         "GetIpForwardEntry2",
         "DeleteIpForwardEntry2",
@@ -377,6 +378,13 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "record_route_change",
         "cleanup_after",
         "secondary_after",
+        "qualify_disposable_exact_host_route_with_active_probe",
+        "WindowsDisposableExactRouteActiveProbe",
+        "ActiveProbeGateClosed",
+        "ActiveProbeFailed",
+        "require_active_probe_gate()?;",
+        "recovery_error_after",
+        "recovery_failure_is_primary_and_retains_the_probe_failure",
         "error.win32_code()",
         "prior failure: {prior}; cleanup failure: {cleanup}",
         "ROUTE_REMOVAL_TIMEOUT",
@@ -408,6 +416,30 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
             "route owner contains {forbidden}"
         );
     }
+    let recovery_observation = owner
+        .find("let recovered = match observe_windows_packet_route(destination)")
+        .expect("route owner must always perform the recovery observation");
+    let pending_error_return = owner
+        .find("if let Some(error) = pending_error")
+        .expect("route owner must retain a pending active-probe failure");
+    assert!(
+        recovery_observation < pending_error_return,
+        "route owner must prove baseline recovery before returning an active-probe failure"
+    );
+    let probe_free_start = owner
+        .find("pub fn qualify_disposable_exact_host_route(")
+        .expect("route owner must retain the probe-free wrapper");
+    let active_probe_start = owner
+        .find("pub fn qualify_disposable_exact_host_route_with_active_probe")
+        .expect("route owner must expose the gated active-probe entrypoint");
+    let implementation_start = owner
+        .find("fn qualify_disposable_exact_host_route_impl")
+        .expect("both public entrypoints must share one exact-route implementation");
+    let probe_free_wrapper = &owner[probe_free_start..active_probe_start];
+    let active_probe_wrapper = &owner[active_probe_start..implementation_start];
+    assert!(probe_free_wrapper.contains("qualify_disposable_exact_host_route_impl"));
+    assert!(!probe_free_wrapper.contains("require_active_probe_gate"));
+    assert!(active_probe_wrapper.contains("require_active_probe_gate()?;"));
 
     let module = include_str!("../src/packet_egress/mod.rs").replace("\r\n", "\n");
     assert!(module.contains(
@@ -419,6 +451,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "disposable-windows-packet-fixture",
         "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI",
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
@@ -437,6 +470,17 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "exact cleanup failed",
         "remove_and_verify",
         "qualify_disposable_exact_host_route",
+        "qualify_disposable_exact_host_route_with_active_probe",
+        "native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route",
+        "injected active-probe failure must be returned after recovery proof",
+        "IP_UNICAST_IF",
+        "interface_index.to_be()",
+        "getsockopt",
+        "setsockopt",
+        "Socket::new",
+        ".local_addr()",
+        ".peer_addr()",
+        "connect no-payload IPv4 UDP socket",
         "require_adapter_absent",
     ] {
         assert!(
@@ -449,6 +493,11 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "GetUnicastIpAddressTable",
         "Set-DnsClientServerAddress",
         "WintunDeleteDriver",
+        ".send(",
+        ".send_to(",
+        ".recv(",
+        ".recv_from(",
+        "TcpStream",
     ] {
         assert!(
             !fixture.contains(forbidden),
@@ -461,6 +510,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow.contains("Qualify owned exact-route transition and cleanup"));
     assert!(workflow.contains("-TestTarget wintun_exact_route_windows"));
     assert!(workflow.contains("-TimeoutSeconds 120"));
+    assert!(workflow.contains("Qualify no-payload IPv4 socket selection under exact route"));
+    assert!(workflow
+        .contains("-TestName native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route"));
 
     let production_host = include_str!("../src/service_host/windows.rs");
     assert!(!production_host.contains("disposable_route_owner_v1"));
