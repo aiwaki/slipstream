@@ -760,8 +760,14 @@ done
         self.assertIn("-TimeoutSeconds 120", workflow)
         self.assertNotIn("Tee-Object -Variable output", workflow)
         self.assertIn("Start-Process", runner)
+        self.assertIn("function Stop-RetainedProcessTree", runner)
         self.assertIn("$process.WaitForExit(250)", runner)
-        self.assertIn("$process.Kill($true)", runner)
+        self.assertIn("$Process.Kill($true)", runner)
+        self.assertIn(
+            "if (-not $Process.WaitForExit($WaitMilliseconds))", runner
+        )
+        self.assertIn("throw $cleanupFailure", runner)
+        self.assertNotIn("[void]$process.WaitForExit", runner)
         self.assertIn("RedirectStandardOutput", runner)
         self.assertIn("RedirectStandardError", runner)
         for forbidden in (

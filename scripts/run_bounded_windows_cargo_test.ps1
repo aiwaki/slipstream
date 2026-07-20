@@ -74,6 +74,28 @@ function Publish-NewOutput(
     }
 }
 
+function Stop-RetainedProcessTree(
+    [System.Diagnostics.Process]$Process,
+    [int]$WaitMilliseconds
+) {
+    if ($Process.WaitForExit(0)) {
+        return
+    }
+
+    $rootProcessId = $Process.Id
+    try {
+        $Process.Kill($true)
+    } catch {
+        if ($Process.WaitForExit(0)) {
+            return
+        }
+        throw "Retained process $rootProcessId termination failed: $($_.Exception.Message)"
+    }
+    if (-not $Process.WaitForExit($WaitMilliseconds)) {
+        throw "Retained process $rootProcessId remained alive after termination"
+    }
+}
+
 $cargo = (Get-Command cargo -CommandType Application -ErrorAction Stop).Source
 $arguments = [System.Collections.Generic.List[string]]::new()
 foreach ($argument in @("test", "--locked", "--manifest-path", $ManifestPath)) {
@@ -102,6 +124,7 @@ $stderrPath = Join-Path $tempRoot "slipstream-cargo-$runId.stderr.log"
 $stdoutCursor = 0
 $stderrCursor = 0
 $process = $null
+$cleanupFailure = $null
 
 try {
     # Start-Process -Wait follows descendants. Poll the retained root handle so
@@ -129,12 +152,9 @@ try {
             Publish-NewOutput $stderrPath ([ref]$stderrCursor) $true
             $rootPid = $process.Id
             try {
-                $process.Kill($true)
+                Stop-RetainedProcessTree $process 10000
             } catch {
                 throw "Exact cargo process $rootPid timed out and its retained-tree termination failed: $($_.Exception.Message)"
-            }
-            if (-not $process.WaitForExit(10000)) {
-                throw "Exact cargo process $rootPid remained alive after retained-tree termination"
             }
             throw "Exact cargo process $rootPid exceeded the $TimeoutSeconds-second qualification deadline"
         }
@@ -157,13 +177,15 @@ try {
     if ($null -ne $process) {
         if (-not $process.HasExited) {
             try {
-                $process.Kill($true)
-                [void]$process.WaitForExit(10000)
+                Stop-RetainedProcessTree $process 10000
             } catch {
-                Write-Warning "Final exact-process cleanup failed: $($_.Exception.Message)"
+                $cleanupFailure = "Final exact-process cleanup failed: $($_.Exception.Message)"
             }
         }
         $process.Dispose()
     }
     Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $cleanupFailure) {
+        throw $cleanupFailure
+    }
 }
