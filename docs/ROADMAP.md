@@ -404,19 +404,24 @@ therefore stays phased and closed to production traffic:
    backend. Direct, unknown, missing, encrypted, ambiguous, malformed, stale,
    unsafe, or mismatched evidence stays direct. The production host does not
    compose v2 and no native API is present.
-3. Prove outbound loop avoidance, activation safety for pre-existing flows,
-   bounded capture expiry/removal, crash-safe rollback, and explicit
+3. Completed in disposable PR CI; repeat on the exact merged commit: qualify
+   the smallest native lifecycle on AMD64 and ARM64 Windows. It loads only the
+   exact admitted DLL, creates one uniquely named adapter, starts and ends the
+   minimum-size session, removes that adapter, and leaves addresses, routes,
+   DNS, proxy, PAC, VPN, and the driver itself untouched. This is a
+   compatibility subgate, not capture or routing authorization.
+4. Prove outbound loop avoidance, activation safety for pre-existing flows,
+   bounded capture expiry/removal, child-process crash cleanup, and explicit
    coexistence with an active external VPN on disposable AMD64 and ARM64
    Windows. Never add a default route or change system DNS, proxy, PAC, or VPN
    settings.
-4. Only after that feasibility gate passes, add owned Wintun adapter and exact-
-   route transactions, select a bounded userspace IPv4/IPv6 and TCP/UDP stack,
-   and bridge its flows
+5. Only after that feasibility gate passes, add owned exact-route transactions,
+   select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.
-5. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
+6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
-6. Compose packet effects into the production SCM host only after every earlier
+7. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
 

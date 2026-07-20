@@ -1,0 +1,134 @@
+name: windows-packet-adapter-qualification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "crates/slipstream-windows-adapter/**"
+      - "vendor/wintun/**"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "crates/slipstream-windows-adapter/**"
+      - "vendor/wintun/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-packet-adapter-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-wintun-lifecycle:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            architecture: amd64
+            source_architecture: x86_64
+            os_architecture: X64
+          - runner: windows-11-arm
+            architecture: arm64
+            source_architecture: aarch64
+            os_architecture: Arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
+        with:
+          components: clippy
+
+      - name: Require the expected native runner architecture
+        shell: pwsh
+        env:
+          EXPECTED_OS_ARCHITECTURE: ${{ matrix.os_architecture }}
+        run: |
+          $actual = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($actual -ne $env:EXPECTED_OS_ARCHITECTURE) {
+            throw "Expected $($env:EXPECTED_OS_ARCHITECTURE), got $actual"
+          }
+
+      - name: Fetch and verify the pinned Wintun package
+        shell: pwsh
+        env:
+          SOURCE_ARCHITECTURE: ${{ matrix.source_architecture }}
+        run: |
+          $source = Get-Content -Raw "vendor/wintun/SOURCE.json" | ConvertFrom-Json
+          $expectedUrl = "https://www.wintun.net/builds/wintun-0.14.1.zip"
+          if ($source.version -ne "0.14.1" -or $source.source_url -ne $expectedUrl) {
+            throw "Wintun source record is not the reviewed 0.14.1 package"
+          }
+
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP "slipstream-wintun-$($source.version)"
+          $archive = Join-Path $fixtureRoot "wintun-$($source.version).zip"
+          $expanded = Join-Path $fixtureRoot "expanded"
+          Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+
+          $verified = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+            try {
+              Invoke-WebRequest -Uri $source.source_url -OutFile $archive
+              $archiveFile = Get-Item -LiteralPath $archive
+              $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($archiveFile.Length -eq [long]$source.archive_length -and $archiveHash -eq $source.archive_sha256) {
+                $verified = $true
+                break
+              }
+              Write-Warning "Wintun attempt $attempt returned an incomplete or mismatched archive"
+            } catch {
+              Write-Warning "Wintun attempt $attempt failed: $($_.Exception.Message)"
+            }
+            if ($attempt -lt 4) {
+              Start-Sleep -Seconds (2 * $attempt)
+            }
+          }
+          if (-not $verified) {
+            throw "Pinned Wintun archive did not pass exact length and SHA-256 after four attempts"
+          }
+
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+          $architecture = $source.architectures.PSObject.Properties[$env:SOURCE_ARCHITECTURE].Value
+          if ($null -eq $architecture) {
+            throw "Missing Wintun source record for $($env:SOURCE_ARCHITECTURE)"
+          }
+          $dll = Join-Path $expanded $architecture.path
+          $dllFile = Get-Item -LiteralPath $dll
+          $dllHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($dllFile.Length -ne [long]$architecture.length -or $dllHash -ne $architecture.sha256) {
+            throw "Pinned Wintun DLL did not pass exact length and SHA-256"
+          }
+
+          "SLIPSTREAM_WINTUN_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SLIPSTREAM_WINTUN_LICENSE=$(Join-Path $expanded $source.license.path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SLIPSTREAM_WINTUN_DLL=$dll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Qualify owned adapter and session cleanup
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_LIFECYCLE_CI: "1"
+        run: |
+          $testName = "native_wintun_adapter_and_session_lifecycle_is_owned_and_disposable"
+          $output = & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-packet-fixture --test wintun_lifecycle_windows $testName -- --exact --test-threads=1 2>&1
+          $exitCode = $LASTEXITCODE
+          $lines = @($output | ForEach-Object { $_.ToString() })
+          $lines | Write-Output
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+          if ($lines -notcontains "test $testName ... ok") {
+            throw "Expected exact native Wintun lifecycle test did not execute"
+          }
+
+      - name: Lint the disposable packet fixture
+        run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --features disposable-windows-packet-fixture -- -D warnings
