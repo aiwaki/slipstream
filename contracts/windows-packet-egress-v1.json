@@ -1,0 +1,782 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_packet_egress",
+  "contract_version": 1,
+  "invariants": {
+    "pure_admission_only": true,
+    "pre_capture_route_evidence_required": true,
+    "capture_generation_bound": true,
+    "owned_capture_route_transition_bound": true,
+    "route_epoch_bound": true,
+    "luid_and_live_index_bound": true,
+    "source_address_revalidation_bound": true,
+    "capture_interface_rejected": true,
+    "ipv6_global_unicast_registry_snapshot": "2025-10-10",
+    "ipv6_special_purpose_registry_snapshot": "2025-10-09",
+    "ipv4_unicast_interface_value_is_network_order": true,
+    "ipv6_unicast_interface_value_is_host_order": true,
+    "external_vpn_interface_type_is_not_rewritten": true,
+    "backend_selection": false,
+    "native_route_query": false,
+    "native_socket_effect": false,
+    "native_adapter_effect": false,
+    "native_route_effect": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "production_service_host_composition": false,
+    "maximum_evidence_lifetime_ms": 5000
+  },
+  "remaining_native_gates": {
+    "trusted_route_collector": "required",
+    "trusted_owned_route_transition_issuer": "required",
+    "live_luid_to_index_revalidation": "required",
+    "live_source_address_revalidation": "required",
+    "actual_ipv4_socket_binding": "required",
+    "actual_ipv6_socket_binding": "required",
+    "competing_capture_route_qualification": "required",
+    "pre_existing_flow_activation_safety": "required",
+    "bounded_capture_expiry_and_removal": "required",
+    "external_vpn_coexistence": "required",
+    "disposable_amd64_qualification": "required",
+    "disposable_arm64_qualification": "required"
+  },
+  "vectors": [
+    {
+      "name": "ipv4-system-egress-is-generation-and-route-bound",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 41,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": {
+        "result": "plan",
+        "destination": "104.16.58.5",
+        "source_address": "10.0.0.4",
+        "egress_luid": 120,
+        "egress_index": 12,
+        "binding_kind": "ipv4_network_byte_order",
+        "binding_value": 201326592
+      }
+    },
+    {
+      "name": "ipv6-vpn-like-egress-is-preserved-without-type-guessing",
+      "request": {
+        "capture_generation": 8,
+        "flow_id": 42,
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "capture_started_at_ms": 2100,
+        "now_ms": 2200,
+        "current_route_epoch": 12,
+        "current_capture_interface": { "luid": 901, "index": 91 },
+        "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "fd00::24",
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "route_prefix": "2606:4700:4400::ac40:9b4c/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
+        "baseline": {
+          "capture_generation": 8,
+          "route_epoch": 11,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "observed_at_ms": 2000,
+          "expires_at_ms": 6000,
+          "capture_interface": { "luid": 901, "index": 91 },
+          "egress_interface": { "luid": 220, "index": 29 },
+          "source_address": "fd00::24",
+          "route_prefix": "::/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": {
+        "result": "plan",
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "source_address": "fd00::24",
+        "egress_luid": 220,
+        "egress_index": 29,
+        "binding_kind": "ipv6_host_byte_order",
+        "binding_value": 29
+      }
+    },
+    {
+      "name": "capture-generation-mismatch-fails-closed",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 43,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 6,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "capture_generation_mismatch" }
+    },
+    {
+      "name": "post-activation-route-change-invalidates-the-plan",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 44,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 11,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "route_epoch_mismatch" }
+    },
+    {
+      "name": "route-observed-after-capture-is-not-a-baseline",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 45,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1250,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1200,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "route_observed_after_capture" }
+    },
+    {
+      "name": "expired-route-evidence-fails-closed",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 46,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 5000,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "evidence_expired" }
+    },
+    {
+      "name": "destination-mismatch-fails-closed",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 47,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "1.1.1.1",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "destination_mismatch" }
+    },
+    {
+      "name": "reused-egress-index-or-luid-fails-closed",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 48,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 121, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "egress_interface_identity_changed" }
+    },
+    {
+      "name": "capture-interface-can-never-be-egress",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 49,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 900, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 900, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "capture_interface_selected" }
+    },
+    {
+      "name": "source-family-must-match-destination",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 50,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "fd00::24",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "fd00::24",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "source_address_family_mismatch" }
+    },
+    {
+      "name": "noncanonical-route-prefix-fails-closed",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 51,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "104.16.58.5/24",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "invalid_route_prefix" }
+    },
+    {
+      "name": "destination-must-belong-to-the-baseline-prefix",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 52,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "1.1.1.0/24",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "destination_outside_route_prefix" }
+    },
+    {
+      "name": "loopback-route-is-never-an-internet-egress",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 53,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": true
+        }
+      },
+      "expected": { "result": "error", "error": "loopback_route" }
+    },
+    {
+      "name": "unsafe-destination-is-not-admitted",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 54,
+        "destination": "192.0.2.1",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "192.0.2.1",
+          "route_prefix": "192.0.2.1/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "192.0.2.1",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_destination" }
+    },
+    {
+      "name": "deprecated-6to4-relay-block-is-not-public-egress",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 55,
+        "destination": "192.88.99.1",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.4",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "192.88.99.1",
+          "route_prefix": "192.88.99.1/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "192.88.99.1",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_destination" }
+    },
+    {
+      "name": "orchidv2-is-not-public-ipv6-egress",
+      "request": {
+        "capture_generation": 8,
+        "flow_id": 56,
+        "destination": "2001:20::1",
+        "capture_started_at_ms": 2100,
+        "now_ms": 2200,
+        "current_route_epoch": 12,
+        "current_capture_interface": { "luid": 901, "index": 91 },
+        "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "fd00::24",
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "2001:20::1",
+          "route_prefix": "2001:20::1/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
+        "baseline": {
+          "capture_generation": 8,
+          "route_epoch": 11,
+          "destination": "2001:20::1",
+          "observed_at_ms": 2000,
+          "expires_at_ms": 6000,
+          "capture_interface": { "luid": 901, "index": 91 },
+          "egress_interface": { "luid": 220, "index": 29 },
+          "source_address": "fd00::24",
+          "route_prefix": "::/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_destination" }
+    },
+    {
+      "name": "dets-prefix-is-not-a-public-ipv6-source",
+      "request": {
+        "capture_generation": 8,
+        "flow_id": 57,
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "capture_started_at_ms": 2100,
+        "now_ms": 2200,
+        "current_route_epoch": 12,
+        "current_capture_interface": { "luid": 901, "index": 91 },
+        "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "2001:30::1",
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "route_prefix": "2606:4700:4400::ac40:9b4c/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
+        "baseline": {
+          "capture_generation": 8,
+          "route_epoch": 11,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "observed_at_ms": 2000,
+          "expires_at_ms": 6000,
+          "capture_interface": { "luid": 901, "index": 91 },
+          "egress_interface": { "luid": 220, "index": 29 },
+          "source_address": "2001:30::1",
+          "route_prefix": "::/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_source_address" }
+    },
+    {
+      "name": "ipv6-special-purpose-destination-is-not-admitted",
+      "request": {
+        "capture_generation": 8,
+        "flow_id": 58,
+        "destination": "100::1",
+        "capture_started_at_ms": 2100,
+        "now_ms": 2200,
+        "current_route_epoch": 12,
+        "current_capture_interface": { "luid": 901, "index": 91 },
+        "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "fd00::24",
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "100::1",
+          "route_prefix": "100::1/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
+        "baseline": {
+          "capture_generation": 8,
+          "route_epoch": 11,
+          "destination": "100::1",
+          "observed_at_ms": 2000,
+          "expires_at_ms": 6000,
+          "capture_interface": { "luid": 901, "index": 91 },
+          "egress_interface": { "luid": 220, "index": 29 },
+          "source_address": "fd00::24",
+          "route_prefix": "::/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_destination" }
+    },
+    {
+      "name": "ipv6-special-purpose-source-is-not-admitted",
+      "request": {
+        "capture_generation": 8,
+        "flow_id": 59,
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "capture_started_at_ms": 2100,
+        "now_ms": 2200,
+        "current_route_epoch": 12,
+        "current_capture_interface": { "luid": 901, "index": 91 },
+        "current_egress_interface": { "luid": 220, "index": 29 },
+        "current_source_address": "100::1",
+        "capture_route": {
+          "capture_generation": 8,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "route_prefix": "2606:4700:4400::ac40:9b4c/128",
+          "previous_route_epoch": 11,
+          "active_route_epoch": 12,
+          "activated_at_ms": 2050,
+          "capture_interface": { "luid": 901, "index": 91 }
+        },
+        "baseline": {
+          "capture_generation": 8,
+          "route_epoch": 11,
+          "destination": "2606:4700:4400::ac40:9b4c",
+          "observed_at_ms": 2000,
+          "expires_at_ms": 6000,
+          "capture_interface": { "luid": 901, "index": 91 },
+          "egress_interface": { "luid": 220, "index": 29 },
+          "source_address": "100::1",
+          "route_prefix": "::/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_source_address" }
+    },
+    {
+      "name": "source-address-change-invalidates-the-plan",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 60,
+        "destination": "104.16.58.5",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "current_source_address": "10.0.0.5",
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "104.16.58.5",
+          "route_prefix": "104.16.58.5/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "104.16.58.5",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "source_address_changed" }
+    }
+  ]
+}

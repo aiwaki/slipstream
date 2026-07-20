@@ -9,7 +9,8 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
-| 2026-07-20 | Abrupt Wintun owner-process termination | Qualified on native AMD64/ARM64 PR runners; exact-main rerun pending | The fixture spawns only its exact integration-test executable. The child independently admits the pinned DLL, creates one unique `SlipstreamCI-Crash-*` adapter and minimum session, and atomically publishes its exact adapter name and PID. The parent proves that name is live, terminates only the retained child handle without running Rust destructors, waits for that exact process, and accepts success only after `WintunOpenAdapter` reports the unique name absent within 30 seconds. A 90-second child fail-safe exits without destructors if the parent itself fails. The gate performs no process-name search, adapter/driver deletion, route or address configuration, or DNS/proxy/PAC/VPN mutation. Both native architectures passed in [run 29713791755](https://github.com/aiwaki/slipstream/actions/runs/29713791755). | Repeat on the exact merged commit. Then separate loop, activation, removal, and VPN-coexistence proofs. |
+| 2026-07-20 | Windows packet egress and loop-avoidance boundary | Pure v1 contract implemented; native proof still closed | Windows exposes separate IPv4 and IPv6 per-socket interface selection, while Wintun exposes a stable adapter LUID that can be converted back to the current index. Installing the owned capture route is itself an expected route-epoch transition, so equality between the pre-capture and active epochs would reject every valid plan. The corrected contract pairs fresh pre-capture route evidence with an exact owned activation from that baseline epoch to the current epoch and binds both to the capture generation, destination, exact host prefix, unchanged currently selected source address, and unchanged LUID/index identities. Every later route change invalidates the plan. It always rejects the capture interface and preserves any other system-selected interface, including an external VPN, without classifying or mutating it. IPv4 stores the interface index in network byte order and IPv6 in host byte order. The module has no route query, notification, socket, adapter, route, backend, or production effect. | Build a trusted read-only `GetBestRoute2`/LUID/source collector plus an owned-transition issuer, then qualify actual IPv4/IPv6 binding with a competing capture route on native AMD64/ARM64. Pre-existing flows, bounded removal, and external-VPN coexistence remain required. |
+| 2026-07-20 | Abrupt Wintun owner-process termination | Qualified on exact-main native AMD64/ARM64 runners | The fixture spawns only its exact integration-test executable. The child independently admits the pinned DLL, creates one unique `SlipstreamCI-Crash-*` adapter and minimum session, and atomically publishes its exact adapter name and PID. The parent proves that name is live, terminates only the retained child handle without running Rust destructors, waits for that exact process, and accepts success only after `WintunOpenAdapter` reports the unique name absent within 30 seconds. A 90-second child fail-safe exits without destructors if the parent itself fails. The gate performs no process-name search, adapter/driver deletion, route or address configuration, or DNS/proxy/PAC/VPN mutation. Both native architectures passed in PR [run 29713791755](https://github.com/aiwaki/slipstream/actions/runs/29713791755) and exact-main [run 29714575179](https://github.com/aiwaki/slipstream/actions/runs/29714575179). | Keep the cleanup subgate required. Continue with separate loop, activation, removal, and VPN-coexistence proofs. |
 | 2026-07-20 | Wintun native lifecycle and partial artifact delivery | Qualified on exact-main native AMD64/ARM64 runners | A direct download of the pinned 750,540-byte Wintun archive exited successfully after writing only 16,366 bytes and produced no ZIP central directory. The existing artifact admission would reject it, but transport exit status alone is therefore not download evidence. The native fixture retains the exact read-only admission while loading only the matching-architecture DLL, creates one unique adapter, starts/ends a 128 KiB session, and removes only that adapter. Its workflow retries boundedly and accepts the archive and DLL only after exact length and SHA-256 checks. It never calls `WintunDeleteDriver` or configures routes, addresses, DNS, proxy, PAC, or VPN. The first native run proved that Wintun 0.14.1 reports an absent adapter as `ERROR_NOT_FOUND (1168)` on both x64 and ARM64; the pre/post proof accepts only that code or `ERROR_FILE_NOT_FOUND`, and every other open failure remains fatal. The corrected fixture passed in PR [run 29712583287](https://github.com/aiwaki/slipstream/actions/runs/29712583287) and exact-main [run 29713033740](https://github.com/aiwaki/slipstream/actions/runs/29713033740). | Keep this compatibility subgate required. Do not infer capture or routing readiness from it. |
 | 2026-07-20 | Packaged qualification used a superseded Geph release | Root cause proven; workflow fix under CI | `ci.yml` and `owned-geph-qualification.yml` derived only `geph-vendor-0.3.0`, while `vendor/geph/SOURCE.json` records revision `1` and `build-app.yml` correctly uses `geph-vendor-0.3.0-r1`. GitHub labels the unrevisioned release superseded; its `geph5-client` SHA-256 is `a1df14cb...`, while r1 is `3299d20f...`. The previous packaged lifecycle therefore qualified the macOS/PF lifecycle around a different Geph binary than the release path. A coincident GitHub `503` exposed the mismatch. Every workflow download now derives the immutable revisioned tag and uses one bounded retry helper that publishes no partial output. | Disqualify the downloaded `140598b` app from workstation testing. Require the exact corrected merge commit to pass packaged lifecycle with r1, then download that artifact without launching it. |
 | 2026-07-20 | Packaged daemon blocked before first StatusV2 during controlled install | Root cause reproduced; workstation rollback clean; bounded startup fix under qualification | Exact artifact `c07ade34` started its listener and standalone Telegram-proxy check, then emitted no later session line before the installer reported `status missing`. The private anchor had not armed. Workstation evidence showed synchronous system DNS could stall on the first neutral target while a later target was directly reachable. The resolver ran in the daemon process with no timeout, and `amain()` wrote its first status only after awaiting the whole PF qualification. System-DNS lookups now run under the console user in killable child processes with per-target limits and one monotonic preflight budget. Startup publishes a probe-free `dormant` snapshot immediately after listener creation; regular status consumes cached DNS diagnostics, whose background refresh uses the same bounded resolver helper. A real sleeping child proves timeout and process disappearance. The packaged lifecycle now blackholes the first neutral target at the macOS resolver layer, captures the already-published status at that query, requires a later target to activate, and rejects a surviving helper. | Pass full Python/Rust checks and the exact packaged lifecycle before any new workstation install; do not use the primary workstation as the first privileged gate. |
@@ -256,8 +257,46 @@ activation does not strand pre-existing flows, that capture expires and is
 removed promptly, and that an external VPN remains unmodified and usable.
 Windows exposes explicit per-socket interface selection such as
 [`IP_UNICAST_IF`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-ip-socket-options),
+and
+[`IPV6_UNICAST_IF`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-ipv6-socket-options),
 but the v2 feasibility gate must prove the complete IPv4/IPv6 behavior rather
-than assume that one socket option solves loop avoidance.
+than assume that one socket option solves loop avoidance. Wintun exposes the
+adapter LUID through its
+[`WintunGetAdapterLUID`](https://git.zx2c4.com/wintun/tree/api/wintun.h?h=0.14.1)
+API. A future read-only collector must obtain the pre-capture route through
+[`GetBestRoute2`](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/getbestroute2),
+revalidate its current interface index through
+[`ConvertInterfaceLuidToIndex`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoindex),
+record the baseline route epoch, and after activation repeat the read-only
+best-route/source lookup constrained to that preserved egress interface. The
+current source must exactly match the baseline; interface identity alone does
+not prove that an address remains selected. Installing the exact owned capture
+route
+is itself an expected epoch transition, so a separate trusted issuer must
+serialize that operation and attest its destination, exact host prefix,
+capture interface, previous epoch, and active epoch. Every later
+[`NotifyRouteChange2`](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyroutechange2)
+epoch advance invalidates the admission.
+
+`windows-packet-egress-v1` freezes only the pure admission produced from that
+future trusted evidence. It permits any non-capture egress selected by the
+system, including an external VPN, and contains no interface-type allowlist.
+IPv4 special-purpose ranges, including the deprecated `192.88.99.0/24` 6to4
+relay block, fail closed. Public IPv6 destinations are frozen against the
+[IANA IPv6 Global Unicast Address Space](https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml)
+snapshot dated 2025-10-10 and cross-checked against the 2025-10-09
+[IPv6 Special-Purpose Address Space](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml);
+the positive allocation table is not sufficient by itself. Assigned but
+non-global ORCHIDv2 `2001:20::/28` and DET `2001:30::/28`, plus unlisted,
+documentation, and discard-only ranges, fail closed. The
+plan records the platform-specific socket-option value but does not call the
+option. Therefore its vectors prove stale-, special-purpose-, and
+self-interface rejection, not that real packets avoid a competing capture
+route; that remains a disposable native AMD64/ARM64 gate. The serializable
+activation record is deliberately not authorization to mutate the route table.
+The native issuer remains closed until it can prove that the record describes
+Slipstream's exact serialized transition rather than hiding an unrelated
+concurrent route change.
 
 ### Remaining safety gates
 
@@ -268,21 +307,28 @@ a route-table mutation. Native work remains ordered as follows:
 1. Completed: collect artifact evidence through read-only Windows APIs and
    qualify the official package plus tamper rejection on disposable AMD64 and
    ARM64 Windows without loading the DLL or creating an adapter.
-2. Freeze packet-route v1 and specify a capture-only v2 contract. Backend
-   authorization must come from bounded per-flow evidence; missing or opaque
-   hostname evidence stays direct.
-3. Before loading a DLL or changing a route, prove outbound loop avoidance,
-   activation safety for existing flows, bounded capture expiry/removal, and
-   explicit coexistence with an already-active external VPN on disposable
-   Windows.
-4. Only if that feasibility gate passes, define owned adapter and exact-route
+2. Completed as a pure contract: freeze packet-route v1 and specify a
+   capture-only v2 boundary. Backend authorization must come from bounded
+   per-flow evidence; missing or opaque hostname evidence stays direct.
+3. Completed on native AMD64 and ARM64: load only the exact admitted DLL,
+   create one unique adapter and minimum session, and prove bounded cleanup
+   after both ordinary close and abrupt termination of the exact owner process.
+   These gates configure no address or route.
+4. Current: keep `windows-packet-egress-v1` pure while adding a trusted
+   read-only route collector, an exact owned-transition issuer, and a
+   disposable IPv4/IPv6 socket fixture. Prove
+   actual outbound loop avoidance under a competing capture route, activation
+   safety for existing flows, bounded capture expiry/removal, and explicit
+   coexistence with an already-active external VPN on both native
+   architectures.
+5. Only if that feasibility gate passes, define owned adapter and exact-route
    transactions with crash-safe rollback, then select and bound a userspace
    IPv4/IPv6 and TCP/UDP stack. Prove that direct,
    local-bypass, and geo-exit packet flows retain the shared policy invariants;
    Discord and YouTube must never acquire a Geph edge.
-5. Qualify crash, reboot, sleep/wake, update, uninstall, route churn, and
+6. Qualify crash, reboot, sleep/wake, update, uninstall, route churn, and
    external DNS/proxy/PAC/VPN coexistence on disposable AMD64 and ARM64 hosts.
-6. Compose the adapter into the production service only after every earlier
+7. Compose the adapter into the production service only after every earlier
    gate passes and teardown leaves no adapter, route, process, or durable
    ownership residue.
 

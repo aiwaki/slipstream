@@ -1,0 +1,296 @@
+use serde::Deserialize;
+use serde_json::Value;
+use slipstream_windows_adapter::packet_egress::{
+    prepare_windows_packet_egress, WindowsPacketEgressErrorCode, WindowsPacketEgressRequest,
+    WindowsPacketSocketInterfaceBinding, MAX_PACKET_EGRESS_EVIDENCE_LIFETIME_MS,
+    WINDOWS_PACKET_EGRESS_CONTRACT_VERSION,
+};
+
+const CONTRACT: &str = include_str!("../../../contracts/windows-packet-egress-v1.json");
+
+#[derive(Debug, Deserialize)]
+struct ContractFixture {
+    schema_version: u32,
+    contract: String,
+    contract_version: u32,
+    invariants: Value,
+    remaining_native_gates: Value,
+    vectors: Vec<EgressVector>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EgressVector {
+    name: String,
+    request: WindowsPacketEgressRequest,
+    expected: ExpectedEgress,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExpectedEgress {
+    result: String,
+    destination: Option<String>,
+    source_address: Option<String>,
+    egress_luid: Option<u64>,
+    egress_index: Option<u32>,
+    binding_kind: Option<String>,
+    binding_value: Option<u32>,
+    error: Option<WindowsPacketEgressErrorCode>,
+}
+
+fn contract() -> ContractFixture {
+    serde_json::from_str(CONTRACT).expect("Windows packet-egress v1 must be valid JSON")
+}
+
+#[test]
+fn contract_keeps_native_socket_route_and_adapter_effects_closed() {
+    let fixture = contract();
+    assert_eq!(fixture.schema_version, 1);
+    assert_eq!(fixture.contract, "slipstream.windows_packet_egress");
+    assert_eq!(
+        fixture.contract_version,
+        WINDOWS_PACKET_EGRESS_CONTRACT_VERSION
+    );
+    assert_eq!(fixture.invariants["pure_admission_only"], true);
+    assert_eq!(
+        fixture.invariants["pre_capture_route_evidence_required"],
+        true
+    );
+    assert_eq!(fixture.invariants["capture_generation_bound"], true);
+    assert_eq!(
+        fixture.invariants["owned_capture_route_transition_bound"],
+        true
+    );
+    assert_eq!(fixture.invariants["route_epoch_bound"], true);
+    assert_eq!(fixture.invariants["luid_and_live_index_bound"], true);
+    assert_eq!(
+        fixture.invariants["source_address_revalidation_bound"],
+        true
+    );
+    assert_eq!(fixture.invariants["capture_interface_rejected"], true);
+    assert_eq!(
+        fixture.invariants["ipv6_global_unicast_registry_snapshot"],
+        "2025-10-10"
+    );
+    assert_eq!(
+        fixture.invariants["ipv6_special_purpose_registry_snapshot"],
+        "2025-10-09"
+    );
+    assert_eq!(fixture.invariants["backend_selection"], false);
+    assert_eq!(fixture.invariants["native_route_query"], false);
+    assert_eq!(fixture.invariants["native_socket_effect"], false);
+    assert_eq!(fixture.invariants["native_adapter_effect"], false);
+    assert_eq!(fixture.invariants["native_route_effect"], false);
+    assert_eq!(fixture.invariants["default_route_mutation"], false);
+    assert_eq!(fixture.invariants["system_dns_mutation"], false);
+    assert_eq!(fixture.invariants["proxy_pac_vpn_mutation"], false);
+    assert_eq!(
+        fixture.invariants["production_service_host_composition"],
+        false
+    );
+    assert_eq!(
+        fixture.invariants["maximum_evidence_lifetime_ms"],
+        MAX_PACKET_EGRESS_EVIDENCE_LIFETIME_MS
+    );
+    assert!(fixture
+        .remaining_native_gates
+        .as_object()
+        .expect("native gates must be an object")
+        .values()
+        .all(|value| value == "required"));
+    assert_eq!(
+        fixture.remaining_native_gates["trusted_owned_route_transition_issuer"],
+        "required"
+    );
+}
+
+#[test]
+fn language_neutral_vectors_admit_only_fresh_non_capture_egress() {
+    for vector in contract().vectors {
+        match prepare_windows_packet_egress(&vector.request) {
+            Ok(plan) => {
+                assert_eq!(vector.expected.result, "plan", "{}", vector.name);
+                assert_eq!(
+                    Some(plan.destination().to_string()),
+                    vector.expected.destination,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(
+                    Some(plan.source_address().to_string()),
+                    vector.expected.source_address,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(
+                    Some(plan.egress_interface().luid),
+                    vector.expected.egress_luid,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(
+                    Some(plan.egress_interface().index),
+                    vector.expected.egress_index,
+                    "{}",
+                    vector.name
+                );
+                let (kind, value) = match plan.socket_binding() {
+                    WindowsPacketSocketInterfaceBinding::Ipv4NetworkByteOrder(value) => {
+                        ("ipv4_network_byte_order", value)
+                    }
+                    WindowsPacketSocketInterfaceBinding::Ipv6HostByteOrder(value) => {
+                        ("ipv6_host_byte_order", value)
+                    }
+                };
+                assert_eq!(
+                    Some(kind.to_owned()),
+                    vector.expected.binding_kind,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(
+                    Some(value),
+                    vector.expected.binding_value,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(vector.expected.error, None, "{}", vector.name);
+                assert_eq!(
+                    plan.capture_generation(),
+                    vector.request.capture_generation,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(plan.flow_id(), vector.request.flow_id, "{}", vector.name);
+                assert_eq!(
+                    plan.route_epoch(),
+                    vector.request.current_route_epoch,
+                    "{}",
+                    vector.name
+                );
+                assert_eq!(
+                    plan.expires_at_ms(),
+                    vector.request.baseline.expires_at_ms,
+                    "{}",
+                    vector.name
+                );
+            }
+            Err(error) => {
+                assert_eq!(vector.expected.result, "error", "{}", vector.name);
+                assert_eq!(Some(error.code()), vector.expected.error, "{}", vector.name);
+                assert_eq!(vector.expected.destination, None, "{}", vector.name);
+                assert_eq!(vector.expected.source_address, None, "{}", vector.name);
+                assert_eq!(vector.expected.egress_luid, None, "{}", vector.name);
+                assert_eq!(vector.expected.egress_index, None, "{}", vector.name);
+                assert_eq!(vector.expected.binding_kind, None, "{}", vector.name);
+                assert_eq!(vector.expected.binding_value, None, "{}", vector.name);
+            }
+        }
+    }
+}
+
+#[test]
+fn owned_capture_route_transition_is_exact_and_later_changes_invalidate_it() {
+    let mut request = contract()
+        .vectors
+        .into_iter()
+        .find(|vector| vector.name == "ipv4-system-egress-is-generation-and-route-bound")
+        .expect("IPv4 admission vector must exist")
+        .request;
+
+    assert!(prepare_windows_packet_egress(&request).is_ok());
+
+    request.capture_route.previous_route_epoch = request.baseline.route_epoch + 1;
+    assert_eq!(
+        prepare_windows_packet_egress(&request)
+            .expect_err("owned transition must begin at the baseline epoch")
+            .code(),
+        WindowsPacketEgressErrorCode::CaptureRoutePreviousEpochMismatch
+    );
+
+    request.capture_route.previous_route_epoch = request.baseline.route_epoch;
+    request.capture_route.active_route_epoch = request.baseline.route_epoch;
+    assert_eq!(
+        prepare_windows_packet_egress(&request)
+            .expect_err("owned transition must advance the route epoch")
+            .code(),
+        WindowsPacketEgressErrorCode::InvalidCaptureRouteEpochTransition
+    );
+
+    request.capture_route.active_route_epoch = request.current_route_epoch;
+    request.current_route_epoch += 1;
+    assert_eq!(
+        prepare_windows_packet_egress(&request)
+            .expect_err("a later route change must invalidate the admission")
+            .code(),
+        WindowsPacketEgressErrorCode::RouteEpochMismatch
+    );
+}
+
+#[test]
+fn every_egress_failure_has_a_stable_machine_code() {
+    let codes = [
+        WindowsPacketEgressErrorCode::InvalidCaptureGeneration,
+        WindowsPacketEgressErrorCode::InvalidFlowId,
+        WindowsPacketEgressErrorCode::InvalidRouteEpoch,
+        WindowsPacketEgressErrorCode::CaptureGenerationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRouteGenerationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRoutePreviousEpochMismatch,
+        WindowsPacketEgressErrorCode::InvalidCaptureRouteEpochTransition,
+        WindowsPacketEgressErrorCode::RouteEpochMismatch,
+        WindowsPacketEgressErrorCode::InvalidActivationWindow,
+        WindowsPacketEgressErrorCode::RouteObservedAfterCapture,
+        WindowsPacketEgressErrorCode::InvalidCaptureRouteActivationWindow,
+        WindowsPacketEgressErrorCode::InvalidEvidenceWindow,
+        WindowsPacketEgressErrorCode::EvidenceExpired,
+        WindowsPacketEgressErrorCode::DestinationNotCanonical,
+        WindowsPacketEgressErrorCode::BaselineDestinationNotCanonical,
+        WindowsPacketEgressErrorCode::UnsafeDestination,
+        WindowsPacketEgressErrorCode::DestinationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRouteDestinationMismatch,
+        WindowsPacketEgressErrorCode::CaptureRoutePrefixMismatch,
+        WindowsPacketEgressErrorCode::InvalidInterfaceIdentity,
+        WindowsPacketEgressErrorCode::CaptureInterfaceIdentityChanged,
+        WindowsPacketEgressErrorCode::CaptureRouteInterfaceMismatch,
+        WindowsPacketEgressErrorCode::EgressInterfaceIdentityChanged,
+        WindowsPacketEgressErrorCode::CaptureInterfaceSelected,
+        WindowsPacketEgressErrorCode::SourceAddressNotCanonical,
+        WindowsPacketEgressErrorCode::CurrentSourceAddressNotCanonical,
+        WindowsPacketEgressErrorCode::SourceAddressChanged,
+        WindowsPacketEgressErrorCode::SourceAddressFamilyMismatch,
+        WindowsPacketEgressErrorCode::UnsafeSourceAddress,
+        WindowsPacketEgressErrorCode::InvalidRoutePrefix,
+        WindowsPacketEgressErrorCode::RoutePrefixFamilyMismatch,
+        WindowsPacketEgressErrorCode::DestinationOutsideRoutePrefix,
+        WindowsPacketEgressErrorCode::LoopbackRoute,
+    ];
+    assert!(codes.iter().all(|code| !code.as_str().is_empty()));
+    assert_eq!(MAX_PACKET_EGRESS_EVIDENCE_LIFETIME_MS, 5_000);
+}
+
+#[test]
+fn egress_v1_is_pure_and_not_composed_into_the_production_host() {
+    let source = include_str!("../src/packet_egress/v1.rs").replace("\r\n", "\n");
+    for forbidden in [
+        "windows_sys",
+        "TcpStream",
+        "UdpSocket",
+        "socket2",
+        "setsockopt",
+        "GetBestRoute2",
+        "NotifyRouteChange2",
+        "ConvertInterfaceLuidToIndex",
+        "CreateIpForwardEntry2",
+        "DeleteIpForwardEntry2",
+        "Wintun",
+        "unsafe {",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "egress v1 contains {forbidden}"
+        );
+    }
+
+    let production_host = include_str!("../src/service_host/v1.rs");
+    assert!(!production_host.contains("packet_egress"));
+    assert!(!production_host.contains("prepare_windows_packet_egress"));
+}

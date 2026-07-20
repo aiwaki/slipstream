@@ -111,6 +111,27 @@ Slipstream routing decisions and bounded recovery primitives.
   route, socket, DNS, proxy, PAC, VPN, or production-host effect, and keeps all
   native loop, activation, expiry, rollback, coexistence, and architecture
   qualification gates closed.
+- `windows-packet-egress-v1.json` freezes the pure outbound loop-avoidance
+  admission below that capture boundary. A plan requires short-lived route
+  evidence observed before capture plus an exact owned capture-route activation
+  that moves the baseline epoch to the active epoch. The activation, plan, and
+  current state must retain the same capture generation, destination, exact
+  host prefix, and capture-interface LUID/index; a later route change
+  invalidates the plan. Stable egress LUID-to-index identity, source family,
+  and a containing baseline route prefix are also required. The capture
+  interface is always rejected. IPv4 special-purpose ranges, including the
+  deprecated `192.88.99.0/24` 6to4 relay block, fail closed. IPv6 destinations
+  fail closed against the frozen 2025-10-10 IANA
+  global-unicast allocation snapshot, including unallocated and special-purpose
+  space. The positive allocation list is intersected with the frozen 2025-10-09
+  special-purpose registry, so assigned but non-global ORCHIDv2 and DET
+  prefixes also fail closed. The currently selected source address must still
+  exactly match the baseline before a plan is emitted. IPv4 records the
+  `IP_UNICAST_IF` value in network byte order while IPv6
+  records the `IPV6_UNICAST_IF` value in host byte order. This does not
+  call either socket option, trust JSON as native evidence, query or mutate a
+  route, classify an external VPN, or compose the production host; those remain
+  separate disposable AMD64/ARM64 gates.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service
