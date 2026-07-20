@@ -5,7 +5,7 @@
 //! route, open a socket, load a packet adapter, or authorize packet egress.
 
 use super::v1::{is_safe_public_destination, prefix_contains, same_family};
-use super::WindowsPacketInterfaceIdentity;
+use super::{WindowsPacketInterfaceIdentity, WindowsPacketRouteObservation};
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -18,37 +18,6 @@ use windows_sys::Win32::Networking::WinSock::{
     AF_INET, AF_INET6, IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, SOCKADDR_IN,
     SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WindowsPacketRouteObservation {
-    destination: IpAddr,
-    egress_interface: WindowsPacketInterfaceIdentity,
-    source_address: IpAddr,
-    route_prefix: String,
-    route_is_loopback: bool,
-}
-
-impl WindowsPacketRouteObservation {
-    pub const fn destination(&self) -> IpAddr {
-        self.destination
-    }
-
-    pub const fn egress_interface(&self) -> WindowsPacketInterfaceIdentity {
-        self.egress_interface
-    }
-
-    pub const fn source_address(&self) -> IpAddr {
-        self.source_address
-    }
-
-    pub fn route_prefix(&self) -> &str {
-        &self.route_prefix
-    }
-
-    pub const fn route_is_loopback(&self) -> bool {
-        self.route_is_loopback
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WindowsPacketRouteObserverErrorCode {
@@ -188,13 +157,13 @@ pub fn observe_windows_packet_route(
     };
     revalidate_interface_identity(interface)?;
 
-    Ok(WindowsPacketRouteObservation {
+    Ok(WindowsPacketRouteObservation::from_kernel(
         destination,
-        egress_interface: interface,
+        interface,
         source_address,
         route_prefix,
-        route_is_loopback: best_route.Loopback,
-    })
+        best_route.Loopback,
+    ))
 }
 
 fn revalidate_interface_identity(
