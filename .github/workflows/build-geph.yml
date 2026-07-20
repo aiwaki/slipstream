@@ -108,13 +108,14 @@ jobs:
               }
             done
             rm -rf /tmp/geph-existing
-            mkdir -p /tmp/geph-existing
-            gh release download "$tag" --repo "${{ github.repository }}" \
+            python3 scripts/download_github_release_assets.py \
+              --repo "${{ github.repository }}" \
+              --tag "$tag" \
+              --output /tmp/geph-existing \
               --pattern geph5-client.SOURCE.json \
               --pattern geph5-client.Cargo.lock \
               --pattern geph5-client.spdx.json \
-              --pattern geph5-client-dependency-audit.json \
-              --dir /tmp/geph-existing
+              --pattern geph5-client-dependency-audit.json
             cmp vendor/geph/SOURCE.json /tmp/geph-existing/geph5-client.SOURCE.json || {
               echo "release $tag has a different source contract; bump release_revision"
               exit 1

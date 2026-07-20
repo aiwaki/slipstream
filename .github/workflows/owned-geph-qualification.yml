@@ -82,10 +82,15 @@ jobs:
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
-          tag="geph-vendor-$version"
-          mkdir -p app-tauri/src-tauri/binaries /tmp/geph
-          gh release download "$tag" --repo "${{ github.repository }}" \
-            --pattern geph5-client --dir /tmp/geph
+          release_revision="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["release_revision"])')"
+          tag="geph-vendor-$version-r$release_revision"
+          rm -rf /tmp/geph
+          mkdir -p app-tauri/src-tauri/binaries
+          python3 scripts/download_github_release_assets.py \
+            --repo "${{ github.repository }}" \
+            --tag "$tag" \
+            --output /tmp/geph \
+            --pattern geph5-client
           cp /tmp/geph/geph5-client \
             app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
           chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin

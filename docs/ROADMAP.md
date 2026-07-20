@@ -58,11 +58,13 @@ release exists; stable distribution remains a separate M3 gate.
 The primary-Mac delivery failures exposed both kernel `lo0 (skip)` state and an
 unbounded startup resolver call. PRs #178 and #180 now lease and restore the
 loopback state, publish safe dormant status before network qualification, and
-bound system-DNS helpers under one startup deadline. The exact `140598b`
-artifact passed the full disposable packaged lifecycle with an OS-level stalled
-resolver, independent PF sentinel, Safari, Chrome, restart, and residue-free
-uninstall. It remains unlaunched; the only remaining M0 gate is one short,
-prearranged workstation smoke with immediate rollback on the first failure.
+bound system-DNS helpers under one startup deadline. The `140598b` disposable
+gate proved the stalled-resolver, PF-sentinel, browser, restart, and cleanup
+behavior, but it packaged superseded `geph-vendor-0.3.0` while the recorded
+release input is `geph-vendor-0.3.0-r1`. The unlaunched artifact is therefore
+not a workstation candidate. M0 next requires the revisioned artifact to pass
+the same gate on the exact merge commit; only then may one short, prearranged
+workstation smoke run with immediate rollback on the first failure.
 
 ## M1 - Autonomous Routing V1
 

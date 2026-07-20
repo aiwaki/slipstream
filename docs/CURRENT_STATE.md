@@ -39,7 +39,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Disposable qualification complete; one scheduled workstation smoke remains | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and failure-atomic install/uninstall are implemented. PRs #174-#180 cover app removal, exact-system passthrough, baseline qualification, loopback leasing, failure-atomic lifecycle, probe-free startup status, killable console-user DNS helpers, and one total preflight budget. The exact `140598b` artifact passed an OS-level stalled-resolver packaged gate: dormant status existed before the first DNS query, a later neutral target activated PF, no resolver helper survived, external PF state remained intact, and cleanup was residue-free. The qualified app is downloaded but unlaunched. M0 remains open only until one short, user-scheduled workstation smoke confirms the disposable result. |
+| M0 - Safe Base | Current Geph artifact requalification required; workstation smoke blocked | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and failure-atomic install/uninstall are implemented. PRs #174-#180 cover app removal, exact-system passthrough, baseline qualification, loopback leasing, failure-atomic lifecycle, probe-free startup status, killable console-user DNS helpers, and one total preflight budget. The `140598b` packaged gate proved those lifecycle properties, but its workflow downloaded superseded `geph-vendor-0.3.0` instead of the `geph-vendor-0.3.0-r1` recorded in `vendor/geph/SOURCE.json` and used by release builds. Those binaries have different SHA-256 identities, so the downloaded app is not eligible for workstation smoke. M0 remains open until the revisioned artifact passes the same disposable gate on the exact merge commit; only then may one short, user-scheduled smoke be considered. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
@@ -337,15 +337,18 @@ launched or installed on the primary workstation.
 ## Next Verified Action
 
 Do not reinstall or re-arm Slipstream on the primary workstation while the user
-is away. The bounded startup change and its disposable packaged gate are now on
-`main`; the next macOS action is exactly one short, user-scheduled smoke using
-the exact `140598b` artifact. Preflight and rollback commands must be prepared
-before that window, and no repeated administrator prompts are acceptable. If
-the smoke fails, uninstall immediately and preserve the first failing evidence;
-do not improvise another install in the same session. In parallel, M4 may
-continue only through pure contracts and disposable Windows CI. Native route
-effects remain blocked until destination attribution and coexistence can be
-proved without pretending that a partial DNS cache is complete.
+is away. The downloaded `140598b` app used a superseded Geph artifact and must
+not be launched. First merge the workflow correction, then require the exact
+main commit to pass the disposable packaged lifecycle with the revisioned tag
+from `vendor/geph/SOURCE.json`. Downloading that newly qualified artifact is
+safe, but launching it still waits for one short, user-scheduled smoke with
+preflight and rollback prepared in advance. No repeated administrator prompts
+are acceptable. If the smoke fails, uninstall immediately and preserve the
+first failing evidence; do not improvise another install in the same session.
+In parallel, M4 may continue only through pure contracts and disposable Windows
+CI. Native route effects remain blocked until destination attribution and
+coexistence can be proved without pretending that a partial DNS cache is
+complete.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
 ## External Gates
