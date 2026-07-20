@@ -213,7 +213,7 @@ fn revalidate_interface_identity(
     Ok(())
 }
 
-fn sockaddr_from_ip(address: IpAddr) -> SOCKADDR_INET {
+pub(super) fn sockaddr_from_ip(address: IpAddr) -> SOCKADDR_INET {
     match address {
         IpAddr::V4(address) => {
             let [s_b1, s_b2, s_b3, s_b4] = address.octets();

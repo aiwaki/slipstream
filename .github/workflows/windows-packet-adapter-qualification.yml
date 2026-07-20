@@ -183,5 +183,21 @@ jobs:
             -TimeoutSeconds 120 `
             -NoCapture
 
+      - name: Qualify owned exact-route transition and cleanup
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
+        run: |
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_exact_route_windows `
+            -TestName native_wintun_exact_route_transition_is_owned_and_removed `
+            -TimeoutSeconds 120 `
+            -NoCapture
+
       - name: Lint the disposable packet fixture
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --features disposable-windows-packet-fixture -- -D warnings
