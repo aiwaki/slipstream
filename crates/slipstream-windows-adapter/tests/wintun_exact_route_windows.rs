@@ -6,8 +6,9 @@ use slipstream_windows_adapter::packet_adapter::{
 };
 use slipstream_windows_adapter::packet_egress::{
     qualify_disposable_exact_host_route, qualify_disposable_exact_host_route_with_active_probe,
-    WindowsDisposableExactRouteActiveProbe, WindowsOwnedRouteTransitionIssuer,
-    WindowsPacketInterfaceIdentity, WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
+    WindowsDisposableExactRouteActiveProbe, WindowsDisposableExactRouteErrorCode,
+    WindowsOwnedRouteTransitionIssuer, WindowsPacketInterfaceIdentity,
+    WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
@@ -150,11 +151,34 @@ fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route() {
         let mut adapter = OwnedWintunAdapter::create(&api, &adapter_name, &tunnel_type)?;
         adapter.start_session()?;
         let capture_interface = adapter.interface_identity()?;
-        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(2, capture_interface, 1)
-            .map_err(|error| format!("construct socket-binding issuer: {error}"))?;
         let capture_source = Ipv4Addr::new(192, 0, 2, 2);
         let mut address = OwnedUnicastAddress::create(capture_interface, capture_source)?;
         let destination = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 1));
+        let mut failure_issuer = WindowsOwnedRouteTransitionIssuer::new(2, capture_interface, 1)
+            .map_err(|error| format!("construct probe-failure issuer: {error}"))?;
+        let injected_error = qualify_disposable_exact_host_route_with_active_probe(
+            &mut failure_issuer,
+            destination,
+            |active| {
+                if active.capture_source_address() != IpAddr::V4(capture_source) {
+                    return Err("unexpected capture source before injected failure".to_owned());
+                }
+                Err("injected active-probe failure".to_owned())
+            },
+        )
+        .expect_err("injected active-probe failure must be returned after recovery proof");
+        if injected_error.code() != WindowsDisposableExactRouteErrorCode::ActiveProbeFailed
+            || !injected_error
+                .to_string()
+                .contains("injected active-probe failure")
+        {
+            return Err(format!(
+                "probe-failure recovery returned unexpected evidence: {injected_error}"
+            ));
+        }
+
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(3, capture_interface, 1)
+            .map_err(|error| format!("construct socket-binding issuer: {error}"))?;
         let route_result = qualify_disposable_exact_host_route_with_active_probe(
             &mut issuer,
             destination,
