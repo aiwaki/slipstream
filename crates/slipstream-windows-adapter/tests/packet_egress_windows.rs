@@ -1,7 +1,9 @@
 #![cfg(windows)]
 
 use slipstream_windows_adapter::packet_egress::{
-    observe_windows_packet_route, WindowsPacketRouteObserverErrorCode,
+    observe_windows_packet_route, WindowsOwnedRouteTransitionIssuer,
+    WindowsOwnedRouteTransitionState, WindowsPacketInterfaceIdentity,
+    WindowsPacketRouteObserverErrorCode,
 };
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -17,6 +19,22 @@ fn native_packet_route_observer_is_read_only_and_consistent() {
     assert!(matches!(observation.source_address(), IpAddr::V4(_)));
     assert!(!observation.route_prefix().is_empty());
     assert!(!observation.route_is_loopback());
+
+    let egress = observation.egress_interface();
+    let capture = WindowsPacketInterfaceIdentity {
+        luid: if egress.luid == 1 { 2 } else { 1 },
+        index: if egress.index == 1 { 2 } else { 1 },
+    };
+    let mut issuer = WindowsOwnedRouteTransitionIssuer::new(1, capture, 1)
+        .expect("a distinct non-zero capture identity must be accepted");
+    let intent = issuer
+        .begin_exact_host_activation(observation)
+        .expect("the collector-owned timestamp must stage immediately");
+    assert_eq!(intent.baseline().egress_interface, egress);
+    issuer
+        .cancel_before_effect(intent)
+        .expect("staging without a route effect must remain reversible");
+    assert_eq!(issuer.state(), WindowsOwnedRouteTransitionState::Ready);
 
     let error = observe_windows_packet_route(IpAddr::V4(Ipv4Addr::LOCALHOST))
         .expect_err("special-purpose destinations must fail before route observation");

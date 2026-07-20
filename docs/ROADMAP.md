@@ -425,8 +425,13 @@ therefore stays phased and closed to production traffic:
    current `GetBestRoute2` result, canonicalizes its selected source and prefix,
    and revalidates the exact LUID/index pair without a route, socket, adapter,
    DNS, proxy, PAC, or VPN effect. It does not mint route epochs or activation
-   evidence. Next implement the trusted owned-transition issuer and qualify
-   actual IPv4/IPv6 socket binding under a competing capture route, then
+   evidence. The next isolated contract consumes that opaque baseline, allows
+   one pending transition, and issues an opaque current activation only after a
+   second observation selects the exact host route through the owned capture
+   identity. It still has no route effect or production composition. Next bind
+   its crate-private attestation to one disposable exact-route owner with
+   bounded removal, then qualify actual IPv4/IPv6 socket binding under a
+   competing capture route, followed by
    activation safety for pre-existing flows, bounded capture expiry/removal,
    and explicit external-VPN coexistence on disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.

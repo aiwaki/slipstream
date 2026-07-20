@@ -324,3 +324,38 @@ fn native_route_observer_is_read_only_and_not_composed() {
     assert!(!production_host.contains("observe_windows_packet_route"));
     assert!(!production_host.contains("WindowsPacketRouteObservation"));
 }
+
+#[test]
+fn owned_route_transition_issuer_is_opaque_pure_and_not_composed() {
+    let source = include_str!("../src/packet_egress/transition_v1.rs").replace("\r\n", "\n");
+    for required in [
+        "Arc::ptr_eq",
+        "begin_exact_host_activation",
+        "attest_exact_host_route_created",
+        "record_route_change",
+        "require_current_activation",
+    ] {
+        assert!(source.contains(required), "issuer is missing {required}");
+    }
+    for forbidden in [
+        "CreateIpForwardEntry2",
+        "SetIpForwardEntry2",
+        "DeleteIpForwardEntry2",
+        "NotifyRouteChange2",
+        "GetBestRoute2",
+        "TcpStream",
+        "UdpSocket",
+        "socket2",
+        "setsockopt",
+        "Wintun",
+        "Command::new",
+        "Deserialize",
+        "Serialize",
+    ] {
+        assert!(!source.contains(forbidden), "issuer contains {forbidden}");
+    }
+
+    let production_host = include_str!("../src/service_host/v1.rs");
+    assert!(!production_host.contains("WindowsOwnedRouteTransitionIssuer"));
+    assert!(!production_host.contains("WindowsOwnedCaptureRouteActivation"));
+}
