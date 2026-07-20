@@ -445,8 +445,8 @@ therefore stays phased and closed to production traffic:
    address, and adapter absent. The current isolated subgate prepares equivalent
    IPv6 selection using host-order `IPV6_UNICAST_IF`, two exact `/128` source
    addresses, one explicitly owned test-only baseline `/64`, and the owned
-   competing destination `/128`; it remains unqualified until native AMD64 and
-   ARM64 both pass. Actual packet delivery
+   competing destination `/128`; PR #194's exact head passed on native AMD64
+   and ARM64, with exact-main requalification still required. Actual packet delivery
    stays closed to a later gate, followed by activation safety for pre-existing flows,
    bounded capture expiry/removal, and explicit external-VPN coexistence on
    disposable AMD64 and ARM64 Windows.
