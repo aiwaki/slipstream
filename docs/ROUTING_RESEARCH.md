@@ -277,7 +277,8 @@ epoch advance invalidates the admission.
 `windows-packet-egress-v1` freezes only the pure admission produced from that
 future trusted evidence. It permits any non-capture egress selected by the
 system, including an external VPN, and contains no interface-type allowlist.
-Public IPv6 destinations are frozen against the
+IPv4 special-purpose ranges, including the deprecated `192.88.99.0/24` 6to4
+relay block, fail closed. Public IPv6 destinations are frozen against the
 [IANA IPv6 Global Unicast Address Space](https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml)
 snapshot dated 2025-10-10 and cross-checked against the
 [IPv6 Special-Purpose Address Space](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml);

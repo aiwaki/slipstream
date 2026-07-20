@@ -546,10 +546,45 @@
       "expected": { "result": "error", "error": "unsafe_destination" }
     },
     {
+      "name": "deprecated-6to4-relay-block-is-not-public-egress",
+      "request": {
+        "capture_generation": 7,
+        "flow_id": 55,
+        "destination": "192.88.99.1",
+        "capture_started_at_ms": 1100,
+        "now_ms": 1200,
+        "current_route_epoch": 10,
+        "current_capture_interface": { "luid": 900, "index": 90 },
+        "current_egress_interface": { "luid": 120, "index": 12 },
+        "capture_route": {
+          "capture_generation": 7,
+          "destination": "192.88.99.1",
+          "route_prefix": "192.88.99.1/32",
+          "previous_route_epoch": 9,
+          "active_route_epoch": 10,
+          "activated_at_ms": 1050,
+          "capture_interface": { "luid": 900, "index": 90 }
+        },
+        "baseline": {
+          "capture_generation": 7,
+          "route_epoch": 9,
+          "destination": "192.88.99.1",
+          "observed_at_ms": 1000,
+          "expires_at_ms": 5000,
+          "capture_interface": { "luid": 900, "index": 90 },
+          "egress_interface": { "luid": 120, "index": 12 },
+          "source_address": "10.0.0.4",
+          "route_prefix": "0.0.0.0/0",
+          "route_is_loopback": false
+        }
+      },
+      "expected": { "result": "error", "error": "unsafe_destination" }
+    },
+    {
       "name": "ipv6-special-purpose-destination-is-not-admitted",
       "request": {
         "capture_generation": 8,
-        "flow_id": 55,
+        "flow_id": 56,
         "destination": "100::1",
         "capture_started_at_ms": 2100,
         "now_ms": 2200,
@@ -584,7 +619,7 @@
       "name": "ipv6-special-purpose-source-is-not-admitted",
       "request": {
         "capture_generation": 8,
-        "flow_id": 56,
+        "flow_id": 57,
         "destination": "2606:4700:4400::ac40:9b4c",
         "capture_started_at_ms": 2100,
         "now_ms": 2200,

@@ -119,8 +119,9 @@ Slipstream routing decisions and bounded recovery primitives.
   host prefix, and capture-interface LUID/index; a later route change
   invalidates the plan. Stable egress LUID-to-index identity, source family,
   and a containing baseline route prefix are also required. The capture
-  interface is always rejected. IPv6 destinations fail closed against the
-  frozen 2025-10-10 IANA
+  interface is always rejected. IPv4 special-purpose ranges, including the
+  deprecated `192.88.99.0/24` 6to4 relay block, fail closed. IPv6 destinations
+  fail closed against the frozen 2025-10-10 IANA
   global-unicast allocation snapshot, including unallocated and special-purpose
   space. IPv4 records the `IP_UNICAST_IF` value in network byte order while IPv6
   records the `IPV6_UNICAST_IF` value in host byte order. This does not
