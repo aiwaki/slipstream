@@ -107,6 +107,17 @@ before DLL loading, adapter/route ownership, packet-stack integration, or
 rollback work begins. This module cannot load a DLL, create an adapter, install
 a route, or touch system DNS, proxy, PAC, VPN, or the production service host.
 
+`packet_adapter::v2` is a separate pure capture-only classifier. It accepts one
+already-observed flow with a nonzero generation and flow ID, a canonical public
+numeric destination, and at most five seconds of transport-matched TLS SNI or
+QUIC Initial evidence. It normalizes and validates the hostname, then applies
+the active shared policy. Discord and YouTube classify only as local bypass;
+OpenAI and other reviewed foreign-exit groups classify only as geo-exit policy.
+No result names or authorizes a backend. Direct and unknown policy, ECH,
+missing or malformed hostname evidence, protocol mismatch, unsafe destination,
+and stale evidence all return direct passthrough. V2 contains no native API and
+is not composed into the production service host.
+
 The `wfp_*::v1` modules preserve a now-superseded own-driver research path for
 compatibility and future reference; they are not the Windows shipping plan.
 `wfp_capture::v1` freezes that WFP driver/service data boundary while

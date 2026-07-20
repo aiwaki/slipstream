@@ -204,6 +204,18 @@ loop, activation, expiry, and coexistence gates pass may a reviewed userspace
 packet stack and backend bridge be considered; the stream contracts are not
 silently reused as packet ownership proof.
 
+`contracts/windows-packet-capture-v2.json` now freezes that pure classifier.
+Each observation binds a nonzero capture generation and flow ID to a canonical
+public destination and a five-second evidence window. TLS flows accept only
+ClientHello SNI evidence and QUIC flows accept only Initial SNI evidence. The
+hostname is normalized and reclassified through the active shared policy;
+`local_bypass` and `geo_exit` are policy results, not backend authorization.
+Direct, unknown, ECH, missing, malformed, mismatched, stale, and unsafe cases
+all preserve direct passthrough. The module has no DLL, adapter, route, socket,
+DNS, proxy, PAC, VPN, or production-host effect. Native work remains blocked on
+disposable loop avoidance, activation, bounded removal, rollback, external-VPN,
+AMD64, and ARM64 qualification.
+
 The remaining `windows-wfp-*` contracts preserve the superseded own-driver
 research path only. `contracts/windows-wfp-capture-v1.json` freezes that WFP
 `ALE_CONNECT_REDIRECT_V4/V6` data boundary. A manually encoded 128-byte

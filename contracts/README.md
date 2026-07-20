@@ -101,6 +101,16 @@ Slipstream routing decisions and bounded recovery primitives.
   and no native issuer or route effect may be built from it. Default routes and
   system DNS/proxy/PAC/VPN mutation are impossible. It does not load the DLL,
   install a route, or compose production traffic.
+- `windows-packet-capture-v2.json` freezes the capture-only feasibility
+  boundary above a future packet source. Every flow carries a nonzero capture
+  generation and flow identity plus at most five seconds of in-band TLS SNI or
+  QUIC Initial hostname evidence. The active policy may classify only
+  `local_bypass` or `geo_exit`; direct, unknown, opaque, ECH, malformed, stale,
+  mismatched, or unsafe observations remain direct passthrough. Classification
+  is not backend authorization. The contract has no DLL loading, adapter,
+  route, socket, DNS, proxy, PAC, VPN, or production-host effect, and keeps all
+  native loop, activation, expiry, rollback, coexistence, and architecture
+  qualification gates closed.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service
