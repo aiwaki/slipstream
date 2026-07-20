@@ -294,3 +294,33 @@ fn egress_v1_is_pure_and_not_composed_into_the_production_host() {
     assert!(!production_host.contains("packet_egress"));
     assert!(!production_host.contains("prepare_windows_packet_egress"));
 }
+
+#[test]
+fn native_route_observer_is_read_only_and_not_composed() {
+    let source = include_str!("../src/packet_egress/windows.rs").replace("\r\n", "\n");
+    for required in [
+        "GetBestRoute2",
+        "ConvertInterfaceLuidToIndex",
+        "ConvertInterfaceIndexToLuid",
+    ] {
+        assert!(source.contains(required), "observer is missing {required}");
+    }
+    for forbidden in [
+        "CreateIpForwardEntry2",
+        "SetIpForwardEntry2",
+        "DeleteIpForwardEntry2",
+        "NotifyRouteChange2",
+        "TcpStream",
+        "UdpSocket",
+        "socket2",
+        "setsockopt",
+        "Wintun",
+        "Command::new",
+    ] {
+        assert!(!source.contains(forbidden), "observer contains {forbidden}");
+    }
+
+    let production_host = include_str!("../src/service_host/v1.rs");
+    assert!(!production_host.contains("observe_windows_packet_route"));
+    assert!(!production_host.contains("WindowsPacketRouteObservation"));
+}

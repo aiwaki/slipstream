@@ -55,6 +55,23 @@ jobs:
             throw "Expected $($env:EXPECTED_OS_ARCHITECTURE), got $actual"
           }
 
+      - name: Qualify read-only route and source observation
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          $testName = "native_packet_route_observer_is_read_only_and_consistent"
+          $output = & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test packet_egress_windows $testName -- --exact --test-threads=1 2>&1
+          $exitCode = $LASTEXITCODE
+          $lines = @($output | ForEach-Object { $_.ToString() })
+          $lines | Write-Output
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+          if ($lines -notcontains "test $testName ... ok") {
+            throw "Expected exact read-only route observer test did not execute"
+          }
+
       - name: Fetch and verify the pinned Wintun package
         shell: pwsh
         env:
