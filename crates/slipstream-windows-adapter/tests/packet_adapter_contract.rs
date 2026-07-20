@@ -442,6 +442,16 @@ fn native_wintun_lifecycle_is_disposable_route_free_and_not_composed() {
         "WintunEndSession",
         "WintunCloseAdapter",
         "require_adapter_absent",
+        "SLIPSTREAM_WINDOWS_WINTUN_CRASH_CI",
+        "native_wintun_child_termination_removes_owned_adapter_and_session",
+        "native_wintun_crash_child_holds_owned_adapter_and_session",
+        "std::env::current_exe",
+        "require_adapter_present",
+        "terminate_and_wait",
+        "wait_for_adapter_absent",
+        "child.kill()",
+        "child.wait()",
+        "create_new(true)",
     ] {
         assert!(
             fixture.contains(required),
@@ -458,6 +468,9 @@ fn native_wintun_lifecycle_is_disposable_route_free_and_not_composed() {
         "WinHttp",
         "TcpStream",
         "UdpSocket",
+        "taskkill",
+        "TerminateProcess",
+        "Win32_NetworkManagement_IpHelper",
     ] {
         assert!(
             !fixture.contains(forbidden),
