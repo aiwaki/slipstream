@@ -131,6 +131,7 @@ jobs:
           }
 
       - name: Qualify exact child-process termination cleanup
+        timeout-minutes: 4
         shell: pwsh
         env:
           CARGO_TERM_COLOR: never
@@ -138,10 +139,10 @@ jobs:
           SLIPSTREAM_WINDOWS_WINTUN_CRASH_CI: "1"
         run: |
           $testName = "native_wintun_child_termination_removes_owned_adapter_and_session"
-          $output = & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-packet-fixture --test wintun_lifecycle_windows $testName -- --exact --test-threads=1 2>&1
+          $output = @()
+          & cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-packet-fixture --test wintun_lifecycle_windows $testName -- --exact --nocapture --test-threads=1 2>&1 | Tee-Object -Variable output
           $exitCode = $LASTEXITCODE
           $lines = @($output | ForEach-Object { $_.ToString() })
-          $lines | Write-Output
           if ($exitCode -ne 0) {
             exit $exitCode
           }

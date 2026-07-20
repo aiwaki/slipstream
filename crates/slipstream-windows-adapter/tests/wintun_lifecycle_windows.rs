@@ -30,6 +30,7 @@ const WINTUN_CRASH_READY_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_READY";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const CHILD_READY_TIMEOUT: Duration = Duration::from_secs(45);
 const CHILD_FAILSAFE_LIFETIME: Duration = Duration::from_secs(90);
+const CHILD_TERMINATION_TIMEOUT: Duration = Duration::from_secs(15);
 const ADAPTER_REMOVAL_TIMEOUT: Duration = Duration::from_secs(30);
 const PROBE_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -99,6 +100,7 @@ fn native_wintun_child_termination_removes_owned_adapter_and_session() {
         return;
     }
 
+    eprintln!("[wintun-crash] stage=load-admitted-dll");
     let (admission, api) = load_admitted_wintun()
         .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
     let adapter_name_string = unique_adapter_name("Crash");
@@ -126,19 +128,26 @@ fn native_wintun_child_termination_removes_owned_adapter_and_session() {
         .spawn()
         .unwrap_or_else(|error| panic!("spawn exact Wintun crash child: {error}"));
     let mut child = ExactChild::new(child);
+    eprintln!("[wintun-crash] stage=child-spawned pid={}", child.id());
     let expected_marker = format!("{adapter_name_string}\n{}\n", child.id());
 
     wait_for_child_ready(&mut child, fixture_dir.marker_path(), &expected_marker)
         .unwrap_or_else(|error| panic!("Wintun crash child readiness: {error}"));
+    eprintln!("[wintun-crash] stage=child-ready");
     api.require_adapter_present(&adapter_name, "before exact child termination")
         .unwrap_or_else(|error| panic!("Wintun crash live proof: {error}"));
+    eprintln!("[wintun-crash] stage=adapter-present");
 
+    eprintln!("[wintun-crash] stage=terminate-child");
     let status = child
         .terminate_and_wait()
         .unwrap_or_else(|error| panic!("terminate exact Wintun crash child: {error}"));
+    eprintln!("[wintun-crash] stage=child-exited status={status}");
     assert!(!status.success(), "crash child exited gracefully: {status}");
+    eprintln!("[wintun-crash] stage=wait-adapter-absent");
     api.wait_for_adapter_absent(&adapter_name, ADAPTER_REMOVAL_TIMEOUT)
         .unwrap_or_else(|error| panic!("Wintun post-crash cleanup proof: {error}"));
+    eprintln!("[wintun-crash] stage=adapter-absent");
 
     drop(api);
     assert_eq!(
@@ -435,31 +444,54 @@ impl ExactChild {
     }
 
     fn terminate_and_wait(&mut self) -> Result<ExitStatus, String> {
-        let child = self.child_mut();
-        if let Some(status) = child
+        if let Some(status) = self
+            .child_mut()
             .try_wait()
             .map_err(|error| format!("inspect exact child before termination: {error}"))?
         {
+            self.child = None;
             return Err(format!("crash child exited before termination: {status}"));
         }
-        child
+        self.child_mut()
             .kill()
             .map_err(|error| format!("terminate exact child handle: {error}"))?;
-        let status = child
-            .wait()
-            .map_err(|error| format!("wait for exact terminated child: {error}"))?;
-        self.child = None;
-        Ok(status)
+        self.wait_for_exit(CHILD_TERMINATION_TIMEOUT)
+    }
+
+    fn wait_for_exit(&mut self, timeout: Duration) -> Result<ExitStatus, String> {
+        let pid = self.id();
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self
+                .child_mut()
+                .try_wait()
+                .map_err(|error| format!("inspect exact terminated child {pid}: {error}"))?
+            {
+                self.child = None;
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "exact terminated child {pid} did not exit within {} ms",
+                    timeout.as_millis()
+                ));
+            }
+            thread::sleep(PROBE_INTERVAL);
+        }
     }
 }
 
 impl Drop for ExactChild {
     fn drop(&mut self) {
-        let Some(child) = self.child.as_mut() else {
+        let Some(mut child) = self.child.take() else {
             return;
         };
         let _ = child.kill();
-        let _ = child.wait();
+        let _ = thread::Builder::new()
+            .name("wintun-exact-child-reaper".to_owned())
+            .spawn(move || {
+                let _ = child.wait();
+            });
     }
 }
 
