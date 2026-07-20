@@ -26,6 +26,7 @@ pub const WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION: u32 = 1;
 
 const DISPOSABLE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_DISPOSABLE_CI";
 const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
+const SOCKET_BINDING_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI";
 const ROUTE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const ROUTE_PROBE_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -41,6 +42,7 @@ pub enum WindowsDisposableExactRouteErrorCode {
     PostActivationObservationFailed,
     TransitionAttestationFailed,
     ActivationNotCurrent,
+    ActiveProbeGateClosed,
     ActiveProbeFailed,
     ExactRouteDeleteFailed,
     ExactRouteRemovalUnproven,
@@ -62,6 +64,7 @@ impl WindowsDisposableExactRouteErrorCode {
             Self::PostActivationObservationFailed => "post_activation_observation_failed",
             Self::TransitionAttestationFailed => "transition_attestation_failed",
             Self::ActivationNotCurrent => "activation_not_current",
+            Self::ActiveProbeGateClosed => "active_probe_gate_closed",
             Self::ActiveProbeFailed => "active_probe_failed",
             Self::ExactRouteDeleteFailed => "exact_route_delete_failed",
             Self::ExactRouteRemovalUnproven => "exact_route_removal_unproven",
@@ -241,14 +244,28 @@ pub fn qualify_disposable_exact_host_route(
     issuer: &mut WindowsOwnedRouteTransitionIssuer,
     destination: IpAddr,
 ) -> Result<WindowsDisposableExactRouteQualification, WindowsDisposableExactRouteError> {
-    qualify_disposable_exact_host_route_with_active_probe(issuer, destination, |_| Ok(()))
+    qualify_disposable_exact_host_route_impl(issuer, destination, |_| Ok(()))
 }
 
 /// Run one disposable probe while the exact route is active and attested.
 ///
+/// This entrypoint requires the additional socket-binding CI gate. The
+/// probe-free wrapper retains the original two-gate route qualification.
 /// The probe receives read-only route facts and cannot retain the activation.
 /// Returning an error still performs exact route removal and recovery proof.
 pub fn qualify_disposable_exact_host_route_with_active_probe<F>(
+    issuer: &mut WindowsOwnedRouteTransitionIssuer,
+    destination: IpAddr,
+    active_probe: F,
+) -> Result<WindowsDisposableExactRouteQualification, WindowsDisposableExactRouteError>
+where
+    F: FnOnce(&WindowsDisposableExactRouteActiveProbe<'_>) -> Result<(), String>,
+{
+    require_active_probe_gate()?;
+    qualify_disposable_exact_host_route_impl(issuer, destination, active_probe)
+}
+
+fn qualify_disposable_exact_host_route_impl<F>(
     issuer: &mut WindowsOwnedRouteTransitionIssuer,
     destination: IpAddr,
     active_probe: F,
@@ -436,6 +453,15 @@ fn require_disposable_gate() -> Result<(), WindowsDisposableExactRouteError> {
     }
     Err(WindowsDisposableExactRouteError::new(
         WindowsDisposableExactRouteErrorCode::DisposableGateClosed,
+    ))
+}
+
+fn require_active_probe_gate() -> Result<(), WindowsDisposableExactRouteError> {
+    if std::env::var(SOCKET_BINDING_CI_ENV).as_deref() == Ok("1") {
+        return Ok(());
+    }
+    Err(WindowsDisposableExactRouteError::new(
+        WindowsDisposableExactRouteErrorCode::ActiveProbeGateClosed,
     ))
 }
 

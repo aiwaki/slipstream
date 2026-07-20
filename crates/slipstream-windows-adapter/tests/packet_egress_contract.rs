@@ -367,6 +367,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     for required in [
         "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI",
         "CreateIpForwardEntry2",
         "GetIpForwardEntry2",
         "DeleteIpForwardEntry2",
@@ -379,7 +380,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "secondary_after",
         "qualify_disposable_exact_host_route_with_active_probe",
         "WindowsDisposableExactRouteActiveProbe",
+        "ActiveProbeGateClosed",
         "ActiveProbeFailed",
+        "require_active_probe_gate()?;",
         "recovery_error_after",
         "recovery_failure_is_primary_and_retains_the_probe_failure",
         "error.win32_code()",
@@ -423,6 +426,20 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         recovery_observation < pending_error_return,
         "route owner must prove baseline recovery before returning an active-probe failure"
     );
+    let probe_free_start = owner
+        .find("pub fn qualify_disposable_exact_host_route(")
+        .expect("route owner must retain the probe-free wrapper");
+    let active_probe_start = owner
+        .find("pub fn qualify_disposable_exact_host_route_with_active_probe")
+        .expect("route owner must expose the gated active-probe entrypoint");
+    let implementation_start = owner
+        .find("fn qualify_disposable_exact_host_route_impl")
+        .expect("both public entrypoints must share one exact-route implementation");
+    let probe_free_wrapper = &owner[probe_free_start..active_probe_start];
+    let active_probe_wrapper = &owner[active_probe_start..implementation_start];
+    assert!(probe_free_wrapper.contains("qualify_disposable_exact_host_route_impl"));
+    assert!(!probe_free_wrapper.contains("require_active_probe_gate"));
+    assert!(active_probe_wrapper.contains("require_active_probe_gate()?;"));
 
     let module = include_str!("../src/packet_egress/mod.rs").replace("\r\n", "\n");
     assert!(module.contains(

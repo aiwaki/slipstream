@@ -490,7 +490,9 @@ Wintun `/32`, then sets `IP_UNICAST_IF` to the retained baseline interface,
 reads the same host-order index back, binds the retained baseline source, and
 connects without calling a send or receive API. Probe failure still runs the
 owned exact-route cleanup and baseline recovery observation before it is
-returned. The exact PR head passed the selected fixture and
+returned. The active-probe entrypoint itself requires the third socket-binding
+CI gate; the probe-free exact-route wrapper retains the original two-gate
+admission. The exact PR head passed the selected fixture and
 all existing packet gates on native AMD64 and ARM64 in
 [run 29739433700](https://github.com/aiwaki/slipstream/actions/runs/29739433700),
 all required checks and packaged lifecycle in
