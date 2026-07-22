@@ -57,7 +57,15 @@ const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
 const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
 const IPV4_MIN_HEADER_LENGTH: usize = 20;
 const IPV6_HEADER_LENGTH: usize = 40;
+const IPV6_PAYLOAD_LENGTH_OFFSET: usize = 4;
+const IPV6_NEXT_HEADER_OFFSET: usize = 6;
+const IPV6_HOP_LIMIT_OFFSET: usize = 7;
+const IPV6_SOURCE_OFFSET: usize = 8;
+const IPV6_DESTINATION_OFFSET: usize = 24;
 const UDP_HEADER_LENGTH: usize = 8;
+const UDP_SOURCE_PORT_OFFSET: usize = 0;
+const UDP_DESTINATION_PORT_OFFSET: usize = 2;
+const UDP_LENGTH_OFFSET: usize = 4;
 const UDP_CHECKSUM_OFFSET: usize = 6;
 const IPV4_VERSION_AND_MIN_HEADER_LENGTH: u8 = 0x45;
 const IPV6_VERSION: u8 = 0x60;
@@ -841,9 +849,16 @@ fn parse_ipv4_udp_request(
     }
 
     let udp = &packet[header_length..];
-    let source_port = u16::from_be_bytes([udp[0], udp[1]]);
-    let destination_port = u16::from_be_bytes([udp[2], udp[3]]);
-    let udp_length = usize::from(u16::from_be_bytes([udp[4], udp[5]]));
+    let source_port =
+        u16::from_be_bytes([udp[UDP_SOURCE_PORT_OFFSET], udp[UDP_SOURCE_PORT_OFFSET + 1]]);
+    let destination_port = u16::from_be_bytes([
+        udp[UDP_DESTINATION_PORT_OFFSET],
+        udp[UDP_DESTINATION_PORT_OFFSET + 1],
+    ]);
+    let udp_length = usize::from(u16::from_be_bytes([
+        udp[UDP_LENGTH_OFFSET],
+        udp[UDP_LENGTH_OFFSET + 1],
+    ]));
     if source_port != expected_source_port
         || destination_port != expected_destination_port
         || udp_length != udp.len()
@@ -873,19 +888,22 @@ fn parse_ipv6_udp_request(
         return Ok(None);
     }
     let mut source_octets = [0u8; 16];
-    source_octets.copy_from_slice(&packet[8..24]);
+    source_octets.copy_from_slice(&packet[IPV6_SOURCE_OFFSET..IPV6_DESTINATION_OFFSET]);
     let mut destination_octets = [0u8; 16];
-    destination_octets.copy_from_slice(&packet[24..40]);
+    destination_octets.copy_from_slice(&packet[IPV6_DESTINATION_OFFSET..IPV6_HEADER_LENGTH]);
     let source = Ipv6Addr::from(source_octets);
     let destination = Ipv6Addr::from(destination_octets);
     if source != expected_source
         || destination != expected_destination
-        || packet[6] != UDP_PROTOCOL_NUMBER
+        || packet[IPV6_NEXT_HEADER_OFFSET] != UDP_PROTOCOL_NUMBER
     {
         return Ok(None);
     }
 
-    let payload_length = usize::from(u16::from_be_bytes([packet[4], packet[5]]));
+    let payload_length = usize::from(u16::from_be_bytes([
+        packet[IPV6_PAYLOAD_LENGTH_OFFSET],
+        packet[IPV6_PAYLOAD_LENGTH_OFFSET + 1],
+    ]));
     if payload_length != packet.len() - IPV6_HEADER_LENGTH || payload_length < UDP_HEADER_LENGTH {
         return Err(format!(
             "captured IPv6 packet length mismatch: packet={}, payload={payload_length}",
@@ -893,9 +911,16 @@ fn parse_ipv6_udp_request(
         ));
     }
     let udp = &packet[IPV6_HEADER_LENGTH..];
-    let source_port = u16::from_be_bytes([udp[0], udp[1]]);
-    let destination_port = u16::from_be_bytes([udp[2], udp[3]]);
-    let udp_length = usize::from(u16::from_be_bytes([udp[4], udp[5]]));
+    let source_port =
+        u16::from_be_bytes([udp[UDP_SOURCE_PORT_OFFSET], udp[UDP_SOURCE_PORT_OFFSET + 1]]);
+    let destination_port = u16::from_be_bytes([
+        udp[UDP_DESTINATION_PORT_OFFSET],
+        udp[UDP_DESTINATION_PORT_OFFSET + 1],
+    ]);
+    let udp_length = usize::from(u16::from_be_bytes([
+        udp[UDP_LENGTH_OFFSET],
+        udp[UDP_LENGTH_OFFSET + 1],
+    ]));
     if source_port != expected_source_port
         || destination_port != expected_destination_port
         || udp_length != udp.len()
@@ -940,11 +965,14 @@ fn build_ipv4_udp_packet(
     packet[12..16].copy_from_slice(&source.octets());
     packet[16..20].copy_from_slice(&destination.octets());
 
-    packet[IPV4_MIN_HEADER_LENGTH..IPV4_MIN_HEADER_LENGTH + 2]
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET
+        ..IPV4_MIN_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET + 2]
         .copy_from_slice(&source_port.to_be_bytes());
-    packet[IPV4_MIN_HEADER_LENGTH + 2..IPV4_MIN_HEADER_LENGTH + 4]
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET
+        ..IPV4_MIN_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET + 2]
         .copy_from_slice(&destination_port.to_be_bytes());
-    packet[IPV4_MIN_HEADER_LENGTH + 4..IPV4_MIN_HEADER_LENGTH + 6]
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_LENGTH_OFFSET
+        ..IPV4_MIN_HEADER_LENGTH + UDP_LENGTH_OFFSET + 2]
         .copy_from_slice(&udp_length_u16.to_be_bytes());
     packet[IPV4_MIN_HEADER_LENGTH + UDP_HEADER_LENGTH..].copy_from_slice(payload);
 
@@ -991,16 +1019,20 @@ fn build_ipv6_udp_packet(
 
     let mut packet = vec![0u8; total_length];
     packet[0] = IPV6_VERSION;
-    packet[4..6].copy_from_slice(&udp_length_u16.to_be_bytes());
-    packet[6] = UDP_PROTOCOL_NUMBER;
-    packet[7] = IPV6_DEFAULT_HOP_LIMIT;
-    packet[8..24].copy_from_slice(&source.octets());
-    packet[24..40].copy_from_slice(&destination.octets());
+    packet[IPV6_PAYLOAD_LENGTH_OFFSET..IPV6_PAYLOAD_LENGTH_OFFSET + 2]
+        .copy_from_slice(&udp_length_u16.to_be_bytes());
+    packet[IPV6_NEXT_HEADER_OFFSET] = UDP_PROTOCOL_NUMBER;
+    packet[IPV6_HOP_LIMIT_OFFSET] = IPV6_DEFAULT_HOP_LIMIT;
+    packet[IPV6_SOURCE_OFFSET..IPV6_DESTINATION_OFFSET].copy_from_slice(&source.octets());
+    packet[IPV6_DESTINATION_OFFSET..IPV6_HEADER_LENGTH].copy_from_slice(&destination.octets());
 
-    packet[IPV6_HEADER_LENGTH..IPV6_HEADER_LENGTH + 2].copy_from_slice(&source_port.to_be_bytes());
-    packet[IPV6_HEADER_LENGTH + 2..IPV6_HEADER_LENGTH + 4]
+    packet[IPV6_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET
+        ..IPV6_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET + 2]
+        .copy_from_slice(&source_port.to_be_bytes());
+    packet[IPV6_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET
+        ..IPV6_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET + 2]
         .copy_from_slice(&destination_port.to_be_bytes());
-    packet[IPV6_HEADER_LENGTH + 4..IPV6_HEADER_LENGTH + 6]
+    packet[IPV6_HEADER_LENGTH + UDP_LENGTH_OFFSET..IPV6_HEADER_LENGTH + UDP_LENGTH_OFFSET + 2]
         .copy_from_slice(&udp_length_u16.to_be_bytes());
     packet[IPV6_HEADER_LENGTH + UDP_HEADER_LENGTH..].copy_from_slice(payload);
 
