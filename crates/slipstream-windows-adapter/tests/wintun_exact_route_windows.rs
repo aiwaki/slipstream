@@ -1259,7 +1259,7 @@ fn connected_ipv4_tcp_stream(
         }
         Err(error)
             if error.kind() == ErrorKind::WouldBlock
-                || matches!(error.raw_os_error(), Some(10035 | 10036 | 10037)) => {}
+                || matches!(error.raw_os_error(), Some(10035..=10037)) => {}
         Err(error) => return Err(format!("start nonblocking IPv4 TCP connect: {error}")),
     }
 
