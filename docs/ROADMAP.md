@@ -448,9 +448,12 @@ therefore stays phased and closed to production traffic:
    competing destination `/128` on native AMD64 and ARM64. PR #195's exact main
    passed one closed IPv4 UDP round trip through the Wintun receive and send
    rings with one shared deadline and no external endpoint or backend. The
-   PR #196's exact head passed the same closed proof for IPv6 with its mandatory
-   UDP checksum on native AMD64 and ARM64; exact-main requalification remains.
-   Activation safety for pre-existing flows,
+   PR #196's exact main passed the same closed proof for IPv6 with its mandatory
+   UDP checksum on native AMD64 and ARM64. The current bounded follow-up adds a
+   fresh constrained `GetBestRoute2` observation for the retained baseline
+   source and LUID while the exact capture route is active; caller-repeated
+   baseline fields cannot authorize the disposable active probe. Activation
+   safety for pre-existing flows,
    bounded capture expiry/removal, and explicit external-VPN coexistence on
    disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.

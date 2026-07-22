@@ -31,6 +31,8 @@ pub enum WindowsPacketRouteObserverErrorCode {
     DestinationOutsideRoutePrefix,
     InvalidEgressInterface,
     InterfaceIdentityChanged,
+    EgressInterfaceMismatch,
+    SourceAddressMismatch,
 }
 
 impl WindowsPacketRouteObserverErrorCode {
@@ -45,6 +47,8 @@ impl WindowsPacketRouteObserverErrorCode {
             Self::DestinationOutsideRoutePrefix => "destination_outside_route_prefix",
             Self::InvalidEgressInterface => "invalid_egress_interface",
             Self::InterfaceIdentityChanged => "interface_identity_changed",
+            Self::EgressInterfaceMismatch => "egress_interface_mismatch",
+            Self::SourceAddressMismatch => "source_address_mismatch",
         }
     }
 }
@@ -110,15 +114,75 @@ pub fn observe_windows_packet_route(
         ));
     }
 
+    observe_windows_packet_route_query(destination, null(), 0, null())
+}
+
+/// Revalidate one exact source/interface pair while another route may be more
+/// specific in the unconstrained table.
+///
+/// The kernel still chooses the route row. The caller supplies only the
+/// already-observed interface and source constraints; the returned opaque fact
+/// is rejected unless the kernel preserves both identities. This remains a
+/// read-only observation and is not packet-egress authorization.
+pub fn observe_windows_packet_route_on_interface(
+    destination: IpAddr,
+    interface: WindowsPacketInterfaceIdentity,
+    source_address: IpAddr,
+) -> Result<WindowsPacketRouteObservation, WindowsPacketRouteObserverError> {
+    use WindowsPacketRouteObserverErrorCode as Code;
+
+    if !is_safe_public_destination(destination) {
+        return Err(WindowsPacketRouteObserverError::new(
+            Code::UnsafeDestination,
+        ));
+    }
+    if !same_family(destination, source_address) {
+        return Err(WindowsPacketRouteObserverError::new(
+            Code::SourceAddressFamilyMismatch,
+        ));
+    }
+    revalidate_interface_identity(interface)?;
+
+    let interface_luid = NET_LUID_LH {
+        Value: interface.luid,
+    };
+    let source_address_storage = sockaddr_from_ip(source_address);
+    let observation = observe_windows_packet_route_query(
+        destination,
+        &interface_luid,
+        interface.index,
+        &source_address_storage,
+    )?;
+    if observation.egress_interface() != interface {
+        return Err(WindowsPacketRouteObserverError::new(
+            Code::EgressInterfaceMismatch,
+        ));
+    }
+    if observation.source_address() != source_address {
+        return Err(WindowsPacketRouteObserverError::new(
+            Code::SourceAddressMismatch,
+        ));
+    }
+    Ok(observation)
+}
+
+fn observe_windows_packet_route_query(
+    destination: IpAddr,
+    interface_luid: *const NET_LUID_LH,
+    interface_index: u32,
+    source_address: *const SOCKADDR_INET,
+) -> Result<WindowsPacketRouteObservation, WindowsPacketRouteObserverError> {
+    use WindowsPacketRouteObserverErrorCode as Code;
+
     let observed_at_ms = windows_uptime_ms();
     let destination_address = sockaddr_from_ip(destination);
     let mut best_route = MIB_IPFORWARD_ROW2::default();
     let mut best_source_address = SOCKADDR_INET::default();
     let result = unsafe {
         GetBestRoute2(
-            null(),
-            0,
-            null(),
+            interface_luid,
+            interface_index,
+            source_address,
             &destination_address,
             0,
             &mut best_route,

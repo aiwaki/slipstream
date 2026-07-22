@@ -9,12 +9,12 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-22, through merged
-[PR #195](https://github.com/aiwaki/slipstream/pull/195) at main commit
-`7f33aad2796c8212a8a037ecdd1cd7fd29458b6d`, including its successful
-[native AMD64/ARM64 run 29952406839](https://github.com/aiwaki/slipstream/actions/runs/29952406839),
-[required CI run 29952406818](https://github.com/aiwaki/slipstream/actions/runs/29952406818),
+[PR #196](https://github.com/aiwaki/slipstream/pull/196) at main commit
+`b0e69a21ef656a4310c40a93801bf401406f8ec6`, including its successful
+[native AMD64/ARM64 run 29955536068](https://github.com/aiwaki/slipstream/actions/runs/29955536068),
+[required CI run 29955536070](https://github.com/aiwaki/slipstream/actions/runs/29955536070),
 and
-[dependency-audit run 29952406838](https://github.com/aiwaki/slipstream/actions/runs/29952406838).
+[dependency-audit run 29955536124](https://github.com/aiwaki/slipstream/actions/runs/29955536124).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -44,7 +44,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Closed IPv4 delivery qualified on exact main; IPv6 delivery qualified on PR head | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, and one closed IPv4 capture/injection round trip on native AMD64 and ARM64. PR #196 applies the same closed proof to IPv6 and passed native AMD64/ARM64 plus required package and audit gates on its exact head; exact-main requalification remains. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. Pre-existing-flow safety, crash-safe capture removal, external-VPN coexistence, userspace forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Closed IPv4/IPv6 delivery qualified on exact main; pinned-egress revalidation in progress | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, and closed IPv4/IPv6 capture/injection round trips on native AMD64 and ARM64. The current isolated follow-up replaces caller-repeated baseline source/LUID fields with a fresh constrained `GetBestRoute2` observation before any disposable active probe. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. Pre-existing-flow safety, crash-safe capture removal, external-VPN coexistence, userspace forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -524,15 +524,13 @@ and adapter. PR #195's exact main passed one synthetic IPv4 UDP datagram into
 the owned capture ring and one synthetic response injected back to the same
 socket under one strict deadline on native AMD64 and ARM64. It has no external
 endpoint, backend, default route, production host, DNS, proxy, PAC, or VPN
-effect. PR #196's exact head passed the equivalent closed IPv6 proof with its
-mandatory UDP checksum on native AMD64 and ARM64 in
-[run 29954282655](https://github.com/aiwaki/slipstream/actions/runs/29954282655),
-alongside required/package gates in
-[run 29954282730](https://github.com/aiwaki/slipstream/actions/runs/29954282730)
-and audits in
-[run 29954282707](https://github.com/aiwaki/slipstream/actions/runs/29954282707).
-Fresh source/LUID revalidation,
-pre-existing-flow activation safety, bounded capture removal, and explicit
+effect. PR #196's exact main passed the equivalent closed IPv6 proof with its
+mandatory UDP checksum in the audited runs recorded above. The current bounded
+gate freshly constrains `GetBestRoute2` to the retained baseline source/LUID
+while the owned exact route is active; caller-repeated fields are not
+sufficient evidence. It still requires native AMD64/ARM64 qualification. After
+that, pre-existing-flow activation safety,
+bounded capture removal, and explicit
 external-VPN coexistence remain separate gates before any exact-route
 transaction or production composition. A partial DNS cache is never treated
 as complete attribution.
@@ -543,9 +541,6 @@ External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 - Add `SLIPSTREAM_GEPH_ACCOUNT_SECRET` to the protected
   `geph-qualification` environment, then run the account-backed owned-Geph
   qualification successfully from `main`.
-- Merge the clean PR #196 head and requalify closed IPv6 packet delivery on the
-  exact main commit; IPv4 delivery and no-payload interface selection are
-  already exact-main qualified.
 - Qualify a physical default-route change and lid-close/wake cycle on a
   disposable Mac.
 - Add Developer ID signing, hardened runtime, notarization, stapling, policy-key

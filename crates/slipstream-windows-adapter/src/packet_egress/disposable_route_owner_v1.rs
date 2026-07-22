@@ -6,9 +6,10 @@
 
 use super::transition_v1::{WindowsOwnedRouteTransitionError, WindowsOwnedRouteTransitionIssuer};
 use super::windows::{
-    observe_windows_packet_route, sockaddr_from_ip, WindowsPacketRouteObserverError,
+    observe_windows_packet_route, observe_windows_packet_route_on_interface, sockaddr_from_ip,
+    WindowsPacketRouteObserverError, WindowsPacketRouteObserverErrorCode,
 };
-use super::WindowsPacketInterfaceIdentity;
+use super::{WindowsPacketInterfaceIdentity, WindowsPacketRouteObservation};
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -42,6 +43,11 @@ pub enum WindowsDisposableExactRouteErrorCode {
     PostActivationObservationFailed,
     TransitionAttestationFailed,
     ActivationNotCurrent,
+    BaselineEgressRevalidationFailed,
+    BaselineEgressInterfaceChanged,
+    BaselineSourceAddressChanged,
+    BaselineRoutePrefixChanged,
+    BaselineLoopbackStateChanged,
     ActiveProbeGateClosed,
     ActiveProbeFailed,
     ExactRouteDeleteFailed,
@@ -64,6 +70,11 @@ impl WindowsDisposableExactRouteErrorCode {
             Self::PostActivationObservationFailed => "post_activation_observation_failed",
             Self::TransitionAttestationFailed => "transition_attestation_failed",
             Self::ActivationNotCurrent => "activation_not_current",
+            Self::BaselineEgressRevalidationFailed => "baseline_egress_revalidation_failed",
+            Self::BaselineEgressInterfaceChanged => "baseline_egress_interface_changed",
+            Self::BaselineSourceAddressChanged => "baseline_source_address_changed",
+            Self::BaselineRoutePrefixChanged => "baseline_route_prefix_changed",
+            Self::BaselineLoopbackStateChanged => "baseline_loopback_state_changed",
             Self::ActiveProbeGateClosed => "active_probe_gate_closed",
             Self::ActiveProbeFailed => "active_probe_failed",
             Self::ExactRouteDeleteFailed => "exact_route_delete_failed",
@@ -312,6 +323,19 @@ where
         issuer
             .require_current_activation(&activation)
             .map_err(|error| transition_error(Code::ActivationNotCurrent, error))?;
+        let revalidated_baseline = observe_windows_packet_route_on_interface(
+            destination,
+            baseline_egress_interface,
+            baseline_source_address,
+        )
+        .map_err(baseline_revalidation_error)?;
+        require_same_baseline_egress(
+            &revalidated_baseline,
+            baseline_egress_interface,
+            baseline_source_address,
+            &baseline_route_prefix,
+            baseline_route_is_loopback,
+        )?;
         active_probe(&WindowsDisposableExactRouteActiveProbe {
             destination,
             exact_route_prefix: &exact_route_prefix,
@@ -425,6 +449,38 @@ where
     })
 }
 
+fn require_same_baseline_egress(
+    observation: &WindowsPacketRouteObservation,
+    interface: WindowsPacketInterfaceIdentity,
+    source_address: IpAddr,
+    route_prefix: &str,
+    route_is_loopback: bool,
+) -> Result<(), WindowsDisposableExactRouteError> {
+    use WindowsDisposableExactRouteErrorCode as Code;
+
+    if observation.egress_interface() != interface {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineEgressInterfaceChanged,
+        ));
+    }
+    if observation.source_address() != source_address {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineSourceAddressChanged,
+        ));
+    }
+    if observation.route_prefix() != route_prefix {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineRoutePrefixChanged,
+        ));
+    }
+    if observation.route_is_loopback() != route_is_loopback {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineLoopbackStateChanged,
+        ));
+    }
+    Ok(())
+}
+
 fn retain_secondary_error(
     primary: &mut Option<WindowsDisposableExactRouteError>,
     secondary: WindowsDisposableExactRouteError,
@@ -481,6 +537,28 @@ fn observation_error(
         error.win32_code(),
         error.code().as_str(),
     )
+}
+
+fn baseline_revalidation_error(
+    error: WindowsPacketRouteObserverError,
+) -> WindowsDisposableExactRouteError {
+    let code = baseline_revalidation_error_code(error.code());
+    observation_error(code, error)
+}
+
+fn baseline_revalidation_error_code(
+    observer_code: WindowsPacketRouteObserverErrorCode,
+) -> WindowsDisposableExactRouteErrorCode {
+    match observer_code {
+        WindowsPacketRouteObserverErrorCode::InterfaceIdentityChanged
+        | WindowsPacketRouteObserverErrorCode::EgressInterfaceMismatch => {
+            WindowsDisposableExactRouteErrorCode::BaselineEgressInterfaceChanged
+        }
+        WindowsPacketRouteObserverErrorCode::SourceAddressMismatch => {
+            WindowsDisposableExactRouteErrorCode::BaselineSourceAddressChanged
+        }
+        _ => WindowsDisposableExactRouteErrorCode::BaselineEgressRevalidationFailed,
+    }
 }
 
 fn exact_route_row(
@@ -629,9 +707,30 @@ fn lookup_exact_route(
 #[cfg(test)]
 mod tests {
     use super::{
-        recovery_error_after, WindowsDisposableExactRouteError,
+        baseline_revalidation_error_code, recovery_error_after, WindowsDisposableExactRouteError,
         WindowsDisposableExactRouteErrorCode as Code,
+        WindowsPacketRouteObserverErrorCode as ObserverCode,
     };
+
+    #[test]
+    fn baseline_revalidation_preserves_field_specific_mismatch_codes() {
+        assert_eq!(
+            baseline_revalidation_error_code(ObserverCode::InterfaceIdentityChanged),
+            Code::BaselineEgressInterfaceChanged
+        );
+        assert_eq!(
+            baseline_revalidation_error_code(ObserverCode::EgressInterfaceMismatch),
+            Code::BaselineEgressInterfaceChanged
+        );
+        assert_eq!(
+            baseline_revalidation_error_code(ObserverCode::SourceAddressMismatch),
+            Code::BaselineSourceAddressChanged
+        );
+        assert_eq!(
+            baseline_revalidation_error_code(ObserverCode::RouteQueryFailed),
+            Code::BaselineEgressRevalidationFailed
+        );
+    }
 
     #[test]
     fn combined_cleanup_failure_retains_both_errors_and_structured_cleanup_code() {
