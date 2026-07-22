@@ -538,58 +538,63 @@ fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered() {
             return Err("IPv4 existing-flow adapters resolved to the same interface".to_owned());
         }
 
-        let mut baseline_address = OwnedUnicastAddress::create(
-            baseline_interface,
-            IpAddr::V4(IPV4_BASELINE_SOURCE),
-            IPV4_HOST_PREFIX_LENGTH,
-        )?;
-        let mut capture_address = OwnedUnicastAddress::create(
-            capture_interface,
-            IpAddr::V4(IPV4_CAPTURE_SOURCE),
-            IPV4_HOST_PREFIX_LENGTH,
-        )?;
-        let mut baseline_route = OwnedFixtureBaselineRoute::create(
-            baseline_interface,
-            IpAddr::V4(IPV4_BASELINE_NETWORK),
-            IPV4_BASELINE_PREFIX_LENGTH,
-        )?;
-        let socket = connected_ipv4_udp_socket(
-            IPV4_BASELINE_SOURCE,
-            IPV4_PREEXISTING_DESTINATION,
-            PACKET_DELIVERY_PORT,
-        )?;
-        prove_ipv4_udp_round_trip_on_adapter(
-            &socket,
-            &baseline_adapter,
-            IPV4_BASELINE_SOURCE,
-            IPV4_PREEXISTING_DESTINATION,
-            PREEXISTING_WARMUP_REQUEST,
-            PREEXISTING_WARMUP_RESPONSE,
-            "pre-existing warm-up",
-        )?;
-
-        let mut active_path = None;
-        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(7, capture_interface, 1)
-            .map_err(|error| format!("construct IPv4 existing-flow issuer: {error}"))?;
-        let route_result = qualify_disposable_exact_host_route_with_active_probe(
-            &mut issuer,
-            IpAddr::V4(IPV4_PREEXISTING_DESTINATION),
-            |active| {
-                let path = prove_ipv4_preexisting_flow_during_activation(
-                    active,
-                    &socket,
-                    &baseline_adapter,
-                    &capture_adapter,
-                )?;
-                active_path = Some(path);
-                match path {
-                    PreexistingFlowPath::Baseline => Ok(()),
-                    PreexistingFlowPath::Capture => Err(PREEXISTING_CAPTURE_ROLLBACK.to_owned()),
-                }
-            },
-        );
-
+        let mut baseline_address = None;
+        let mut capture_address = None;
+        let mut baseline_route = None;
         let flow_result = (|| {
+            baseline_address = Some(OwnedUnicastAddress::create(
+                baseline_interface,
+                IpAddr::V4(IPV4_BASELINE_SOURCE),
+                IPV4_HOST_PREFIX_LENGTH,
+            )?);
+            capture_address = Some(OwnedUnicastAddress::create(
+                capture_interface,
+                IpAddr::V4(IPV4_CAPTURE_SOURCE),
+                IPV4_HOST_PREFIX_LENGTH,
+            )?);
+            baseline_route = Some(OwnedFixtureBaselineRoute::create(
+                baseline_interface,
+                IpAddr::V4(IPV4_BASELINE_NETWORK),
+                IPV4_BASELINE_PREFIX_LENGTH,
+            )?);
+            let socket = connected_ipv4_udp_socket(
+                IPV4_BASELINE_SOURCE,
+                IPV4_PREEXISTING_DESTINATION,
+                PACKET_DELIVERY_PORT,
+            )?;
+            prove_ipv4_udp_round_trip_on_adapter(
+                &socket,
+                &baseline_adapter,
+                IPV4_BASELINE_SOURCE,
+                IPV4_PREEXISTING_DESTINATION,
+                PREEXISTING_WARMUP_REQUEST,
+                PREEXISTING_WARMUP_RESPONSE,
+                "pre-existing warm-up",
+            )?;
+
+            let mut active_path = None;
+            let mut issuer = WindowsOwnedRouteTransitionIssuer::new(7, capture_interface, 1)
+                .map_err(|error| format!("construct IPv4 existing-flow issuer: {error}"))?;
+            let route_result = qualify_disposable_exact_host_route_with_active_probe(
+                &mut issuer,
+                IpAddr::V4(IPV4_PREEXISTING_DESTINATION),
+                |active| {
+                    let path = prove_ipv4_preexisting_flow_during_activation(
+                        active,
+                        &socket,
+                        &baseline_adapter,
+                        &capture_adapter,
+                    )?;
+                    active_path = Some(path);
+                    match path {
+                        PreexistingFlowPath::Baseline => Ok(()),
+                        PreexistingFlowPath::Capture => {
+                            Err(PREEXISTING_CAPTURE_ROLLBACK.to_owned())
+                        }
+                    }
+                },
+            );
+
             let qualification = match (route_result, active_path) {
                 (Ok(qualification), Some(PreexistingFlowPath::Baseline)) => Some(qualification),
                 (Err(error), Some(PreexistingFlowPath::Capture))
@@ -636,9 +641,22 @@ fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered() {
             Ok::<_, String>(qualification)
         })();
 
-        let baseline_route_cleanup = baseline_route.remove_and_verify();
-        let capture_address_cleanup = capture_address.remove_and_verify();
-        let baseline_address_cleanup = baseline_address.remove_and_verify();
+        let baseline_route_cleanup = match baseline_route.as_mut() {
+            Some(route) => route.remove_and_verify(),
+            None => Ok(()),
+        };
+        let capture_address_cleanup = match capture_address.as_mut() {
+            Some(address) => address.remove_and_verify(),
+            None => Ok(()),
+        };
+        let baseline_address_cleanup = match baseline_address.as_mut() {
+            Some(address) => address.remove_and_verify(),
+            None => Ok(()),
+        };
+        capture_adapter.end_session();
+        capture_adapter.close_adapter();
+        baseline_adapter.end_session();
+        baseline_adapter.close_adapter();
         let mut cleanup_errors = Vec::new();
         if let Err(error) = baseline_route_cleanup {
             cleanup_errors.push(format!("baseline route: {error}"));
@@ -656,11 +674,6 @@ fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered() {
             ));
         }
         flow_result?;
-
-        capture_adapter.end_session();
-        capture_adapter.close_adapter();
-        baseline_adapter.end_session();
-        baseline_adapter.close_adapter();
         Ok::<(), String>(())
     })();
 
@@ -1295,6 +1308,9 @@ fn parse_ipv4_udp_request(
     if fragment & 0x3fff != 0 {
         return Err("captured IPv4 UDP request was fragmented".to_owned());
     }
+    if internet_checksum(&packet[..header_length]) != 0 {
+        return Err("captured IPv4 packet has an invalid header checksum".to_owned());
+    }
 
     let udp = &packet[header_length..];
     let source_port =
@@ -1311,17 +1327,83 @@ fn parse_ipv4_udp_request(
         || destination_port != expected_destination_port
         || udp_length != udp.len()
         || udp_length != UDP_HEADER_LENGTH + expected_payload.len()
-        || &udp[UDP_HEADER_LENGTH..] != expected_payload
     {
         return Err(format!(
             "captured IPv4 UDP request mismatch: source_port={source_port}, destination_port={destination_port}, udp_length={udp_length}, packet_udp_length={} ",
             udp.len()
         ));
     }
+    let udp_checksum = u16::from_be_bytes([udp[UDP_CHECKSUM_OFFSET], udp[UDP_CHECKSUM_OFFSET + 1]]);
+    if udp_checksum != 0 {
+        let mut pseudo_header = Vec::with_capacity(12 + udp_length);
+        pseudo_header.extend_from_slice(&source.octets());
+        pseudo_header.extend_from_slice(&destination.octets());
+        pseudo_header.push(0);
+        pseudo_header.push(UDP_PROTOCOL_NUMBER);
+        pseudo_header.extend_from_slice(&(udp_length as u16).to_be_bytes());
+        pseudo_header.extend_from_slice(udp);
+        if internet_checksum(&pseudo_header) != 0 {
+            return Err("captured IPv4 UDP request has an invalid checksum".to_owned());
+        }
+    }
+    if &udp[UDP_HEADER_LENGTH..] != expected_payload {
+        return Err("captured IPv4 UDP request payload mismatch".to_owned());
+    }
     Ok(Some(CapturedUdpRequest {
         source_port,
         destination_port,
     }))
+}
+
+#[test]
+fn ipv4_udp_request_parser_requires_valid_checksums() {
+    let source_port = 40_001;
+    let packet = build_ipv4_udp_packet(
+        IPV4_BASELINE_SOURCE,
+        IPV4_PREEXISTING_DESTINATION,
+        source_port,
+        PACKET_DELIVERY_PORT,
+        PREEXISTING_WARMUP_REQUEST,
+    )
+    .expect("build checksum-valid IPv4 UDP request");
+    let parse = |packet: &[u8]| {
+        parse_ipv4_udp_request(
+            packet,
+            IPV4_BASELINE_SOURCE,
+            IPV4_PREEXISTING_DESTINATION,
+            source_port,
+            PACKET_DELIVERY_PORT,
+            PREEXISTING_WARMUP_REQUEST,
+        )
+    };
+
+    assert_eq!(
+        parse(&packet).expect("parse checksum-valid IPv4 UDP request"),
+        Some(CapturedUdpRequest {
+            source_port,
+            destination_port: PACKET_DELIVERY_PORT,
+        })
+    );
+
+    let mut invalid_header = packet.clone();
+    invalid_header[8] ^= 1;
+    assert!(parse(&invalid_header)
+        .expect_err("reject an invalid IPv4 header checksum")
+        .contains("invalid header checksum"));
+
+    let mut invalid_udp = packet.clone();
+    invalid_udp[IPV4_MIN_HEADER_LENGTH + UDP_HEADER_LENGTH] ^= 1;
+    assert!(parse(&invalid_udp)
+        .expect_err("reject an invalid IPv4 UDP checksum")
+        .contains("invalid checksum"));
+
+    let mut zero_udp_checksum = packet;
+    zero_udp_checksum
+        [IPV4_MIN_HEADER_LENGTH + UDP_CHECKSUM_OFFSET..IPV4_MIN_HEADER_LENGTH + UDP_HEADER_LENGTH]
+        .fill(0);
+    assert!(parse(&zero_udp_checksum)
+        .expect("IPv4 permits a zero UDP checksum")
+        .is_some());
 }
 
 fn parse_ipv6_udp_request(

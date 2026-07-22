@@ -580,7 +580,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         .find("PREEXISTING_RETRY_REQUEST")
         .expect("pre-existing-flow gate must retain a post-rollback retry");
     let cleanup = preexisting
-        .find("let baseline_route_cleanup = baseline_route.remove_and_verify()")
+        .find("let baseline_route_cleanup = match baseline_route.as_mut()")
         .expect("pre-existing-flow gate must explicitly clean its baseline route");
     let accept_flow_result = preexisting
         .find("flow_result?;")
