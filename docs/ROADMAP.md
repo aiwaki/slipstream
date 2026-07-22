@@ -462,9 +462,14 @@ therefore stays phased and closed to production traffic:
    requests must have a valid IPv4 header checksum and either a valid UDP
    checksum or IPv4's permitted zero UDP checksum; every acquired route and
    address reaches verified cleanup on early failure. This closes only the
-   first IPv4 UDP subgate. TCP pre-existing-flow activation safety, bounded
-   capture expiry/removal, and explicit external-VPN coexistence remain
-   separate native AMD64 and ARM64 Windows gates.
+   first IPv4 UDP subgate. PR #200's final candidate adds a separate real
+   TCP-stream gate with a checksum-valid synthetic handshake, activation
+   exchange, fail-closed exact-route rollback if the established stream reaches
+   capture, retransmission recovery, and an unconditional same-stream
+   post-removal exchange. Its qualified code head passed native AMD64 and ARM64
+   twice plus required CI and audit; exact-main evidence remains required before
+   that TCP gate closes. Bounded capture expiry/removal and explicit
+   external-VPN coexistence remain separate native AMD64 and ARM64 Windows gates.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
