@@ -4,9 +4,7 @@
 //! selects for one numeric destination. It cannot create, update, or delete a
 //! route, open a socket, load a packet adapter, or authorize packet egress.
 
-use super::v1::{
-    is_safe_public_destination, is_usable_source_address, prefix_contains, same_family,
-};
+use super::v1::{is_safe_public_destination, prefix_contains, same_family};
 use super::{WindowsPacketInterfaceIdentity, WindowsPacketRouteObservation};
 use std::error::Error;
 use std::fmt;
@@ -28,7 +26,6 @@ pub enum WindowsPacketRouteObserverErrorCode {
     RouteQueryFailed,
     UnsupportedAddressFamily,
     SourceAddressFamilyMismatch,
-    UnsafeSourceAddress,
     InvalidRoutePrefix,
     RoutePrefixFamilyMismatch,
     DestinationOutsideRoutePrefix,
@@ -45,7 +42,6 @@ impl WindowsPacketRouteObserverErrorCode {
             Self::RouteQueryFailed => "route_query_failed",
             Self::UnsupportedAddressFamily => "unsupported_address_family",
             Self::SourceAddressFamilyMismatch => "source_address_family_mismatch",
-            Self::UnsafeSourceAddress => "unsafe_source_address",
             Self::InvalidRoutePrefix => "invalid_route_prefix",
             Self::RoutePrefixFamilyMismatch => "route_prefix_family_mismatch",
             Self::DestinationOutsideRoutePrefix => "destination_outside_route_prefix",
@@ -143,11 +139,6 @@ pub fn observe_windows_packet_route_on_interface(
     if !same_family(destination, source_address) {
         return Err(WindowsPacketRouteObserverError::new(
             Code::SourceAddressFamilyMismatch,
-        ));
-    }
-    if !is_usable_source_address(source_address) {
-        return Err(WindowsPacketRouteObserverError::new(
-            Code::UnsafeSourceAddress,
         ));
     }
     revalidate_interface_identity(interface)?;

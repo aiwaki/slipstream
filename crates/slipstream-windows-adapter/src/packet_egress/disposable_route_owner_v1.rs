@@ -9,7 +9,7 @@ use super::windows::{
     observe_windows_packet_route, observe_windows_packet_route_on_interface, sockaddr_from_ip,
     WindowsPacketRouteObserverError,
 };
-use super::WindowsPacketInterfaceIdentity;
+use super::{WindowsPacketInterfaceIdentity, WindowsPacketRouteObservation};
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -44,7 +44,10 @@ pub enum WindowsDisposableExactRouteErrorCode {
     TransitionAttestationFailed,
     ActivationNotCurrent,
     BaselineEgressRevalidationFailed,
-    BaselineEgressChanged,
+    BaselineEgressInterfaceChanged,
+    BaselineSourceAddressChanged,
+    BaselineRoutePrefixChanged,
+    BaselineLoopbackStateChanged,
     ActiveProbeGateClosed,
     ActiveProbeFailed,
     ExactRouteDeleteFailed,
@@ -68,7 +71,10 @@ impl WindowsDisposableExactRouteErrorCode {
             Self::TransitionAttestationFailed => "transition_attestation_failed",
             Self::ActivationNotCurrent => "activation_not_current",
             Self::BaselineEgressRevalidationFailed => "baseline_egress_revalidation_failed",
-            Self::BaselineEgressChanged => "baseline_egress_changed",
+            Self::BaselineEgressInterfaceChanged => "baseline_egress_interface_changed",
+            Self::BaselineSourceAddressChanged => "baseline_source_address_changed",
+            Self::BaselineRoutePrefixChanged => "baseline_route_prefix_changed",
+            Self::BaselineLoopbackStateChanged => "baseline_loopback_state_changed",
             Self::ActiveProbeGateClosed => "active_probe_gate_closed",
             Self::ActiveProbeFailed => "active_probe_failed",
             Self::ExactRouteDeleteFailed => "exact_route_delete_failed",
@@ -323,15 +329,13 @@ where
             baseline_source_address,
         )
         .map_err(|error| observation_error(Code::BaselineEgressRevalidationFailed, error))?;
-        if revalidated_baseline.egress_interface() != baseline_egress_interface
-            || revalidated_baseline.source_address() != baseline_source_address
-            || revalidated_baseline.route_prefix() != baseline_route_prefix
-            || revalidated_baseline.route_is_loopback() != baseline_route_is_loopback
-        {
-            return Err(WindowsDisposableExactRouteError::new(
-                Code::BaselineEgressChanged,
-            ));
-        }
+        require_same_baseline_egress(
+            &revalidated_baseline,
+            baseline_egress_interface,
+            baseline_source_address,
+            &baseline_route_prefix,
+            baseline_route_is_loopback,
+        )?;
         active_probe(&WindowsDisposableExactRouteActiveProbe {
             destination,
             exact_route_prefix: &exact_route_prefix,
@@ -443,6 +447,38 @@ where
         recovered_egress_interface: recovered.egress_interface(),
         route_epoch_after_removal,
     })
+}
+
+fn require_same_baseline_egress(
+    observation: &WindowsPacketRouteObservation,
+    interface: WindowsPacketInterfaceIdentity,
+    source_address: IpAddr,
+    route_prefix: &str,
+    route_is_loopback: bool,
+) -> Result<(), WindowsDisposableExactRouteError> {
+    use WindowsDisposableExactRouteErrorCode as Code;
+
+    if observation.egress_interface() != interface {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineEgressInterfaceChanged,
+        ));
+    }
+    if observation.source_address() != source_address {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineSourceAddressChanged,
+        ));
+    }
+    if observation.route_prefix() != route_prefix {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineRoutePrefixChanged,
+        ));
+    }
+    if observation.route_is_loopback() != route_is_loopback {
+        return Err(WindowsDisposableExactRouteError::new(
+            Code::BaselineLoopbackStateChanged,
+        ));
+    }
+    Ok(())
 }
 
 fn retain_secondary_error(

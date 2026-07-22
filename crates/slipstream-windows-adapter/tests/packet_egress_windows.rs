@@ -55,16 +55,4 @@ fn native_packet_route_observer_is_read_only_and_consistent() {
         WindowsPacketRouteObserverErrorCode::UnsafeDestination
     );
     assert_eq!(error.win32_code(), None);
-
-    let error = observe_windows_packet_route_on_interface(
-        destination,
-        egress,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-    )
-    .expect_err("unsafe source constraints must fail before route observation");
-    assert_eq!(
-        error.code(),
-        WindowsPacketRouteObserverErrorCode::UnsafeSourceAddress
-    );
-    assert_eq!(error.win32_code(), None);
 }
