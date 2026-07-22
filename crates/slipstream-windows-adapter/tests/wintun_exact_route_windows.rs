@@ -500,9 +500,6 @@ fn prove_ipv4_packet_round_trip(
     let socket = UdpSocket::bind(SocketAddrV4::new(expected_capture_source, 0))
         .map_err(|error| format!("bind IPv4 packet-delivery socket: {error}"))?;
     socket
-        .set_read_timeout(Some(PACKET_DELIVERY_TIMEOUT))
-        .map_err(|error| format!("bound IPv4 packet-delivery receive timeout: {error}"))?;
-    socket
         .connect(peer)
         .map_err(|error| format!("connect IPv4 packet-delivery socket: {error}"))?;
     let local = match socket
@@ -520,6 +517,7 @@ fn prove_ipv4_packet_round_trip(
         ));
     }
 
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
     let sent = socket
         .send(PACKET_REQUEST_PAYLOAD)
         .map_err(|error| format!("send IPv4 packet-delivery request: {error}"))?;
@@ -536,7 +534,7 @@ fn prove_ipv4_packet_round_trip(
         local.port(),
         PACKET_DELIVERY_PORT,
         PACKET_REQUEST_PAYLOAD,
-        Instant::now() + PACKET_DELIVERY_TIMEOUT,
+        deadline,
     )?;
     let response = build_ipv4_udp_packet(
         destination,
@@ -547,10 +545,20 @@ fn prove_ipv4_packet_round_trip(
     )?;
     adapter.inject_packet(&response)?;
 
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| "Wintun packet round trip exceeded its bounded deadline".to_owned())?;
+    socket
+        .set_read_timeout(Some(remaining))
+        .map_err(|error| format!("bound IPv4 packet-delivery receive timeout: {error}"))?;
     let mut received = vec![0u8; PACKET_RESPONSE_PAYLOAD.len() + 1];
     let received_length = socket
         .recv(&mut received)
         .map_err(|error| format!("receive injected IPv4 packet-delivery response: {error}"))?;
+    if Instant::now() > deadline {
+        return Err("Wintun packet round trip exceeded its bounded deadline".to_owned());
+    }
     if &received[..received_length] != PACKET_RESPONSE_PAYLOAD {
         return Err(format!(
             "injected IPv4 response payload mismatch: length={received_length}"
@@ -1127,6 +1135,9 @@ impl<'a> OwnedWintunAdapter<'a> {
             return Err("Wintun packet receive requires an active owned session".to_owned());
         }
         loop {
+            if Instant::now() >= deadline {
+                return Err("Wintun packet receive exceeded its bounded deadline".to_owned());
+            }
             let mut packet_size = 0u32;
             let packet = unsafe { (self.api.receive_packet)(self.session, &mut packet_size) };
             if !packet.is_null() {

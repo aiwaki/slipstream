@@ -503,6 +503,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "build_ipv4_udp_packet",
         "PACKET_DELIVERY_TIMEOUT",
         "Wintun packet receive exceeded its bounded deadline",
+        "Wintun packet round trip exceeded its bounded deadline",
         "require_adapter_absent",
     ] {
         assert!(
