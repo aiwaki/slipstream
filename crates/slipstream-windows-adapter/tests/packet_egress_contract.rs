@@ -569,6 +569,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         .map(|offset| preexisting_start + offset)
         .expect("pre-existing-flow gate must end before the IPv6 packet gate");
     let preexisting = &fixture[preexisting_start..preexisting_end];
+    assert!(preexisting.contains("PREEXISTING_CAPTURE_ROLLBACK"));
     let warmup = preexisting
         .find("PREEXISTING_WARMUP_REQUEST")
         .expect("pre-existing-flow gate must prove a warm-up exchange");

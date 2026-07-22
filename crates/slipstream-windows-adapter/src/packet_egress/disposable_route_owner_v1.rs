@@ -157,6 +157,10 @@ impl WindowsDisposableExactRouteError {
     pub const fn win32_code(&self) -> Option<u32> {
         self.win32_code
     }
+
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
+    }
 }
 
 impl fmt::Display for WindowsDisposableExactRouteError {
