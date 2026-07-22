@@ -449,13 +449,22 @@ therefore stays phased and closed to production traffic:
    passed one closed IPv4 UDP round trip through the Wintun receive and send
    rings with one shared deadline and no external endpoint or backend. The
    PR #196's exact main passed the same closed proof for IPv6 with its mandatory
-   UDP checksum on native AMD64 and ARM64. The current bounded follow-up adds a
-   fresh constrained `GetBestRoute2` observation for the retained baseline
+   UDP checksum on native AMD64 and ARM64. PR #197 added a fresh constrained
+   `GetBestRoute2` observation for the retained baseline
    source and LUID while the exact capture route is active; caller-repeated
-   baseline fields cannot authorize the disposable active probe. Activation
-   safety for pre-existing flows,
-   bounded capture expiry/removal, and explicit external-VPN coexistence on
-   disposable AMD64 and ARM64 Windows.
+   baseline fields cannot authorize the disposable active probe. Its exact main
+   passed that gate on native AMD64 and ARM64. PR #198's candidate passed the
+   next disposable subgate on both architectures: two owned IPv4 Wintun
+   interfaces and one owned non-default `/24` baseline route prove a connected
+   UDP socket works before exact `/32` activation, then require either
+   uninterrupted baseline delivery or an active-probe failure followed by
+   owned-route removal and a successful retry on the same socket. Captured
+   requests must have a valid IPv4 header checksum and either a valid UDP
+   checksum or IPv4's permitted zero UDP checksum; every acquired route and
+   address reaches verified cleanup on early failure. Exact-main confirmation
+   remains before closing this first UDP subgate. TCP pre-existing-flow
+   activation safety, bounded capture expiry/removal, and explicit external-VPN
+   coexistence remain separate native AMD64 and ARM64 Windows gates.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
