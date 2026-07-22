@@ -158,7 +158,7 @@ impl WindowsDisposableExactRouteError {
         self.win32_code
     }
 
-    pub fn detail(&self) -> Option<&str> {
+    pub fn detail_message(&self) -> Option<&str> {
         self.detail.as_deref()
     }
 }

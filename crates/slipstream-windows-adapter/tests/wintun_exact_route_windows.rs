@@ -599,7 +599,7 @@ fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered() {
                 (Ok(qualification), Some(PreexistingFlowPath::Baseline)) => Some(qualification),
                 (Err(error), Some(PreexistingFlowPath::Capture))
                     if error.code() == WindowsDisposableExactRouteErrorCode::ActiveProbeFailed
-                        && error.detail() == Some(PREEXISTING_CAPTURE_ROLLBACK) =>
+                        && error.detail_message() == Some(PREEXISTING_CAPTURE_ROLLBACK) =>
                 {
                     prove_ipv4_udp_round_trip_on_adapter(
                         &socket,
