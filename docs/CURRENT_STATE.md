@@ -520,9 +520,10 @@ evidence; do not improvise another install in the same session.
 Continue M4 on disposable systems. PRs #193 and #194 proved no-payload IPv4
 and IPv6 socket selection under competing exact Wintun routes on exact main,
 native AMD64 and ARM64, while removing every owned route, address, session,
-and adapter. The current isolated gate sends one synthetic IPv4 UDP datagram
-into the owned capture ring and injects one synthetic response back to the
-same socket under a strict deadline. It has no external endpoint, backend,
+and adapter. PR #195's exact head passed one synthetic IPv4 UDP datagram into
+the owned capture ring and one synthetic response injected back to the same
+socket under one strict deadline on native AMD64 and ARM64. It has no external
+endpoint, backend,
 default route, production host, DNS, proxy, PAC, or VPN effect. IPv6 packet
 delivery, fresh source/LUID revalidation, pre-existing-flow activation safety,
 bounded capture removal, and explicit

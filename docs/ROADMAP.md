@@ -445,10 +445,11 @@ therefore stays phased and closed to production traffic:
    address, and adapter absent. PR #194's exact main qualified equivalent IPv6
    selection using host-order `IPV6_UNICAST_IF`, two exact `/128` source
    addresses, one explicitly owned test-only baseline `/64`, and the owned
-   competing destination `/128` on native AMD64 and ARM64. The current isolated
-   subgate exercises one closed IPv4 UDP round trip through the Wintun receive
-   and send rings with no external endpoint or backend. IPv6 packet delivery
-   remains separate, followed by activation safety for pre-existing flows,
+   competing destination `/128` on native AMD64 and ARM64. PR #195's exact head
+   passed one closed IPv4 UDP round trip through the Wintun receive and send
+   rings with one shared deadline and no external endpoint or backend. Exact-main
+   requalification and IPv6 packet delivery remain separate, followed by
+   activation safety for pre-existing flows,
    bounded capture expiry/removal, and explicit external-VPN coexistence on
    disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
