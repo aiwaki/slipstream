@@ -442,12 +442,13 @@ therefore stays phased and closed to production traffic:
    qualified no-payload IPv4 socket selection: set `IP_UNICAST_IF` in network
    byte order, read back the exact host-order interface index, bind the retained
    baseline source, connect without sending, and then prove the owned route,
-   address, and adapter absent. The current isolated subgate prepares equivalent
-   IPv6 selection using host-order `IPV6_UNICAST_IF`, two exact `/128` source
+   address, and adapter absent. PR #194's exact main qualified equivalent IPv6
+   selection using host-order `IPV6_UNICAST_IF`, two exact `/128` source
    addresses, one explicitly owned test-only baseline `/64`, and the owned
-   competing destination `/128`; PR #194's exact head passed on native AMD64
-   and ARM64, with exact-main requalification still required. Actual packet delivery
-   stays closed to a later gate, followed by activation safety for pre-existing flows,
+   competing destination `/128` on native AMD64 and ARM64. The current isolated
+   subgate exercises one closed IPv4 UDP round trip through the Wintun receive
+   and send rings with no external endpoint or backend. IPv6 packet delivery
+   remains separate, followed by activation safety for pre-existing flows,
    bounded capture expiry/removal, and explicit external-VPN coexistence on
    disposable AMD64 and ARM64 Windows.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.

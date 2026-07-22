@@ -12,7 +12,7 @@ use slipstream_windows_adapter::packet_egress::{
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::{
-    FreeLibrary, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND, HMODULE,
+    FreeLibrary, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND, ERROR_NO_MORE_ITEMS, HMODULE,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2,
@@ -43,11 +43,18 @@ use windows_sys::Win32::System::LibraryLoader::{
 const DISPOSABLE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_DISPOSABLE_CI";
 const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
 const SOCKET_BINDING_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI";
+const PACKET_DELIVERY_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
+const WINTUN_MAX_IP_PACKET_SIZE: usize = 0xffff;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_PROBE_INTERVAL: Duration = Duration::from_millis(25);
 const BASELINE_ROUTE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
+const PACKET_DELIVERY_TIMEOUT: Duration = Duration::from_secs(3);
+const PACKET_DELIVERY_PROBE_INTERVAL: Duration = Duration::from_millis(5);
+const PACKET_DELIVERY_PORT: u16 = 41_723;
+const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
+const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
 const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
 const IPV6_BASELINE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 2);
 const IPV6_CAPTURE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 3);
@@ -70,6 +77,13 @@ type WintunGetRunningDriverVersion = unsafe extern "system" fn() -> u32;
 type WintunStartSession =
     unsafe extern "system" fn(adapter: WintunAdapterHandle, capacity: u32) -> WintunSessionHandle;
 type WintunEndSession = unsafe extern "system" fn(session: WintunSessionHandle);
+type WintunReceivePacket =
+    unsafe extern "system" fn(session: WintunSessionHandle, packet_size: *mut u32) -> *mut u8;
+type WintunReleaseReceivePacket =
+    unsafe extern "system" fn(session: WintunSessionHandle, packet: *const u8);
+type WintunAllocateSendPacket =
+    unsafe extern "system" fn(session: WintunSessionHandle, packet_size: u32) -> *mut u8;
+type WintunSendPacket = unsafe extern "system" fn(session: WintunSessionHandle, packet: *const u8);
 
 #[test]
 fn native_wintun_exact_route_transition_is_owned_and_removed() {
@@ -375,6 +389,299 @@ fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route() {
     );
 }
 
+#[test]
+fn native_wintun_ipv4_packet_round_trip_is_captured_and_injected() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PACKET_DELIVERY_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let adapter_name = wide(&unique_adapter_name("Packet4"));
+    let tunnel_type = wide("Slipstream CI IPv4 Packet Delivery");
+    api.require_adapter_absent(&adapter_name, "before IPv4 packet-delivery fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv4 packet-delivery preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut adapter = OwnedWintunAdapter::create(&api, &adapter_name, &tunnel_type)?;
+        adapter.start_session()?;
+        let capture_interface = adapter.interface_identity()?;
+        let capture_source = Ipv4Addr::new(192, 0, 2, 20);
+        let destination = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 2));
+        let mut address =
+            OwnedUnicastAddress::create(capture_interface, IpAddr::V4(capture_source), 32)?;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(5, capture_interface, 1)
+            .map_err(|error| format!("construct IPv4 packet-delivery issuer: {error}"))?;
+
+        let route_result = qualify_disposable_exact_host_route_with_active_probe(
+            &mut issuer,
+            destination,
+            |active| prove_ipv4_packet_round_trip(active, &adapter, capture_source),
+        )
+        .map_err(|error| format!("qualify IPv4 packet delivery: {error}"));
+
+        let address_cleanup = address.remove_and_verify();
+        if let Err(cleanup_error) = address_cleanup {
+            return Err(format!(
+                "owned IPv4 packet-delivery address cleanup failed: {cleanup_error}; route result: {route_result:?}"
+            ));
+        }
+        let qualification = route_result?;
+        if qualification.destination() != destination
+            || qualification.exact_route_prefix() != "1.0.0.2/32"
+            || qualification.capture_interface() != capture_interface
+            || qualification.baseline_egress_interface() == capture_interface
+            || qualification.recovered_egress_interface()
+                != qualification.baseline_egress_interface()
+            || qualification.route_epoch_after_removal() != 3
+        {
+            return Err(
+                "IPv4 packet-delivery qualification returned inconsistent evidence".to_owned(),
+            );
+        }
+
+        adapter.end_session();
+        adapter.close_adapter();
+        Ok::<(), String>(())
+    })();
+
+    let cleanup_result =
+        api.require_adapter_absent(&adapter_name, "after IPv4 packet-delivery fixture");
+    if let Err(cleanup_error) = cleanup_result {
+        panic!(
+            "Wintun IPv4 packet-delivery cleanup proof failed: {cleanup_error}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable IPv4 packet-delivery qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+fn prove_ipv4_packet_round_trip(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    adapter: &OwnedWintunAdapter<'_>,
+    expected_capture_source: Ipv4Addr,
+) -> Result<(), String> {
+    let destination = match active.destination() {
+        IpAddr::V4(destination) => destination,
+        IpAddr::V6(_) => {
+            return Err("IPv4 packet-delivery probe received an IPv6 destination".to_owned())
+        }
+    };
+    if active.exact_route_prefix() != format!("{destination}/32")
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.capture_source_address() != IpAddr::V4(expected_capture_source)
+        || active.baseline_source_address() == IpAddr::V4(expected_capture_source)
+    {
+        return Err("active route facts do not prove the owned capture path".to_owned());
+    }
+
+    let peer = SocketAddrV4::new(destination, PACKET_DELIVERY_PORT);
+    let socket = UdpSocket::bind(SocketAddrV4::new(expected_capture_source, 0))
+        .map_err(|error| format!("bind IPv4 packet-delivery socket: {error}"))?;
+    socket
+        .set_read_timeout(Some(PACKET_DELIVERY_TIMEOUT))
+        .map_err(|error| format!("bound IPv4 packet-delivery receive timeout: {error}"))?;
+    socket
+        .connect(peer)
+        .map_err(|error| format!("connect IPv4 packet-delivery socket: {error}"))?;
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read IPv4 packet-delivery local address: {error}"))?
+    {
+        SocketAddr::V4(local) => local,
+        SocketAddr::V6(_) => {
+            return Err("IPv4 packet-delivery socket retained an IPv6 local address".to_owned())
+        }
+    };
+    if *local.ip() != expected_capture_source || local.port() == 0 {
+        return Err(format!(
+            "IPv4 packet-delivery source mismatch: local={local}, expected={expected_capture_source}"
+        ));
+    }
+
+    let sent = socket
+        .send(PACKET_REQUEST_PAYLOAD)
+        .map_err(|error| format!("send IPv4 packet-delivery request: {error}"))?;
+    if sent != PACKET_REQUEST_PAYLOAD.len() {
+        return Err(format!(
+            "IPv4 packet-delivery request was partial: sent={sent}, expected={}",
+            PACKET_REQUEST_PAYLOAD.len()
+        ));
+    }
+
+    let request = adapter.receive_matching_ipv4_udp_request(
+        expected_capture_source,
+        destination,
+        local.port(),
+        PACKET_DELIVERY_PORT,
+        PACKET_REQUEST_PAYLOAD,
+        Instant::now() + PACKET_DELIVERY_TIMEOUT,
+    )?;
+    let response = build_ipv4_udp_packet(
+        destination,
+        expected_capture_source,
+        request.destination_port,
+        request.source_port,
+        PACKET_RESPONSE_PAYLOAD,
+    )?;
+    adapter.inject_packet(&response)?;
+
+    let mut received = [0u8; 64];
+    let received_length = socket
+        .recv(&mut received)
+        .map_err(|error| format!("receive injected IPv4 packet-delivery response: {error}"))?;
+    if &received[..received_length] != PACKET_RESPONSE_PAYLOAD {
+        return Err(format!(
+            "injected IPv4 response payload mismatch: length={received_length}"
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct CapturedIpv4UdpRequest {
+    source_port: u16,
+    destination_port: u16,
+}
+
+fn parse_ipv4_udp_request(
+    packet: &[u8],
+    expected_source: Ipv4Addr,
+    expected_destination: Ipv4Addr,
+    expected_source_port: u16,
+    expected_destination_port: u16,
+    expected_payload: &[u8],
+) -> Result<Option<CapturedIpv4UdpRequest>, String> {
+    if packet.len() < 20 || packet[0] >> 4 != 4 {
+        return Ok(None);
+    }
+    let source = Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
+    let destination = Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
+    if source != expected_source || destination != expected_destination || packet[9] != 17 {
+        return Ok(None);
+    }
+
+    let header_length = usize::from(packet[0] & 0x0f) * 4;
+    if header_length < 20 || header_length > packet.len() {
+        return Err("captured IPv4 packet has an invalid header length".to_owned());
+    }
+    let total_length = usize::from(u16::from_be_bytes([packet[2], packet[3]]));
+    if total_length != packet.len() || total_length < header_length + 8 {
+        return Err(format!(
+            "captured IPv4 packet length mismatch: packet={}, header={header_length}, total={total_length}",
+            packet.len()
+        ));
+    }
+    let fragment = u16::from_be_bytes([packet[6], packet[7]]);
+    if fragment & 0x3fff != 0 {
+        return Err("captured IPv4 UDP request was fragmented".to_owned());
+    }
+
+    let udp = &packet[header_length..];
+    let source_port = u16::from_be_bytes([udp[0], udp[1]]);
+    let destination_port = u16::from_be_bytes([udp[2], udp[3]]);
+    let udp_length = usize::from(u16::from_be_bytes([udp[4], udp[5]]));
+    if source_port != expected_source_port
+        || destination_port != expected_destination_port
+        || udp_length != udp.len()
+        || udp_length != 8 + expected_payload.len()
+        || &udp[8..] != expected_payload
+    {
+        return Err(format!(
+            "captured IPv4 UDP request mismatch: source_port={source_port}, destination_port={destination_port}, udp_length={udp_length}, packet_udp_length={} ",
+            udp.len()
+        ));
+    }
+    Ok(Some(CapturedIpv4UdpRequest {
+        source_port,
+        destination_port,
+    }))
+}
+
+fn build_ipv4_udp_packet(
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    source_port: u16,
+    destination_port: u16,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    let udp_length = 8usize
+        .checked_add(payload.len())
+        .ok_or_else(|| "IPv4 UDP payload length overflow".to_owned())?;
+    let total_length = 20usize
+        .checked_add(udp_length)
+        .ok_or_else(|| "IPv4 packet length overflow".to_owned())?;
+    let total_length_u16 = u16::try_from(total_length)
+        .map_err(|_| "IPv4 packet exceeds the 65535-byte limit".to_owned())?;
+    let udp_length_u16 = u16::try_from(udp_length)
+        .map_err(|_| "IPv4 UDP packet exceeds the 65535-byte limit".to_owned())?;
+
+    let mut packet = vec![0u8; total_length];
+    packet[0] = 0x45;
+    packet[2..4].copy_from_slice(&total_length_u16.to_be_bytes());
+    packet[4..6].copy_from_slice(&0x534cu16.to_be_bytes());
+    packet[8] = 64;
+    packet[9] = 17;
+    packet[12..16].copy_from_slice(&source.octets());
+    packet[16..20].copy_from_slice(&destination.octets());
+
+    packet[20..22].copy_from_slice(&source_port.to_be_bytes());
+    packet[22..24].copy_from_slice(&destination_port.to_be_bytes());
+    packet[24..26].copy_from_slice(&udp_length_u16.to_be_bytes());
+    packet[28..].copy_from_slice(payload);
+
+    let ipv4_checksum = internet_checksum(&packet[..20]);
+    packet[10..12].copy_from_slice(&ipv4_checksum.to_be_bytes());
+
+    let mut pseudo_header = Vec::with_capacity(12 + udp_length);
+    pseudo_header.extend_from_slice(&source.octets());
+    pseudo_header.extend_from_slice(&destination.octets());
+    pseudo_header.push(0);
+    pseudo_header.push(17);
+    pseudo_header.extend_from_slice(&udp_length_u16.to_be_bytes());
+    pseudo_header.extend_from_slice(&packet[20..]);
+    let udp_checksum = internet_checksum(&pseudo_header);
+    packet[26..28].copy_from_slice(
+        &(if udp_checksum == 0 {
+            0xffff
+        } else {
+            udp_checksum
+        })
+        .to_be_bytes(),
+    );
+    Ok(packet)
+}
+
+fn internet_checksum(bytes: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    let mut chunks = bytes.chunks_exact(2);
+    for chunk in &mut chunks {
+        sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
+    }
+    if let Some(byte) = chunks.remainder().first() {
+        sum += u32::from(*byte) << 8;
+    }
+    while sum > 0xffff {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
 fn prove_ipv4_socket_binding(
     active: &WindowsDisposableExactRouteActiveProbe<'_>,
     expected_capture_source: Ipv4Addr,
@@ -631,6 +938,10 @@ struct LoadedWintun {
     get_running_driver_version: WintunGetRunningDriverVersion,
     start_session: WintunStartSession,
     end_session: WintunEndSession,
+    receive_packet: WintunReceivePacket,
+    release_receive_packet: WintunReleaseReceivePacket,
+    allocate_send_packet: WintunAllocateSendPacket,
+    send_packet: WintunSendPacket,
 }
 
 impl LoadedWintun {
@@ -662,6 +973,10 @@ impl LoadedWintun {
                     get_running_driver_version: resolve(module, c"WintunGetRunningDriverVersion")?,
                     start_session: resolve(module, c"WintunStartSession")?,
                     end_session: resolve(module, c"WintunEndSession")?,
+                    receive_packet: resolve(module, c"WintunReceivePacket")?,
+                    release_receive_packet: resolve(module, c"WintunReleaseReceivePacket")?,
+                    allocate_send_packet: resolve(module, c"WintunAllocateSendPacket")?,
+                    send_packet: resolve(module, c"WintunSendPacket")?,
                 })
             })()
         };
@@ -769,6 +1084,91 @@ impl<'a> OwnedWintunAdapter<'a> {
             luid: luid_value,
             index,
         })
+    }
+
+    fn receive_matching_ipv4_udp_request(
+        &self,
+        expected_source: Ipv4Addr,
+        expected_destination: Ipv4Addr,
+        expected_source_port: u16,
+        expected_destination_port: u16,
+        expected_payload: &[u8],
+        deadline: Instant,
+    ) -> Result<CapturedIpv4UdpRequest, String> {
+        loop {
+            let packet = self.receive_packet_until(deadline)?;
+            if let Some(request) = parse_ipv4_udp_request(
+                &packet,
+                expected_source,
+                expected_destination,
+                expected_source_port,
+                expected_destination_port,
+                expected_payload,
+            )? {
+                return Ok(request);
+            }
+        }
+    }
+
+    fn receive_packet_until(&self, deadline: Instant) -> Result<Vec<u8>, String> {
+        if self.session.is_null() {
+            return Err("Wintun packet receive requires an active owned session".to_owned());
+        }
+        loop {
+            let mut packet_size = 0u32;
+            let packet = unsafe { (self.api.receive_packet)(self.session, &mut packet_size) };
+            if !packet.is_null() {
+                if packet_size == 0 || packet_size as usize > WINTUN_MAX_IP_PACKET_SIZE {
+                    unsafe {
+                        (self.api.release_receive_packet)(self.session, packet);
+                    }
+                    return Err(format!(
+                        "Wintun returned an invalid packet length {packet_size}"
+                    ));
+                }
+                let packet_copy =
+                    unsafe { std::slice::from_raw_parts(packet, packet_size as usize).to_vec() };
+                unsafe {
+                    (self.api.release_receive_packet)(self.session, packet);
+                }
+                return Ok(packet_copy);
+            }
+
+            let error = last_error();
+            if error != ERROR_NO_MORE_ITEMS {
+                return Err(format!("WintunReceivePacket failed with {error}"));
+            }
+            if Instant::now() >= deadline {
+                return Err("Wintun packet receive exceeded its bounded deadline".to_owned());
+            }
+            thread::sleep(PACKET_DELIVERY_PROBE_INTERVAL);
+        }
+    }
+
+    fn inject_packet(&self, packet: &[u8]) -> Result<(), String> {
+        if self.session.is_null() {
+            return Err("Wintun packet injection requires an active owned session".to_owned());
+        }
+        if packet.is_empty() || packet.len() > WINTUN_MAX_IP_PACKET_SIZE {
+            return Err(format!(
+                "Wintun packet injection length {} is outside the valid range",
+                packet.len()
+            ));
+        }
+        let packet_size = u32::try_from(packet.len())
+            .map_err(|_| "Wintun packet injection length overflow".to_owned())?;
+        let destination = unsafe { (self.api.allocate_send_packet)(self.session, packet_size) };
+        if destination.is_null() {
+            return Err(format!(
+                "WintunAllocateSendPacket failed with {}",
+                last_error()
+            ));
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(packet.as_ptr(), destination, packet.len());
+            (self.api.send_packet)(self.session, destination);
+        }
+        Ok(())
     }
 
     fn end_session(&mut self) {
