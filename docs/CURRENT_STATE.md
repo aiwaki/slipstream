@@ -44,7 +44,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | First IPv4 UDP pre-existing-flow subgate exact-main qualified; TCP candidate under native qualification | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, and one bounded IPv4 UDP pre-existing-flow activation subgate on native AMD64 and ARM64. PR #198 creates a controlled connected UDP socket, proves a checksum-valid baseline round trip before exact-route activation, and then accepts only continued baseline delivery or an owned-route rollback followed by a successful retry on the same socket. PR #200's candidate adds an independent real TCP-stream gate with a synthetic checksum-valid handshake, payload continuity or fail-closed exact-route rollback, retransmission recovery, and an unconditional same-stream post-removal exchange. Its native and exact-main evidence remain pending, so TCP is not yet closed. Every acquired route and address reaches verified cleanup even when setup or exchange fails. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. Crash-safe capture removal, external-VPN coexistence, userspace forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | IPv4 UDP exact-main qualified; TCP PR-qualified with exact-main pending | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, and one bounded IPv4 UDP pre-existing-flow activation subgate on native AMD64 and ARM64. PR #198 creates a controlled connected UDP socket, proves a checksum-valid baseline round trip before exact-route activation, and then accepts only continued baseline delivery or an owned-route rollback followed by a successful retry on the same socket. PR #200's candidate independently establishes a real TCP stream through a synthetic checksum-valid handshake, then proves payload continuity or fail-closed exact-route rollback, retransmission recovery, and an unconditional same-stream post-removal exchange. Its final head passed native AMD64 and ARM64 twice plus required CI and audit; exact-main evidence remains pending, so TCP is not yet closed. Every acquired route and address reaches verified cleanup even when setup or exchange fails. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. Crash-safe capture removal, external-VPN coexistence, userspace forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -549,7 +549,15 @@ transaction or production composition. A partial DNS cache is never treated as
 complete attribution.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
-PR #200's candidate is the independent IPv4 TCP pre-existing-flow gate. It
+PR #200's candidate is the independent IPv4 TCP pre-existing-flow gate. Its
+final head `d384817c7e64d79806c6ac18eab9a6f4803f3092` passed native AMD64 and
+ARM64 twice in
+[run 29965217892](https://github.com/aiwaki/slipstream/actions/runs/29965217892),
+all required checks and packaged lifecycle in
+[run 29965217886](https://github.com/aiwaki/slipstream/actions/runs/29965217886),
+and dependency audit in
+[run 29965217897](https://github.com/aiwaki/slipstream/actions/runs/29965217897).
+It
 establishes one real Windows TCP stream through the owned baseline Wintun ring,
 requires a checksum-valid SYN/SYN-ACK/final-ACK exchange and a payload round
 trip before activation, then accepts only baseline continuity or fail-closed
@@ -558,9 +566,8 @@ also complete another baseline exchange after route removal. Its first native
 revision exposed that `peer_addr()` alone can become observable before Windows
 has completed the handshake; the corrected candidate requires the captured
 final ACK with exact sequence and acknowledgment numbers before treating the
-stream as established. Native AMD64/ARM64 requalification, required CI, review,
-merge, and exact-main evidence remain required before TCP is removed from the
-open M4 gates.
+stream as established. Fresh review, merge, and exact-main evidence remain
+required before TCP is removed from the open M4 gates.
 
 ## External Gates
 
