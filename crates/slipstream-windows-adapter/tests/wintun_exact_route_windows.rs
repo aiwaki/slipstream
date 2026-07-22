@@ -55,6 +55,12 @@ const PACKET_DELIVERY_PROBE_INTERVAL: Duration = Duration::from_millis(5);
 const PACKET_DELIVERY_PORT: u16 = 41_723;
 const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
 const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
+const IPV4_MIN_HEADER_LENGTH: usize = 20;
+const UDP_HEADER_LENGTH: usize = 8;
+const IPV4_VERSION_AND_MIN_HEADER_LENGTH: u8 = 0x45;
+const IPV4_PACKET_IDENTIFICATION: u16 = 0x534c;
+const IPV4_DEFAULT_TTL: u8 = 64;
+const IPV4_UDP_PROTOCOL: u8 = 17;
 const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
 const IPV6_BASELINE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 2);
 const IPV6_CAPTURE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 3);
@@ -541,7 +547,7 @@ fn prove_ipv4_packet_round_trip(
     )?;
     adapter.inject_packet(&response)?;
 
-    let mut received = [0u8; 64];
+    let mut received = vec![0u8; PACKET_RESPONSE_PAYLOAD.len() + 1];
     let received_length = socket
         .recv(&mut received)
         .map_err(|error| format!("receive injected IPv4 packet-delivery response: {error}"))?;
@@ -567,21 +573,24 @@ fn parse_ipv4_udp_request(
     expected_destination_port: u16,
     expected_payload: &[u8],
 ) -> Result<Option<CapturedIpv4UdpRequest>, String> {
-    if packet.len() < 20 || packet[0] >> 4 != 4 {
+    if packet.len() < IPV4_MIN_HEADER_LENGTH || packet[0] >> 4 != 4 {
         return Ok(None);
     }
     let source = Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
     let destination = Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
-    if source != expected_source || destination != expected_destination || packet[9] != 17 {
+    if source != expected_source
+        || destination != expected_destination
+        || packet[9] != IPV4_UDP_PROTOCOL
+    {
         return Ok(None);
     }
 
     let header_length = usize::from(packet[0] & 0x0f) * 4;
-    if header_length < 20 || header_length > packet.len() {
+    if header_length < IPV4_MIN_HEADER_LENGTH || header_length > packet.len() {
         return Err("captured IPv4 packet has an invalid header length".to_owned());
     }
     let total_length = usize::from(u16::from_be_bytes([packet[2], packet[3]]));
-    if total_length != packet.len() || total_length < header_length + 8 {
+    if total_length != packet.len() || total_length < header_length + UDP_HEADER_LENGTH {
         return Err(format!(
             "captured IPv4 packet length mismatch: packet={}, header={header_length}, total={total_length}",
             packet.len()
@@ -599,8 +608,8 @@ fn parse_ipv4_udp_request(
     if source_port != expected_source_port
         || destination_port != expected_destination_port
         || udp_length != udp.len()
-        || udp_length != 8 + expected_payload.len()
-        || &udp[8..] != expected_payload
+        || udp_length != UDP_HEADER_LENGTH + expected_payload.len()
+        || &udp[UDP_HEADER_LENGTH..] != expected_payload
     {
         return Err(format!(
             "captured IPv4 UDP request mismatch: source_port={source_port}, destination_port={destination_port}, udp_length={udp_length}, packet_udp_length={} ",
@@ -620,10 +629,10 @@ fn build_ipv4_udp_packet(
     destination_port: u16,
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let udp_length = 8usize
+    let udp_length = UDP_HEADER_LENGTH
         .checked_add(payload.len())
         .ok_or_else(|| "IPv4 UDP payload length overflow".to_owned())?;
-    let total_length = 20usize
+    let total_length = IPV4_MIN_HEADER_LENGTH
         .checked_add(udp_length)
         .ok_or_else(|| "IPv4 packet length overflow".to_owned())?;
     let total_length_u16 = u16::try_from(total_length)
@@ -632,29 +641,32 @@ fn build_ipv4_udp_packet(
         .map_err(|_| "IPv4 UDP packet exceeds the 65535-byte limit".to_owned())?;
 
     let mut packet = vec![0u8; total_length];
-    packet[0] = 0x45;
+    packet[0] = IPV4_VERSION_AND_MIN_HEADER_LENGTH;
     packet[2..4].copy_from_slice(&total_length_u16.to_be_bytes());
-    packet[4..6].copy_from_slice(&0x534cu16.to_be_bytes());
-    packet[8] = 64;
-    packet[9] = 17;
+    packet[4..6].copy_from_slice(&IPV4_PACKET_IDENTIFICATION.to_be_bytes());
+    packet[8] = IPV4_DEFAULT_TTL;
+    packet[9] = IPV4_UDP_PROTOCOL;
     packet[12..16].copy_from_slice(&source.octets());
     packet[16..20].copy_from_slice(&destination.octets());
 
-    packet[20..22].copy_from_slice(&source_port.to_be_bytes());
-    packet[22..24].copy_from_slice(&destination_port.to_be_bytes());
-    packet[24..26].copy_from_slice(&udp_length_u16.to_be_bytes());
-    packet[28..].copy_from_slice(payload);
+    packet[IPV4_MIN_HEADER_LENGTH..IPV4_MIN_HEADER_LENGTH + 2]
+        .copy_from_slice(&source_port.to_be_bytes());
+    packet[IPV4_MIN_HEADER_LENGTH + 2..IPV4_MIN_HEADER_LENGTH + 4]
+        .copy_from_slice(&destination_port.to_be_bytes());
+    packet[IPV4_MIN_HEADER_LENGTH + 4..IPV4_MIN_HEADER_LENGTH + 6]
+        .copy_from_slice(&udp_length_u16.to_be_bytes());
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_HEADER_LENGTH..].copy_from_slice(payload);
 
-    let ipv4_checksum = internet_checksum(&packet[..20]);
+    let ipv4_checksum = internet_checksum(&packet[..IPV4_MIN_HEADER_LENGTH]);
     packet[10..12].copy_from_slice(&ipv4_checksum.to_be_bytes());
 
     let mut pseudo_header = Vec::with_capacity(12 + udp_length);
     pseudo_header.extend_from_slice(&source.octets());
     pseudo_header.extend_from_slice(&destination.octets());
     pseudo_header.push(0);
-    pseudo_header.push(17);
+    pseudo_header.push(IPV4_UDP_PROTOCOL);
     pseudo_header.extend_from_slice(&udp_length_u16.to_be_bytes());
-    pseudo_header.extend_from_slice(&packet[20..]);
+    pseudo_header.extend_from_slice(&packet[IPV4_MIN_HEADER_LENGTH..]);
     let udp_checksum = internet_checksum(&pseudo_header);
     packet[26..28].copy_from_slice(
         &(if udp_checksum == 0 {
