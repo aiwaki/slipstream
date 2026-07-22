@@ -475,6 +475,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv4_packet_round_trip_is_captured_and_injected",
+        "native_wintun_ipv6_packet_round_trip_is_captured_and_injected",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
         "interface_index.to_be()",
@@ -500,10 +501,13 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "WintunAllocateSendPacket",
         "WintunSendPacket",
         "receive_matching_ipv4_udp_request",
+        "receive_matching_ipv6_udp_request",
         "build_ipv4_udp_packet",
+        "build_ipv6_udp_packet",
         "PACKET_DELIVERY_TIMEOUT",
         "Wintun packet receive exceeded its bounded deadline",
         "Wintun packet round trip exceeded its bounded deadline",
+        "Wintun IPv6 packet round trip exceeded its bounded deadline",
         "require_adapter_absent",
     ] {
         assert!(
@@ -574,6 +578,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow.contains("Qualify closed IPv4 packet capture and injection round trip"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv4_packet_round_trip_is_captured_and_injected"));
+    assert!(workflow.contains("Qualify closed IPv6 packet capture and injection round trip"));
+    assert!(workflow
+        .contains("-TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected"));
     assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI: \"1\""));
 
     let production_host = include_str!("../src/service_host/windows.rs");

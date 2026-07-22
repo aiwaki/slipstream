@@ -56,11 +56,23 @@ const PACKET_DELIVERY_PORT: u16 = 41_723;
 const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
 const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
 const IPV4_MIN_HEADER_LENGTH: usize = 20;
+const IPV6_HEADER_LENGTH: usize = 40;
+const IPV6_PAYLOAD_LENGTH_OFFSET: usize = 4;
+const IPV6_NEXT_HEADER_OFFSET: usize = 6;
+const IPV6_HOP_LIMIT_OFFSET: usize = 7;
+const IPV6_SOURCE_OFFSET: usize = 8;
+const IPV6_DESTINATION_OFFSET: usize = 24;
 const UDP_HEADER_LENGTH: usize = 8;
+const UDP_SOURCE_PORT_OFFSET: usize = 0;
+const UDP_DESTINATION_PORT_OFFSET: usize = 2;
+const UDP_LENGTH_OFFSET: usize = 4;
+const UDP_CHECKSUM_OFFSET: usize = 6;
 const IPV4_VERSION_AND_MIN_HEADER_LENGTH: u8 = 0x45;
+const IPV6_VERSION: u8 = 0x60;
 const IPV4_PACKET_IDENTIFICATION: u16 = 0x534c;
 const IPV4_DEFAULT_TTL: u8 = 64;
-const IPV4_UDP_PROTOCOL: u8 = 17;
+const IPV6_DEFAULT_HOP_LIMIT: u8 = 64;
+const UDP_PROTOCOL_NUMBER: u8 = 17;
 const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
 const IPV6_BASELINE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 2);
 const IPV6_CAPTURE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 3);
@@ -477,6 +489,140 @@ fn native_wintun_ipv4_packet_round_trip_is_captured_and_injected() {
     );
 }
 
+#[test]
+fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PACKET_DELIVERY_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let baseline_name = wide(&unique_adapter_name("Packet6Baseline"));
+    let capture_name = wide(&unique_adapter_name("Packet6Capture"));
+    let baseline_tunnel_type = wide("Slipstream CI IPv6 Packet Baseline");
+    let capture_tunnel_type = wide("Slipstream CI IPv6 Packet Capture");
+    api.require_adapter_absent(&baseline_name, "before IPv6 packet baseline fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv6 packet baseline preflight: {error}"));
+    api.require_adapter_absent(&capture_name, "before IPv6 packet capture fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv6 packet capture preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut baseline_adapter =
+            OwnedWintunAdapter::create(&api, &baseline_name, &baseline_tunnel_type)?;
+        baseline_adapter.start_session()?;
+        let baseline_interface = baseline_adapter.interface_identity()?;
+        let mut capture_adapter =
+            OwnedWintunAdapter::create(&api, &capture_name, &capture_tunnel_type)?;
+        capture_adapter.start_session()?;
+        let capture_interface = capture_adapter.interface_identity()?;
+        if capture_interface == baseline_interface {
+            return Err("IPv6 packet fixture adapters resolved to the same interface".to_owned());
+        }
+
+        let baseline_source = IPV6_BASELINE_SOURCE;
+        let capture_source = IPV6_CAPTURE_SOURCE;
+        let destination = IpAddr::V6(IPV6_DESTINATION);
+        let mut baseline_address = OwnedUnicastAddress::create(
+            baseline_interface,
+            IpAddr::V6(baseline_source),
+            IPV6_HOST_PREFIX_LENGTH,
+        )?;
+        let mut capture_address = OwnedUnicastAddress::create(
+            capture_interface,
+            IpAddr::V6(capture_source),
+            IPV6_HOST_PREFIX_LENGTH,
+        )?;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(6, capture_interface, 1)
+            .map_err(|error| format!("construct IPv6 packet-delivery issuer: {error}"))?;
+        let mut baseline_route = OwnedFixtureBaselineRoute::create(
+            baseline_interface,
+            IPV6_BASELINE_NETWORK,
+            IPV6_BASELINE_PREFIX_LENGTH,
+        )?;
+
+        let route_result = qualify_disposable_exact_host_route_with_active_probe(
+            &mut issuer,
+            destination,
+            |active| {
+                prove_ipv6_packet_round_trip(
+                    active,
+                    &capture_adapter,
+                    capture_source,
+                    baseline_interface,
+                    baseline_source,
+                )
+            },
+        )
+        .map_err(|error| format!("qualify IPv6 packet delivery: {error}"));
+
+        let baseline_route_cleanup = baseline_route.remove_and_verify();
+        let capture_address_cleanup = capture_address.remove_and_verify();
+        let baseline_address_cleanup = baseline_address.remove_and_verify();
+        let mut cleanup_errors = Vec::new();
+        if let Err(error) = baseline_route_cleanup {
+            cleanup_errors.push(format!("baseline route: {error}"));
+        }
+        if let Err(error) = capture_address_cleanup {
+            cleanup_errors.push(format!("capture address: {error}"));
+        }
+        if let Err(error) = baseline_address_cleanup {
+            cleanup_errors.push(format!("baseline address: {error}"));
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(format!(
+                "IPv6 packet fixture cleanup failed: {}; route result: {route_result:?}",
+                cleanup_errors.join("; ")
+            ));
+        }
+        let qualification = route_result?;
+
+        if qualification.destination() != destination
+            || qualification.exact_route_prefix() != "2606:4700:4700::1111/128"
+            || qualification.capture_interface() != capture_interface
+            || qualification.baseline_egress_interface() != baseline_interface
+            || qualification.recovered_egress_interface() != baseline_interface
+            || qualification.route_epoch_after_removal() != 3
+        {
+            return Err(
+                "IPv6 packet-delivery qualification returned inconsistent evidence".to_owned(),
+            );
+        }
+
+        capture_adapter.end_session();
+        capture_adapter.close_adapter();
+        baseline_adapter.end_session();
+        baseline_adapter.close_adapter();
+        Ok::<(), String>(())
+    })();
+
+    let baseline_cleanup =
+        api.require_adapter_absent(&baseline_name, "after IPv6 packet baseline fixture");
+    let capture_cleanup =
+        api.require_adapter_absent(&capture_name, "after IPv6 packet capture fixture");
+    if baseline_cleanup.is_err() || capture_cleanup.is_err() {
+        panic!(
+            "Wintun IPv6 packet adapter cleanup proof failed: baseline={baseline_cleanup:?}, capture={capture_cleanup:?}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable IPv6 packet-delivery qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
 fn prove_ipv4_packet_round_trip(
     active: &WindowsDisposableExactRouteActiveProbe<'_>,
     adapter: &OwnedWintunAdapter<'_>,
@@ -567,8 +713,101 @@ fn prove_ipv4_packet_round_trip(
     Ok(())
 }
 
+fn prove_ipv6_packet_round_trip(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    adapter: &OwnedWintunAdapter<'_>,
+    expected_capture_source: Ipv6Addr,
+    expected_baseline_interface: WindowsPacketInterfaceIdentity,
+    expected_baseline_source: Ipv6Addr,
+) -> Result<(), String> {
+    let destination = match active.destination() {
+        IpAddr::V6(destination) => destination,
+        IpAddr::V4(_) => {
+            return Err("IPv6 packet-delivery probe received an IPv4 destination".to_owned())
+        }
+    };
+    if active.exact_route_prefix() != format!("{destination}/128")
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.baseline_egress_interface() != expected_baseline_interface
+        || active.capture_source_address() != IpAddr::V6(expected_capture_source)
+        || active.baseline_source_address() != IpAddr::V6(expected_baseline_source)
+    {
+        return Err("active route facts do not prove the owned IPv6 capture path".to_owned());
+    }
+
+    let peer = SocketAddrV6::new(destination, PACKET_DELIVERY_PORT, 0, 0);
+    let socket = UdpSocket::bind(SocketAddrV6::new(expected_capture_source, 0, 0, 0))
+        .map_err(|error| format!("bind IPv6 packet-delivery socket: {error}"))?;
+    socket
+        .connect(peer)
+        .map_err(|error| format!("connect IPv6 packet-delivery socket: {error}"))?;
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read IPv6 packet-delivery local address: {error}"))?
+    {
+        SocketAddr::V6(local) => local,
+        SocketAddr::V4(_) => {
+            return Err("IPv6 packet-delivery socket retained an IPv4 local address".to_owned())
+        }
+    };
+    if *local.ip() != expected_capture_source || local.port() == 0 {
+        return Err(format!(
+            "IPv6 packet-delivery source mismatch: local={local}, expected={expected_capture_source}"
+        ));
+    }
+
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let sent = socket
+        .send(PACKET_REQUEST_PAYLOAD)
+        .map_err(|error| format!("send IPv6 packet-delivery request: {error}"))?;
+    if sent != PACKET_REQUEST_PAYLOAD.len() {
+        return Err(format!(
+            "IPv6 packet-delivery request was partial: sent={sent}, expected={}",
+            PACKET_REQUEST_PAYLOAD.len()
+        ));
+    }
+
+    let request = adapter.receive_matching_ipv6_udp_request(
+        expected_capture_source,
+        destination,
+        local.port(),
+        PACKET_DELIVERY_PORT,
+        PACKET_REQUEST_PAYLOAD,
+        deadline,
+    )?;
+    let response = build_ipv6_udp_packet(
+        destination,
+        expected_capture_source,
+        request.destination_port,
+        request.source_port,
+        PACKET_RESPONSE_PAYLOAD,
+    )?;
+    adapter.inject_packet(&response)?;
+
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| "Wintun IPv6 packet round trip exceeded its bounded deadline".to_owned())?;
+    socket
+        .set_read_timeout(Some(remaining))
+        .map_err(|error| format!("bound IPv6 packet-delivery receive timeout: {error}"))?;
+    let mut received = vec![0u8; PACKET_RESPONSE_PAYLOAD.len() + 1];
+    let received_length = socket
+        .recv(&mut received)
+        .map_err(|error| format!("receive injected IPv6 packet-delivery response: {error}"))?;
+    if Instant::now() > deadline {
+        return Err("Wintun IPv6 packet round trip exceeded its bounded deadline".to_owned());
+    }
+    if &received[..received_length] != PACKET_RESPONSE_PAYLOAD {
+        return Err(format!(
+            "injected IPv6 response payload mismatch: length={received_length}"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Eq, PartialEq)]
-struct CapturedIpv4UdpRequest {
+struct CapturedUdpRequest {
     source_port: u16,
     destination_port: u16,
 }
@@ -580,7 +819,7 @@ fn parse_ipv4_udp_request(
     expected_source_port: u16,
     expected_destination_port: u16,
     expected_payload: &[u8],
-) -> Result<Option<CapturedIpv4UdpRequest>, String> {
+) -> Result<Option<CapturedUdpRequest>, String> {
     if packet.len() < IPV4_MIN_HEADER_LENGTH || packet[0] >> 4 != 4 {
         return Ok(None);
     }
@@ -588,7 +827,7 @@ fn parse_ipv4_udp_request(
     let destination = Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
     if source != expected_source
         || destination != expected_destination
-        || packet[9] != IPV4_UDP_PROTOCOL
+        || packet[9] != UDP_PROTOCOL_NUMBER
     {
         return Ok(None);
     }
@@ -610,9 +849,16 @@ fn parse_ipv4_udp_request(
     }
 
     let udp = &packet[header_length..];
-    let source_port = u16::from_be_bytes([udp[0], udp[1]]);
-    let destination_port = u16::from_be_bytes([udp[2], udp[3]]);
-    let udp_length = usize::from(u16::from_be_bytes([udp[4], udp[5]]));
+    let source_port =
+        u16::from_be_bytes([udp[UDP_SOURCE_PORT_OFFSET], udp[UDP_SOURCE_PORT_OFFSET + 1]]);
+    let destination_port = u16::from_be_bytes([
+        udp[UDP_DESTINATION_PORT_OFFSET],
+        udp[UDP_DESTINATION_PORT_OFFSET + 1],
+    ]);
+    let udp_length = usize::from(u16::from_be_bytes([
+        udp[UDP_LENGTH_OFFSET],
+        udp[UDP_LENGTH_OFFSET + 1],
+    ]));
     if source_port != expected_source_port
         || destination_port != expected_destination_port
         || udp_length != udp.len()
@@ -624,7 +870,69 @@ fn parse_ipv4_udp_request(
             udp.len()
         ));
     }
-    Ok(Some(CapturedIpv4UdpRequest {
+    Ok(Some(CapturedUdpRequest {
+        source_port,
+        destination_port,
+    }))
+}
+
+fn parse_ipv6_udp_request(
+    packet: &[u8],
+    expected_source: Ipv6Addr,
+    expected_destination: Ipv6Addr,
+    expected_source_port: u16,
+    expected_destination_port: u16,
+    expected_payload: &[u8],
+) -> Result<Option<CapturedUdpRequest>, String> {
+    if packet.len() < IPV6_HEADER_LENGTH || packet[0] >> 4 != 6 {
+        return Ok(None);
+    }
+    let mut source_octets = [0u8; 16];
+    source_octets.copy_from_slice(&packet[IPV6_SOURCE_OFFSET..IPV6_DESTINATION_OFFSET]);
+    let mut destination_octets = [0u8; 16];
+    destination_octets.copy_from_slice(&packet[IPV6_DESTINATION_OFFSET..IPV6_HEADER_LENGTH]);
+    let source = Ipv6Addr::from(source_octets);
+    let destination = Ipv6Addr::from(destination_octets);
+    if source != expected_source
+        || destination != expected_destination
+        || packet[IPV6_NEXT_HEADER_OFFSET] != UDP_PROTOCOL_NUMBER
+    {
+        return Ok(None);
+    }
+
+    let payload_length = usize::from(u16::from_be_bytes([
+        packet[IPV6_PAYLOAD_LENGTH_OFFSET],
+        packet[IPV6_PAYLOAD_LENGTH_OFFSET + 1],
+    ]));
+    if payload_length != packet.len() - IPV6_HEADER_LENGTH || payload_length < UDP_HEADER_LENGTH {
+        return Err(format!(
+            "captured IPv6 packet length mismatch: packet={}, payload={payload_length}",
+            packet.len()
+        ));
+    }
+    let udp = &packet[IPV6_HEADER_LENGTH..];
+    let source_port =
+        u16::from_be_bytes([udp[UDP_SOURCE_PORT_OFFSET], udp[UDP_SOURCE_PORT_OFFSET + 1]]);
+    let destination_port = u16::from_be_bytes([
+        udp[UDP_DESTINATION_PORT_OFFSET],
+        udp[UDP_DESTINATION_PORT_OFFSET + 1],
+    ]);
+    let udp_length = usize::from(u16::from_be_bytes([
+        udp[UDP_LENGTH_OFFSET],
+        udp[UDP_LENGTH_OFFSET + 1],
+    ]));
+    if source_port != expected_source_port
+        || destination_port != expected_destination_port
+        || udp_length != udp.len()
+        || udp_length != UDP_HEADER_LENGTH + expected_payload.len()
+        || &udp[UDP_HEADER_LENGTH..] != expected_payload
+    {
+        return Err(format!(
+            "captured IPv6 UDP request mismatch: source_port={source_port}, destination_port={destination_port}, udp_length={udp_length}, packet_udp_length={}",
+            udp.len()
+        ));
+    }
+    Ok(Some(CapturedUdpRequest {
         source_port,
         destination_port,
     }))
@@ -653,15 +961,18 @@ fn build_ipv4_udp_packet(
     packet[2..4].copy_from_slice(&total_length_u16.to_be_bytes());
     packet[4..6].copy_from_slice(&IPV4_PACKET_IDENTIFICATION.to_be_bytes());
     packet[8] = IPV4_DEFAULT_TTL;
-    packet[9] = IPV4_UDP_PROTOCOL;
+    packet[9] = UDP_PROTOCOL_NUMBER;
     packet[12..16].copy_from_slice(&source.octets());
     packet[16..20].copy_from_slice(&destination.octets());
 
-    packet[IPV4_MIN_HEADER_LENGTH..IPV4_MIN_HEADER_LENGTH + 2]
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET
+        ..IPV4_MIN_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET + 2]
         .copy_from_slice(&source_port.to_be_bytes());
-    packet[IPV4_MIN_HEADER_LENGTH + 2..IPV4_MIN_HEADER_LENGTH + 4]
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET
+        ..IPV4_MIN_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET + 2]
         .copy_from_slice(&destination_port.to_be_bytes());
-    packet[IPV4_MIN_HEADER_LENGTH + 4..IPV4_MIN_HEADER_LENGTH + 6]
+    packet[IPV4_MIN_HEADER_LENGTH + UDP_LENGTH_OFFSET
+        ..IPV4_MIN_HEADER_LENGTH + UDP_LENGTH_OFFSET + 2]
         .copy_from_slice(&udp_length_u16.to_be_bytes());
     packet[IPV4_MIN_HEADER_LENGTH + UDP_HEADER_LENGTH..].copy_from_slice(payload);
 
@@ -672,11 +983,68 @@ fn build_ipv4_udp_packet(
     pseudo_header.extend_from_slice(&source.octets());
     pseudo_header.extend_from_slice(&destination.octets());
     pseudo_header.push(0);
-    pseudo_header.push(IPV4_UDP_PROTOCOL);
+    pseudo_header.push(UDP_PROTOCOL_NUMBER);
     pseudo_header.extend_from_slice(&udp_length_u16.to_be_bytes());
     pseudo_header.extend_from_slice(&packet[IPV4_MIN_HEADER_LENGTH..]);
     let udp_checksum = internet_checksum(&pseudo_header);
     packet[26..28].copy_from_slice(
+        &(if udp_checksum == 0 {
+            0xffff
+        } else {
+            udp_checksum
+        })
+        .to_be_bytes(),
+    );
+    Ok(packet)
+}
+
+fn build_ipv6_udp_packet(
+    source: Ipv6Addr,
+    destination: Ipv6Addr,
+    source_port: u16,
+    destination_port: u16,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    let udp_length = UDP_HEADER_LENGTH
+        .checked_add(payload.len())
+        .ok_or_else(|| "IPv6 UDP payload length overflow".to_owned())?;
+    let udp_length_u16 = u16::try_from(udp_length)
+        .map_err(|_| "IPv6 UDP packet exceeds the 65535-byte limit".to_owned())?;
+    let total_length = IPV6_HEADER_LENGTH
+        .checked_add(udp_length)
+        .ok_or_else(|| "IPv6 packet length overflow".to_owned())?;
+    if total_length > WINTUN_MAX_IP_PACKET_SIZE {
+        return Err("IPv6 packet exceeds the Wintun packet-size limit".to_owned());
+    }
+
+    let mut packet = vec![0u8; total_length];
+    packet[0] = IPV6_VERSION;
+    packet[IPV6_PAYLOAD_LENGTH_OFFSET..IPV6_PAYLOAD_LENGTH_OFFSET + 2]
+        .copy_from_slice(&udp_length_u16.to_be_bytes());
+    packet[IPV6_NEXT_HEADER_OFFSET] = UDP_PROTOCOL_NUMBER;
+    packet[IPV6_HOP_LIMIT_OFFSET] = IPV6_DEFAULT_HOP_LIMIT;
+    packet[IPV6_SOURCE_OFFSET..IPV6_DESTINATION_OFFSET].copy_from_slice(&source.octets());
+    packet[IPV6_DESTINATION_OFFSET..IPV6_HEADER_LENGTH].copy_from_slice(&destination.octets());
+
+    packet[IPV6_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET
+        ..IPV6_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET + 2]
+        .copy_from_slice(&source_port.to_be_bytes());
+    packet[IPV6_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET
+        ..IPV6_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET + 2]
+        .copy_from_slice(&destination_port.to_be_bytes());
+    packet[IPV6_HEADER_LENGTH + UDP_LENGTH_OFFSET..IPV6_HEADER_LENGTH + UDP_LENGTH_OFFSET + 2]
+        .copy_from_slice(&udp_length_u16.to_be_bytes());
+    packet[IPV6_HEADER_LENGTH + UDP_HEADER_LENGTH..].copy_from_slice(payload);
+
+    let mut pseudo_header = Vec::with_capacity(40 + udp_length);
+    pseudo_header.extend_from_slice(&source.octets());
+    pseudo_header.extend_from_slice(&destination.octets());
+    pseudo_header.extend_from_slice(&(udp_length as u32).to_be_bytes());
+    pseudo_header.extend_from_slice(&[0, 0, 0, UDP_PROTOCOL_NUMBER]);
+    pseudo_header.extend_from_slice(&packet[IPV6_HEADER_LENGTH..]);
+    let udp_checksum = internet_checksum(&pseudo_header);
+    let checksum_offset = IPV6_HEADER_LENGTH + UDP_CHECKSUM_OFFSET;
+    packet[checksum_offset..checksum_offset + 2].copy_from_slice(
         &(if udp_checksum == 0 {
             0xffff
         } else {
@@ -1114,10 +1482,34 @@ impl<'a> OwnedWintunAdapter<'a> {
         expected_destination_port: u16,
         expected_payload: &[u8],
         deadline: Instant,
-    ) -> Result<CapturedIpv4UdpRequest, String> {
+    ) -> Result<CapturedUdpRequest, String> {
         loop {
             let packet = self.receive_packet_until(deadline)?;
             if let Some(request) = parse_ipv4_udp_request(
+                &packet,
+                expected_source,
+                expected_destination,
+                expected_source_port,
+                expected_destination_port,
+                expected_payload,
+            )? {
+                return Ok(request);
+            }
+        }
+    }
+
+    fn receive_matching_ipv6_udp_request(
+        &self,
+        expected_source: Ipv6Addr,
+        expected_destination: Ipv6Addr,
+        expected_source_port: u16,
+        expected_destination_port: u16,
+        expected_payload: &[u8],
+        deadline: Instant,
+    ) -> Result<CapturedUdpRequest, String> {
+        loop {
+            let packet = self.receive_packet_until(deadline)?;
+            if let Some(request) = parse_ipv6_udp_request(
                 &packet,
                 expected_source,
                 expected_destination,
