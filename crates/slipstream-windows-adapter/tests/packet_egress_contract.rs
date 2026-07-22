@@ -538,6 +538,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "build_ipv6_udp_packet",
         "parse_ipv4_tcp_segment",
         "connected_ipv4_tcp_stream",
+        "handshake_ack.sequence_number",
         "complete_ipv4_tcp_round_trip_on_adapter",
         "TcpStream",
         "PACKET_DELIVERY_TIMEOUT",

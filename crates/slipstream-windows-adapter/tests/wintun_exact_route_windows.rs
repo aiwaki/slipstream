@@ -106,6 +106,7 @@ const UDP_PROTOCOL_NUMBER: u8 = 17;
 const TCP_PROTOCOL_NUMBER: u8 = 6;
 const TCP_FLAG_FIN: u8 = 0x01;
 const TCP_FLAG_SYN: u8 = 0x02;
+const TCP_FLAG_RST: u8 = 0x04;
 const TCP_FLAG_PSH: u8 = 0x08;
 const TCP_FLAG_ACK: u8 = 0x10;
 const TCP_SERVER_INITIAL_SEQUENCE: u32 = 0x534c_1000;
@@ -1285,6 +1286,24 @@ fn connected_ipv4_tcp_stream(
         &[],
     )?;
     adapter.inject_packet(&syn_ack)?;
+    let handshake_ack = adapter.receive_matching_ipv4_tcp_segment(
+        source,
+        destination,
+        Some(local.port()),
+        destination_port,
+        &[],
+        TCP_FLAG_ACK,
+        TCP_FLAG_SYN | TCP_FLAG_RST | TCP_FLAG_FIN,
+        deadline,
+    )?;
+    if handshake_ack.sequence_number != syn.sequence_number.wrapping_add(1)
+        || handshake_ack.acknowledgment_number != TCP_SERVER_INITIAL_SEQUENCE.wrapping_add(1)
+    {
+        return Err(format!(
+            "synthetic IPv4 TCP handshake ACK mismatch: sequence={}, acknowledgment={}",
+            handshake_ack.sequence_number, handshake_ack.acknowledgment_number
+        ));
+    }
 
     loop {
         if let Some(error) = socket
