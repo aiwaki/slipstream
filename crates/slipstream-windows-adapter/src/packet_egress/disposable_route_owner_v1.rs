@@ -6,7 +6,8 @@
 
 use super::transition_v1::{WindowsOwnedRouteTransitionError, WindowsOwnedRouteTransitionIssuer};
 use super::windows::{
-    observe_windows_packet_route, sockaddr_from_ip, WindowsPacketRouteObserverError,
+    observe_windows_packet_route, observe_windows_packet_route_on_interface, sockaddr_from_ip,
+    WindowsPacketRouteObserverError,
 };
 use super::WindowsPacketInterfaceIdentity;
 use std::error::Error;
@@ -42,6 +43,8 @@ pub enum WindowsDisposableExactRouteErrorCode {
     PostActivationObservationFailed,
     TransitionAttestationFailed,
     ActivationNotCurrent,
+    BaselineEgressRevalidationFailed,
+    BaselineEgressChanged,
     ActiveProbeGateClosed,
     ActiveProbeFailed,
     ExactRouteDeleteFailed,
@@ -64,6 +67,8 @@ impl WindowsDisposableExactRouteErrorCode {
             Self::PostActivationObservationFailed => "post_activation_observation_failed",
             Self::TransitionAttestationFailed => "transition_attestation_failed",
             Self::ActivationNotCurrent => "activation_not_current",
+            Self::BaselineEgressRevalidationFailed => "baseline_egress_revalidation_failed",
+            Self::BaselineEgressChanged => "baseline_egress_changed",
             Self::ActiveProbeGateClosed => "active_probe_gate_closed",
             Self::ActiveProbeFailed => "active_probe_failed",
             Self::ExactRouteDeleteFailed => "exact_route_delete_failed",
@@ -312,6 +317,21 @@ where
         issuer
             .require_current_activation(&activation)
             .map_err(|error| transition_error(Code::ActivationNotCurrent, error))?;
+        let revalidated_baseline = observe_windows_packet_route_on_interface(
+            destination,
+            baseline_egress_interface,
+            baseline_source_address,
+        )
+        .map_err(|error| observation_error(Code::BaselineEgressRevalidationFailed, error))?;
+        if revalidated_baseline.egress_interface() != baseline_egress_interface
+            || revalidated_baseline.source_address() != baseline_source_address
+            || revalidated_baseline.route_prefix() != baseline_route_prefix
+            || revalidated_baseline.route_is_loopback() != baseline_route_is_loopback
+        {
+            return Err(WindowsDisposableExactRouteError::new(
+                Code::BaselineEgressChanged,
+            ));
+        }
         active_probe(&WindowsDisposableExactRouteActiveProbe {
             destination,
             exact_route_prefix: &exact_route_prefix,

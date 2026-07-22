@@ -183,7 +183,7 @@ jobs:
             -TimeoutSeconds 120 `
             -NoCapture
 
-      - name: Qualify owned exact-route transition and cleanup
+      - name: Qualify exact-route transition, pinned egress revalidation, and cleanup
         timeout-minutes: 3
         shell: pwsh
         env:

@@ -302,6 +302,11 @@ fn native_route_observer_is_read_only_and_not_composed() {
         "GetBestRoute2",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
+        "observe_windows_packet_route_on_interface",
+        "&interface_luid",
+        "&source_address_storage",
+        "EgressInterfaceMismatch",
+        "SourceAddressMismatch",
     ] {
         assert!(source.contains(required), "observer is missing {required}");
     }
@@ -380,6 +385,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "secondary_after",
         "qualify_disposable_exact_host_route_with_active_probe",
         "WindowsDisposableExactRouteActiveProbe",
+        "observe_windows_packet_route_on_interface",
+        "BaselineEgressRevalidationFailed",
+        "BaselineEgressChanged",
         "ActiveProbeGateClosed",
         "ActiveProbeFailed",
         "require_active_probe_gate()?;",
@@ -440,6 +448,16 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(probe_free_wrapper.contains("qualify_disposable_exact_host_route_impl"));
     assert!(!probe_free_wrapper.contains("require_active_probe_gate"));
     assert!(active_probe_wrapper.contains("require_active_probe_gate()?;"));
+    let baseline_revalidation = owner
+        .find("let revalidated_baseline = observe_windows_packet_route_on_interface")
+        .expect("route owner must revalidate baseline egress under the active exact route");
+    let active_probe_call = owner
+        .find("active_probe(&WindowsDisposableExactRouteActiveProbe")
+        .expect("route owner must invoke the disposable probe");
+    assert!(
+        baseline_revalidation < active_probe_call,
+        "baseline source and interface must be revalidated before the probe can run"
+    );
 
     let module = include_str!("../src/packet_egress/mod.rs").replace("\r\n", "\n");
     assert!(module.contains(
@@ -566,7 +584,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
 
     let workflow =
         include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml");
-    assert!(workflow.contains("Qualify owned exact-route transition and cleanup"));
+    assert!(workflow
+        .contains("Qualify exact-route transition, pinned egress revalidation, and cleanup"));
     assert!(workflow.contains("-TestTarget wintun_exact_route_windows"));
     assert!(workflow.contains("-TimeoutSeconds 120"));
     assert!(workflow.contains("Qualify no-payload IPv4 socket selection under exact route"));
