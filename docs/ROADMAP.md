@@ -453,14 +453,18 @@ therefore stays phased and closed to production traffic:
    `GetBestRoute2` observation for the retained baseline
    source and LUID while the exact capture route is active; caller-repeated
    baseline fields cannot authorize the disposable active probe. Its exact main
-   passed that gate on native AMD64 and ARM64. The next disposable
-   subgate creates two owned IPv4 Wintun interfaces and one owned non-default
-   `/24` baseline route, proves a connected UDP socket works before exact `/32`
-   activation, and then requires either uninterrupted baseline delivery or an
-   active-probe failure followed by owned-route removal and a successful retry
-   on the same socket. TCP pre-existing-flow activation safety, bounded capture
-   expiry/removal, and explicit external-VPN coexistence remain separate native
-   AMD64 and ARM64 Windows gates.
+   passed that gate on native AMD64 and ARM64. PR #198's candidate passed the
+   next disposable subgate on both architectures: two owned IPv4 Wintun
+   interfaces and one owned non-default `/24` baseline route prove a connected
+   UDP socket works before exact `/32` activation, then require either
+   uninterrupted baseline delivery or an active-probe failure followed by
+   owned-route removal and a successful retry on the same socket. Captured
+   requests must have a valid IPv4 header checksum and either a valid UDP
+   checksum or IPv4's permitted zero UDP checksum; every acquired route and
+   address reaches verified cleanup on early failure. Exact-main confirmation
+   remains before closing this first UDP subgate. TCP pre-existing-flow
+   activation safety, bounded capture expiry/removal, and explicit external-VPN
+   coexistence remain separate native AMD64 and ARM64 Windows gates.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
