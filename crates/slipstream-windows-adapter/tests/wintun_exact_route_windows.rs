@@ -12,7 +12,10 @@ use slipstream_windows_adapter::packet_egress::{
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
+use std::io::{ErrorKind, Read, Write};
+use std::net::{
+    IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream, UdpSocket,
+};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
@@ -45,6 +48,7 @@ const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
 const SOCKET_BINDING_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI";
 const PACKET_DELIVERY_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI";
 const PREEXISTING_FLOW_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI";
+const PREEXISTING_TCP_FLOW_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const WINTUN_MAX_IP_PACKET_SIZE: usize = 0xffff;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -54,6 +58,7 @@ const BASELINE_ROUTE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const PACKET_DELIVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const PACKET_DELIVERY_PROBE_INTERVAL: Duration = Duration::from_millis(5);
 const PACKET_DELIVERY_PORT: u16 = 41_723;
+const TCP_PACKET_DELIVERY_PORT: u16 = 41_724;
 const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
 const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
 const PREEXISTING_WARMUP_REQUEST: &[u8] = b"slipstream-preexisting-warmup-v1";
@@ -63,6 +68,14 @@ const PREEXISTING_ACTIVE_RESPONSE: &[u8] = b"slipstream-preexisting-active-respo
 const PREEXISTING_RETRY_REQUEST: &[u8] = b"slipstream-preexisting-retry-v1";
 const PREEXISTING_RETRY_RESPONSE: &[u8] = b"slipstream-preexisting-retry-response-v1";
 const PREEXISTING_CAPTURE_ROLLBACK: &str = "preexisting_flow_reached_capture_with_baseline_source";
+const PREEXISTING_TCP_WARMUP_REQUEST: &[u8] = b"slipstream-tcp-warmup-v1";
+const PREEXISTING_TCP_WARMUP_RESPONSE: &[u8] = b"slipstream-tcp-warmup-response-v1";
+const PREEXISTING_TCP_ACTIVE_REQUEST: &[u8] = b"slipstream-tcp-active-v1";
+const PREEXISTING_TCP_ACTIVE_RESPONSE: &[u8] = b"slipstream-tcp-active-response-v1";
+const PREEXISTING_TCP_RETRY_REQUEST: &[u8] = b"slipstream-tcp-retry-v1";
+const PREEXISTING_TCP_RETRY_RESPONSE: &[u8] = b"slipstream-tcp-retry-response-v1";
+const PREEXISTING_TCP_CAPTURE_ROLLBACK: &str =
+    "preexisting_tcp_flow_reached_capture_with_baseline_source";
 const IPV4_MIN_HEADER_LENGTH: usize = 20;
 const IPV6_HEADER_LENGTH: usize = 40;
 const IPV6_PAYLOAD_LENGTH_OFFSET: usize = 4;
@@ -75,12 +88,27 @@ const UDP_SOURCE_PORT_OFFSET: usize = 0;
 const UDP_DESTINATION_PORT_OFFSET: usize = 2;
 const UDP_LENGTH_OFFSET: usize = 4;
 const UDP_CHECKSUM_OFFSET: usize = 6;
+const TCP_MIN_HEADER_LENGTH: usize = 20;
+const TCP_SOURCE_PORT_OFFSET: usize = 0;
+const TCP_DESTINATION_PORT_OFFSET: usize = 2;
+const TCP_SEQUENCE_OFFSET: usize = 4;
+const TCP_ACKNOWLEDGMENT_OFFSET: usize = 8;
+const TCP_DATA_OFFSET: usize = 12;
+const TCP_FLAGS_OFFSET: usize = 13;
+const TCP_WINDOW_OFFSET: usize = 14;
+const TCP_CHECKSUM_OFFSET: usize = 16;
 const IPV4_VERSION_AND_MIN_HEADER_LENGTH: u8 = 0x45;
 const IPV6_VERSION: u8 = 0x60;
 const IPV4_PACKET_IDENTIFICATION: u16 = 0x534c;
 const IPV4_DEFAULT_TTL: u8 = 64;
 const IPV6_DEFAULT_HOP_LIMIT: u8 = 64;
 const UDP_PROTOCOL_NUMBER: u8 = 17;
+const TCP_PROTOCOL_NUMBER: u8 = 6;
+const TCP_FLAG_FIN: u8 = 0x01;
+const TCP_FLAG_SYN: u8 = 0x02;
+const TCP_FLAG_PSH: u8 = 0x08;
+const TCP_FLAG_ACK: u8 = 0x10;
+const TCP_SERVER_INITIAL_SEQUENCE: u32 = 0x534c_1000;
 const IPV4_BASELINE_NETWORK: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 0);
 const IPV4_BASELINE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 2);
 const IPV4_CAPTURE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 3);
@@ -702,6 +730,215 @@ fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered() {
 }
 
 #[test]
+fn native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PACKET_DELIVERY_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PREEXISTING_TCP_FLOW_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    assert_ipv4_tcp_segment_parser_contract();
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let baseline_name = wide(&unique_adapter_name("TcpFlow4Baseline"));
+    let capture_name = wide(&unique_adapter_name("TcpFlow4Capture"));
+    let baseline_tunnel_type = wide("Slipstream CI IPv4 TCP Baseline");
+    let capture_tunnel_type = wide("Slipstream CI IPv4 TCP Capture");
+    api.require_adapter_absent(&baseline_name, "before IPv4 TCP-flow baseline fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv4 TCP-flow baseline preflight: {error}"));
+    api.require_adapter_absent(&capture_name, "before IPv4 TCP-flow capture fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv4 TCP-flow capture preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut baseline_adapter =
+            OwnedWintunAdapter::create(&api, &baseline_name, &baseline_tunnel_type)?;
+        baseline_adapter.start_session()?;
+        let baseline_interface = baseline_adapter.interface_identity()?;
+        let mut capture_adapter =
+            OwnedWintunAdapter::create(&api, &capture_name, &capture_tunnel_type)?;
+        capture_adapter.start_session()?;
+        let capture_interface = capture_adapter.interface_identity()?;
+        if capture_interface == baseline_interface {
+            return Err("IPv4 TCP-flow adapters resolved to the same interface".to_owned());
+        }
+
+        let mut baseline_address = None;
+        let mut capture_address = None;
+        let mut baseline_route = None;
+        let flow_result = (|| {
+            baseline_address = Some(OwnedUnicastAddress::create(
+                baseline_interface,
+                IpAddr::V4(IPV4_BASELINE_SOURCE),
+                IPV4_HOST_PREFIX_LENGTH,
+            )?);
+            capture_address = Some(OwnedUnicastAddress::create(
+                capture_interface,
+                IpAddr::V4(IPV4_CAPTURE_SOURCE),
+                IPV4_HOST_PREFIX_LENGTH,
+            )?);
+            baseline_route = Some(OwnedFixtureBaselineRoute::create(
+                baseline_interface,
+                IpAddr::V4(IPV4_BASELINE_NETWORK),
+                IPV4_BASELINE_PREFIX_LENGTH,
+            )?);
+            let mut stream = connected_ipv4_tcp_stream(
+                IPV4_BASELINE_SOURCE,
+                IPV4_PREEXISTING_DESTINATION,
+                TCP_PACKET_DELIVERY_PORT,
+                &baseline_adapter,
+            )?;
+            prove_ipv4_tcp_round_trip_on_adapter(
+                &mut stream,
+                &baseline_adapter,
+                IPV4_BASELINE_SOURCE,
+                IPV4_PREEXISTING_DESTINATION,
+                PREEXISTING_TCP_WARMUP_REQUEST,
+                PREEXISTING_TCP_WARMUP_RESPONSE,
+                "TCP pre-existing warm-up",
+            )?;
+
+            let mut active_path = None;
+            let mut issuer = WindowsOwnedRouteTransitionIssuer::new(8, capture_interface, 1)
+                .map_err(|error| format!("construct IPv4 TCP-flow issuer: {error}"))?;
+            let route_result = qualify_disposable_exact_host_route_with_active_probe(
+                &mut issuer,
+                IpAddr::V4(IPV4_PREEXISTING_DESTINATION),
+                |active| {
+                    let path = prove_ipv4_tcp_preexisting_flow_during_activation(
+                        active,
+                        &mut stream,
+                        &baseline_adapter,
+                        &capture_adapter,
+                    )?;
+                    active_path = Some(path);
+                    match path {
+                        PreexistingFlowPath::Baseline => Ok(()),
+                        PreexistingFlowPath::Capture => {
+                            Err(PREEXISTING_TCP_CAPTURE_ROLLBACK.to_owned())
+                        }
+                    }
+                },
+            );
+
+            let qualification = match (route_result, active_path) {
+                (Ok(qualification), Some(PreexistingFlowPath::Baseline)) => Some(qualification),
+                (Err(error), Some(PreexistingFlowPath::Capture))
+                    if error.code() == WindowsDisposableExactRouteErrorCode::ActiveProbeFailed
+                        && error.detail_message() == Some(PREEXISTING_TCP_CAPTURE_ROLLBACK) =>
+                {
+                    complete_ipv4_tcp_round_trip_on_adapter(
+                        &mut stream,
+                        &baseline_adapter,
+                        IPV4_BASELINE_SOURCE,
+                        IPV4_PREEXISTING_DESTINATION,
+                        PREEXISTING_TCP_ACTIVE_REQUEST,
+                        PREEXISTING_TCP_ACTIVE_RESPONSE,
+                        "post-rollback TCP active retransmission",
+                    )?;
+                    None
+                }
+                (Ok(_), path) => {
+                    return Err(format!(
+                        "TCP-flow qualification succeeded without baseline continuity: {path:?}"
+                    ))
+                }
+                (Err(error), path) => {
+                    return Err(format!(
+                        "TCP-flow qualification returned unexpected evidence: error={error}, path={path:?}"
+                    ))
+                }
+            };
+            prove_ipv4_tcp_round_trip_on_adapter(
+                &mut stream,
+                &baseline_adapter,
+                IPV4_BASELINE_SOURCE,
+                IPV4_PREEXISTING_DESTINATION,
+                PREEXISTING_TCP_RETRY_REQUEST,
+                PREEXISTING_TCP_RETRY_RESPONSE,
+                "post-removal TCP retry",
+            )?;
+
+            if let Some(qualification) = qualification.as_ref() {
+                if qualification.destination() != IpAddr::V4(IPV4_PREEXISTING_DESTINATION)
+                    || qualification.exact_route_prefix() != "1.0.0.3/32"
+                    || qualification.capture_interface() != capture_interface
+                    || qualification.baseline_egress_interface() != baseline_interface
+                    || qualification.recovered_egress_interface() != baseline_interface
+                    || qualification.route_epoch_after_removal() != 3
+                {
+                    return Err(
+                        "IPv4 TCP-flow qualification returned inconsistent evidence".to_owned()
+                    );
+                }
+            }
+            drop(stream);
+            Ok::<_, String>(qualification)
+        })();
+
+        let baseline_route_cleanup = match baseline_route.as_mut() {
+            Some(route) => route.remove_and_verify(),
+            None => Ok(()),
+        };
+        let capture_address_cleanup = match capture_address.as_mut() {
+            Some(address) => address.remove_and_verify(),
+            None => Ok(()),
+        };
+        let baseline_address_cleanup = match baseline_address.as_mut() {
+            Some(address) => address.remove_and_verify(),
+            None => Ok(()),
+        };
+        capture_adapter.end_session();
+        capture_adapter.close_adapter();
+        baseline_adapter.end_session();
+        baseline_adapter.close_adapter();
+        let mut cleanup_errors = Vec::new();
+        if let Err(error) = baseline_route_cleanup {
+            cleanup_errors.push(format!("baseline route: {error}"));
+        }
+        if let Err(error) = capture_address_cleanup {
+            cleanup_errors.push(format!("capture address: {error}"));
+        }
+        if let Err(error) = baseline_address_cleanup {
+            cleanup_errors.push(format!("baseline address: {error}"));
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(format!(
+                "IPv4 TCP-flow fixture cleanup failed: {}; flow result: {flow_result:?}",
+                cleanup_errors.join("; "),
+            ));
+        }
+        flow_result?;
+        Ok::<(), String>(())
+    })();
+
+    let baseline_cleanup =
+        api.require_adapter_absent(&baseline_name, "after IPv4 TCP-flow baseline fixture");
+    let capture_cleanup =
+        api.require_adapter_absent(&capture_name, "after IPv4 TCP-flow capture fixture");
+    if baseline_cleanup.is_err() || capture_cleanup.is_err() {
+        panic!(
+            "Wintun IPv4 TCP-flow adapter cleanup proof failed: baseline={baseline_cleanup:?}, capture={capture_cleanup:?}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable IPv4 TCP-flow qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+#[test]
 fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected() {
     if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
         || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
@@ -991,6 +1228,330 @@ fn prove_ipv4_preexisting_flow_during_activation(
     Ok(path)
 }
 
+fn connected_ipv4_tcp_stream(
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    destination_port: u16,
+    adapter: &OwnedWintunAdapter<'_>,
+) -> Result<TcpStream, String> {
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
+        .map_err(|error| format!("create IPv4 TCP socket: {error}"))?;
+    socket
+        .bind(&SockAddr::from(SocketAddrV4::new(source, 0)))
+        .map_err(|error| format!("bind IPv4 TCP baseline source {source}: {error}"))?;
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read bound IPv4 TCP address: {error}"))?
+        .as_socket()
+    {
+        Some(SocketAddr::V4(local)) if *local.ip() == source && local.port() != 0 => local,
+        other => return Err(format!("unexpected bound IPv4 TCP address: {other:?}")),
+    };
+    socket
+        .set_nonblocking(true)
+        .map_err(|error| format!("make IPv4 TCP connect nonblocking: {error}"))?;
+    let peer = SocketAddrV4::new(destination, destination_port);
+    match socket.connect(&SockAddr::from(peer)) {
+        Ok(()) => {
+            return Err(
+                "disposable IPv4 TCP socket connected without the synthetic handshake".to_owned(),
+            )
+        }
+        Err(error)
+            if error.kind() == ErrorKind::WouldBlock
+                || matches!(error.raw_os_error(), Some(10035 | 10036 | 10037)) => {}
+        Err(error) => return Err(format!("start nonblocking IPv4 TCP connect: {error}")),
+    }
+
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let syn = adapter.receive_matching_ipv4_tcp_segment(
+        source,
+        destination,
+        Some(local.port()),
+        destination_port,
+        &[],
+        TCP_FLAG_SYN,
+        TCP_FLAG_ACK,
+        deadline,
+    )?;
+    let syn_ack = build_ipv4_tcp_packet(
+        destination,
+        source,
+        destination_port,
+        local.port(),
+        TCP_SERVER_INITIAL_SEQUENCE,
+        syn.sequence_number.wrapping_add(1),
+        TCP_FLAG_SYN | TCP_FLAG_ACK,
+        &[],
+    )?;
+    adapter.inject_packet(&syn_ack)?;
+
+    loop {
+        if let Some(error) = socket
+            .take_error()
+            .map_err(|error| format!("read IPv4 TCP connect error: {error}"))?
+        {
+            return Err(format!("synthetic IPv4 TCP connect failed: {error}"));
+        }
+        match socket.peer_addr() {
+            Ok(observed) if observed.as_socket() == Some(SocketAddr::V4(peer)) => break,
+            Ok(observed) => {
+                return Err(format!(
+                    "synthetic IPv4 TCP connect selected unexpected peer {observed:?}"
+                ))
+            }
+            Err(error)
+                if error.kind() == ErrorKind::NotConnected
+                    || matches!(error.raw_os_error(), Some(10035 | 10057)) => {}
+            Err(error) => return Err(format!("observe synthetic IPv4 TCP connect: {error}")),
+        }
+        if Instant::now() >= deadline {
+            return Err("synthetic IPv4 TCP handshake exceeded its bounded deadline".to_owned());
+        }
+        thread::sleep(PACKET_DELIVERY_PROBE_INTERVAL);
+    }
+    socket
+        .set_nonblocking(false)
+        .map_err(|error| format!("restore blocking IPv4 TCP socket: {error}"))?;
+    let stream: TcpStream = socket.into();
+    stream
+        .set_nodelay(true)
+        .map_err(|error| format!("disable Nagle for IPv4 TCP fixture: {error}"))?;
+    stream
+        .set_read_timeout(Some(PACKET_DELIVERY_TIMEOUT))
+        .map_err(|error| format!("bound IPv4 TCP read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(PACKET_DELIVERY_TIMEOUT))
+        .map_err(|error| format!("bound IPv4 TCP write timeout: {error}"))?;
+    Ok(stream)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prove_ipv4_tcp_round_trip_on_adapter(
+    stream: &mut TcpStream,
+    adapter: &OwnedWintunAdapter<'_>,
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    request_payload: &[u8],
+    response_payload: &[u8],
+    phase: &str,
+) -> Result<(), String> {
+    stream
+        .write_all(request_payload)
+        .map_err(|error| format!("write {phase} request: {error}"))?;
+    complete_ipv4_tcp_round_trip_on_adapter(
+        stream,
+        adapter,
+        source,
+        destination,
+        request_payload,
+        response_payload,
+        phase,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_ipv4_tcp_round_trip_on_adapter(
+    stream: &mut TcpStream,
+    adapter: &OwnedWintunAdapter<'_>,
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    request_payload: &[u8],
+    response_payload: &[u8],
+    phase: &str,
+) -> Result<(), String> {
+    let local = match stream
+        .local_addr()
+        .map_err(|error| format!("read {phase} local address: {error}"))?
+    {
+        SocketAddr::V4(local) => local,
+        SocketAddr::V6(_) => return Err(format!("{phase} retained an IPv6 local address")),
+    };
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let request = adapter.receive_matching_ipv4_tcp_segment(
+        source,
+        destination,
+        Some(local.port()),
+        TCP_PACKET_DELIVERY_PORT,
+        request_payload,
+        TCP_FLAG_ACK,
+        TCP_FLAG_SYN | TCP_FLAG_FIN,
+        deadline,
+    )?;
+    inject_and_receive_ipv4_tcp_response(
+        stream,
+        adapter,
+        request,
+        destination,
+        source,
+        response_payload,
+        deadline,
+        phase,
+    )
+}
+
+fn prove_ipv4_tcp_preexisting_flow_during_activation(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    stream: &mut TcpStream,
+    baseline_adapter: &OwnedWintunAdapter<'_>,
+    capture_adapter: &OwnedWintunAdapter<'_>,
+) -> Result<PreexistingFlowPath, String> {
+    if active.destination() != IpAddr::V4(IPV4_PREEXISTING_DESTINATION)
+        || active.exact_route_prefix() != "1.0.0.3/32"
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.baseline_source_address() != IpAddr::V4(IPV4_BASELINE_SOURCE)
+        || active.capture_source_address() != IpAddr::V4(IPV4_CAPTURE_SOURCE)
+    {
+        return Err("active route facts do not prove controlled TCP-flow paths".to_owned());
+    }
+    let local = match stream
+        .local_addr()
+        .map_err(|error| format!("read active TCP-flow local address: {error}"))?
+    {
+        SocketAddr::V4(local) => local,
+        SocketAddr::V6(_) => return Err("active TCP-flow retained an IPv6 source".to_owned()),
+    };
+    let peer = match stream
+        .peer_addr()
+        .map_err(|error| format!("read active TCP-flow peer address: {error}"))?
+    {
+        SocketAddr::V4(peer) => peer,
+        SocketAddr::V6(_) => return Err("active TCP-flow retained an IPv6 peer".to_owned()),
+    };
+    if *local.ip() != IPV4_BASELINE_SOURCE
+        || local.port() == 0
+        || *peer.ip() != IPV4_PREEXISTING_DESTINATION
+        || peer.port() != TCP_PACKET_DELIVERY_PORT
+    {
+        return Err(format!(
+            "active TCP-flow endpoints changed before send: local={local}, peer={peer}"
+        ));
+    }
+
+    stream
+        .write_all(PREEXISTING_TCP_ACTIVE_REQUEST)
+        .map_err(|error| format!("write active TCP-flow request: {error}"))?;
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let (path, request) = receive_ipv4_tcp_segment_from_either_adapter(
+        baseline_adapter,
+        capture_adapter,
+        IPV4_BASELINE_SOURCE,
+        IPV4_PREEXISTING_DESTINATION,
+        local.port(),
+        TCP_PACKET_DELIVERY_PORT,
+        PREEXISTING_TCP_ACTIVE_REQUEST,
+        deadline,
+    )?;
+    if path == PreexistingFlowPath::Capture {
+        return Ok(path);
+    }
+    inject_and_receive_ipv4_tcp_response(
+        stream,
+        baseline_adapter,
+        request,
+        IPV4_PREEXISTING_DESTINATION,
+        IPV4_BASELINE_SOURCE,
+        PREEXISTING_TCP_ACTIVE_RESPONSE,
+        deadline,
+        "active TCP baseline continuity",
+    )?;
+    Ok(path)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn receive_ipv4_tcp_segment_from_either_adapter(
+    baseline_adapter: &OwnedWintunAdapter<'_>,
+    capture_adapter: &OwnedWintunAdapter<'_>,
+    expected_source: Ipv4Addr,
+    expected_destination: Ipv4Addr,
+    expected_source_port: u16,
+    expected_destination_port: u16,
+    expected_payload: &[u8],
+    deadline: Instant,
+) -> Result<(PreexistingFlowPath, CapturedTcpSegment), String> {
+    loop {
+        if let Some(packet) = baseline_adapter.try_receive_packet()? {
+            if let Some(segment) = parse_ipv4_tcp_segment(
+                &packet,
+                expected_source,
+                expected_destination,
+                Some(expected_source_port),
+                expected_destination_port,
+                expected_payload,
+                TCP_FLAG_ACK,
+                TCP_FLAG_SYN | TCP_FLAG_FIN,
+            )? {
+                return Ok((PreexistingFlowPath::Baseline, segment));
+            }
+        }
+        if let Some(packet) = capture_adapter.try_receive_packet()? {
+            if let Some(segment) = parse_ipv4_tcp_segment(
+                &packet,
+                expected_source,
+                expected_destination,
+                Some(expected_source_port),
+                expected_destination_port,
+                expected_payload,
+                TCP_FLAG_ACK,
+                TCP_FLAG_SYN | TCP_FLAG_FIN,
+            )? {
+                return Ok((PreexistingFlowPath::Capture, segment));
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "pre-existing IPv4 TCP request reached neither owned adapter before deadline"
+                    .to_owned(),
+            );
+        }
+        thread::sleep(PACKET_DELIVERY_PROBE_INTERVAL);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inject_and_receive_ipv4_tcp_response(
+    stream: &mut TcpStream,
+    adapter: &OwnedWintunAdapter<'_>,
+    request: CapturedTcpSegment,
+    response_source: Ipv4Addr,
+    response_destination: Ipv4Addr,
+    response_payload: &[u8],
+    deadline: Instant,
+    phase: &str,
+) -> Result<(), String> {
+    let payload_length = u32::try_from(request.payload_length)
+        .map_err(|_| format!("{phase} TCP payload length exceeds u32"))?;
+    let acknowledged = request.sequence_number.wrapping_add(payload_length);
+    let response = build_ipv4_tcp_packet(
+        response_source,
+        response_destination,
+        request.destination_port,
+        request.source_port,
+        request.acknowledgment_number,
+        acknowledged,
+        TCP_FLAG_PSH | TCP_FLAG_ACK,
+        response_payload,
+    )?;
+    adapter.inject_packet(&response)?;
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| format!("{phase} exceeded its bounded deadline"))?;
+    stream
+        .set_read_timeout(Some(remaining))
+        .map_err(|error| format!("bound {phase} receive timeout: {error}"))?;
+    let mut received = vec![0u8; response_payload.len()];
+    stream
+        .read_exact(&mut received)
+        .map_err(|error| format!("read {phase} response: {error}"))?;
+    if Instant::now() > deadline || received != response_payload {
+        return Err(format!(
+            "{phase} response exceeded its deadline or mismatched"
+        ));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn receive_ipv4_udp_request_from_either_adapter(
     baseline_adapter: &OwnedWintunAdapter<'_>,
@@ -1267,10 +1828,185 @@ struct CapturedUdpRequest {
     destination_port: u16,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct CapturedTcpSegment {
+    source_port: u16,
+    destination_port: u16,
+    sequence_number: u32,
+    acknowledgment_number: u32,
+    flags: u8,
+    payload_length: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PreexistingFlowPath {
     Baseline,
     Capture,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_ipv4_tcp_segment(
+    packet: &[u8],
+    expected_source: Ipv4Addr,
+    expected_destination: Ipv4Addr,
+    expected_source_port: Option<u16>,
+    expected_destination_port: u16,
+    expected_payload: &[u8],
+    required_flags: u8,
+    forbidden_flags: u8,
+) -> Result<Option<CapturedTcpSegment>, String> {
+    if packet.len() < IPV4_MIN_HEADER_LENGTH || packet[0] >> 4 != 4 {
+        return Ok(None);
+    }
+    let source = Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
+    let destination = Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
+    if source != expected_source
+        || destination != expected_destination
+        || packet[9] != TCP_PROTOCOL_NUMBER
+    {
+        return Ok(None);
+    }
+
+    let ip_header_length = usize::from(packet[0] & 0x0f) * 4;
+    if ip_header_length < IPV4_MIN_HEADER_LENGTH || ip_header_length > packet.len() {
+        return Err("captured IPv4 TCP packet has an invalid IP header length".to_owned());
+    }
+    let total_length = usize::from(u16::from_be_bytes([packet[2], packet[3]]));
+    if total_length != packet.len() || total_length < ip_header_length + TCP_MIN_HEADER_LENGTH {
+        return Err(format!(
+            "captured IPv4 TCP packet length mismatch: packet={}, header={ip_header_length}, total={total_length}",
+            packet.len()
+        ));
+    }
+    let fragment = u16::from_be_bytes([packet[6], packet[7]]);
+    if fragment & 0x3fff != 0 {
+        return Err("captured IPv4 TCP segment was fragmented".to_owned());
+    }
+    if internet_checksum(&packet[..ip_header_length]) != 0 {
+        return Err("captured IPv4 TCP packet has an invalid IP header checksum".to_owned());
+    }
+
+    let tcp = &packet[ip_header_length..];
+    let tcp_header_length = usize::from(tcp[TCP_DATA_OFFSET] >> 4) * 4;
+    if tcp_header_length < TCP_MIN_HEADER_LENGTH || tcp_header_length > tcp.len() {
+        return Err("captured IPv4 TCP segment has an invalid TCP header length".to_owned());
+    }
+    let source_port =
+        u16::from_be_bytes([tcp[TCP_SOURCE_PORT_OFFSET], tcp[TCP_SOURCE_PORT_OFFSET + 1]]);
+    let destination_port = u16::from_be_bytes([
+        tcp[TCP_DESTINATION_PORT_OFFSET],
+        tcp[TCP_DESTINATION_PORT_OFFSET + 1],
+    ]);
+    if expected_source_port.is_some_and(|port| source_port != port)
+        || destination_port != expected_destination_port
+    {
+        return Ok(None);
+    }
+    let flags = tcp[TCP_FLAGS_OFFSET];
+    if flags & required_flags != required_flags || flags & forbidden_flags != 0 {
+        return Ok(None);
+    }
+
+    let tcp_length = tcp.len();
+    let mut pseudo_header = Vec::with_capacity(12 + tcp_length);
+    pseudo_header.extend_from_slice(&source.octets());
+    pseudo_header.extend_from_slice(&destination.octets());
+    pseudo_header.push(0);
+    pseudo_header.push(TCP_PROTOCOL_NUMBER);
+    pseudo_header.extend_from_slice(
+        &u16::try_from(tcp_length)
+            .map_err(|_| "captured IPv4 TCP segment exceeds 65535 bytes".to_owned())?
+            .to_be_bytes(),
+    );
+    pseudo_header.extend_from_slice(tcp);
+    if internet_checksum(&pseudo_header) != 0 {
+        return Err("captured IPv4 TCP segment has an invalid checksum".to_owned());
+    }
+
+    let payload = &tcp[tcp_header_length..];
+    if payload.is_empty() && !expected_payload.is_empty() {
+        return Ok(None);
+    }
+    if payload != expected_payload {
+        return Err(format!(
+            "captured IPv4 TCP payload mismatch: observed={}, expected={}",
+            payload.len(),
+            expected_payload.len()
+        ));
+    }
+    Ok(Some(CapturedTcpSegment {
+        source_port,
+        destination_port,
+        sequence_number: u32::from_be_bytes([
+            tcp[TCP_SEQUENCE_OFFSET],
+            tcp[TCP_SEQUENCE_OFFSET + 1],
+            tcp[TCP_SEQUENCE_OFFSET + 2],
+            tcp[TCP_SEQUENCE_OFFSET + 3],
+        ]),
+        acknowledgment_number: u32::from_be_bytes([
+            tcp[TCP_ACKNOWLEDGMENT_OFFSET],
+            tcp[TCP_ACKNOWLEDGMENT_OFFSET + 1],
+            tcp[TCP_ACKNOWLEDGMENT_OFFSET + 2],
+            tcp[TCP_ACKNOWLEDGMENT_OFFSET + 3],
+        ]),
+        flags,
+        payload_length: payload.len(),
+    }))
+}
+
+fn assert_ipv4_tcp_segment_parser_contract() {
+    let source_port = 40_002;
+    let packet = build_ipv4_tcp_packet(
+        IPV4_BASELINE_SOURCE,
+        IPV4_PREEXISTING_DESTINATION,
+        source_port,
+        TCP_PACKET_DELIVERY_PORT,
+        100,
+        200,
+        TCP_FLAG_PSH | TCP_FLAG_ACK,
+        PREEXISTING_TCP_WARMUP_REQUEST,
+    )
+    .expect("build checksum-valid IPv4 TCP segment");
+    let parse = |packet: &[u8]| {
+        parse_ipv4_tcp_segment(
+            packet,
+            IPV4_BASELINE_SOURCE,
+            IPV4_PREEXISTING_DESTINATION,
+            Some(source_port),
+            TCP_PACKET_DELIVERY_PORT,
+            PREEXISTING_TCP_WARMUP_REQUEST,
+            TCP_FLAG_ACK,
+            TCP_FLAG_SYN | TCP_FLAG_FIN,
+        )
+    };
+    assert_eq!(
+        parse(&packet).expect("parse checksum-valid IPv4 TCP segment"),
+        Some(CapturedTcpSegment {
+            source_port,
+            destination_port: TCP_PACKET_DELIVERY_PORT,
+            sequence_number: 100,
+            acknowledgment_number: 200,
+            flags: TCP_FLAG_PSH | TCP_FLAG_ACK,
+            payload_length: PREEXISTING_TCP_WARMUP_REQUEST.len(),
+        })
+    );
+
+    let mut invalid_header = packet.clone();
+    invalid_header[8] ^= 1;
+    assert!(parse(&invalid_header)
+        .expect_err("reject an invalid IPv4 TCP IP-header checksum")
+        .contains("invalid IP header checksum"));
+
+    let mut invalid_tcp = packet;
+    invalid_tcp[IPV4_MIN_HEADER_LENGTH + TCP_MIN_HEADER_LENGTH] ^= 1;
+    assert!(parse(&invalid_tcp)
+        .expect_err("reject an invalid IPv4 TCP checksum")
+        .contains("invalid checksum"));
+}
+
+#[test]
+fn ipv4_tcp_segment_parser_requires_valid_checksums() {
+    assert_ipv4_tcp_segment_parser_contract();
 }
 
 fn parse_ipv4_udp_request(
@@ -1466,6 +2202,74 @@ fn parse_ipv6_udp_request(
         source_port,
         destination_port,
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_ipv4_tcp_packet(
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    source_port: u16,
+    destination_port: u16,
+    sequence_number: u32,
+    acknowledgment_number: u32,
+    flags: u8,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    let tcp_length = TCP_MIN_HEADER_LENGTH
+        .checked_add(payload.len())
+        .ok_or_else(|| "IPv4 TCP payload length overflow".to_owned())?;
+    let total_length = IPV4_MIN_HEADER_LENGTH
+        .checked_add(tcp_length)
+        .ok_or_else(|| "IPv4 TCP packet length overflow".to_owned())?;
+    let total_length_u16 = u16::try_from(total_length)
+        .map_err(|_| "IPv4 TCP packet exceeds the 65535-byte limit".to_owned())?;
+    let tcp_length_u16 = u16::try_from(tcp_length)
+        .map_err(|_| "IPv4 TCP segment exceeds the 65535-byte limit".to_owned())?;
+
+    let mut packet = vec![0u8; total_length];
+    packet[0] = IPV4_VERSION_AND_MIN_HEADER_LENGTH;
+    packet[2..4].copy_from_slice(&total_length_u16.to_be_bytes());
+    packet[4..6].copy_from_slice(&IPV4_PACKET_IDENTIFICATION.to_be_bytes());
+    packet[8] = IPV4_DEFAULT_TTL;
+    packet[9] = TCP_PROTOCOL_NUMBER;
+    packet[12..16].copy_from_slice(&source.octets());
+    packet[16..20].copy_from_slice(&destination.octets());
+
+    let tcp = &mut packet[IPV4_MIN_HEADER_LENGTH..];
+    tcp[TCP_SOURCE_PORT_OFFSET..TCP_SOURCE_PORT_OFFSET + 2]
+        .copy_from_slice(&source_port.to_be_bytes());
+    tcp[TCP_DESTINATION_PORT_OFFSET..TCP_DESTINATION_PORT_OFFSET + 2]
+        .copy_from_slice(&destination_port.to_be_bytes());
+    tcp[TCP_SEQUENCE_OFFSET..TCP_SEQUENCE_OFFSET + 4]
+        .copy_from_slice(&sequence_number.to_be_bytes());
+    tcp[TCP_ACKNOWLEDGMENT_OFFSET..TCP_ACKNOWLEDGMENT_OFFSET + 4]
+        .copy_from_slice(&acknowledgment_number.to_be_bytes());
+    tcp[TCP_DATA_OFFSET] = 5 << 4;
+    tcp[TCP_FLAGS_OFFSET] = flags;
+    tcp[TCP_WINDOW_OFFSET..TCP_WINDOW_OFFSET + 2].copy_from_slice(&u16::MAX.to_be_bytes());
+    tcp[TCP_MIN_HEADER_LENGTH..].copy_from_slice(payload);
+
+    let ipv4_checksum = internet_checksum(&packet[..IPV4_MIN_HEADER_LENGTH]);
+    packet[10..12].copy_from_slice(&ipv4_checksum.to_be_bytes());
+
+    let mut pseudo_header = Vec::with_capacity(12 + tcp_length);
+    pseudo_header.extend_from_slice(&source.octets());
+    pseudo_header.extend_from_slice(&destination.octets());
+    pseudo_header.push(0);
+    pseudo_header.push(TCP_PROTOCOL_NUMBER);
+    pseudo_header.extend_from_slice(&tcp_length_u16.to_be_bytes());
+    pseudo_header.extend_from_slice(&packet[IPV4_MIN_HEADER_LENGTH..]);
+    let tcp_checksum = internet_checksum(&pseudo_header);
+    let checksum_offset = IPV4_MIN_HEADER_LENGTH + TCP_CHECKSUM_OFFSET;
+    packet[checksum_offset..checksum_offset + 2].copy_from_slice(
+        &(if tcp_checksum == 0 {
+            0xffff
+        } else {
+            tcp_checksum
+        })
+        .to_be_bytes(),
+    );
+    Ok(packet)
 }
 
 fn build_ipv4_udp_packet(
@@ -2024,6 +2828,35 @@ impl<'a> OwnedWintunAdapter<'a> {
                 expected_payload,
             )? {
                 return Ok(request);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn receive_matching_ipv4_tcp_segment(
+        &self,
+        expected_source: Ipv4Addr,
+        expected_destination: Ipv4Addr,
+        expected_source_port: Option<u16>,
+        expected_destination_port: u16,
+        expected_payload: &[u8],
+        required_flags: u8,
+        forbidden_flags: u8,
+        deadline: Instant,
+    ) -> Result<CapturedTcpSegment, String> {
+        loop {
+            let packet = self.receive_packet_until(deadline)?;
+            if let Some(segment) = parse_ipv4_tcp_segment(
+                &packet,
+                expected_source,
+                expected_destination,
+                expected_source_port,
+                expected_destination_port,
+                expected_payload,
+                required_flags,
+                forbidden_flags,
+            )? {
+                return Ok(segment);
             }
         }
     }

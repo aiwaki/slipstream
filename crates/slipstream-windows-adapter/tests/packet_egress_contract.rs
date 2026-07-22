@@ -477,6 +477,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI",
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
@@ -500,6 +501,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv4_packet_round_trip_is_captured_and_injected",
         "native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered",
+        "native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered",
         "native_wintun_ipv6_packet_round_trip_is_captured_and_injected",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
@@ -532,7 +534,12 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "try_receive_packet",
         "receive_matching_ipv6_udp_request",
         "build_ipv4_udp_packet",
+        "build_ipv4_tcp_packet",
         "build_ipv6_udp_packet",
+        "parse_ipv4_tcp_segment",
+        "connected_ipv4_tcp_stream",
+        "complete_ipv4_tcp_round_trip_on_adapter",
+        "TcpStream",
         "PACKET_DELIVERY_TIMEOUT",
         "Wintun packet receive exceeded its bounded deadline",
         "Wintun packet round trip exceeded its bounded deadline",
@@ -553,7 +560,6 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "WintunDeleteDriver",
         ".send_to(",
         ".recv_from(",
-        "TcpStream",
     ] {
         assert!(
             !fixture.contains(forbidden),
@@ -565,9 +571,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         .find("fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered()")
         .expect("fixture must contain the IPv4 pre-existing-flow gate");
     let preexisting_end = fixture[preexisting_start..]
-        .find("fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected()")
+        .find("fn native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered()")
         .map(|offset| preexisting_start + offset)
-        .expect("pre-existing-flow gate must end before the IPv6 packet gate");
+        .expect("UDP pre-existing-flow gate must end before the TCP gate");
     let preexisting = &fixture[preexisting_start..preexisting_end];
     assert!(preexisting.contains("PREEXISTING_CAPTURE_ROLLBACK"));
     let warmup = preexisting
@@ -587,6 +593,38 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         .expect("pre-existing-flow gate must defer its result until after cleanup");
     assert!(warmup < activation && activation < retry);
     assert!(cleanup < accept_flow_result);
+
+    let tcp_preexisting_start = preexisting_end;
+    let tcp_preexisting_end = fixture[tcp_preexisting_start..]
+        .find("fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected()")
+        .map(|offset| tcp_preexisting_start + offset)
+        .expect("TCP pre-existing-flow gate must end before the IPv6 packet gate");
+    let tcp_preexisting = &fixture[tcp_preexisting_start..tcp_preexisting_end];
+    assert!(tcp_preexisting.contains("PREEXISTING_TCP_CAPTURE_ROLLBACK"));
+    let tcp_warmup = tcp_preexisting
+        .find("PREEXISTING_TCP_WARMUP_REQUEST")
+        .expect("TCP gate must establish and warm up the stream before activation");
+    let tcp_activation = tcp_preexisting
+        .find("qualify_disposable_exact_host_route_with_active_probe")
+        .expect("TCP gate must use owned exact-route activation");
+    let tcp_retransmission = tcp_preexisting
+        .find("post-rollback TCP active retransmission")
+        .expect("TCP gate must finish the unacknowledged active segment after rollback");
+    let tcp_retry = tcp_preexisting
+        .find("PREEXISTING_TCP_RETRY_REQUEST")
+        .expect("TCP gate must retain a post-removal same-stream retry");
+    let tcp_stream_drop = tcp_preexisting
+        .find("drop(stream);")
+        .expect("TCP gate must close its stream before fixture cleanup");
+    let tcp_cleanup = tcp_preexisting
+        .find("let baseline_route_cleanup = match baseline_route.as_mut()")
+        .expect("TCP gate must explicitly clean its baseline route");
+    let tcp_accept_flow_result = tcp_preexisting
+        .find("flow_result?;")
+        .expect("TCP gate must defer its result until after cleanup");
+    assert!(tcp_warmup < tcp_activation);
+    assert!(tcp_activation < tcp_retransmission && tcp_retransmission < tcp_retry);
+    assert!(tcp_stream_drop < tcp_cleanup && tcp_cleanup < tcp_accept_flow_result);
 
     for (start_marker, end_marker) in [
         (
@@ -642,6 +680,11 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "-TestName native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered"
     ));
     assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI: \"1\""));
+    assert!(workflow.contains("Qualify pre-existing IPv4 TCP flow activation safety"));
+    assert!(workflow.contains(
+        "-TestName native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered"
+    ));
+    assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI: \"1\""));
     assert!(workflow.contains("Qualify closed IPv6 packet capture and injection round trip"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected"));
