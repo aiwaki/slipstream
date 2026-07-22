@@ -321,6 +321,7 @@ fn native_route_observer_is_read_only_and_not_composed() {
         "setsockopt",
         "Wintun",
         "Command::new",
+        "is_usable_source_address",
     ] {
         assert!(!source.contains(forbidden), "observer contains {forbidden}");
     }
