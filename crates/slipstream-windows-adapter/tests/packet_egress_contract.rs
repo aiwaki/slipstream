@@ -452,6 +452,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI",
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
@@ -473,6 +474,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "qualify_disposable_exact_host_route_with_active_probe",
         "native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route",
+        "native_wintun_ipv4_packet_round_trip_is_captured_and_injected",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
         "interface_index.to_be()",
@@ -493,6 +495,15 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         ".peer_addr()",
         "connect no-payload IPv4 UDP socket",
         "connect no-payload IPv6 UDP socket",
+        "WintunReceivePacket",
+        "WintunReleaseReceivePacket",
+        "WintunAllocateSendPacket",
+        "WintunSendPacket",
+        "receive_matching_ipv4_udp_request",
+        "build_ipv4_udp_packet",
+        "PACKET_DELIVERY_TIMEOUT",
+        "Wintun packet receive exceeded its bounded deadline",
+        "Wintun packet round trip exceeded its bounded deadline",
         "require_adapter_absent",
     ] {
         assert!(
@@ -505,9 +516,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "GetUnicastIpAddressTable",
         "Set-DnsClientServerAddress",
         "WintunDeleteDriver",
-        ".send(",
         ".send_to(",
-        ".recv(",
         ".recv_from(",
         "TcpStream",
     ] {
@@ -515,6 +524,40 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
             !fixture.contains(forbidden),
             "route fixture contains {forbidden}"
         );
+    }
+
+    for (start_marker, end_marker) in [
+        (
+            "fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route()",
+            "fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route()",
+        ),
+        (
+            "fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route()",
+            "fn native_wintun_ipv4_packet_round_trip_is_captured_and_injected()",
+        ),
+        (
+            "fn prove_ipv4_socket_binding(",
+            "fn prove_ipv6_socket_binding(",
+        ),
+        (
+            "fn prove_ipv6_socket_binding(",
+            "fn set_and_verify_ipv4_unicast_interface(",
+        ),
+    ] {
+        let start = fixture
+            .find(start_marker)
+            .unwrap_or_else(|| panic!("missing no-payload region start {start_marker}"));
+        let end = fixture[start..]
+            .find(end_marker)
+            .map(|offset| start + offset)
+            .unwrap_or_else(|| panic!("missing no-payload region end {end_marker}"));
+        let region = &fixture[start..end];
+        for forbidden in [".send(", ".send_to(", ".recv(", ".recv_from("] {
+            assert!(
+                !region.contains(forbidden),
+                "no-payload region {start_marker} contains {forbidden}"
+            );
+        }
     }
 
     let workflow =
@@ -528,8 +571,14 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow.contains("Qualify no-payload IPv6 socket selection under exact route"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route"));
+    assert!(workflow.contains("Qualify closed IPv4 packet capture and injection round trip"));
+    assert!(workflow
+        .contains("-TestName native_wintun_ipv4_packet_round_trip_is_captured_and_injected"));
+    assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI: \"1\""));
 
     let production_host = include_str!("../src/service_host/windows.rs");
     assert!(!production_host.contains("disposable_route_owner_v1"));
     assert!(!production_host.contains("qualify_disposable_exact_host_route"));
+    assert!(!production_host.contains("WintunReceivePacket"));
+    assert!(!production_host.contains("WintunSendPacket"));
 }
