@@ -466,10 +466,10 @@ therefore stays phased and closed to production traffic:
    TCP-stream gate with a checksum-valid synthetic handshake, activation
    exchange, fail-closed exact-route rollback if the established stream reaches
    capture, retransmission recovery, and an unconditional same-stream
-   post-removal exchange. Its final head passed native AMD64 and ARM64 twice
-   plus required CI and audit; exact-main evidence remains required before that
-   TCP gate closes. Bounded capture expiry/removal and explicit external-VPN
-   coexistence remain separate native AMD64 and ARM64 Windows gates.
+   post-removal exchange. Its qualified code head passed native AMD64 and ARM64
+   twice plus required CI and audit; exact-main evidence remains required before
+   that TCP gate closes. Bounded capture expiry/removal and explicit
+   external-VPN coexistence remain separate native AMD64 and ARM64 Windows gates.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
