@@ -543,10 +543,10 @@ either keep using that baseline path, or cause the active probe to fail so the
 owner removes only the exact route and the same socket completes a bounded
 baseline retry. Every acquired route and address reaches explicit verified
 cleanup before any result is accepted. This closes only the first IPv4 UDP
-subgate. TCP pre-existing-flow activation safety, bounded capture removal, and
-explicit external-VPN coexistence remain separate gates before any exact-route
-transaction or production composition. A partial DNS cache is never treated as
-complete attribution.
+subgate; PR #200 below subsequently closes TCP pre-existing-flow activation.
+Bounded crash-safe capture removal and explicit external-VPN coexistence remain
+separate gates before any exact-route transaction or production composition. A
+partial DNS cache is never treated as complete attribution.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
 PR #200 is the independent IPv4 TCP pre-existing-flow gate. Its qualified code
