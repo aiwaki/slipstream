@@ -739,7 +739,7 @@ fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected() {
             .map_err(|error| format!("construct IPv6 packet-delivery issuer: {error}"))?;
         let mut baseline_route = OwnedFixtureBaselineRoute::create(
             baseline_interface,
-            IPV6_BASELINE_NETWORK,
+            IpAddr::V6(IPV6_BASELINE_NETWORK),
             IPV6_BASELINE_PREFIX_LENGTH,
         )?;
 
