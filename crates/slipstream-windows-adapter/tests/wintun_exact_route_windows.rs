@@ -44,6 +44,7 @@ const DISPOSABLE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_DISPOSABLE_CI";
 const EXACT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI";
 const SOCKET_BINDING_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI";
 const PACKET_DELIVERY_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI";
+const PREEXISTING_FLOW_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const WINTUN_MAX_IP_PACKET_SIZE: usize = 0xffff;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -55,6 +56,13 @@ const PACKET_DELIVERY_PROBE_INTERVAL: Duration = Duration::from_millis(5);
 const PACKET_DELIVERY_PORT: u16 = 41_723;
 const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
 const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
+const PREEXISTING_WARMUP_REQUEST: &[u8] = b"slipstream-preexisting-warmup-v1";
+const PREEXISTING_WARMUP_RESPONSE: &[u8] = b"slipstream-preexisting-warmup-response-v1";
+const PREEXISTING_ACTIVE_REQUEST: &[u8] = b"slipstream-preexisting-active-v1";
+const PREEXISTING_ACTIVE_RESPONSE: &[u8] = b"slipstream-preexisting-active-response-v1";
+const PREEXISTING_RETRY_REQUEST: &[u8] = b"slipstream-preexisting-retry-v1";
+const PREEXISTING_RETRY_RESPONSE: &[u8] = b"slipstream-preexisting-retry-response-v1";
+const PREEXISTING_CAPTURE_ROLLBACK: &str = "preexisting_flow_reached_capture_with_baseline_source";
 const IPV4_MIN_HEADER_LENGTH: usize = 20;
 const IPV6_HEADER_LENGTH: usize = 40;
 const IPV6_PAYLOAD_LENGTH_OFFSET: usize = 4;
@@ -73,6 +81,12 @@ const IPV4_PACKET_IDENTIFICATION: u16 = 0x534c;
 const IPV4_DEFAULT_TTL: u8 = 64;
 const IPV6_DEFAULT_HOP_LIMIT: u8 = 64;
 const UDP_PROTOCOL_NUMBER: u8 = 17;
+const IPV4_BASELINE_NETWORK: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 0);
+const IPV4_BASELINE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 2);
+const IPV4_CAPTURE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 3);
+const IPV4_PREEXISTING_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 3);
+const IPV4_BASELINE_PREFIX_LENGTH: u8 = 24;
+const IPV4_HOST_PREFIX_LENGTH: u8 = 32;
 const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
 const IPV6_BASELINE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 2);
 const IPV6_CAPTURE_SOURCE: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 3);
@@ -326,7 +340,7 @@ fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route() {
             .map_err(|error| format!("construct IPv6 socket-binding issuer: {error}"))?;
         let mut baseline_route = OwnedFixtureBaselineRoute::create(
             baseline_interface,
-            IPV6_BASELINE_NETWORK,
+            IpAddr::V6(IPV6_BASELINE_NETWORK),
             IPV6_BASELINE_PREFIX_LENGTH,
         )?;
 
@@ -490,6 +504,191 @@ fn native_wintun_ipv4_packet_round_trip_is_captured_and_injected() {
 }
 
 #[test]
+fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PACKET_DELIVERY_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PREEXISTING_FLOW_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let baseline_name = wide(&unique_adapter_name("PreFlow4Baseline"));
+    let capture_name = wide(&unique_adapter_name("PreFlow4Capture"));
+    let baseline_tunnel_type = wide("Slipstream CI IPv4 Existing Baseline");
+    let capture_tunnel_type = wide("Slipstream CI IPv4 Existing Capture");
+    api.require_adapter_absent(&baseline_name, "before IPv4 existing-flow baseline fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv4 existing-flow baseline preflight: {error}"));
+    api.require_adapter_absent(&capture_name, "before IPv4 existing-flow capture fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv4 existing-flow capture preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut baseline_adapter =
+            OwnedWintunAdapter::create(&api, &baseline_name, &baseline_tunnel_type)?;
+        baseline_adapter.start_session()?;
+        let baseline_interface = baseline_adapter.interface_identity()?;
+        let mut capture_adapter =
+            OwnedWintunAdapter::create(&api, &capture_name, &capture_tunnel_type)?;
+        capture_adapter.start_session()?;
+        let capture_interface = capture_adapter.interface_identity()?;
+        if capture_interface == baseline_interface {
+            return Err("IPv4 existing-flow adapters resolved to the same interface".to_owned());
+        }
+
+        let mut baseline_address = OwnedUnicastAddress::create(
+            baseline_interface,
+            IpAddr::V4(IPV4_BASELINE_SOURCE),
+            IPV4_HOST_PREFIX_LENGTH,
+        )?;
+        let mut capture_address = OwnedUnicastAddress::create(
+            capture_interface,
+            IpAddr::V4(IPV4_CAPTURE_SOURCE),
+            IPV4_HOST_PREFIX_LENGTH,
+        )?;
+        let mut baseline_route = OwnedFixtureBaselineRoute::create(
+            baseline_interface,
+            IpAddr::V4(IPV4_BASELINE_NETWORK),
+            IPV4_BASELINE_PREFIX_LENGTH,
+        )?;
+        let socket = connected_ipv4_udp_socket(
+            IPV4_BASELINE_SOURCE,
+            IPV4_PREEXISTING_DESTINATION,
+            PACKET_DELIVERY_PORT,
+        )?;
+        prove_ipv4_udp_round_trip_on_adapter(
+            &socket,
+            &baseline_adapter,
+            IPV4_BASELINE_SOURCE,
+            IPV4_PREEXISTING_DESTINATION,
+            PREEXISTING_WARMUP_REQUEST,
+            PREEXISTING_WARMUP_RESPONSE,
+            "pre-existing warm-up",
+        )?;
+
+        let mut active_path = None;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(7, capture_interface, 1)
+            .map_err(|error| format!("construct IPv4 existing-flow issuer: {error}"))?;
+        let route_result = qualify_disposable_exact_host_route_with_active_probe(
+            &mut issuer,
+            IpAddr::V4(IPV4_PREEXISTING_DESTINATION),
+            |active| {
+                let path = prove_ipv4_preexisting_flow_during_activation(
+                    active,
+                    &socket,
+                    &baseline_adapter,
+                    &capture_adapter,
+                )?;
+                active_path = Some(path);
+                match path {
+                    PreexistingFlowPath::Baseline => Ok(()),
+                    PreexistingFlowPath::Capture => Err(PREEXISTING_CAPTURE_ROLLBACK.to_owned()),
+                }
+            },
+        );
+
+        let flow_result = (|| {
+            let qualification = match (route_result, active_path) {
+                (Ok(qualification), Some(PreexistingFlowPath::Baseline)) => Some(qualification),
+                (Err(error), Some(PreexistingFlowPath::Capture))
+                    if error.code() == WindowsDisposableExactRouteErrorCode::ActiveProbeFailed
+                        && error.to_string().contains(PREEXISTING_CAPTURE_ROLLBACK) =>
+                {
+                    prove_ipv4_udp_round_trip_on_adapter(
+                        &socket,
+                        &baseline_adapter,
+                        IPV4_BASELINE_SOURCE,
+                        IPV4_PREEXISTING_DESTINATION,
+                        PREEXISTING_RETRY_REQUEST,
+                        PREEXISTING_RETRY_RESPONSE,
+                        "post-rollback retry",
+                    )?;
+                    None
+                }
+                (Ok(_), path) => {
+                    return Err(format!(
+                        "existing-flow qualification succeeded without baseline continuity: {path:?}"
+                    ))
+                }
+                (Err(error), path) => {
+                    return Err(format!(
+                        "existing-flow qualification returned unexpected evidence: error={error}, path={path:?}"
+                    ))
+                }
+            };
+
+            if let Some(qualification) = qualification.as_ref() {
+                if qualification.destination() != IpAddr::V4(IPV4_PREEXISTING_DESTINATION)
+                    || qualification.exact_route_prefix() != "1.0.0.3/32"
+                    || qualification.capture_interface() != capture_interface
+                    || qualification.baseline_egress_interface() != baseline_interface
+                    || qualification.recovered_egress_interface() != baseline_interface
+                    || qualification.route_epoch_after_removal() != 3
+                {
+                    return Err(
+                        "IPv4 existing-flow qualification returned inconsistent evidence"
+                            .to_owned(),
+                    );
+                }
+            }
+            Ok::<_, String>(qualification)
+        })();
+
+        let baseline_route_cleanup = baseline_route.remove_and_verify();
+        let capture_address_cleanup = capture_address.remove_and_verify();
+        let baseline_address_cleanup = baseline_address.remove_and_verify();
+        let mut cleanup_errors = Vec::new();
+        if let Err(error) = baseline_route_cleanup {
+            cleanup_errors.push(format!("baseline route: {error}"));
+        }
+        if let Err(error) = capture_address_cleanup {
+            cleanup_errors.push(format!("capture address: {error}"));
+        }
+        if let Err(error) = baseline_address_cleanup {
+            cleanup_errors.push(format!("baseline address: {error}"));
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(format!(
+                "IPv4 existing-flow fixture cleanup failed: {}; flow result: {flow_result:?}",
+                cleanup_errors.join("; "),
+            ));
+        }
+        flow_result?;
+
+        capture_adapter.end_session();
+        capture_adapter.close_adapter();
+        baseline_adapter.end_session();
+        baseline_adapter.close_adapter();
+        Ok::<(), String>(())
+    })();
+
+    let baseline_cleanup =
+        api.require_adapter_absent(&baseline_name, "after IPv4 existing-flow baseline fixture");
+    let capture_cleanup =
+        api.require_adapter_absent(&capture_name, "after IPv4 existing-flow capture fixture");
+    if baseline_cleanup.is_err() || capture_cleanup.is_err() {
+        panic!(
+            "Wintun IPv4 existing-flow adapter cleanup proof failed: baseline={baseline_cleanup:?}, capture={capture_cleanup:?}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable IPv4 existing-flow qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+#[test]
 fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected() {
     if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
         || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
@@ -621,6 +820,249 @@ fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected() {
             .expect("revalidate retained admitted Wintun DLL"),
         admission.evidence().dll_length
     );
+}
+
+fn connected_ipv4_udp_socket(
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    destination_port: u16,
+) -> Result<UdpSocket, String> {
+    let socket = UdpSocket::bind(SocketAddrV4::new(source, 0))
+        .map_err(|error| format!("bind pre-existing IPv4 UDP socket: {error}"))?;
+    let peer = SocketAddrV4::new(destination, destination_port);
+    socket
+        .connect(peer)
+        .map_err(|error| format!("connect pre-existing IPv4 UDP socket: {error}"))?;
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read pre-existing IPv4 UDP local address: {error}"))?
+    {
+        SocketAddr::V4(local) => local,
+        SocketAddr::V6(_) => {
+            return Err("pre-existing IPv4 UDP socket retained an IPv6 local address".to_owned())
+        }
+    };
+    let observed_peer = match socket
+        .peer_addr()
+        .map_err(|error| format!("read pre-existing IPv4 UDP peer address: {error}"))?
+    {
+        SocketAddr::V4(peer) => peer,
+        SocketAddr::V6(_) => {
+            return Err("pre-existing IPv4 UDP socket retained an IPv6 peer".to_owned())
+        }
+    };
+    if *local.ip() != source || local.port() == 0 || observed_peer != peer {
+        return Err(format!(
+            "pre-existing IPv4 UDP binding mismatch: local={local}, peer={observed_peer}, expected_source={source}, expected_peer={peer}"
+        ));
+    }
+    Ok(socket)
+}
+
+fn prove_ipv4_udp_round_trip_on_adapter(
+    socket: &UdpSocket,
+    adapter: &OwnedWintunAdapter<'_>,
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    request_payload: &[u8],
+    response_payload: &[u8],
+    phase: &str,
+) -> Result<(), String> {
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read {phase} local address: {error}"))?
+    {
+        SocketAddr::V4(local) => local,
+        SocketAddr::V6(_) => return Err(format!("{phase} socket retained an IPv6 local address")),
+    };
+    if *local.ip() != source || local.port() == 0 {
+        return Err(format!(
+            "{phase} source mismatch: local={local}, expected={source}"
+        ));
+    }
+
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let sent = socket
+        .send(request_payload)
+        .map_err(|error| format!("send {phase} request: {error}"))?;
+    if sent != request_payload.len() {
+        return Err(format!(
+            "{phase} request was partial: sent={sent}, expected={}",
+            request_payload.len()
+        ));
+    }
+    let request = adapter.receive_matching_ipv4_udp_request(
+        source,
+        destination,
+        local.port(),
+        PACKET_DELIVERY_PORT,
+        request_payload,
+        deadline,
+    )?;
+    inject_and_receive_ipv4_udp_response(
+        socket,
+        adapter,
+        request,
+        destination,
+        source,
+        response_payload,
+        deadline,
+        phase,
+    )
+}
+
+fn prove_ipv4_preexisting_flow_during_activation(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    socket: &UdpSocket,
+    baseline_adapter: &OwnedWintunAdapter<'_>,
+    capture_adapter: &OwnedWintunAdapter<'_>,
+) -> Result<PreexistingFlowPath, String> {
+    if active.destination() != IpAddr::V4(IPV4_PREEXISTING_DESTINATION)
+        || active.exact_route_prefix() != "1.0.0.3/32"
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.baseline_source_address() != IpAddr::V4(IPV4_BASELINE_SOURCE)
+        || active.capture_source_address() != IpAddr::V4(IPV4_CAPTURE_SOURCE)
+    {
+        return Err(
+            "active route facts do not prove the controlled existing-flow paths".to_owned(),
+        );
+    }
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read active existing-flow local address: {error}"))?
+    {
+        SocketAddr::V4(local) => local,
+        SocketAddr::V6(_) => {
+            return Err("active existing-flow socket retained an IPv6 local address".to_owned())
+        }
+    };
+    if *local.ip() != IPV4_BASELINE_SOURCE || local.port() == 0 {
+        return Err(format!(
+            "active existing-flow source changed before send: {local}"
+        ));
+    }
+
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let sent = socket
+        .send(PREEXISTING_ACTIVE_REQUEST)
+        .map_err(|error| format!("send active existing-flow request: {error}"))?;
+    if sent != PREEXISTING_ACTIVE_REQUEST.len() {
+        return Err(format!(
+            "active existing-flow request was partial: sent={sent}, expected={}",
+            PREEXISTING_ACTIVE_REQUEST.len()
+        ));
+    }
+    let (path, request) = receive_ipv4_udp_request_from_either_adapter(
+        baseline_adapter,
+        capture_adapter,
+        IPV4_BASELINE_SOURCE,
+        IPV4_PREEXISTING_DESTINATION,
+        local.port(),
+        PACKET_DELIVERY_PORT,
+        PREEXISTING_ACTIVE_REQUEST,
+        deadline,
+    )?;
+    if path == PreexistingFlowPath::Capture {
+        return Ok(path);
+    }
+    inject_and_receive_ipv4_udp_response(
+        socket,
+        baseline_adapter,
+        request,
+        IPV4_PREEXISTING_DESTINATION,
+        IPV4_BASELINE_SOURCE,
+        PREEXISTING_ACTIVE_RESPONSE,
+        deadline,
+        "active baseline continuity",
+    )?;
+    Ok(path)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn receive_ipv4_udp_request_from_either_adapter(
+    baseline_adapter: &OwnedWintunAdapter<'_>,
+    capture_adapter: &OwnedWintunAdapter<'_>,
+    expected_source: Ipv4Addr,
+    expected_destination: Ipv4Addr,
+    expected_source_port: u16,
+    expected_destination_port: u16,
+    expected_payload: &[u8],
+    deadline: Instant,
+) -> Result<(PreexistingFlowPath, CapturedUdpRequest), String> {
+    loop {
+        if let Some(packet) = baseline_adapter.try_receive_packet()? {
+            if let Some(request) = parse_ipv4_udp_request(
+                &packet,
+                expected_source,
+                expected_destination,
+                expected_source_port,
+                expected_destination_port,
+                expected_payload,
+            )? {
+                return Ok((PreexistingFlowPath::Baseline, request));
+            }
+        }
+        if let Some(packet) = capture_adapter.try_receive_packet()? {
+            if let Some(request) = parse_ipv4_udp_request(
+                &packet,
+                expected_source,
+                expected_destination,
+                expected_source_port,
+                expected_destination_port,
+                expected_payload,
+            )? {
+                return Ok((PreexistingFlowPath::Capture, request));
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "pre-existing IPv4 request reached neither owned adapter before deadline"
+                    .to_owned(),
+            );
+        }
+        thread::sleep(PACKET_DELIVERY_PROBE_INTERVAL);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inject_and_receive_ipv4_udp_response(
+    socket: &UdpSocket,
+    adapter: &OwnedWintunAdapter<'_>,
+    request: CapturedUdpRequest,
+    response_source: Ipv4Addr,
+    response_destination: Ipv4Addr,
+    response_payload: &[u8],
+    deadline: Instant,
+    phase: &str,
+) -> Result<(), String> {
+    let response = build_ipv4_udp_packet(
+        response_source,
+        response_destination,
+        request.destination_port,
+        request.source_port,
+        response_payload,
+    )?;
+    adapter.inject_packet(&response)?;
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| format!("{phase} exceeded its bounded deadline"))?;
+    socket
+        .set_read_timeout(Some(remaining))
+        .map_err(|error| format!("bound {phase} receive timeout: {error}"))?;
+    let mut received = vec![0u8; response_payload.len() + 1];
+    let received_length = socket
+        .recv(&mut received)
+        .map_err(|error| format!("receive {phase} response: {error}"))?;
+    if Instant::now() > deadline {
+        return Err(format!("{phase} exceeded its bounded deadline"));
+    }
+    if &received[..received_length] != response_payload {
+        return Err(format!(
+            "{phase} response payload mismatch: length={received_length}"
+        ));
+    }
+    Ok(())
 }
 
 fn prove_ipv4_packet_round_trip(
@@ -810,6 +1252,12 @@ fn prove_ipv6_packet_round_trip(
 struct CapturedUdpRequest {
     source_port: u16,
     destination_port: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PreexistingFlowPath {
+    Baseline,
+    Capture,
 }
 
 fn parse_ipv4_udp_request(
@@ -1523,41 +1971,48 @@ impl<'a> OwnedWintunAdapter<'a> {
     }
 
     fn receive_packet_until(&self, deadline: Instant) -> Result<Vec<u8>, String> {
-        if self.session.is_null() {
-            return Err("Wintun packet receive requires an active owned session".to_owned());
-        }
         loop {
             if Instant::now() >= deadline {
                 return Err("Wintun packet receive exceeded its bounded deadline".to_owned());
             }
-            let mut packet_size = 0u32;
-            let packet = unsafe { (self.api.receive_packet)(self.session, &mut packet_size) };
-            if !packet.is_null() {
-                if packet_size == 0 || packet_size as usize > WINTUN_MAX_IP_PACKET_SIZE {
-                    unsafe {
-                        (self.api.release_receive_packet)(self.session, packet);
-                    }
-                    return Err(format!(
-                        "Wintun returned an invalid packet length {packet_size}"
-                    ));
-                }
-                let packet_copy =
-                    unsafe { std::slice::from_raw_parts(packet, packet_size as usize).to_vec() };
-                unsafe {
-                    (self.api.release_receive_packet)(self.session, packet);
-                }
-                return Ok(packet_copy);
-            }
-
-            let error = last_error();
-            if error != ERROR_NO_MORE_ITEMS {
-                return Err(format!("WintunReceivePacket failed with {error}"));
+            if let Some(packet) = self.try_receive_packet()? {
+                return Ok(packet);
             }
             if Instant::now() >= deadline {
                 return Err("Wintun packet receive exceeded its bounded deadline".to_owned());
             }
             thread::sleep(PACKET_DELIVERY_PROBE_INTERVAL);
         }
+    }
+
+    fn try_receive_packet(&self) -> Result<Option<Vec<u8>>, String> {
+        if self.session.is_null() {
+            return Err("Wintun packet receive requires an active owned session".to_owned());
+        }
+        let mut packet_size = 0u32;
+        let packet = unsafe { (self.api.receive_packet)(self.session, &mut packet_size) };
+        if packet.is_null() {
+            let error = last_error();
+            return if error == ERROR_NO_MORE_ITEMS {
+                Ok(None)
+            } else {
+                Err(format!("WintunReceivePacket failed with {error}"))
+            };
+        }
+        if packet_size == 0 || packet_size as usize > WINTUN_MAX_IP_PACKET_SIZE {
+            unsafe {
+                (self.api.release_receive_packet)(self.session, packet);
+            }
+            return Err(format!(
+                "Wintun returned an invalid packet length {packet_size}"
+            ));
+        }
+        let packet_copy =
+            unsafe { std::slice::from_raw_parts(packet, packet_size as usize).to_vec() };
+        unsafe {
+            (self.api.release_receive_packet)(self.session, packet);
+        }
+        Ok(Some(packet_copy))
     }
 
     fn inject_packet(&self, packet: &[u8]) -> Result<(), String> {
@@ -1622,12 +2077,27 @@ struct OwnedFixtureBaselineRoute {
 impl OwnedFixtureBaselineRoute {
     fn create(
         interface: WindowsPacketInterfaceIdentity,
-        network: Ipv6Addr,
+        network: IpAddr,
         prefix_length: u8,
     ) -> Result<Self, String> {
-        if prefix_length != IPV6_BASELINE_PREFIX_LENGTH || network != IPV6_BASELINE_NETWORK {
-            return Err("fixture baseline route must remain the fixed IPv6 /64".to_owned());
+        let admitted_fixture = matches!(
+            (network, prefix_length),
+            (IpAddr::V4(address), IPV4_BASELINE_PREFIX_LENGTH)
+                if address == IPV4_BASELINE_NETWORK
+        ) || matches!(
+            (network, prefix_length),
+            (IpAddr::V6(address), IPV6_BASELINE_PREFIX_LENGTH)
+                if address == IPV6_BASELINE_NETWORK
+        );
+        if !admitted_fixture {
+            return Err(
+                "fixture baseline route must remain the fixed IPv4 /24 or IPv6 /64".to_owned(),
+            );
         }
+        let unspecified = match network {
+            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        };
 
         let mut row = MIB_IPFORWARD_ROW2::default();
         unsafe {
@@ -1637,9 +2107,9 @@ impl OwnedFixtureBaselineRoute {
             Value: interface.luid,
         };
         row.InterfaceIndex = interface.index;
-        row.DestinationPrefix.Prefix = sockaddr_from_ip(IpAddr::V6(network));
+        row.DestinationPrefix.Prefix = sockaddr_from_ip(network);
         row.DestinationPrefix.PrefixLength = prefix_length;
-        row.NextHop = sockaddr_from_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        row.NextHop = sockaddr_from_ip(unspecified);
         row.SitePrefixLength = prefix_length;
         row.Metric = 5;
         row.Protocol = MIB_IPPROTO_NETMGMT;
@@ -1649,7 +2119,7 @@ impl OwnedFixtureBaselineRoute {
         row.Immortal = false;
 
         if lookup_fixture_baseline_route(row)?.is_some() {
-            return Err("fixture IPv6 baseline route already exists before creation".to_owned());
+            return Err("fixture baseline route already exists before creation".to_owned());
         }
         let result = unsafe { CreateIpForwardEntry2(&row) };
         if result != 0 {

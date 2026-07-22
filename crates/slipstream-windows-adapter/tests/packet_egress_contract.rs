@@ -476,6 +476,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI",
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
@@ -498,6 +499,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv4_packet_round_trip_is_captured_and_injected",
+        "native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered",
         "native_wintun_ipv6_packet_round_trip_is_captured_and_injected",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
@@ -508,7 +510,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "CreateIpForwardEntry2",
         "GetIpForwardEntry2",
         "DeleteIpForwardEntry2",
-        "fixture baseline route must remain the fixed IPv6 /64",
+        "fixture baseline route must remain the fixed IPv4 /24 or IPv6 /64",
+        "const IPV4_BASELINE_PREFIX_LENGTH: u8 = 24;",
+        "const IPV4_HOST_PREFIX_LENGTH: u8 = 32;",
         "const IPV6_BASELINE_PREFIX_LENGTH: u8 = 64;",
         "const IPV6_HOST_PREFIX_LENGTH: u8 = 128;",
         "BASELINE_ROUTE_REMOVAL_TIMEOUT",
@@ -524,6 +528,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "WintunAllocateSendPacket",
         "WintunSendPacket",
         "receive_matching_ipv4_udp_request",
+        "receive_ipv4_udp_request_from_either_adapter",
+        "try_receive_packet",
         "receive_matching_ipv6_udp_request",
         "build_ipv4_udp_packet",
         "build_ipv6_udp_packet",
@@ -531,6 +537,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "Wintun packet receive exceeded its bounded deadline",
         "Wintun packet round trip exceeded its bounded deadline",
         "Wintun IPv6 packet round trip exceeded its bounded deadline",
+        "PREEXISTING_WARMUP_REQUEST",
+        "PREEXISTING_CAPTURE_ROLLBACK",
         "require_adapter_absent",
     ] {
         assert!(
@@ -552,6 +560,32 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
             "route fixture contains {forbidden}"
         );
     }
+
+    let preexisting_start = fixture
+        .find("fn native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered()")
+        .expect("fixture must contain the IPv4 pre-existing-flow gate");
+    let preexisting_end = fixture[preexisting_start..]
+        .find("fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected()")
+        .map(|offset| preexisting_start + offset)
+        .expect("pre-existing-flow gate must end before the IPv6 packet gate");
+    let preexisting = &fixture[preexisting_start..preexisting_end];
+    let warmup = preexisting
+        .find("PREEXISTING_WARMUP_REQUEST")
+        .expect("pre-existing-flow gate must prove a warm-up exchange");
+    let activation = preexisting
+        .find("qualify_disposable_exact_host_route_with_active_probe")
+        .expect("pre-existing-flow gate must use the owned exact-route activation");
+    let retry = preexisting
+        .find("PREEXISTING_RETRY_REQUEST")
+        .expect("pre-existing-flow gate must retain a post-rollback retry");
+    let cleanup = preexisting
+        .find("let baseline_route_cleanup = baseline_route.remove_and_verify()")
+        .expect("pre-existing-flow gate must explicitly clean its baseline route");
+    let accept_flow_result = preexisting
+        .find("flow_result?;")
+        .expect("pre-existing-flow gate must defer its result until after cleanup");
+    assert!(warmup < activation && activation < retry);
+    assert!(cleanup < accept_flow_result);
 
     for (start_marker, end_marker) in [
         (
@@ -602,6 +636,11 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow.contains("Qualify closed IPv4 packet capture and injection round trip"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv4_packet_round_trip_is_captured_and_injected"));
+    assert!(workflow.contains("Qualify pre-existing IPv4 UDP flow activation safety"));
+    assert!(workflow.contains(
+        "-TestName native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered"
+    ));
+    assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI: \"1\""));
     assert!(workflow.contains("Qualify closed IPv6 packet capture and injection round trip"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected"));
