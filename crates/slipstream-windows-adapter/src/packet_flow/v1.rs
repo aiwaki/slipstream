@@ -182,6 +182,7 @@ pub struct WindowsPacketFlowAdmission {
     key: WindowsPacketFlowKey,
     session_id: u64,
     request: WindowsDataPlaneRequest,
+    egress: WindowsPacketEgressPlan,
     destination: String,
     destination_port: u16,
     expires_at_ms: u64,
@@ -198,6 +199,10 @@ impl WindowsPacketFlowAdmission {
 
     pub fn request(&self) -> &WindowsDataPlaneRequest {
         &self.request
+    }
+
+    pub fn egress(&self) -> &WindowsPacketEgressPlan {
+        &self.egress
     }
 
     pub fn destination(&self) -> &str {
@@ -281,9 +286,13 @@ pub fn prepare_windows_packet_flow(
         },
         session_id,
         request: request.clone(),
+        egress: egress.clone(),
         destination: classification.destination().to_string(),
         destination_port: HTTPS_PORT,
-        expires_at_ms: classification.expires_at_ms().min(egress.expires_at_ms()),
+        expires_at_ms: classification
+            .expires_at_ms()
+            .min(egress.expires_at_ms())
+            .min(request.first_payload_deadline_at_ms),
     })
 }
 
@@ -480,7 +489,7 @@ pub enum WindowsPacketFlowCommand {
         key: WindowsPacketFlowKey,
         session_id: u64,
         request: WindowsDataPlaneRequest,
-        destination: String,
+        egress: WindowsPacketEgressPlan,
         destination_port: u16,
     },
     Forward {
@@ -908,7 +917,7 @@ pub fn reduce_windows_packet_flow(
                 key,
                 session_id: admission.session_id,
                 request: admission.request.clone(),
-                destination: admission.destination.clone(),
+                egress: admission.egress.clone(),
                 destination_port: admission.destination_port,
             });
             commands.push(WindowsPacketFlowCommand::ScheduleIdleDeadline {

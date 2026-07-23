@@ -12,7 +12,7 @@ use slipstream_windows_adapter::packet_adapter::v2::{
 use slipstream_windows_adapter::packet_egress::{
     prepare_windows_packet_egress, WindowsPacketBaselineRouteEvidence,
     WindowsPacketCaptureRouteActivationEvidence, WindowsPacketEgressRequest,
-    WindowsPacketInterfaceIdentity,
+    WindowsPacketInterfaceIdentity, WindowsPacketSocketInterfaceBinding,
 };
 use slipstream_windows_adapter::packet_flow::{
     prepare_windows_packet_flow, reduce_windows_packet_flow, WindowsPacketFlowAdmission,
@@ -384,6 +384,8 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
     for invariant in [
         "pure_forwarding_contract_only",
         "capture_classification_and_egress_plan_bound",
+        "open_backend_preserves_full_egress_binding",
+        "admission_expires_by_first_payload_deadline",
         "active_policy_revalidated",
         "protected_local_bypass_never_uses_geph",
         "ordered_payload_frames",
@@ -398,6 +400,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "reset_clears_owned_queues",
         "rejected_open_cancels_unowned_session",
         "capture_flow_identity_remains_owned_until_generation_retirement",
+        "capture_generation_retirement_is_monotonic",
         "retired_generation_cannot_reopen",
         "terminal_history_bounded",
     ] {
@@ -499,6 +502,15 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
     assert_eq!(local.key().transport, WindowsPacketFlowTransport::Tcp);
     assert_eq!(local.destination(), "104.16.58.5");
     assert_eq!(local.destination_port(), 443);
+    assert_eq!(local.expires_at_ms(), 4_000);
+    assert_eq!(local.egress().route_epoch(), 10);
+    assert_eq!(local.egress().source_address().to_string(), "10.0.0.4");
+    assert_eq!(local.egress().egress_interface().luid, 120);
+    assert_eq!(local.egress().egress_interface().index, 12);
+    assert_eq!(
+        local.egress().socket_binding(),
+        WindowsPacketSocketInterfaceBinding::Ipv4NetworkByteOrder(12_u32.to_be())
+    );
     assert_eq!(
         local.request().backend,
         WindowsDataPlaneBackend::LocalEngine
@@ -519,6 +531,39 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
     )
     .expect("geo-exit may use verified Geph");
     assert_eq!(geo.request().backend, WindowsDataPlaneBackend::Geph);
+
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    let commands = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission: local.clone(),
+        },
+        &contract().config,
+    );
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::OpenBackend {
+            egress,
+            destination_port: 443,
+            ..
+        } if egress == local.egress()
+    )));
+
+    let mut delayed = WindowsPacketFlowRegistry::new(1_200);
+    let rejected = apply(
+        &mut delayed,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 4_000,
+            admission: local,
+        },
+        &contract().config,
+    );
+    assert!(rejected.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "admission_expired"
+    )));
 }
 
 #[test]
@@ -599,6 +644,17 @@ fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning()
             admission: first,
         },
         &config,
+    );
+    assert_eq!(
+        reduce_windows_packet_flow(
+            &state,
+            &WindowsPacketFlowEvent::CaptureGenerationRetired {
+                now_ms: 1_205,
+                capture_generation: 7,
+            },
+            &config,
+        ),
+        Err(slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::ActiveCaptureGenerationRetirement)
     );
     apply(
         &mut state,
@@ -1195,6 +1251,10 @@ fn pure_source_and_production_host_remain_uncomposed() {
         "CreateProcess",
         "TerminateProcess",
         "Command::new",
+        "std::fs::",
+        "std::net::",
+        "std::process::",
+        "socket2::",
         "Set-DnsClientServerAddress",
         "ProxyEnable",
         "VpnService",

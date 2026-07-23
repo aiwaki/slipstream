@@ -5,6 +5,8 @@
   "invariants": {
     "pure_forwarding_contract_only": true,
     "capture_classification_and_egress_plan_bound": true,
+    "open_backend_preserves_full_egress_binding": true,
+    "admission_expires_by_first_payload_deadline": true,
     "active_policy_revalidated": true,
     "protected_local_bypass_never_uses_geph": true,
     "ordered_payload_frames": true,
@@ -19,6 +21,7 @@
     "reset_clears_owned_queues": true,
     "rejected_open_cancels_unowned_session": true,
     "capture_flow_identity_remains_owned_until_generation_retirement": true,
+    "capture_generation_retirement_is_monotonic": true,
     "retired_generation_cannot_reopen": true,
     "terminal_history_bounded": true,
     "native_socket_effect": false,
