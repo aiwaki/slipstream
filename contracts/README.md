@@ -209,7 +209,8 @@ Slipstream routing decisions and bounded recovery primitives.
 - `windows-userspace-byte-owner-v1.json` binds actual payload bytes to an
   opened tuple owner only after a successful frozen packet-flow-v1 payload
   transition. Opening requires the exact admission capability retained by the
-  tuple binding, not merely a matching flow key. The predecessor must equal the
+  tuple binding, not merely a matching flow key, and every later active
+  transition must preserve that complete capability. The predecessor must equal the
   owner's last full packet-flow snapshot and the resulting directional queue
   must grow by the exact declared length, so an unrelated idle refresh cannot
   stage bytes. Exact flow key,

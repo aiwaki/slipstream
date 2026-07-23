@@ -503,10 +503,10 @@ impl WindowsUserspaceByteOwner {
                 "packet-flow transition does not contain the exact authorized forward set",
             ));
         }
-        if transition_flow.admission.key() != owner_flow.binding.key() {
+        if transition_flow.admission != *owner_flow.binding.admission() {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload,
-                "packet-flow transition does not match the opaque tuple binding",
+                "packet-flow transition does not preserve the bound admission capability",
             ));
         }
         let expected_transition_bytes = previous_flow
@@ -766,6 +766,12 @@ impl WindowsUserspaceByteOwner {
             });
             if let Some(packet_flow_state) = active_flow {
                 let authorize_client_payload = if let Some(flow) = self.flows.get(&key) {
+                    if packet_flow_state.admission != *flow.binding.admission() {
+                        return Err(WindowsUserspaceByteOwnerError::new(
+                            WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
+                            "packet-flow transition does not preserve the bound admission capability",
+                        ));
+                    }
                     if !flow.queues_match(packet_flow_state) {
                         return Err(WindowsUserspaceByteOwnerError::new(
                             WindowsUserspaceByteOwnerErrorCode::StaleTransition,

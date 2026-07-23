@@ -226,6 +226,7 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
     for invariant in [
         "opaque_tuple_binding_required",
         "exact_open_admission_capability_required",
+        "full_admission_preserved_across_payload_and_reconcile",
         "successful_packet_flow_payload_transition_required",
         "exact_packet_flow_predecessor_required",
         "payload_queue_delta_required",
@@ -300,6 +301,93 @@ fn opening_rejects_same_key_transitions_from_other_admission_capabilities() {
         );
         assert_eq!(owner.active_flow_count(), 0);
     }
+}
+
+#[test]
+fn payload_and_reconcile_preserve_the_complete_bound_admission() {
+    let policy_tables = bundled_policy_v1();
+    let mut owner = WindowsUserspaceByteOwner::new(
+        WindowsUserspaceByteOwnerConfig::from_packet_flow(&packet_flow_config())
+            .expect("valid owner bounds"),
+    )
+    .expect("valid byte owner");
+    let (state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
+
+    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_350, key };
+    let backend_ready = reduce(&state, &backend_event);
+    owner
+        .reconcile(&backend_event, &state, &backend_ready)
+        .expect("backend-ready owner reconciliation");
+    let payload_event = WindowsPacketFlowEvent::Payload {
+        now_ms: 1_400,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let payload = reduce(&backend_ready.state, &payload_event);
+
+    let (_, mut substituted_fixture) = fixture_pair(7, 41);
+    substituted_fixture.host = "youtube.com".to_owned();
+    let substituted_admission = admission(&substituted_fixture, &policy_tables);
+    assert_eq!(substituted_admission.key(), key);
+    assert_ne!(
+        payload
+            .state
+            .flows
+            .get(&key)
+            .expect("payload flow")
+            .admission,
+        substituted_admission
+    );
+
+    let mut substituted_payload = payload.clone();
+    substituted_payload
+        .state
+        .flows
+        .get_mut(&key)
+        .expect("payload flow")
+        .admission = substituted_admission.clone();
+    let stage_error = owner
+        .stage_payload(
+            &payload_event,
+            &backend_ready.state,
+            &substituted_payload,
+            vec![7, 8, 9],
+        )
+        .expect_err("same-key admission cannot substitute during payload staging");
+    assert_eq!(
+        stage_error.code,
+        WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload
+    );
+    assert_eq!(owner.owned_frame_count(), 0);
+
+    owner
+        .stage_payload(
+            &payload_event,
+            &backend_ready.state,
+            &payload,
+            vec![7, 8, 9],
+        )
+        .expect("exact admission payload ownership");
+    let refresh_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_450, key };
+    let refresh = reduce(&payload.state, &refresh_event);
+    let mut substituted_refresh = refresh.clone();
+    substituted_refresh
+        .state
+        .flows
+        .get_mut(&key)
+        .expect("refreshed flow")
+        .admission = substituted_admission;
+    let reconcile_error = owner
+        .reconcile(&refresh_event, &payload.state, &substituted_refresh)
+        .expect_err("same-key admission cannot substitute during reconciliation");
+    assert_eq!(
+        reconcile_error.code,
+        WindowsUserspaceByteOwnerErrorCode::TransitionMismatch
+    );
+    assert_eq!(owner.owned_frame_count(), 1);
+    assert_eq!(owner.owned_byte_count(), 3);
 }
 
 #[test]

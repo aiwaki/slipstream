@@ -17,6 +17,7 @@
   "invariants": {
     "opaque_tuple_binding_required": true,
     "exact_open_admission_capability_required": true,
+    "full_admission_preserved_across_payload_and_reconcile": true,
     "successful_packet_flow_payload_transition_required": true,
     "exact_packet_flow_predecessor_required": true,
     "payload_queue_delta_required": true,
