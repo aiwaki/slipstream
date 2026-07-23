@@ -174,9 +174,11 @@ qualifies a separate pre-stack normalizer instead of mutating frozen selection
 v1. It reconstructs exact in-order and out-of-order packets inside fixed
 assembly, payload, fragment-count, and timeout bounds, rejects overlap and
 conflicts, and delivers the completed packet to the selected stack with the
-original UDP source endpoint. It accepts only a Fragment Header immediately
-after the IPv6 base header and remains outside Windows capture and production
-composition.
+original UDP source endpoint. RFC 6946 atomic fragments are reconstructed
+without allocating, expiring, or otherwise touching reassembly state, including
+when their identification collides with an incomplete assembly or both bounded
+slots are occupied. It accepts only a Fragment Header immediately after the
+IPv6 base header and remains outside Windows capture and production composition.
 
 Selection is not integration. Capture v4 now extends frozen capture v3 only
 after policy classification and retains the original client source address and

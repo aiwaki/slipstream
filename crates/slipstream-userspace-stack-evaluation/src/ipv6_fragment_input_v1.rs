@@ -136,14 +136,25 @@ impl Assembly {
             return Ok(None);
         }
 
-        let mut packet = Vec::with_capacity(IPV6_HEADER_BYTES + total_size);
-        let mut header = self.canonical_header;
-        header[4..6].copy_from_slice(&(total_size as u16).to_be_bytes());
-        header[6] = self.next_header;
-        packet.extend_from_slice(&header);
-        packet.extend_from_slice(&self.bytes[..total_size]);
-        Ok(Some(packet))
+        Ok(Some(reconstruct_packet(
+            self.canonical_header,
+            self.next_header,
+            &self.bytes[..total_size],
+        )))
     }
+}
+
+fn reconstruct_packet(
+    mut header: [u8; IPV6_HEADER_BYTES],
+    next_header: u8,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(IPV6_HEADER_BYTES + payload.len());
+    header[4..6].copy_from_slice(&(payload.len() as u16).to_be_bytes());
+    header[6] = next_header;
+    packet.extend_from_slice(&header);
+    packet.extend_from_slice(payload);
+    packet
 }
 
 #[derive(Debug, Default)]
@@ -172,8 +183,16 @@ impl Ipv6FragmentReassembler {
         now_ms: u64,
         packet: &[u8],
     ) -> Result<ReassemblyOutcome, ReassemblyError> {
-        self.expire(now_ms);
         let fragment = parse_fragment(packet)?;
+        if fragment.offset == 0 && !fragment.more_fragments {
+            return Ok(ReassemblyOutcome::Complete(reconstruct_packet(
+                fragment.canonical_header,
+                fragment.next_header,
+                fragment.payload,
+            )));
+        }
+
+        self.expire(now_ms);
         let existing = self
             .assemblies
             .iter()

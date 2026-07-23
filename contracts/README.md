@@ -204,12 +204,13 @@ Slipstream routing decisions and bounded recovery primitives.
   `smoltcp 0.13.1` ingress does not natively deliver IPv6 Fragment Header
   input. The normalizer accepts only a Fragment Header immediately after the
   IPv6 base header, reconstructs exact in-order and out-of-order packets inside
-  two 4096-byte/16-fragment/60-second assembly bounds, and rejects overlap,
-  conflicting headers or sizes, malformed alignment, and capacity growth. The
-  reconstructed packet is delivered to the selected stack with the original
-  UDP source endpoint. It remains outside Windows capture and production-host
-  composition and has no native packet, socket, route, DNS, proxy, PAC, VPN,
-  process, or service effect.
+  two 4096-byte/16-fragment/60-second assembly bounds, processes RFC 6946
+  atomic fragments without allocating or touching reassembly state, and rejects
+  overlap, conflicting headers or sizes, malformed alignment, and capacity
+  growth. The reconstructed packet is delivered to the selected stack with the
+  original UDP source endpoint. It remains outside Windows capture and
+  production-host composition and has no native packet, socket, route, DNS,
+  proxy, PAC, VPN, process, or service effect.
 - `windows-userspace-stack-effect-v1.json` composes frozen byte-owner v1 with
   the selected `smoltcp 0.13.1` candidate in a separate test-only crate. Its
   deterministic in-memory Layer 3 pair proves exact IPv4/IPv6 TCP/UDP payload

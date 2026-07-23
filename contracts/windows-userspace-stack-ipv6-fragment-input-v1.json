@@ -27,6 +27,7 @@
     "pre_stack_exact_packet_reconstruction": true,
     "pre_stack_in_order_reassembly": true,
     "pre_stack_out_of_order_reassembly": true,
+    "rfc6946_atomic_fragments_bypass_reassembly_state": true,
     "original_udp_source_endpoint_delivery": true,
     "identification_isolation": true,
     "overlap_rejection": true,

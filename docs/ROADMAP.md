@@ -525,7 +525,8 @@ therefore stays phased and closed to production traffic:
    v1 contract qualifies an effect-free pre-stack normalizer: it accepts only
    a Fragment Header immediately after the IPv6 base header, reconstructs exact
    in-order and out-of-order packets inside fixed assembly, payload,
-   fragment-count, and timeout bounds, rejects overlap and conflicts, and
+   fragment-count, and timeout bounds, processes RFC 6946 atomic fragments
+   without touching reassembly state, rejects overlap and conflicts, and
    delivers a completed UDP packet to the selected stack with its original
    source endpoint. Windows capture composition remains closed.
    Capture v4 and userspace-flow-binding v1 now close the immutable original

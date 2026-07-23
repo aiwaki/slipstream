@@ -300,6 +300,54 @@ fn tcp_fragment_payload_reassembles_exactly_before_stack_processing() {
 }
 
 #[test]
+fn atomic_fragment_is_delivered_without_allocating_or_touching_reassembly_state() {
+    let packet = udp_packet(&vec![0xd4; 512]);
+    let payload_len = packet.len() - 40;
+    let incomplete = fragment(&packet, 7, 0, 256, true);
+    let completion = fragment(&packet, 7, 256, payload_len - 256, false);
+    let atomic = fragment(&packet, 7, 0, payload_len, false);
+    let mut reassembler = Ipv6FragmentReassembler::new();
+
+    assert_eq!(
+        reassembler.ingest(1, &incomplete),
+        Ok(ReassemblyOutcome::Pending)
+    );
+    assert_eq!(reassembler.active_assemblies(), 1);
+    assert_eq!(
+        reassembler.ingest(REASSEMBLY_TIMEOUT_MS + 1, &atomic),
+        Ok(ReassemblyOutcome::Complete(packet.clone()))
+    );
+    assert_eq!(reassembler.active_assemblies(), 1);
+    assert_eq!(
+        reassembler.ingest(2, &completion),
+        Ok(ReassemblyOutcome::Complete(packet))
+    );
+    assert_eq!(reassembler.active_assemblies(), 0);
+}
+
+#[test]
+fn atomic_fragment_bypasses_full_reassembly_capacity() {
+    let packet = udp_packet(&vec![0xe5; 512]);
+    let payload_len = packet.len() - 40;
+    let mut reassembler = Ipv6FragmentReassembler::new();
+    for identification in 1..=MAX_ACTIVE_ASSEMBLIES as u32 {
+        assert_eq!(
+            reassembler.ingest(
+                identification as u64,
+                &fragment(&packet, identification, 0, 256, true)
+            ),
+            Ok(ReassemblyOutcome::Pending)
+        );
+    }
+
+    assert_eq!(
+        reassembler.ingest(10, &fragment(&packet, 99, 0, payload_len, false)),
+        Ok(ReassemblyOutcome::Complete(packet))
+    );
+    assert_eq!(reassembler.active_assemblies(), MAX_ACTIVE_ASSEMBLIES);
+}
+
+#[test]
 fn legal_two_fragment_split_matrix_reconstructs_exactly() {
     for payload_len in [1, 8, 31, 512, 1024, 2048, 4000] {
         let packet = udp_packet(&vec![payload_len as u8; payload_len]);
