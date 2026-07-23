@@ -628,7 +628,7 @@ impl WindowsUserspaceByteOwner {
             through_sequence: sequence,
         };
 
-        let next_packet_flow_state = {
+        let (next_packet_flow_state, release_terminal_owner) = {
             let flow = self.flows.get(&key).ok_or_else(|| {
                 WindowsUserspaceByteOwnerError::new(
                     WindowsUserspaceByteOwnerErrorCode::UnknownFlow,
@@ -673,16 +673,6 @@ impl WindowsUserspaceByteOwner {
                             format!("packet-flow rejected the acknowledgement: {}", error.error),
                         )
                     })?;
-            let next_packet_flow_state = acknowledgement_transition
-                .state
-                .flows
-                .get(&key)
-                .ok_or_else(|| {
-                    WindowsUserspaceByteOwnerError::new(
-                        WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
-                        "packet-flow acknowledgement did not retain the delivered flow",
-                    )
-                })?;
             let expected_direction_bytes = flow
                 .queue(direction)
                 .bytes
@@ -701,23 +691,40 @@ impl WindowsUserspaceByteOwner {
                     WindowsPacketFlowDirection::ClientToBackend
                 }
             };
-            if next_packet_flow_state.queued_bytes(direction) != expected_direction_bytes
-                || next_packet_flow_state.queued_bytes(other_direction)
-                    != flow.queue(other_direction).bytes
+            let other_direction_bytes = flow.queue(other_direction).bytes;
+            // A fully drained terminal acknowledgement may be pruned immediately.
+            let (next_packet_flow_state, release_terminal_owner) = match acknowledgement_transition
+                .state
+                .flows
+                .get(&key)
             {
-                return Err(WindowsUserspaceByteOwnerError::new(
-                    WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
-                    "packet-flow acknowledgement does not commit the exact owned payload",
-                ));
-            }
-            if next_packet_flow_state.phase.is_terminal()
-                && (expected_direction_bytes != 0 || flow.queue(other_direction).bytes != 0)
-            {
-                return Err(WindowsUserspaceByteOwnerError::new(
-                    WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
-                    "terminal packet-flow acknowledgement retains owned payload",
-                ));
-            }
+                Some(state) => {
+                    if state.queued_bytes(direction) != expected_direction_bytes
+                        || state.queued_bytes(other_direction) != other_direction_bytes
+                    {
+                        return Err(WindowsUserspaceByteOwnerError::new(
+                            WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
+                            "packet-flow acknowledgement does not commit the exact owned payload",
+                        ));
+                    }
+                    if state.phase.is_terminal()
+                        && (expected_direction_bytes != 0 || other_direction_bytes != 0)
+                    {
+                        return Err(WindowsUserspaceByteOwnerError::new(
+                            WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
+                            "terminal packet-flow acknowledgement retains owned payload",
+                        ));
+                    }
+                    (Some(state.clone()), state.phase.is_terminal())
+                }
+                None if expected_direction_bytes == 0 && other_direction_bytes == 0 => (None, true),
+                None => {
+                    return Err(WindowsUserspaceByteOwnerError::new(
+                        WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
+                        "packet-flow acknowledgement removed a flow with owned payload",
+                    ));
+                }
+            };
             let delivery = WindowsUserspaceByteDelivery {
                 key,
                 binding: &flow.binding,
@@ -731,7 +738,7 @@ impl WindowsUserspaceByteOwner {
                     error.to_string(),
                 )
             })?;
-            next_packet_flow_state.clone()
+            (next_packet_flow_state, release_terminal_owner)
         };
 
         let flow = self
@@ -744,10 +751,12 @@ impl WindowsUserspaceByteOwner {
             .pop_front()
             .expect("validated front payload must remain present");
         queue.bytes -= frame.bytes.len();
-        flow.packet_flow_state = next_packet_flow_state;
+        if let Some(next_packet_flow_state) = next_packet_flow_state {
+            flow.packet_flow_state = next_packet_flow_state;
+        }
         self.owned_frames -= 1;
         self.owned_bytes -= frame.bytes.len();
-        if flow.packet_flow_state.phase.is_terminal() {
+        if release_terminal_owner {
             let mut cleanup = WindowsUserspaceByteCleanup::default();
             self.remove_flow(key, &mut cleanup);
             debug_assert_eq!(cleanup.removed_flows, 1);
@@ -774,6 +783,14 @@ impl WindowsUserspaceByteOwner {
         }
         let mut cleanup = WindowsUserspaceByteCleanup::default();
         if let Some(key) = event.flow_key() {
+            if self.flows.contains_key(&key)
+                && matches!(event, WindowsPacketFlowEvent::Forwarded { .. })
+            {
+                return Err(WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
+                    "forwarded events must commit through the byte-owner effect path",
+                ));
+            }
             if let Some(flow) = self.flows.get(&key) {
                 if previous.flows.get(&key) != Some(&flow.packet_flow_state) {
                     return Err(WindowsUserspaceByteOwnerError::new(

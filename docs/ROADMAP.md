@@ -541,7 +541,9 @@ therefore stays phased and closed to production traffic:
    effects retain only the uncommitted suffix, successful effects produce exact
    `Forwarded` events only after preflighting them against the current full
    registry and its global monotonic watermark, and a terminal final
-   acknowledgement releases the empty owner in the same commit. Ordinary
+   acknowledgement releases the empty owner in the same commit even if bounded
+   terminal history immediately prunes it. Generic reconciliation cannot
+   accept `Forwarded` for a retained owner and bypass the effect. Ordinary
    terminal cleanup is exact-flow scoped, and explicit generation retirement
    is high-watermark bounded. Before either cleanup releases bytes, its
    transition must exactly equal a fresh reduction from the supplied full

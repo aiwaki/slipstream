@@ -22,6 +22,8 @@
     "full_admission_preserved_across_payload_and_reconcile": true,
     "payload_exact_reduction_required": true,
     "active_reconcile_exact_reduction_required": true,
+    "forwarded_event_requires_effect_path": true,
+    "terminal_history_pruning_preserves_delivery": true,
     "successful_packet_flow_payload_transition_required": true,
     "exact_packet_flow_predecessor_required": true,
     "payload_queue_delta_required": true,

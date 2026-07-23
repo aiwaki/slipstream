@@ -223,7 +223,11 @@ Slipstream routing decisions and bounded recovery primitives.
   exact accepting transition, and queued client frames gain that authorization
   only from an exact one-to-one `BackendReady` command set. Before invoking the
   effect, delivery must also reduce its exact `Forwarded` acknowledgement from
-  the current full registry, including the global monotonic watermark.
+  the current full registry, including the global monotonic watermark. A
+  retained owner rejects `Forwarded` through generic reconciliation, so the
+  injected effect cannot be bypassed. If the exact terminal acknowledgement is
+  immediately pruned from bounded packet-flow history, delivery remains valid
+  only when both owned directional queues become empty.
   If that acknowledgement drains a gracefully closed flow into a terminal
   state, the empty byte owner is released in the same successful commit.
   Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,

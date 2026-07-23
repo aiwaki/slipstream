@@ -664,8 +664,11 @@ cleanup removes only its exact flow; explicit generation retirement is
 high-watermark bounded. Before either path releases bytes, its transition must
 exactly equal a fresh reduction from the supplied full registry. Delivery preflights the exact acknowledgement from the
 current full registry before invoking the effect, including its global
-monotonic watermark. A final acknowledgement that makes a gracefully closed
-flow terminal also releases its empty owner immediately. The next safe M4
+monotonic watermark. Generic reconciliation rejects `Forwarded` while an owner
+exists, so it cannot skip the effect. A final acknowledgement that makes a
+gracefully closed flow terminal also releases its empty owner immediately,
+including when bounded terminal-history pruning removes that exact flow from
+the reducer output. The next safe M4
 gate is a test-only effect adapter in the separate
 evaluation crate that exercises this owner
 against the selected stack without linking `smoltcp` into the Windows adapter.

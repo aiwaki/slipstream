@@ -118,18 +118,36 @@ fn open_flow(
     capture_generation: u64,
     flow_id: u64,
 ) -> (WindowsPacketFlowRegistry, WindowsPacketFlowKey) {
+    open_flow_at(
+        owner,
+        state,
+        capture_generation,
+        flow_id,
+        1_300,
+        &packet_flow_config(),
+    )
+}
+
+fn open_flow_at(
+    owner: &mut WindowsUserspaceByteOwner,
+    state: WindowsPacketFlowRegistry,
+    capture_generation: u64,
+    flow_id: u64,
+    now_ms: u64,
+    config: &WindowsPacketFlowConfig,
+) -> (WindowsPacketFlowRegistry, WindowsPacketFlowKey) {
     let policy_tables = bundled_policy_v1();
     let (classification_fixture, admission_fixture) = fixture_pair(capture_generation, flow_id);
     let classification = classification(&classification_fixture, &policy_tables);
     let admission = admission(&admission_fixture, &policy_tables);
-    let binding = bind_windows_userspace_flow(&classification, &admission, 1_300)
+    let binding = bind_windows_userspace_flow(&classification, &admission, now_ms)
         .expect("exact fixture binding");
     let key = binding.key();
-    let event = flow_open_event(admission, 1_300, &policy_tables);
-    let transition = reduce_windows_packet_flow(state.clone(), &event, &packet_flow_config())
-        .expect("packet flow open");
+    let event = flow_open_event(admission, now_ms, &policy_tables);
+    let transition =
+        reduce_windows_packet_flow(state.clone(), &event, config).expect("packet flow open");
     owner
-        .open_flow(binding, &event, &state, &transition, &packet_flow_config())
+        .open_flow(binding, &event, &state, &transition, config)
         .expect("byte owner open");
     (transition.state, key)
 }
@@ -231,6 +249,8 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "full_admission_preserved_across_payload_and_reconcile",
         "payload_exact_reduction_required",
         "active_reconcile_exact_reduction_required",
+        "forwarded_event_requires_effect_path",
+        "terminal_history_pruning_preserves_delivery",
         "successful_packet_flow_payload_transition_required",
         "exact_packet_flow_predecessor_required",
         "payload_queue_delta_required",
@@ -1110,6 +1130,30 @@ fn final_forward_acknowledgement_releases_the_terminal_owner() {
         .expect("backend half-close reconciliation");
     assert!(!backend_half.state.flows[&key].phase.is_terminal());
 
+    let premature_acknowledgement = WindowsPacketFlowEvent::Forwarded {
+        now_ms: 1_430,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        through_sequence: 1,
+    };
+    let premature_commit = reduce(&backend_half.state, &premature_acknowledgement);
+    assert!(premature_commit.state.flows[&key].phase.is_terminal());
+    let premature_error = owner
+        .reconcile(
+            &premature_acknowledgement,
+            &backend_half.state,
+            &premature_commit,
+            &config,
+        )
+        .expect_err("terminal acknowledgement cannot bypass the byte effect");
+    assert_eq!(
+        premature_error.code,
+        WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected
+    );
+    assert_eq!(owner.active_flow_count(), 1);
+    assert_eq!(owner.owned_frame_count(), 1);
+    assert_eq!(owner.owned_byte_count(), 3);
+
     let mut effects = RecordingByteEffect::default();
     let acknowledgement = owner
         .execute_forward(&forward, &backend_half.state, &config, &mut effects, 1_430)
@@ -1125,6 +1169,118 @@ fn final_forward_acknowledgement_releases_the_terminal_owner() {
         .reconcile(&acknowledgement, &backend_half.state, &committed, &config)
         .expect("post-commit reconciliation remains idempotent");
     assert_eq!(cleanup, Default::default());
+}
+
+#[test]
+fn final_forward_survives_terminal_history_pruning() {
+    let mut config = packet_flow_config();
+    config.max_retained_terminal_flows = 1;
+    let owner_config =
+        WindowsUserspaceByteOwnerConfig::from_packet_flow(&config).expect("valid owner config");
+    let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
+    let (state, key) = open_flow_at(
+        &mut owner,
+        WindowsPacketFlowRegistry::new(1_200),
+        7,
+        41,
+        1_300,
+        &config,
+    );
+
+    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_320, key };
+    let backend_ready = reduce_windows_packet_flow(state.clone(), &backend_event, &config)
+        .expect("backend-ready transition");
+    owner
+        .reconcile(&backend_event, &state, &backend_ready, &config)
+        .expect("backend-ready owner reconciliation");
+    let payload_event = WindowsPacketFlowEvent::Payload {
+        now_ms: 1_340,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let payload = reduce_windows_packet_flow(backend_ready.state.clone(), &payload_event, &config)
+        .expect("payload transition");
+    owner
+        .stage_payload(
+            &payload_event,
+            &backend_ready.state,
+            &payload,
+            &config,
+            vec![7, 8, 9],
+        )
+        .expect("payload ownership");
+    let forward = payload
+        .commands
+        .iter()
+        .find(|command| matches!(command, WindowsPacketFlowCommand::Forward { .. }))
+        .cloned()
+        .expect("ready payload must include a forward command");
+
+    let client_half_event = WindowsPacketFlowEvent::HalfClosed {
+        now_ms: 1_350,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+    };
+    let client_half =
+        reduce_windows_packet_flow(payload.state.clone(), &client_half_event, &config)
+            .expect("client half-close transition");
+    owner
+        .reconcile(&client_half_event, &payload.state, &client_half, &config)
+        .expect("client half-close reconciliation");
+    let backend_half_event = WindowsPacketFlowEvent::HalfClosed {
+        now_ms: 1_360,
+        key,
+        direction: WindowsPacketFlowDirection::BackendToClient,
+    };
+    let backend_half =
+        reduce_windows_packet_flow(client_half.state.clone(), &backend_half_event, &config)
+            .expect("backend half-close transition");
+    owner
+        .reconcile(
+            &backend_half_event,
+            &client_half.state,
+            &backend_half,
+            &config,
+        )
+        .expect("backend half-close reconciliation");
+
+    let (state, other_key) = open_flow_at(&mut owner, backend_half.state, 8, 42, 1_370, &config);
+    assert!(key < other_key);
+    let cancel_event = WindowsPacketFlowEvent::Cancelled {
+        now_ms: 1_450,
+        key: other_key,
+    };
+    let cancelled = reduce_windows_packet_flow(state.clone(), &cancel_event, &config)
+        .expect("other terminal transition");
+    owner
+        .reconcile(&cancel_event, &state, &cancelled, &config)
+        .expect("other owner cleanup");
+    assert_eq!(owner.active_flow_count(), 1);
+
+    let expected_acknowledgement = WindowsPacketFlowEvent::Forwarded {
+        now_ms: 1_450,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        through_sequence: 1,
+    };
+    let pruned =
+        reduce_windows_packet_flow(cancelled.state.clone(), &expected_acknowledgement, &config)
+            .expect("terminal acknowledgement transition");
+    assert!(!pruned.state.flows.contains_key(&key));
+    assert!(pruned.state.flows.contains_key(&other_key));
+
+    let mut effects = RecordingByteEffect::default();
+    let acknowledgement = owner
+        .execute_forward(&forward, &cancelled.state, &config, &mut effects, 1_450)
+        .expect("pruned terminal acknowledgement still delivers bytes");
+    assert_eq!(acknowledgement, expected_acknowledgement);
+    assert_eq!(effects.deliveries.len(), 1);
+    assert_eq!(effects.deliveries[0].3, vec![7, 8, 9]);
+    assert_eq!(owner.active_flow_count(), 0);
+    assert_eq!(owner.owned_frame_count(), 0);
+    assert_eq!(owner.owned_byte_count(), 0);
 }
 
 #[test]
