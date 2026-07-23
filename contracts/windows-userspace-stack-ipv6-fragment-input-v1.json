@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_userspace_stack_ipv6_fragment_input",
+  "contract_version": 1,
+  "qualification_status": "bounded_pre_stack_reassembly_qualified",
+  "depends_on": {
+    "contract": "slipstream.windows_userspace_stack_selection",
+    "contract_version": 1,
+    "path": "contracts/windows-userspace-stack-selection-v1.json",
+    "selected_stack": "smoltcp",
+    "selected_stack_version": "0.13.1"
+  },
+  "bounds": {
+    "accepted_ipv6_extension_shape": "fragment_header_immediately_after_base_header",
+    "accepted_transport_protocols": [
+      "tcp",
+      "udp"
+    ],
+    "max_active_assemblies": 2,
+    "max_fragments_per_assembly": 16,
+    "max_reassembled_payload_bytes": 4096,
+    "reassembly_timeout_ms": 60000,
+    "fragment_offset_alignment_bytes": 8
+  },
+  "qualified_properties": {
+    "selected_stack_native_ipv6_fragment_delivery": false,
+    "pre_stack_exact_packet_reconstruction": true,
+    "pre_stack_in_order_reassembly": true,
+    "pre_stack_out_of_order_reassembly": true,
+    "original_udp_source_endpoint_delivery": true,
+    "identification_isolation": true,
+    "overlap_rejection": true,
+    "conflicting_header_rejection": true,
+    "conflicting_total_size_rejection": true,
+    "non_final_alignment_validation": true,
+    "reserved_bits_validation": true,
+    "bounded_assembly_capacity": true,
+    "bounded_fragment_count": true,
+    "bounded_payload_memory": true,
+    "bounded_timeout_cleanup": true
+  },
+  "known_limits": {
+    "extension_headers_before_fragment": "unsupported_fail_closed",
+    "ipv6_jumbograms": "unsupported_fail_closed",
+    "payloads_above_4096_bytes": "unsupported_fail_closed",
+    "selected_stack_outbound_ipv6_fragmentation": "unimplemented_drop_without_frame",
+    "production_backend_bridge": "not_implemented"
+  },
+  "invariants": {
+    "additive_contract_preserves_selection_v1": true,
+    "effect_free_byte_normalization_only": true,
+    "production_service_host_composition": false,
+    "native_connector_effect": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "socket_or_dns_effect": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "default_route_mutation": false,
+    "discord_or_youtube_geo_exit": false
+  },
+  "remaining_gates": {
+    "windows_capture_composition": "required",
+    "native_connector_effects": "required",
+    "production_service_host_composition": "required",
+    "disposable_amd64_packet_flow": "required",
+    "disposable_arm64_packet_flow": "required"
+  }
+}

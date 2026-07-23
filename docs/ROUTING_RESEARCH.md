@@ -164,7 +164,19 @@ reassembly, dual-stack UDP checksum rejection, and exact frame/socket limits.
 It also freezes an important limitation rather than hiding it: the selected
 version's dispatch path states that IPv6 fragmentation is unimplemented and
 drops an oversized packet without emitting a frame. Incoming IPv6 fragment
-reassembly is enabled but not yet independently qualified.
+reassembly is not implemented by the selected stack either: the feature flag
+exposes Fragment Header wire types and shared bounded storage, but the IPv6
+ingress path sends `Next Header = Fragment` through its unsupported-protocol
+branch. An executable raw-fragment test confirms that no UDP payload reaches
+the socket. The additive
+`windows-userspace-stack-ipv6-fragment-input-v1.json` contract therefore
+qualifies a separate pre-stack normalizer instead of mutating frozen selection
+v1. It reconstructs exact in-order and out-of-order packets inside fixed
+assembly, payload, fragment-count, and timeout bounds, rejects overlap and
+conflicts, and delivers the completed packet to the selected stack with the
+original UDP source endpoint. It accepts only a Fragment Header immediately
+after the IPv6 base header and remains outside Windows capture and production
+composition.
 
 Selection is not integration. Capture v4 now extends frozen capture v3 only
 after policy classification and retains the original client source address and
