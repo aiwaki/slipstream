@@ -175,6 +175,17 @@ fn admission_with_key(
     capture_generation: u64,
     flow_id: u64,
 ) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
+    admission_with_owner(host, backend, transport, capture_generation, flow_id, 9)
+}
+
+fn admission_with_owner(
+    host: &str,
+    backend: WindowsDataPlaneBackend,
+    transport: WindowsPacketCaptureTransport,
+    capture_generation: u64,
+    flow_id: u64,
+    session_id: u64,
+) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
     let policy_tables = bundled_policy_v1();
     let source = match transport {
         WindowsPacketCaptureTransport::TcpTls => {
@@ -207,13 +218,20 @@ fn admission_with_key(
     let egress = prepare_windows_packet_egress(&egress_request_for(capture_generation, flow_id))
         .expect("valid egress fixture");
     let request = WindowsDataPlaneRequest {
-        request_id: format!("packet-{}", observation.flow_id),
+        request_id: format!("packet-{}-{session_id}", observation.flow_id),
         policy: classify_route_policy(host, &policy_tables),
         backend,
         started_at_ms: 1_200,
         first_payload_deadline_at_ms: 4_000,
     };
-    prepare_windows_packet_flow(&classification, &egress, 9, &request, 1_200, &policy_tables)
+    prepare_windows_packet_flow(
+        &classification,
+        &egress,
+        session_id,
+        &request,
+        1_200,
+        &policy_tables,
+    )
 }
 
 fn apply(
@@ -379,6 +397,8 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "udp_datagram_boundaries_preserved",
         "reset_clears_owned_queues",
         "rejected_open_cancels_unowned_session",
+        "capture_flow_identity_remains_owned_until_generation_retirement",
+        "retired_generation_cannot_reopen",
         "terminal_history_bounded",
     ] {
         assert_eq!(fixture.invariants[invariant], true, "{invariant}");
@@ -554,6 +574,102 @@ fn duplicate_open_is_idempotent_and_flow_limit_cancels_the_unowned_session() {
         WindowsPacketFlowCommand::DataPlane {
             event: WindowsDataPlaneEvent::SessionCancelled { .. }
         }
+    )));
+}
+
+#[test]
+fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning() {
+    let mut config = contract().config;
+    config.max_retained_terminal_flows = 1;
+    let first = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        7,
+        41,
+        9,
+    )
+    .expect("first owner should be admitted");
+    let first_key = first.key();
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission: first,
+        },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Reset {
+            now_ms: 1_210,
+            key: first_key,
+            direction: WindowsPacketFlowDirection::BackendToClient,
+            reason: "closed".to_owned(),
+        },
+        &config,
+    );
+
+    let same_capture_new_session = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        7,
+        41,
+        10,
+    )
+    .expect("second session has independently valid boundary evidence");
+    let second_key = same_capture_new_session.key();
+    let rejected = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_220,
+            admission: same_capture_new_session,
+        },
+        &config,
+    );
+    assert!(!state.flows.contains_key(&second_key));
+    assert!(rejected.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "capture_flow_already_owned"
+    )));
+
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::CaptureGenerationRetired {
+            now_ms: 1_230,
+            capture_generation: 7,
+        },
+        &config,
+    );
+    assert!(state.flows.is_empty());
+    assert!(state.capture_flow_owners.is_empty());
+    assert_eq!(state.retired_capture_generation_high_watermark, 7);
+
+    let retired_replay = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        7,
+        41,
+        11,
+    )
+    .expect("old evidence remains structurally valid inside its original lifetime");
+    let replay = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_240,
+            admission: retired_replay,
+        },
+        &config,
+    );
+    assert!(state.flows.is_empty());
+    assert!(replay.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "capture_generation_retired"
     )));
 }
 

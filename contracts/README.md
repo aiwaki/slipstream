@@ -144,7 +144,10 @@ Slipstream routing decisions and bounded recovery primitives.
   backpressure deadlines close only that owned flow. TCP half-closes propagate
   only after the preceding queue drains, UDP datagram boundaries remain
   distinct, resets clear both queues, and terminal history is bounded and
-  ABA-safe. Backend bytes reach data-plane v1 only after confirmed client
+  ABA-safe. Pruning terminal detail retains a separate captured-flow owner
+  tombstone; only monotonic retirement of an inactive capture generation may
+  discard it, and that retirement high-watermark rejects delayed reopen. Backend
+  bytes reach data-plane v1 only after confirmed client
   delivery; an expired or capacity-rejected open cancels its not-yet-owned
   session. Commands otherwise report connector lifecycle back into data-plane
   v1. This contract performs no packet reconstruction, socket,

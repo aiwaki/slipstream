@@ -18,6 +18,8 @@
     "udp_datagram_boundaries_preserved": true,
     "reset_clears_owned_queues": true,
     "rejected_open_cancels_unowned_session": true,
+    "capture_flow_identity_remains_owned_until_generation_retirement": true,
+    "retired_generation_cannot_reopen": true,
     "terminal_history_bounded": true,
     "native_socket_effect": false,
     "native_packet_effect": false,
@@ -31,6 +33,7 @@
   "config": {
     "max_active_flows": 8,
     "max_retained_terminal_flows": 2,
+    "max_retained_flow_identities": 16,
     "max_chunk_bytes": 4,
     "max_queued_frames_per_direction": 4,
     "high_watermark_bytes": 6,

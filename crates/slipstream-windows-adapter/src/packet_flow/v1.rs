@@ -21,6 +21,7 @@ use std::fmt;
 pub const WINDOWS_PACKET_FLOW_CONTRACT_VERSION: u32 = 1;
 const MAX_ACTIVE_FLOWS: usize = 65_535;
 const MAX_RETAINED_TERMINAL_FLOWS: usize = 65_535;
+const MAX_RETAINED_FLOW_IDENTITIES: usize = 1_000_000;
 const MAX_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_BUFFERED_BYTES: usize = 4 * 1024 * 1024;
 const MAX_QUEUED_FRAMES_PER_DIRECTION: usize = 65_536;
@@ -34,6 +35,7 @@ const HTTPS_PORT: u16 = 443;
 pub struct WindowsPacketFlowConfig {
     pub max_active_flows: usize,
     pub max_retained_terminal_flows: usize,
+    pub max_retained_flow_identities: usize,
     pub max_chunk_bytes: usize,
     pub max_queued_frames_per_direction: usize,
     pub high_watermark_bytes: usize,
@@ -55,6 +57,17 @@ impl WindowsPacketFlowConfig {
         {
             return Err(WindowsPacketFlowError::InvalidConfig(
                 "max_retained_terminal_flows must be within 1..=65535",
+            ));
+        }
+        if self.max_retained_flow_identities == 0
+            || self.max_retained_flow_identities > MAX_RETAINED_FLOW_IDENTITIES
+            || self.max_retained_flow_identities
+                < self
+                    .max_active_flows
+                    .saturating_add(self.max_retained_terminal_flows)
+        {
+            return Err(WindowsPacketFlowError::InvalidConfig(
+                "max_retained_flow_identities must cover active plus terminal flows and remain <= 1000000",
             ));
         }
         if self.max_chunk_bytes == 0 || self.max_chunk_bytes > MAX_CHUNK_BYTES {
@@ -121,6 +134,23 @@ pub struct WindowsPacketFlowKey {
     pub flow_id: u64,
     pub transport: WindowsPacketFlowTransport,
     pub session_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct WindowsPacketCaptureFlowIdentity {
+    pub capture_generation: u64,
+    pub flow_id: u64,
+    pub transport: WindowsPacketFlowTransport,
+}
+
+impl WindowsPacketFlowKey {
+    pub const fn capture_identity(self) -> WindowsPacketCaptureFlowIdentity {
+        WindowsPacketCaptureFlowIdentity {
+            capture_generation: self.capture_generation,
+            flow_id: self.flow_id,
+            transport: self.transport,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -329,6 +359,8 @@ impl WindowsPacketFlowState {
 pub struct WindowsPacketFlowRegistry {
     pub started_at_ms: u64,
     pub updated_at_ms: u64,
+    pub retired_capture_generation_high_watermark: u64,
+    pub capture_flow_owners: BTreeMap<WindowsPacketCaptureFlowIdentity, WindowsPacketFlowKey>,
     pub flows: BTreeMap<WindowsPacketFlowKey, WindowsPacketFlowState>,
 }
 
@@ -337,6 +369,8 @@ impl WindowsPacketFlowRegistry {
         Self {
             started_at_ms,
             updated_at_ms: started_at_ms,
+            retired_capture_generation_high_watermark: 0,
+            capture_flow_owners: BTreeMap::new(),
             flows: BTreeMap::new(),
         }
     }
@@ -400,6 +434,10 @@ pub enum WindowsPacketFlowEvent {
         key: WindowsPacketFlowKey,
         direction: WindowsPacketFlowDirection,
     },
+    CaptureGenerationRetired {
+        now_ms: u64,
+        capture_generation: u64,
+    },
 }
 
 impl WindowsPacketFlowEvent {
@@ -414,13 +452,14 @@ impl WindowsPacketFlowEvent {
             | Self::Reset { now_ms, .. }
             | Self::Cancelled { now_ms, .. }
             | Self::IdleDeadline { now_ms, .. }
-            | Self::BackpressureDeadline { now_ms, .. } => *now_ms,
+            | Self::BackpressureDeadline { now_ms, .. }
+            | Self::CaptureGenerationRetired { now_ms, .. } => *now_ms,
         }
     }
 
-    pub const fn key(&self) -> WindowsPacketFlowKey {
+    pub const fn flow_key(&self) -> Option<WindowsPacketFlowKey> {
         match self {
-            Self::FlowOpened { admission, .. } => admission.key(),
+            Self::FlowOpened { admission, .. } => Some(admission.key()),
             Self::BackendReady { key, .. }
             | Self::Payload { key, .. }
             | Self::Forwarded { key, .. }
@@ -429,7 +468,8 @@ impl WindowsPacketFlowEvent {
             | Self::Reset { key, .. }
             | Self::Cancelled { key, .. }
             | Self::IdleDeadline { key, .. }
-            | Self::BackpressureDeadline { key, .. } => *key,
+            | Self::BackpressureDeadline { key, .. } => Some(*key),
+            Self::CaptureGenerationRetired { .. } => None,
         }
     }
 }
@@ -492,6 +532,7 @@ pub struct WindowsPacketFlowTransition {
 pub enum WindowsPacketFlowError {
     InvalidConfig(&'static str),
     NonMonotonicEvent,
+    ActiveCaptureGenerationRetirement,
     InvalidTransition,
     InvalidTransportTransition,
     EmptyPayload,
@@ -509,6 +550,9 @@ impl fmt::Display for WindowsPacketFlowError {
         match self {
             Self::InvalidConfig(reason) => write!(formatter, "invalid config: {reason}"),
             Self::NonMonotonicEvent => formatter.write_str("event time moved backwards"),
+            Self::ActiveCaptureGenerationRetirement => {
+                formatter.write_str("capture generation still owns active flows")
+            }
             Self::InvalidTransition => formatter.write_str("invalid packet-flow transition"),
             Self::InvalidTransportTransition => {
                 formatter.write_str("transition is invalid for this transport")
@@ -771,25 +815,77 @@ pub fn reduce_windows_packet_flow(
     if now_ms < registry.updated_at_ms {
         return Err(WindowsPacketFlowError::NonMonotonicEvent);
     }
-    let key = event.key();
     let mut next = registry.clone();
     next.updated_at_ms = now_ms;
     let mut commands = Vec::new();
 
+    if let WindowsPacketFlowEvent::CaptureGenerationRetired {
+        capture_generation, ..
+    } = event
+    {
+        if *capture_generation == 0
+            || *capture_generation <= next.retired_capture_generation_high_watermark
+        {
+            return Ok(WindowsPacketFlowTransition {
+                state: next,
+                commands,
+            });
+        }
+        if next.flows.iter().any(|(key, flow)| {
+            key.capture_generation <= *capture_generation && !flow.phase.is_terminal()
+        }) {
+            return Err(WindowsPacketFlowError::ActiveCaptureGenerationRetirement);
+        }
+        next.retired_capture_generation_high_watermark = *capture_generation;
+        next.capture_flow_owners
+            .retain(|identity, _| identity.capture_generation > *capture_generation);
+        next.flows
+            .retain(|key, _| key.capture_generation > *capture_generation);
+        return Ok(WindowsPacketFlowTransition {
+            state: next,
+            commands,
+        });
+    }
+
+    let key = event
+        .flow_key()
+        .ok_or(WindowsPacketFlowError::InvalidTransition)?;
+
     if let WindowsPacketFlowEvent::FlowOpened { admission, .. } = event {
-        if next.flows.contains_key(&key) {
+        let identity = key.capture_identity();
+        if key.capture_generation <= next.retired_capture_generation_high_watermark {
+            reject_admission(
+                admission,
+                key,
+                now_ms,
+                "capture_generation_retired",
+                &mut commands,
+            );
+        } else if let Some(owner) = next.capture_flow_owners.get(&identity) {
+            if *owner != key {
+                reject_admission(
+                    admission,
+                    key,
+                    now_ms,
+                    "capture_flow_already_owned",
+                    &mut commands,
+                );
+            }
             return Ok(WindowsPacketFlowTransition {
                 state: next,
                 commands,
             });
         } else if now_ms >= admission.expires_at_ms {
             reject_admission(admission, key, now_ms, "admission_expired", &mut commands);
+        } else if next.capture_flow_owners.len() >= config.max_retained_flow_identities {
+            reject_admission(admission, key, now_ms, "identity_limit", &mut commands);
         } else if next.active_flow_count() >= config.max_active_flows {
             reject_admission(admission, key, now_ms, "flow_limit", &mut commands);
         } else {
             let idle_deadline_at_ms = now_ms
                 .checked_add(config.idle_timeout_ms)
                 .ok_or(WindowsPacketFlowError::TimeOverflow)?;
+            next.capture_flow_owners.insert(identity, key);
             next.flows.insert(
                 key,
                 WindowsPacketFlowState {
@@ -1128,7 +1224,10 @@ pub fn reduce_windows_packet_flow(
                 &mut commands,
             );
         }
-        WindowsPacketFlowEvent::FlowOpened { .. } => unreachable!("handled above"),
+        WindowsPacketFlowEvent::FlowOpened { .. }
+        | WindowsPacketFlowEvent::CaptureGenerationRetired { .. } => {
+            unreachable!("handled above")
+        }
     }
 
     prune_terminal_flows(&mut next, config.max_retained_terminal_flows);
