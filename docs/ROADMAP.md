@@ -500,9 +500,12 @@ therefore stays phased and closed to production traffic:
    recovery contracts. Discord and YouTube remain local-only.
    PR #206 exact merge commit
    `e8cb475fc65a375d0dd57f757e2f5bc575a4fcde` implements the pure v1 contract
-   and passed required CI, packaged lifecycle, audit, and native AMD64/ARM64
-   qualification. It keeps native effects, userspace stack selection, and
-   production-host composition closed. Its packet path
+   and passed required CI, packaged lifecycle, and audit. The separate native
+   AMD64/ARM64 workflow kept the existing Wintun regression gates green but
+   does not execute `packet_flow_contract`; disposable native packet-flow and
+   backend qualification therefore remain open. The contract keeps native
+   effects, userspace stack selection, and production-host composition closed.
+   Its packet path
    consumes registry ownership, updates only one bounded flow, retains unique
    capture and data-plane owners, preserves the capture-v3 destination port,
    admits only a binding minted from the still-opening accepted data-plane
