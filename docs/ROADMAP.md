@@ -474,8 +474,9 @@ therefore stays phased and closed to production traffic:
    probe, terminates only the retained child handle, and requires bounded adapter,
    address, and `/32` absence plus exact baseline recovery. PR #202 head passed
    that proof on native AMD64 and ARM64 plus required CI, packaged lifecycle,
-   and audit; exact-main repetition remains pending. Explicit external-VPN
-   coexistence stays a separate later gate and is not inferred from
+   and audit. Exact merge commit `ebe9f9c70b378f688badf6ba35cd96dd200d0bb4`
+   repeated every gate successfully, so abrupt capture-owner termination is
+   closed. Explicit external-VPN coexistence is next and is not inferred from
    process-termination cleanup.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
