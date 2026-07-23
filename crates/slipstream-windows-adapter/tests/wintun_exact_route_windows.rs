@@ -585,17 +585,21 @@ fn native_wintun_independent_route_owner_is_preserved_during_capture() {
                 .ok_or_else(|| {
                     "independent route-owner adapter disappeared after readiness".to_owned()
                 })?;
-            let route_row = fixture_route_row(
+            let route_lookup = fixture_route_row(
                 independent_interface,
                 IpAddr::V4(IPV4_BASELINE_NETWORK),
                 IPV4_BASELINE_PREFIX_LENGTH,
                 0,
             );
-            let address_row = fixture_unicast_address_row(
+            let route_row = lookup_fixture_route(route_lookup)?
+                .ok_or_else(|| "independent route-owner /24 was not observable".to_owned())?;
+            let address_lookup = fixture_unicast_address_row(
                 independent_interface,
                 IpAddr::V4(IPV4_INDEPENDENT_ROUTE_SOURCE),
                 IPV4_HOST_PREFIX_LENGTH,
             );
+            let address_row = lookup_unicast_address(address_lookup)?
+                .ok_or_else(|| "independent route-owner address was not observable".to_owned())?;
             independent_evidence = Some(IndependentRouteEvidence {
                 route_row,
                 address_row,
@@ -3726,15 +3730,46 @@ fn require_independent_route_resources_unchanged(
     }
     let observed_route = lookup_fixture_route(route_row)?
         .ok_or_else(|| "independent route-owner /24 disappeared".to_owned())?;
-    if !same_fixture_route_key(observed_route, route_row) {
-        return Err("independent route-owner /24 identity changed".to_owned());
+    if !same_independent_route_state(observed_route, route_row) {
+        return Err("independent route-owner /24 attributes changed".to_owned());
     }
     let observed_address = lookup_unicast_address(address_row)?
         .ok_or_else(|| "independent route-owner address disappeared".to_owned())?;
-    if !same_unicast_address_key(observed_address, address_row) {
-        return Err("independent route-owner address identity changed".to_owned());
+    if !same_independent_address_state(observed_address, address_row) {
+        return Err("independent route-owner address attributes changed".to_owned());
     }
     Ok(())
+}
+
+fn same_independent_route_state(
+    observed: MIB_IPFORWARD_ROW2,
+    expected: MIB_IPFORWARD_ROW2,
+) -> bool {
+    same_fixture_route_key(observed, expected)
+        && observed.SitePrefixLength == expected.SitePrefixLength
+        && observed.Metric == expected.Metric
+        && observed.Protocol == expected.Protocol
+        && observed.Loopback == expected.Loopback
+        && observed.AutoconfigureAddress == expected.AutoconfigureAddress
+        && observed.Publish == expected.Publish
+        && observed.Immortal == expected.Immortal
+        && observed.Origin == expected.Origin
+}
+
+fn same_independent_address_state(
+    observed: MIB_UNICASTIPADDRESS_ROW,
+    expected: MIB_UNICASTIPADDRESS_ROW,
+) -> bool {
+    same_unicast_address_key(observed, expected)
+        && expected.DadState == IpDadStatePreferred
+        && !expected.SkipAsSource
+        && observed.PrefixOrigin == expected.PrefixOrigin
+        && observed.SuffixOrigin == expected.SuffixOrigin
+        && observed.OnLinkPrefixLength == expected.OnLinkPrefixLength
+        && observed.SkipAsSource == expected.SkipAsSource
+        && observed.DadState == expected.DadState
+        && (unsafe { observed.ScopeId.Anonymous.Value })
+            == (unsafe { expected.ScopeId.Anonymous.Value })
 }
 
 fn require_independent_route_selected(
