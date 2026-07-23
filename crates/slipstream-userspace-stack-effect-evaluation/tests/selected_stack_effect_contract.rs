@@ -45,6 +45,10 @@ fn contract() -> ContractFixture {
     serde_json::from_str(CONTRACT).expect("selected-stack effect v1 must be valid JSON")
 }
 
+fn manifest_has_section(manifest: &str, section: &str) -> bool {
+    manifest.lines().any(|line| line.trim() == section)
+}
+
 #[test]
 fn effect_contract_freezes_both_predecessors_without_modifying_them() {
     let fixture = contract();
@@ -130,8 +134,11 @@ fn effect_contract_is_bounded_and_test_only() {
         assert_eq!(fixture.invariants[invariant], false, "{invariant}");
     }
 
-    assert!(!MANIFEST.contains("\n[dependencies]\n"));
-    assert!(MANIFEST.contains("\n[dev-dependencies]\n"));
+    assert!(!manifest_has_section(MANIFEST, "[dependencies]"));
+    assert!(manifest_has_section(MANIFEST, "[dev-dependencies]"));
+    let crlf_manifest = MANIFEST.replace('\n', "\r\n");
+    assert!(!manifest_has_section(&crlf_manifest, "[dependencies]"));
+    assert!(manifest_has_section(&crlf_manifest, "[dev-dependencies]"));
     for forbidden in [
         "TcpStream",
         "UdpSocket",
