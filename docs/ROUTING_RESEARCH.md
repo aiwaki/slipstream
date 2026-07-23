@@ -181,7 +181,8 @@ authorization. It preserves queued client payload in a non-forwardable state
 until an exact `BackendReady` authorization. Delivery preflights the exact
 acknowledgement from the current full registry and global watermark before the
 effect, then advances the retained state only after success. It prevents replay of a committed
-prefix, and keeps cleanup event-scoped: ordinary terminal evidence removes only
+prefix; a terminal final acknowledgement releases its empty owner in the same
+successful commit. Cleanup stays event-scoped: ordinary terminal evidence removes only
 its exact inactive flow, while explicit generation retirement is bounded by the
 packet-flow high watermark. Before either path releases bytes, its transition
 must exactly equal a fresh reduction from the supplied full registry, including

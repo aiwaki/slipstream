@@ -238,6 +238,7 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "pre_backend_client_forward_rejected",
         "forward_acknowledgement_preflight_required",
         "global_registry_watermark_required",
+        "terminal_forward_releases_owner",
         "effect_failure_retains_exact_payload",
         "duplicate_and_out_of_order_payload_rejected",
         "per_flow_directional_memory_bounded",
@@ -1000,6 +1001,84 @@ fn unrelated_registry_watermark_rejects_forward_before_effect() {
     assert_eq!(effects.deliveries.len(), 1);
     assert_eq!(owner.owned_frame_count(), 0);
     assert_eq!(owner.owned_byte_count(), 0);
+}
+
+#[test]
+fn final_forward_acknowledgement_releases_the_terminal_owner() {
+    let config = packet_flow_config();
+    let owner_config =
+        WindowsUserspaceByteOwnerConfig::from_packet_flow(&config).expect("valid owner config");
+    let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
+    let (state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
+
+    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_350, key };
+    let backend_ready = reduce(&state, &backend_event);
+    owner
+        .reconcile(&backend_event, &state, &backend_ready, &config)
+        .expect("backend-ready owner reconciliation");
+    let payload_event = WindowsPacketFlowEvent::Payload {
+        now_ms: 1_400,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let payload = reduce(&backend_ready.state, &payload_event);
+    owner
+        .stage_payload(
+            &payload_event,
+            &backend_ready.state,
+            &payload,
+            vec![7, 8, 9],
+        )
+        .expect("payload ownership");
+    let forward = payload
+        .commands
+        .iter()
+        .find(|command| matches!(command, WindowsPacketFlowCommand::Forward { .. }))
+        .cloned()
+        .expect("ready payload must include a forward command");
+
+    let client_half_event = WindowsPacketFlowEvent::HalfClosed {
+        now_ms: 1_410,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+    };
+    let client_half = reduce(&payload.state, &client_half_event);
+    owner
+        .reconcile(&client_half_event, &payload.state, &client_half, &config)
+        .expect("client half-close reconciliation");
+    let backend_half_event = WindowsPacketFlowEvent::HalfClosed {
+        now_ms: 1_420,
+        key,
+        direction: WindowsPacketFlowDirection::BackendToClient,
+    };
+    let backend_half = reduce(&client_half.state, &backend_half_event);
+    owner
+        .reconcile(
+            &backend_half_event,
+            &client_half.state,
+            &backend_half,
+            &config,
+        )
+        .expect("backend half-close reconciliation");
+    assert!(!backend_half.state.flows[&key].phase.is_terminal());
+
+    let mut effects = RecordingByteEffect::default();
+    let acknowledgement = owner
+        .execute_forward(&forward, &backend_half.state, &config, &mut effects, 1_430)
+        .expect("last queued payload delivery");
+    let committed = reduce(&backend_half.state, &acknowledgement);
+    assert!(committed.state.flows[&key].phase.is_terminal());
+    assert_eq!(effects.deliveries.len(), 1);
+    assert_eq!(owner.active_flow_count(), 0);
+    assert_eq!(owner.owned_frame_count(), 0);
+    assert_eq!(owner.owned_byte_count(), 0);
+
+    let cleanup = owner
+        .reconcile(&acknowledgement, &backend_half.state, &committed, &config)
+        .expect("post-commit reconciliation remains idempotent");
+    assert_eq!(cleanup, Default::default());
 }
 
 #[test]

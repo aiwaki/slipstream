@@ -708,6 +708,14 @@ impl WindowsUserspaceByteOwner {
                     "packet-flow acknowledgement does not commit the exact owned payload",
                 ));
             }
+            if next_packet_flow_state.phase.is_terminal()
+                && (expected_direction_bytes != 0 || flow.queue(other_direction).bytes != 0)
+            {
+                return Err(WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
+                    "terminal packet-flow acknowledgement retains owned payload",
+                ));
+            }
             let delivery = WindowsUserspaceByteDelivery {
                 key,
                 binding: &flow.binding,
@@ -737,6 +745,13 @@ impl WindowsUserspaceByteOwner {
         flow.packet_flow_state = next_packet_flow_state;
         self.owned_frames -= 1;
         self.owned_bytes -= frame.bytes.len();
+        if flow.packet_flow_state.phase.is_terminal() {
+            let mut cleanup = WindowsUserspaceByteCleanup::default();
+            self.remove_flow(key, &mut cleanup);
+            debug_assert_eq!(cleanup.removed_flows, 1);
+            debug_assert_eq!(cleanup.removed_frames, 0);
+            debug_assert_eq!(cleanup.removed_bytes, 0);
+        }
         Ok(acknowledgement)
     }
 

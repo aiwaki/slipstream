@@ -29,6 +29,7 @@
     "pre_backend_client_forward_rejected": true,
     "forward_acknowledgement_preflight_required": true,
     "global_registry_watermark_required": true,
+    "terminal_forward_releases_owner": true,
     "effect_failure_retains_exact_payload": true,
     "duplicate_and_out_of_order_payload_rejected": true,
     "per_flow_directional_memory_bounded": true,

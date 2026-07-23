@@ -222,6 +222,8 @@ Slipstream routing decisions and bounded recovery primitives.
   only from an exact one-to-one `BackendReady` command set. Before invoking the
   effect, delivery must also reduce its exact `Forwarded` acknowledgement from
   the current full registry, including the global monotonic watermark.
+  If that acknowledgement drains a gracefully closed flow into a terminal
+  state, the empty byte owner is released in the same successful commit.
   Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,
   oversized, and mismatched commands fail closed. Ordinary terminal
   reconciliation removes only the event's flow after monotonic transition
