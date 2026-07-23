@@ -132,6 +132,23 @@ Slipstream routing decisions and bounded recovery primitives.
   call either socket option, trust JSON as native evidence, query or mutate a
   route, classify an external VPN, or compose the production host; those remain
   separate disposable AMD64/ARM64 gates.
+- `windows-packet-flow-v1.json` freezes the pure forwarding seam after capture
+  classification and outbound-route admission. Its opaque admission binds one
+  capture generation, flow ID, monotonic data-plane session ID, transport,
+  destination, active policy result, backend, and evidence lifetime. The pure
+  state retains only ordered frame identities and byte counts; a future effect
+  must retain immutable payload bytes under the same flow/direction/sequence
+  identity until delivery is acknowledged. High/low watermarks pause and
+  resume only the producing side, while idle and sustained
+  backpressure deadlines close only that owned flow. TCP half-closes propagate
+  only after the preceding queue drains, UDP datagram boundaries remain
+  distinct, resets clear both queues, and terminal history is bounded and
+  ABA-safe. Backend bytes reach data-plane v1 only after confirmed client
+  delivery; an expired or capacity-rejected open cancels its not-yet-owned
+  session. Commands otherwise report connector lifecycle back into data-plane
+  v1. This contract performs no packet reconstruction, socket,
+  adapter, route, DNS, proxy, PAC, VPN, process, or service effect and is not
+  composed into the production host.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service

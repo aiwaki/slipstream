@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_packet_flow",
+  "contract_version": 1,
+  "invariants": {
+    "pure_forwarding_contract_only": true,
+    "capture_classification_and_egress_plan_bound": true,
+    "active_policy_revalidated": true,
+    "protected_local_bypass_never_uses_geph": true,
+    "ordered_payload_frames": true,
+    "payload_bytes_remain_effect_owned_by_flow_key": true,
+    "payload_and_queue_sizes_bounded": true,
+    "high_low_watermark_backpressure": true,
+    "backpressure_timeout_bounded": true,
+    "idle_timeout_bounded": true,
+    "tcp_half_close_preserved_after_queue_drain": true,
+    "udp_datagram_boundaries_preserved": true,
+    "reset_clears_owned_queues": true,
+    "rejected_open_cancels_unowned_session": true,
+    "terminal_history_bounded": true,
+    "native_socket_effect": false,
+    "native_packet_effect": false,
+    "native_adapter_effect": false,
+    "native_route_effect": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "production_service_host_composition": false
+  },
+  "config": {
+    "max_active_flows": 8,
+    "max_retained_terminal_flows": 2,
+    "max_chunk_bytes": 4,
+    "high_watermark_bytes": 6,
+    "low_watermark_bytes": 2,
+    "max_buffered_bytes": 8,
+    "idle_timeout_ms": 1000,
+    "backpressure_timeout_ms": 250
+  },
+  "vectors": [
+    {
+      "name": "tcp-half-closes-after-ordered-drain",
+      "capture_generation": 7,
+      "flow_id": 41,
+      "host": "updates.discord.com",
+      "backend": "local_engine",
+      "transport": "tcp",
+      "events": [
+        { "kind": "backend_ready", "now_ms": 1210 },
+        { "kind": "payload", "now_ms": 1220, "direction": "client_to_backend", "sequence": 1, "bytes": 2 },
+        { "kind": "half_closed", "now_ms": 1230, "direction": "client_to_backend" },
+        { "kind": "forwarded", "now_ms": 1240, "direction": "client_to_backend", "through_sequence": 1 },
+        { "kind": "payload", "now_ms": 1250, "direction": "backend_to_client", "sequence": 1, "bytes": 2 },
+        { "kind": "forwarded", "now_ms": 1260, "direction": "backend_to_client", "through_sequence": 1 },
+        { "kind": "half_closed", "now_ms": 1270, "direction": "backend_to_client" }
+      ],
+      "expected": {
+        "phase": "succeeded",
+        "resource_owned": false,
+        "client_to_backend_bytes": 0,
+        "backend_to_client_bytes": 0,
+        "terminal_reason": "graceful",
+        "must_emit": ["open_backend", "backend_connected", "half_close_client_to_backend", "backend_payload", "half_close_backend_to_client", "close_flow", "backend_closed"]
+      }
+    },
+    {
+      "name": "sustained-backpressure-is-flow-local-failure",
+      "capture_generation": 8,
+      "flow_id": 42,
+      "host": "updates.discord.com",
+      "backend": "local_engine",
+      "transport": "tcp",
+      "events": [
+        { "kind": "payload", "now_ms": 1210, "direction": "client_to_backend", "sequence": 1, "bytes": 4 },
+        { "kind": "payload", "now_ms": 1220, "direction": "client_to_backend", "sequence": 2, "bytes": 2 },
+        { "kind": "backpressure_deadline", "now_ms": 1470, "direction": "client_to_backend" }
+      ],
+      "expected": {
+        "phase": "failed",
+        "resource_owned": false,
+        "client_to_backend_bytes": 0,
+        "backend_to_client_bytes": 0,
+        "terminal_reason": "packet_flow_backpressure_timeout",
+        "must_emit": ["open_backend", "pause_client_to_backend", "close_flow", "backend_reset"]
+      }
+    },
+    {
+      "name": "udp-datagrams-remain-distinct-until-drained",
+      "capture_generation": 9,
+      "flow_id": 43,
+      "host": "chatgpt.com",
+      "backend": "geph",
+      "transport": "udp",
+      "events": [
+        { "kind": "backend_ready", "now_ms": 1210 },
+        { "kind": "payload", "now_ms": 1220, "direction": "client_to_backend", "sequence": 1, "bytes": 2 },
+        { "kind": "payload", "now_ms": 1230, "direction": "client_to_backend", "sequence": 2, "bytes": 1 },
+        { "kind": "datagram_side_closed", "now_ms": 1240 },
+        { "kind": "forwarded", "now_ms": 1250, "direction": "client_to_backend", "through_sequence": 2 }
+      ],
+      "expected": {
+        "phase": "succeeded",
+        "resource_owned": false,
+        "client_to_backend_bytes": 0,
+        "backend_to_client_bytes": 0,
+        "terminal_reason": "graceful",
+        "must_emit": ["open_backend", "backend_connected", "forward_client_to_backend", "close_flow", "backend_closed"]
+      }
+    },
+    {
+      "name": "client-reset-is-cancellation-not-backend-failure",
+      "capture_generation": 10,
+      "flow_id": 44,
+      "host": "updates.discord.com",
+      "backend": "local_engine",
+      "transport": "tcp",
+      "events": [
+        { "kind": "reset", "now_ms": 1210, "direction": "client_to_backend", "reason": "client reset" }
+      ],
+      "expected": {
+        "phase": "cancelled",
+        "resource_owned": false,
+        "client_to_backend_bytes": 0,
+        "backend_to_client_bytes": 0,
+        "terminal_reason": "client reset",
+        "must_emit": ["open_backend", "close_flow", "cancel_requested", "session_cancelled"]
+      }
+    }
+  ],
+  "remaining_native_gates": {
+    "userspace_tcp_stack_selection": "required",
+    "userspace_udp_stack_selection": "required",
+    "packet_reassembly_and_checksum_qualification": "required",
+    "native_connector_effects": "required",
+    "production_service_host_composition": "required",
+    "disposable_amd64_qualification": "required",
+    "disposable_arm64_qualification": "required"
+  }
+}

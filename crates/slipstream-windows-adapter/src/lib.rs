@@ -15,6 +15,7 @@ pub mod direct_connector;
 pub mod direct_ingress;
 pub mod packet_adapter;
 pub mod packet_egress;
+pub mod packet_flow;
 pub mod service_controller;
 pub mod service_host;
 pub mod service_lifecycle;
