@@ -863,6 +863,118 @@ fn one_data_plane_session_cannot_own_two_capture_flows() {
 }
 
 #[test]
+fn stale_or_reused_capture_open_cannot_cancel_a_live_data_plane_owner() {
+    let config = contract().config;
+    let live = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        8,
+        41,
+        90,
+    )
+    .expect("live owner should be admitted");
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission: live,
+        },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::CaptureGenerationRetired {
+            now_ms: 1_205,
+            capture_generation: 7,
+        },
+        &config,
+    );
+
+    let stale = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        7,
+        42,
+        90,
+    )
+    .expect("stale evidence remains structurally valid");
+    let rejected = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_210,
+            admission: stale,
+        },
+        &config,
+    );
+    assert!(rejected.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "data_plane_session_already_owned"
+    )));
+    assert!(!rejected
+        .iter()
+        .any(|command| matches!(command, WindowsPacketFlowCommand::DataPlane { .. })));
+
+    let retained = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        8,
+        42,
+        91,
+    )
+    .expect("second capture owner should be admitted");
+    let retained_key = retained.key();
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_220,
+            admission: retained,
+        },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Reset {
+            now_ms: 1_230,
+            key: retained_key,
+            direction: WindowsPacketFlowDirection::BackendToClient,
+            reason: "closed".to_owned(),
+        },
+        &config,
+    );
+
+    let reused_capture = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        8,
+        42,
+        90,
+    )
+    .expect("reused capture has independently valid evidence");
+    let rejected = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_240,
+            admission: reused_capture,
+        },
+        &config,
+    );
+    assert!(rejected.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "data_plane_session_already_owned"
+    )));
+    assert!(!rejected
+        .iter()
+        .any(|command| matches!(command, WindowsPacketFlowCommand::DataPlane { .. })));
+}
+
+#[test]
 fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning() {
     let mut config = contract().config;
     config.max_retained_terminal_flows = 1;
