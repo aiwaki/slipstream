@@ -1,8 +1,11 @@
 use serde::Deserialize;
 use serde_json::Value;
-use slipstream_core::routing_policy::{bundled_policy_v1, classify_route_policy};
+use slipstream_core::routing_policy::{
+    bundled_policy_v1, classify_route_policy, RoutingPolicyTables,
+};
 use slipstream_windows_adapter::data_plane::{
-    WindowsDataPlaneBackend, WindowsDataPlaneEvent, WindowsDataPlaneRequest,
+    reduce_windows_data_plane, WindowsDataPlaneBackend, WindowsDataPlaneConfig,
+    WindowsDataPlaneEvent, WindowsDataPlaneRequest, WindowsDataPlaneState,
 };
 use slipstream_windows_adapter::packet_adapter::v3::{
     classify_windows_packet_capture, WindowsPacketCaptureAttribution, WindowsPacketCaptureDecision,
@@ -15,11 +18,12 @@ use slipstream_windows_adapter::packet_egress::{
     WindowsPacketInterfaceIdentity, WindowsPacketSocketInterfaceBinding,
 };
 use slipstream_windows_adapter::packet_flow::{
-    execute_windows_packet_flow_transition_from, prepare_windows_packet_flow,
-    reduce_windows_packet_flow, WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode,
-    WindowsPacketFlowCommand, WindowsPacketFlowConfig, WindowsPacketFlowDirection,
-    WindowsPacketFlowEffects, WindowsPacketFlowEvent, WindowsPacketFlowPhase,
-    WindowsPacketFlowRegistry, WindowsPacketFlowTransport, WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
+    bind_windows_packet_flow_session, execute_windows_packet_flow_transition_from,
+    prepare_windows_packet_flow, reduce_windows_packet_flow, WindowsPacketFlowAdmission,
+    WindowsPacketFlowAdmissionErrorCode, WindowsPacketFlowCommand, WindowsPacketFlowConfig,
+    WindowsPacketFlowDirection, WindowsPacketFlowEffects, WindowsPacketFlowEvent,
+    WindowsPacketFlowPhase, WindowsPacketFlowRegistry, WindowsPacketFlowTransport,
+    WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
 };
 
 const CONTRACT: &str = include_str!("../../../contracts/windows-packet-flow-v1.json");
@@ -161,6 +165,40 @@ fn egress_request_for(capture_generation: u64, flow_id: u64) -> WindowsPacketEgr
     request
 }
 
+fn accepted_data_plane_state(
+    request: &WindowsDataPlaneRequest,
+    session_id: u64,
+    policy_tables: &RoutingPolicyTables,
+) -> WindowsDataPlaneState {
+    let config = WindowsDataPlaneConfig {
+        max_active_sessions: 64,
+        max_retained_terminal_sessions: 64,
+        cancel_timeout_ms: 1_000,
+        shutdown_timeout_ms: 2_000,
+    };
+    let ready = reduce_windows_data_plane(
+        &WindowsDataPlaneState::new(1_200),
+        &WindowsDataPlaneEvent::WorkerReady { now_ms: 1_200 },
+        &config,
+        policy_tables,
+    )
+    .expect("data-plane worker should become ready")
+    .state;
+    let mut ready = ready;
+    ready.next_session_id = session_id;
+    reduce_windows_data_plane(
+        &ready,
+        &WindowsDataPlaneEvent::RequestAccepted {
+            now_ms: 1_200,
+            request: request.clone(),
+        },
+        &config,
+        policy_tables,
+    )
+    .expect("data-plane acceptance should reduce")
+    .state
+}
+
 fn admission(
     host: &str,
     backend: WindowsDataPlaneBackend,
@@ -276,14 +314,9 @@ fn admission_with_request_owner(
         started_at_ms: 1_200,
         first_payload_deadline_at_ms: 4_000,
     };
-    prepare_windows_packet_flow(
-        &classification,
-        &egress,
-        session_id,
-        &request,
-        1_200,
-        &policy_tables,
-    )
+    let data_plane = accepted_data_plane_state(&request, session_id, &policy_tables);
+    let session = bind_windows_packet_flow_session(&data_plane, &request.request_id, session_id)?;
+    prepare_windows_packet_flow(&classification, &egress, session, 1_200, &policy_tables)
 }
 
 fn apply(
@@ -480,6 +513,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
     for invariant in [
         "pure_forwarding_contract_only",
         "capture_classification_and_egress_plan_bound",
+        "accepted_data_plane_session_capability_required",
         "original_destination_port_bound",
         "open_backend_preserves_full_egress_binding",
         "admission_expires_by_first_payload_deadline",
@@ -627,7 +661,7 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
             WindowsDataPlaneBackend::Geph,
             WindowsPacketCaptureTransport::TcpTls,
         ),
-        Err(WindowsPacketFlowAdmissionErrorCode::InvalidDataPlaneRequest)
+        Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotFound)
     );
     let geo = admission(
         "chatgpt.com",
@@ -669,6 +703,29 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
         WindowsPacketFlowCommand::RejectFlow { reason, .. }
             if reason == "admission_expired"
     )));
+}
+
+#[test]
+fn packet_flow_session_binding_requires_the_exact_accepted_pair() {
+    let policy_tables = bundled_policy_v1();
+    let request = WindowsDataPlaneRequest {
+        request_id: "accepted-request".to_owned(),
+        policy: classify_route_policy("updates.discord.com", &policy_tables),
+        backend: WindowsDataPlaneBackend::LocalEngine,
+        started_at_ms: 1_200,
+        first_payload_deadline_at_ms: 4_000,
+    };
+    let state = accepted_data_plane_state(&request, 90, &policy_tables);
+
+    assert_eq!(
+        bind_windows_packet_flow_session(&state, "unknown-request", 90),
+        Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotFound)
+    );
+    assert_eq!(
+        bind_windows_packet_flow_session(&state, &request.request_id, 91),
+        Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionMismatch)
+    );
+    assert!(bind_windows_packet_flow_session(&state, &request.request_id, 90).is_ok());
 }
 
 #[test]

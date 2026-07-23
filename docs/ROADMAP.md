@@ -502,8 +502,10 @@ therefore stays phased and closed to production traffic:
    stack selection, and production-host composition closed. Its packet path
    consumes registry ownership, updates only one bounded flow, retains unique
    capture and data-plane owners, preserves the capture-v3 destination port,
-   and resumes partial effect batches from an exact cursor. The next subgate is
-   the bounded stack evaluation, not another routing or capture mechanism.
+   admits only a binding minted from the still-opening accepted data-plane
+   session, and resumes partial effect batches from an exact cursor. The next
+   subgate is the bounded stack evaluation, not another routing or capture
+   mechanism.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier

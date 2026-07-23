@@ -11,6 +11,7 @@
 
 use crate::data_plane::{
     validate_windows_data_plane_request, WindowsDataPlaneEvent, WindowsDataPlaneRequest,
+    WindowsDataPlaneSessionPhase, WindowsDataPlaneState, WindowsDataPlaneWorkerPhase,
 };
 use crate::packet_adapter::v3::{WindowsPacketCaptureTransport, WindowsPacketPolicyClassification};
 use crate::packet_egress::WindowsPacketEgressPlan;
@@ -188,6 +189,13 @@ pub struct WindowsPacketFlowAdmission {
     expires_at_ms: u64,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct WindowsPacketFlowSessionBinding {
+    session_id: u64,
+    request: WindowsDataPlaneRequest,
+    accepted_at_ms: u64,
+}
+
 impl WindowsPacketFlowAdmission {
     pub const fn key(&self) -> WindowsPacketFlowKey {
         self.key
@@ -222,6 +230,10 @@ impl WindowsPacketFlowAdmission {
 #[serde(rename_all = "snake_case")]
 pub enum WindowsPacketFlowAdmissionErrorCode {
     InvalidSessionId,
+    DataPlaneWorkerNotReady,
+    DataPlaneSessionNotFound,
+    DataPlaneSessionMismatch,
+    DataPlaneSessionNotOpening,
     UnsupportedTransport,
     ClassificationExpired,
     EgressExpired,
@@ -233,19 +245,54 @@ pub enum WindowsPacketFlowAdmissionErrorCode {
     PolicyMismatch,
 }
 
+/// Mints an opaque one-shot binding only from an accepted, still-opening
+/// data-plane session. Packet admission never accepts a free-standing session
+/// ID beside an unrelated request.
+pub fn bind_windows_packet_flow_session(
+    data_plane: &WindowsDataPlaneState,
+    request_id: &str,
+    session_id: u64,
+) -> Result<WindowsPacketFlowSessionBinding, WindowsPacketFlowAdmissionErrorCode> {
+    if session_id == 0 {
+        return Err(WindowsPacketFlowAdmissionErrorCode::InvalidSessionId);
+    }
+    if data_plane.worker_phase != WindowsDataPlaneWorkerPhase::Ready {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneWorkerNotReady);
+    }
+    let session = data_plane
+        .sessions
+        .get(request_id)
+        .ok_or(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotFound)?;
+    if session.session_id != session_id {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionMismatch);
+    }
+    if session.phase != WindowsDataPlaneSessionPhase::Opening
+        || session.cancel_requested
+        || !session.resource_owned
+    {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotOpening);
+    }
+    Ok(WindowsPacketFlowSessionBinding {
+        session_id,
+        request: session.request.clone(),
+        accepted_at_ms: session.updated_at_ms,
+    })
+}
+
 /// Binds the three existing pure boundaries without exposing an authorizing
 /// constructor for the resulting admission token.
 pub fn prepare_windows_packet_flow(
     classification: &WindowsPacketPolicyClassification,
     egress: &WindowsPacketEgressPlan,
-    session_id: u64,
-    request: &WindowsDataPlaneRequest,
+    session: WindowsPacketFlowSessionBinding,
     now_ms: u64,
     policy_tables: &RoutingPolicyTables,
 ) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
-    if session_id == 0 {
-        return Err(WindowsPacketFlowAdmissionErrorCode::InvalidSessionId);
-    }
+    let WindowsPacketFlowSessionBinding {
+        session_id,
+        request,
+        accepted_at_ms,
+    } = session;
     let transport = match classification.transport() {
         WindowsPacketCaptureTransport::TcpTls => WindowsPacketFlowTransport::Tcp,
         WindowsPacketCaptureTransport::UdpQuic => WindowsPacketFlowTransport::Udp,
@@ -268,14 +315,21 @@ pub fn prepare_windows_packet_flow(
     if classification.destination() != egress.destination() {
         return Err(WindowsPacketFlowAdmissionErrorCode::DestinationMismatch);
     }
-    validate_windows_data_plane_request(request, policy_tables)
+    validate_windows_data_plane_request(&request, policy_tables)
         .map_err(|_| WindowsPacketFlowAdmissionErrorCode::InvalidDataPlaneRequest)?;
-    if now_ms < request.started_at_ms || now_ms >= request.first_payload_deadline_at_ms {
+    if now_ms < accepted_at_ms
+        || now_ms < request.started_at_ms
+        || now_ms >= request.first_payload_deadline_at_ms
+    {
         return Err(WindowsPacketFlowAdmissionErrorCode::InvalidDataPlaneWindow);
     }
     if request.policy != *classification.policy() {
         return Err(WindowsPacketFlowAdmissionErrorCode::PolicyMismatch);
     }
+    let expires_at_ms = classification
+        .expires_at_ms()
+        .min(egress.expires_at_ms())
+        .min(request.first_payload_deadline_at_ms);
 
     Ok(WindowsPacketFlowAdmission {
         key: WindowsPacketFlowKey {
@@ -285,14 +339,11 @@ pub fn prepare_windows_packet_flow(
             session_id,
         },
         session_id,
-        request: request.clone(),
+        request,
         egress: egress.clone(),
         destination: classification.destination().to_string(),
         destination_port: classification.destination_port(),
-        expires_at_ms: classification
-            .expires_at_ms()
-            .min(egress.expires_at_ms())
-            .min(request.first_payload_deadline_at_ms),
+        expires_at_ms,
     })
 }
 
