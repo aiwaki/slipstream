@@ -518,7 +518,17 @@ therefore stays phased and closed to production traffic:
    checksum rejection, and fixed frame/socket/reassembly bounds without
    linking the dependency into the Windows adapter or production host.
    Oversized IPv6 output is explicitly fail-closed because the selected version
-   does not emit IPv6 fragments. IPv6 fragment input remains unqualified.
+   does not emit IPv6 fragments. Source review and an executable raw-fragment
+   test also prove that `smoltcp 0.13.1` does not natively reassemble IPv6
+   Fragment Header input despite exposing the header type and feature flag.
+   Frozen selection v1 remains unchanged. A separate additive fragment-input
+   v1 contract qualifies an effect-free pre-stack normalizer: it accepts only
+   a Fragment Header immediately after the IPv6 base header, reconstructs exact
+   in-order and out-of-order packets inside fixed assembly, payload,
+   fragment-count, and timeout bounds, processes RFC 6946 atomic fragments
+   without touching reassembly state, rejects overlap and conflicts, and
+   delivers a completed UDP packet to the selected stack with its original
+   source endpoint. Windows capture composition remains closed.
    Capture v4 and userspace-flow-binding v1 now close the immutable original
    five-tuple gap without mutating frozen capture v3 or packet-flow v1. The
    binding distinguishes the original client source from the admitted outbound
@@ -553,8 +563,9 @@ therefore stays phased and closed to production traffic:
    through a deterministic in-memory Layer 3 pair. It proves exact IPv4/IPv6
    TCP/UDP delivery in both directions, original tuple use, and retry after a
    pre-mutation injected failure without changing either frozen predecessor or
-   linking the stack into the Windows adapter. The next subgate is separate
-   IPv6 fragment-input qualification. Native
+   linking the stack into the Windows adapter. The next subgate is composing
+   the bounded fragment-input normalizer with versioned Windows capture in an
+   effect-only harness. Native
    connectors, packet-flow qualification on disposable AMD64/ARM64, and
    production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
