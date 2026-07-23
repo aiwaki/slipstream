@@ -390,11 +390,13 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "protected_local_bypass_never_uses_geph",
         "ordered_payload_frames",
         "unissued_frames_cannot_be_acknowledged",
+        "stale_acknowledgement_does_not_refresh_idle",
         "payload_bytes_remain_effect_owned_by_flow_key",
         "payload_and_queue_sizes_bounded",
         "frame_count_and_aggregate_budget_bounded",
         "high_low_watermark_backpressure",
         "backpressure_timeout_bounded",
+        "client_backpressure_is_cancellation",
         "idle_timeout_bounded",
         "tcp_half_close_preserved_after_queue_drain",
         "early_client_half_close_survives_backend_open",
@@ -807,6 +809,19 @@ fn queued_payload_waits_for_backend_and_backpressure_resumes_at_low_watermark() 
         state.flows[&key].queued_bytes(WindowsPacketFlowDirection::ClientToBackend),
         2
     );
+    let idle_deadline = state.flows[&key].idle_deadline_at_ms;
+    let stale = apply(
+        &mut state,
+        WindowsPacketFlowEvent::Forwarded {
+            now_ms: 1_250,
+            key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            through_sequence: 1,
+        },
+        &config,
+    );
+    assert!(stale.is_empty());
+    assert_eq!(state.flows[&key].idle_deadline_at_ms, idle_deadline);
 }
 
 #[test]

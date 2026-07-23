@@ -140,10 +140,13 @@ Slipstream routing decisions and bounded recovery primitives.
   must retain immutable payload bytes under the same flow/direction/sequence
   identity until delivery is acknowledged. An acknowledgement is invalid until
   the corresponding backend is ready and the forwarding command has been
-  issued. Per-direction byte and frame bounds
+  issued; stale acknowledgements do not refresh an idle deadline. Per-direction
+  byte and frame bounds
   plus a validated aggregate budget prevent tiny-frame memory amplification.
-  High/low watermarks pause and resume only the producing side, while idle and sustained
-  backpressure deadlines close only that owned flow. TCP half-closes propagate
+  High/low watermarks pause and resume only the producing side, while idle and
+  sustained backpressure deadlines close only that owned flow. Pressure toward
+  a slow client is cancellation rather than a fabricated backend failure. TCP
+  half-closes propagate
   only after the preceding queue drains, including when the client closes its
   write side before backend readiness. UDP datagram boundaries remain distinct,
   resets clear both queues, and terminal history is bounded and

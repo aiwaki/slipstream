@@ -726,6 +726,24 @@ fn cancel_flow(
     }
 }
 
+fn close_for_directional_pressure(
+    flow: &mut WindowsPacketFlowState,
+    key: WindowsPacketFlowKey,
+    now_ms: u64,
+    direction: WindowsPacketFlowDirection,
+    reason: &str,
+    commands: &mut Vec<WindowsPacketFlowCommand>,
+) {
+    match direction {
+        WindowsPacketFlowDirection::ClientToBackend => {
+            fail_backend(flow, key, now_ms, reason, commands);
+        }
+        WindowsPacketFlowDirection::BackendToClient => {
+            cancel_flow(flow, key, now_ms, reason, commands);
+        }
+    }
+}
+
 fn maybe_forward_half_close(
     flow: &mut WindowsPacketFlowState,
     key: WindowsPacketFlowKey,
@@ -1029,9 +1047,33 @@ pub fn reduce_windows_packet_flow(
                 .checked_add(*bytes)
                 .ok_or(WindowsPacketFlowError::ByteCountOverflow)?;
             if flow.queue(*direction).frames.len() >= config.max_queued_frames_per_direction {
-                fail_backend(flow, key, now_ms, "packet_flow_frame_limit", &mut commands);
+                let reason = match direction {
+                    WindowsPacketFlowDirection::ClientToBackend => "packet_flow_frame_limit",
+                    WindowsPacketFlowDirection::BackendToClient => "packet_flow_client_frame_limit",
+                };
+                close_for_directional_pressure(
+                    flow,
+                    key,
+                    now_ms,
+                    *direction,
+                    reason,
+                    &mut commands,
+                );
             } else if new_bytes > config.max_buffered_bytes {
-                fail_backend(flow, key, now_ms, "packet_flow_buffer_limit", &mut commands);
+                let reason = match direction {
+                    WindowsPacketFlowDirection::ClientToBackend => "packet_flow_buffer_limit",
+                    WindowsPacketFlowDirection::BackendToClient => {
+                        "packet_flow_client_buffer_limit"
+                    }
+                };
+                close_for_directional_pressure(
+                    flow,
+                    key,
+                    now_ms,
+                    *direction,
+                    reason,
+                    &mut commands,
+                );
             } else {
                 let backend_ready = flow.backend_ready;
                 let mut backpressure_deadline = None;
@@ -1147,6 +1189,12 @@ pub fn reduce_windows_packet_flow(
                     },
                 });
             }
+            if forwarded_bytes == 0 {
+                return Ok(WindowsPacketFlowTransition {
+                    state: next,
+                    commands,
+                });
+            }
             maybe_forward_half_close(flow, key, *direction, &mut commands);
             maybe_finish_gracefully(flow, key, now_ms, &mut commands);
             if !flow.phase.is_terminal() {
@@ -1240,13 +1288,13 @@ pub fn reduce_windows_packet_flow(
                     commands,
                 });
             }
-            fail_backend(
-                flow,
-                key,
-                now_ms,
-                "packet_flow_backpressure_timeout",
-                &mut commands,
-            );
+            let reason = match direction {
+                WindowsPacketFlowDirection::ClientToBackend => "packet_flow_backpressure_timeout",
+                WindowsPacketFlowDirection::BackendToClient => {
+                    "packet_flow_client_backpressure_timeout"
+                }
+            };
+            close_for_directional_pressure(flow, key, now_ms, *direction, reason, &mut commands);
         }
         WindowsPacketFlowEvent::FlowOpened { .. }
         | WindowsPacketFlowEvent::CaptureGenerationRetired { .. } => {

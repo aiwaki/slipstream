@@ -11,11 +11,13 @@
     "protected_local_bypass_never_uses_geph": true,
     "ordered_payload_frames": true,
     "unissued_frames_cannot_be_acknowledged": true,
+    "stale_acknowledgement_does_not_refresh_idle": true,
     "payload_bytes_remain_effect_owned_by_flow_key": true,
     "payload_and_queue_sizes_bounded": true,
     "frame_count_and_aggregate_budget_bounded": true,
     "high_low_watermark_backpressure": true,
     "backpressure_timeout_bounded": true,
+    "client_backpressure_is_cancellation": true,
     "idle_timeout_bounded": true,
     "tcp_half_close_preserved_after_queue_drain": true,
     "early_client_half_close_survives_backend_open": true,
@@ -141,6 +143,28 @@
         "backend_to_client_bytes": 0,
         "terminal_reason": "graceful",
         "must_emit": ["open_backend", "backend_connected", "forward_client_to_backend", "close_flow", "backend_closed"]
+      }
+    },
+    {
+      "name": "slow-client-backpressure-is-cancellation",
+      "capture_generation": 12,
+      "flow_id": 46,
+      "host": "chatgpt.com",
+      "backend": "geph",
+      "transport": "tcp",
+      "events": [
+        { "kind": "backend_ready", "now_ms": 1210 },
+        { "kind": "payload", "now_ms": 1220, "direction": "backend_to_client", "sequence": 1, "bytes": 4 },
+        { "kind": "payload", "now_ms": 1230, "direction": "backend_to_client", "sequence": 2, "bytes": 2 },
+        { "kind": "backpressure_deadline", "now_ms": 1480, "direction": "backend_to_client" }
+      ],
+      "expected": {
+        "phase": "cancelled",
+        "resource_owned": false,
+        "client_to_backend_bytes": 0,
+        "backend_to_client_bytes": 0,
+        "terminal_reason": "packet_flow_client_backpressure_timeout",
+        "must_emit": ["open_backend", "backend_connected", "pause_backend_to_client", "close_flow", "cancel_requested", "session_cancelled"]
       }
     },
     {
