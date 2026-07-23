@@ -138,8 +138,9 @@ Slipstream routing decisions and bounded recovery primitives.
   destination, active policy result, backend, and evidence lifetime. The pure
   state retains only ordered frame identities and byte counts; a future effect
   must retain immutable payload bytes under the same flow/direction/sequence
-  identity until delivery is acknowledged. High/low watermarks pause and
-  resume only the producing side, while idle and sustained
+  identity until delivery is acknowledged. Per-direction byte and frame bounds
+  plus a validated aggregate budget prevent tiny-frame memory amplification.
+  High/low watermarks pause and resume only the producing side, while idle and sustained
   backpressure deadlines close only that owned flow. TCP half-closes propagate
   only after the preceding queue drains, UDP datagram boundaries remain
   distinct, resets clear both queues, and terminal history is bounded and

@@ -23,6 +23,9 @@ const MAX_ACTIVE_FLOWS: usize = 65_535;
 const MAX_RETAINED_TERMINAL_FLOWS: usize = 65_535;
 const MAX_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_BUFFERED_BYTES: usize = 4 * 1024 * 1024;
+const MAX_QUEUED_FRAMES_PER_DIRECTION: usize = 65_536;
+const MAX_TOTAL_BUFFERED_BYTES: usize = 256 * 1024 * 1024;
+const MAX_TOTAL_QUEUED_FRAMES: usize = 1_000_000;
 const MAX_TIMEOUT_MS: u64 = 300_000;
 const MAX_REASON_CHARS: usize = 200;
 const HTTPS_PORT: u16 = 443;
@@ -32,6 +35,7 @@ pub struct WindowsPacketFlowConfig {
     pub max_active_flows: usize,
     pub max_retained_terminal_flows: usize,
     pub max_chunk_bytes: usize,
+    pub max_queued_frames_per_direction: usize,
     pub high_watermark_bytes: usize,
     pub low_watermark_bytes: usize,
     pub max_buffered_bytes: usize,
@@ -58,6 +62,13 @@ impl WindowsPacketFlowConfig {
                 "max_chunk_bytes must be within 1..=65536",
             ));
         }
+        if self.max_queued_frames_per_direction == 0
+            || self.max_queued_frames_per_direction > MAX_QUEUED_FRAMES_PER_DIRECTION
+        {
+            return Err(WindowsPacketFlowError::InvalidConfig(
+                "max_queued_frames_per_direction must be within 1..=65536",
+            ));
+        }
         if self.low_watermark_bytes >= self.high_watermark_bytes
             || self.high_watermark_bytes > self.max_buffered_bytes
             || self.max_buffered_bytes > MAX_BUFFERED_BYTES
@@ -73,6 +84,24 @@ impl WindowsPacketFlowConfig {
         {
             return Err(WindowsPacketFlowError::InvalidConfig(
                 "timeouts must be within 1..=300000ms",
+            ));
+        }
+        let total_buffer_budget = self
+            .max_active_flows
+            .checked_mul(self.max_buffered_bytes)
+            .and_then(|value| value.checked_mul(2));
+        if !matches!(total_buffer_budget, Some(value) if value <= MAX_TOTAL_BUFFERED_BYTES) {
+            return Err(WindowsPacketFlowError::InvalidConfig(
+                "aggregate directional byte budget exceeds 268435456",
+            ));
+        }
+        let total_frame_budget = self
+            .max_active_flows
+            .checked_mul(self.max_queued_frames_per_direction)
+            .and_then(|value| value.checked_mul(2));
+        if !matches!(total_frame_budget, Some(value) if value <= MAX_TOTAL_QUEUED_FRAMES) {
+            return Err(WindowsPacketFlowError::InvalidConfig(
+                "aggregate directional frame budget exceeds 1000000",
             ));
         }
         Ok(())
@@ -886,7 +915,9 @@ pub fn reduce_windows_packet_flow(
                 .bytes
                 .checked_add(*bytes)
                 .ok_or(WindowsPacketFlowError::ByteCountOverflow)?;
-            if new_bytes > config.max_buffered_bytes {
+            if flow.queue(*direction).frames.len() >= config.max_queued_frames_per_direction {
+                fail_backend(flow, key, now_ms, "packet_flow_frame_limit", &mut commands);
+            } else if new_bytes > config.max_buffered_bytes {
                 fail_backend(flow, key, now_ms, "packet_flow_buffer_limit", &mut commands);
             } else {
                 let backend_ready = flow.backend_ready;

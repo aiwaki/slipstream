@@ -371,6 +371,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "ordered_payload_frames",
         "payload_bytes_remain_effect_owned_by_flow_key",
         "payload_and_queue_sizes_bounded",
+        "frame_count_and_aggregate_budget_bounded",
         "high_low_watermark_backpressure",
         "backpressure_timeout_bounded",
         "idle_timeout_bounded",
@@ -933,6 +934,42 @@ fn sustained_backpressure_closes_only_the_owned_flow() {
         command,
         WindowsPacketFlowCommand::CloseFlow { key: closed } if *closed == key
     )));
+}
+
+#[test]
+fn frame_count_bound_rejects_many_tiny_chunks_before_byte_capacity() {
+    let mut config = contract().config;
+    config.max_queued_frames_per_direction = 1;
+    let (mut state, admission) = opened_registry(&config);
+    let key = admission.key();
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Payload {
+            now_ms: 1_210,
+            key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            sequence: 1,
+            bytes: 1,
+        },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Payload {
+            now_ms: 1_220,
+            key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            sequence: 2,
+            bytes: 1,
+        },
+        &config,
+    );
+    assert_eq!(state.flows[&key].phase, WindowsPacketFlowPhase::Failed);
+    assert_eq!(state.flows[&key].terminal_reason, "packet_flow_frame_limit");
+    assert_eq!(
+        state.flows[&key].queued_bytes(WindowsPacketFlowDirection::ClientToBackend),
+        0
+    );
 }
 
 #[test]
