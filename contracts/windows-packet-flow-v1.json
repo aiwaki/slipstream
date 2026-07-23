@@ -6,6 +6,7 @@
     "pure_forwarding_contract_only": true,
     "capture_classification_and_egress_plan_bound": true,
     "accepted_data_plane_session_capability_required": true,
+    "backend_open_revalidates_current_data_plane_session": true,
     "original_destination_port_bound": true,
     "open_backend_preserves_full_egress_binding": true,
     "admission_expires_by_first_payload_deadline": true,

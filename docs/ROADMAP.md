@@ -503,7 +503,8 @@ therefore stays phased and closed to production traffic:
    consumes registry ownership, updates only one bounded flow, retains unique
    capture and data-plane owners, preserves the capture-v3 destination port,
    admits only a binding minted from the still-opening accepted data-plane
-   session, and resumes partial effect batches from an exact cursor. The next
+   session, revalidates that same current session at backend opening, and
+   resumes partial effect batches from an exact cursor. The next
    subgate is the bounded stack evaluation, not another routing or capture
    mechanism.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and

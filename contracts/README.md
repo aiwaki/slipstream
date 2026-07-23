@@ -142,7 +142,10 @@ Slipstream routing decisions and bounded recovery primitives.
   classification and outbound-route admission. Its opaque admission binds one
   capture generation, flow ID, unique data-plane request/session owner minted
   from the still-opening accepted data-plane session rather than a free-standing
-  caller-supplied ID/request pair,
+  caller-supplied ID/request pair. Backend opening requires a second opaque
+  event capability minted from the same session while it is still current and
+  opening, so a delayed clone of the earlier admission cannot resurrect a
+  cancelled session,
   transport, destination and original port, active policy result, backend, and
   evidence lifetime. The pure
   state retains only ordered frame identities and byte counts; a future effect

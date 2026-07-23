@@ -637,6 +637,7 @@ original destination port without changing frozen v2 policy semantics. Keyed
 events update only one bounded flow, data-plane session/request ownership is
 unique until generation retirement, admission consumes a binding minted from
 the still-opening accepted data-plane session rather than an unrelated raw ID,
+backend opening revalidates a fresh capability for that same current session,
 and retained command batches resume from an exact failure cursor without replay.
 After exact-main confirmation, the next
 safe M4 gate is a bounded userspace IPv4/IPv6 TCP/UDP stack evaluation behind

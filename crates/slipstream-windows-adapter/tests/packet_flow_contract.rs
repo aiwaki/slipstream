@@ -19,11 +19,11 @@ use slipstream_windows_adapter::packet_egress::{
 };
 use slipstream_windows_adapter::packet_flow::{
     bind_windows_packet_flow_session, execute_windows_packet_flow_transition_from,
-    prepare_windows_packet_flow, reduce_windows_packet_flow, WindowsPacketFlowAdmission,
-    WindowsPacketFlowAdmissionErrorCode, WindowsPacketFlowCommand, WindowsPacketFlowConfig,
-    WindowsPacketFlowDirection, WindowsPacketFlowEffects, WindowsPacketFlowEvent,
-    WindowsPacketFlowPhase, WindowsPacketFlowRegistry, WindowsPacketFlowTransport,
-    WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
+    prepare_windows_packet_flow, prepare_windows_packet_flow_open, reduce_windows_packet_flow,
+    WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode, WindowsPacketFlowCommand,
+    WindowsPacketFlowConfig, WindowsPacketFlowDirection, WindowsPacketFlowEffects,
+    WindowsPacketFlowEvent, WindowsPacketFlowPhase, WindowsPacketFlowRegistry,
+    WindowsPacketFlowTransport, WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
 };
 
 const CONTRACT: &str = include_str!("../../../contracts/windows-packet-flow-v1.json");
@@ -315,7 +315,8 @@ fn admission_with_request_owner(
         first_payload_deadline_at_ms: 4_000,
     };
     let data_plane = accepted_data_plane_state(&request, session_id, &policy_tables);
-    let session = bind_windows_packet_flow_session(&data_plane, &request.request_id, session_id)?;
+    let session =
+        bind_windows_packet_flow_session(&data_plane, &request.request_id, session_id, 1_200)?;
     prepare_windows_packet_flow(
         &classification,
         &egress,
@@ -324,6 +325,14 @@ fn admission_with_request_owner(
         1_200,
         &policy_tables,
     )
+}
+
+fn flow_open_event(now_ms: u64, admission: WindowsPacketFlowAdmission) -> WindowsPacketFlowEvent {
+    let policy_tables = bundled_policy_v1();
+    let data_plane =
+        accepted_data_plane_state(admission.request(), admission.session_id(), &policy_tables);
+    prepare_windows_packet_flow_open(admission, &data_plane, now_ms)
+        .expect("open event should revalidate the accepted session")
 }
 
 fn apply(
@@ -499,10 +508,7 @@ fn opened_registry(
     let mut state = WindowsPacketFlowRegistry::new(1_200);
     apply(
         &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: admission.clone(),
-        },
+        flow_open_event(1_200, admission.clone()),
         config,
     );
     (state, admission)
@@ -521,6 +527,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "pure_forwarding_contract_only",
         "capture_classification_and_egress_plan_bound",
         "accepted_data_plane_session_capability_required",
+        "backend_open_revalidates_current_data_plane_session",
         "original_destination_port_bound",
         "open_backend_preserves_full_egress_binding",
         "admission_expires_by_first_payload_deadline",
@@ -593,10 +600,7 @@ fn language_neutral_vectors_cover_tcp_udp_backpressure_and_cancellation() {
         let mut state = WindowsPacketFlowRegistry::new(1_200);
         let mut emitted = apply(
             &mut state,
-            WindowsPacketFlowEvent::FlowOpened {
-                now_ms: 1_200,
-                admission,
-            },
+            flow_open_event(1_200, admission),
             &fixture.config,
         )
         .iter()
@@ -682,10 +686,7 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
     let mut state = WindowsPacketFlowRegistry::new(1_200);
     let commands = apply(
         &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: local.clone(),
-        },
+        flow_open_event(1_200, local.clone()),
         &contract().config,
     );
     assert!(commands.iter().any(|command| matches!(
@@ -700,10 +701,7 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
     let mut delayed = WindowsPacketFlowRegistry::new(1_200);
     let rejected = apply(
         &mut delayed,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 4_000,
-            admission: local,
-        },
+        flow_open_event(4_000, local),
         &contract().config,
     );
     assert!(rejected.iter().any(|command| matches!(
@@ -726,34 +724,17 @@ fn packet_flow_session_binding_requires_the_exact_accepted_pair() {
     let state = accepted_data_plane_state(&request, 90, &policy_tables);
 
     assert_eq!(
-        bind_windows_packet_flow_session(&state, "unknown-request", 90),
+        bind_windows_packet_flow_session(&state, "unknown-request", 90, 1_200),
         Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotFound)
     );
     assert_eq!(
-        bind_windows_packet_flow_session(&state, &request.request_id, 91),
+        bind_windows_packet_flow_session(&state, &request.request_id, 91, 1_200),
         Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionMismatch)
     );
-    assert!(bind_windows_packet_flow_session(&state, &request.request_id, 90).is_ok());
+    assert!(bind_windows_packet_flow_session(&state, &request.request_id, 90, 1_200).is_ok());
 
-    let binding = bind_windows_packet_flow_session(&state, &request.request_id, 90)
+    let binding = bind_windows_packet_flow_session(&state, &request.request_id, 90, 1_200)
         .expect("the accepted pair should mint a binding");
-    let cancelled = reduce_windows_data_plane(
-        &state,
-        &WindowsDataPlaneEvent::CancelRequested {
-            now_ms: 1_210,
-            request_id: request.request_id.clone(),
-            session_id: 90,
-        },
-        &WindowsDataPlaneConfig {
-            max_active_sessions: 64,
-            max_retained_terminal_sessions: 64,
-            cancel_timeout_ms: 1_000,
-            shutdown_timeout_ms: 2_000,
-        },
-        &policy_tables,
-    )
-    .expect("cancellation should reduce")
-    .state;
     let observation = WindowsPacketCaptureObservation {
         capture_generation: 7,
         flow_id: 41,
@@ -773,15 +754,34 @@ fn packet_flow_session_binding_requires_the_exact_accepted_pair() {
         other => panic!("capture should classify, got {other:?}"),
     };
     let egress = prepare_windows_packet_egress(&egress_request()).expect("egress should admit");
+    let admission = prepare_windows_packet_flow(
+        &classification,
+        &egress,
+        &state,
+        binding,
+        1_200,
+        &policy_tables,
+    )
+    .expect("the current session should admit a packet flow");
+    let cancelled = reduce_windows_data_plane(
+        &state,
+        &WindowsDataPlaneEvent::CancelRequested {
+            now_ms: 1_210,
+            request_id: request.request_id.clone(),
+            session_id: 90,
+        },
+        &WindowsDataPlaneConfig {
+            max_active_sessions: 64,
+            max_retained_terminal_sessions: 64,
+            cancel_timeout_ms: 1_000,
+            shutdown_timeout_ms: 2_000,
+        },
+        &policy_tables,
+    )
+    .expect("cancellation should reduce")
+    .state;
     assert_eq!(
-        prepare_windows_packet_flow(
-            &classification,
-            &egress,
-            &cancelled,
-            binding,
-            1_210,
-            &policy_tables,
-        ),
+        prepare_windows_packet_flow_open(admission, &cancelled, 1_210),
         Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotOpening)
     );
 }
@@ -802,10 +802,7 @@ fn admission_and_backend_open_preserve_a_nonstandard_destination_port() {
 
     let commands = apply(
         &mut WindowsPacketFlowRegistry::new(1_200),
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission,
-        },
+        flow_open_event(1_200, admission),
         &contract().config,
     );
     assert!(commands.iter().any(|command| matches!(
@@ -823,22 +820,8 @@ fn duplicate_open_is_idempotent_and_flow_limit_cancels_the_unowned_session() {
     config.max_active_flows = 1;
     let first = tcp_admission();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: first.clone(),
-        },
-        &config,
-    );
-    let duplicate = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_201,
-            admission: first,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, first.clone()), &config);
+    let duplicate = apply(&mut state, flow_open_event(1_201, first), &config);
     assert!(duplicate.is_empty());
     assert_eq!(state.active_flow_count(), 1);
 
@@ -851,14 +834,7 @@ fn duplicate_open_is_idempotent_and_flow_limit_cancels_the_unowned_session() {
     )
     .expect("second protected flow should be valid");
     let second_key = second.key();
-    let rejected = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_202,
-            admission: second,
-        },
-        &config,
-    );
+    let rejected = apply(&mut state, flow_open_event(1_202, second), &config);
     assert!(!state.flows.contains_key(&second_key));
     assert!(rejected.iter().any(|command| matches!(
         command,
@@ -896,22 +872,8 @@ fn one_data_plane_session_cannot_own_two_capture_flows() {
     .expect("second capture has independently valid boundary evidence");
     let second_key = second.key();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: first,
-        },
-        &config,
-    );
-    let rejected = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_210,
-            admission: second,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, first), &config);
+    let rejected = apply(&mut state, flow_open_event(1_210, second), &config);
 
     assert!(!state.flows.contains_key(&second_key));
     assert_eq!(state.active_flow_count(), 1);
@@ -949,22 +911,8 @@ fn one_data_plane_session_cannot_own_two_capture_flows() {
     .expect("second request identity is structurally valid");
     let second_key = second.key();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: first,
-        },
-        &config,
-    );
-    let rejected = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_210,
-            admission: second,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, first), &config);
+    let rejected = apply(&mut state, flow_open_event(1_210, second), &config);
     assert!(!state.flows.contains_key(&second_key));
     assert_eq!(state.data_plane_request_owners.len(), 1);
     assert!(rejected.iter().any(|command| matches!(
@@ -990,14 +938,7 @@ fn stale_or_reused_capture_open_cannot_cancel_a_live_data_plane_owner() {
     )
     .expect("live owner should be admitted");
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: live,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, live), &config);
     apply(
         &mut state,
         WindowsPacketFlowEvent::CaptureGenerationRetired {
@@ -1016,14 +957,7 @@ fn stale_or_reused_capture_open_cannot_cancel_a_live_data_plane_owner() {
         90,
     )
     .expect("stale evidence remains structurally valid");
-    let rejected = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_210,
-            admission: stale,
-        },
-        &config,
-    );
+    let rejected = apply(&mut state, flow_open_event(1_210, stale), &config);
     assert!(rejected.iter().any(|command| matches!(
         command,
         WindowsPacketFlowCommand::RejectFlow { reason, .. }
@@ -1043,14 +977,7 @@ fn stale_or_reused_capture_open_cannot_cancel_a_live_data_plane_owner() {
     )
     .expect("second capture owner should be admitted");
     let retained_key = retained.key();
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_220,
-            admission: retained,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_220, retained), &config);
     apply(
         &mut state,
         WindowsPacketFlowEvent::Reset {
@@ -1071,14 +998,7 @@ fn stale_or_reused_capture_open_cannot_cancel_a_live_data_plane_owner() {
         90,
     )
     .expect("reused capture has independently valid evidence");
-    let rejected = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_240,
-            admission: reused_capture,
-        },
-        &config,
-    );
+    let rejected = apply(&mut state, flow_open_event(1_240, reused_capture), &config);
     assert!(rejected.iter().any(|command| matches!(
         command,
         WindowsPacketFlowCommand::RejectFlow { reason, .. }
@@ -1104,14 +1024,7 @@ fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning()
     .expect("first owner should be admitted");
     let first_key = first.key();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: first,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, first), &config);
     assert_eq!(
         reduce_error(
             &mut state,
@@ -1146,10 +1059,7 @@ fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning()
     let second_key = same_capture_new_session.key();
     let rejected = apply(
         &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_220,
-            admission: same_capture_new_session,
-        },
+        flow_open_event(1_220, same_capture_new_session),
         &config,
     );
     assert!(!state.flows.contains_key(&second_key));
@@ -1182,14 +1092,7 @@ fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning()
         11,
     )
     .expect("old evidence remains structurally valid inside its original lifetime");
-    let replay = apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_240,
-            admission: retired_replay,
-        },
-        &config,
-    );
+    let replay = apply(&mut state, flow_open_event(1_240, retired_replay), &config);
     assert!(state.flows.is_empty());
     assert!(replay.iter().any(|command| matches!(
         command,
@@ -1547,14 +1450,7 @@ fn udp_keeps_datagrams_distinct_and_closes_after_both_queues_drain() {
     .expect("geo UDP classification should be admitted");
     let key = admission.key();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, admission), &config);
     apply(
         &mut state,
         WindowsPacketFlowEvent::BackendReady { now_ms: 1_210, key },
@@ -1628,14 +1524,7 @@ fn udp_close_before_backend_ready_cancels_instead_of_claiming_success() {
     .expect("geo UDP classification should be admitted");
     let key = admission.key();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, admission), &config);
     let commands = apply(
         &mut state,
         WindowsPacketFlowEvent::DatagramSideClosed { now_ms: 1_210, key },
@@ -1698,14 +1587,7 @@ fn reset_timeout_and_sequence_errors_are_bounded_and_terminal() {
     let admission = tcp_admission();
     let timeout_key = admission.key();
     let mut timed = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut timed,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission,
-        },
-        &config,
-    );
+    apply(&mut timed, flow_open_event(1_200, admission), &config);
     apply(
         &mut timed,
         WindowsPacketFlowEvent::IdleDeadline {
@@ -1869,14 +1751,7 @@ fn terminal_history_is_pruned_deterministically() {
     config.max_retained_terminal_flows = 1;
     let first = tcp_admission();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: first.clone(),
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, first.clone()), &config);
     apply(
         &mut state,
         WindowsPacketFlowEvent::Reset {
@@ -1897,14 +1772,7 @@ fn terminal_history_is_pruned_deterministically() {
     )
     .expect("second protected flow should be admitted locally");
     let second_key = second.key();
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_220,
-            admission: second,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_220, second), &config);
     apply(
         &mut state,
         WindowsPacketFlowEvent::Reset {
@@ -1935,22 +1803,8 @@ fn keyed_packet_events_touch_only_the_owned_flow_state() {
     .expect("second protected flow should be valid");
     let second_key = second.key();
     let mut state = WindowsPacketFlowRegistry::new(1_200);
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_200,
-            admission: first,
-        },
-        &config,
-    );
-    apply(
-        &mut state,
-        WindowsPacketFlowEvent::FlowOpened {
-            now_ms: 1_210,
-            admission: second,
-        },
-        &config,
-    );
+    apply(&mut state, flow_open_event(1_200, first), &config);
+    apply(&mut state, flow_open_event(1_210, second), &config);
     let untouched = state.flows[&second_key].clone();
     apply(
         &mut state,

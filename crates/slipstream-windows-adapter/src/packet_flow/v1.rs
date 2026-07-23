@@ -186,6 +186,7 @@ pub struct WindowsPacketFlowAdmission {
     egress: WindowsPacketEgressPlan,
     destination: String,
     destination_port: u16,
+    accepted_at_ms: u64,
     expires_at_ms: u64,
 }
 
@@ -194,6 +195,13 @@ pub struct WindowsPacketFlowSessionBinding {
     session_id: u64,
     request: WindowsDataPlaneRequest,
     accepted_at_ms: u64,
+    checked_at_ms: u64,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct WindowsPacketFlowOpen {
+    admission: WindowsPacketFlowAdmission,
+    current_session: WindowsPacketFlowSessionBinding,
 }
 
 impl WindowsPacketFlowAdmission {
@@ -252,6 +260,7 @@ pub fn bind_windows_packet_flow_session(
     data_plane: &WindowsDataPlaneState,
     request_id: &str,
     session_id: u64,
+    now_ms: u64,
 ) -> Result<WindowsPacketFlowSessionBinding, WindowsPacketFlowAdmissionErrorCode> {
     if session_id == 0 {
         return Err(WindowsPacketFlowAdmissionErrorCode::InvalidSessionId);
@@ -272,10 +281,14 @@ pub fn bind_windows_packet_flow_session(
     {
         return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotOpening);
     }
+    if now_ms < data_plane.updated_at_ms || now_ms < session.updated_at_ms {
+        return Err(WindowsPacketFlowAdmissionErrorCode::InvalidDataPlaneWindow);
+    }
     Ok(WindowsPacketFlowSessionBinding {
         session_id,
         request: session.request.clone(),
         accepted_at_ms: session.updated_at_ms,
+        checked_at_ms: now_ms,
     })
 }
 
@@ -293,6 +306,7 @@ pub fn prepare_windows_packet_flow(
         session_id,
         request,
         accepted_at_ms,
+        checked_at_ms,
     } = session;
     if data_plane.worker_phase != WindowsDataPlaneWorkerPhase::Ready {
         return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneWorkerNotReady);
@@ -308,6 +322,7 @@ pub fn prepare_windows_packet_flow(
         || current_session.cancel_requested
         || !current_session.resource_owned
         || current_session.updated_at_ms != accepted_at_ms
+        || checked_at_ms != now_ms
     {
         return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotOpening);
     }
@@ -361,7 +376,36 @@ pub fn prepare_windows_packet_flow(
         egress: egress.clone(),
         destination: classification.destination().to_string(),
         destination_port: classification.destination_port(),
+        accepted_at_ms,
         expires_at_ms,
+    })
+}
+
+/// Revalidates the accepted data-plane session at the exact backend-open event
+/// boundary. The returned event is opaque and cannot be constructed from a
+/// delayed admission alone.
+pub fn prepare_windows_packet_flow_open(
+    admission: WindowsPacketFlowAdmission,
+    data_plane: &WindowsDataPlaneState,
+    now_ms: u64,
+) -> Result<WindowsPacketFlowEvent, WindowsPacketFlowAdmissionErrorCode> {
+    let current_session = bind_windows_packet_flow_session(
+        data_plane,
+        &admission.request.request_id,
+        admission.session_id,
+        now_ms,
+    )?;
+    if current_session.request != admission.request
+        || current_session.accepted_at_ms != admission.accepted_at_ms
+    {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionMismatch);
+    }
+    Ok(WindowsPacketFlowEvent::FlowOpened {
+        now_ms,
+        open: Box::new(WindowsPacketFlowOpen {
+            admission,
+            current_session,
+        }),
     })
 }
 
@@ -466,11 +510,11 @@ impl WindowsPacketFlowRegistry {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum WindowsPacketFlowEvent {
     FlowOpened {
         now_ms: u64,
-        admission: WindowsPacketFlowAdmission,
+        open: Box<WindowsPacketFlowOpen>,
     },
     BackendReady {
         now_ms: u64,
@@ -542,7 +586,7 @@ impl WindowsPacketFlowEvent {
 
     pub const fn flow_key(&self) -> Option<WindowsPacketFlowKey> {
         match self {
-            Self::FlowOpened { admission, .. } => Some(admission.key()),
+            Self::FlowOpened { open, .. } => Some(open.admission.key()),
             Self::BackendReady { key, .. }
             | Self::Payload { key, .. }
             | Self::Forwarded { key, .. }
@@ -1099,7 +1143,8 @@ pub fn reduce_windows_packet_flow(
         .flow_key()
         .unwrap_or_else(|| unreachable!("capture retirement was handled above"));
 
-    if let WindowsPacketFlowEvent::FlowOpened { admission, .. } = event {
+    if let WindowsPacketFlowEvent::FlowOpened { open, .. } = event {
+        let admission = &open.admission;
         let identity = key.capture_identity();
         let session_owner = registry
             .data_plane_session_owners
@@ -1109,7 +1154,13 @@ pub fn reduce_windows_packet_flow(
             .data_plane_request_owners
             .get(&admission.request.request_id)
             .copied();
-        if session_owner.is_some_and(|owner| owner != key) {
+        if open.current_session.checked_at_ms != now_ms
+            || open.current_session.session_id != admission.session_id
+            || open.current_session.request != admission.request
+            || open.current_session.accepted_at_ms != admission.accepted_at_ms
+        {
+            reject_flow(key, "data_plane_session_not_current", &mut commands);
+        } else if session_owner.is_some_and(|owner| owner != key) {
             reject_flow(key, "data_plane_session_already_owned", &mut commands);
         } else if request_owner.is_some_and(|owner| owner != key) {
             reject_flow(key, "data_plane_request_already_owned", &mut commands);
