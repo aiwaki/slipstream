@@ -1037,6 +1037,9 @@ pub fn reduce_windows_packet_flow(
             if flow.admission.key.transport != WindowsPacketFlowTransport::Tcp {
                 return Err(WindowsPacketFlowError::InvalidTransportTransition);
             }
+            if *direction == WindowsPacketFlowDirection::BackendToClient && !flow.backend_ready {
+                return Err(WindowsPacketFlowError::InvalidTransition);
+            }
             match direction {
                 WindowsPacketFlowDirection::ClientToBackend if flow.client_input_open => {
                     flow.client_input_open = false;
@@ -1060,6 +1063,20 @@ pub fn reduce_windows_packet_flow(
         WindowsPacketFlowEvent::DatagramSideClosed { .. } => {
             if flow.admission.key.transport != WindowsPacketFlowTransport::Udp {
                 return Err(WindowsPacketFlowError::InvalidTransportTransition);
+            }
+            if !flow.backend_ready {
+                cancel_flow(
+                    flow,
+                    key,
+                    now_ms,
+                    "datagram_closed_before_backend_ready",
+                    &mut commands,
+                );
+                prune_terminal_flows(&mut next, config.max_retained_terminal_flows);
+                return Ok(WindowsPacketFlowTransition {
+                    state: next,
+                    commands,
+                });
             }
             flow.client_input_open = false;
             flow.backend_input_open = false;

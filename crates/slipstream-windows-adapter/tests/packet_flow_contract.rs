@@ -819,6 +819,45 @@ fn udp_keeps_datagrams_distinct_and_closes_after_both_queues_drain() {
 }
 
 #[test]
+fn udp_close_before_backend_ready_cancels_instead_of_claiming_success() {
+    let config = contract().config;
+    let admission = admission(
+        "chatgpt.com",
+        WindowsDataPlaneBackend::Geph,
+        WindowsPacketCaptureTransport::UdpQuic,
+    )
+    .expect("geo UDP classification should be admitted");
+    let key = admission.key();
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission,
+        },
+        &config,
+    );
+    let commands = apply(
+        &mut state,
+        WindowsPacketFlowEvent::DatagramSideClosed { now_ms: 1_210, key },
+        &config,
+    );
+    assert_eq!(state.flows[&key].phase, WindowsPacketFlowPhase::Cancelled);
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::DataPlane {
+            event: WindowsDataPlaneEvent::SessionCancelled { .. }
+        }
+    )));
+    assert!(!commands.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::DataPlane {
+            event: WindowsDataPlaneEvent::BackendClosed { .. }
+        }
+    )));
+}
+
+#[test]
 fn reset_timeout_and_sequence_errors_are_bounded_and_terminal() {
     let config = contract().config;
     let (mut state, admission) = opened_registry(&config);
