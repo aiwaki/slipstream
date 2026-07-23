@@ -17,10 +17,14 @@ enum Side {
     B,
 }
 
+type FrameSchedule = Vec<(i64, Vec<u8>)>;
+
 #[derive(Default)]
 struct LinkState {
     to_a: VecDeque<Vec<u8>>,
     to_b: VecDeque<Vec<u8>>,
+    emitted_to_a: FrameSchedule,
+    emitted_to_b: FrameSchedule,
     peak_to_a: usize,
     peak_to_b: usize,
     sent_to_a: usize,
@@ -82,6 +86,7 @@ impl phy::RxToken for RxToken {
 struct TxToken {
     state: Rc<RefCell<LinkState>>,
     side: Side,
+    at_ms: i64,
 }
 
 impl phy::TxToken for TxToken {
@@ -96,12 +101,14 @@ impl phy::TxToken for TxToken {
         match self.side {
             Side::A => {
                 assert!(state.to_b.len() < MAX_LINK_FRAMES_PER_DIRECTION);
+                state.emitted_to_b.push((self.at_ms, frame.clone()));
                 state.to_b.push_back(frame);
                 state.peak_to_b = state.peak_to_b.max(state.to_b.len());
                 state.sent_to_b += 1;
             }
             Side::B => {
                 assert!(state.to_a.len() < MAX_LINK_FRAMES_PER_DIRECTION);
+                state.emitted_to_a.push((self.at_ms, frame.clone()));
                 state.to_a.push_back(frame);
                 state.peak_to_a = state.peak_to_a.max(state.to_a.len());
                 state.sent_to_a += 1;
@@ -115,7 +122,7 @@ impl Device for BoundedDevice {
     type RxToken<'a> = RxToken;
     type TxToken<'a> = TxToken;
 
-    fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+    fn receive(&mut self, timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         if !self.peer_has_capacity() {
             return None;
         }
@@ -131,14 +138,16 @@ impl Device for BoundedDevice {
             TxToken {
                 state: self.state.clone(),
                 side: self.side,
+                at_ms: timestamp.total_millis(),
             },
         ))
     }
 
-    fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
+    fn transmit(&mut self, timestamp: Instant) -> Option<Self::TxToken<'_>> {
         self.peer_has_capacity().then(|| TxToken {
             state: self.state.clone(),
             side: self.side,
+            at_ms: timestamp.total_millis(),
         })
     }
 
@@ -236,7 +245,7 @@ fn assert_link_is_bounded(state: &LinkState) {
     assert!(state.peak_to_b <= MAX_LINK_FRAMES_PER_DIRECTION);
 }
 
-fn udp_round_trip(ipv6: bool, payload: &[u8]) -> (usize, usize) {
+fn udp_round_trip(ipv6: bool, payload: &[u8]) -> (FrameSchedule, FrameSchedule) {
     let (a_device, b_device, link) = BoundedDevice::pair();
     let mut a = TestStack::new(a_device, [10, 0, 0, 1], [0xfd00, 0, 0, 0, 0, 0, 0, 1], 1);
     let mut b = TestStack::new(b_device, [10, 0, 0, 2], [0xfd00, 0, 0, 0, 0, 0, 0, 2], 2);
@@ -283,7 +292,7 @@ fn udp_round_trip(ipv6: bool, payload: &[u8]) -> (usize, usize) {
     assert_eq!(&response[..len], b"ok");
     let state = link.borrow();
     assert_link_is_bounded(&state);
-    (state.sent_to_a, state.sent_to_b)
+    (state.emitted_to_a.clone(), state.emitted_to_b.clone())
 }
 
 fn udp_checksum_rejection(ipv6: bool) {
@@ -407,7 +416,7 @@ fn tcp_round_trip(ipv6: bool) {
 fn ipv4_fragmentation_reassembles_inside_fixed_bounds() {
     let (_, client_to_server) = udp_round_trip(false, &vec![0x5a; 2048]);
     assert!(
-        client_to_server >= 2,
+        client_to_server.len() >= 2,
         "the payload must cross multiple L3 frames"
     );
 }
@@ -415,7 +424,7 @@ fn ipv4_fragmentation_reassembles_inside_fixed_bounds() {
 #[test]
 fn ipv6_udp_below_mtu_round_trips_inside_fixed_bounds() {
     let (_, client_to_server) = udp_round_trip(true, &vec![0xa5; 512]);
-    assert_eq!(client_to_server, 1);
+    assert_eq!(client_to_server.len(), 1);
 }
 
 #[test]
@@ -437,10 +446,16 @@ fn oversized_ipv6_udp_drops_without_emitting_an_l3_frame() {
             IpEndpoint::new(IpAddress::v6(0xfd00, 0, 0, 0, 0, 0, 0, 2), 53),
         )
         .unwrap();
+    assert_eq!(a.sockets.get::<udp::Socket>(a_socket).send_queue(), 2048);
     a.poll(1);
+    assert_eq!(a.sockets.get::<udp::Socket>(a_socket).send_queue(), 0);
+    for now_ms in 2..=32 {
+        a.poll(now_ms);
+    }
     let state = link.borrow();
     assert_eq!(state.sent_to_b, 0);
     assert!(state.to_b.is_empty());
+    assert!(state.emitted_to_b.is_empty());
 }
 
 #[test]
