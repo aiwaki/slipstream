@@ -404,6 +404,9 @@ therefore stays phased and closed to production traffic:
    backend. Direct, unknown, missing, encrypted, ambiguous, malformed, stale,
    unsafe, or mismatched evidence stays direct. The production host does not
    compose v2 and no native API is present.
+   Capture v3 extends that frozen classifier only to require and retain the
+   original nonzero destination port; zero port evidence stays direct,
+   and v3 remains pure and uncomposed.
 3. Completed on the exact merged commit: the smallest native lifecycle on AMD64
    and ARM64 Windows loads only the exact admitted DLL, creates one uniquely
    named adapter, starts and ends the minimum-size session, removes that
@@ -496,7 +499,10 @@ therefore stays phased and closed to production traffic:
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.
    PR #206 implements the pure v1 contract and keeps native effects, userspace
-   stack selection, and production-host composition closed. The next subgate is
+   stack selection, and production-host composition closed. Its packet path
+   consumes registry ownership, updates only one bounded flow, retains unique
+   capture and data-plane owners, preserves the capture-v3 destination port,
+   and resumes partial effect batches from an exact cursor. The next subgate is
    the bounded stack evaluation, not another routing or capture mechanism.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.

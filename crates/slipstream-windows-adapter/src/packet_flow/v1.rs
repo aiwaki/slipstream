@@ -4,18 +4,19 @@
 //! admission. It owns bounded ordered payload metadata and emits abstract
 //! forwarding commands keyed by direction and sequence. A future effect keeps
 //! the corresponding immutable bytes under that identity until `Forwarded`;
-//! cloning this reducer never clones packet buffers. The contract does not
+//! one reduction consumes registry ownership and clones only the bounded flow
+//! it touches. The contract does not
 //! reconstruct TCP, open sockets, load an adapter, install routes, or compose
 //! the production service host.
 
 use crate::data_plane::{
     validate_windows_data_plane_request, WindowsDataPlaneEvent, WindowsDataPlaneRequest,
 };
-use crate::packet_adapter::v2::{WindowsPacketCaptureTransport, WindowsPacketPolicyClassification};
+use crate::packet_adapter::v3::{WindowsPacketCaptureTransport, WindowsPacketPolicyClassification};
 use crate::packet_egress::WindowsPacketEgressPlan;
 use serde::{Deserialize, Serialize};
 use slipstream_core::routing_policy::RoutingPolicyTables;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 pub const WINDOWS_PACKET_FLOW_CONTRACT_VERSION: u32 = 1;
@@ -29,7 +30,6 @@ const MAX_TOTAL_BUFFERED_BYTES: usize = 256 * 1024 * 1024;
 const MAX_TOTAL_QUEUED_FRAMES: usize = 1_000_000;
 const MAX_TIMEOUT_MS: u64 = 300_000;
 const MAX_REASON_CHARS: usize = 200;
-const HTTPS_PORT: u16 = 443;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WindowsPacketFlowConfig {
@@ -288,7 +288,7 @@ pub fn prepare_windows_packet_flow(
         request: request.clone(),
         egress: egress.clone(),
         destination: classification.destination().to_string(),
-        destination_port: HTTPS_PORT,
+        destination_port: classification.destination_port(),
         expires_at_ms: classification
             .expires_at_ms()
             .min(egress.expires_at_ms())
@@ -370,7 +370,11 @@ pub struct WindowsPacketFlowRegistry {
     pub updated_at_ms: u64,
     pub retired_capture_generation_high_watermark: u64,
     pub capture_flow_owners: BTreeMap<WindowsPacketCaptureFlowIdentity, WindowsPacketFlowKey>,
+    pub data_plane_session_owners: BTreeMap<u64, WindowsPacketFlowKey>,
+    pub data_plane_request_owners: BTreeMap<String, WindowsPacketFlowKey>,
     pub flows: BTreeMap<WindowsPacketFlowKey, WindowsPacketFlowState>,
+    terminal_flow_order: BTreeSet<(u64, WindowsPacketFlowKey)>,
+    active_flows: usize,
 }
 
 impl WindowsPacketFlowRegistry {
@@ -380,15 +384,16 @@ impl WindowsPacketFlowRegistry {
             updated_at_ms: started_at_ms,
             retired_capture_generation_high_watermark: 0,
             capture_flow_owners: BTreeMap::new(),
+            data_plane_session_owners: BTreeMap::new(),
+            data_plane_request_owners: BTreeMap::new(),
             flows: BTreeMap::new(),
+            terminal_flow_order: BTreeSet::new(),
+            active_flows: 0,
         }
     }
 
-    pub fn active_flow_count(&self) -> usize {
-        self.flows
-            .values()
-            .filter(|flow| !flow.phase.is_terminal())
-            .count()
+    pub const fn active_flow_count(&self) -> usize {
+        self.active_flows
     }
 }
 
@@ -531,11 +536,103 @@ pub enum WindowsPacketFlowCommand {
     },
 }
 
+impl WindowsPacketFlowCommand {
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::OpenBackend { .. } => "open_backend",
+            Self::Forward { .. } => "forward",
+            Self::PauseReads { .. } => "pause_reads",
+            Self::ResumeReads { .. } => "resume_reads",
+            Self::HalfCloseWrite { .. } => "half_close_write",
+            Self::CloseFlow { .. } => "close_flow",
+            Self::ScheduleIdleDeadline { .. } => "schedule_idle_deadline",
+            Self::ScheduleBackpressureDeadline { .. } => "schedule_backpressure_deadline",
+            Self::DataPlane { .. } => "data_plane",
+            Self::RejectFlow { .. } => "reject_flow",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowsPacketFlowTransition {
     pub state: WindowsPacketFlowRegistry,
     pub commands: Vec<WindowsPacketFlowCommand>,
 }
+
+pub trait WindowsPacketFlowEffects {
+    type Error: fmt::Display;
+
+    /// Executes one command atomically. A failed command must leave no visible
+    /// effect; commands before the retry cursor remain committed.
+    fn execute(&mut self, command: &WindowsPacketFlowCommand) -> Result<(), Self::Error>;
+}
+
+pub fn execute_windows_packet_flow_transition<E: WindowsPacketFlowEffects>(
+    transition: &WindowsPacketFlowTransition,
+    effects: &mut E,
+) -> Result<(), WindowsPacketFlowEffectExecutionError> {
+    execute_windows_packet_flow_transition_from(transition, effects, 0)
+}
+
+/// Resumes the retained transition without replaying its completed prefix.
+/// The caller commits `transition.state` only after this returns `Ok`.
+pub fn execute_windows_packet_flow_transition_from<E: WindowsPacketFlowEffects>(
+    transition: &WindowsPacketFlowTransition,
+    effects: &mut E,
+    next_command_index: usize,
+) -> Result<(), WindowsPacketFlowEffectExecutionError> {
+    if next_command_index > transition.commands.len() {
+        return Err(WindowsPacketFlowEffectExecutionError {
+            command: "transition_cursor",
+            message: format!(
+                "command cursor {next_command_index} exceeds batch length {}",
+                transition.commands.len()
+            ),
+            failed_command_index: next_command_index,
+            next_command_index,
+            completed_commands: 0,
+        });
+    }
+
+    for (command_index, command) in transition
+        .commands
+        .iter()
+        .enumerate()
+        .skip(next_command_index)
+    {
+        effects
+            .execute(command)
+            .map_err(|error| WindowsPacketFlowEffectExecutionError {
+                command: command.kind(),
+                message: error.to_string(),
+                failed_command_index: command_index,
+                next_command_index: command_index,
+                completed_commands: command_index,
+            })?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowsPacketFlowEffectExecutionError {
+    pub command: &'static str,
+    pub message: String,
+    pub failed_command_index: usize,
+    pub next_command_index: usize,
+    pub completed_commands: usize,
+}
+
+impl fmt::Display for WindowsPacketFlowEffectExecutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} effect at command {} failed after {} completed command(s): {}",
+            self.command, self.failed_command_index, self.completed_commands, self.message
+        )
+    }
+}
+
+impl std::error::Error for WindowsPacketFlowEffectExecutionError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WindowsPacketFlowError {
@@ -584,6 +681,20 @@ impl fmt::Display for WindowsPacketFlowError {
 
 impl std::error::Error for WindowsPacketFlowError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowsPacketFlowReductionError {
+    pub state: Box<WindowsPacketFlowRegistry>,
+    pub error: WindowsPacketFlowError,
+}
+
+impl fmt::Display for WindowsPacketFlowReductionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for WindowsPacketFlowReductionError {}
+
 fn bounded_reason(reason: &str) -> String {
     reason.chars().take(MAX_REASON_CHARS).collect()
 }
@@ -595,10 +706,7 @@ fn reject_admission(
     reason: &str,
     commands: &mut Vec<WindowsPacketFlowCommand>,
 ) {
-    commands.push(WindowsPacketFlowCommand::RejectFlow {
-        key,
-        reason: reason.to_owned(),
-    });
+    reject_flow(key, reason, commands);
     for event in [
         WindowsDataPlaneEvent::CancelRequested {
             now_ms,
@@ -613,6 +721,17 @@ fn reject_admission(
     ] {
         commands.push(WindowsPacketFlowCommand::DataPlane { event });
     }
+}
+
+fn reject_flow(
+    key: WindowsPacketFlowKey,
+    reason: &str,
+    commands: &mut Vec<WindowsPacketFlowCommand>,
+) {
+    commands.push(WindowsPacketFlowCommand::RejectFlow {
+        key,
+        reason: reason.to_owned(),
+    });
 }
 
 fn data_plane_event(
@@ -814,39 +933,54 @@ fn maybe_finish_gracefully(
 }
 
 fn prune_terminal_flows(registry: &mut WindowsPacketFlowRegistry, retained_limit: usize) {
-    let terminal_count = registry
-        .flows
-        .values()
-        .filter(|flow| flow.phase.is_terminal())
-        .count();
-    let remove_count = terminal_count.saturating_sub(retained_limit);
-    if remove_count == 0 {
-        return;
-    }
-    let mut terminal: Vec<_> = registry
-        .flows
-        .iter()
-        .filter(|(_, flow)| flow.phase.is_terminal())
-        .map(|(key, flow)| (flow.updated_at_ms, *key))
-        .collect();
-    terminal.sort_unstable();
-    for (_, key) in terminal.into_iter().take(remove_count) {
+    while registry.terminal_flow_order.len() > retained_limit {
+        let Some((_, key)) = registry.terminal_flow_order.pop_first() else {
+            break;
+        };
         registry.flows.remove(&key);
     }
 }
 
+fn finish_transition(
+    mut state: WindowsPacketFlowRegistry,
+    now_ms: u64,
+    commands: Vec<WindowsPacketFlowCommand>,
+    retained_limit: usize,
+) -> WindowsPacketFlowTransition {
+    state.updated_at_ms = now_ms;
+    prune_terminal_flows(&mut state, retained_limit);
+    WindowsPacketFlowTransition { state, commands }
+}
+
 pub fn reduce_windows_packet_flow(
-    registry: &WindowsPacketFlowRegistry,
+    mut registry: WindowsPacketFlowRegistry,
     event: &WindowsPacketFlowEvent,
     config: &WindowsPacketFlowConfig,
-) -> Result<WindowsPacketFlowTransition, WindowsPacketFlowError> {
-    config.validate()?;
+) -> Result<WindowsPacketFlowTransition, WindowsPacketFlowReductionError> {
+    macro_rules! fail {
+        ($error:expr) => {
+            return Err(WindowsPacketFlowReductionError {
+                state: Box::new(registry),
+                error: $error,
+            })
+        };
+    }
+    macro_rules! try_flow {
+        ($result:expr) => {
+            match $result {
+                Ok(value) => value,
+                Err(error) => fail!(error),
+            }
+        };
+    }
+
+    if let Err(error) = config.validate() {
+        fail!(error);
+    }
     let now_ms = event.now_ms();
     if now_ms < registry.updated_at_ms {
-        return Err(WindowsPacketFlowError::NonMonotonicEvent);
+        fail!(WindowsPacketFlowError::NonMonotonicEvent);
     }
-    let mut next = registry.clone();
-    next.updated_at_ms = now_ms;
     let mut commands = Vec::new();
 
     if let WindowsPacketFlowEvent::CaptureGenerationRetired {
@@ -854,36 +988,59 @@ pub fn reduce_windows_packet_flow(
     } = event
     {
         if *capture_generation == 0
-            || *capture_generation <= next.retired_capture_generation_high_watermark
+            || *capture_generation <= registry.retired_capture_generation_high_watermark
         {
-            return Ok(WindowsPacketFlowTransition {
-                state: next,
+            return Ok(finish_transition(
+                registry,
+                now_ms,
                 commands,
-            });
+                config.max_retained_terminal_flows,
+            ));
         }
-        if next.flows.iter().any(|(key, flow)| {
+        if registry.flows.iter().any(|(key, flow)| {
             key.capture_generation <= *capture_generation && !flow.phase.is_terminal()
         }) {
-            return Err(WindowsPacketFlowError::ActiveCaptureGenerationRetirement);
+            fail!(WindowsPacketFlowError::ActiveCaptureGenerationRetirement);
         }
-        next.retired_capture_generation_high_watermark = *capture_generation;
-        next.capture_flow_owners
+        registry.retired_capture_generation_high_watermark = *capture_generation;
+        registry
+            .capture_flow_owners
             .retain(|identity, _| identity.capture_generation > *capture_generation);
-        next.flows
+        registry
+            .data_plane_session_owners
+            .retain(|_, key| key.capture_generation > *capture_generation);
+        registry
+            .data_plane_request_owners
+            .retain(|_, key| key.capture_generation > *capture_generation);
+        registry
+            .terminal_flow_order
+            .retain(|(_, key)| key.capture_generation > *capture_generation);
+        registry
+            .flows
             .retain(|key, _| key.capture_generation > *capture_generation);
-        return Ok(WindowsPacketFlowTransition {
-            state: next,
+        return Ok(finish_transition(
+            registry,
+            now_ms,
             commands,
-        });
+            config.max_retained_terminal_flows,
+        ));
     }
 
     let key = event
         .flow_key()
-        .ok_or(WindowsPacketFlowError::InvalidTransition)?;
+        .unwrap_or_else(|| unreachable!("capture retirement was handled above"));
 
     if let WindowsPacketFlowEvent::FlowOpened { admission, .. } = event {
         let identity = key.capture_identity();
-        if key.capture_generation <= next.retired_capture_generation_high_watermark {
+        let session_owner = registry
+            .data_plane_session_owners
+            .get(&admission.session_id)
+            .copied();
+        let request_owner = registry
+            .data_plane_request_owners
+            .get(&admission.request.request_id)
+            .copied();
+        if key.capture_generation <= registry.retired_capture_generation_high_watermark {
             reject_admission(
                 admission,
                 key,
@@ -891,7 +1048,7 @@ pub fn reduce_windows_packet_flow(
                 "capture_generation_retired",
                 &mut commands,
             );
-        } else if let Some(owner) = next.capture_flow_owners.get(&identity) {
+        } else if let Some(owner) = registry.capture_flow_owners.get(&identity) {
             if *owner != key {
                 reject_admission(
                     admission,
@@ -901,22 +1058,35 @@ pub fn reduce_windows_packet_flow(
                     &mut commands,
                 );
             }
-            return Ok(WindowsPacketFlowTransition {
-                state: next,
+            return Ok(finish_transition(
+                registry,
+                now_ms,
                 commands,
-            });
+                config.max_retained_terminal_flows,
+            ));
+        } else if session_owner.is_some_and(|owner| owner != key) {
+            reject_flow(key, "data_plane_session_already_owned", &mut commands);
+        } else if request_owner.is_some_and(|owner| owner != key) {
+            reject_flow(key, "data_plane_request_already_owned", &mut commands);
         } else if now_ms >= admission.expires_at_ms {
             reject_admission(admission, key, now_ms, "admission_expired", &mut commands);
-        } else if next.capture_flow_owners.len() >= config.max_retained_flow_identities {
+        } else if registry.capture_flow_owners.len() >= config.max_retained_flow_identities {
             reject_admission(admission, key, now_ms, "identity_limit", &mut commands);
-        } else if next.active_flow_count() >= config.max_active_flows {
+        } else if registry.active_flow_count() >= config.max_active_flows {
             reject_admission(admission, key, now_ms, "flow_limit", &mut commands);
         } else {
-            let idle_deadline_at_ms = now_ms
-                .checked_add(config.idle_timeout_ms)
-                .ok_or(WindowsPacketFlowError::TimeOverflow)?;
-            next.capture_flow_owners.insert(identity, key);
-            next.flows.insert(
+            let idle_deadline_at_ms = match now_ms.checked_add(config.idle_timeout_ms) {
+                Some(deadline) => deadline,
+                None => fail!(WindowsPacketFlowError::TimeOverflow),
+            };
+            registry.capture_flow_owners.insert(identity, key);
+            registry
+                .data_plane_session_owners
+                .insert(admission.session_id, key);
+            registry
+                .data_plane_request_owners
+                .insert(admission.request.request_id.clone(), key);
+            registry.flows.insert(
                 key,
                 WindowsPacketFlowState {
                     admission: admission.clone(),
@@ -934,6 +1104,7 @@ pub fn reduce_windows_packet_flow(
                     updated_at_ms: now_ms,
                 },
             );
+            registry.active_flows += 1;
             commands.push(WindowsPacketFlowCommand::OpenBackend {
                 key,
                 session_id: admission.session_id,
@@ -946,46 +1117,54 @@ pub fn reduce_windows_packet_flow(
                 at_ms: idle_deadline_at_ms,
             });
         }
-        prune_terminal_flows(&mut next, config.max_retained_terminal_flows);
-        return Ok(WindowsPacketFlowTransition {
-            state: next,
+        return Ok(finish_transition(
+            registry,
+            now_ms,
             commands,
-        });
+            config.max_retained_terminal_flows,
+        ));
     }
 
-    let Some(flow) = next.flows.get_mut(&key) else {
-        return Ok(WindowsPacketFlowTransition {
-            state: next,
+    let Some(existing_flow) = registry.flows.get(&key) else {
+        return Ok(finish_transition(
+            registry,
+            now_ms,
             commands,
-        });
+            config.max_retained_terminal_flows,
+        ));
     };
-    if flow.phase.is_terminal() {
-        return Ok(WindowsPacketFlowTransition {
-            state: next,
+    if existing_flow.phase.is_terminal() {
+        return Ok(finish_transition(
+            registry,
+            now_ms,
             commands,
-        });
+            config.max_retained_terminal_flows,
+        ));
     }
+    let mut flow = existing_flow.clone();
 
     match event {
         WindowsPacketFlowEvent::BackendReady { .. } => {
             if flow.backend_ready {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             }
             if !matches!(
                 flow.phase,
                 WindowsPacketFlowPhase::Opening | WindowsPacketFlowPhase::Draining
             ) {
-                return Err(WindowsPacketFlowError::InvalidTransition);
+                fail!(WindowsPacketFlowError::InvalidTransition);
             }
             flow.backend_ready = true;
             if flow.phase == WindowsPacketFlowPhase::Opening {
                 flow.phase = WindowsPacketFlowPhase::Relaying;
             }
             commands.push(data_plane_event(
-                flow,
+                &flow,
                 now_ms,
                 |now_ms, request_id, session_id| WindowsDataPlaneEvent::BackendConnected {
                     now_ms,
@@ -1002,12 +1181,12 @@ pub fn reduce_windows_packet_flow(
                 });
             }
             maybe_forward_half_close(
-                flow,
+                &mut flow,
                 key,
                 WindowsPacketFlowDirection::ClientToBackend,
                 &mut commands,
             );
-            refresh_idle(flow, key, now_ms, config, &mut commands)?;
+            try_flow!(refresh_idle(&mut flow, key, now_ms, config, &mut commands));
         }
         WindowsPacketFlowEvent::Payload {
             direction,
@@ -1016,10 +1195,10 @@ pub fn reduce_windows_packet_flow(
             ..
         } => {
             if *bytes == 0 {
-                return Err(WindowsPacketFlowError::EmptyPayload);
+                fail!(WindowsPacketFlowError::EmptyPayload);
             }
             if *bytes > config.max_chunk_bytes {
-                return Err(WindowsPacketFlowError::PayloadTooLarge);
+                fail!(WindowsPacketFlowError::PayloadTooLarge);
             }
             let input_open = match direction {
                 WindowsPacketFlowDirection::ClientToBackend => flow.client_input_open,
@@ -1029,30 +1208,31 @@ pub fn reduce_windows_packet_flow(
                 || (*direction == WindowsPacketFlowDirection::BackendToClient
                     && !flow.backend_ready)
             {
-                return Err(WindowsPacketFlowError::InvalidTransition);
+                fail!(WindowsPacketFlowError::InvalidTransition);
             }
             let next_sequence = flow.queue(*direction).next_sequence;
             if *sequence < next_sequence {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             }
             if *sequence != next_sequence {
-                return Err(WindowsPacketFlowError::OutOfOrderPayload);
+                fail!(WindowsPacketFlowError::OutOfOrderPayload);
             }
-            let new_bytes = flow
-                .queue(*direction)
-                .bytes
-                .checked_add(*bytes)
-                .ok_or(WindowsPacketFlowError::ByteCountOverflow)?;
+            let new_bytes = match flow.queue(*direction).bytes.checked_add(*bytes) {
+                Some(bytes) => bytes,
+                None => fail!(WindowsPacketFlowError::ByteCountOverflow),
+            };
             if flow.queue(*direction).frames.len() >= config.max_queued_frames_per_direction {
                 let reason = match direction {
                     WindowsPacketFlowDirection::ClientToBackend => "packet_flow_frame_limit",
                     WindowsPacketFlowDirection::BackendToClient => "packet_flow_client_frame_limit",
                 };
                 close_for_directional_pressure(
-                    flow,
+                    &mut flow,
                     key,
                     now_ms,
                     *direction,
@@ -1067,7 +1247,7 @@ pub fn reduce_windows_packet_flow(
                     }
                 };
                 close_for_directional_pressure(
-                    flow,
+                    &mut flow,
                     key,
                     now_ms,
                     *direction,
@@ -1084,15 +1264,16 @@ pub fn reduce_windows_packet_flow(
                         bytes: *bytes,
                     });
                     queue.bytes = new_bytes;
-                    queue.next_sequence = queue
-                        .next_sequence
-                        .checked_add(1)
-                        .ok_or(WindowsPacketFlowError::SequenceOverflow)?;
+                    queue.next_sequence = match queue.next_sequence.checked_add(1) {
+                        Some(sequence) => sequence,
+                        None => fail!(WindowsPacketFlowError::SequenceOverflow),
+                    };
                     if queue.bytes >= config.high_watermark_bytes && !queue.paused {
                         queue.paused = true;
-                        let deadline = now_ms
-                            .checked_add(config.backpressure_timeout_ms)
-                            .ok_or(WindowsPacketFlowError::TimeOverflow)?;
+                        let deadline = match now_ms.checked_add(config.backpressure_timeout_ms) {
+                            Some(deadline) => deadline,
+                            None => fail!(WindowsPacketFlowError::TimeOverflow),
+                        };
                         queue.backpressure_deadline_at_ms = Some(deadline);
                         backpressure_deadline = Some(deadline);
                     }
@@ -1118,7 +1299,7 @@ pub fn reduce_windows_packet_flow(
                         at_ms: deadline,
                     });
                 }
-                refresh_idle(flow, key, now_ms, config, &mut commands)?;
+                try_flow!(refresh_idle(&mut flow, key, now_ms, config, &mut commands));
             }
         }
         WindowsPacketFlowEvent::Forwarded {
@@ -1127,7 +1308,7 @@ pub fn reduce_windows_packet_flow(
             ..
         } => {
             if !flow.backend_ready {
-                return Err(WindowsPacketFlowError::InvalidForwardAcknowledgement);
+                fail!(WindowsPacketFlowError::InvalidForwardAcknowledgement);
             }
             let input_open = match direction {
                 WindowsPacketFlowDirection::ClientToBackend => flow.client_input_open,
@@ -1139,13 +1320,15 @@ pub fn reduce_windows_packet_flow(
                 .back()
                 .map(|frame| frame.sequence)
             else {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             };
             if *through_sequence > last_sequence {
-                return Err(WindowsPacketFlowError::InvalidForwardAcknowledgement);
+                fail!(WindowsPacketFlowError::InvalidForwardAcknowledgement);
             }
             let (forwarded_bytes, resume_reads) = {
                 let queue = flow.queue_mut(*direction);
@@ -1158,14 +1341,15 @@ pub fn reduce_windows_packet_flow(
                     let Some(frame) = queue.frames.pop_front() else {
                         break;
                     };
-                    forwarded_bytes = forwarded_bytes
-                        .checked_add(frame.bytes)
-                        .ok_or(WindowsPacketFlowError::ByteCountOverflow)?;
+                    forwarded_bytes = match forwarded_bytes.checked_add(frame.bytes) {
+                        Some(bytes) => bytes,
+                        None => fail!(WindowsPacketFlowError::ByteCountOverflow),
+                    };
                 }
-                queue.bytes = queue
-                    .bytes
-                    .checked_sub(forwarded_bytes)
-                    .ok_or(WindowsPacketFlowError::QueueAccountingMismatch)?;
+                queue.bytes = match queue.bytes.checked_sub(forwarded_bytes) {
+                    Some(bytes) => bytes,
+                    None => fail!(WindowsPacketFlowError::QueueAccountingMismatch),
+                };
                 let clear_backpressure = queue.paused && queue.bytes <= config.low_watermark_bytes;
                 if clear_backpressure {
                     queue.paused = false;
@@ -1190,23 +1374,25 @@ pub fn reduce_windows_packet_flow(
                 });
             }
             if forwarded_bytes == 0 {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             }
-            maybe_forward_half_close(flow, key, *direction, &mut commands);
-            maybe_finish_gracefully(flow, key, now_ms, &mut commands);
+            maybe_forward_half_close(&mut flow, key, *direction, &mut commands);
+            maybe_finish_gracefully(&mut flow, key, now_ms, &mut commands);
             if !flow.phase.is_terminal() {
-                refresh_idle(flow, key, now_ms, config, &mut commands)?;
+                try_flow!(refresh_idle(&mut flow, key, now_ms, config, &mut commands));
             }
         }
         WindowsPacketFlowEvent::HalfClosed { direction, .. } => {
             if flow.admission.key.transport != WindowsPacketFlowTransport::Tcp {
-                return Err(WindowsPacketFlowError::InvalidTransportTransition);
+                fail!(WindowsPacketFlowError::InvalidTransportTransition);
             }
             if *direction == WindowsPacketFlowDirection::BackendToClient && !flow.backend_ready {
-                return Err(WindowsPacketFlowError::InvalidTransition);
+                fail!(WindowsPacketFlowError::InvalidTransition);
             }
             match direction {
                 WindowsPacketFlowDirection::ClientToBackend if flow.client_input_open => {
@@ -1216,77 +1402,93 @@ pub fn reduce_windows_packet_flow(
                     flow.backend_input_open = false;
                 }
                 _ => {
-                    return Ok(WindowsPacketFlowTransition {
-                        state: next,
+                    return Ok(finish_transition(
+                        registry,
+                        now_ms,
                         commands,
-                    })
+                        config.max_retained_terminal_flows,
+                    ))
                 }
             }
-            maybe_forward_half_close(flow, key, *direction, &mut commands);
-            maybe_finish_gracefully(flow, key, now_ms, &mut commands);
+            maybe_forward_half_close(&mut flow, key, *direction, &mut commands);
+            maybe_finish_gracefully(&mut flow, key, now_ms, &mut commands);
             if !flow.phase.is_terminal() {
-                refresh_idle(flow, key, now_ms, config, &mut commands)?;
+                try_flow!(refresh_idle(&mut flow, key, now_ms, config, &mut commands));
             }
         }
         WindowsPacketFlowEvent::DatagramSideClosed { .. } => {
             if flow.admission.key.transport != WindowsPacketFlowTransport::Udp {
-                return Err(WindowsPacketFlowError::InvalidTransportTransition);
+                fail!(WindowsPacketFlowError::InvalidTransportTransition);
             }
             if !flow.backend_ready {
                 cancel_flow(
-                    flow,
+                    &mut flow,
                     key,
                     now_ms,
                     "datagram_closed_before_backend_ready",
                     &mut commands,
                 );
-                prune_terminal_flows(&mut next, config.max_retained_terminal_flows);
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
-                    commands,
-                });
-            }
-            flow.client_input_open = false;
-            flow.backend_input_open = false;
-            maybe_finish_gracefully(flow, key, now_ms, &mut commands);
-            if !flow.phase.is_terminal() {
-                refresh_idle(flow, key, now_ms, config, &mut commands)?;
+            } else {
+                flow.client_input_open = false;
+                flow.backend_input_open = false;
+                maybe_finish_gracefully(&mut flow, key, now_ms, &mut commands);
+                if !flow.phase.is_terminal() {
+                    try_flow!(refresh_idle(&mut flow, key, now_ms, config, &mut commands));
+                }
             }
         }
         WindowsPacketFlowEvent::Reset {
             direction, reason, ..
         } => {
             if *direction == WindowsPacketFlowDirection::BackendToClient {
-                fail_backend(flow, key, now_ms, reason, &mut commands);
+                fail_backend(&mut flow, key, now_ms, reason, &mut commands);
             } else {
-                cancel_flow(flow, key, now_ms, reason, &mut commands);
+                cancel_flow(&mut flow, key, now_ms, reason, &mut commands);
             }
         }
         WindowsPacketFlowEvent::Cancelled { .. } => {
-            cancel_flow(flow, key, now_ms, "packet_flow_cancelled", &mut commands);
+            cancel_flow(
+                &mut flow,
+                key,
+                now_ms,
+                "packet_flow_cancelled",
+                &mut commands,
+            );
         }
         WindowsPacketFlowEvent::IdleDeadline { .. } => {
             if now_ms < flow.idle_deadline_at_ms {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             }
-            fail_backend(flow, key, now_ms, "packet_flow_idle_timeout", &mut commands);
+            fail_backend(
+                &mut flow,
+                key,
+                now_ms,
+                "packet_flow_idle_timeout",
+                &mut commands,
+            );
         }
         WindowsPacketFlowEvent::BackpressureDeadline { direction, .. } => {
             let queue = flow.queue(*direction);
             let Some(deadline) = queue.backpressure_deadline_at_ms else {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             };
             if now_ms < deadline || !queue.paused {
-                return Ok(WindowsPacketFlowTransition {
-                    state: next,
+                return Ok(finish_transition(
+                    registry,
+                    now_ms,
                     commands,
-                });
+                    config.max_retained_terminal_flows,
+                ));
             }
             let reason = match direction {
                 WindowsPacketFlowDirection::ClientToBackend => "packet_flow_backpressure_timeout",
@@ -1294,7 +1496,14 @@ pub fn reduce_windows_packet_flow(
                     "packet_flow_client_backpressure_timeout"
                 }
             };
-            close_for_directional_pressure(flow, key, now_ms, *direction, reason, &mut commands);
+            close_for_directional_pressure(
+                &mut flow,
+                key,
+                now_ms,
+                *direction,
+                reason,
+                &mut commands,
+            );
         }
         WindowsPacketFlowEvent::FlowOpened { .. }
         | WindowsPacketFlowEvent::CaptureGenerationRetired { .. } => {
@@ -1302,9 +1511,17 @@ pub fn reduce_windows_packet_flow(
         }
     }
 
-    prune_terminal_flows(&mut next, config.max_retained_terminal_flows);
-    Ok(WindowsPacketFlowTransition {
-        state: next,
+    if flow.phase.is_terminal() {
+        registry.active_flows = registry.active_flows.saturating_sub(1);
+        registry
+            .terminal_flow_order
+            .insert((flow.updated_at_ms, key));
+    }
+    registry.flows.insert(key, flow);
+    Ok(finish_transition(
+        registry,
+        now_ms,
         commands,
-    })
+        config.max_retained_terminal_flows,
+    ))
 }

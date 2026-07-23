@@ -4,7 +4,7 @@ use slipstream_core::routing_policy::{bundled_policy_v1, classify_route_policy};
 use slipstream_windows_adapter::data_plane::{
     WindowsDataPlaneBackend, WindowsDataPlaneEvent, WindowsDataPlaneRequest,
 };
-use slipstream_windows_adapter::packet_adapter::v2::{
+use slipstream_windows_adapter::packet_adapter::v3::{
     classify_windows_packet_capture, WindowsPacketCaptureAttribution, WindowsPacketCaptureDecision,
     WindowsPacketCaptureObservation, WindowsPacketCaptureTransport,
     WindowsPacketHostnameEvidenceSource,
@@ -15,9 +15,10 @@ use slipstream_windows_adapter::packet_egress::{
     WindowsPacketInterfaceIdentity, WindowsPacketSocketInterfaceBinding,
 };
 use slipstream_windows_adapter::packet_flow::{
-    prepare_windows_packet_flow, reduce_windows_packet_flow, WindowsPacketFlowAdmission,
-    WindowsPacketFlowAdmissionErrorCode, WindowsPacketFlowCommand, WindowsPacketFlowConfig,
-    WindowsPacketFlowDirection, WindowsPacketFlowEvent, WindowsPacketFlowPhase,
+    execute_windows_packet_flow_transition_from, prepare_windows_packet_flow,
+    reduce_windows_packet_flow, WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode,
+    WindowsPacketFlowCommand, WindowsPacketFlowConfig, WindowsPacketFlowDirection,
+    WindowsPacketFlowEffects, WindowsPacketFlowEvent, WindowsPacketFlowPhase,
     WindowsPacketFlowRegistry, WindowsPacketFlowTransport, WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
 };
 
@@ -175,7 +176,14 @@ fn admission_with_key(
     capture_generation: u64,
     flow_id: u64,
 ) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
-    admission_with_owner(host, backend, transport, capture_generation, flow_id, 9)
+    admission_with_owner(
+        host,
+        backend,
+        transport,
+        capture_generation,
+        flow_id,
+        flow_id,
+    )
 }
 
 fn admission_with_owner(
@@ -185,6 +193,49 @@ fn admission_with_owner(
     capture_generation: u64,
     flow_id: u64,
     session_id: u64,
+) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
+    admission_with_port_owner(
+        host,
+        backend,
+        transport,
+        capture_generation,
+        flow_id,
+        session_id,
+        443,
+    )
+}
+
+fn admission_with_port_owner(
+    host: &str,
+    backend: WindowsDataPlaneBackend,
+    transport: WindowsPacketCaptureTransport,
+    capture_generation: u64,
+    flow_id: u64,
+    session_id: u64,
+    destination_port: u16,
+) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
+    admission_with_request_owner(
+        host,
+        backend,
+        transport,
+        capture_generation,
+        flow_id,
+        session_id,
+        destination_port,
+        format!("packet-{flow_id}-{session_id}"),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn admission_with_request_owner(
+    host: &str,
+    backend: WindowsDataPlaneBackend,
+    transport: WindowsPacketCaptureTransport,
+    capture_generation: u64,
+    flow_id: u64,
+    session_id: u64,
+    destination_port: u16,
+    request_id: String,
 ) -> Result<WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode> {
     let policy_tables = bundled_policy_v1();
     let source = match transport {
@@ -203,6 +254,7 @@ fn admission_with_owner(
         flow_id,
         transport,
         destination: "104.16.58.5".to_owned(),
+        destination_port,
         observed_at_ms: 1_100,
         expires_at_ms: 5_000,
         attribution: WindowsPacketCaptureAttribution::Hostname {
@@ -218,7 +270,7 @@ fn admission_with_owner(
     let egress = prepare_windows_packet_egress(&egress_request_for(capture_generation, flow_id))
         .expect("valid egress fixture");
     let request = WindowsDataPlaneRequest {
-        request_id: format!("packet-{}-{session_id}", observation.flow_id),
+        request_id,
         policy: classify_route_policy(host, &policy_tables),
         backend,
         started_at_ms: 1_200,
@@ -239,10 +291,54 @@ fn apply(
     event: WindowsPacketFlowEvent,
     config: &WindowsPacketFlowConfig,
 ) -> Vec<WindowsPacketFlowCommand> {
-    let transition = reduce_windows_packet_flow(state, &event, config)
-        .unwrap_or_else(|error| panic!("{event:?}: {error}"));
+    let started_at_ms = state.started_at_ms;
+    let owned = std::mem::replace(state, WindowsPacketFlowRegistry::new(started_at_ms));
+    let transition = match reduce_windows_packet_flow(owned, &event, config) {
+        Ok(transition) => transition,
+        Err(failure) => {
+            *state = *failure.state;
+            panic!("{event:?}: {}", failure.error);
+        }
+    };
     *state = transition.state;
     transition.commands
+}
+
+fn reduce_error(
+    state: &mut WindowsPacketFlowRegistry,
+    event: &WindowsPacketFlowEvent,
+    config: &WindowsPacketFlowConfig,
+) -> slipstream_windows_adapter::packet_flow::WindowsPacketFlowError {
+    let before = state.clone();
+    let started_at_ms = state.started_at_ms;
+    let owned = std::mem::replace(state, WindowsPacketFlowRegistry::new(started_at_ms));
+    let failure = reduce_windows_packet_flow(owned, event, config).expect_err("event must fail");
+    assert_eq!(*failure.state, before, "failed reduction must be atomic");
+    *state = *failure.state;
+    failure.error
+}
+
+#[derive(Default)]
+struct FailSecondForwardOnce {
+    completed: Vec<WindowsPacketFlowCommand>,
+    successful_forwards: usize,
+    failed: bool,
+}
+
+impl WindowsPacketFlowEffects for FailSecondForwardOnce {
+    type Error = &'static str;
+
+    fn execute(&mut self, command: &WindowsPacketFlowCommand) -> Result<(), Self::Error> {
+        if matches!(command, WindowsPacketFlowCommand::Forward { .. }) {
+            if self.successful_forwards == 1 && !self.failed {
+                self.failed = true;
+                return Err("injected second-forward failure");
+            }
+            self.successful_forwards += 1;
+        }
+        self.completed.push(command.clone());
+        Ok(())
+    }
 }
 
 fn fixture_event(
@@ -384,6 +480,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
     for invariant in [
         "pure_forwarding_contract_only",
         "capture_classification_and_egress_plan_bound",
+        "original_destination_port_bound",
         "open_backend_preserves_full_egress_binding",
         "admission_expires_by_first_payload_deadline",
         "active_policy_revalidated",
@@ -405,9 +502,12 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "reset_clears_owned_queues",
         "rejected_open_cancels_unowned_session",
         "capture_flow_identity_remains_owned_until_generation_retirement",
+        "data_plane_session_has_one_packet_flow_owner",
         "capture_generation_retirement_is_monotonic",
         "retired_generation_cannot_reopen",
         "terminal_history_bounded",
+        "keyed_event_work_is_flow_local",
+        "effect_batches_resume_without_replaying_completed_commands",
     ] {
         assert_eq!(fixture.invariants[invariant], true, "{invariant}");
     }
@@ -572,6 +672,37 @@ fn admission_binds_capture_egress_policy_and_protected_routes() {
 }
 
 #[test]
+fn admission_and_backend_open_preserve_a_nonstandard_destination_port() {
+    let admission = admission_with_port_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        7,
+        41,
+        41,
+        8443,
+    )
+    .expect("capture v3 should retain a valid nonstandard TLS port");
+    assert_eq!(admission.destination_port(), 8443);
+
+    let commands = apply(
+        &mut WindowsPacketFlowRegistry::new(1_200),
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission,
+        },
+        &contract().config,
+    );
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::OpenBackend {
+            destination_port: 8443,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn duplicate_open_is_idempotent_and_flow_limit_cancels_the_unowned_session() {
     let mut config = contract().config;
     config.max_active_flows = 1;
@@ -628,6 +759,110 @@ fn duplicate_open_is_idempotent_and_flow_limit_cancels_the_unowned_session() {
 }
 
 #[test]
+fn one_data_plane_session_cannot_own_two_capture_flows() {
+    let config = contract().config;
+    let first = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        7,
+        41,
+        90,
+    )
+    .expect("first owner should be admitted");
+    let second = admission_with_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        8,
+        42,
+        90,
+    )
+    .expect("second capture has independently valid boundary evidence");
+    let second_key = second.key();
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission: first,
+        },
+        &config,
+    );
+    let rejected = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_210,
+            admission: second,
+        },
+        &config,
+    );
+
+    assert!(!state.flows.contains_key(&second_key));
+    assert_eq!(state.active_flow_count(), 1);
+    assert_eq!(state.data_plane_session_owners.len(), 1);
+    assert!(rejected.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "data_plane_session_already_owned"
+    )));
+    assert!(!rejected
+        .iter()
+        .any(|command| matches!(command, WindowsPacketFlowCommand::DataPlane { .. })));
+
+    let first = admission_with_request_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        9,
+        43,
+        91,
+        443,
+        "shared-request".to_owned(),
+    )
+    .expect("first request owner should be admitted");
+    let second = admission_with_request_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        10,
+        44,
+        92,
+        443,
+        "shared-request".to_owned(),
+    )
+    .expect("second request identity is structurally valid");
+    let second_key = second.key();
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission: first,
+        },
+        &config,
+    );
+    let rejected = apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_210,
+            admission: second,
+        },
+        &config,
+    );
+    assert!(!state.flows.contains_key(&second_key));
+    assert_eq!(state.data_plane_request_owners.len(), 1);
+    assert!(rejected.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::RejectFlow { reason, .. }
+            if reason == "data_plane_request_already_owned"
+    )));
+    assert!(!rejected
+        .iter()
+        .any(|command| matches!(command, WindowsPacketFlowCommand::DataPlane { .. })));
+}
+
+#[test]
 fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning() {
     let mut config = contract().config;
     config.max_retained_terminal_flows = 1;
@@ -651,15 +886,15 @@ fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning()
         &config,
     );
     assert_eq!(
-        reduce_windows_packet_flow(
-            &state,
+        reduce_error(
+            &mut state,
             &WindowsPacketFlowEvent::CaptureGenerationRetired {
                 now_ms: 1_205,
                 capture_generation: 7,
             },
             &config,
         ),
-        Err(slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::ActiveCaptureGenerationRetirement)
+        slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::ActiveCaptureGenerationRetirement
     );
     apply(
         &mut state,
@@ -707,6 +942,8 @@ fn capture_identity_tombstone_blocks_new_session_and_survives_terminal_pruning()
     );
     assert!(state.flows.is_empty());
     assert!(state.capture_flow_owners.is_empty());
+    assert!(state.data_plane_session_owners.is_empty());
+    assert!(state.data_plane_request_owners.is_empty());
     assert_eq!(state.retired_capture_generation_high_watermark, 7);
 
     let retired_replay = admission_with_owner(
@@ -825,6 +1062,48 @@ fn queued_payload_waits_for_backend_and_backpressure_resumes_at_low_watermark() 
 }
 
 #[test]
+fn effect_batch_resumes_at_the_exact_failed_command_without_replay() {
+    let config = contract().config;
+    let (mut state, admission) = opened_registry(&config);
+    let key = admission.key();
+    for (now_ms, sequence) in [(1_210, 1), (1_220, 2)] {
+        apply(
+            &mut state,
+            WindowsPacketFlowEvent::Payload {
+                now_ms,
+                key,
+                direction: WindowsPacketFlowDirection::ClientToBackend,
+                sequence,
+                bytes: 2,
+            },
+            &config,
+        );
+    }
+
+    let transition = reduce_windows_packet_flow(
+        state,
+        &WindowsPacketFlowEvent::BackendReady { now_ms: 1_230, key },
+        &config,
+    )
+    .expect("backend-ready transition should reduce");
+    assert!(transition.state.flows[&key].backend_ready);
+    let mut effects = FailSecondForwardOnce::default();
+    let failure = execute_windows_packet_flow_transition_from(&transition, &mut effects, 0)
+        .expect_err("the second forwarding effect should fail once");
+    assert_eq!(failure.command, "forward");
+    assert_eq!(failure.next_command_index, 2);
+    assert_eq!(effects.completed, transition.commands[..2]);
+
+    execute_windows_packet_flow_transition_from(
+        &transition,
+        &mut effects,
+        failure.next_command_index,
+    )
+    .expect("the exact retained suffix should resume");
+    assert_eq!(effects.completed, transition.commands);
+}
+
+#[test]
 fn acknowledgement_before_backend_readiness_cannot_consume_queued_payload() {
     let config = contract().config;
     let (mut state, admission) = opened_registry(&config);
@@ -842,8 +1121,8 @@ fn acknowledgement_before_backend_readiness_cannot_consume_queued_payload() {
     );
 
     assert_eq!(
-        reduce_windows_packet_flow(
-            &state,
+        reduce_error(
+            &mut state,
             &WindowsPacketFlowEvent::Forwarded {
                 now_ms: 1_220,
                 key,
@@ -852,7 +1131,7 @@ fn acknowledgement_before_backend_readiness_cannot_consume_queued_payload() {
             },
             &config,
         ),
-        Err(slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::InvalidForwardAcknowledgement)
+        slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::InvalidForwardAcknowledgement
     );
     assert_eq!(
         state.flows[&key].queued_bytes(WindowsPacketFlowDirection::ClientToBackend),
@@ -1155,18 +1434,20 @@ fn reset_timeout_and_sequence_errors_are_bounded_and_terminal() {
     let config = contract().config;
     let (mut state, admission) = opened_registry(&config);
     let key = admission.key();
-    assert!(reduce_windows_packet_flow(
-        &state,
-        &WindowsPacketFlowEvent::Payload {
-            now_ms: 1_210,
-            key,
-            direction: WindowsPacketFlowDirection::ClientToBackend,
-            sequence: 2,
-            bytes: 1,
-        },
-        &config,
-    )
-    .is_err());
+    assert_eq!(
+        reduce_error(
+            &mut state,
+            &WindowsPacketFlowEvent::Payload {
+                now_ms: 1_210,
+                key,
+                direction: WindowsPacketFlowDirection::ClientToBackend,
+                sequence: 2,
+                bytes: 1,
+            },
+            &config,
+        ),
+        slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::OutOfOrderPayload
+    );
 
     let reset = apply(
         &mut state,
@@ -1359,6 +1640,56 @@ fn terminal_history_is_pruned_deterministically() {
     assert_eq!(state.flows.len(), 1);
     assert!(!state.flows.contains_key(&first.key()));
     assert_eq!(state.flows[&second_key].terminal_reason, "second");
+}
+
+#[test]
+fn keyed_packet_events_touch_only_the_owned_flow_state() {
+    let config = contract().config;
+    let first = tcp_admission();
+    let first_key = first.key();
+    let second = admission_with_key(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        8,
+        42,
+    )
+    .expect("second protected flow should be valid");
+    let second_key = second.key();
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_200,
+            admission: first,
+        },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::FlowOpened {
+            now_ms: 1_210,
+            admission: second,
+        },
+        &config,
+    );
+    let untouched = state.flows[&second_key].clone();
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Payload {
+            now_ms: 1_220,
+            key: first_key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            sequence: 1,
+            bytes: 2,
+        },
+        &config,
+    );
+    assert_eq!(state.flows[&second_key], untouched);
+
+    let source = include_str!("../src/packet_flow/v1.rs");
+    assert!(!source.contains("registry.clone()"));
+    assert!(!source.contains("let mut next = registry.clone()"));
 }
 
 #[test]

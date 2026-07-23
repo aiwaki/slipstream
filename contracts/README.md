@@ -111,6 +111,12 @@ Slipstream routing decisions and bounded recovery primitives.
   route, socket, DNS, proxy, PAC, VPN, or production-host effect, and keeps all
   native loop, activation, expiry, rollback, coexistence, and architecture
   qualification gates closed.
+- `windows-packet-capture-v3.json` extends the frozen v2 classifier without
+  changing its policy semantics. It requires the original nonzero destination
+  port on every observation and carries that port through a classified flow;
+  a zero port remains direct passthrough. V3 is still capture-only,
+  authorizes no backend, performs no native effect, and is not composed into
+  the production host.
 - `windows-packet-egress-v1.json` freezes the pure outbound loop-avoidance
   admission below that capture boundary. A plan requires short-lived route
   evidence observed before capture plus an exact owned capture-route activation
@@ -134,8 +140,9 @@ Slipstream routing decisions and bounded recovery primitives.
   separate disposable AMD64/ARM64 gates.
 - `windows-packet-flow-v1.json` freezes the pure forwarding seam after capture
   classification and outbound-route admission. Its opaque admission binds one
-  capture generation, flow ID, monotonic data-plane session ID, transport,
-  destination, active policy result, backend, and evidence lifetime. The pure
+  capture generation, flow ID, unique data-plane request/session owner,
+  transport, destination and original port, active policy result, backend, and
+  evidence lifetime. The pure
   state retains only ordered frame identities and byte counts; a future effect
   must retain immutable payload bytes under the same flow/direction/sequence
   identity until delivery is acknowledged. An acknowledgement is invalid until
@@ -152,14 +159,18 @@ Slipstream routing decisions and bounded recovery primitives.
   resets clear both queues, and terminal history is bounded and
   ABA-safe. Pruning terminal detail retains a separate captured-flow owner
   tombstone; only monotonic retirement of an inactive capture generation may
-  discard it, and that retirement high-watermark rejects delayed reopen. The
+  discard it, and that retirement high-watermark rejects delayed reopen.
+  Keyed packet events copy and replace only their bounded flow state; active
+  and terminal indexes avoid whole-registry scans on the packet path. The
   backend-open command retains the admitted route epoch, source address, egress
   interface, and socket binding, while the admission lifetime is capped by the
   data-plane first-payload deadline. Backend bytes reach data-plane v1 only
   after confirmed client
   delivery; an expired or capacity-rejected open cancels its not-yet-owned
   session. Commands otherwise report connector lifecycle back into data-plane
-  v1. This contract performs no packet reconstruction, socket,
+  v1. A caller retains each transition until its command batch completes and
+  resumes a failed batch from the exact cursor without replaying its committed
+  prefix. This contract performs no packet reconstruction, socket,
   adapter, route, DNS, proxy, PAC, VPN, process, or service effect and is not
   composed into the production host.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service

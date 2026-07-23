@@ -632,7 +632,11 @@ The versioned pure packet-to-flow v1 contract now lives after isolated capture
 classification and egress admission in PR #206. It keeps bounded TCP/UDP flow
 ownership, backpressure, half-close/reset, timeout, route-class dispatch, and
 cleanup outside the production SCM host and performs no socket, route, adapter,
-DNS, proxy, PAC, VPN, or packet effect. After exact-main confirmation, the next
+DNS, proxy, PAC, VPN, or packet effect. Capture v3 preserves the client's
+original destination port without changing frozen v2 policy semantics. Keyed
+events update only one bounded flow, data-plane session/request ownership is
+unique until generation retirement, and retained command batches resume from
+an exact failure cursor without replay. After exact-main confirmation, the next
 safe M4 gate is a bounded userspace IPv4/IPv6 TCP/UDP stack evaluation behind
 an injected byte-owner effect and fake adapter. No implementation may enter the
 production host until that stack preserves these frozen vectors and passes

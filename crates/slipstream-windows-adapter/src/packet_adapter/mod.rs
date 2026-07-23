@@ -2,6 +2,7 @@
 
 mod v1;
 pub mod v2;
+pub mod v3;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
