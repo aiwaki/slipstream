@@ -524,10 +524,35 @@ therefore stays phased and closed to production traffic:
    binding distinguishes the original client source from the admitted outbound
    egress source and requires exact generation, flow ID, transport,
    destination address/port, IP family, active policy, and expiry agreement.
-   It owns no payload and does not instantiate the selected stack. The next
-   subgate is a bounded pure byte-owner bridge plus separate IPv6 fragment-input
-   qualification. Native connectors, packet-flow qualification on disposable
-   AMD64/ARM64, and production-host composition remain later independent gates.
+   It retains that exact admission capability so a separately valid same-key
+   destination or request cannot open the byte owner. Opening requires the
+   complete reducer-issued backend command set and must exactly equal a fresh
+   reduction from its supplied full predecessor. It does not instantiate
+   the selected stack. Userspace byte-owner v1 requires every later payload or
+   active reconciliation transition to equal a fresh reduction from its full
+   predecessor and configuration while preserving that complete admission
+   capability. A bounded exact full-registry cursor also advances on unrelated
+   transitions, so stale target-only state cannot roll back another flow, and now
+   retains actual payload by exact flow, direction, sequence, and length only
+   when the caller supplies the exact last packet-flow predecessor and the
+   resulting queue grows by the declared length. Every retained frame also
+   requires forwarding authorization from that transition. Its bounded
+   directional queues survive delayed backend readiness but cannot execute
+   until `BackendReady` authorizes the client queue one-to-one; failed injected
+   effects retain only the uncommitted suffix, successful effects produce exact
+   `Forwarded` events only after preflighting them against the current full
+   registry and its global monotonic watermark, and a terminal final
+   acknowledgement releases the empty owner in the same commit even if bounded
+   terminal history immediately prunes it. Generic reconciliation cannot
+   accept `Forwarded` for a retained owner and bypass the effect. Ordinary
+   terminal cleanup is exact-flow scoped, and explicit generation retirement
+   is high-watermark bounded. Before either cleanup releases bytes, its
+   transition must exactly equal a fresh reduction from the supplied full
+   registry, including unrelated-flow progress. The
+   next subgate is a test-only effect adapter for the selected stack plus
+   separate IPv6 fragment-input qualification. Native
+   connectors, packet-flow qualification on disposable AMD64/ARM64, and
+   production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier

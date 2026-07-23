@@ -194,17 +194,55 @@ Slipstream routing decisions and bounded recovery primitives.
   fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds.
   It also records the current oversized-IPv6 drop and the source-endpoint gap
   that existed when the selection contract was frozen. The separate binding
-  contract below closes only that immutable-data gap; payload ownership and
-  stack execution remain open. The dependency is not linked into the Windows
-  adapter or production service host and performs no socket, adapter, route,
-  DNS, proxy, PAC, VPN, process, or service effect.
+  and byte-owner contracts below close the immutable tuple and byte-lifetime
+  gaps; selected-stack execution remains separate. The dependency is not
+  linked into the Windows adapter or production service host and performs no
+  socket, adapter, route, DNS, proxy, PAC, VPN, process, or service effect.
 - `windows-userspace-flow-binding-v1.json` joins a capture-v4 original source
   endpoint to an already-admitted frozen packet-flow-v1 capability. The exact
   generation, flow ID, transport, destination address/port, active policy, IP
   family, and earliest expiry must match before it exposes an immutable
-  original five-tuple. It neither owns payload bytes nor instantiates
+  original five-tuple and retains that exact admission capability for later
+  open-transition verification. It neither owns payload bytes nor instantiates
   `smoltcp`; it has no Wintun, socket, adapter, route, DNS, proxy, PAC, VPN,
   process, service, or production-host effect.
+- `windows-userspace-byte-owner-v1.json` binds actual payload bytes to an
+  opened tuple owner only after a successful frozen packet-flow-v1 payload
+  transition. Opening requires the exact admission capability retained by the
+  tuple binding and the complete reducer-issued backend-open command set, not
+  merely a matching flow key. The complete opening transition must also equal
+  a fresh reduction from its supplied full predecessor. Every later payload or
+  active reconciliation transition must also equal a fresh reduction from its
+  supplied full predecessor and configuration while preserving that complete
+  capability. The owner retains the last complete packet-flow registry, and
+  exact unrelated transitions advance that cursor too; a stale target-only
+  snapshot cannot discard unrelated progress. The predecessor must equal the
+  owner's last full packet-flow snapshot and the resulting directional queue
+  must grow by the exact declared length, so an unrelated idle refresh cannot
+  stage bytes. Exact flow key, direction, sequence, and length are retained in
+  fixed directional queues until one injected forwarding effect succeeds. A
+  caller-constructed forward command is insufficient: each frame also retains
+  authorization from the exact accepting transition, and queued client frames
+  gain it only from an exact one-to-one `BackendReady` command set. Before invoking the
+  effect, delivery must also reduce its exact `Forwarded` acknowledgement from
+  the current full registry, including the global monotonic watermark. A
+  retained owner rejects `Forwarded` through generic reconciliation, so the
+  injected effect cannot be bypassed. If the exact terminal acknowledgement is
+  immediately pruned from bounded packet-flow history, delivery remains valid
+  only when both owned directional queues become empty.
+  If that acknowledgement drains a gracefully closed flow into a terminal
+  state, the empty byte owner is released in the same successful commit.
+  Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,
+  oversized, and mismatched commands fail closed. Ordinary terminal
+  reconciliation removes only the event's flow after monotonic transition
+  evidence. Explicit generation retirement is bounded by the packet-flow high
+  watermark. Before either cleanup path releases bytes, the transition must
+  exactly equal a fresh frozen-v1 reduction from the supplied full registry.
+  Stale terminal or retirement state therefore cannot remove newer bytes after
+  unrelated registry progress or at the same timestamp.
+  The selected
+  `smoltcp 0.13.1` identity is cross-checked from the frozen selection contract,
+  but the adapter neither instantiates it nor enters the production host.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service
