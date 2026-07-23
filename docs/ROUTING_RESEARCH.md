@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-23 | Windows userspace TCP/UDP stack selection | Selected for effect-free bounded evaluation; production composition closed | Pin `smoltcp 0.13.1` with exact features and checksum in a separate Rust 1.91 test crate. A deterministic fake Layer 3 link with fixed queues and buffers qualifies IPv4/IPv6 TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, and checksum rejection. `ipstack 1.0.1` was rejected because its accepted-stream and packet ownership uses unbounded Tokio channels; `tun2proxy` was rejected as a composition because it owns route, DNS, and proxy behavior outside Slipstream's policy boundary. The selected `smoltcp` version does not emit oversized IPv6 packets, and the current packet-flow v1 identity lacks the original source address/port required for a real stack bridge. | Add a versioned source-endpoint binding and a pure, effect-injected byte-owner bridge. Separately qualify IPv6 fragment input, native backends, AMD64/ARM64 packet flow, and lifecycle before production-host composition. |
 | 2026-07-22 | Closed Windows IPv6 packet capture and injection | Qualified on PR #196 head, native AMD64/ARM64; exact-main pending | The IPv6 gate reuses the four explicit disposable gates and the already-qualified two-adapter topology: exact `/128` addresses on separate baseline and capture adapters, one owned test-only `/64` baseline route, and one competing owned destination `/128`. A socket bound to the capture source sends one fixed UDP request; the fixture accepts only the exact IPv6 header, addresses, ports, lengths, and payload from that capture session, then injects a synthetic response with the mandatory IPv6 UDP pseudo-header checksum. One absolute deadline covers send, capture, injection, and receive. Exact-route recovery plus explicit removal of the broader route, both addresses, sessions, and adapters remain mandatory. No external endpoint, default route, backend, production-host composition, DNS, proxy, PAC, or VPN state is involved. Native AMD64/ARM64 passed in [run 29954282655](https://github.com/aiwaki/slipstream/actions/runs/29954282655), required/package gates in [run 29954282730](https://github.com/aiwaki/slipstream/actions/runs/29954282730), and audits in [run 29954282707](https://github.com/aiwaki/slipstream/actions/runs/29954282707). | Merge the clean exact head and rerun on exact main. Keep forwarding, pre-existing-flow safety, crash removal, and external-VPN coexistence separate. |
 | 2026-07-22 | Closed Windows IPv4 packet capture and injection | Qualified on exact main, native AMD64/ARM64 | The first packet-delivery effect remains inside the four-gate disposable Wintun fixture. One socket bound to the fixture-owned `192.0.2.20/32` sends a fixed UDP request through one owned exact `/32` route. The test reads only the matching Wintun session ring, accepts only the exact IPv4 source, destination, ports, lengths, and payload, injects one checksum-valid synthetic response through that same session, and requires the original socket to receive the exact response within one shared three-second deadline. Route recovery and explicit absence of the exact route, address, session, and adapter remain mandatory even when the active probe fails. There is no external server, default route, backend, production-host composition, DNS, proxy, PAC, or VPN effect. The exact selected test and fixture lint passed on both architectures on PR head in [run 29951216211](https://github.com/aiwaki/slipstream/actions/runs/29951216211) and on the exact merge commit in [run 29952406839](https://github.com/aiwaki/slipstream/actions/runs/29952406839); required/package and audit gates passed on exact main in [run 29952406818](https://github.com/aiwaki/slipstream/actions/runs/29952406818) and [run 29952406838](https://github.com/aiwaki/slipstream/actions/runs/29952406838). | Keep the exact-main gate required. Qualify IPv6 delivery separately before forwarding, pre-existing-flow, crash-removal, or external-VPN claims. |
 | 2026-07-20 | Windows no-payload IPv6 socket selection under a competing exact route | Qualified on exact main, native AMD64/ARM64 | IPv6 uses [`IPV6_UNICAST_IF`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-ipv6-socket-options) with the interface index in host byte order, unlike IPv4's network-order setter. The closed fixture creates two unique Wintun adapters and assigns each one exact `/128` source address. It separately owns one fixed public `/64` baseline route so address creation cannot implicitly create the same controlled prefix, while the production-tested exact-route owner alone creates the competing destination `/128`. The probe reads back the exact interface option, binds the retained baseline source, and performs UDP `connect` without `send` or `recv`. Success requires the route observer to select baseline, then capture, then the identical baseline again, followed by explicit absence of the exact route, broader test route, both addresses, sessions, and adapters. The new broader route exists only in this three-gate disposable fixture, is not a default route, and never enters production. No DNS, proxy, PAC, VPN, backend, or remote payload is touched. Both architectures and strict fixture lint passed on PR head in [run 29745253970](https://github.com/aiwaki/slipstream/actions/runs/29745253970) and on the exact merge commit in [run 29773208168](https://github.com/aiwaki/slipstream/actions/runs/29773208168); required/package and audit gates passed on exact main in [run 29773207895](https://github.com/aiwaki/slipstream/actions/runs/29773207895) and [run 29773208142](https://github.com/aiwaki/slipstream/actions/runs/29773208142). | Keep the exact-main gate required. Qualify actual packet delivery separately; do not call this external-VPN coexistence or production loop avoidance. |
@@ -127,6 +128,48 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-10 | Wake canary recovery rerun | Implemented | Forced canary triggers that arrive during an in-flight wake check are queued for a short rerun instead of being dropped by the force cooldown. | Keep wake recovery event-driven; do not lengthen normal canary cadence. |
 | 2026-07-10 | Exact-host local-bypass re-sweep | Implemented | A real Discord/YouTube runtime miss starts a deduplicated background strategy sweep for that exact host and clears its negative cache only after a fake/desync strategy succeeds. | Tune cooldowns only from observed runtime evidence. |
 | 2026-07-10 | Geph-down log semantics | Superseded 2026-07-11 | A proxied geo-exit attempt still never falls through local desync, but persistent fail-close under an active global redirect was unsafe. Backend loss now pauses only the private PF anchor and leaves native networking in control. | Keep runtime messages aligned with dormant/active PF state. |
+
+## Windows Userspace Stack Selection (2026-07-23)
+
+The pure packet-flow contract needs a userspace TCP/UDP stack before raw Layer
+3 packets can become owned flows. The selection gate evaluated three current
+families without loading Wintun, opening sockets, or mutating the workstation:
+
+- [`smoltcp 0.13.1`](https://docs.rs/smoltcp/0.13.1/smoltcp/) exposes explicit
+  polling, caller-supplied device tokens, and fixed socket, fragmentation, and
+  reassembly storage. Exact features and the crates.io checksum are frozen in
+  `windows-userspace-stack-selection-v1.json`. The latest version requires Rust
+  1.91, so it lives in a separate evaluation crate; the production core and
+  Windows adapter keep their existing MSRV and dependency graph.
+- [`ipstack 1.0.1`](https://github.com/narrowlink/ipstack) converts packets to
+  async accepted streams, but the reviewed implementation uses unbounded Tokio
+  channels for accepted streams and packet delivery. Its background-task and
+  queue ownership cannot satisfy the current fixed memory and cancellation
+  contract without maintaining a fork, so it is not selected.
+- [`tun2proxy`](https://github.com/tun2proxy/tun2proxy) currently uses
+  `ipstack` and also owns routing, DNS, and proxy orchestration. Those are
+  application-level effects that Slipstream must keep behind its own policy,
+  coexistence, and rollback contracts; the project is useful research but not
+  a reusable stack boundary here. The older `ipstack-geph` crate was also not
+  selected: its published source points at a repository that was not available
+  during review and it does not improve the ownership boundary.
+
+The fake Layer 3 qualification proves deterministic IPv4/IPv6 TCP round trips,
+IPv4 and below-MTU IPv6 UDP, IPv4 outbound fragmentation plus inbound
+reassembly, dual-stack UDP checksum rejection, and exact frame/socket limits.
+It also freezes an important limitation rather than hiding it: the selected
+version's dispatch path states that IPv6 fragmentation is unimplemented and
+drops an oversized packet without emitting a frame. Incoming IPv6 fragment
+reassembly is enabled but not yet independently qualified.
+
+Selection is not integration. Packet capture v3 retains destination address and
+port, while packet-flow v1 retains capture generation, flow ID, transport, and
+data-plane session ID. Neither retains the original source address and port
+needed to identify a userspace TCP/UDP endpoint. The next contract must add that
+binding as a new version and bridge immutable bytes through injected effects;
+frozen v1 must not be widened implicitly. Native connector effects, Wintun
+composition, disposable AMD64/ARM64 packet flow, and production service-host
+composition remain closed.
 
 ## Windows Packet Capture Selection (2026-07-18)
 
