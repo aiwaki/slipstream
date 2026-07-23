@@ -22,8 +22,8 @@ use slipstream_windows_adapter::packet_flow::{
     prepare_windows_packet_flow, prepare_windows_packet_flow_open, reduce_windows_packet_flow,
     WindowsPacketFlowAdmission, WindowsPacketFlowAdmissionErrorCode, WindowsPacketFlowCommand,
     WindowsPacketFlowConfig, WindowsPacketFlowDirection, WindowsPacketFlowEffects,
-    WindowsPacketFlowEvent, WindowsPacketFlowPhase, WindowsPacketFlowRegistry,
-    WindowsPacketFlowTransport, WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
+    WindowsPacketFlowEvent, WindowsPacketFlowKey, WindowsPacketFlowPhase,
+    WindowsPacketFlowRegistry, WindowsPacketFlowTransport, WINDOWS_PACKET_FLOW_CONTRACT_VERSION,
 };
 
 const CONTRACT: &str = include_str!("../../../contracts/windows-packet-flow-v1.json");
@@ -351,6 +351,43 @@ fn apply(
     };
     *state = transition.state;
     transition.commands
+}
+
+fn assert_rejection_cancels_exact_session(
+    commands: &[WindowsPacketFlowCommand],
+    key: WindowsPacketFlowKey,
+    reason: &str,
+    request_id: &str,
+    session_id: u64,
+) {
+    assert!(matches!(
+        commands,
+        [
+            WindowsPacketFlowCommand::RejectFlow {
+                key: rejected_key,
+                reason: rejected_reason,
+            },
+            WindowsPacketFlowCommand::DataPlane {
+                event: WindowsDataPlaneEvent::CancelRequested {
+                    request_id: cancelled_request,
+                    session_id: cancelled_session,
+                    ..
+                }
+            },
+            WindowsPacketFlowCommand::DataPlane {
+                event: WindowsDataPlaneEvent::SessionCancelled {
+                    request_id: terminal_request,
+                    session_id: terminal_session,
+                    ..
+                }
+            }
+        ] if *rejected_key == key
+            && rejected_reason == reason
+            && cancelled_request == request_id
+            && *cancelled_session == session_id
+            && terminal_request == request_id
+            && *terminal_session == session_id
+    ));
 }
 
 fn reduce_error(
@@ -915,14 +952,68 @@ fn one_data_plane_session_cannot_own_two_capture_flows() {
     let rejected = apply(&mut state, flow_open_event(1_210, second), &config);
     assert!(!state.flows.contains_key(&second_key));
     assert_eq!(state.data_plane_request_owners.len(), 1);
-    assert!(rejected.iter().any(|command| matches!(
-        command,
-        WindowsPacketFlowCommand::RejectFlow { reason, .. }
-            if reason == "data_plane_request_already_owned"
-    )));
-    assert!(!rejected
-        .iter()
-        .any(|command| matches!(command, WindowsPacketFlowCommand::DataPlane { .. })));
+    assert_rejection_cancels_exact_session(
+        &rejected,
+        second_key,
+        "data_plane_request_already_owned",
+        "shared-request",
+        92,
+    );
+}
+
+#[test]
+fn retained_request_owner_cancels_only_the_new_reused_data_plane_session() {
+    let config = contract().config;
+    let first = admission_with_request_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        9,
+        43,
+        91,
+        443,
+        "reused-request".to_owned(),
+    )
+    .expect("first request owner should be admitted");
+    let first_key = first.key();
+    let mut state = WindowsPacketFlowRegistry::new(1_200);
+    apply(&mut state, flow_open_event(1_200, first), &config);
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Reset {
+            now_ms: 1_210,
+            key: first_key,
+            direction: WindowsPacketFlowDirection::BackendToClient,
+            reason: "closed".to_owned(),
+        },
+        &config,
+    );
+    assert!(state.flows[&first_key].phase.is_terminal());
+    assert_eq!(state.data_plane_request_owners["reused-request"], first_key);
+
+    let second = admission_with_request_owner(
+        "updates.discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::TcpTls,
+        10,
+        44,
+        92,
+        443,
+        "reused-request".to_owned(),
+    )
+    .expect("a new accepted data-plane session may reuse pruned request history");
+    let second_key = second.key();
+    let rejected = apply(&mut state, flow_open_event(1_220, second), &config);
+
+    assert!(!state.flows.contains_key(&second_key));
+    assert_eq!(state.data_plane_request_owners["reused-request"], first_key);
+    assert_rejection_cancels_exact_session(
+        &rejected,
+        second_key,
+        "data_plane_request_already_owned",
+        "reused-request",
+        92,
+    );
 }
 
 #[test]

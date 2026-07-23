@@ -1163,7 +1163,13 @@ pub fn reduce_windows_packet_flow(
         } else if session_owner.is_some_and(|owner| owner != key) {
             reject_flow(key, "data_plane_session_already_owned", &mut commands);
         } else if request_owner.is_some_and(|owner| owner != key) {
-            reject_flow(key, "data_plane_request_already_owned", &mut commands);
+            reject_admission(
+                admission,
+                key,
+                now_ms,
+                "data_plane_request_already_owned",
+                &mut commands,
+            );
         } else if key.capture_generation <= registry.retired_capture_generation_high_watermark {
             reject_admission(
                 admission,
