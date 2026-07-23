@@ -472,9 +472,11 @@ therefore stays phased and closed to production traffic:
    closed. The bounded crash-safe capture-removal candidate now isolates capture
    ownership in one exact child process, publishes readiness only from the active
    probe, terminates only the retained child handle, and requires bounded adapter,
-   address, and `/32` absence plus exact baseline recovery. It remains pending
-   native AMD64 and ARM64 qualification. Explicit external-VPN coexistence stays
-   a separate later gate and is not inferred from process-termination cleanup.
+   address, and `/32` absence plus exact baseline recovery. PR #202 head passed
+   that proof on native AMD64 and ARM64 plus required CI, packaged lifecycle,
+   and audit; exact-main repetition remains pending. Explicit external-VPN
+   coexistence stays a separate later gate and is not inferred from
+   process-termination cleanup.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
