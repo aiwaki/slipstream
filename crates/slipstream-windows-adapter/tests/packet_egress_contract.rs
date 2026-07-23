@@ -478,6 +478,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CHILD",
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
@@ -502,6 +504,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "native_wintun_ipv4_packet_round_trip_is_captured_and_injected",
         "native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered",
         "native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered",
+        "native_wintun_child_termination_removes_active_capture_route",
+        "native_wintun_crash_child_holds_active_capture_route",
         "native_wintun_ipv6_packet_round_trip_is_captured_and_injected",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
@@ -547,6 +551,14 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "Wintun IPv6 packet round trip exceeded its bounded deadline",
         "PREEXISTING_WARMUP_REQUEST",
         "PREEXISTING_CAPTURE_ROLLBACK",
+        "Command::new",
+        "ExactCrashChild",
+        "wait_for_crash_child_ready",
+        "write_crash_ready_marker",
+        "observe_windows_packet_route",
+        "wait_for_adapter_absent_until",
+        "wait_for_fixture_route_absent_until",
+        "wait_for_unicast_address_absent_until",
         "require_adapter_absent",
     ] {
         assert!(
@@ -627,6 +639,84 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(tcp_activation < tcp_retransmission && tcp_retransmission < tcp_retry);
     assert!(tcp_stream_drop < tcp_cleanup && tcp_cleanup < tcp_accept_flow_result);
 
+    let crash_parent_start = fixture
+        .find("fn native_wintun_child_termination_removes_active_capture_route()")
+        .expect("fixture must contain the crash-removal parent gate");
+    let crash_child_start = fixture[crash_parent_start..]
+        .find("fn native_wintun_crash_child_holds_active_capture_route()")
+        .map(|offset| crash_parent_start + offset)
+        .expect("crash-removal parent must end before its exact child");
+    let crash_child_end = fixture[crash_child_start..]
+        .find("fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route()")
+        .map(|offset| crash_child_start + offset)
+        .expect("crash-removal child must end before the socket-selection gate");
+    let crash_parent = &fixture[crash_parent_start..crash_child_start];
+    let crash_child = &fixture[crash_child_start..crash_child_end];
+
+    let baseline_route = crash_parent
+        .find("OwnedFixtureBaselineRoute::create")
+        .expect("crash parent must create its owned non-default baseline route");
+    let spawn = crash_parent
+        .find("Command::new(current_exe)")
+        .expect("crash parent must spawn only the exact integration-test executable");
+    let ready = crash_parent
+        .find("wait_for_crash_child_ready")
+        .expect("crash parent must wait for atomic active-route readiness");
+    let active_route = crash_parent
+        .find("observe_windows_packet_route(IpAddr::V4")
+        .expect("crash parent must independently observe the active capture route");
+    let terminate = crash_parent
+        .find("child.terminate_and_wait()")
+        .expect("crash parent must terminate the exact retained child handle");
+    let adapter_absent = crash_parent
+        .find("wait_for_adapter_absent_until")
+        .expect("crash parent must bound adapter removal");
+    let route_absent = crash_parent
+        .find("wait_for_fixture_route_absent_until")
+        .expect("crash parent must bound exact-route removal");
+    let address_absent = crash_parent
+        .find("wait_for_unicast_address_absent_until")
+        .expect("crash parent must bound address removal");
+    let recovered = crash_parent
+        .find("observe post-crash baseline route")
+        .expect("crash parent must prove exact baseline recovery");
+    let baseline_cleanup = crash_parent
+        .find("let baseline_route_cleanup = match baseline_route.as_mut()")
+        .expect("crash parent must explicitly clean its baseline route");
+    let accept_crash_result = crash_parent
+        .find("crash_result?;")
+        .expect("crash parent must defer acceptance until after fixture cleanup");
+    assert!(baseline_route < spawn && spawn < ready && ready < active_route);
+    assert!(active_route < terminate && terminate < adapter_absent);
+    assert!(adapter_absent < route_absent && route_absent < address_absent);
+    assert!(address_absent < recovered && recovered < baseline_cleanup);
+    assert!(baseline_cleanup < accept_crash_result);
+
+    let child_activation = crash_child
+        .find("qualify_disposable_exact_host_route_with_active_probe")
+        .expect("crash child must use the existing production-gated route owner");
+    let publish_ready = crash_child
+        .find("write_crash_ready_marker")
+        .expect("crash child must publish readiness only from the active probe");
+    let failsafe_sleep = crash_child
+        .find("thread::sleep(CRASH_CHILD_FAILSAFE_LIFETIME)")
+        .expect("crash child must retain a bounded failsafe lifetime");
+    assert!(child_activation < publish_ready && publish_ready < failsafe_sleep);
+    for forbidden in [
+        "0.0.0.0/0",
+        "::/0",
+        "taskkill",
+        "pkill",
+        "TerminateProcess",
+        "Set-DnsClientServerAddress",
+        "ProxyEnable",
+    ] {
+        assert!(
+            !crash_child.contains(forbidden),
+            "crash child contains forbidden broad effect {forbidden}"
+        );
+    }
+
     for (start_marker, end_marker) in [
         (
             "fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route()",
@@ -686,6 +776,12 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "-TestName native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered"
     ));
     assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI: \"1\""));
+    assert!(workflow.contains("Qualify crash-safe active capture removal"));
+    assert!(
+        workflow.contains("-TestName native_wintun_child_termination_removes_active_capture_route")
+    );
+    assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CI: \"1\""));
+    assert!(workflow.contains("-TimeoutSeconds 180"));
     assert!(workflow.contains("Qualify closed IPv6 packet capture and injection round trip"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected"));

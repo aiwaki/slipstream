@@ -5,13 +5,14 @@ use slipstream_windows_adapter::packet_adapter::{
     WindowsPacketAdapterArchitecture,
 };
 use slipstream_windows_adapter::packet_egress::{
-    qualify_disposable_exact_host_route, qualify_disposable_exact_host_route_with_active_probe,
-    WindowsDisposableExactRouteActiveProbe, WindowsDisposableExactRouteErrorCode,
-    WindowsOwnedRouteTransitionIssuer, WindowsPacketInterfaceIdentity,
-    WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
+    observe_windows_packet_route, qualify_disposable_exact_host_route,
+    qualify_disposable_exact_host_route_with_active_probe, WindowsDisposableExactRouteActiveProbe,
+    WindowsDisposableExactRouteErrorCode, WindowsOwnedRouteTransitionIssuer,
+    WindowsPacketInterfaceIdentity, WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
+use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{
     IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream, UdpSocket,
@@ -19,6 +20,7 @@ use std::net::{
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -49,12 +51,21 @@ const SOCKET_BINDING_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI
 const PACKET_DELIVERY_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI";
 const PREEXISTING_FLOW_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_FLOW_CI";
 const PREEXISTING_TCP_FLOW_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI";
+const CRASH_REMOVAL_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CI";
+const CRASH_REMOVAL_CHILD_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CHILD";
+const CRASH_REMOVAL_ADAPTER_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_ADAPTER";
+const CRASH_REMOVAL_READY_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_READY";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const WINTUN_MAX_IP_PACKET_SIZE: usize = 0xffff;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const ADDRESS_PROBE_INTERVAL: Duration = Duration::from_millis(25);
 const BASELINE_ROUTE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(5);
+const CRASH_CHILD_READY_TIMEOUT: Duration = Duration::from_secs(45);
+const CRASH_CHILD_FAILSAFE_LIFETIME: Duration = Duration::from_secs(90);
+const CRASH_CHILD_TERMINATION_TIMEOUT: Duration = Duration::from_secs(15);
+const CRASH_CAPTURE_REMOVAL_TIMEOUT: Duration = Duration::from_secs(30);
+const CRASH_PROBE_INTERVAL: Duration = Duration::from_millis(100);
 const PACKET_DELIVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const PACKET_DELIVERY_PROBE_INTERVAL: Duration = Duration::from_millis(5);
 const PACKET_DELIVERY_PORT: u16 = 41_723;
@@ -114,6 +125,7 @@ const IPV4_BASELINE_NETWORK: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 0);
 const IPV4_BASELINE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 2);
 const IPV4_CAPTURE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 3);
 const IPV4_PREEXISTING_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 3);
+const IPV4_CRASH_REMOVAL_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 4);
 const IPV4_BASELINE_PREFIX_LENGTH: u8 = 24;
 const IPV4_HOST_PREFIX_LENGTH: u8 = 32;
 const IPV6_BASELINE_NETWORK: Ipv6Addr = Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0);
@@ -216,6 +228,292 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
             .retained_dll_length()
             .expect("revalidate retained admitted Wintun DLL"),
         admission.evidence().dll_length
+    );
+}
+
+#[test]
+fn native_wintun_child_termination_removes_active_capture_route() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(CRASH_REMOVAL_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let baseline_name = wide(&unique_adapter_name("CrashRouteBaseline"));
+    let capture_name_string = unique_adapter_name("CrashRouteCapture");
+    let capture_name = wide(&capture_name_string);
+    let baseline_tunnel_type = wide("Slipstream CI Crash Baseline");
+    api.require_adapter_absent(&baseline_name, "before crash-route baseline fixture")
+        .unwrap_or_else(|error| panic!("Wintun crash-route baseline preflight: {error}"));
+    api.require_adapter_absent(&capture_name, "before crash-route capture fixture")
+        .unwrap_or_else(|error| panic!("Wintun crash-route capture preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut baseline_adapter =
+            OwnedWintunAdapter::create(&api, &baseline_name, &baseline_tunnel_type)?;
+        baseline_adapter.start_session()?;
+        let baseline_interface = baseline_adapter.interface_identity()?;
+        let mut baseline_address = None;
+        let mut baseline_route = None;
+        let crash_result = (|| {
+            baseline_address = Some(OwnedUnicastAddress::create(
+                baseline_interface,
+                IpAddr::V4(IPV4_BASELINE_SOURCE),
+                IPV4_HOST_PREFIX_LENGTH,
+            )?);
+            baseline_route = Some(OwnedFixtureBaselineRoute::create(
+                baseline_interface,
+                IpAddr::V4(IPV4_BASELINE_NETWORK),
+                IPV4_BASELINE_PREFIX_LENGTH,
+            )?);
+
+            let fixture_dir = OwnedCrashFixtureDirectory::create()?;
+            let current_exe = std::env::current_exe()
+                .map_err(|error| format!("resolve exact integration-test executable: {error}"))?;
+            let child = Command::new(current_exe)
+                .args([
+                    "--exact",
+                    "native_wintun_crash_child_holds_active_capture_route",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CRASH_REMOVAL_CHILD_ENV, "1")
+                .env(CRASH_REMOVAL_ADAPTER_ENV, &capture_name_string)
+                .env(CRASH_REMOVAL_READY_ENV, fixture_dir.marker_path())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| format!("spawn exact crash-route child: {error}"))?;
+            let mut child = ExactCrashChild::new(child);
+            let expected_marker = format!("{capture_name_string}\n{}\n", child.id());
+            let mut evidence = None;
+            let active_result = (|| {
+                wait_for_crash_child_ready(
+                    &mut child,
+                    fixture_dir.marker_path(),
+                    &expected_marker,
+                )?;
+                let capture_interface =
+                    api.adapter_interface_identity(&capture_name)?
+                        .ok_or_else(|| {
+                            "crash-route capture adapter disappeared after readiness".to_owned()
+                        })?;
+                if capture_interface == baseline_interface {
+                    return Err(
+                        "crash-route capture adapter reused the baseline identity".to_owned()
+                    );
+                }
+                let route_row = fixture_route_row(
+                    capture_interface,
+                    IpAddr::V4(IPV4_CRASH_REMOVAL_DESTINATION),
+                    IPV4_HOST_PREFIX_LENGTH,
+                    0,
+                );
+                let address_row = fixture_unicast_address_row(
+                    capture_interface,
+                    IpAddr::V4(IPV4_CAPTURE_SOURCE),
+                    IPV4_HOST_PREFIX_LENGTH,
+                );
+                let observed_route = lookup_fixture_route(route_row)?
+                    .ok_or_else(|| "active crash-route /32 was not observable".to_owned())?;
+                if !same_fixture_route_key(observed_route, route_row) {
+                    return Err("active crash-route /32 identity changed".to_owned());
+                }
+                let observed_address = lookup_unicast_address(address_row)?
+                    .ok_or_else(|| "active crash-route address was not observable".to_owned())?;
+                if !same_unicast_address_key(observed_address, address_row) {
+                    return Err("active crash-route address identity changed".to_owned());
+                }
+                let active =
+                    observe_windows_packet_route(IpAddr::V4(IPV4_CRASH_REMOVAL_DESTINATION))
+                        .map_err(|error| format!("observe active crash route: {error}"))?;
+                if active.egress_interface() != capture_interface
+                    || active.source_address() != IpAddr::V4(IPV4_CAPTURE_SOURCE)
+                    || active.route_prefix() != "1.0.0.4/32"
+                {
+                    return Err(format!(
+                        "active crash route selected unexpected evidence: interface={:?}, source={}, prefix={}",
+                        active.egress_interface(),
+                        active.source_address(),
+                        active.route_prefix()
+                    ));
+                }
+                evidence = Some(CrashCaptureEvidence {
+                    capture_interface,
+                    route_row,
+                    address_row,
+                });
+                Ok::<(), String>(())
+            })();
+
+            let termination_result = child.terminate_and_wait();
+            let removal_result = (|| {
+                let deadline = Instant::now() + CRASH_CAPTURE_REMOVAL_TIMEOUT;
+                api.wait_for_adapter_absent_until(&capture_name, deadline)?;
+                if let Some(evidence) = evidence {
+                    wait_for_fixture_route_absent_until(evidence.route_row, deadline)?;
+                    wait_for_unicast_address_absent_until(evidence.address_row, deadline)?;
+                    let recovered =
+                        observe_windows_packet_route(IpAddr::V4(IPV4_CRASH_REMOVAL_DESTINATION))
+                            .map_err(|error| {
+                                format!("observe post-crash baseline route: {error}")
+                            })?;
+                    if recovered.egress_interface() != baseline_interface
+                        || recovered.source_address() != IpAddr::V4(IPV4_BASELINE_SOURCE)
+                        || recovered.route_prefix() != "1.0.0.0/24"
+                        || evidence.capture_interface == recovered.egress_interface()
+                    {
+                        return Err(format!(
+                            "post-crash route did not recover the exact baseline: interface={:?}, source={}, prefix={}",
+                            recovered.egress_interface(),
+                            recovered.source_address(),
+                            recovered.route_prefix()
+                        ));
+                    }
+                }
+                Ok::<(), String>(())
+            })();
+
+            let mut errors = Vec::new();
+            if let Err(error) = active_result {
+                errors.push(format!("active evidence: {error}"));
+            }
+            match termination_result {
+                Ok(status) if !status.success() => {}
+                Ok(status) => errors.push(format!("crash child exited successfully: {status}")),
+                Err(error) => errors.push(format!("child termination: {error}")),
+            }
+            if let Err(error) = removal_result {
+                errors.push(format!("bounded capture removal: {error}"));
+            }
+            if !errors.is_empty() {
+                return Err(errors.join("; "));
+            }
+            Ok::<(), String>(())
+        })();
+
+        let baseline_route_cleanup = match baseline_route.as_mut() {
+            Some(route) => route.remove_and_verify(),
+            None => Ok(()),
+        };
+        let baseline_address_cleanup = match baseline_address.as_mut() {
+            Some(address) => address.remove_and_verify(),
+            None => Ok(()),
+        };
+        baseline_adapter.end_session();
+        baseline_adapter.close_adapter();
+        let mut cleanup_errors = Vec::new();
+        if let Err(error) = baseline_route_cleanup {
+            cleanup_errors.push(format!("baseline route: {error}"));
+        }
+        if let Err(error) = baseline_address_cleanup {
+            cleanup_errors.push(format!("baseline address: {error}"));
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(format!(
+                "crash-route baseline cleanup failed: {}; crash result: {crash_result:?}",
+                cleanup_errors.join("; ")
+            ));
+        }
+        crash_result?;
+        Ok::<(), String>(())
+    })();
+
+    let baseline_cleanup =
+        api.require_adapter_absent(&baseline_name, "after crash-route baseline fixture");
+    let capture_cleanup =
+        api.require_adapter_absent(&capture_name, "after crash-route capture fixture");
+    if baseline_cleanup.is_err() || capture_cleanup.is_err() {
+        panic!(
+            "Wintun crash-route adapter cleanup proof failed: baseline={baseline_cleanup:?}, capture={capture_cleanup:?}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable crash-route qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL after crash-route removal"),
+        admission.evidence().dll_length
+    );
+}
+
+#[test]
+fn native_wintun_crash_child_holds_active_capture_route() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(CRASH_REMOVAL_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(CRASH_REMOVAL_CHILD_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let adapter_name_string = std::env::var(CRASH_REMOVAL_ADAPTER_ENV)
+        .expect("crash-route child requires its exact adapter name");
+    assert!(
+        adapter_name_string.starts_with("SlipstreamCI-CrashRouteCapture-"),
+        "crash-route child rejected an unowned adapter name"
+    );
+    let ready_path = required_path(CRASH_REMOVAL_READY_ENV);
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted child Wintun DLL: {error}"));
+    let adapter_name = wide(&adapter_name_string);
+    let tunnel_type = wide("Slipstream CI Crash Capture");
+    api.require_adapter_absent(&adapter_name, "inside crash-route child before creation")
+        .unwrap_or_else(|error| panic!("Wintun crash-route child preflight: {error}"));
+
+    let mut adapter = OwnedWintunAdapter::create(&api, &adapter_name, &tunnel_type)
+        .unwrap_or_else(|error| panic!("create crash-route child adapter: {error}"));
+    adapter
+        .start_session()
+        .unwrap_or_else(|error| panic!("start crash-route child session: {error}"));
+    let capture_interface = adapter
+        .interface_identity()
+        .unwrap_or_else(|error| panic!("read crash-route child interface: {error}"));
+    let mut address = OwnedUnicastAddress::create(
+        capture_interface,
+        IpAddr::V4(IPV4_CAPTURE_SOURCE),
+        IPV4_HOST_PREFIX_LENGTH,
+    )
+    .unwrap_or_else(|error| panic!("create crash-route child address: {error}"));
+    let mut issuer = WindowsOwnedRouteTransitionIssuer::new(9, capture_interface, 1)
+        .unwrap_or_else(|error| panic!("construct crash-route child issuer: {error}"));
+
+    let route_result = qualify_disposable_exact_host_route_with_active_probe(
+        &mut issuer,
+        IpAddr::V4(IPV4_CRASH_REMOVAL_DESTINATION),
+        |active| {
+            if active.capture_interface() != capture_interface
+                || active.capture_source_address() != IpAddr::V4(IPV4_CAPTURE_SOURCE)
+                || active.exact_route_prefix() != "1.0.0.4/32"
+            {
+                return Err("crash-route child received inconsistent active evidence".to_owned());
+            }
+            write_crash_ready_marker(
+                &ready_path,
+                &format!("{adapter_name_string}\n{}\n", std::process::id()),
+            )?;
+            std::hint::black_box((&admission, &api, &adapter, &address, active));
+            thread::sleep(CRASH_CHILD_FAILSAFE_LIFETIME);
+            Err("crash-route child exceeded its failsafe lifetime".to_owned())
+        },
+    );
+    let address_cleanup = address.remove_and_verify();
+    adapter.end_session();
+    adapter.close_adapter();
+    panic!(
+        "crash-route child returned instead of being terminated: route={route_result:?}, address_cleanup={address_cleanup:?}"
     );
 }
 
@@ -2670,6 +2968,186 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+struct CrashCaptureEvidence {
+    capture_interface: WindowsPacketInterfaceIdentity,
+    route_row: MIB_IPFORWARD_ROW2,
+    address_row: MIB_UNICASTIPADDRESS_ROW,
+}
+
+struct ExactCrashChild {
+    child: Option<Child>,
+}
+
+impl ExactCrashChild {
+    fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn id(&self) -> u32 {
+        self.child.as_ref().expect("child handle is present").id()
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("child handle is present")
+    }
+
+    fn terminate_and_wait(&mut self) -> Result<ExitStatus, String> {
+        if let Some(status) = self
+            .child_mut()
+            .try_wait()
+            .map_err(|error| format!("inspect crash-route child before termination: {error}"))?
+        {
+            self.child = None;
+            return Err(format!(
+                "crash-route child exited before exact termination: {status}"
+            ));
+        }
+        self.child_mut()
+            .kill()
+            .map_err(|error| format!("terminate exact crash-route child handle: {error}"))?;
+        self.wait_for_exit(CRASH_CHILD_TERMINATION_TIMEOUT)
+    }
+
+    fn wait_for_exit(&mut self, timeout: Duration) -> Result<ExitStatus, String> {
+        let pid = self.id();
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self
+                .child_mut()
+                .try_wait()
+                .map_err(|error| format!("inspect terminated crash-route child {pid}: {error}"))?
+            {
+                self.child = None;
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "terminated crash-route child {pid} did not exit within {} ms",
+                    timeout.as_millis()
+                ));
+            }
+            thread::sleep(CRASH_PROBE_INTERVAL);
+        }
+    }
+}
+
+impl Drop for ExactCrashChild {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let _ = child.kill();
+        let _ = thread::Builder::new()
+            .name("wintun-crash-route-child-reaper".to_owned())
+            .spawn(move || {
+                let _ = child.wait();
+            });
+    }
+}
+
+struct OwnedCrashFixtureDirectory {
+    directory: PathBuf,
+    marker: PathBuf,
+}
+
+impl OwnedCrashFixtureDirectory {
+    fn create() -> Result<Self, String> {
+        let base = std::env::var_os("RUNNER_TEMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let run_id = std::env::var("GITHUB_RUN_ID").unwrap_or_else(|_| "local".to_owned());
+        let attempt = std::env::var("GITHUB_RUN_ATTEMPT").unwrap_or_else(|_| "0".to_owned());
+        let directory = base.join(format!(
+            "slipstream-wintun-crash-route-{run_id}-{attempt}-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory)
+            .map_err(|error| format!("create {}: {error}", directory.display()))?;
+        let marker = directory.join("ready.txt");
+        Ok(Self { directory, marker })
+    }
+
+    fn marker_path(&self) -> &Path {
+        &self.marker
+    }
+}
+
+impl Drop for OwnedCrashFixtureDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.marker);
+        let _ = fs::remove_dir(&self.directory);
+    }
+}
+
+fn wait_for_crash_child_ready(
+    child: &mut ExactCrashChild,
+    marker: &Path,
+    expected: &str,
+) -> Result<(), String> {
+    let deadline = Instant::now() + CRASH_CHILD_READY_TIMEOUT;
+    loop {
+        if let Some(status) = child
+            .child_mut()
+            .try_wait()
+            .map_err(|error| format!("inspect crash-route child readiness: {error}"))?
+        {
+            return Err(format!(
+                "crash-route child exited before readiness: {status}"
+            ));
+        }
+        match fs::read_to_string(marker) {
+            Ok(contents) if contents == expected => return Ok(()),
+            Ok(contents) => {
+                return Err(format!(
+                    "crash-route child published unexpected marker {contents:?}"
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound && Instant::now() < deadline => {
+                thread::sleep(CRASH_PROBE_INTERVAL);
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Err(format!(
+                    "crash-route child did not publish readiness within {} ms",
+                    CRASH_CHILD_READY_TIMEOUT.as_millis()
+                ));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "read crash-route child marker {}: {error}",
+                    marker.display()
+                ));
+            }
+        }
+    }
+}
+
+fn write_crash_ready_marker(path: &Path, contents: &str) -> Result<(), String> {
+    let temporary = path.with_extension("pending");
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("create {}: {error}", temporary.display()))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|error| format!("write {}: {error}", temporary.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("sync {}: {error}", temporary.display()))?;
+        drop(file);
+        fs::rename(&temporary, path).map_err(|error| {
+            format!(
+                "publish {} as {}: {error}",
+                temporary.display(),
+                path.display()
+            )
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 struct LoadedWintun {
     module: HMODULE,
     create_adapter: WintunCreateAdapter,
@@ -2729,22 +3207,49 @@ impl LoadedWintun {
         resolved
     }
 
-    fn adapter_presence(&self, name: &[u16]) -> Result<bool, String> {
+    fn adapter_interface_identity(
+        &self,
+        name: &[u16],
+    ) -> Result<Option<WindowsPacketInterfaceIdentity>, String> {
         let adapter = unsafe { (self.open_adapter)(name.as_ptr()) };
         if adapter.is_null() {
             let error = last_error();
             return if matches!(error, ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND) {
-                Ok(false)
+                Ok(None)
             } else {
                 Err(format!(
-                    "adapter presence could not be proven: WintunOpenAdapter failed with {error}"
+                    "adapter identity could not be proven: WintunOpenAdapter failed with {error}"
                 ))
             };
         }
+        let identity_result = (|| {
+            let mut luid = NET_LUID_LH::default();
+            unsafe {
+                (self.get_adapter_luid)(adapter, &mut luid);
+            }
+            let luid_value = unsafe { luid.Value };
+            if luid_value == 0 {
+                return Err("WintunGetAdapterLUID returned a zero LUID".to_owned());
+            }
+            let mut index = 0;
+            let result = unsafe { ConvertInterfaceLuidToIndex(&luid, &mut index) };
+            if result != 0 || index == 0 {
+                return Err(format!("ConvertInterfaceLuidToIndex failed with {result}"));
+            }
+            Ok(WindowsPacketInterfaceIdentity {
+                luid: luid_value,
+                index,
+            })
+        })();
         unsafe {
             (self.close_adapter)(adapter);
         }
-        Ok(true)
+        identity_result.map(Some)
+    }
+
+    fn adapter_presence(&self, name: &[u16]) -> Result<bool, String> {
+        self.adapter_interface_identity(name)
+            .map(|identity| identity.is_some())
     }
 
     fn require_adapter_absent(&self, name: &[u16], phase: &str) -> Result<(), String> {
@@ -2752,6 +3257,20 @@ impl LoadedWintun {
             return Err(format!("test adapter still exists {phase}"));
         }
         Ok(())
+    }
+
+    fn wait_for_adapter_absent_until(&self, name: &[u16], deadline: Instant) -> Result<(), String> {
+        loop {
+            if !self.adapter_presence(name)? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(
+                    "crash-route adapter remained after bounded child termination".to_owned(),
+                );
+            }
+            thread::sleep(CRASH_PROBE_INTERVAL);
+        }
     }
 }
 
@@ -3003,6 +3522,37 @@ impl Drop for OwnedWintunAdapter<'_> {
     }
 }
 
+fn fixture_route_row(
+    interface: WindowsPacketInterfaceIdentity,
+    network: IpAddr,
+    prefix_length: u8,
+    metric: u32,
+) -> MIB_IPFORWARD_ROW2 {
+    let unspecified = match network {
+        IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+    };
+    let mut row = MIB_IPFORWARD_ROW2::default();
+    unsafe {
+        InitializeIpForwardEntry(&mut row);
+    }
+    row.InterfaceLuid = NET_LUID_LH {
+        Value: interface.luid,
+    };
+    row.InterfaceIndex = interface.index;
+    row.DestinationPrefix.Prefix = sockaddr_from_ip(network);
+    row.DestinationPrefix.PrefixLength = prefix_length;
+    row.NextHop = sockaddr_from_ip(unspecified);
+    row.SitePrefixLength = prefix_length;
+    row.Metric = metric;
+    row.Protocol = MIB_IPPROTO_NETMGMT;
+    row.Loopback = false;
+    row.AutoconfigureAddress = false;
+    row.Publish = false;
+    row.Immortal = false;
+    row
+}
+
 struct OwnedFixtureBaselineRoute {
     row: MIB_IPFORWARD_ROW2,
     present: bool,
@@ -3028,31 +3578,9 @@ impl OwnedFixtureBaselineRoute {
                 "fixture baseline route must remain the fixed IPv4 /24 or IPv6 /64".to_owned(),
             );
         }
-        let unspecified = match network {
-            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-        };
+        let row = fixture_route_row(interface, network, prefix_length, 5);
 
-        let mut row = MIB_IPFORWARD_ROW2::default();
-        unsafe {
-            InitializeIpForwardEntry(&mut row);
-        }
-        row.InterfaceLuid = NET_LUID_LH {
-            Value: interface.luid,
-        };
-        row.InterfaceIndex = interface.index;
-        row.DestinationPrefix.Prefix = sockaddr_from_ip(network);
-        row.DestinationPrefix.PrefixLength = prefix_length;
-        row.NextHop = sockaddr_from_ip(unspecified);
-        row.SitePrefixLength = prefix_length;
-        row.Metric = 5;
-        row.Protocol = MIB_IPPROTO_NETMGMT;
-        row.Loopback = false;
-        row.AutoconfigureAddress = false;
-        row.Publish = false;
-        row.Immortal = false;
-
-        if lookup_fixture_baseline_route(row)?.is_some() {
+        if lookup_fixture_route(row)?.is_some() {
             return Err("fixture baseline route already exists before creation".to_owned());
         }
         let result = unsafe { CreateIpForwardEntry2(&row) };
@@ -3062,8 +3590,8 @@ impl OwnedFixtureBaselineRoute {
             ));
         }
         let mut owned = Self { row, present: true };
-        let verification_error = match lookup_fixture_baseline_route(row) {
-            Ok(Some(observed)) if same_fixture_baseline_route_key(observed, row) => {
+        let verification_error = match lookup_fixture_route(row) {
+            Ok(Some(observed)) if same_fixture_route_key(observed, row) => {
                 return Ok(owned);
             }
             Ok(Some(_)) => "created route identity changed during verification".to_owned(),
@@ -3072,7 +3600,7 @@ impl OwnedFixtureBaselineRoute {
         };
         let cleanup_result = owned.remove_and_verify();
         Err(format!(
-            "fixture IPv6 baseline route verification failed: {verification_error}; cleanup={cleanup_result:?}"
+            "fixture baseline route verification failed: {verification_error}; cleanup={cleanup_result:?}"
         ))
     }
 
@@ -3086,14 +3614,12 @@ impl OwnedFixtureBaselineRoute {
 
         let deadline = Instant::now() + BASELINE_ROUTE_REMOVAL_TIMEOUT;
         loop {
-            if lookup_fixture_baseline_route(self.row)?.is_none() {
+            if lookup_fixture_route(self.row)?.is_none() {
                 self.present = false;
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err(
-                    "fixture IPv6 baseline route remained after bounded deletion".to_owned(),
-                );
+                return Err("fixture baseline route remained after bounded deletion".to_owned());
             }
             thread::sleep(ADDRESS_PROBE_INTERVAL);
         }
@@ -3110,25 +3636,62 @@ impl Drop for OwnedFixtureBaselineRoute {
     }
 }
 
-fn lookup_fixture_baseline_route(
-    row: MIB_IPFORWARD_ROW2,
-) -> Result<Option<MIB_IPFORWARD_ROW2>, String> {
+fn lookup_fixture_route(row: MIB_IPFORWARD_ROW2) -> Result<Option<MIB_IPFORWARD_ROW2>, String> {
     let mut observed = row;
     let result = unsafe { GetIpForwardEntry2(&mut observed) };
     match result {
         0 => Ok(Some(observed)),
         ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND => Ok(None),
-        error => Err(format!("GetIpForwardEntry2 baseline failed with {error}")),
+        error => Err(format!(
+            "GetIpForwardEntry2 fixture route failed with {error}"
+        )),
     }
 }
 
-fn same_fixture_baseline_route_key(left: MIB_IPFORWARD_ROW2, right: MIB_IPFORWARD_ROW2) -> bool {
+fn same_fixture_route_key(left: MIB_IPFORWARD_ROW2, right: MIB_IPFORWARD_ROW2) -> bool {
     (unsafe { left.InterfaceLuid.Value }) == (unsafe { right.InterfaceLuid.Value })
         && left.InterfaceIndex == right.InterfaceIndex
         && left.DestinationPrefix.PrefixLength == right.DestinationPrefix.PrefixLength
         && ip_from_sockaddr(left.DestinationPrefix.Prefix)
             == ip_from_sockaddr(right.DestinationPrefix.Prefix)
         && ip_from_sockaddr(left.NextHop) == ip_from_sockaddr(right.NextHop)
+}
+
+fn wait_for_fixture_route_absent_until(
+    row: MIB_IPFORWARD_ROW2,
+    deadline: Instant,
+) -> Result<(), String> {
+    loop {
+        if lookup_fixture_route(row)?.is_none() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "active crash-route /32 remained after bounded child termination".to_owned(),
+            );
+        }
+        thread::sleep(CRASH_PROBE_INTERVAL);
+    }
+}
+
+fn fixture_unicast_address_row(
+    interface: WindowsPacketInterfaceIdentity,
+    address: IpAddr,
+    prefix_length: u8,
+) -> MIB_UNICASTIPADDRESS_ROW {
+    let mut row = MIB_UNICASTIPADDRESS_ROW::default();
+    unsafe {
+        InitializeUnicastIpAddressEntry(&mut row);
+    }
+    row.InterfaceLuid = NET_LUID_LH {
+        Value: interface.luid,
+    };
+    row.InterfaceIndex = interface.index;
+    row.Address = sockaddr_from_ip(address);
+    row.OnLinkPrefixLength = prefix_length;
+    row.SkipAsSource = false;
+    row.DadState = IpDadStatePreferred;
+    row
 }
 
 struct OwnedUnicastAddress {
@@ -3142,18 +3705,7 @@ impl OwnedUnicastAddress {
         address: IpAddr,
         prefix_length: u8,
     ) -> Result<Self, String> {
-        let mut row = MIB_UNICASTIPADDRESS_ROW::default();
-        unsafe {
-            InitializeUnicastIpAddressEntry(&mut row);
-        }
-        row.InterfaceLuid = NET_LUID_LH {
-            Value: interface.luid,
-        };
-        row.InterfaceIndex = interface.index;
-        row.Address = sockaddr_from_ip(address);
-        row.OnLinkPrefixLength = prefix_length;
-        row.SkipAsSource = false;
-        row.DadState = IpDadStatePreferred;
+        let row = fixture_unicast_address_row(interface, address, prefix_length);
 
         if lookup_unicast_address(row)?.is_some() {
             return Err("owned Wintun address already exists before creation".to_owned());
@@ -3253,6 +3805,23 @@ fn same_unicast_address_key(
     (unsafe { left.InterfaceLuid.Value }) == (unsafe { right.InterfaceLuid.Value })
         && left.InterfaceIndex == right.InterfaceIndex
         && ip_from_sockaddr(left.Address) == ip_from_sockaddr(right.Address)
+}
+
+fn wait_for_unicast_address_absent_until(
+    row: MIB_UNICASTIPADDRESS_ROW,
+    deadline: Instant,
+) -> Result<(), String> {
+    loop {
+        if lookup_unicast_address(row)?.is_none() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "active crash-route address remained after bounded child termination".to_owned(),
+            );
+        }
+        thread::sleep(CRASH_PROBE_INTERVAL);
+    }
 }
 
 fn ip_from_sockaddr(address: SOCKADDR_INET) -> Option<IpAddr> {

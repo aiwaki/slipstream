@@ -44,7 +44,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | IPv4 UDP/TCP pre-existing-flow exact-main qualified | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, and bounded IPv4 UDP and TCP pre-existing-flow activation subgates on native AMD64 and ARM64. PR #198 proves either UDP baseline continuity or owned-route rollback followed by a successful retry on the same socket. PR #200 independently establishes a real TCP stream through a checksum-valid synthetic handshake, then proves payload continuity or fail-closed exact-route rollback, retransmission recovery, and an unconditional same-stream post-removal exchange. Every acquired route and address reaches verified cleanup even when setup or exchange fails. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. Bounded crash-safe capture removal is the next isolated gate; external-VPN coexistence, userspace forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Crash-safe capture removal qualified on PR head; exact-main pending | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, and bounded IPv4 UDP and TCP pre-existing-flow activation subgates on native AMD64 and ARM64. PR #198 proves either UDP baseline continuity or owned-route rollback followed by a successful retry on the same socket. PR #200 independently establishes a real TCP stream through a checksum-valid synthetic handshake, then proves payload continuity or fail-closed exact-route rollback, retransmission recovery, and an unconditional same-stream post-removal exchange. Every acquired route and address reaches verified cleanup even when setup or exchange fails. PR #202 head adds and passes an exact child-process termination fixture with bounded adapter/address/route absence plus baseline recovery on native AMD64 and ARM64; exact-main repetition is pending. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. External-VPN coexistence, userspace forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -576,6 +576,23 @@ final ACK with exact sequence and acknowledgment numbers before treating the
 stream as established. TCP pre-existing-flow activation is now closed. The next
 isolated M4 gate must prove bounded crash-safe removal of capture ownership
 without inferring external-VPN coexistence from that result.
+
+The current crash-removal candidate keeps the baseline adapter, exact source,
+and non-default `/24` in the parent while an exact child process owns the
+capture adapter, source, and production-gated `/32`. An atomic marker is
+published only from the active probe. The parent independently observes the
+active capture identity, terminates only that retained child handle, and then
+requires bounded adapter, address, and `/32` absence plus exact baseline route
+recovery. It uses no external endpoint, backend, default route, production-host
+composition, DNS, proxy, PAC, VPN, broad process kill, or driver mutation.
+PR #202 head passed this proof on native AMD64 and ARM64 in
+[run 29967959561](https://github.com/aiwaki/slipstream/actions/runs/29967959561),
+all required checks and packaged lifecycle in
+[run 29967959616](https://github.com/aiwaki/slipstream/actions/runs/29967959616),
+and dependency audit in
+[run 29967959553](https://github.com/aiwaki/slipstream/actions/runs/29967959553).
+Exact-main repetition is pending. External-VPN coexistence remains the next
+independent gate after merge.
 
 ## External Gates
 
