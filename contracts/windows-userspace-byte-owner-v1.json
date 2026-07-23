@@ -17,6 +17,8 @@
   "invariants": {
     "opaque_tuple_binding_required": true,
     "exact_open_admission_capability_required": true,
+    "exact_backend_open_command_set_required": true,
+    "open_exact_reduction_required": true,
     "full_admission_preserved_across_payload_and_reconcile": true,
     "successful_packet_flow_payload_transition_required": true,
     "exact_packet_flow_predecessor_required": true,
@@ -31,6 +33,7 @@
     "duplicate_and_out_of_order_payload_rejected": true,
     "per_flow_directional_memory_bounded": true,
     "terminal_cleanup_is_event_scoped": true,
+    "destructive_cleanup_exact_transition_required": true,
     "same_timestamp_stale_terminal_transition_cannot_remove_newer_bytes": true,
     "generation_retirement_is_bounded_and_stale_safe": true,
     "selected_stack_effect_is_injected": true,

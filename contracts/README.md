@@ -209,12 +209,13 @@ Slipstream routing decisions and bounded recovery primitives.
 - `windows-userspace-byte-owner-v1.json` binds actual payload bytes to an
   opened tuple owner only after a successful frozen packet-flow-v1 payload
   transition. Opening requires the exact admission capability retained by the
-  tuple binding, not merely a matching flow key, and every later active
-  transition must preserve that complete capability. The predecessor must equal the
-  owner's last full packet-flow snapshot and the resulting directional queue
-  must grow by the exact declared length, so an unrelated idle refresh cannot
-  stage bytes. Exact flow key,
-  direction, sequence, and length are retained in fixed directional queues
+  tuple binding and the complete reducer-issued backend-open command set, not
+  merely a matching flow key. The complete opening transition must also equal
+  a fresh reduction from its supplied full predecessor. Every later active transition must preserve that
+  complete capability. The predecessor must equal the owner's last full
+  packet-flow snapshot and the resulting directional queue must grow by the
+  exact declared length, so an unrelated idle refresh cannot stage bytes.
+  Exact flow key, direction, sequence, and length are retained in fixed directional queues
   until one injected forwarding effect succeeds. A caller-constructed forward
   command is insufficient: each frame also retains authorization from the
   exact accepting transition, and queued client frames gain that authorization
@@ -225,8 +226,10 @@ Slipstream routing decisions and bounded recovery primitives.
   oversized, and mismatched commands fail closed. Ordinary terminal
   reconciliation removes only the event's flow after monotonic transition
   evidence. Explicit generation retirement is bounded by the packet-flow high
-  watermark. Cleanup compares the exact predecessor snapshot, so stale terminal
-  or retirement state cannot remove newer bytes even at the same timestamp.
+  watermark. Before either cleanup path releases bytes, the transition must
+  exactly equal a fresh frozen-v1 reduction from the supplied full registry.
+  Stale terminal or retirement state therefore cannot remove newer bytes after
+  unrelated registry progress or at the same timestamp.
   The selected
   `smoltcp 0.13.1` identity is cross-checked from the frozen selection contract,
   but the adapter neither instantiates it nor enters the production host.

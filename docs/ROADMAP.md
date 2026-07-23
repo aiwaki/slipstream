@@ -525,7 +525,9 @@ therefore stays phased and closed to production traffic:
    egress source and requires exact generation, flow ID, transport,
    destination address/port, IP family, active policy, and expiry agreement.
    It retains that exact admission capability so a separately valid same-key
-   destination or request cannot open the byte owner. It does not instantiate
+   destination or request cannot open the byte owner. Opening requires the
+   complete reducer-issued backend command set and must exactly equal a fresh
+   reduction from its supplied full predecessor. It does not instantiate
    the selected stack. Userspace byte-owner v1 requires every later active
    transition to preserve that complete admission capability and now
    retains actual payload by exact flow, direction, sequence, and length only
@@ -538,8 +540,9 @@ therefore stays phased and closed to production traffic:
    `Forwarded` events only after preflighting them against the current full
    registry and its global monotonic watermark, ordinary
    terminal cleanup is exact-flow scoped, and explicit generation retirement
-   is high-watermark bounded. Both cleanup paths require exact predecessor
-   equality and therefore reject same-timestamp stale transitions. The
+   is high-watermark bounded. Before either cleanup releases bytes, its
+   transition must exactly equal a fresh reduction from the supplied full
+   registry, including unrelated-flow progress. The
    next subgate is a test-only effect adapter for the selected stack plus
    separate IPv6 fragment-input qualification. Native
    connectors, packet-flow qualification on disposable AMD64/ARM64, and

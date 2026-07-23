@@ -298,7 +298,9 @@ impl WindowsUserspaceByteOwner {
         &mut self,
         binding: WindowsUserspaceFlowBinding,
         event: &WindowsPacketFlowEvent,
+        previous: &WindowsPacketFlowRegistry,
         transition: &WindowsPacketFlowTransition,
+        packet_flow_config: &WindowsPacketFlowConfig,
     ) -> Result<(), WindowsUserspaceByteOwnerError> {
         let now_ms = match event {
             WindowsPacketFlowEvent::FlowOpened { now_ms, .. } => *now_ms,
@@ -354,21 +356,27 @@ impl WindowsUserspaceByteOwner {
                 "packet-flow open transition is not the empty active binding flow",
             ));
         }
-        let exact_open = transition.commands.iter().any(|command| {
-            matches!(
-                command,
-                WindowsPacketFlowCommand::OpenBackend {
-                    key: command_key,
-                    ..
-                } if *command_key == key
-            )
-        });
-        if !exact_open {
+        let admission = binding.admission();
+        let expected_commands = [
+            WindowsPacketFlowCommand::OpenBackend {
+                key,
+                session_id: admission.session_id(),
+                request: admission.request().clone(),
+                egress: admission.egress().clone(),
+                destination_port: admission.destination_port(),
+            },
+            WindowsPacketFlowCommand::ScheduleIdleDeadline {
+                key,
+                at_ms: transition_flow.idle_deadline_at_ms,
+            },
+        ];
+        if transition.commands.as_slice() != expected_commands.as_slice() {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
-                "packet-flow open transition lacks the exact backend-open command",
+                "packet-flow open transition does not contain the exact binding command set",
             ));
         }
+        Self::require_exact_transition(previous, event, transition, packet_flow_config)?;
         self.flows.insert(
             key,
             WindowsUserspaceOwnedFlow::new(binding, transition_flow.clone()),
@@ -738,6 +746,7 @@ impl WindowsUserspaceByteOwner {
         event: &WindowsPacketFlowEvent,
         previous: &WindowsPacketFlowRegistry,
         transition: &WindowsPacketFlowTransition,
+        packet_flow_config: &WindowsPacketFlowConfig,
     ) -> Result<WindowsUserspaceByteCleanup, WindowsUserspaceByteOwnerError> {
         let now_ms = event.now_ms();
         if transition.state.updated_at_ms != now_ms {
@@ -832,7 +841,15 @@ impl WindowsUserspaceByteOwner {
                     flow.packet_flow_state = packet_flow_state.clone();
                 }
             } else {
-                self.remove_flow(key, &mut cleanup);
+                if self.flows.contains_key(&key) {
+                    Self::require_exact_transition(
+                        previous,
+                        event,
+                        transition,
+                        packet_flow_config,
+                    )?;
+                    self.remove_flow(key, &mut cleanup);
+                }
             }
         } else if let WindowsPacketFlowEvent::CaptureGenerationRetired {
             capture_generation, ..
@@ -859,11 +876,39 @@ impl WindowsUserspaceByteOwner {
                 .filter(|key| key.capture_generation <= *capture_generation)
                 .copied()
                 .collect();
+            if !keys.is_empty() {
+                Self::require_exact_transition(previous, event, transition, packet_flow_config)?;
+            }
             for key in keys {
                 self.remove_flow(key, &mut cleanup);
             }
         }
         Ok(cleanup)
+    }
+
+    fn require_exact_transition(
+        previous: &WindowsPacketFlowRegistry,
+        event: &WindowsPacketFlowEvent,
+        transition: &WindowsPacketFlowTransition,
+        packet_flow_config: &WindowsPacketFlowConfig,
+    ) -> Result<(), WindowsUserspaceByteOwnerError> {
+        let expected = reduce_windows_packet_flow(previous.clone(), event, packet_flow_config)
+            .map_err(|error| {
+                WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                    format!(
+                        "packet-flow rejected cleanup from the supplied registry: {}",
+                        error.error
+                    ),
+                )
+            })?;
+        if expected != *transition {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                "cleanup transition was not reduced from the supplied full registry",
+            ));
+        }
+        Ok(())
     }
 
     fn remove_flow(
