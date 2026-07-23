@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_userspace_stack_selection",
+  "contract_version": 1,
+  "selection_status": "selected_for_bounded_evaluation",
+  "selected_stack": {
+    "crate": "smoltcp",
+    "version": "0.13.1",
+    "crate_sha256": "5f73d40463bba65efc9adc6370b56df76d563cc46e2482bba58351b4afb7535e",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "repository": "https://github.com/smoltcp-rs/smoltcp",
+    "license": "0BSD",
+    "rust_version": "1.91",
+    "default_features": false,
+    "features": [
+      "fragmentation-buffer-size-4096",
+      "medium-ip",
+      "proto-ipv4",
+      "proto-ipv4-fragmentation",
+      "proto-ipv6",
+      "proto-ipv6-fragmentation",
+      "reassembly-buffer-count-2",
+      "reassembly-buffer-size-4096",
+      "socket-tcp",
+      "socket-udp",
+      "std"
+    ]
+  },
+  "bounds": {
+    "medium": "layer_3",
+    "mtu": 1280,
+    "max_link_frames_per_direction": 8,
+    "max_burst_frames": 1,
+    "max_sockets_per_stack": 2,
+    "udp_packet_slots_per_direction": 4,
+    "udp_bytes_per_direction": 4096,
+    "tcp_bytes_per_direction": 4096,
+    "fragmentation_buffer_bytes": 4096,
+    "reassembly_buffer_bytes": 4096,
+    "reassembly_buffer_count": 2,
+    "random_seed_source": "explicit_test_vector"
+  },
+  "qualified_properties": {
+    "ipv4_tcp_round_trip": true,
+    "ipv6_tcp_round_trip": true,
+    "ipv4_udp_round_trip": true,
+    "ipv6_udp_below_mtu_round_trip": true,
+    "ipv4_outbound_fragmentation_and_inbound_reassembly": true,
+    "ipv4_udp_checksum_rejection": true,
+    "ipv6_udp_checksum_rejection": true,
+    "fixed_link_queue_bound": true,
+    "fixed_socket_buffer_bound": true
+  },
+  "known_limits": {
+    "ipv6_outbound_fragmentation": "unimplemented_drop_without_frame",
+    "ipv6_fragment_reassembly": "not_yet_qualified",
+    "source_endpoint_binding": "not_present_in_windows_packet_flow_v1",
+    "production_backend_bridge": "not_implemented"
+  },
+  "invariants": {
+    "evaluation_dependency_only": true,
+    "production_service_host_composition": false,
+    "native_connector_effect": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "socket_or_dns_effect": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "default_route_mutation": false,
+    "discord_or_youtube_geo_exit": false
+  },
+  "remaining_gates": {
+    "versioned_source_endpoint_binding": "required",
+    "ipv6_fragment_reassembly_qualification": "required",
+    "native_connector_effects": "required",
+    "production_service_host_composition": "required",
+    "disposable_amd64_packet_flow": "required",
+    "disposable_arm64_packet_flow": "required"
+  }
+}

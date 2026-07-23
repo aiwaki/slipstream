@@ -64,8 +64,16 @@ cd app-tauri/src-tauri
 cargo test
 ```
 
+```bash
+cargo test --locked --manifest-path crates/slipstream-core/Cargo.toml
+cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
+cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml
+```
+
 The Python suite includes the language-neutral routing and recovery vectors in
-[`contracts/`](contracts/README.md). Rust reads the same vectors.
+[`contracts/`](contracts/README.md). Rust reads the same vectors. The userspace
+stack evaluation is effect-free and does not load Wintun, open native sockets,
+or mutate adapter, route, DNS, proxy, PAC, VPN, process, or service state.
 
 ## Build
 

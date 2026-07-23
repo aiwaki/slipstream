@@ -512,8 +512,18 @@ therefore stays phased and closed to production traffic:
    session, revalidates that same current session at backend opening, and
    resumes partial effect batches from an exact cursor. A reused request ID
    rejected by a retained owner cancels only its exact new data-plane session.
-   The next subgate is the bounded stack evaluation, not another routing or
-   capture mechanism.
+   The bounded selection gate now pins `smoltcp 0.13.1` in an isolated Rust
+   1.91 evaluation crate. A deterministic fake Layer 3 link proves dual-stack
+   TCP, UDP below the IPv6 MTU, IPv4 fragmentation/reassembly, dual-stack UDP
+   checksum rejection, and fixed frame/socket/reassembly bounds without
+   linking the dependency into the Windows adapter or production host.
+   Oversized IPv6 output is explicitly fail-closed because the selected version
+   does not emit IPv6 fragments. IPv6 fragment input remains unqualified.
+   The next subgate is a versioned source-endpoint binding and pure bridge:
+   packet-flow v1 retains destination address/port but not the original source
+   address/port required by a userspace stack. Do not mutate frozen v1 or infer
+   that tuple. Native connectors, packet-flow qualification on disposable
+   AMD64/ARM64, and production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier

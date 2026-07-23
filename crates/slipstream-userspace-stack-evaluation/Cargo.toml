@@ -1,0 +1,25 @@
+[package]
+name = "slipstream-userspace-stack-evaluation"
+version = "0.1.0"
+description = "Effect-free userspace network-stack qualification for Slipstream"
+edition = "2021"
+rust-version = "1.91"
+license = "MIT"
+publish = false
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+smoltcp = { version = "=0.13.1", default-features = false, features = [
+  "std",
+  "medium-ip",
+  "proto-ipv4",
+  "proto-ipv6",
+  "proto-ipv4-fragmentation",
+  "proto-ipv6-fragmentation",
+  "socket-tcp",
+  "socket-udp",
+  "fragmentation-buffer-size-4096",
+  "reassembly-buffer-size-4096",
+  "reassembly-buffer-count-2",
+] }

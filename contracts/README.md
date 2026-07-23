@@ -180,6 +180,14 @@ Slipstream routing decisions and bounded recovery primitives.
   prefix. This contract performs no packet reconstruction, socket,
   adapter, route, DNS, proxy, PAC, VPN, process, or service effect and is not
   composed into the production host.
+- `windows-userspace-stack-selection-v1.json` selects the exact
+  `smoltcp 0.13.1` crate only for a bounded, effect-free evaluation harness.
+  Its fake Layer 3 link proves dual-stack TCP, UDP below the IPv6 MTU, IPv4
+  fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds.
+  It also records the current oversized-IPv6 drop and missing source-endpoint
+  binding as open gates. The dependency is not linked into the Windows adapter
+  or production service host and performs no socket, adapter, route, DNS,
+  proxy, PAC, VPN, process, or service effect.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service
