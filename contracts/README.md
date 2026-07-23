@@ -219,6 +219,18 @@ Slipstream routing decisions and bounded recovery primitives.
   leaves both the byte owner and selected stack unchanged. The crate has no native packet,
   socket, Wintun, route, DNS, proxy, PAC, VPN, process, service, or
   production-host effect.
+- `windows-capture-fragment-effect-v1.json` additively composes frozen packet
+  capture v4 with bounded IPv6 fragment-input v1 in the same test-only crate.
+  It binds every retained assembly to the exact capture generation, flow,
+  source, destination, transport, and ports; direct passthrough and mismatched
+  evidence never enter fragment state. Same-identification cross-flow input
+  cannot evict another owner, RFC 6946 atomic fragments bypass state, and exact
+  timeout or normalization failure releases only its own assembly. An assembly
+  expires at the earlier of the normalizer's 60-second timeout and capture
+  v4's five-second evidence expiry, so normalized traffic cannot outlive the
+  attribution that selected its policy. It performs no native packet, socket,
+  Wintun, route, DNS, proxy, PAC, VPN, process, service, or production-host
+  effect.
 - `windows-userspace-flow-binding-v1.json` joins a capture-v4 original source
   endpoint to an already-admitted frozen packet-flow-v1 capability. The exact
   generation, flow ID, transport, destination address/port, active policy, IP

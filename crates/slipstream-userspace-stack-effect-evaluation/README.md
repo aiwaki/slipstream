@@ -16,10 +16,14 @@ cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-eva
 cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings
 ```
 
-The frozen language-neutral contract is
+The frozen language-neutral selected-stack contract is
 [`contracts/windows-userspace-stack-effect-v1.json`](../../contracts/windows-userspace-stack-effect-v1.json).
-Passing this gate does not admit the selected stack into the Windows production
-host. Bounded IPv6 fragment input is qualified in a separate effect-free
-contract; composing that normalizer with versioned capture evidence, native
-packet effects, and disposable AMD64/ARM64 lifecycle qualification remain
-separate gates.
+The additive
+[`contracts/windows-capture-fragment-effect-v1.json`](../../contracts/windows-capture-fragment-effect-v1.json)
+contract composes capture v4 classification with bounded IPv6 fragment input
+only in this test crate. Retained assemblies are owned by one exact capture
+generation and flow, expire no later than their five-second capture evidence,
+and cannot blend or evict a same-identification assembly from another flow.
+Passing either gate does not admit the selected stack into the Windows
+production host. Native packet effects and disposable AMD64/ARM64 lifecycle
+qualification remain separate gates.

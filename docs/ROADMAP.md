@@ -528,7 +528,14 @@ therefore stays phased and closed to production traffic:
    fragment-count, and timeout bounds, processes RFC 6946 atomic fragments
    without touching reassembly state, rejects overlap and conflicts, and
    delivers a completed UDP packet to the selected stack with its original
-   source endpoint. Windows capture composition remains closed.
+   source endpoint. An additive test-only capture-fragment contract now runs
+   frozen capture v4 classification before fragment state, binds each ordinary
+   assembly to one exact capture generation, flow, tuple, transport, ports,
+   and policy result, and expires it at the earlier evidence or fragment
+   deadline. Capture v4 therefore limits composed state to five seconds.
+   Direct passthrough and mismatched input allocate nothing; cross-flow
+   identification collisions cannot evict an owner; atomic fragments remain
+   stateless. Native packet effects and production composition remain closed.
    Capture v4 and userspace-flow-binding v1 now close the immutable original
    five-tuple gap without mutating frozen capture v3 or packet-flow v1. The
    binding distinguishes the original client source from the admitted outbound
@@ -563,11 +570,12 @@ therefore stays phased and closed to production traffic:
    through a deterministic in-memory Layer 3 pair. It proves exact IPv4/IPv6
    TCP/UDP delivery in both directions, original tuple use, and retry after a
    pre-mutation injected failure without changing either frozen predecessor or
-   linking the stack into the Windows adapter. The next subgate is composing
-   the bounded fragment-input normalizer with versioned Windows capture in an
-   effect-only harness. Native
-   connectors, packet-flow qualification on disposable AMD64/ARM64, and
-   production-host composition remain later independent gates.
+   linking the stack into the Windows adapter. A second additive effect-only
+   harness now composes bounded IPv6 fragment input with versioned capture
+   evidence while keeping both frozen predecessors unchanged. The next subgate
+   is native connector effects, followed by packet-flow qualification on
+   disposable AMD64/ARM64. Production-host composition remains a later
+   independent gate.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier
