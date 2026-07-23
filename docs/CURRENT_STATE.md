@@ -9,12 +9,12 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-22, through merged
-[PR #200](https://github.com/aiwaki/slipstream/pull/200) at main commit
-`8cac5602eaccd992a1f2a5e86bb2510aac789a9a`, including its successful
-[native AMD64/ARM64 run 29966086550](https://github.com/aiwaki/slipstream/actions/runs/29966086550),
-[required CI run 29966086559](https://github.com/aiwaki/slipstream/actions/runs/29966086559),
+[PR #202](https://github.com/aiwaki/slipstream/pull/202) at main commit
+`ebe9f9c70b378f688badf6ba35cd96dd200d0bb4`, including its successful
+[native AMD64/ARM64 run 29968586744](https://github.com/aiwaki/slipstream/actions/runs/29968586744),
+[required CI run 29968586745](https://github.com/aiwaki/slipstream/actions/runs/29968586745),
 and
-[dependency-audit run 29966086558](https://github.com/aiwaki/slipstream/actions/runs/29966086558).
+[dependency-audit run 29968586782](https://github.com/aiwaki/slipstream/actions/runs/29968586782).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -544,9 +544,10 @@ owner removes only the exact route and the same socket completes a bounded
 baseline retry. Every acquired route and address reaches explicit verified
 cleanup before any result is accepted. This closes only the first IPv4 UDP
 subgate; PR #200 below subsequently closes TCP pre-existing-flow activation.
-Bounded crash-safe capture removal and explicit external-VPN coexistence remain
-separate gates before any exact-route transaction or production composition. A
-partial DNS cache is never treated as complete attribution.
+Crash-safe capture removal is closed by PR #202. Explicit external-VPN
+coexistence remains a separate gate before any exact-route transaction or
+production composition. A partial DNS cache is never treated as complete
+attribution.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
 PR #200 is the independent IPv4 TCP pre-existing-flow gate. Its qualified code
@@ -573,9 +574,9 @@ also complete another baseline exchange after route removal. Its first native
 revision exposed that `peer_addr()` alone can become observable before Windows
 has completed the handshake; the corrected candidate requires the captured
 final ACK with exact sequence and acknowledgment numbers before treating the
-stream as established. TCP pre-existing-flow activation is now closed. The next
-isolated M4 gate must prove bounded crash-safe removal of capture ownership
-without inferring external-VPN coexistence from that result.
+stream as established. TCP pre-existing-flow activation is now closed. PR #202
+subsequently closed bounded crash-safe removal of capture ownership without
+inferring external-VPN coexistence from that result.
 
 The current crash-removal candidate keeps the baseline adapter, exact source,
 and non-default `/24` in the parent while an exact child process owns the
