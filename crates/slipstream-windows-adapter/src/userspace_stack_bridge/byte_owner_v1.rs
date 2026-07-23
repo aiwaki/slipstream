@@ -274,6 +274,7 @@ pub struct WindowsUserspaceByteCleanup {
 pub struct WindowsUserspaceByteOwner {
     config: WindowsUserspaceByteOwnerConfig,
     flows: BTreeMap<WindowsPacketFlowKey, WindowsUserspaceOwnedFlow>,
+    packet_flow_registry: Option<WindowsPacketFlowRegistry>,
     owned_frames: usize,
     owned_bytes: usize,
 }
@@ -288,9 +289,27 @@ impl WindowsUserspaceByteOwner {
         Ok(Self {
             config,
             flows: BTreeMap::new(),
+            packet_flow_registry: None,
             owned_frames: 0,
             owned_bytes: 0,
         })
+    }
+
+    fn require_current_registry(
+        &self,
+        previous: &WindowsPacketFlowRegistry,
+    ) -> Result<(), WindowsUserspaceByteOwnerError> {
+        if self
+            .packet_flow_registry
+            .as_ref()
+            .is_some_and(|current| current != previous)
+        {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                "packet-flow predecessor is not the byte owner's current full registry",
+            ));
+        }
+        Ok(())
     }
 
     /// Opens byte ownership only alongside the successful packet-flow open.
@@ -311,6 +330,7 @@ impl WindowsUserspaceByteOwner {
                 ));
             }
         };
+        self.require_current_registry(previous)?;
         if now_ms >= binding.expires_at_ms() {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::BindingExpired,
@@ -381,6 +401,7 @@ impl WindowsUserspaceByteOwner {
             key,
             WindowsUserspaceOwnedFlow::new(binding, transition_flow.clone()),
         );
+        self.packet_flow_registry = Some(transition.state.clone());
         Ok(())
     }
 
@@ -420,6 +441,7 @@ impl WindowsUserspaceByteOwner {
                 "payload exceeds the byte-owner chunk bound",
             ));
         }
+        self.require_current_registry(previous)?;
 
         let owner_flow = self.flows.get(&key).ok_or_else(|| {
             WindowsUserspaceByteOwnerError::new(
@@ -596,6 +618,7 @@ impl WindowsUserspaceByteOwner {
         flow.packet_flow_state = transition_flow.clone();
         self.owned_frames += 1;
         self.owned_bytes += declared_bytes;
+        self.packet_flow_registry = Some(transition.state.clone());
         Ok(())
     }
 
@@ -621,6 +644,7 @@ impl WindowsUserspaceByteOwner {
                 ));
             }
         };
+        self.require_current_registry(previous)?;
         let acknowledgement = WindowsPacketFlowEvent::Forwarded {
             now_ms,
             key,
@@ -628,7 +652,7 @@ impl WindowsUserspaceByteOwner {
             through_sequence: sequence,
         };
 
-        let (next_packet_flow_state, release_terminal_owner) = {
+        let (next_packet_flow_state, release_terminal_owner, next_registry) = {
             let flow = self.flows.get(&key).ok_or_else(|| {
                 WindowsUserspaceByteOwnerError::new(
                     WindowsUserspaceByteOwnerErrorCode::UnknownFlow,
@@ -693,38 +717,37 @@ impl WindowsUserspaceByteOwner {
             };
             let other_direction_bytes = flow.queue(other_direction).bytes;
             // A fully drained terminal acknowledgement may be pruned immediately.
-            let (next_packet_flow_state, release_terminal_owner) = match acknowledgement_transition
-                .state
-                .flows
-                .get(&key)
-            {
-                Some(state) => {
-                    if state.queued_bytes(direction) != expected_direction_bytes
-                        || state.queued_bytes(other_direction) != other_direction_bytes
-                    {
-                        return Err(WindowsUserspaceByteOwnerError::new(
+            let (next_packet_flow_state, release_terminal_owner) =
+                match acknowledgement_transition.state.flows.get(&key) {
+                    Some(state) => {
+                        if state.queued_bytes(direction) != expected_direction_bytes
+                            || state.queued_bytes(other_direction) != other_direction_bytes
+                        {
+                            return Err(WindowsUserspaceByteOwnerError::new(
                             WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
                             "packet-flow acknowledgement does not commit the exact owned payload",
                         ));
+                        }
+                        if state.phase.is_terminal()
+                            && (expected_direction_bytes != 0 || other_direction_bytes != 0)
+                        {
+                            return Err(WindowsUserspaceByteOwnerError::new(
+                                WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
+                                "terminal packet-flow acknowledgement retains owned payload",
+                            ));
+                        }
+                        (Some(state.clone()), state.phase.is_terminal())
                     }
-                    if state.phase.is_terminal()
-                        && (expected_direction_bytes != 0 || other_direction_bytes != 0)
-                    {
+                    None if expected_direction_bytes == 0 && other_direction_bytes == 0 => {
+                        (None, true)
+                    }
+                    None => {
                         return Err(WindowsUserspaceByteOwnerError::new(
                             WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
-                            "terminal packet-flow acknowledgement retains owned payload",
+                            "packet-flow acknowledgement removed a flow with owned payload",
                         ));
                     }
-                    (Some(state.clone()), state.phase.is_terminal())
-                }
-                None if expected_direction_bytes == 0 && other_direction_bytes == 0 => (None, true),
-                None => {
-                    return Err(WindowsUserspaceByteOwnerError::new(
-                        WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected,
-                        "packet-flow acknowledgement removed a flow with owned payload",
-                    ));
-                }
-            };
+                };
             let delivery = WindowsUserspaceByteDelivery {
                 key,
                 binding: &flow.binding,
@@ -738,7 +761,11 @@ impl WindowsUserspaceByteOwner {
                     error.to_string(),
                 )
             })?;
-            (next_packet_flow_state, release_terminal_owner)
+            (
+                next_packet_flow_state,
+                release_terminal_owner,
+                acknowledgement_transition.state,
+            )
         };
 
         let flow = self
@@ -756,6 +783,7 @@ impl WindowsUserspaceByteOwner {
         }
         self.owned_frames -= 1;
         self.owned_bytes -= frame.bytes.len();
+        self.packet_flow_registry = Some(next_registry);
         if release_terminal_owner {
             let mut cleanup = WindowsUserspaceByteCleanup::default();
             self.remove_flow(key, &mut cleanup);
@@ -781,6 +809,12 @@ impl WindowsUserspaceByteOwner {
                 "packet-flow registry timestamp does not match the cleanup event",
             ));
         }
+        if self.packet_flow_registry.as_ref() == Some(&transition.state) {
+            Self::require_exact_transition(previous, event, transition, packet_flow_config)?;
+            return Ok(WindowsUserspaceByteCleanup::default());
+        }
+        self.require_current_registry(previous)?;
+        Self::require_exact_transition(previous, event, transition, packet_flow_config)?;
         let mut cleanup = WindowsUserspaceByteCleanup::default();
         if let Some(key) = event.flow_key() {
             if self.flows.contains_key(&key)
@@ -821,12 +855,6 @@ impl WindowsUserspaceByteOwner {
                             "packet-flow transition queues do not match the owned bytes",
                         ));
                     }
-                    Self::require_exact_transition(
-                        previous,
-                        event,
-                        transition,
-                        packet_flow_config,
-                    )?;
                     let backend_became_ready = matches!(
                         event,
                         WindowsPacketFlowEvent::BackendReady { key: event_key, .. }
@@ -882,12 +910,6 @@ impl WindowsUserspaceByteOwner {
                 }
             } else {
                 if self.flows.contains_key(&key) {
-                    Self::require_exact_transition(
-                        previous,
-                        event,
-                        transition,
-                        packet_flow_config,
-                    )?;
                     self.remove_flow(key, &mut cleanup);
                 }
             }
@@ -916,13 +938,11 @@ impl WindowsUserspaceByteOwner {
                 .filter(|key| key.capture_generation <= *capture_generation)
                 .copied()
                 .collect();
-            if !keys.is_empty() {
-                Self::require_exact_transition(previous, event, transition, packet_flow_config)?;
-            }
             for key in keys {
                 self.remove_flow(key, &mut cleanup);
             }
         }
+        self.packet_flow_registry = Some(transition.state.clone());
         Ok(cleanup)
     }
 

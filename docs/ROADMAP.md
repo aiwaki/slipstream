@@ -531,7 +531,8 @@ therefore stays phased and closed to production traffic:
    the selected stack. Userspace byte-owner v1 requires every later payload or
    active reconciliation transition to equal a fresh reduction from its full
    predecessor and configuration while preserving that complete admission
-   capability, and now
+   capability. A bounded exact full-registry cursor also advances on unrelated
+   transitions, so stale target-only state cannot roll back another flow, and now
    retains actual payload by exact flow, direction, sequence, and length only
    when the caller supplies the exact last packet-flow predecessor and the
    resulting queue grows by the declared length. Every retained frame also

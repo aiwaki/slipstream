@@ -654,7 +654,9 @@ The bounded byte-owner bridge now retains exact flow, direction, sequence, and
 payload bytes after successful packet-flow-v1 acceptance. Every active
 transition must preserve the complete admission capability retained by the
 immutable tuple binding and exactly equal a fresh reduction from its supplied
-full predecessor and configuration. It releases bytes
+full predecessor and configuration. A bounded full-registry cursor advances on
+exact unrelated transitions too, preventing a stale target-only snapshot from
+rolling back another flow. It releases bytes
 only after one injected atomic effect succeeds, retains the exact suffix on
 failure, and accepts staging only from the exact current packet-flow predecessor
 with the matching queue delta and transition-issued forwarding authorization.

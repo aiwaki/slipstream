@@ -214,14 +214,16 @@ Slipstream routing decisions and bounded recovery primitives.
   a fresh reduction from its supplied full predecessor. Every later payload or
   active reconciliation transition must also equal a fresh reduction from its
   supplied full predecessor and configuration while preserving that complete
-  capability. The predecessor must equal the owner's last full
-  packet-flow snapshot and the resulting directional queue must grow by the
-  exact declared length, so an unrelated idle refresh cannot stage bytes.
-  Exact flow key, direction, sequence, and length are retained in fixed directional queues
-  until one injected forwarding effect succeeds. A caller-constructed forward
-  command is insufficient: each frame also retains authorization from the
-  exact accepting transition, and queued client frames gain that authorization
-  only from an exact one-to-one `BackendReady` command set. Before invoking the
+  capability. The owner retains the last complete packet-flow registry, and
+  exact unrelated transitions advance that cursor too; a stale target-only
+  snapshot cannot discard unrelated progress. The predecessor must equal the
+  owner's last full packet-flow snapshot and the resulting directional queue
+  must grow by the exact declared length, so an unrelated idle refresh cannot
+  stage bytes. Exact flow key, direction, sequence, and length are retained in
+  fixed directional queues until one injected forwarding effect succeeds. A
+  caller-constructed forward command is insufficient: each frame also retains
+  authorization from the exact accepting transition, and queued client frames
+  gain it only from an exact one-to-one `BackendReady` command set. Before invoking the
   effect, delivery must also reduce its exact `Forwarded` acknowledgement from
   the current full registry, including the global monotonic watermark. A
   retained owner rejects `Forwarded` through generic reconciliation, so the

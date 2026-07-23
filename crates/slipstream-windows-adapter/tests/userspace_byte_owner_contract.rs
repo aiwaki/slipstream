@@ -249,6 +249,7 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "full_admission_preserved_across_payload_and_reconcile",
         "payload_exact_reduction_required",
         "active_reconcile_exact_reduction_required",
+        "exact_full_registry_predecessor_required",
         "forwarded_event_requires_effect_path",
         "terminal_history_pruning_preserves_delivery",
         "successful_packet_flow_payload_transition_required",
@@ -520,7 +521,7 @@ fn payload_and_reconcile_preserve_the_complete_bound_admission() {
         .expect_err("same-key admission cannot substitute during reconciliation");
     assert_eq!(
         reconcile_error.code,
-        WindowsUserspaceByteOwnerErrorCode::TransitionMismatch
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
     );
     assert_eq!(owner.owned_frame_count(), 1);
     assert_eq!(owner.owned_byte_count(), 3);
@@ -1037,6 +1038,9 @@ fn unrelated_registry_watermark_rejects_forward_before_effect() {
     let unrelated_event = flow_open_event(unrelated_admission, 1_500, &policy_tables);
     let advanced = reduce(&payload.state, &unrelated_event);
     assert_eq!(advanced.state.updated_at_ms, 1_500);
+    owner
+        .reconcile(&unrelated_event, &payload.state, &advanced, &config)
+        .expect("unrelated progress advances the full-registry cursor");
 
     let mut effects = RecordingByteEffect::default();
     let error = owner
@@ -1066,6 +1070,69 @@ fn unrelated_registry_watermark_rejects_forward_before_effect() {
     assert_eq!(effects.deliveries.len(), 1);
     assert_eq!(owner.owned_frame_count(), 0);
     assert_eq!(owner.owned_byte_count(), 0);
+}
+
+#[test]
+fn stale_full_registry_cannot_omit_unrelated_progress() {
+    let config = packet_flow_config();
+    let owner_config =
+        WindowsUserspaceByteOwnerConfig::from_packet_flow(&config).expect("valid owner config");
+    let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
+    let (state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
+
+    let policy_tables = bundled_policy_v1();
+    let (_, unrelated_fixture) = fixture_pair(8, 42);
+    let unrelated_admission = admission(&unrelated_fixture, &policy_tables);
+    let unrelated_event = flow_open_event(unrelated_admission, 1_400, &policy_tables);
+    let advanced = reduce(&state, &unrelated_event);
+    owner
+        .reconcile(&unrelated_event, &state, &advanced, &config)
+        .expect("unrelated progress advances the full-registry cursor");
+
+    let stale_payload_event = WindowsPacketFlowEvent::Payload {
+        now_ms: 1_450,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let stale_payload = reduce(&state, &stale_payload_event);
+    let stage_error = owner
+        .stage_payload(
+            &stale_payload_event,
+            &state,
+            &stale_payload,
+            &config,
+            vec![1, 2, 3],
+        )
+        .expect_err("stale payload predecessor cannot omit unrelated progress");
+    assert_eq!(
+        stage_error.code,
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
+    );
+    assert_eq!(owner.owned_frame_count(), 0);
+    assert_eq!(owner.owned_byte_count(), 0);
+
+    let stale_ready_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_450, key };
+    let stale_ready = reduce(&state, &stale_ready_event);
+    let reconcile_error = owner
+        .reconcile(&stale_ready_event, &state, &stale_ready, &config)
+        .expect_err("stale active predecessor cannot omit unrelated progress");
+    assert_eq!(
+        reconcile_error.code,
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
+    );
+
+    let current_ready_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_500, key };
+    let current_ready = reduce(&advanced.state, &current_ready_event);
+    owner
+        .reconcile(
+            &current_ready_event,
+            &advanced.state,
+            &current_ready,
+            &config,
+        )
+        .expect("current full-registry predecessor remains usable");
 }
 
 #[test]
@@ -1164,6 +1231,20 @@ fn final_forward_acknowledgement_releases_the_terminal_owner() {
     assert_eq!(owner.active_flow_count(), 0);
     assert_eq!(owner.owned_frame_count(), 0);
     assert_eq!(owner.owned_byte_count(), 0);
+
+    let forged_replay_event = WindowsPacketFlowEvent::Cancelled { now_ms: 1_430, key };
+    let forged_replay_error = owner
+        .reconcile(
+            &forged_replay_event,
+            &backend_half.state,
+            &committed,
+            &config,
+        )
+        .expect_err("idempotent replay still requires the exact event reduction");
+    assert_eq!(
+        forged_replay_error.code,
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
+    );
 
     let cleanup = owner
         .reconcile(&acknowledgement, &backend_half.state, &committed, &config)
