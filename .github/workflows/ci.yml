@@ -32,8 +32,9 @@ jobs:
             app-tauri/src-tauri/target
             crates/slipstream-core/target
             crates/slipstream-userspace-stack-evaluation/target
+            crates/slipstream-userspace-stack-effect-evaluation/target
             crates/slipstream-windows-adapter/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('app-tauri/src-tauri/Cargo.lock', 'crates/slipstream-core/Cargo.lock', 'crates/slipstream-userspace-stack-evaluation/Cargo.lock', 'crates/slipstream-windows-adapter/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ hashFiles('app-tauri/src-tauri/Cargo.lock', 'crates/slipstream-core/Cargo.lock', 'crates/slipstream-userspace-stack-evaluation/Cargo.lock', 'crates/slipstream-userspace-stack-effect-evaluation/Cargo.lock', 'crates/slipstream-windows-adapter/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
 
@@ -173,6 +174,9 @@ jobs:
       - name: Rust userspace stack evaluation tests
         run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml
 
+      - name: Rust selected-stack effect evaluation tests
+        run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
+
       - name: Rust tray lint
         working-directory: app-tauri/src-tauri
         run: cargo clippy --all-targets -- -D warnings
@@ -185,6 +189,9 @@ jobs:
 
       - name: Rust userspace stack evaluation lint
         run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml --all-targets -- -D warnings
+
+      - name: Rust selected-stack effect evaluation lint
+        run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings
 
       - name: Installed daemon lifecycle sentinel smoke
         env:
@@ -207,6 +214,9 @@ jobs:
 
       - name: Test the effect-free userspace stack evaluation
         run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml
+
+      - name: Test the selected-stack byte-owner effect boundary
+        run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
 
       - name: Qualify exact Windows SCM registration and removal
         env:

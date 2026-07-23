@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_userspace_stack_effect",
+  "contract_version": 1,
+  "scope": "test_only_in_memory",
+  "selected_stack": {
+    "contract": "slipstream.windows_userspace_stack_selection",
+    "contract_version": 1,
+    "crate": "smoltcp",
+    "version": "0.13.1"
+  },
+  "byte_owner": {
+    "contract": "slipstream.windows_userspace_byte_owner",
+    "contract_version": 1
+  },
+  "bounds": {
+    "max_effect_payload_bytes": 512,
+    "max_poll_steps": 5000
+  },
+  "qualified_properties": {
+    "ipv4_tcp_bidirectional_delivery": true,
+    "ipv6_tcp_bidirectional_delivery": true,
+    "ipv4_udp_bidirectional_delivery": true,
+    "ipv6_udp_bidirectional_delivery": true,
+    "exact_flow_identity_used": true,
+    "exact_original_tuple_used": true,
+    "exact_payload_preserved": true,
+    "effect_failure_precedes_stack_mutation": true,
+    "effect_failure_retains_byte_owner_payload": true,
+    "retry_commits_once": true
+  },
+  "invariants": {
+    "test_dependency_only": true,
+    "frozen_stack_selection_modified": false,
+    "frozen_byte_owner_modified": false,
+    "production_service_host_composition": false,
+    "native_packet_effect": false,
+    "native_socket_effect": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "default_route_mutation": false,
+    "discord_or_youtube_geo_exit": false
+  },
+  "remaining_gates": {
+    "ipv6_fragment_reassembly_qualification": "required",
+    "native_connector_effects": "required",
+    "disposable_amd64_packet_flow": "required",
+    "disposable_arm64_packet_flow": "required",
+    "production_service_host_composition": "required"
+  }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "slipstream-userspace-stack-effect-evaluation"
+version = "0.1.0"
+description = "Effect-free Windows byte-owner to userspace-stack qualification for Slipstream"
+edition = "2021"
+rust-version = "1.91"
+license = "MIT"
+publish = false
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+slipstream-core = { path = "../slipstream-core" }
+slipstream-userspace-stack-evaluation = { path = "../slipstream-userspace-stack-evaluation" }
+slipstream-windows-adapter = { path = "../slipstream-windows-adapter" }
+smoltcp = { version = "=0.13.1", default-features = false, features = [
+  "std",
+  "medium-ip",
+  "proto-ipv4",
+  "proto-ipv6",
+  "socket-tcp",
+  "socket-udp",
+] }

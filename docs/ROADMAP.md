@@ -548,9 +548,13 @@ therefore stays phased and closed to production traffic:
    terminal cleanup is exact-flow scoped, and explicit generation retirement
    is high-watermark bounded. Before either cleanup releases bytes, its
    transition must exactly equal a fresh reduction from the supplied full
-   registry, including unrelated-flow progress. The
-   next subgate is a test-only effect adapter for the selected stack plus
-   separate IPv6 fragment-input qualification. Native
+   registry, including unrelated-flow progress. A separate test-only
+   effect-evaluation crate now composes that owner with pinned `smoltcp 0.13.1`
+   through a deterministic in-memory Layer 3 pair. It proves exact IPv4/IPv6
+   TCP/UDP delivery in both directions, original tuple use, and retry after a
+   pre-mutation injected failure without changing either frozen predecessor or
+   linking the stack into the Windows adapter. The next subgate is separate
+   IPv6 fragment-input qualification. Native
    connectors, packet-flow qualification on disposable AMD64/ARM64, and
    production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and

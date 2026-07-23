@@ -68,6 +68,7 @@ cargo test
 cargo test --locked --manifest-path crates/slipstream-core/Cargo.toml
 cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml
 cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml
+cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
 ```
 
 The Python suite includes the language-neutral routing and recovery vectors in
@@ -79,8 +80,9 @@ userspace-flow binding plus bounded payload ownership outside the production
 service host. Payload staging requires the exact current packet-flow
 predecessor and resulting queue delta; cleanup uses the same causal snapshot
 rather than timestamp ordering. Payload effects are injected and
-failure-atomic; the selected stack is still instantiated only in its separate
-evaluation crate.
+failure-atomic. A second test-only evaluation crate composes that effect
+boundary with the selected stack through an in-memory Layer 3 pair; neither
+crate is linked into the Windows production host.
 
 ## Build
 

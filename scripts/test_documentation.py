@@ -16,6 +16,7 @@ DOCS = (
     ROOT / "docs" / "README.md",
     ROOT / "docs" / "ARCHITECTURE.md",
     ROOT / "crates" / "slipstream-userspace-stack-evaluation" / "README.md",
+    ROOT / "crates" / "slipstream-userspace-stack-effect-evaluation" / "README.md",
     ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md",
     ROOT / "spike" / "README.md",
     ROOT / "spike" / "VOICEPROBE.md",
