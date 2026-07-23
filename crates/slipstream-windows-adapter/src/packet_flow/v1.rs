@@ -284,6 +284,7 @@ pub fn bind_windows_packet_flow_session(
 pub fn prepare_windows_packet_flow(
     classification: &WindowsPacketPolicyClassification,
     egress: &WindowsPacketEgressPlan,
+    data_plane: &WindowsDataPlaneState,
     session: WindowsPacketFlowSessionBinding,
     now_ms: u64,
     policy_tables: &RoutingPolicyTables,
@@ -293,6 +294,23 @@ pub fn prepare_windows_packet_flow(
         request,
         accepted_at_ms,
     } = session;
+    if data_plane.worker_phase != WindowsDataPlaneWorkerPhase::Ready {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneWorkerNotReady);
+    }
+    let current_session = data_plane
+        .sessions
+        .get(&request.request_id)
+        .ok_or(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotFound)?;
+    if current_session.session_id != session_id || current_session.request != request {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionMismatch);
+    }
+    if current_session.phase != WindowsDataPlaneSessionPhase::Opening
+        || current_session.cancel_requested
+        || !current_session.resource_owned
+        || current_session.updated_at_ms != accepted_at_ms
+    {
+        return Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotOpening);
+    }
     let transport = match classification.transport() {
         WindowsPacketCaptureTransport::TcpTls => WindowsPacketFlowTransport::Tcp,
         WindowsPacketCaptureTransport::UdpQuic => WindowsPacketFlowTransport::Udp,

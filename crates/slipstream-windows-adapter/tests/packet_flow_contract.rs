@@ -316,7 +316,14 @@ fn admission_with_request_owner(
     };
     let data_plane = accepted_data_plane_state(&request, session_id, &policy_tables);
     let session = bind_windows_packet_flow_session(&data_plane, &request.request_id, session_id)?;
-    prepare_windows_packet_flow(&classification, &egress, session, 1_200, &policy_tables)
+    prepare_windows_packet_flow(
+        &classification,
+        &egress,
+        &data_plane,
+        session,
+        1_200,
+        &policy_tables,
+    )
 }
 
 fn apply(
@@ -726,6 +733,56 @@ fn packet_flow_session_binding_requires_the_exact_accepted_pair() {
         Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionMismatch)
     );
     assert!(bind_windows_packet_flow_session(&state, &request.request_id, 90).is_ok());
+
+    let binding = bind_windows_packet_flow_session(&state, &request.request_id, 90)
+        .expect("the accepted pair should mint a binding");
+    let cancelled = reduce_windows_data_plane(
+        &state,
+        &WindowsDataPlaneEvent::CancelRequested {
+            now_ms: 1_210,
+            request_id: request.request_id.clone(),
+            session_id: 90,
+        },
+        &WindowsDataPlaneConfig {
+            max_active_sessions: 64,
+            max_retained_terminal_sessions: 64,
+            cancel_timeout_ms: 1_000,
+            shutdown_timeout_ms: 2_000,
+        },
+        &policy_tables,
+    )
+    .expect("cancellation should reduce")
+    .state;
+    let observation = WindowsPacketCaptureObservation {
+        capture_generation: 7,
+        flow_id: 41,
+        transport: WindowsPacketCaptureTransport::TcpTls,
+        destination: "104.16.58.5".to_owned(),
+        destination_port: 443,
+        observed_at_ms: 1_100,
+        expires_at_ms: 5_000,
+        attribution: WindowsPacketCaptureAttribution::Hostname {
+            source: WindowsPacketHostnameEvidenceSource::TlsClientHelloSni,
+            host: "updates.discord.com".to_owned(),
+        },
+    };
+    let classification = match classify_windows_packet_capture(&observation, 1_200, &policy_tables)
+    {
+        WindowsPacketCaptureDecision::PolicyClassified(classification) => classification,
+        other => panic!("capture should classify, got {other:?}"),
+    };
+    let egress = prepare_windows_packet_egress(&egress_request()).expect("egress should admit");
+    assert_eq!(
+        prepare_windows_packet_flow(
+            &classification,
+            &egress,
+            &cancelled,
+            binding,
+            1_210,
+            &policy_tables,
+        ),
+        Err(WindowsPacketFlowAdmissionErrorCode::DataPlaneSessionNotOpening)
+    );
 }
 
 #[test]
