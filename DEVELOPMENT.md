@@ -73,7 +73,9 @@ cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation
 The Python suite includes the language-neutral routing and recovery vectors in
 [`contracts/`](contracts/README.md). Rust reads the same vectors. The userspace
 stack evaluation is effect-free and does not load Wintun, open native sockets,
-or mutate adapter, route, DNS, proxy, PAC, VPN, process, or service state.
+or mutate adapter, route, DNS, proxy, PAC, VPN, process, or service state. The
+Windows adapter tests also keep capture-v4 source evidence and the pure
+userspace-flow binding outside the production service host.
 
 ## Build
 

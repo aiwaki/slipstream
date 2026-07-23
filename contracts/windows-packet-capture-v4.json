@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_packet_capture",
+  "contract_version": 4,
+  "extends_contract_version": 3,
+  "invariants": {
+    "capture_only": true,
+    "v3_passthrough_semantics_preserved": true,
+    "original_source_endpoint_required_for_classified_flows": true,
+    "zero_source_port_is_direct_passthrough": true,
+    "unsafe_source_address_is_direct_passthrough": true,
+    "source_and_destination_address_families_match": true,
+    "backend_authorization": false,
+    "native_dll_loading": false,
+    "native_adapter_creation": false,
+    "native_route_effect": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "production_service_host_composition": false
+  },
+  "vectors": [
+    {
+      "name": "discord-ipv4-source-endpoint-is-preserved",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 7,
+        "flow_id": 41,
+        "transport": "tcp_tls",
+        "source_address": "10.254.0.2",
+        "source_port": 54001,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "policy_classified",
+        "route_class": "local_bypass",
+        "service_group": "discord",
+        "source_address": "10.254.0.2",
+        "source_port": 54001,
+        "destination_address": "104.16.58.5",
+        "destination_port": 443
+      }
+    },
+    {
+      "name": "openai-ipv6-source-endpoint-is-preserved",
+      "now_ms": 2200,
+      "observation": {
+        "capture_generation": 8,
+        "flow_id": 51,
+        "transport": "udp_quic",
+        "source_address": "fd00::2",
+        "source_port": 54002,
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "destination_port": 443,
+        "observed_at_ms": 2000,
+        "expires_at_ms": 6000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "quic_initial_sni",
+          "host": "chatgpt.com"
+        }
+      },
+      "expected": {
+        "disposition": "policy_classified",
+        "route_class": "geo_exit",
+        "service_group": "openai",
+        "source_address": "fd00::2",
+        "source_port": 54002,
+        "destination_address": "2606:4700:4400::ac40:9b4c",
+        "destination_port": 443
+      }
+    },
+    {
+      "name": "zero-source-port-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 9,
+        "flow_id": 61,
+        "transport": "tcp_tls",
+        "source_address": "10.254.0.2",
+        "source_port": 0,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "invalid_source_port"
+      }
+    },
+    {
+      "name": "loopback-source-address-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 71,
+        "transport": "tcp_tls",
+        "source_address": "127.0.0.1",
+        "source_port": 54003,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unsafe_source_address"
+      }
+    },
+    {
+      "name": "mixed-address-family-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 11,
+        "flow_id": 81,
+        "transport": "tcp_tls",
+        "source_address": "fd00::2",
+        "source_port": 54004,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "address_family_mismatch"
+      }
+    },
+    {
+      "name": "v3-rejection-precedes-source-validation",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 12,
+        "flow_id": 91,
+        "transport": "tcp_tls",
+        "source_address": "127.0.0.1",
+        "source_port": 0,
+        "destination": "104.16.58.5",
+        "destination_port": 0,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "invalid_destination_port"
+      }
+    }
+  ]
+}

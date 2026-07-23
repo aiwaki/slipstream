@@ -117,6 +117,13 @@ Slipstream routing decisions and bounded recovery primitives.
   a zero port remains direct passthrough. V3 is still capture-only,
   authorizes no backend, performs no native effect, and is not composed into
   the production host.
+- `windows-packet-capture-v4.json` extends frozen v3 only for a flow that v3
+  already policy-classified. It requires the original nonzero client source
+  address and port, rejects unsafe source addresses and mixed IP families, and
+  preserves every earlier v3 passthrough decision before considering the new
+  endpoint. This source is distinct from the outbound egress source selected
+  below. V4 remains capture-only, authorizes no backend, performs no native
+  effect, and is not composed into the production host.
 - `windows-packet-egress-v1.json` freezes the pure outbound loop-avoidance
   admission below that capture boundary. A plan requires short-lived route
   evidence observed before capture plus an exact owned capture-route activation
@@ -184,10 +191,19 @@ Slipstream routing decisions and bounded recovery primitives.
   `smoltcp 0.13.1` crate only for a bounded, effect-free evaluation harness.
   Its fake Layer 3 link proves dual-stack TCP, UDP below the IPv6 MTU, IPv4
   fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds.
-  It also records the current oversized-IPv6 drop and missing source-endpoint
-  binding as open gates. The dependency is not linked into the Windows adapter
-  or production service host and performs no socket, adapter, route, DNS,
-  proxy, PAC, VPN, process, or service effect.
+  It also records the current oversized-IPv6 drop and the source-endpoint gap
+  that existed when the selection contract was frozen. The separate binding
+  contract below closes only that immutable-data gap; payload ownership and
+  stack execution remain open. The dependency is not linked into the Windows
+  adapter or production service host and performs no socket, adapter, route,
+  DNS, proxy, PAC, VPN, process, or service effect.
+- `windows-userspace-flow-binding-v1.json` joins a capture-v4 original source
+  endpoint to an already-admitted frozen packet-flow-v1 capability. The exact
+  generation, flow ID, transport, destination address/port, active policy, IP
+  family, and earliest expiry must match before it exposes an immutable
+  original five-tuple. It neither owns payload bytes nor instantiates
+  `smoltcp`; it has no Wintun, socket, adapter, route, DNS, proxy, PAC, VPN,
+  process, service, or production-host effect.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service
