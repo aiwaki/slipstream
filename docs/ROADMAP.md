@@ -495,6 +495,9 @@ therefore stays phased and closed to production traffic:
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.
+   PR #206 implements the pure v1 contract and keeps native effects, userspace
+   stack selection, and production-host composition closed. The next subgate is
+   the bounded stack evaluation, not another routing or capture mechanism.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier

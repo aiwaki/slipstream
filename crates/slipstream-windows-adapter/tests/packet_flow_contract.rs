@@ -389,6 +389,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "active_policy_revalidated",
         "protected_local_bypass_never_uses_geph",
         "ordered_payload_frames",
+        "unissued_frames_cannot_be_acknowledged",
         "payload_bytes_remain_effect_owned_by_flow_key",
         "payload_and_queue_sizes_bounded",
         "frame_count_and_aggregate_budget_bounded",
@@ -806,6 +807,56 @@ fn queued_payload_waits_for_backend_and_backpressure_resumes_at_low_watermark() 
         state.flows[&key].queued_bytes(WindowsPacketFlowDirection::ClientToBackend),
         2
     );
+}
+
+#[test]
+fn acknowledgement_before_backend_readiness_cannot_consume_queued_payload() {
+    let config = contract().config;
+    let (mut state, admission) = opened_registry(&config);
+    let key = admission.key();
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Payload {
+            now_ms: 1_210,
+            key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            sequence: 1,
+            bytes: 2,
+        },
+        &config,
+    );
+
+    assert_eq!(
+        reduce_windows_packet_flow(
+            &state,
+            &WindowsPacketFlowEvent::Forwarded {
+                now_ms: 1_220,
+                key,
+                direction: WindowsPacketFlowDirection::ClientToBackend,
+                through_sequence: 1,
+            },
+            &config,
+        ),
+        Err(slipstream_windows_adapter::packet_flow::WindowsPacketFlowError::InvalidForwardAcknowledgement)
+    );
+    assert_eq!(
+        state.flows[&key].queued_bytes(WindowsPacketFlowDirection::ClientToBackend),
+        2
+    );
+    let ready = apply(
+        &mut state,
+        WindowsPacketFlowEvent::BackendReady { now_ms: 1_230, key },
+        &config,
+    );
+    assert!(ready.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::Forward {
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            sequence: 1,
+            bytes: 2,
+            ..
+        }
+    )));
 }
 
 #[test]

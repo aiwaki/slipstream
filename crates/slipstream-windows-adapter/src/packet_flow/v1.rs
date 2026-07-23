@@ -1084,6 +1084,9 @@ pub fn reduce_windows_packet_flow(
             through_sequence,
             ..
         } => {
+            if !flow.backend_ready {
+                return Err(WindowsPacketFlowError::InvalidForwardAcknowledgement);
+            }
             let input_open = match direction {
                 WindowsPacketFlowDirection::ClientToBackend => flow.client_input_open,
                 WindowsPacketFlowDirection::BackendToClient => flow.backend_input_open,

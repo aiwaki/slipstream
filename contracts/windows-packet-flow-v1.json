@@ -10,6 +10,7 @@
     "active_policy_revalidated": true,
     "protected_local_bypass_never_uses_geph": true,
     "ordered_payload_frames": true,
+    "unissued_frames_cannot_be_acknowledged": true,
     "payload_bytes_remain_effect_owned_by_flow_key": true,
     "payload_and_queue_sizes_bounded": true,
     "frame_count_and_aggregate_budget_bounded": true,
