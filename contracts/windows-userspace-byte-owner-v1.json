@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_userspace_byte_owner",
+  "contract_version": 1,
+  "selected_stack": {
+    "contract": "slipstream.windows_userspace_stack_selection",
+    "contract_version": 1,
+    "crate": "smoltcp",
+    "version": "0.13.1"
+  },
+  "config": {
+    "max_active_flows": 8,
+    "max_chunk_bytes": 4,
+    "max_queued_frames_per_direction": 4,
+    "max_buffered_bytes_per_direction": 8
+  },
+  "invariants": {
+    "opaque_tuple_binding_required": true,
+    "successful_packet_flow_payload_transition_required": true,
+    "exact_flow_direction_sequence_and_length_owned": true,
+    "payload_bytes_retained_until_atomic_effect_success": true,
+    "effect_failure_retains_exact_payload": true,
+    "duplicate_and_out_of_order_payload_rejected": true,
+    "per_flow_directional_memory_bounded": true,
+    "terminal_cleanup_is_event_scoped": true,
+    "stale_terminal_transition_cannot_remove_newer_bytes": true,
+    "generation_retirement_is_bounded_and_stale_safe": true,
+    "selected_stack_effect_is_injected": true,
+    "frozen_packet_flow_v1_modified": false,
+    "selected_stack_instantiated_in_adapter": false,
+    "native_packet_effect": false,
+    "native_socket_effect": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "production_service_host_composition": false
+  },
+  "vectors": [
+    {
+      "name": "client_payload_waits_for_backend",
+      "action": "stage",
+      "backend_ready": false,
+      "direction": "client_to_backend",
+      "sequence": 1,
+      "declared_bytes": 3,
+      "payload": [1, 2, 3],
+      "effect": "not_run",
+      "forward_bytes": null,
+      "expected": {
+        "disposition": "owned",
+        "error": null,
+        "owned_frames": 1,
+        "owned_bytes": 3
+      }
+    },
+    {
+      "name": "exact_backend_payload_is_forwarded",
+      "action": "execute",
+      "backend_ready": true,
+      "direction": "backend_to_client",
+      "sequence": 1,
+      "declared_bytes": 2,
+      "payload": [170, 187],
+      "effect": "succeed",
+      "forward_bytes": 2,
+      "expected": {
+        "disposition": "forwarded",
+        "error": null,
+        "owned_frames": 0,
+        "owned_bytes": 0
+      }
+    },
+    {
+      "name": "payload_length_mismatch_is_rejected",
+      "action": "stage",
+      "backend_ready": true,
+      "direction": "client_to_backend",
+      "sequence": 1,
+      "declared_bytes": 3,
+      "payload": [1, 2],
+      "effect": "not_run",
+      "forward_bytes": null,
+      "expected": {
+        "disposition": "rejected",
+        "error": "payload_length_mismatch",
+        "owned_frames": 0,
+        "owned_bytes": 0
+      }
+    },
+    {
+      "name": "duplicate_payload_is_rejected",
+      "action": "duplicate_stage",
+      "backend_ready": true,
+      "direction": "client_to_backend",
+      "sequence": 1,
+      "declared_bytes": 2,
+      "payload": [16, 32],
+      "effect": "not_run",
+      "forward_bytes": null,
+      "expected": {
+        "disposition": "rejected_after_first_owner",
+        "error": "out_of_order_payload",
+        "owned_frames": 1,
+        "owned_bytes": 2
+      }
+    },
+    {
+      "name": "effect_failure_retains_payload",
+      "action": "execute",
+      "backend_ready": true,
+      "direction": "client_to_backend",
+      "sequence": 1,
+      "declared_bytes": 4,
+      "payload": [222, 173, 190, 239],
+      "effect": "fail",
+      "forward_bytes": 4,
+      "expected": {
+        "disposition": "retained",
+        "error": "effect_failed",
+        "owned_frames": 1,
+        "owned_bytes": 4
+      }
+    },
+    {
+      "name": "forward_metadata_mismatch_keeps_payload",
+      "action": "execute",
+      "backend_ready": true,
+      "direction": "client_to_backend",
+      "sequence": 1,
+      "declared_bytes": 3,
+      "payload": [7, 8, 9],
+      "effect": "succeed",
+      "forward_bytes": 2,
+      "expected": {
+        "disposition": "retained",
+        "error": "forward_metadata_mismatch",
+        "owned_frames": 1,
+        "owned_bytes": 3
+      }
+    }
+  ]
+}

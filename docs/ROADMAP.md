@@ -524,10 +524,17 @@ therefore stays phased and closed to production traffic:
    binding distinguishes the original client source from the admitted outbound
    egress source and requires exact generation, flow ID, transport,
    destination address/port, IP family, active policy, and expiry agreement.
-   It owns no payload and does not instantiate the selected stack. The next
-   subgate is a bounded pure byte-owner bridge plus separate IPv6 fragment-input
-   qualification. Native connectors, packet-flow qualification on disposable
-   AMD64/ARM64, and production-host composition remain later independent gates.
+   It does not instantiate the selected stack. Userspace byte-owner v1 now
+   retains actual payload by exact flow, direction, sequence, and length after
+   packet-flow acceptance. Its bounded directional queues survive delayed
+   backend readiness; failed injected effects retain only the uncommitted
+   suffix, successful effects produce exact `Forwarded` events, ordinary
+   terminal cleanup is exact-flow scoped, and explicit generation retirement
+   is high-watermark bounded. Both cleanup paths reject stale transitions. The
+   next subgate is a test-only effect adapter for the selected stack plus
+   separate IPv6 fragment-input qualification. Native
+   connectors, packet-flow qualification on disposable AMD64/ARM64, and
+   production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier

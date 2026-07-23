@@ -194,10 +194,10 @@ Slipstream routing decisions and bounded recovery primitives.
   fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds.
   It also records the current oversized-IPv6 drop and the source-endpoint gap
   that existed when the selection contract was frozen. The separate binding
-  contract below closes only that immutable-data gap; payload ownership and
-  stack execution remain open. The dependency is not linked into the Windows
-  adapter or production service host and performs no socket, adapter, route,
-  DNS, proxy, PAC, VPN, process, or service effect.
+  and byte-owner contracts below close the immutable tuple and byte-lifetime
+  gaps; selected-stack execution remains separate. The dependency is not
+  linked into the Windows adapter or production service host and performs no
+  socket, adapter, route, DNS, proxy, PAC, VPN, process, or service effect.
 - `windows-userspace-flow-binding-v1.json` joins a capture-v4 original source
   endpoint to an already-admitted frozen packet-flow-v1 capability. The exact
   generation, flow ID, transport, destination address/port, active policy, IP
@@ -205,6 +205,18 @@ Slipstream routing decisions and bounded recovery primitives.
   original five-tuple. It neither owns payload bytes nor instantiates
   `smoltcp`; it has no Wintun, socket, adapter, route, DNS, proxy, PAC, VPN,
   process, service, or production-host effect.
+- `windows-userspace-byte-owner-v1.json` binds actual payload bytes to an
+  opened tuple owner only after a successful frozen packet-flow-v1 payload
+  transition. Exact flow key, direction, sequence, and length are retained in
+  fixed directional queues until one injected forwarding effect succeeds.
+  Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,
+  oversized, and mismatched commands fail closed. Ordinary terminal
+  reconciliation removes only the event's flow after monotonic transition
+  evidence. Explicit generation retirement is bounded by the packet-flow high
+  watermark, and stale terminal or retirement state cannot remove newer bytes.
+  The selected
+  `smoltcp 0.13.1` identity is cross-checked from the frozen selection contract,
+  but the adapter neither instantiates it nor enters the production host.
 - `windows-wfp-capture-v1.json` preserves the superseded WFP driver/service
   research wire without invoking WFP or opening a socket. Its fixed 128-byte
   context binds original IPv4/IPv6 endpoints to the exact owned service

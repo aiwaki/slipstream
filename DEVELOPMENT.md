@@ -75,7 +75,9 @@ The Python suite includes the language-neutral routing and recovery vectors in
 stack evaluation is effect-free and does not load Wintun, open native sockets,
 or mutate adapter, route, DNS, proxy, PAC, VPN, process, or service state. The
 Windows adapter tests also keep capture-v4 source evidence and the pure
-userspace-flow binding outside the production service host.
+userspace-flow binding plus bounded payload ownership outside the production
+service host. Payload effects are injected and failure-atomic; the selected
+stack is still instantiated only in its separate evaluation crate.
 
 ## Build
 

@@ -9,15 +9,14 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-23, through merged
-[PR #207](https://github.com/aiwaki/slipstream/pull/207) at main commit
-`8604b3222ad63f8fcea7c4006e6d8a1759bada74`. All required checks,
+[PR #209](https://github.com/aiwaki/slipstream/pull/209) at main commit
+`396b3f6d4d032149e44e450803a3d02ceac063a7`. All required checks,
 Windows adapter contracts, and packaged lifecycle passed in
-[run 29981498885](https://github.com/aiwaki/slipstream/actions/runs/29981498885),
-and dependency plus vendored-Geph audits passed in
-[run 29981498904](https://github.com/aiwaki/slipstream/actions/runs/29981498904).
-PR #207 changed only the continuation checkpoint; the most recent native
-Wintun regression evidence remains PR #206's AMD64/ARM64
-[run 29980382835](https://github.com/aiwaki/slipstream/actions/runs/29980382835).
+[run 29987173544](https://github.com/aiwaki/slipstream/actions/runs/29987173544),
+dependency plus vendored-Geph audits passed in
+[run 29987173607](https://github.com/aiwaki/slipstream/actions/runs/29987173607),
+and native Wintun regression evidence passed on AMD64 and ARM64 in
+[run 29987173566](https://github.com/aiwaki/slipstream/actions/runs/29987173566).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -47,7 +46,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Original five-tuple bound; stack execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 now retains the original client source address/port only after frozen-v3 policy classification, and userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission without confusing it with the outbound egress source. No payload or stack is composed. Oversized IPv6 output currently drops without a frame and IPv6 fragment input remains unqualified. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, a bounded byte-owner bridge, native backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Payload ownership bounded; selected-stack execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded and rejects stale evidence. The selected stack is not instantiated in the adapter. Oversized IPv6 output currently drops without a frame and IPv6 fragment input remains unqualified. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, a test-only selected-stack effect adapter, native backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -648,8 +647,14 @@ client source address/port without patching frozen capture v3 or packet-flow
 v1. The binding requires exact generation, flow ID, transport, destination
 address/port, IP family, active policy, and expiry agreement, and explicitly
 keeps the original client source separate from the outbound egress source.
-The next safe M4 gate is a bounded pure byte-owner bridge between that immutable
-tuple, packet-flow v1, and the selected stack. Every native effect remains fake.
+The bounded byte-owner bridge now retains exact flow, direction, sequence, and
+payload bytes after successful packet-flow-v1 acceptance. It releases bytes
+only after one injected atomic effect succeeds, retains the exact suffix on
+failure. Ordinary terminal cleanup removes only its exact flow; explicit
+generation retirement is high-watermark bounded, and both paths reject stale
+evidence. The next safe M4 gate is a test-only effect adapter in the separate
+evaluation crate that exercises this owner
+against the selected stack without linking `smoltcp` into the Windows adapter.
 No implementation may enter the production host until IPv6 fragment input,
 native backends, and disposable AMD64/ARM64 lifecycle qualification pass as
 separate gates.
