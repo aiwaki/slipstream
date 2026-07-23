@@ -732,6 +732,9 @@ fn maybe_forward_half_close(
     direction: WindowsPacketFlowDirection,
     commands: &mut Vec<WindowsPacketFlowCommand>,
 ) {
+    if !flow.backend_ready {
+        return;
+    }
     let queue_empty = flow.queue(direction).frames.is_empty();
     let input_open = match direction {
         WindowsPacketFlowDirection::ClientToBackend => flow.client_input_open,
@@ -953,11 +956,16 @@ pub fn reduce_windows_packet_flow(
                     commands,
                 });
             }
-            if flow.phase != WindowsPacketFlowPhase::Opening {
+            if !matches!(
+                flow.phase,
+                WindowsPacketFlowPhase::Opening | WindowsPacketFlowPhase::Draining
+            ) {
                 return Err(WindowsPacketFlowError::InvalidTransition);
             }
             flow.backend_ready = true;
-            flow.phase = WindowsPacketFlowPhase::Relaying;
+            if flow.phase == WindowsPacketFlowPhase::Opening {
+                flow.phase = WindowsPacketFlowPhase::Relaying;
+            }
             commands.push(data_plane_event(
                 flow,
                 now_ms,

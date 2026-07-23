@@ -17,6 +17,7 @@
     "backpressure_timeout_bounded": true,
     "idle_timeout_bounded": true,
     "tcp_half_close_preserved_after_queue_drain": true,
+    "early_client_half_close_survives_backend_open": true,
     "udp_datagram_boundaries_preserved": true,
     "reset_clears_owned_queues": true,
     "rejected_open_cancels_unowned_session": true,
@@ -90,6 +91,31 @@
         "backend_to_client_bytes": 0,
         "terminal_reason": "packet_flow_backpressure_timeout",
         "must_emit": ["open_backend", "pause_client_to_backend", "close_flow", "backend_reset"]
+      }
+    },
+    {
+      "name": "tcp-client-half-close-before-backend-ready",
+      "capture_generation": 11,
+      "flow_id": 45,
+      "host": "updates.discord.com",
+      "backend": "local_engine",
+      "transport": "tcp",
+      "events": [
+        { "kind": "payload", "now_ms": 1210, "direction": "client_to_backend", "sequence": 1, "bytes": 2 },
+        { "kind": "half_closed", "now_ms": 1220, "direction": "client_to_backend" },
+        { "kind": "backend_ready", "now_ms": 1230 },
+        { "kind": "forwarded", "now_ms": 1240, "direction": "client_to_backend", "through_sequence": 1 },
+        { "kind": "payload", "now_ms": 1250, "direction": "backend_to_client", "sequence": 1, "bytes": 2 },
+        { "kind": "forwarded", "now_ms": 1260, "direction": "backend_to_client", "through_sequence": 1 },
+        { "kind": "half_closed", "now_ms": 1270, "direction": "backend_to_client" }
+      ],
+      "expected": {
+        "phase": "succeeded",
+        "resource_owned": false,
+        "client_to_backend_bytes": 0,
+        "backend_to_client_bytes": 0,
+        "terminal_reason": "graceful",
+        "must_emit": ["open_backend", "backend_connected", "forward_client_to_backend", "half_close_client_to_backend", "backend_payload", "half_close_backend_to_client", "close_flow", "backend_closed"]
       }
     },
     {

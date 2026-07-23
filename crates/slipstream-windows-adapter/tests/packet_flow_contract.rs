@@ -396,6 +396,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "backpressure_timeout_bounded",
         "idle_timeout_bounded",
         "tcp_half_close_preserved_after_queue_drain",
+        "early_client_half_close_survives_backend_open",
         "udp_datagram_boundaries_preserved",
         "reset_clears_owned_queues",
         "rejected_open_cancels_unowned_session",

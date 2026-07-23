@@ -142,8 +142,9 @@ Slipstream routing decisions and bounded recovery primitives.
   plus a validated aggregate budget prevent tiny-frame memory amplification.
   High/low watermarks pause and resume only the producing side, while idle and sustained
   backpressure deadlines close only that owned flow. TCP half-closes propagate
-  only after the preceding queue drains, UDP datagram boundaries remain
-  distinct, resets clear both queues, and terminal history is bounded and
+  only after the preceding queue drains, including when the client closes its
+  write side before backend readiness. UDP datagram boundaries remain distinct,
+  resets clear both queues, and terminal history is bounded and
   ABA-safe. Pruning terminal detail retains a separate captured-flow owner
   tombstone; only monotonic retirement of an inactive capture generation may
   discard it, and that retirement high-watermark rejects delayed reopen. The
