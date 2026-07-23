@@ -20,6 +20,7 @@
     "high_low_watermark_backpressure": true,
     "backpressure_timeout_bounded": true,
     "client_backpressure_is_cancellation": true,
+    "client_delivery_idle_is_cancellation": true,
     "idle_timeout_bounded": true,
     "tcp_half_close_preserved_after_queue_drain": true,
     "early_client_half_close_survives_backend_open": true,

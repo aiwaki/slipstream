@@ -535,6 +535,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "high_low_watermark_backpressure",
         "backpressure_timeout_bounded",
         "client_backpressure_is_cancellation",
+        "client_delivery_idle_is_cancellation",
         "idle_timeout_bounded",
         "tcp_half_close_preserved_after_queue_drain",
         "early_client_half_close_survives_backend_open",
@@ -1721,6 +1722,57 @@ fn reset_timeout_and_sequence_errors_are_bounded_and_terminal() {
         timed.flows[&timeout_key].terminal_reason,
         "packet_flow_idle_timeout"
     );
+}
+
+#[test]
+fn idle_with_undelivered_backend_payload_is_client_cancellation() {
+    let config = contract().config;
+    let (mut state, admission) = opened_registry(&config);
+    let key = admission.key();
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::BackendReady { now_ms: 1_205, key },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::Payload {
+            now_ms: 1_210,
+            key,
+            direction: WindowsPacketFlowDirection::BackendToClient,
+            sequence: 1,
+            bytes: 1,
+        },
+        &config,
+    );
+    assert!(!state.flows[&key].reads_paused(WindowsPacketFlowDirection::BackendToClient));
+    let idle_deadline = state.flows[&key].idle_deadline_at_ms;
+    let commands = apply(
+        &mut state,
+        WindowsPacketFlowEvent::IdleDeadline {
+            now_ms: idle_deadline,
+            key,
+        },
+        &config,
+    );
+
+    assert_eq!(state.flows[&key].phase, WindowsPacketFlowPhase::Cancelled);
+    assert_eq!(
+        state.flows[&key].terminal_reason,
+        "packet_flow_client_idle_timeout"
+    );
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::DataPlane {
+            event: WindowsDataPlaneEvent::CancelRequested { .. }
+        }
+    )));
+    assert!(!commands.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::DataPlane {
+            event: WindowsDataPlaneEvent::BackendReset { .. }
+        }
+    )));
 }
 
 #[test]

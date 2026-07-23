@@ -1533,13 +1533,23 @@ pub fn reduce_windows_packet_flow(
                     config.max_retained_terminal_flows,
                 ));
             }
-            fail_backend(
-                &mut flow,
-                key,
-                now_ms,
-                "packet_flow_idle_timeout",
-                &mut commands,
-            );
+            if flow.backend_to_client.frames.is_empty() {
+                fail_backend(
+                    &mut flow,
+                    key,
+                    now_ms,
+                    "packet_flow_idle_timeout",
+                    &mut commands,
+                );
+            } else {
+                cancel_flow(
+                    &mut flow,
+                    key,
+                    now_ms,
+                    "packet_flow_client_idle_timeout",
+                    &mut commands,
+                );
+            }
         }
         WindowsPacketFlowEvent::BackpressureDeadline { direction, .. } => {
             let queue = flow.queue(*direction);

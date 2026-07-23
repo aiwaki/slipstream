@@ -154,7 +154,9 @@ Slipstream routing decisions and bounded recovery primitives.
   plus a validated aggregate budget prevent tiny-frame memory amplification.
   High/low watermarks pause and resume only the producing side, while idle and
   sustained backpressure deadlines close only that owned flow. Pressure toward
-  a slow client is cancellation rather than a fabricated backend failure. TCP
+  a slow client is cancellation rather than a fabricated backend failure;
+  this includes idle expiry while backend-to-client payload remains
+  undelivered below the high watermark. TCP
   half-closes propagate
   only after the preceding queue drains, including when the client closes its
   write side before backend readiness. UDP datagram boundaries remain distinct,
