@@ -125,18 +125,21 @@ fn open_flow(
     let binding = bind_windows_userspace_flow(&classification, &admission, 1_300)
         .expect("exact fixture binding");
     let key = binding.key();
-    owner.open_flow(binding, 1_300).expect("byte owner open");
     let event = flow_open_event(admission, 1_300, &policy_tables);
     let transition =
         reduce_windows_packet_flow(state, &event, &packet_flow_config()).expect("packet flow open");
+    owner
+        .open_flow(binding, &event, &transition)
+        .expect("byte owner open");
     (transition.state, key)
 }
 
 fn reduce(
-    state: WindowsPacketFlowRegistry,
+    state: &WindowsPacketFlowRegistry,
     event: &WindowsPacketFlowEvent,
 ) -> slipstream_windows_adapter::packet_flow::WindowsPacketFlowTransition {
-    reduce_windows_packet_flow(state, event, &packet_flow_config()).expect("packet-flow transition")
+    reduce_windows_packet_flow(state.clone(), event, &packet_flow_config())
+        .expect("packet-flow transition")
 }
 
 #[derive(Default)]
@@ -223,13 +226,15 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
     for invariant in [
         "opaque_tuple_binding_required",
         "successful_packet_flow_payload_transition_required",
+        "exact_packet_flow_predecessor_required",
+        "payload_queue_delta_required",
         "exact_flow_direction_sequence_and_length_owned",
         "payload_bytes_retained_until_atomic_effect_success",
         "effect_failure_retains_exact_payload",
         "duplicate_and_out_of_order_payload_rejected",
         "per_flow_directional_memory_bounded",
         "terminal_cleanup_is_event_scoped",
-        "stale_terminal_transition_cannot_remove_newer_bytes",
+        "same_timestamp_stale_terminal_transition_cannot_remove_newer_bytes",
         "generation_retirement_is_bounded_and_stale_safe",
         "selected_stack_effect_is_injected",
     ] {
@@ -260,11 +265,12 @@ fn language_neutral_vectors_keep_exact_bytes_until_effect_success() {
         let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
         let (mut state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
         if vector.backend_ready {
-            state = reduce(
-                state,
-                &WindowsPacketFlowEvent::BackendReady { now_ms: 1_350, key },
-            )
-            .state;
+            let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_350, key };
+            let backend_transition = reduce(&state, &backend_event);
+            owner
+                .reconcile(&backend_event, &state, &backend_transition)
+                .expect("backend-ready owner reconciliation");
+            state = backend_transition.state;
         }
         let payload_event = WindowsPacketFlowEvent::Payload {
             now_ms: 1_400,
@@ -273,15 +279,22 @@ fn language_neutral_vectors_keep_exact_bytes_until_effect_success() {
             sequence: vector.sequence,
             bytes: vector.declared_bytes,
         };
-        let transition = reduce(state, &payload_event);
-        let first_stage = owner.stage_payload(&payload_event, &transition, vector.payload.clone());
+        let transition = reduce(&state, &payload_event);
+        let first_stage =
+            owner.stage_payload(&payload_event, &state, &transition, vector.payload.clone());
 
         let error = match vector.action.as_str() {
             "stage" => first_stage.err().map(|error| error.code),
             "duplicate_stage" => {
                 first_stage.expect("first duplicate vector stage must own bytes");
+                let duplicate = reduce(&transition.state, &payload_event);
                 owner
-                    .stage_payload(&payload_event, &transition, vector.payload.clone())
+                    .stage_payload(
+                        &payload_event,
+                        &transition.state,
+                        &duplicate,
+                        vector.payload.clone(),
+                    )
                     .expect_err("duplicate payload must fail")
                     .code
                     .into()
@@ -341,25 +354,66 @@ fn language_neutral_vectors_keep_exact_bytes_until_effect_success() {
 }
 
 #[test]
+fn unrelated_idle_refresh_cannot_stage_payload_bytes() {
+    let owner_config = WindowsUserspaceByteOwnerConfig::from_packet_flow(&packet_flow_config())
+        .expect("valid owner config");
+    let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
+    let (state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
+    let half_close_event = WindowsPacketFlowEvent::HalfClosed {
+        now_ms: 1_350,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+    };
+    let half_closed = reduce(&state, &half_close_event);
+    assert!(half_closed.commands.iter().any(|command| {
+        matches!(
+            command,
+            WindowsPacketFlowCommand::ScheduleIdleDeadline {
+                key: command_key,
+                ..
+            } if *command_key == key
+        )
+    }));
+    let payload_event = WindowsPacketFlowEvent::Payload {
+        now_ms: 1_350,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let error = owner
+        .stage_payload(&payload_event, &state, &half_closed, vec![1, 2, 3])
+        .expect_err("idle refresh alone must not prove payload acceptance");
+
+    assert_eq!(
+        error.code,
+        WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload
+    );
+    assert_eq!(owner.owned_frame_count(), 0);
+    assert_eq!(owner.owned_byte_count(), 0);
+}
+
+#[test]
 fn terminal_reconciliation_removes_only_the_closed_flow() {
     let owner_config = WindowsUserspaceByteOwnerConfig::from_packet_flow(&packet_flow_config())
         .expect("valid owner config");
     let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
     let (state, first_key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
     let (state, second_key) = open_flow(&mut owner, state, 8, 42);
-    let state = reduce(
-        state,
-        &WindowsPacketFlowEvent::BackendReady {
-            now_ms: 1_350,
-            key: first_key,
-        },
-    )
-    .state;
-    let stale_cancel_event = WindowsPacketFlowEvent::Cancelled {
-        now_ms: 1_375,
+    let ready_event = WindowsPacketFlowEvent::BackendReady {
+        now_ms: 1_350,
         key: first_key,
     };
-    let stale_cancelled = reduce(state.clone(), &stale_cancel_event);
+    let ready = reduce(&state, &ready_event);
+    owner
+        .reconcile(&ready_event, &state, &ready)
+        .expect("backend-ready owner reconciliation");
+    let state = ready.state;
+    let stale_cancel_event = WindowsPacketFlowEvent::Cancelled {
+        now_ms: 1_400,
+        key: first_key,
+    };
+    let stale_cancelled = reduce(&state, &stale_cancel_event);
     let payload_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_400,
         key: first_key,
@@ -367,12 +421,12 @@ fn terminal_reconciliation_removes_only_the_closed_flow() {
         sequence: 1,
         bytes: 3,
     };
-    let payload_transition = reduce(state, &payload_event);
+    let payload_transition = reduce(&state, &payload_event);
     owner
-        .stage_payload(&payload_event, &payload_transition, vec![1, 2, 3])
+        .stage_payload(&payload_event, &state, &payload_transition, vec![1, 2, 3])
         .expect("payload ownership");
     let stale_cleanup = owner
-        .reconcile(&stale_cancel_event, &stale_cancelled)
+        .reconcile(&stale_cancel_event, &state, &stale_cancelled)
         .expect_err("stale terminal transition must not remove newer bytes");
     assert_eq!(
         stale_cleanup.code,
@@ -384,9 +438,9 @@ fn terminal_reconciliation_removes_only_the_closed_flow() {
         now_ms: 1_500,
         key: first_key,
     };
-    let cancelled = reduce(payload_transition.state, &cancel_event);
+    let cancelled = reduce(&payload_transition.state, &cancel_event);
     let cleanup = owner
-        .reconcile(&cancel_event, &cancelled)
+        .reconcile(&cancel_event, &payload_transition.state, &cancelled)
         .expect("current terminal cleanup");
     assert_eq!(cleanup.removed_flows, 1);
     assert_eq!(cleanup.removed_frames, 1);
@@ -404,7 +458,10 @@ fn stale_generation_retirement_cannot_hide_newer_owned_bytes() {
     let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
     let (opening_state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
     let ready_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_350, key };
-    let ready = reduce(opening_state, &ready_event);
+    let ready = reduce(&opening_state, &ready_event);
+    owner
+        .reconcile(&ready_event, &opening_state, &ready)
+        .expect("backend-ready owner reconciliation");
     let stale_base = ready.state.clone();
     let payload_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_400,
@@ -413,20 +470,25 @@ fn stale_generation_retirement_cannot_hide_newer_owned_bytes() {
         sequence: 1,
         bytes: 3,
     };
-    let payload_transition = reduce(ready.state, &payload_event);
+    let payload_transition = reduce(&ready.state, &payload_event);
     owner
-        .stage_payload(&payload_event, &payload_transition, vec![1, 2, 3])
+        .stage_payload(
+            &payload_event,
+            &ready.state,
+            &payload_transition,
+            vec![1, 2, 3],
+        )
         .expect("payload ownership");
 
-    let stale_cancel_event = WindowsPacketFlowEvent::Cancelled { now_ms: 1_360, key };
-    let stale_cancelled = reduce(stale_base, &stale_cancel_event);
+    let stale_cancel_event = WindowsPacketFlowEvent::Cancelled { now_ms: 1_400, key };
+    let stale_cancelled = reduce(&stale_base, &stale_cancel_event);
     let stale_retire_event = WindowsPacketFlowEvent::CaptureGenerationRetired {
-        now_ms: 1_370,
+        now_ms: 1_400,
         capture_generation: key.capture_generation,
     };
-    let stale_retired = reduce(stale_cancelled.state, &stale_retire_event);
+    let stale_retired = reduce(&stale_cancelled.state, &stale_retire_event);
     let error = owner
-        .reconcile(&stale_retire_event, &stale_retired)
+        .reconcile(&stale_retire_event, &stale_cancelled.state, &stale_retired)
         .expect_err("stale retirement must be visible and retain newer bytes");
 
     assert_eq!(
@@ -451,19 +513,20 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         sequence: 1,
         bytes: 3,
     };
-    let queued = reduce(state, &payload_event);
+    let queued = reduce(&state, &payload_event);
     assert!(!queued
         .commands
         .iter()
         .any(|command| { matches!(command, WindowsPacketFlowCommand::Forward { .. }) }));
     owner
-        .stage_payload(&payload_event, &queued, vec![4, 5, 6])
+        .stage_payload(&payload_event, &state, &queued, vec![4, 5, 6])
         .expect("pre-backend payload ownership");
 
-    let backend_ready = reduce(
-        queued.state,
-        &WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key },
-    );
+    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key };
+    let backend_ready = reduce(&queued.state, &backend_event);
+    owner
+        .reconcile(&backend_event, &queued.state, &backend_ready)
+        .expect("backend-ready owner reconciliation");
     let forward = backend_ready
         .commands
         .iter()
@@ -501,9 +564,9 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
         sequence: 1,
         bytes: 2,
     };
-    let first = reduce(state, &first_event);
+    let first = reduce(&state, &first_event);
     owner
-        .stage_payload(&first_event, &first, vec![1, 2])
+        .stage_payload(&first_event, &state, &first, vec![1, 2])
         .expect("first payload ownership");
     let second_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_360,
@@ -512,15 +575,16 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
         sequence: 2,
         bytes: 2,
     };
-    let second = reduce(first.state, &second_event);
+    let second = reduce(&first.state, &second_event);
     owner
-        .stage_payload(&second_event, &second, vec![3, 4])
+        .stage_payload(&second_event, &first.state, &second, vec![3, 4])
         .expect("second payload ownership");
 
-    let ready = reduce(
-        second.state,
-        &WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key },
-    );
+    let ready_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key };
+    let ready = reduce(&second.state, &ready_event);
+    owner
+        .reconcile(&ready_event, &second.state, &ready)
+        .expect("backend-ready owner reconciliation");
     let forwards: Vec<_> = ready
         .commands
         .iter()
@@ -613,9 +677,9 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
         sequence: 1,
         bytes: 2,
     };
-    let first = reduce(state, &first_event);
+    let first = reduce(&state, &first_event);
     frame_owner
-        .stage_payload(&first_event, &first, vec![1, 2])
+        .stage_payload(&first_event, &state, &first, vec![1, 2])
         .expect("first frame fits stricter owner");
     let second_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_360,
@@ -624,9 +688,9 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
         sequence: 2,
         bytes: 2,
     };
-    let second = reduce(first.state, &second_event);
+    let second = reduce(&first.state, &second_event);
     let frame_error = frame_owner
-        .stage_payload(&second_event, &second, vec![3, 4])
+        .stage_payload(&second_event, &first.state, &second, vec![3, 4])
         .expect_err("owner frame limit must remain authoritative");
     assert_eq!(
         frame_error.code,
@@ -637,14 +701,17 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
 
     let policy_tables = bundled_policy_v1();
     let (classification_fixture, admission_fixture) = fixture_pair(8, 42);
+    let second_admission = admission(&admission_fixture, &policy_tables);
     let binding = bind_windows_userspace_flow(
         &classification(&classification_fixture, &policy_tables),
-        &admission(&admission_fixture, &policy_tables),
+        &second_admission,
         1_300,
     )
     .expect("second exact binding");
+    let second_open_event = flow_open_event(second_admission, 1_370, &policy_tables);
+    let second_open = reduce(&first.state, &second_open_event);
     let flow_error = frame_owner
-        .open_flow(binding, 1_300)
+        .open_flow(binding, &second_open_event, &second_open)
         .expect_err("owner flow limit must remain authoritative");
     assert_eq!(
         flow_error.code,
@@ -671,9 +738,9 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
         sequence: 1,
         bytes: 2,
     };
-    let first = reduce(state, &first_event);
+    let first = reduce(&state, &first_event);
     byte_owner
-        .stage_payload(&first_event, &first, vec![5, 6])
+        .stage_payload(&first_event, &state, &first, vec![5, 6])
         .expect("first bytes fit stricter owner");
     let second_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_360,
@@ -682,9 +749,9 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
         sequence: 2,
         bytes: 2,
     };
-    let second = reduce(first.state, &second_event);
+    let second = reduce(&first.state, &second_event);
     let byte_error = byte_owner
-        .stage_payload(&second_event, &second, vec![7, 8])
+        .stage_payload(&second_event, &first.state, &second, vec![7, 8])
         .expect_err("owner byte limit must remain authoritative");
     assert_eq!(
         byte_error.code,

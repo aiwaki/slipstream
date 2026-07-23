@@ -207,13 +207,17 @@ Slipstream routing decisions and bounded recovery primitives.
   process, service, or production-host effect.
 - `windows-userspace-byte-owner-v1.json` binds actual payload bytes to an
   opened tuple owner only after a successful frozen packet-flow-v1 payload
-  transition. Exact flow key, direction, sequence, and length are retained in
-  fixed directional queues until one injected forwarding effect succeeds.
+  transition. The predecessor must equal the owner's last full packet-flow
+  snapshot and the resulting directional queue must grow by the exact declared
+  length, so an unrelated idle refresh cannot stage bytes. Exact flow key,
+  direction, sequence, and length are retained in fixed directional queues
+  until one injected forwarding effect succeeds.
   Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,
   oversized, and mismatched commands fail closed. Ordinary terminal
   reconciliation removes only the event's flow after monotonic transition
   evidence. Explicit generation retirement is bounded by the packet-flow high
-  watermark, and stale terminal or retirement state cannot remove newer bytes.
+  watermark. Cleanup compares the exact predecessor snapshot, so stale terminal
+  or retirement state cannot remove newer bytes even at the same timestamp.
   The selected
   `smoltcp 0.13.1` identity is cross-checked from the frozen selection contract,
   but the adapter neither instantiates it nor enters the production host.

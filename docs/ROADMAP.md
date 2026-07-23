@@ -525,12 +525,14 @@ therefore stays phased and closed to production traffic:
    egress source and requires exact generation, flow ID, transport,
    destination address/port, IP family, active policy, and expiry agreement.
    It does not instantiate the selected stack. Userspace byte-owner v1 now
-   retains actual payload by exact flow, direction, sequence, and length after
-   packet-flow acceptance. Its bounded directional queues survive delayed
+   retains actual payload by exact flow, direction, sequence, and length only
+   when the caller supplies the exact last packet-flow predecessor and the
+   resulting queue grows by the declared length. Its bounded directional queues survive delayed
    backend readiness; failed injected effects retain only the uncommitted
    suffix, successful effects produce exact `Forwarded` events, ordinary
    terminal cleanup is exact-flow scoped, and explicit generation retirement
-   is high-watermark bounded. Both cleanup paths reject stale transitions. The
+   is high-watermark bounded. Both cleanup paths require exact predecessor
+   equality and therefore reject same-timestamp stale transitions. The
    next subgate is a test-only effect adapter for the selected stack plus
    separate IPv6 fragment-input qualification. Native
    connectors, packet-flow qualification on disposable AMD64/ARM64, and

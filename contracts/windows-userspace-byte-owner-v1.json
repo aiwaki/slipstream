@@ -17,13 +17,15 @@
   "invariants": {
     "opaque_tuple_binding_required": true,
     "successful_packet_flow_payload_transition_required": true,
+    "exact_packet_flow_predecessor_required": true,
+    "payload_queue_delta_required": true,
     "exact_flow_direction_sequence_and_length_owned": true,
     "payload_bytes_retained_until_atomic_effect_success": true,
     "effect_failure_retains_exact_payload": true,
     "duplicate_and_out_of_order_payload_rejected": true,
     "per_flow_directional_memory_bounded": true,
     "terminal_cleanup_is_event_scoped": true,
-    "stale_terminal_transition_cannot_remove_newer_bytes": true,
+    "same_timestamp_stale_terminal_transition_cannot_remove_newer_bytes": true,
     "generation_retirement_is_bounded_and_stale_safe": true,
     "selected_stack_effect_is_injected": true,
     "frozen_packet_flow_v1_modified": false,
@@ -101,7 +103,7 @@
       "forward_bytes": null,
       "expected": {
         "disposition": "rejected_after_first_owner",
-        "error": "out_of_order_payload",
+        "error": "transition_did_not_accept_payload",
         "owned_frames": 1,
         "owned_bytes": 2
       }

@@ -10,7 +10,7 @@ use super::WindowsUserspaceFlowBinding;
 use crate::packet_flow::{
     WindowsPacketFlowCommand, WindowsPacketFlowConfig, WindowsPacketFlowDirection,
     WindowsPacketFlowEvent, WindowsPacketFlowKey, WindowsPacketFlowPhase,
-    WindowsPacketFlowTransition,
+    WindowsPacketFlowRegistry, WindowsPacketFlowState, WindowsPacketFlowTransition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
@@ -75,10 +75,12 @@ pub enum WindowsUserspaceByteOwnerErrorCode {
     FlowLimit,
     DuplicateFlow,
     UnknownFlow,
+    FlowOpenEventRequired,
     PayloadEventRequired,
     PayloadLengthMismatch,
     PayloadTooLarge,
     TransitionMissingFlow,
+    TransitionMismatch,
     TransitionFlowInactive,
     TransitionDidNotAcceptPayload,
     StaleTransition,
@@ -99,10 +101,12 @@ impl WindowsUserspaceByteOwnerErrorCode {
             Self::FlowLimit => "flow_limit",
             Self::DuplicateFlow => "duplicate_flow",
             Self::UnknownFlow => "unknown_flow",
+            Self::FlowOpenEventRequired => "flow_open_event_required",
             Self::PayloadEventRequired => "payload_event_required",
             Self::PayloadLengthMismatch => "payload_length_mismatch",
             Self::PayloadTooLarge => "payload_too_large",
             Self::TransitionMissingFlow => "transition_missing_flow",
+            Self::TransitionMismatch => "transition_mismatch",
             Self::TransitionFlowInactive => "transition_flow_inactive",
             Self::TransitionDidNotAcceptPayload => "transition_did_not_accept_payload",
             Self::StaleTransition => "stale_transition",
@@ -168,16 +172,19 @@ struct WindowsUserspaceOwnedFlow {
     binding: WindowsUserspaceFlowBinding,
     client_to_backend: WindowsUserspaceByteQueue,
     backend_to_client: WindowsUserspaceByteQueue,
-    updated_at_ms: u64,
+    packet_flow_state: WindowsPacketFlowState,
 }
 
 impl WindowsUserspaceOwnedFlow {
-    fn new(binding: WindowsUserspaceFlowBinding, now_ms: u64) -> Self {
+    fn new(
+        binding: WindowsUserspaceFlowBinding,
+        packet_flow_state: WindowsPacketFlowState,
+    ) -> Self {
         Self {
             binding,
             client_to_backend: WindowsUserspaceByteQueue::new(),
             backend_to_client: WindowsUserspaceByteQueue::new(),
-            updated_at_ms: now_ms,
+            packet_flow_state,
         }
     }
 
@@ -204,6 +211,13 @@ impl WindowsUserspaceOwnedFlow {
 
     fn owned_bytes(&self) -> usize {
         self.client_to_backend.bytes + self.backend_to_client.bytes
+    }
+
+    fn queues_match(&self, packet_flow_state: &WindowsPacketFlowState) -> bool {
+        packet_flow_state.queued_bytes(WindowsPacketFlowDirection::ClientToBackend)
+            == self.client_to_backend.bytes
+            && packet_flow_state.queued_bytes(WindowsPacketFlowDirection::BackendToClient)
+                == self.backend_to_client.bytes
     }
 }
 
@@ -273,11 +287,22 @@ impl WindowsUserspaceByteOwner {
         })
     }
 
+    /// Opens byte ownership only alongside the successful packet-flow open.
     pub fn open_flow(
         &mut self,
         binding: WindowsUserspaceFlowBinding,
-        now_ms: u64,
+        event: &WindowsPacketFlowEvent,
+        transition: &WindowsPacketFlowTransition,
     ) -> Result<(), WindowsUserspaceByteOwnerError> {
+        let now_ms = match event {
+            WindowsPacketFlowEvent::FlowOpened { now_ms, .. } => *now_ms,
+            _ => {
+                return Err(WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::FlowOpenEventRequired,
+                    "byte ownership requires a packet-flow open event",
+                ));
+            }
+        };
         if now_ms >= binding.expires_at_ms() {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::BindingExpired,
@@ -297,14 +322,59 @@ impl WindowsUserspaceByteOwner {
                 "active byte-owner flow limit reached",
             ));
         }
-        self.flows
-            .insert(key, WindowsUserspaceOwnedFlow::new(binding, now_ms));
+        if event.flow_key() != Some(key) || transition.state.updated_at_ms != now_ms {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
+                "packet-flow open transition does not match the tuple binding",
+            ));
+        }
+        let transition_flow = transition.state.flows.get(&key).ok_or_else(|| {
+            WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::TransitionMissingFlow,
+                "packet-flow open transition does not retain the binding flow",
+            )
+        })?;
+        if transition_flow.updated_at_ms != now_ms
+            || transition_flow.admission.key() != key
+            || !matches!(
+                transition_flow.phase,
+                WindowsPacketFlowPhase::Opening | WindowsPacketFlowPhase::Relaying
+            )
+            || transition_flow.queued_bytes(WindowsPacketFlowDirection::ClientToBackend) != 0
+            || transition_flow.queued_bytes(WindowsPacketFlowDirection::BackendToClient) != 0
+        {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
+                "packet-flow open transition is not the empty active binding flow",
+            ));
+        }
+        let exact_open = transition.commands.iter().any(|command| {
+            matches!(
+                command,
+                WindowsPacketFlowCommand::OpenBackend {
+                    key: command_key,
+                    ..
+                } if *command_key == key
+            )
+        });
+        if !exact_open {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
+                "packet-flow open transition lacks the exact backend-open command",
+            ));
+        }
+        self.flows.insert(
+            key,
+            WindowsUserspaceOwnedFlow::new(binding, transition_flow.clone()),
+        );
         Ok(())
     }
 
+    /// Stages bytes only from the owner's exact current packet-flow predecessor.
     pub fn stage_payload(
         &mut self,
         event: &WindowsPacketFlowEvent,
+        previous: &WindowsPacketFlowRegistry,
         transition: &WindowsPacketFlowTransition,
         payload: Vec<u8>,
     ) -> Result<(), WindowsUserspaceByteOwnerError> {
@@ -334,6 +404,38 @@ impl WindowsUserspaceByteOwner {
                 WindowsUserspaceByteOwnerErrorCode::PayloadTooLarge,
                 "payload exceeds the byte-owner chunk bound",
             ));
+        }
+
+        let owner_flow = self.flows.get(&key).ok_or_else(|| {
+            WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::UnknownFlow,
+                "payload flow has no byte owner",
+            )
+        })?;
+        let previous_flow = previous.flows.get(&key).ok_or_else(|| {
+            WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                "packet-flow predecessor does not retain the payload flow",
+            )
+        })?;
+        if previous_flow != &owner_flow.packet_flow_state {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                "packet-flow predecessor is not the byte owner's current causal state",
+            ));
+        }
+        for candidate_direction in [
+            WindowsPacketFlowDirection::ClientToBackend,
+            WindowsPacketFlowDirection::BackendToClient,
+        ] {
+            if previous_flow.queued_bytes(candidate_direction)
+                != owner_flow.queue(candidate_direction).bytes
+            {
+                return Err(WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                    "packet-flow predecessor queue does not match the owned bytes",
+                ));
+            }
         }
 
         let transition_flow = transition.state.flows.get(&key).ok_or_else(|| {
@@ -381,40 +483,54 @@ impl WindowsUserspaceByteOwner {
                     && *command_bytes == declared_bytes
             )
         });
-        let idle_refresh = transition.commands.iter().any(|command| {
-            matches!(
-                command,
-                WindowsPacketFlowCommand::ScheduleIdleDeadline {
-                    key: command_key,
-                    ..
-                } if *command_key == key
-            )
-        });
-        if (should_forward && !exact_forward) || (!should_forward && !idle_refresh) {
+        if should_forward && !exact_forward {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload,
-                "packet-flow transition lacks exact payload acceptance evidence",
+                "packet-flow transition lacks the exact payload forward command",
             ));
         }
-
-        let flow = self.flows.get_mut(&key).ok_or_else(|| {
-            WindowsUserspaceByteOwnerError::new(
-                WindowsUserspaceByteOwnerErrorCode::UnknownFlow,
-                "payload flow has no byte owner",
-            )
-        })?;
-        if transition_flow.admission.key() != flow.binding.key() {
+        if transition_flow.admission.key() != owner_flow.binding.key() {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload,
                 "packet-flow transition does not match the opaque tuple binding",
             ));
         }
-        if now_ms < flow.updated_at_ms {
+        let expected_transition_bytes = previous_flow
+            .queued_bytes(direction)
+            .checked_add(declared_bytes)
+            .ok_or_else(|| {
+                WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::BufferLimit,
+                    "packet-flow payload byte count overflowed",
+                )
+            })?;
+        if transition_flow.queued_bytes(direction) != expected_transition_bytes {
             return Err(WindowsUserspaceByteOwnerError::new(
-                WindowsUserspaceByteOwnerErrorCode::StaleTransition,
-                "payload transition predates the byte owner",
+                WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload,
+                "packet-flow transition did not add the exact payload length",
             ));
         }
+        let other_direction = match direction {
+            WindowsPacketFlowDirection::ClientToBackend => {
+                WindowsPacketFlowDirection::BackendToClient
+            }
+            WindowsPacketFlowDirection::BackendToClient => {
+                WindowsPacketFlowDirection::ClientToBackend
+            }
+        };
+        if transition_flow.queued_bytes(other_direction)
+            != previous_flow.queued_bytes(other_direction)
+        {
+            return Err(WindowsUserspaceByteOwnerError::new(
+                WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload,
+                "packet-flow transition changed the unrelated payload queue",
+            ));
+        }
+
+        let flow = self
+            .flows
+            .get_mut(&key)
+            .expect("validated byte-owner flow must remain present");
         let queue = flow.queue_mut(direction);
         if sequence != queue.next_sequence {
             return Err(WindowsUserspaceByteOwnerError::new(
@@ -452,7 +568,7 @@ impl WindowsUserspaceByteOwner {
         });
         queue.bytes = new_queue_bytes;
         queue.next_sequence = next_sequence;
-        flow.updated_at_ms = now_ms;
+        flow.packet_flow_state = transition_flow.clone();
         self.owned_frames += 1;
         self.owned_bytes += declared_bytes;
         Ok(())
@@ -486,7 +602,7 @@ impl WindowsUserspaceByteOwner {
                     "forward command has no byte owner",
                 )
             })?;
-            if now_ms < flow.updated_at_ms {
+            if now_ms < flow.packet_flow_state.updated_at_ms {
                 return Err(WindowsUserspaceByteOwnerError::new(
                     WindowsUserspaceByteOwnerErrorCode::StaleTransition,
                     "forward command predates the retained payload",
@@ -529,7 +645,6 @@ impl WindowsUserspaceByteOwner {
             .pop_front()
             .expect("validated front payload must remain present");
         queue.bytes -= frame.bytes.len();
-        flow.updated_at_ms = now_ms;
         self.owned_frames -= 1;
         self.owned_bytes -= frame.bytes.len();
         Ok(WindowsPacketFlowEvent::Forwarded {
@@ -540,9 +655,11 @@ impl WindowsUserspaceByteOwner {
         })
     }
 
+    /// Applies active or terminal state only from the exact causal predecessor.
     pub fn reconcile(
         &mut self,
         event: &WindowsPacketFlowEvent,
+        previous: &WindowsPacketFlowRegistry,
         transition: &WindowsPacketFlowTransition,
     ) -> Result<WindowsUserspaceByteCleanup, WindowsUserspaceByteOwnerError> {
         let now_ms = event.now_ms();
@@ -555,14 +672,14 @@ impl WindowsUserspaceByteOwner {
         let mut cleanup = WindowsUserspaceByteCleanup::default();
         if let Some(key) = event.flow_key() {
             if let Some(flow) = self.flows.get(&key) {
-                if now_ms < flow.updated_at_ms {
+                if previous.flows.get(&key) != Some(&flow.packet_flow_state) {
                     return Err(WindowsUserspaceByteOwnerError::new(
                         WindowsUserspaceByteOwnerErrorCode::StaleTransition,
-                        "cleanup event predates the byte owner flow",
+                        "packet-flow predecessor is not the byte owner's current causal state",
                     ));
                 }
             }
-            let active = transition.state.flows.get(&key).is_some_and(|state| {
+            let active_flow = transition.state.flows.get(&key).filter(|state| {
                 matches!(
                     state.phase,
                     WindowsPacketFlowPhase::Opening
@@ -570,9 +687,15 @@ impl WindowsUserspaceByteOwner {
                         | WindowsPacketFlowPhase::Draining
                 )
             });
-            if active {
+            if let Some(packet_flow_state) = active_flow {
                 if let Some(flow) = self.flows.get_mut(&key) {
-                    flow.updated_at_ms = now_ms;
+                    if !flow.queues_match(packet_flow_state) {
+                        return Err(WindowsUserspaceByteOwnerError::new(
+                            WindowsUserspaceByteOwnerErrorCode::StaleTransition,
+                            "packet-flow transition queues do not match the owned bytes",
+                        ));
+                    }
+                    flow.packet_flow_state = packet_flow_state.clone();
                 }
             } else {
                 self.remove_flow(key, &mut cleanup);
@@ -588,20 +711,19 @@ impl WindowsUserspaceByteOwner {
                 ));
             }
             if self.flows.iter().any(|(key, flow)| {
-                key.capture_generation <= *capture_generation && flow.updated_at_ms > now_ms
+                key.capture_generation <= *capture_generation
+                    && previous.flows.get(key) != Some(&flow.packet_flow_state)
             }) {
                 return Err(WindowsUserspaceByteOwnerError::new(
                     WindowsUserspaceByteOwnerErrorCode::StaleTransition,
-                    "generation retirement predates retained byte-owner state",
+                    "generation retirement does not follow current byte-owner state",
                 ));
             }
             let keys: Vec<_> = self
                 .flows
-                .iter()
-                .filter_map(|(key, flow)| {
-                    (key.capture_generation <= *capture_generation && flow.updated_at_ms <= now_ms)
-                        .then_some(*key)
-                })
+                .keys()
+                .filter(|key| key.capture_generation <= *capture_generation)
+                .copied()
                 .collect();
             for key in keys {
                 self.remove_flow(key, &mut cleanup);
