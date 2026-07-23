@@ -397,6 +397,7 @@ fn contract_freezes_pure_and_bounded_v1_invariants() {
         "idle_timeout_bounded",
         "tcp_half_close_preserved_after_queue_drain",
         "early_client_half_close_survives_backend_open",
+        "closed_input_never_resumes_reads",
         "udp_datagram_boundaries_preserved",
         "reset_clears_owned_queues",
         "rejected_open_cancels_unowned_session",
@@ -906,6 +907,59 @@ fn tcp_half_closes_are_forwarded_only_after_each_queue_drains() {
         command,
         WindowsPacketFlowCommand::DataPlane {
             event: WindowsDataPlaneEvent::BackendClosed { .. }
+        }
+    )));
+}
+
+#[test]
+fn closed_input_clears_backpressure_without_resuming_reads() {
+    let config = contract().config;
+    let (mut state, admission) = opened_registry(&config);
+    let key = admission.key();
+    for (now_ms, sequence, bytes) in [(1_210, 1, 4), (1_220, 2, 2)] {
+        apply(
+            &mut state,
+            WindowsPacketFlowEvent::Payload {
+                now_ms,
+                key,
+                direction: WindowsPacketFlowDirection::ClientToBackend,
+                sequence,
+                bytes,
+            },
+            &config,
+        );
+    }
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::HalfClosed {
+            now_ms: 1_230,
+            key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+        },
+        &config,
+    );
+    apply(
+        &mut state,
+        WindowsPacketFlowEvent::BackendReady { now_ms: 1_240, key },
+        &config,
+    );
+
+    let drained = apply(
+        &mut state,
+        WindowsPacketFlowEvent::Forwarded {
+            now_ms: 1_250,
+            key,
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            through_sequence: 1,
+        },
+        &config,
+    );
+    assert!(!state.flows[&key].reads_paused(WindowsPacketFlowDirection::ClientToBackend));
+    assert!(!drained.iter().any(|command| matches!(
+        command,
+        WindowsPacketFlowCommand::ResumeReads {
+            direction: WindowsPacketFlowDirection::ClientToBackend,
+            ..
         }
     )));
 }

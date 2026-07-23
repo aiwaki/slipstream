@@ -1084,6 +1084,10 @@ pub fn reduce_windows_packet_flow(
             through_sequence,
             ..
         } => {
+            let input_open = match direction {
+                WindowsPacketFlowDirection::ClientToBackend => flow.client_input_open,
+                WindowsPacketFlowDirection::BackendToClient => flow.backend_input_open,
+            };
             let Some(last_sequence) = flow
                 .queue(*direction)
                 .frames
@@ -1117,12 +1121,12 @@ pub fn reduce_windows_packet_flow(
                     .bytes
                     .checked_sub(forwarded_bytes)
                     .ok_or(WindowsPacketFlowError::QueueAccountingMismatch)?;
-                let resume_reads = queue.paused && queue.bytes <= config.low_watermark_bytes;
-                if resume_reads {
+                let clear_backpressure = queue.paused && queue.bytes <= config.low_watermark_bytes;
+                if clear_backpressure {
                     queue.paused = false;
                     queue.backpressure_deadline_at_ms = None;
                 }
-                (forwarded_bytes, resume_reads)
+                (forwarded_bytes, clear_backpressure && input_open)
             };
             if resume_reads {
                 commands.push(WindowsPacketFlowCommand::ResumeReads {

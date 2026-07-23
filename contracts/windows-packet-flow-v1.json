@@ -18,6 +18,7 @@
     "idle_timeout_bounded": true,
     "tcp_half_close_preserved_after_queue_drain": true,
     "early_client_half_close_survives_backend_open": true,
+    "closed_input_never_resumes_reads": true,
     "udp_datagram_boundaries_preserved": true,
     "reset_clears_owned_queues": true,
     "rejected_open_cancels_unowned_session": true,
