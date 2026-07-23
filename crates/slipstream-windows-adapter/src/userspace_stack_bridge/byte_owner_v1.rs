@@ -88,6 +88,7 @@ pub enum WindowsUserspaceByteOwnerErrorCode {
     FrameLimit,
     BufferLimit,
     ForwardCommandRequired,
+    ForwardNotAuthorized,
     ForwardMetadataMismatch,
     OwnedPayloadMissing,
     EffectFailed,
@@ -114,6 +115,7 @@ impl WindowsUserspaceByteOwnerErrorCode {
             Self::FrameLimit => "frame_limit",
             Self::BufferLimit => "buffer_limit",
             Self::ForwardCommandRequired => "forward_command_required",
+            Self::ForwardNotAuthorized => "forward_not_authorized",
             Self::ForwardMetadataMismatch => "forward_metadata_mismatch",
             Self::OwnedPayloadMissing => "owned_payload_missing",
             Self::EffectFailed => "effect_failed",
@@ -148,6 +150,7 @@ impl std::error::Error for WindowsUserspaceByteOwnerError {}
 struct WindowsUserspaceOwnedPayload {
     sequence: u64,
     bytes: Box<[u8]>,
+    forward_authorized: bool,
 }
 
 #[derive(Debug)]
@@ -469,24 +472,32 @@ impl WindowsUserspaceByteOwner {
         }
         let should_forward = direction == WindowsPacketFlowDirection::BackendToClient
             || transition_flow.backend_ready;
-        let exact_forward = transition.commands.iter().any(|command| {
-            matches!(
-                command,
-                WindowsPacketFlowCommand::Forward {
-                    key: command_key,
-                    direction: command_direction,
-                    sequence: command_sequence,
-                    bytes: command_bytes,
-                } if *command_key == key
+        let mut forward_count = 0usize;
+        let mut exact_forward_count = 0usize;
+        for command in &transition.commands {
+            if let WindowsPacketFlowCommand::Forward {
+                key: command_key,
+                direction: command_direction,
+                sequence: command_sequence,
+                bytes: command_bytes,
+            } = command
+            {
+                forward_count += 1;
+                if *command_key == key
                     && *command_direction == direction
                     && *command_sequence == sequence
                     && *command_bytes == declared_bytes
-            )
-        });
-        if should_forward && !exact_forward {
+                {
+                    exact_forward_count += 1;
+                }
+            }
+        }
+        let expected_forward_count = if should_forward { 1 } else { 0 };
+        if forward_count != expected_forward_count || exact_forward_count != expected_forward_count
+        {
             return Err(WindowsUserspaceByteOwnerError::new(
                 WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload,
-                "packet-flow transition lacks the exact payload forward command",
+                "packet-flow transition does not contain the exact authorized forward set",
             ));
         }
         if transition_flow.admission.key() != owner_flow.binding.key() {
@@ -565,6 +576,7 @@ impl WindowsUserspaceByteOwner {
         queue.frames.push_back(WindowsUserspaceOwnedPayload {
             sequence,
             bytes: payload.into_boxed_slice(),
+            forward_authorized: should_forward,
         });
         queue.bytes = new_queue_bytes;
         queue.next_sequence = next_sequence;
@@ -618,6 +630,12 @@ impl WindowsUserspaceByteOwner {
                 return Err(WindowsUserspaceByteOwnerError::new(
                     WindowsUserspaceByteOwnerErrorCode::ForwardMetadataMismatch,
                     "forward command does not match the retained front payload",
+                ));
+            }
+            if !frame.forward_authorized {
+                return Err(WindowsUserspaceByteOwnerError::new(
+                    WindowsUserspaceByteOwnerErrorCode::ForwardNotAuthorized,
+                    "retained payload has not been authorized by its packet-flow transition",
                 ));
             }
             let delivery = WindowsUserspaceByteDelivery {
@@ -688,12 +706,63 @@ impl WindowsUserspaceByteOwner {
                 )
             });
             if let Some(packet_flow_state) = active_flow {
-                if let Some(flow) = self.flows.get_mut(&key) {
+                let authorize_client_payload = if let Some(flow) = self.flows.get(&key) {
                     if !flow.queues_match(packet_flow_state) {
                         return Err(WindowsUserspaceByteOwnerError::new(
                             WindowsUserspaceByteOwnerErrorCode::StaleTransition,
                             "packet-flow transition queues do not match the owned bytes",
                         ));
+                    }
+                    let backend_became_ready = matches!(
+                        event,
+                        WindowsPacketFlowEvent::BackendReady { key: event_key, .. }
+                            if *event_key == key
+                    ) && !flow.packet_flow_state.backend_ready;
+                    if backend_became_ready && !packet_flow_state.backend_ready {
+                        return Err(WindowsUserspaceByteOwnerError::new(
+                            WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
+                            "backend-ready event did not make the retained flow ready",
+                        ));
+                    }
+                    if backend_became_ready {
+                        let mut forwards = transition.commands.iter().filter_map(|command| {
+                            if let WindowsPacketFlowCommand::Forward {
+                                key,
+                                direction,
+                                sequence,
+                                bytes,
+                            } = command
+                            {
+                                Some((*key, *direction, *sequence, *bytes))
+                            } else {
+                                None
+                            }
+                        });
+                        let exact_authorization = flow.client_to_backend.frames.iter().all(|frame| {
+                            matches!(
+                                forwards.next(),
+                                Some((command_key, WindowsPacketFlowDirection::ClientToBackend, command_sequence, command_bytes))
+                                    if command_key == key
+                                        && command_sequence == frame.sequence
+                                        && command_bytes == frame.bytes.len()
+                            )
+                        }) && forwards.next().is_none();
+                        if !exact_authorization {
+                            return Err(WindowsUserspaceByteOwnerError::new(
+                                WindowsUserspaceByteOwnerErrorCode::TransitionMismatch,
+                                "backend-ready transition does not exactly authorize the retained client queue",
+                            ));
+                        }
+                    }
+                    backend_became_ready
+                } else {
+                    false
+                };
+                if let Some(flow) = self.flows.get_mut(&key) {
+                    if authorize_client_payload {
+                        for frame in &mut flow.client_to_backend.frames {
+                            frame.forward_authorized = true;
+                        }
                     }
                     flow.packet_flow_state = packet_flow_state.clone();
                 }

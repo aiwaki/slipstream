@@ -529,9 +529,12 @@ therefore stays phased and closed to production traffic:
    the selected stack. Userspace byte-owner v1 now
    retains actual payload by exact flow, direction, sequence, and length only
    when the caller supplies the exact last packet-flow predecessor and the
-   resulting queue grows by the declared length. Its bounded directional queues survive delayed
-   backend readiness; failed injected effects retain only the uncommitted
-   suffix, successful effects produce exact `Forwarded` events, ordinary
+   resulting queue grows by the declared length. Every retained frame also
+   requires forwarding authorization from that transition. Its bounded
+   directional queues survive delayed backend readiness but cannot execute
+   until `BackendReady` authorizes the client queue one-to-one; failed injected
+   effects retain only the uncommitted suffix, successful effects produce exact
+   `Forwarded` events, ordinary
    terminal cleanup is exact-flow scoped, and explicit generation retirement
    is high-watermark bounded. Both cleanup paths require exact predecessor
    equality and therefore reject same-timestamp stale transitions. The

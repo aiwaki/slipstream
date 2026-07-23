@@ -231,6 +231,8 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "payload_queue_delta_required",
         "exact_flow_direction_sequence_and_length_owned",
         "payload_bytes_retained_until_atomic_effect_success",
+        "forward_requires_retained_transition_authorization",
+        "pre_backend_client_forward_rejected",
         "effect_failure_retains_exact_payload",
         "duplicate_and_out_of_order_payload_rejected",
         "per_flow_directional_memory_bounded",
@@ -560,12 +562,53 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         .commands
         .iter()
         .any(|command| { matches!(command, WindowsPacketFlowCommand::Forward { .. }) }));
+    let early_forward = WindowsPacketFlowCommand::Forward {
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let mut forged_queued = queued.clone();
+    forged_queued.commands.push(early_forward.clone());
+    let forged_error = owner
+        .stage_payload(&payload_event, &state, &forged_queued, vec![4, 5, 6])
+        .expect_err("opening payload transition cannot authorize forwarding");
+    assert_eq!(
+        forged_error.code,
+        WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload
+    );
+    assert_eq!(owner.owned_frame_count(), 0);
+
     owner
         .stage_payload(&payload_event, &state, &queued, vec![4, 5, 6])
         .expect("pre-backend payload ownership");
+    let mut effects = RecordingByteEffect::default();
+    let early_error = owner
+        .execute_forward(&early_forward, &mut effects, 1_375)
+        .expect_err("retained client payload cannot forward before backend readiness");
+    assert_eq!(
+        early_error.code,
+        WindowsUserspaceByteOwnerErrorCode::ForwardNotAuthorized
+    );
+    assert!(effects.deliveries.is_empty());
+    assert_eq!(owner.owned_frame_count(), 1);
+    assert_eq!(owner.owned_byte_count(), 3);
 
     let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key };
     let backend_ready = reduce(&queued.state, &backend_event);
+    let mut missing_authorization = backend_ready.clone();
+    missing_authorization
+        .commands
+        .retain(|command| !matches!(command, WindowsPacketFlowCommand::Forward { .. }));
+    let malformed_error = owner
+        .reconcile(&backend_event, &queued.state, &missing_authorization)
+        .expect_err("backend readiness must authorize the exact retained queue");
+    assert_eq!(
+        malformed_error.code,
+        WindowsUserspaceByteOwnerErrorCode::TransitionMismatch
+    );
+    assert_eq!(owner.owned_frame_count(), 1);
+    assert_eq!(owner.owned_byte_count(), 3);
     owner
         .reconcile(&backend_event, &queued.state, &backend_ready)
         .expect("backend-ready owner reconciliation");
@@ -574,7 +617,6 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         .iter()
         .find(|command| matches!(command, WindowsPacketFlowCommand::Forward { .. }))
         .expect("backend readiness must release the retained payload");
-    let mut effects = RecordingByteEffect::default();
     let acknowledgement = owner
         .execute_forward(forward, &mut effects, 1_450)
         .expect("retained payload delivery");

@@ -22,6 +22,8 @@
     "payload_queue_delta_required": true,
     "exact_flow_direction_sequence_and_length_owned": true,
     "payload_bytes_retained_until_atomic_effect_success": true,
+    "forward_requires_retained_transition_authorization": true,
+    "pre_backend_client_forward_rejected": true,
     "effect_failure_retains_exact_payload": true,
     "duplicate_and_out_of_order_payload_rejected": true,
     "per_flow_directional_memory_bounded": true,
@@ -54,6 +56,23 @@
       "expected": {
         "disposition": "owned",
         "error": null,
+        "owned_frames": 1,
+        "owned_bytes": 3
+      }
+    },
+    {
+      "name": "pre_backend_client_forward_is_rejected",
+      "action": "execute",
+      "backend_ready": false,
+      "direction": "client_to_backend",
+      "sequence": 1,
+      "declared_bytes": 3,
+      "payload": [4, 5, 6],
+      "effect": "succeed",
+      "forward_bytes": 3,
+      "expected": {
+        "disposition": "retained",
+        "error": "forward_not_authorized",
         "owned_frames": 1,
         "owned_bytes": 3
       }

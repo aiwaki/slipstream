@@ -214,7 +214,10 @@ Slipstream routing decisions and bounded recovery primitives.
   must grow by the exact declared length, so an unrelated idle refresh cannot
   stage bytes. Exact flow key,
   direction, sequence, and length are retained in fixed directional queues
-  until one injected forwarding effect succeeds.
+  until one injected forwarding effect succeeds. A caller-constructed forward
+  command is insufficient: each frame also retains authorization from the
+  exact accepting transition, and queued client frames gain that authorization
+  only from an exact one-to-one `BackendReady` command set.
   Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,
   oversized, and mismatched commands fail closed. Ordinary terminal
   reconciliation removes only the event's flow after monotonic transition
