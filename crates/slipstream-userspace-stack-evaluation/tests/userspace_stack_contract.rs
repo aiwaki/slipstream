@@ -92,7 +92,8 @@ fn contract_and_lock_freeze_the_exact_evaluation_dependency() {
     let lock_record = format!(
         "name = \"{STACK_NAME}\"\nversion = \"{STACK_VERSION}\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"{STACK_CRATE_SHA256}\""
     );
-    assert!(LOCK.contains(&lock_record));
+    let normalized_lock = LOCK.lines().collect::<Vec<_>>().join("\n");
+    assert!(normalized_lock.contains(&lock_record));
 }
 
 #[test]
