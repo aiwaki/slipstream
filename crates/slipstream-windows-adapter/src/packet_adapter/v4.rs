@@ -7,7 +7,9 @@
 
 use serde::{Deserialize, Serialize};
 use slipstream_core::routing_policy::{RoutePolicyResult, RoutingPolicyTables};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
+
+use crate::packet_egress::is_usable_source_address;
 
 use super::v3::{
     classify_windows_packet_capture as classify_v3, WindowsPacketCaptureDecision as V3Decision,
@@ -162,10 +164,7 @@ pub enum WindowsPacketCaptureDecision {
 }
 
 fn source_address_is_safe(address: IpAddr) -> bool {
-    !address.is_unspecified()
-        && !address.is_loopback()
-        && !address.is_multicast()
-        && address != IpAddr::V4(Ipv4Addr::BROADCAST)
+    is_usable_source_address(address)
 }
 
 fn same_address_family(left: IpAddr, right: IpAddr) -> bool {

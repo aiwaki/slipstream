@@ -463,7 +463,7 @@ pub(super) fn same_family(left: IpAddr, right: IpAddr) -> bool {
     )
 }
 
-fn is_usable_source_address(address: IpAddr) -> bool {
+pub(crate) fn is_usable_source_address(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => is_usable_source_ipv4(address),
         IpAddr::V6(address) => {

@@ -9,6 +9,7 @@
     "original_source_endpoint_required_for_classified_flows": true,
     "zero_source_port_is_direct_passthrough": true,
     "unsafe_source_address_is_direct_passthrough": true,
+    "source_address_must_be_usable_unicast": true,
     "source_and_destination_address_families_match": true,
     "backend_authorization": false,
     "native_dll_loading": false,
@@ -119,6 +120,102 @@
           "kind": "hostname",
           "source": "tls_client_hello_sni",
           "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unsafe_source_address"
+      }
+    },
+    {
+      "name": "ipv4-link-local-source-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 72,
+        "transport": "tcp_tls",
+        "source_address": "169.254.1.1",
+        "source_port": 54003,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unsafe_source_address"
+      }
+    },
+    {
+      "name": "ipv4-this-network-source-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 73,
+        "transport": "tcp_tls",
+        "source_address": "0.1.2.3",
+        "source_port": 54003,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unsafe_source_address"
+      }
+    },
+    {
+      "name": "ipv4-reserved-source-stays-direct",
+      "now_ms": 1200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 74,
+        "transport": "tcp_tls",
+        "source_address": "240.0.0.1",
+        "source_port": 54003,
+        "destination": "104.16.58.5",
+        "destination_port": 443,
+        "observed_at_ms": 1000,
+        "expires_at_ms": 5000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "tls_client_hello_sni",
+          "host": "gateway.discord.gg"
+        }
+      },
+      "expected": {
+        "disposition": "direct_passthrough",
+        "reason": "unsafe_source_address"
+      }
+    },
+    {
+      "name": "ipv6-link-local-source-without-scope-stays-direct",
+      "now_ms": 2200,
+      "observation": {
+        "capture_generation": 10,
+        "flow_id": 75,
+        "transport": "udp_quic",
+        "source_address": "fe80::1",
+        "source_port": 54003,
+        "destination": "2606:4700:4400::ac40:9b4c",
+        "destination_port": 443,
+        "observed_at_ms": 2000,
+        "expires_at_ms": 6000,
+        "attribution": {
+          "kind": "hostname",
+          "source": "quic_initial_sni",
+          "host": "chatgpt.com"
         }
       },
       "expected": {

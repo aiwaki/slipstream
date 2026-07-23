@@ -119,11 +119,12 @@ Slipstream routing decisions and bounded recovery primitives.
   the production host.
 - `windows-packet-capture-v4.json` extends frozen v3 only for a flow that v3
   already policy-classified. It requires the original nonzero client source
-  address and port, rejects unsafe source addresses and mixed IP families, and
-  preserves every earlier v3 passthrough decision before considering the new
-  endpoint. This source is distinct from the outbound egress source selected
-  below. V4 remains capture-only, authorizes no backend, performs no native
-  effect, and is not composed into the production host.
+  address and port, reuses the packet-egress contract's usable-unicast source
+  predicate to reject link-local and reserved ranges, rejects mixed IP
+  families, and preserves every earlier v3 passthrough decision before
+  considering the new endpoint. This source is distinct from the outbound
+  egress source selected below. V4 remains capture-only, authorizes no backend,
+  performs no native effect, and is not composed into the production host.
 - `windows-packet-egress-v1.json` freezes the pure outbound loop-avoidance
   admission below that capture boundary. A plan requires short-lived route
   evidence observed before capture plus an exact owned capture-route activation

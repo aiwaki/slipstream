@@ -63,6 +63,10 @@ fn v4_extends_frozen_v3_only_with_the_original_source_endpoint() {
         fixture.invariants["original_source_endpoint_required_for_classified_flows"],
         true
     );
+    assert_eq!(
+        fixture.invariants["source_address_must_be_usable_unicast"],
+        true
+    );
     assert_eq!(fixture.invariants["backend_authorization"], false);
 }
 
