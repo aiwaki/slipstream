@@ -19,5 +19,7 @@ cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-e
 The frozen language-neutral contract is
 [`contracts/windows-userspace-stack-effect-v1.json`](../../contracts/windows-userspace-stack-effect-v1.json).
 Passing this gate does not admit the selected stack into the Windows production
-host. Native packet effects, IPv6 fragment input, and disposable AMD64/ARM64
-lifecycle qualification remain separate gates.
+host. Bounded IPv6 fragment input is qualified in a separate effect-free
+contract; composing that normalizer with versioned capture evidence, native
+packet effects, and disposable AMD64/ARM64 lifecycle qualification remain
+separate gates.

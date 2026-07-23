@@ -673,11 +673,12 @@ the reducer output. A separate test-only effect-evaluation crate now exercises
 that owner against pinned `smoltcp` through a deterministic in-memory Layer 3
 pair. IPv4/IPv6 TCP/UDP payloads cross in both directions, and an injected
 pre-mutation failure retains the exact payload for one successful retry without
-linking `smoltcp` into the Windows adapter. The next safe M4 gate is bounded
-IPv6 fragment-input qualification in the isolated stack-selection harness.
-No implementation may enter the production host until IPv6 fragment input,
-native backends, and disposable AMD64/ARM64 lifecycle qualification pass as
-separate gates.
+linking `smoltcp` into the Windows adapter. Bounded IPv6 fragment input is now
+qualified separately in that isolated stack-selection harness. The next safe M4
+gate is an effect-only composition of its normalizer with versioned Windows
+capture evidence. No implementation may enter the production host until that
+composition, native backends, and disposable AMD64/ARM64 lifecycle
+qualification pass as separate gates.
 
 ## External Gates
 
