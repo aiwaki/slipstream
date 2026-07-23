@@ -498,15 +498,19 @@ therefore stays phased and closed to production traffic:
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.
-   PR #206 implements the pure v1 contract and keeps native effects, userspace
-   stack selection, and production-host composition closed. Its packet path
+   PR #206 exact merge commit
+   `e8cb475fc65a375d0dd57f757e2f5bc575a4fcde` implements the pure v1 contract
+   and passed required CI, packaged lifecycle, audit, and native AMD64/ARM64
+   qualification. It keeps native effects, userspace stack selection, and
+   production-host composition closed. Its packet path
    consumes registry ownership, updates only one bounded flow, retains unique
    capture and data-plane owners, preserves the capture-v3 destination port,
    admits only a binding minted from the still-opening accepted data-plane
    session, revalidates that same current session at backend opening, and
-   resumes partial effect batches from an exact cursor. The next
-   subgate is the bounded stack evaluation, not another routing or capture
-   mechanism.
+   resumes partial effect batches from an exact cursor. A reused request ID
+   rejected by a retained owner cancels only its exact new data-plane session.
+   The next subgate is the bounded stack evaluation, not another routing or
+   capture mechanism.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier
