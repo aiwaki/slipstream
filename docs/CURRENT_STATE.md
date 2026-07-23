@@ -9,8 +9,9 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-23, through merged
-[PR #204](https://github.com/aiwaki/slipstream/pull/204) at main commit
-`8c1addbcfeb93f6cbd64cac07b29b98f7aae4bbb`, including native AMD64 and ARM64
+[PR #205](https://github.com/aiwaki/slipstream/pull/205) at main commit
+`ca2112b458d137760c1fc2118a73989043fee459`, which records the exact
+[PR #204](https://github.com/aiwaki/slipstream/pull/204) native AMD64 and ARM64
 in
 [run 29971683285](https://github.com/aiwaki/slipstream/actions/runs/29971683285),
 all required checks and packaged lifecycle in
@@ -46,7 +47,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Independent route-owner coexistence qualified on exact main | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route on native AMD64 and ARM64. PR #204 proves the independent child process, adapter, address configuration, and broader route configuration remain live and unchanged before, during, and after Slipstream capture and cleanup, then return to exact owner-only teardown. The earlier WFP path remains frozen research; `windows-packet-capture-v2` and `windows-packet-egress-v1` remain pure non-production contracts. Physical/full-tunnel/split/per-app vendor VPN qualification, packet-to-flow forwarding and backends, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | Pure packet-to-flow v1 contract under exact-head qualification | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route on native AMD64 and ARM64. PR #206 adds the versioned pure packet-to-flow v1 contract with bounded TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, and generation retirement while keeping native effects and production composition closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, userspace stack selection and native backends, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
@@ -627,12 +628,22 @@ and dependency audit in
 The independent VPN-like route-owner gate is closed. It does not qualify every
 physical, full-tunnel, split, or per-app vendor VPN.
 
-The next safe M4 gate is a versioned pure packet-to-flow forwarding contract
-between the already isolated capture, ingress, and connector boundaries. It
-must specify bounded TCP/UDP flow ownership, backpressure, half-close/reset,
-timeout, route-class dispatch, and cleanup before selecting or composing a
-native userspace stack. It must remain outside the production SCM host and
-perform no socket, route, adapter, DNS, proxy, PAC, VPN, or packet effect.
+The versioned pure packet-to-flow v1 contract now lives after isolated capture
+classification and egress admission in PR #206. It keeps bounded TCP/UDP flow
+ownership, backpressure, half-close/reset, timeout, route-class dispatch, and
+cleanup outside the production SCM host and performs no socket, route, adapter,
+DNS, proxy, PAC, VPN, or packet effect. Capture v3 preserves the client's
+original destination port without changing frozen v2 policy semantics. Keyed
+events update only one bounded flow, data-plane session/request ownership is
+unique until generation retirement, admission consumes a binding minted from
+the still-opening accepted data-plane session rather than an unrelated raw ID,
+backend opening revalidates a fresh capability for that same current session,
+and retained command batches resume from an exact failure cursor without replay.
+After exact-main confirmation, the next
+safe M4 gate is a bounded userspace IPv4/IPv6 TCP/UDP stack evaluation behind
+an injected byte-owner effect and fake adapter. No implementation may enter the
+production host until that stack preserves these frozen vectors and passes
+separate disposable native and lifecycle qualification.
 
 ## External Gates
 
