@@ -482,13 +482,17 @@ therefore stays phased and closed to production traffic:
    exact capture route. The parent must prove the child and all of its network
    resources remain unchanged through activation, recovery, and Slipstream
    capture cleanup; only then may the child remove its own resources. PR #204
-   head `069f496ad392ea886b0ad56ca6ffb116065fc838` passed this proof on native
-   AMD64 and ARM64 plus required CI, packaged lifecycle, and audit; exact-main
-   repetition is pending. This deliberately qualifies one independently owned
-   route case, not every physical, full-tunnel, split, or per-app vendor VPN.
+   exact merge commit `8c1addbcfeb93f6cbd64cac07b29b98f7aae4bbb` passed this
+   proof on native AMD64 and ARM64 plus required CI, packaged lifecycle, and
+   audit. This deliberately qualifies one independently owned route case, not
+   every physical, full-tunnel, split, or per-app vendor VPN.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
-5. Only after that feasibility gate passes, add owned exact-route transactions,
-   select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows
+5. After that feasibility gate, freeze a versioned pure packet-to-flow
+   forwarding contract across the isolated capture, ingress, and connector
+   boundaries. It must bound TCP/UDP flow ownership, backpressure,
+   half-close/reset, timeout, route-class dispatch, and cleanup without native
+   effects or production-host composition. Only after that contract passes,
+   select a bounded userspace IPv4/IPv6 and TCP/UDP stack and bridge its flows
    to local-bypass, direct, and geo-exit backends through the shared policy and
    recovery contracts. Discord and YouTube remain local-only.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
