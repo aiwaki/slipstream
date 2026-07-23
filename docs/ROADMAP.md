@@ -519,10 +519,14 @@ therefore stays phased and closed to production traffic:
    linking the dependency into the Windows adapter or production host.
    Oversized IPv6 output is explicitly fail-closed because the selected version
    does not emit IPv6 fragments. IPv6 fragment input remains unqualified.
-   The next subgate is a versioned source-endpoint binding and pure bridge:
-   packet-flow v1 retains destination address/port but not the original source
-   address/port required by a userspace stack. Do not mutate frozen v1 or infer
-   that tuple. Native connectors, packet-flow qualification on disposable
+   Capture v4 and userspace-flow-binding v1 now close the immutable original
+   five-tuple gap without mutating frozen capture v3 or packet-flow v1. The
+   binding distinguishes the original client source from the admitted outbound
+   egress source and requires exact generation, flow ID, transport,
+   destination address/port, IP family, active policy, and expiry agreement.
+   It owns no payload and does not instantiate the selected stack. The next
+   subgate is a bounded pure byte-owner bridge plus separate IPv6 fragment-input
+   qualification. Native connectors, packet-flow qualification on disposable
    AMD64/ARM64, and production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.

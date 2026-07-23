@@ -28,6 +28,7 @@ mod service_operation_lock;
 pub mod service_ownership;
 pub mod service_payload;
 pub mod service_scm;
+pub mod userspace_stack_bridge;
 mod v1;
 pub mod wfp_capture;
 pub mod wfp_runtime;
