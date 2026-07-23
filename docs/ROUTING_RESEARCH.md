@@ -163,14 +163,15 @@ version's dispatch path states that IPv6 fragmentation is unimplemented and
 drops an oversized packet without emitting a frame. Incoming IPv6 fragment
 reassembly is enabled but not yet independently qualified.
 
-Selection is not integration. Packet capture v3 retains destination address and
-port, while packet-flow v1 retains capture generation, flow ID, transport, and
-data-plane session ID. Neither retains the original source address and port
-needed to identify a userspace TCP/UDP endpoint. The next contract must add that
-binding as a new version and bridge immutable bytes through injected effects;
-frozen v1 must not be widened implicitly. Native connector effects, Wintun
-composition, disposable AMD64/ARM64 packet flow, and production service-host
-composition remain closed.
+Selection is not integration. Capture v4 now extends frozen capture v3 only
+after policy classification and retains the original client source address and
+port. Userspace-flow-binding v1 joins that endpoint to an already-admitted
+frozen packet-flow-v1 capability only when the exact generation, flow ID,
+transport, destination address/port, IP family, active policy, and expiry
+agree. The next contract must bridge immutable bytes through injected effects;
+neither the binding nor frozen packet-flow v1 owns payload or instantiates the
+selected stack. Native connector effects, Wintun composition, disposable
+AMD64/ARM64 packet flow, and production service-host composition remain closed.
 
 ## Windows Packet Capture Selection (2026-07-18)
 
