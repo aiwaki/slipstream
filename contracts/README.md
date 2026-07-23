@@ -202,14 +202,17 @@ Slipstream routing decisions and bounded recovery primitives.
   endpoint to an already-admitted frozen packet-flow-v1 capability. The exact
   generation, flow ID, transport, destination address/port, active policy, IP
   family, and earliest expiry must match before it exposes an immutable
-  original five-tuple. It neither owns payload bytes nor instantiates
+  original five-tuple and retains that exact admission capability for later
+  open-transition verification. It neither owns payload bytes nor instantiates
   `smoltcp`; it has no Wintun, socket, adapter, route, DNS, proxy, PAC, VPN,
   process, service, or production-host effect.
 - `windows-userspace-byte-owner-v1.json` binds actual payload bytes to an
   opened tuple owner only after a successful frozen packet-flow-v1 payload
-  transition. The predecessor must equal the owner's last full packet-flow
-  snapshot and the resulting directional queue must grow by the exact declared
-  length, so an unrelated idle refresh cannot stage bytes. Exact flow key,
+  transition. Opening requires the exact admission capability retained by the
+  tuple binding, not merely a matching flow key. The predecessor must equal the
+  owner's last full packet-flow snapshot and the resulting directional queue
+  must grow by the exact declared length, so an unrelated idle refresh cannot
+  stage bytes. Exact flow key,
   direction, sequence, and length are retained in fixed directional queues
   until one injected forwarding effect succeeds.
   Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,

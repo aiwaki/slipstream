@@ -524,7 +524,9 @@ therefore stays phased and closed to production traffic:
    binding distinguishes the original client source from the admitted outbound
    egress source and requires exact generation, flow ID, transport,
    destination address/port, IP family, active policy, and expiry agreement.
-   It does not instantiate the selected stack. Userspace byte-owner v1 now
+   It retains that exact admission capability so a separately valid same-key
+   destination or request cannot open the byte owner. It does not instantiate
+   the selected stack. Userspace byte-owner v1 now
    retains actual payload by exact flow, direction, sequence, and length only
    when the caller supplies the exact last packet-flow predecessor and the
    resulting queue grows by the declared length. Its bounded directional queues survive delayed

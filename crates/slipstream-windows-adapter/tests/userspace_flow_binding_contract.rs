@@ -65,6 +65,7 @@ fn binding_contract_freezes_original_tuple_and_effect_boundaries() {
         "pure_binding_only",
         "capture_v4_source_endpoint_required",
         "frozen_packet_flow_v1_admission_required",
+        "exact_admission_capability_bound",
         "complete_original_five_tuple_bound",
         "destination_address_and_port_match",
         "active_policy_matches",
@@ -134,6 +135,7 @@ fn language_neutral_vectors_bind_only_an_exact_current_tuple() {
                     "{}",
                     vector.name
                 );
+                assert_eq!(binding.admission(), &admission, "{}", vector.name);
                 assert_eq!(
                     binding.key().capture_generation,
                     vector.classification.capture_generation,

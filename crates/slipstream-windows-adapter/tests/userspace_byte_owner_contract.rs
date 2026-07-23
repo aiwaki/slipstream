@@ -225,6 +225,7 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
 
     for invariant in [
         "opaque_tuple_binding_required",
+        "exact_open_admission_capability_required",
         "successful_packet_flow_payload_transition_required",
         "exact_packet_flow_predecessor_required",
         "payload_queue_delta_required",
@@ -253,6 +254,47 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "production_service_host_composition",
     ] {
         assert_eq!(fixture.invariants[invariant], false, "{invariant}");
+    }
+}
+
+#[test]
+fn opening_rejects_same_key_transitions_from_other_admission_capabilities() {
+    let policy_tables = bundled_policy_v1();
+    let (classification_fixture, admission_fixture) = fixture_pair(7, 41);
+    let mut other_request = admission_fixture.clone();
+    other_request.host = "youtube.com".to_owned();
+    let mut other_destination = admission_fixture.clone();
+    other_destination.destination = "104.16.58.6".to_owned();
+
+    for mismatched_fixture in [other_request, other_destination] {
+        let classification = classification(&classification_fixture, &policy_tables);
+        let binding_admission = admission(&admission_fixture, &policy_tables);
+        let binding = bind_windows_userspace_flow(&classification, &binding_admission, 1_300)
+            .expect("exact fixture binding");
+        let mismatched_admission = admission(&mismatched_fixture, &policy_tables);
+        assert_eq!(binding.key(), mismatched_admission.key());
+        assert_ne!(binding.admission(), &mismatched_admission);
+        let event = flow_open_event(mismatched_admission, 1_300, &policy_tables);
+        let transition = reduce_windows_packet_flow(
+            WindowsPacketFlowRegistry::new(1_200),
+            &event,
+            &packet_flow_config(),
+        )
+        .expect("mismatched capability is independently valid");
+
+        let mut owner = WindowsUserspaceByteOwner::new(
+            WindowsUserspaceByteOwnerConfig::from_packet_flow(&packet_flow_config())
+                .expect("valid owner bounds"),
+        )
+        .expect("valid byte owner");
+        let error = owner
+            .open_flow(binding, &event, &transition)
+            .expect_err("same key cannot substitute another admission capability");
+        assert_eq!(
+            error.code,
+            WindowsUserspaceByteOwnerErrorCode::TransitionMismatch
+        );
+        assert_eq!(owner.active_flow_count(), 0);
     }
 }
 

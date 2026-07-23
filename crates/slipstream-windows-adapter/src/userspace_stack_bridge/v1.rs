@@ -26,6 +26,7 @@ pub struct WindowsUserspaceFlowTuple {
 pub struct WindowsUserspaceFlowBinding {
     key: WindowsPacketFlowKey,
     tuple: WindowsUserspaceFlowTuple,
+    admission: WindowsPacketFlowAdmission,
     expires_at_ms: u64,
 }
 
@@ -36,6 +37,10 @@ impl WindowsUserspaceFlowBinding {
 
     pub const fn tuple(&self) -> WindowsUserspaceFlowTuple {
         self.tuple
+    }
+
+    pub const fn admission(&self) -> &WindowsPacketFlowAdmission {
+        &self.admission
     }
 
     pub const fn expires_at_ms(&self) -> u64 {
@@ -150,6 +155,7 @@ pub fn bind_windows_userspace_flow(
                 port: classification.destination_port(),
             },
         },
+        admission: admission.clone(),
         expires_at_ms: classification
             .expires_at_ms()
             .min(admission.expires_at_ms()),

@@ -6,6 +6,7 @@
     "pure_binding_only": true,
     "capture_v4_source_endpoint_required": true,
     "frozen_packet_flow_v1_admission_required": true,
+    "exact_admission_capability_bound": true,
     "complete_original_five_tuple_bound": true,
     "capture_generation_and_flow_id_match": true,
     "transport_and_address_family_match": true,

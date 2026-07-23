@@ -335,7 +335,7 @@ impl WindowsUserspaceByteOwner {
             )
         })?;
         if transition_flow.updated_at_ms != now_ms
-            || transition_flow.admission.key() != key
+            || transition_flow.admission != *binding.admission()
             || !matches!(
                 transition_flow.phase,
                 WindowsPacketFlowPhase::Opening | WindowsPacketFlowPhase::Relaying

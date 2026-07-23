@@ -646,7 +646,9 @@ Capture v4 and userspace-flow-binding v1 now retain and validate the original
 client source address/port without patching frozen capture v3 or packet-flow
 v1. The binding requires exact generation, flow ID, transport, destination
 address/port, IP family, active policy, and expiry agreement, and explicitly
-keeps the original client source separate from the outbound egress source.
+keeps the original client source separate from the outbound egress source. It
+also retains the exact admission capability, so byte ownership cannot open from
+an independently valid same-key transition for another destination or request.
 The bounded byte-owner bridge now retains exact flow, direction, sequence, and
 payload bytes after successful packet-flow-v1 acceptance. It releases bytes
 only after one injected atomic effect succeeds, retains the exact suffix on
