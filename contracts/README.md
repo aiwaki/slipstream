@@ -198,6 +198,14 @@ Slipstream routing decisions and bounded recovery primitives.
   gaps; selected-stack execution remains separate. The dependency is not
   linked into the Windows adapter or production service host and performs no
   socket, adapter, route, DNS, proxy, PAC, VPN, process, or service effect.
+- `windows-userspace-stack-effect-v1.json` composes frozen byte-owner v1 with
+  the selected `smoltcp 0.13.1` candidate in a separate test-only crate. Its
+  deterministic in-memory Layer 3 pair proves exact IPv4/IPv6 TCP/UDP payload
+  enqueue and receipt in both directions, original tuple and flow-identity use,
+  and one retry after an injected pre-mutation effect failure. The failure
+  leaves both the byte owner and selected stack unchanged. The crate has no native packet,
+  socket, Wintun, route, DNS, proxy, PAC, VPN, process, service, or
+  production-host effect.
 - `windows-userspace-flow-binding-v1.json` joins a capture-v4 original source
   endpoint to an already-admitted frozen packet-flow-v1 capability. The exact
   generation, flow ID, transport, destination address/port, active policy, IP
