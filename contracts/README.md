@@ -217,7 +217,9 @@ Slipstream routing decisions and bounded recovery primitives.
   until one injected forwarding effect succeeds. A caller-constructed forward
   command is insufficient: each frame also retains authorization from the
   exact accepting transition, and queued client frames gain that authorization
-  only from an exact one-to-one `BackendReady` command set.
+  only from an exact one-to-one `BackendReady` command set. Before invoking the
+  effect, delivery must also reduce its exact `Forwarded` acknowledgement from
+  the current full registry, including the global monotonic watermark.
   Failed effects retain the exact uncommitted suffix; duplicate, out-of-order,
   oversized, and mismatched commands fail closed. Ordinary terminal
   reconciliation removes only the event's flow after monotonic transition

@@ -233,6 +233,8 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "payload_bytes_retained_until_atomic_effect_success",
         "forward_requires_retained_transition_authorization",
         "pre_backend_client_forward_rejected",
+        "forward_acknowledgement_preflight_required",
+        "global_registry_watermark_required",
         "effect_failure_retains_exact_payload",
         "duplicate_and_out_of_order_payload_rejected",
         "per_flow_directional_memory_bounded",
@@ -355,7 +357,13 @@ fn language_neutral_vectors_keep_exact_bytes_until_effect_success() {
                     fail: vector.effect == "fail",
                     ..RecordingByteEffect::default()
                 };
-                match owner.execute_forward(&command, &mut effects, 1_450) {
+                match owner.execute_forward(
+                    &command,
+                    &transition.state,
+                    &config,
+                    &mut effects,
+                    1_450,
+                ) {
                     Ok(event) => {
                         assert_eq!(vector.expected.disposition, "forwarded", "{}", vector.name);
                         assert!(matches!(
@@ -584,7 +592,13 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         .expect("pre-backend payload ownership");
     let mut effects = RecordingByteEffect::default();
     let early_error = owner
-        .execute_forward(&early_forward, &mut effects, 1_375)
+        .execute_forward(
+            &early_forward,
+            &queued.state,
+            &packet_flow_config(),
+            &mut effects,
+            1_375,
+        )
         .expect_err("retained client payload cannot forward before backend readiness");
     assert_eq!(
         early_error.code,
@@ -618,7 +632,13 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         .find(|command| matches!(command, WindowsPacketFlowCommand::Forward { .. }))
         .expect("backend readiness must release the retained payload");
     let acknowledgement = owner
-        .execute_forward(forward, &mut effects, 1_450)
+        .execute_forward(
+            forward,
+            &backend_ready.state,
+            &packet_flow_config(),
+            &mut effects,
+            1_450,
+        )
         .expect("retained payload delivery");
     assert!(matches!(
         acknowledgement,
@@ -630,6 +650,78 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         } if event_key == key
     ));
     assert_eq!(effects.deliveries[0].3, vec![4, 5, 6]);
+    assert_eq!(owner.owned_frame_count(), 0);
+    assert_eq!(owner.owned_byte_count(), 0);
+}
+
+#[test]
+fn unrelated_registry_watermark_rejects_forward_before_effect() {
+    let config = packet_flow_config();
+    let owner_config =
+        WindowsUserspaceByteOwnerConfig::from_packet_flow(&config).expect("valid owner config");
+    let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
+    let (state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
+
+    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_350, key };
+    let backend_ready = reduce(&state, &backend_event);
+    owner
+        .reconcile(&backend_event, &state, &backend_ready)
+        .expect("backend-ready owner reconciliation");
+    let payload_event = WindowsPacketFlowEvent::Payload {
+        now_ms: 1_400,
+        key,
+        direction: WindowsPacketFlowDirection::ClientToBackend,
+        sequence: 1,
+        bytes: 3,
+    };
+    let payload = reduce(&backend_ready.state, &payload_event);
+    owner
+        .stage_payload(
+            &payload_event,
+            &backend_ready.state,
+            &payload,
+            vec![7, 8, 9],
+        )
+        .expect("payload ownership");
+    let forward = payload
+        .commands
+        .iter()
+        .find(|command| matches!(command, WindowsPacketFlowCommand::Forward { .. }))
+        .expect("ready payload must include a forward command");
+
+    let policy_tables = bundled_policy_v1();
+    let (_, unrelated_fixture) = fixture_pair(8, 42);
+    let unrelated_admission = admission(&unrelated_fixture, &policy_tables);
+    let unrelated_event = flow_open_event(unrelated_admission, 1_500, &policy_tables);
+    let advanced = reduce(&payload.state, &unrelated_event);
+    assert_eq!(advanced.state.updated_at_ms, 1_500);
+
+    let mut effects = RecordingByteEffect::default();
+    let error = owner
+        .execute_forward(forward, &advanced.state, &config, &mut effects, 1_450)
+        .expect_err("global registry watermark must reject a stale acknowledgement");
+    assert_eq!(
+        error.code,
+        WindowsUserspaceByteOwnerErrorCode::ForwardAcknowledgementRejected
+    );
+    assert!(effects.deliveries.is_empty());
+    assert_eq!(owner.owned_frame_count(), 1);
+    assert_eq!(owner.owned_byte_count(), 3);
+
+    let acknowledgement = owner
+        .execute_forward(forward, &advanced.state, &config, &mut effects, 1_550)
+        .expect("current registry watermark permits exact delivery");
+    let committed = reduce(&advanced.state, &acknowledgement);
+    assert_eq!(
+        committed
+            .state
+            .flows
+            .get(&key)
+            .expect("flow remains retained")
+            .queued_bytes(WindowsPacketFlowDirection::ClientToBackend),
+        0
+    );
+    assert_eq!(effects.deliveries.len(), 1);
     assert_eq!(owner.owned_frame_count(), 0);
     assert_eq!(owner.owned_byte_count(), 0);
 }
@@ -677,11 +769,24 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
     assert_eq!(forwards.len(), 2);
 
     let mut effects = FailSecondDeliveryOnce::default();
-    owner
-        .execute_forward(forwards[0], &mut effects, 1_410)
+    let first_acknowledgement = owner
+        .execute_forward(
+            forwards[0],
+            &ready.state,
+            &packet_flow_config(),
+            &mut effects,
+            1_410,
+        )
         .expect("first delivery");
+    let first_committed = reduce(&ready.state, &first_acknowledgement);
     let failure = owner
-        .execute_forward(forwards[1], &mut effects, 1_420)
+        .execute_forward(
+            forwards[1],
+            &first_committed.state,
+            &packet_flow_config(),
+            &mut effects,
+            1_420,
+        )
         .expect_err("second delivery should fail once");
     assert_eq!(
         failure.code,
@@ -692,7 +797,13 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
     assert_eq!(effects.delivered_sequences, vec![1]);
 
     let stale = owner
-        .execute_forward(forwards[0], &mut effects, 1_425)
+        .execute_forward(
+            forwards[0],
+            &first_committed.state,
+            &packet_flow_config(),
+            &mut effects,
+            1_425,
+        )
         .expect_err("completed prefix must not replay");
     assert_eq!(
         stale.code,
@@ -700,7 +811,13 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
     );
     assert_eq!(effects.delivered_sequences, vec![1]);
     owner
-        .execute_forward(forwards[1], &mut effects, 1_430)
+        .execute_forward(
+            forwards[1],
+            &first_committed.state,
+            &packet_flow_config(),
+            &mut effects,
+            1_430,
+        )
         .expect("retained suffix retry");
     assert_eq!(effects.delivered_sequences, vec![1, 2]);
     assert_eq!(owner.owned_frame_count(), 0);

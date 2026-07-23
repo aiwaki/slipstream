@@ -534,7 +534,8 @@ therefore stays phased and closed to production traffic:
    directional queues survive delayed backend readiness but cannot execute
    until `BackendReady` authorizes the client queue one-to-one; failed injected
    effects retain only the uncommitted suffix, successful effects produce exact
-   `Forwarded` events, ordinary
+   `Forwarded` events only after preflighting them against the current full
+   registry and its global monotonic watermark, ordinary
    terminal cleanup is exact-flow scoped, and explicit generation retirement
    is high-watermark bounded. Both cleanup paths require exact predecessor
    equality and therefore reject same-timestamp stale transitions. The
