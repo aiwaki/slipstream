@@ -20,6 +20,8 @@
     "exact_backend_open_command_set_required": true,
     "open_exact_reduction_required": true,
     "full_admission_preserved_across_payload_and_reconcile": true,
+    "payload_exact_reduction_required": true,
+    "active_reconcile_exact_reduction_required": true,
     "successful_packet_flow_payload_transition_required": true,
     "exact_packet_flow_predecessor_required": true,
     "payload_queue_delta_required": true,

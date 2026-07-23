@@ -229,6 +229,8 @@ fn byte_owner_contract_freezes_selected_stack_and_effect_boundaries() {
         "exact_backend_open_command_set_required",
         "open_exact_reduction_required",
         "full_admission_preserved_across_payload_and_reconcile",
+        "payload_exact_reduction_required",
+        "active_reconcile_exact_reduction_required",
         "successful_packet_flow_payload_transition_required",
         "exact_packet_flow_predecessor_required",
         "payload_queue_delta_required",
@@ -460,6 +462,7 @@ fn payload_and_reconcile_preserve_the_complete_bound_admission() {
             &payload_event,
             &backend_ready.state,
             &substituted_payload,
+            &packet_flow_config(),
             vec![7, 8, 9],
         )
         .expect_err("same-key admission cannot substitute during payload staging");
@@ -474,6 +477,7 @@ fn payload_and_reconcile_preserve_the_complete_bound_admission() {
             &payload_event,
             &backend_ready.state,
             &payload,
+            &packet_flow_config(),
             vec![7, 8, 9],
         )
         .expect("exact admission payload ownership");
@@ -531,8 +535,13 @@ fn language_neutral_vectors_keep_exact_bytes_until_effect_success() {
             bytes: vector.declared_bytes,
         };
         let transition = reduce(&state, &payload_event);
-        let first_stage =
-            owner.stage_payload(&payload_event, &state, &transition, vector.payload.clone());
+        let first_stage = owner.stage_payload(
+            &payload_event,
+            &state,
+            &transition,
+            &config,
+            vector.payload.clone(),
+        );
 
         let error = match vector.action.as_str() {
             "stage" => first_stage.err().map(|error| error.code),
@@ -544,6 +553,7 @@ fn language_neutral_vectors_keep_exact_bytes_until_effect_success() {
                         &payload_event,
                         &transition.state,
                         &duplicate,
+                        &config,
                         vector.payload.clone(),
                     )
                     .expect_err("duplicate payload must fail")
@@ -639,7 +649,13 @@ fn unrelated_idle_refresh_cannot_stage_payload_bytes() {
         bytes: 3,
     };
     let error = owner
-        .stage_payload(&payload_event, &state, &half_closed, vec![1, 2, 3])
+        .stage_payload(
+            &payload_event,
+            &state,
+            &half_closed,
+            &packet_flow_config(),
+            vec![1, 2, 3],
+        )
         .expect_err("idle refresh alone must not prove payload acceptance");
 
     assert_eq!(
@@ -698,7 +714,13 @@ fn terminal_reconciliation_removes_only_the_closed_flow() {
     };
     let payload_transition = reduce(&state, &payload_event);
     owner
-        .stage_payload(&payload_event, &state, &payload_transition, vec![1, 2, 3])
+        .stage_payload(
+            &payload_event,
+            &state,
+            &payload_transition,
+            &packet_flow_config(),
+            vec![1, 2, 3],
+        )
         .expect("payload ownership");
     let stale_cleanup = owner
         .reconcile(
@@ -761,6 +783,7 @@ fn stale_generation_retirement_cannot_hide_newer_owned_bytes() {
             &payload_event,
             &ready.state,
             &payload_transition,
+            &packet_flow_config(),
             vec![1, 2, 3],
         )
         .expect("payload ownership");
@@ -816,8 +839,9 @@ fn stale_generation_retirement_cannot_hide_newer_owned_bytes() {
 
 #[test]
 fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
-    let owner_config = WindowsUserspaceByteOwnerConfig::from_packet_flow(&packet_flow_config())
-        .expect("valid owner config");
+    let config = packet_flow_config();
+    let owner_config =
+        WindowsUserspaceByteOwnerConfig::from_packet_flow(&config).expect("valid owner config");
     let mut owner = WindowsUserspaceByteOwner::new(owner_config).expect("byte owner");
     let (state, key) = open_flow(&mut owner, WindowsPacketFlowRegistry::new(1_200), 7, 41);
     let payload_event = WindowsPacketFlowEvent::Payload {
@@ -839,28 +863,60 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         bytes: 3,
     };
     let mut forged_queued = queued.clone();
+    forged_queued
+        .state
+        .flows
+        .get_mut(&key)
+        .expect("forged queued flow")
+        .backend_ready = true;
     forged_queued.commands.push(early_forward.clone());
     let forged_error = owner
-        .stage_payload(&payload_event, &state, &forged_queued, vec![4, 5, 6])
-        .expect_err("opening payload transition cannot authorize forwarding");
+        .stage_payload(
+            &payload_event,
+            &state,
+            &forged_queued,
+            &config,
+            vec![4, 5, 6],
+        )
+        .expect_err("forged payload transition cannot authorize forwarding");
     assert_eq!(
         forged_error.code,
-        WindowsUserspaceByteOwnerErrorCode::TransitionDidNotAcceptPayload
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
     );
     assert_eq!(owner.owned_frame_count(), 0);
 
     owner
-        .stage_payload(&payload_event, &state, &queued, vec![4, 5, 6])
+        .stage_payload(&payload_event, &state, &queued, &config, vec![4, 5, 6])
         .expect("pre-backend payload ownership");
+    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key };
+    let mut forged_backend_ready = queued.clone();
+    forged_backend_ready.state.updated_at_ms = 1_400;
+    let forged_flow = forged_backend_ready
+        .state
+        .flows
+        .get_mut(&key)
+        .expect("forged backend-ready flow");
+    forged_flow.updated_at_ms = 1_400;
+    forged_flow.backend_ready = true;
+    forged_backend_ready.commands.push(early_forward.clone());
+    let forged_reconcile_error = owner
+        .reconcile(
+            &backend_event,
+            &queued.state,
+            &forged_backend_ready,
+            &config,
+        )
+        .expect_err("forged active transition cannot authorize retained bytes");
+    assert_eq!(
+        forged_reconcile_error.code,
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
+    );
+    assert_eq!(owner.owned_frame_count(), 1);
+    assert_eq!(owner.owned_byte_count(), 3);
+
     let mut effects = RecordingByteEffect::default();
     let early_error = owner
-        .execute_forward(
-            &early_forward,
-            &queued.state,
-            &packet_flow_config(),
-            &mut effects,
-            1_375,
-        )
+        .execute_forward(&early_forward, &queued.state, &config, &mut effects, 1_375)
         .expect_err("retained client payload cannot forward before backend readiness");
     assert_eq!(
         early_error.code,
@@ -870,7 +926,6 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
     assert_eq!(owner.owned_frame_count(), 1);
     assert_eq!(owner.owned_byte_count(), 3);
 
-    let backend_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key };
     let backend_ready = reduce(&queued.state, &backend_event);
     let mut missing_authorization = backend_ready.clone();
     missing_authorization
@@ -881,22 +936,17 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
             &backend_event,
             &queued.state,
             &missing_authorization,
-            &packet_flow_config(),
+            &config,
         )
         .expect_err("backend readiness must authorize the exact retained queue");
     assert_eq!(
         malformed_error.code,
-        WindowsUserspaceByteOwnerErrorCode::TransitionMismatch
+        WindowsUserspaceByteOwnerErrorCode::StaleTransition
     );
     assert_eq!(owner.owned_frame_count(), 1);
     assert_eq!(owner.owned_byte_count(), 3);
     owner
-        .reconcile(
-            &backend_event,
-            &queued.state,
-            &backend_ready,
-            &packet_flow_config(),
-        )
+        .reconcile(&backend_event, &queued.state, &backend_ready, &config)
         .expect("backend-ready owner reconciliation");
     let forward = backend_ready
         .commands
@@ -904,13 +954,7 @@ fn payload_owned_before_backend_ready_is_delivered_once_backend_opens() {
         .find(|command| matches!(command, WindowsPacketFlowCommand::Forward { .. }))
         .expect("backend readiness must release the retained payload");
     let acknowledgement = owner
-        .execute_forward(
-            forward,
-            &backend_ready.state,
-            &packet_flow_config(),
-            &mut effects,
-            1_450,
-        )
+        .execute_forward(forward, &backend_ready.state, &config, &mut effects, 1_450)
         .expect("retained payload delivery");
     assert!(matches!(
         acknowledgement,
@@ -957,6 +1001,7 @@ fn unrelated_registry_watermark_rejects_forward_before_effect() {
             &payload_event,
             &backend_ready.state,
             &payload,
+            &config,
             vec![7, 8, 9],
         )
         .expect("payload ownership");
@@ -1029,6 +1074,7 @@ fn final_forward_acknowledgement_releases_the_terminal_owner() {
             &payload_event,
             &backend_ready.state,
             &payload,
+            &config,
             vec![7, 8, 9],
         )
         .expect("payload ownership");
@@ -1097,7 +1143,13 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
     };
     let first = reduce(&state, &first_event);
     owner
-        .stage_payload(&first_event, &state, &first, vec![1, 2])
+        .stage_payload(
+            &first_event,
+            &state,
+            &first,
+            &packet_flow_config(),
+            vec![1, 2],
+        )
         .expect("first payload ownership");
     let second_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_360,
@@ -1108,7 +1160,13 @@ fn ordered_delivery_failure_retains_only_the_uncommitted_suffix() {
     };
     let second = reduce(&first.state, &second_event);
     owner
-        .stage_payload(&second_event, &first.state, &second, vec![3, 4])
+        .stage_payload(
+            &second_event,
+            &first.state,
+            &second,
+            &packet_flow_config(),
+            vec![3, 4],
+        )
         .expect("second payload ownership");
 
     let ready_event = WindowsPacketFlowEvent::BackendReady { now_ms: 1_400, key };
@@ -1235,7 +1293,13 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
     };
     let first = reduce(&state, &first_event);
     frame_owner
-        .stage_payload(&first_event, &state, &first, vec![1, 2])
+        .stage_payload(
+            &first_event,
+            &state,
+            &first,
+            &packet_flow_config(),
+            vec![1, 2],
+        )
         .expect("first frame fits stricter owner");
     let second_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_360,
@@ -1246,7 +1310,13 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
     };
     let second = reduce(&first.state, &second_event);
     let frame_error = frame_owner
-        .stage_payload(&second_event, &first.state, &second, vec![3, 4])
+        .stage_payload(
+            &second_event,
+            &first.state,
+            &second,
+            &packet_flow_config(),
+            vec![3, 4],
+        )
         .expect_err("owner frame limit must remain authoritative");
     assert_eq!(
         frame_error.code,
@@ -1302,7 +1372,13 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
     };
     let first = reduce(&state, &first_event);
     byte_owner
-        .stage_payload(&first_event, &state, &first, vec![5, 6])
+        .stage_payload(
+            &first_event,
+            &state,
+            &first,
+            &packet_flow_config(),
+            vec![5, 6],
+        )
         .expect("first bytes fit stricter owner");
     let second_event = WindowsPacketFlowEvent::Payload {
         now_ms: 1_360,
@@ -1313,7 +1389,13 @@ fn owner_limits_remain_authoritative_over_valid_packet_flow_transitions() {
     };
     let second = reduce(&first.state, &second_event);
     let byte_error = byte_owner
-        .stage_payload(&second_event, &first.state, &second, vec![7, 8])
+        .stage_payload(
+            &second_event,
+            &first.state,
+            &second,
+            &packet_flow_config(),
+            vec![7, 8],
+        )
         .expect_err("owner byte limit must remain authoritative");
     assert_eq!(
         byte_error.code,

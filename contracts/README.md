@@ -211,8 +211,10 @@ Slipstream routing decisions and bounded recovery primitives.
   transition. Opening requires the exact admission capability retained by the
   tuple binding and the complete reducer-issued backend-open command set, not
   merely a matching flow key. The complete opening transition must also equal
-  a fresh reduction from its supplied full predecessor. Every later active transition must preserve that
-  complete capability. The predecessor must equal the owner's last full
+  a fresh reduction from its supplied full predecessor. Every later payload or
+  active reconciliation transition must also equal a fresh reduction from its
+  supplied full predecessor and configuration while preserving that complete
+  capability. The predecessor must equal the owner's last full
   packet-flow snapshot and the resulting directional queue must grow by the
   exact declared length, so an unrelated idle refresh cannot stage bytes.
   Exact flow key, direction, sequence, and length are retained in fixed directional queues

@@ -528,8 +528,10 @@ therefore stays phased and closed to production traffic:
    destination or request cannot open the byte owner. Opening requires the
    complete reducer-issued backend command set and must exactly equal a fresh
    reduction from its supplied full predecessor. It does not instantiate
-   the selected stack. Userspace byte-owner v1 requires every later active
-   transition to preserve that complete admission capability and now
+   the selected stack. Userspace byte-owner v1 requires every later payload or
+   active reconciliation transition to equal a fresh reduction from its full
+   predecessor and configuration while preserving that complete admission
+   capability, and now
    retains actual payload by exact flow, direction, sequence, and length only
    when the caller supplies the exact last packet-flow predecessor and the
    resulting queue grows by the declared length. Every retained frame also

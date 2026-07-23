@@ -390,6 +390,7 @@ impl WindowsUserspaceByteOwner {
         event: &WindowsPacketFlowEvent,
         previous: &WindowsPacketFlowRegistry,
         transition: &WindowsPacketFlowTransition,
+        packet_flow_config: &WindowsPacketFlowConfig,
         payload: Vec<u8>,
     ) -> Result<(), WindowsUserspaceByteOwnerError> {
         let (now_ms, key, direction, sequence, declared_bytes) = match event {
@@ -548,6 +549,7 @@ impl WindowsUserspaceByteOwner {
                 "packet-flow transition changed the unrelated payload queue",
             ));
         }
+        Self::require_exact_transition(previous, event, transition, packet_flow_config)?;
 
         let flow = self
             .flows
@@ -802,6 +804,12 @@ impl WindowsUserspaceByteOwner {
                             "packet-flow transition queues do not match the owned bytes",
                         ));
                     }
+                    Self::require_exact_transition(
+                        previous,
+                        event,
+                        transition,
+                        packet_flow_config,
+                    )?;
                     let backend_became_ready = matches!(
                         event,
                         WindowsPacketFlowEvent::BackendReady { key: event_key, .. }
