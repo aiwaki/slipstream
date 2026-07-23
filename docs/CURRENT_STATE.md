@@ -546,10 +546,12 @@ owner removes only the exact route and the same socket completes a bounded
 baseline retry. Every acquired route and address reaches explicit verified
 cleanup before any result is accepted. This closes only the first IPv4 UDP
 subgate; PR #200 below subsequently closes TCP pre-existing-flow activation.
-Crash-safe capture removal is closed by PR #202. Explicit external-VPN
-coexistence remains a separate gate before any exact-route transaction or
-production composition. A partial DNS cache is never treated as complete
-attribution.
+Crash-safe capture removal is closed by PR #202. At that checkpoint,
+independent external-network-owner coexistence remained separate; PR #204 below
+closes one bounded VPN-like route-owner case. Broader physical, full-tunnel,
+split, and per-app vendor VPN qualification remains separate from the next
+packet-to-flow contract and from production composition. A partial DNS cache is
+never treated as complete attribution.
 External DNS, VPN, proxy, PAC, and unrelated PF state remain read-only.
 
 PR #200 is the independent IPv4 TCP pre-existing-flow gate. Its qualified code
@@ -580,8 +582,8 @@ stream as established. TCP pre-existing-flow activation is now closed. PR #202
 subsequently closed bounded crash-safe removal of capture ownership without
 inferring external-VPN coexistence from that result.
 
-The current crash-removal candidate keeps the baseline adapter, exact source,
-and non-default `/24` in the parent while an exact child process owns the
+PR #202's crash-removal gate keeps the baseline adapter, exact source, and
+non-default `/24` in the parent while an exact child process owns the
 capture adapter, source, and production-gated `/32`. An atomic marker is
 published only from the active probe. The parent independently observes the
 active capture identity, terminates only that retained child handle, and then
@@ -601,10 +603,11 @@ all required checks and packaged lifecycle in
 [run 29968586745](https://github.com/aiwaki/slipstream/actions/runs/29968586745),
 and dependency audit in
 [run 29968586782](https://github.com/aiwaki/slipstream/actions/runs/29968586782).
-Crash-safe capture removal is closed. External-VPN coexistence is the next
-independent native gate.
+Crash-safe capture removal is closed. At that merge boundary, independent
+external-network-owner coexistence was the next native gate; PR #204 below
+closes its bounded synthetic route-owner case.
 
-PR #204 narrows that next gate to independently owned route state. An exact
+PR #204 narrowed that gate to independently owned route state. An exact
 child process owns a uniquely named Wintun adapter,
 the synthetic VPN-like source `198.18.0.2/32`, and a non-default public `/24`.
 The parent owns a separate capture adapter and only the production-gated
