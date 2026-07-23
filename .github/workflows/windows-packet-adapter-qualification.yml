@@ -217,6 +217,24 @@ jobs:
             -TimeoutSeconds 180 `
             -NoCapture
 
+      - name: Qualify independent VPN-like route-owner coexistence
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CI: "1"
+        run: |
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_exact_route_windows `
+            -TestName native_wintun_independent_route_owner_is_preserved_during_capture `
+            -TimeoutSeconds 180 `
+            -NoCapture
+
       - name: Qualify no-payload IPv4 socket selection under exact route
         timeout-minutes: 3
         shell: pwsh

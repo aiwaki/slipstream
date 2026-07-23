@@ -476,8 +476,15 @@ therefore stays phased and closed to production traffic:
    that proof on native AMD64 and ARM64 plus required CI, packaged lifecycle,
    and audit. Exact merge commit `ebe9f9c70b378f688badf6ba35cd96dd200d0bb4`
    repeated every gate successfully, so abrupt capture-owner termination is
-   closed. Explicit external-VPN coexistence is next and is not inferred from
-   process-termination cleanup.
+   closed. The next candidate uses a separately spawned exact child as an
+   independent VPN-like network owner: it retains `198.18.0.2/32` and one
+   non-default public `/24` before, during, and after the parent's separate
+   exact capture route. The parent must prove the child and all of its network
+   resources remain unchanged through activation, recovery, and Slipstream
+   capture cleanup; only then may the child remove its own resources. Native
+   AMD64 and ARM64 evidence is pending. This deliberately qualifies one
+   independently owned route case, not every physical, full-tunnel, split, or
+   per-app vendor VPN.
    Never add a default route or change system DNS, proxy, PAC, or VPN settings.
 5. Only after that feasibility gate passes, add owned exact-route transactions,
    select a bounded userspace IPv4/IPv6 and TCP/UDP stack, and bridge its flows

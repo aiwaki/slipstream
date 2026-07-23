@@ -480,6 +480,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "SLIPSTREAM_WINDOWS_WINTUN_PREEXISTING_TCP_FLOW_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CHILD",
+        "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CI",
+        "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CHILD",
         "WintunGetAdapterLUID",
         "ConvertInterfaceLuidToIndex",
         "ConvertInterfaceIndexToLuid",
@@ -506,6 +508,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered",
         "native_wintun_child_termination_removes_active_capture_route",
         "native_wintun_crash_child_holds_active_capture_route",
+        "native_wintun_independent_route_owner_is_preserved_during_capture",
+        "native_wintun_independent_route_child_holds_baseline",
         "native_wintun_ipv6_packet_round_trip_is_captured_and_injected",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
@@ -555,6 +559,11 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "ExactCrashChild",
         "wait_for_crash_child_ready",
         "write_crash_ready_marker",
+        "IndependentRouteChild",
+        "wait_for_independent_route_child_ready",
+        "wait_for_independent_release",
+        "require_independent_route_resources_unchanged",
+        "require_independent_route_selected",
         "observe_windows_packet_route",
         "wait_for_adapter_absent_until",
         "wait_for_fixture_route_absent_until",
@@ -647,9 +656,9 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         .map(|offset| crash_parent_start + offset)
         .expect("crash-removal parent must end before its exact child");
     let crash_child_end = fixture[crash_child_start..]
-        .find("fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route()")
+        .find("fn native_wintun_independent_route_owner_is_preserved_during_capture()")
         .map(|offset| crash_child_start + offset)
-        .expect("crash-removal child must end before the socket-selection gate");
+        .expect("crash-removal child must end before the independent-owner gate");
     let crash_parent = &fixture[crash_parent_start..crash_child_start];
     let crash_child = &fixture[crash_child_start..crash_child_end];
 
@@ -714,6 +723,91 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         assert!(
             !crash_child.contains(forbidden),
             "crash child contains forbidden broad effect {forbidden}"
+        );
+    }
+
+    let independent_parent_start = crash_child_end;
+    let independent_child_start = fixture[independent_parent_start..]
+        .find("fn native_wintun_independent_route_child_holds_baseline()")
+        .map(|offset| independent_parent_start + offset)
+        .expect("independent-owner parent must end before its exact child");
+    let independent_child_end = fixture[independent_child_start..]
+        .find("fn native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route()")
+        .map(|offset| independent_child_start + offset)
+        .expect("independent-owner child must end before the socket-selection gate");
+    let independent_parent = &fixture[independent_parent_start..independent_child_start];
+    let independent_child = &fixture[independent_child_start..independent_child_end];
+
+    let independent_spawn = independent_parent
+        .find("Command::new(current_exe)")
+        .expect("independent-owner parent must spawn the exact integration-test executable");
+    let independent_ready = independent_parent
+        .find("wait_for_independent_route_child_ready")
+        .expect("independent-owner parent must wait for atomic child readiness");
+    let baseline_selection = independent_parent
+        .find("require_independent_route_selected(independent_interface)")
+        .expect("independent-owner parent must prove the child-owned baseline selection");
+    let capture_create = independent_parent
+        .find("let mut capture_adapter")
+        .expect("independent-owner parent must create a separate capture adapter");
+    let activation = independent_parent
+        .find("qualify_disposable_exact_host_route_with_active_probe")
+        .expect("independent-owner parent must use the production-gated exact route owner");
+    let active_child_check = independent_parent
+        .find("child.require_running(\"while the capture route is active\")")
+        .expect("active probe must prove the independent child is still running");
+    let capture_cleanup = independent_parent
+        .find("let capture_adapter_cleanup =")
+        .expect("independent-owner parent must prove its capture adapter absent");
+    let post_cleanup_child_check = independent_parent
+        .find("child.require_running(\"after Slipstream capture cleanup\")")
+        .expect("parent must prove the independent child survives capture cleanup");
+    let release = independent_parent
+        .find("child.release_and_wait(fixture_dir.release_path())")
+        .expect("parent must release the independent owner only after capture cleanup");
+    let independent_absence = independent_parent
+        .find("api.wait_for_adapter_absent_until(&independent_name")
+        .expect("parent must bound final child-owned adapter cleanup");
+    assert!(independent_spawn < independent_ready && independent_ready < baseline_selection);
+    assert!(baseline_selection < capture_create && capture_create < activation);
+    assert!(activation < active_child_check && active_child_check < capture_cleanup);
+    assert!(capture_cleanup < post_cleanup_child_check && post_cleanup_child_check < release);
+    assert!(release < independent_absence);
+
+    let child_route = independent_child
+        .find("OwnedFixtureBaselineRoute::create")
+        .expect("independent child must own its non-default baseline route");
+    let child_ready = independent_child
+        .find("write_independent_ready_marker")
+        .expect("independent child must publish only after owning its resources");
+    let child_wait = independent_child
+        .find("wait_for_independent_release")
+        .expect("independent child must remain live until explicit release");
+    let child_route_cleanup = independent_child
+        .find("route.remove_and_verify()")
+        .expect("independent child must remove its own route");
+    let child_address_cleanup = independent_child
+        .find("address.remove_and_verify()")
+        .expect("independent child must remove its own address");
+    let child_adapter_cleanup = independent_child
+        .rfind("api.require_adapter_absent(&adapter_name")
+        .expect("independent child must prove its adapter absent");
+    assert!(child_route < child_ready && child_ready < child_wait);
+    assert!(child_wait < child_route_cleanup && child_route_cleanup < child_address_cleanup);
+    assert!(child_address_cleanup < child_adapter_cleanup);
+    for forbidden in [
+        "0.0.0.0/0",
+        "::/0",
+        ".kill()",
+        "taskkill",
+        "pkill",
+        "TerminateProcess",
+        "Set-DnsClientServerAddress",
+        "ProxyEnable",
+    ] {
+        assert!(
+            !independent_parent.contains(forbidden) && !independent_child.contains(forbidden),
+            "independent route-owner gate contains forbidden broad effect {forbidden}"
         );
     }
 
@@ -782,6 +876,10 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     );
     assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CI: \"1\""));
     assert!(workflow.contains("-TimeoutSeconds 180"));
+    assert!(workflow.contains("Qualify independent VPN-like route-owner coexistence"));
+    assert!(workflow
+        .contains("-TestName native_wintun_independent_route_owner_is_preserved_during_capture"));
+    assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CI: \"1\""));
     assert!(workflow.contains("Qualify closed IPv6 packet capture and injection round trip"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected"));
