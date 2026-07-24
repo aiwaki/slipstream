@@ -1,7 +1,7 @@
 [package]
 name = "slipstream-userspace-stack-effect-evaluation"
 version = "0.1.0"
-description = "Effect-free Windows byte-owner to userspace-stack qualification for Slipstream"
+description = "Effect-free Windows userspace-stack composition qualification for Slipstream"
 edition = "2021"
 rust-version = "1.91"
 license = "MIT"

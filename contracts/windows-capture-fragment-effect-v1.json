@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_capture_fragment_effect",
+  "contract_version": 1,
+  "scope": "test_only_in_memory",
+  "depends_on": {
+    "packet_capture": {
+      "contract": "slipstream.windows_packet_capture",
+      "contract_version": 4,
+      "path": "contracts/windows-packet-capture-v4.json"
+    },
+    "fragment_input": {
+      "contract": "slipstream.windows_userspace_stack_ipv6_fragment_input",
+      "contract_version": 1,
+      "path": "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
+    }
+  },
+  "bounds": {
+    "max_capture_bound_assemblies": 2,
+    "max_reassembled_payload_bytes": 4096,
+    "max_fragments_per_assembly": 16,
+    "max_capture_evidence_lifetime_ms": 5000,
+    "fragment_reassembly_timeout_ms": 60000,
+    "effective_assembly_deadline": "earliest_capture_expiry_or_fragment_timeout"
+  },
+  "qualified_properties": {
+    "policy_classification_precedes_fragment_state": true,
+    "direct_passthrough_preserves_packet_and_state": true,
+    "exact_capture_generation_and_flow_bound": true,
+    "exact_source_destination_and_protocol_bound_before_allocation": true,
+    "first_fragment_ports_match_classification": true,
+    "completed_transport_ports_match_classification": true,
+    "in_order_normalization": true,
+    "out_of_order_normalization": true,
+    "rfc6946_atomic_fragment_state_bypass": true,
+    "same_identification_cross_flow_rejected_without_eviction": true,
+    "malformed_or_mismatched_input_does_not_allocate": true,
+    "normalization_error_releases_only_exact_assembly": true,
+    "timeout_releases_only_expired_assembly": true,
+    "assembly_never_outlives_capture_evidence": true,
+    "discord_route_remains_local_bypass": true
+  },
+  "invariants": {
+    "additive_contract_preserves_packet_capture_v4": true,
+    "additive_contract_preserves_fragment_input_v1": true,
+    "test_dependency_only": true,
+    "production_service_host_composition": false,
+    "native_packet_effect": false,
+    "native_socket_effect": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "default_route_mutation": false,
+    "discord_or_youtube_geo_exit": false
+  },
+  "remaining_gates": {
+    "native_connector_effects": "required",
+    "disposable_amd64_packet_flow": "required",
+    "disposable_arm64_packet_flow": "required",
+    "production_service_host_composition": "required"
+  }
+}

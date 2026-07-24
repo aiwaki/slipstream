@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-07-23 | Windows capture-bound IPv6 fragment input | Additive effect-free composition qualified; native effects closed | Classify through frozen capture v4 before touching fragment state. Bind every retained assembly to one exact capture generation, flow, tuple, transport, and policy result. Reject cross-flow identification collisions without eviction, require classified ports on the first fragment and completed packet, and expire state at the earlier capture-evidence or fragment deadline. With capture v4, the effective maximum is five seconds rather than the normalizer's standalone 60 seconds. Atomic fragments remain stateless even on collision or full capacity. | Add native connector effects as a separate disposable gate; do not instantiate this harness in the production host. |
 | 2026-07-23 | Windows byte-owner registry causality | Exact bounded full-registry cursor qualified | Retain the complete latest packet-flow registry after every successful owner operation. Exact unrelated transitions must pass through reconciliation and advance the same cursor. Reject later staging or cleanup from a target-only predecessor that omits that progress, even when the owned target flow itself is unchanged and the stale event freshly reduces. | Preserve the cursor boundary in the selected-stack effect adapter. |
 | 2026-07-23 | Windows byte-owner final acknowledgements | Exact effect path and terminal-history pruning qualified | Reject `Forwarded` through generic reconciliation while an owner exists. Commit it only through the injected effect path after exact reducer preflight. If the exact acknowledgement drains and terminalizes the flow but bounded terminal history immediately prunes it, run the effect and release the owner only when both directional queues are empty; never discard remaining bytes. | Keep this invariant in the selected-stack effect adapter. |
 | 2026-07-23 | Windows userspace payload ownership | Pure bounded byte owner implemented; selected-stack execution and production composition closed | Open one byte owner only from a current original-tuple binding, the exact packet-flow admission capability retained by that binding, and the complete reducer-issued backend-open and idle-deadline command set; another independently valid destination or request cannot substitute merely because its flow key matches. Every later payload or active reconciliation transition must equal a fresh reduction from its supplied full predecessor and configuration while preserving the complete bound admission. Actual payload enters fixed directional queues only when the supplied predecessor equals the owner's last full packet-flow state, the resulting directional queue grows by the declared length, and flow key, direction, sequence, and length agree. The accepting transition must also contain exactly the permitted forwarding command set, which the frame retains as authorization. This rejects unrelated idle refreshes, caller-constructed commands, and forged public transition state as acceptance evidence. Delayed client payload remains owned and non-forwardable until `BackendReady` supplies an exact one-to-one authorization for the retained queue. Before an injected atomic effect may borrow the front payload, the exact `Forwarded` acknowledgement must reduce successfully from the current full registry and global watermark. Effect failure retains the bytes unchanged; success removes them, advances the retained packet-flow state, and returns the preflighted event. This prevents an unrelated newer flow from making an already-applied effect non-monotonic afterward. Completed prefixes cannot replay and bounds derive from packet-flow configuration. Ordinary terminal cleanup removes only the exact inactive flow; generation retirement removes only flows covered by packet-flow's retired-generation high watermark. Before either path releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry, including unrelated-flow progress. The frozen selected-stack contract identity is cross-checked, but no `smoltcp`, Wintun, socket, route, DNS, proxy, PAC, VPN, process, service, or production-host effect is linked. | Add a test-only selected-stack effect adapter in the separate evaluation crate. Separately qualify IPv6 fragment input and native backends before production composition. |
@@ -178,7 +179,15 @@ original UDP source endpoint. RFC 6946 atomic fragments are reconstructed
 without allocating, expiring, or otherwise touching reassembly state, including
 when their identification collides with an incomplete assembly or both bounded
 slots are occupied. It accepts only a Fragment Header immediately after the
-IPv6 base header and remains outside Windows capture and production composition.
+IPv6 base header. The additive capture-fragment effect contract now classifies
+through frozen capture v4 before any fragment-state operation and binds each
+ordinary assembly to one exact capture generation, flow, source, destination,
+transport, ports, and policy result. Its deadline is the earlier of the
+standalone 60-second fragment timeout and the capture evidence expiry, so v4
+limits the composed state to five seconds. Direct passthrough and malformed or
+mismatched input allocate nothing; same-identification input from another flow
+cannot evict its owner. This remains a test-only composition outside native
+packet effects and production composition.
 
 Selection is not integration. Capture v4 now extends frozen capture v3 only
 after policy classification and retains the original client source address and
@@ -209,10 +218,9 @@ stays event-scoped: ordinary terminal evidence removes only
 its exact inactive flow, while explicit generation retirement is bounded by the
 packet-flow high watermark. Before either path releases bytes, its transition
 must exactly equal a fresh reduction from the supplied full registry, including
-unrelated-flow progress. The selected stack is still not
-instantiated in the Windows adapter. A test-only selected-stack effect adapter,
-native connector effects, Wintun composition, disposable AMD64/ARM64 packet
-flow, and production service-host composition remain closed.
+unrelated-flow progress. The selected stack is still not instantiated in the
+Windows adapter. Native connector effects, disposable AMD64/ARM64 packet flow,
+and production service-host composition remain closed.
 
 ## Windows Packet Capture Selection (2026-07-18)
 
