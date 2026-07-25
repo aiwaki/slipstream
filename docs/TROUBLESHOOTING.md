@@ -484,15 +484,26 @@ qualification boundary and is not inferred from full-tunnel behavior.
 Slipstream's on-demand Xbox DNS fallback is separate from that external state:
 after a local failure for one generic hostname, it can make one verified DoH
 query and try the returned address locally. It never changes the system resolver
-configuration.
+configuration. Recovery is ordered and bounded:
+
+1. Preserve the exact destination selected by the user's current system route.
+2. After evidence of a failed generic stream, try app-owned Xbox DNS locally.
+3. If that route also fails, continue through the local DoH/strategy ladder.
+4. Recheck the original system route after the ten-minute recovery window.
+
+None of these stages may select Geph. Discord, YouTube control, Googlevideo
+media, reviewed geo-exit services, direct routes, and traffic without usable SNI
+keep their own policies and never enter this generic sequence.
 
 For a partial page that becomes blank after a long wait, one orderly browser
 close is intentionally treated as ambiguous. The generic local relay records
 that the client closed first before stopping its now-undeliverable upstream read.
 Two client-first closes after a long downstream silence for the same generic host
 schedule that exact local DNS retry. This is process-local, expires automatically,
-and does not route the host through Geph. The retry can use the same IP if Xbox
-DNS and the normal resolver agree, so it is evidence-gated recovery rather than a
+and does not route the host through Geph. If Xbox DNS produces the same broken
+route or its stream later stalls, the host advances to the local strategy ladder
+instead of returning immediately to the first system route. The retry can still
+use the same IP when resolvers agree, so recovery is evidence-gated rather than a
 guaranteed alternate route.
 
 External proxy tools may also leave disabled `ExceptionsList` entries after

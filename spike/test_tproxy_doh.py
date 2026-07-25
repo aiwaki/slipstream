@@ -6903,6 +6903,51 @@ def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
         tproxy._strat_scores.clear()
 
 
+def test_unknown_recovery_stage_progresses_without_foreign_exit():
+    host = "crystalidea.example"
+
+    assert (
+        tproxy.unknown_recovery_stage(host, now=100.0)
+        == tproxy.UNKNOWN_RECOVERY_SYSTEM
+    )
+    assert tproxy._mark_xbox_dns_candidate(host, now=100.0)
+    assert (
+        tproxy.unknown_recovery_stage(host, now=100.1)
+        == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+    )
+    assert tproxy._mark_xbox_dns_exhausted(host, now=100.2)
+    assert (
+        tproxy.unknown_recovery_stage(host, now=100.3)
+        == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
+    )
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert tproxy.note_local_stream_stall(host, "split64+fake", now=100.4)
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.4)
+    assert (
+        tproxy.unknown_recovery_stage(host, now=100.4)
+        == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
+    )
+    assert not tproxy.is_geo_exit_route(host)
+    assert (
+        tproxy.unknown_recovery_stage("updates.discord.com", now=100.3)
+        == tproxy.UNKNOWN_RECOVERY_SYSTEM
+    )
+    assert (
+        tproxy.unknown_recovery_stage(
+            "rr2---sn-ntq7yner.googlevideo.com",
+            now=100.3,
+        )
+        == tproxy.UNKNOWN_RECOVERY_SYSTEM
+    )
+    assert (
+        tproxy.unknown_recovery_stage(
+            host,
+            now=100.2 + tproxy.XBOX_DNS_ATTEMPT_TTL + 0.1,
+        )
+        == tproxy.UNKNOWN_RECOVERY_SYSTEM
+    )
+
+
 def test_repeated_clean_eof_stalls_mark_only_exact_unknown_host_for_xbox_dns():
     host = "crystalidea.example"
     activity = tproxy._RelayActivity(
@@ -6977,6 +7022,11 @@ def test_clean_eof_stall_requires_repeat_before_clearing_xbox_dns_retry():
             now=130.2,
         )
         assert not tproxy._xbox_dns_candidate_active(host, now=130.2)
+        assert tproxy._xbox_dns_attempted_recently(host, now=130.2)
+        assert (
+            tproxy.unknown_recovery_stage(host, now=130.2)
+            == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
+        )
         assert not tproxy.is_geo_exit_route(host)
     finally:
         tproxy._strat_cache.clear()
@@ -7008,7 +7058,7 @@ def test_xbox_dns_fallback_uses_plain_tls_for_unknown_host(monkeypatch):
 
     assert result == ("203.0.113.42", ("reader", "writer", b"server-first"))
     assert calls == [("203.0.113.42", 443, "payments.example.com", "plain", False)]
-    assert tproxy._xbox_dns_attempted_recently("payments.example.com")
+    assert not tproxy._xbox_dns_attempted_recently("payments.example.com")
 
 
 def test_xbox_dns_fallback_excludes_discord_and_youtube(monkeypatch):
