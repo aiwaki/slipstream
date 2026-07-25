@@ -194,8 +194,9 @@ const DISCORD_HOSTS: &[&str] = &[
     "dis.gd",
 ];
 
-const YOUTUBE_VIDEO_HOSTS: &[&str] = &[
-    "googlevideo.com",
+const YOUTUBE_MEDIA_HOSTS: &[&str] = &["googlevideo.com"];
+
+const YOUTUBE_CONTROL_HOSTS: &[&str] = &[
     "youtube.com",
     "youtu.be",
     "ytimg.com",
@@ -284,7 +285,13 @@ pub fn bundled_policy_v1() -> RoutingPolicyTables {
                 StrategySet::FakeOnly,
             ),
             static_route(
-                YOUTUBE_VIDEO_HOSTS,
+                YOUTUBE_MEDIA_HOSTS,
+                RouteClass::DirectPassthrough,
+                ServiceGroup::YoutubeVideo,
+                StrategySet::Direct,
+            ),
+            static_route(
+                YOUTUBE_CONTROL_HOSTS,
                 RouteClass::LocalBypass,
                 ServiceGroup::YoutubeVideo,
                 StrategySet::FakeOnly,

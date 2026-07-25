@@ -8,14 +8,13 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-23, through merged
-[PR #212](https://github.com/aiwaki/slipstream/pull/212) at main commit
-`a17f131dea8622e89c07ffd04ad513ed66337a45`. All required checks,
-Windows adapter contracts, selected-stack evaluations, and packaged lifecycle
-passed in
-[run 30033993893](https://github.com/aiwaki/slipstream/actions/runs/30033993893),
+Last evidence audit: 2026-07-25, through merged
+[PR #213](https://github.com/aiwaki/slipstream/pull/213) at main commit
+`9d49960f4c0f90a5714e08a17495147102d1e38c`. All required checks, the
+Windows adapter contract, and packaged lifecycle passed in
+[run 30057831487](https://github.com/aiwaki/slipstream/actions/runs/30057831487),
 and dependency plus vendored-Geph audits passed in
-[run 30033988993](https://github.com/aiwaki/slipstream/actions/runs/30033988993).
+[run 30057831480](https://github.com/aiwaki/slipstream/actions/runs/30057831480).
 Live PR and `main` state still take precedence over this recorded evidence
 boundary.
 
@@ -41,7 +40,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Disposable qualification complete; one scheduled workstation smoke remains | Private-anchor lifecycle, owned PF tokens, exact process identity, protected secrets, and failure-atomic install/uninstall are implemented. PRs #174-#180 cover app removal, exact-system passthrough, baseline qualification, loopback leasing, failure-atomic lifecycle, probe-free startup status, killable console-user DNS helpers, and one total preflight budget. PR #181 corrected every packaging and qualification path to use the immutable `geph-vendor-0.3.0-r1` recorded in `vendor/geph/SOURCE.json`; the exact merge commit then passed the disposable packaged lifecycle. The older `140598b` download remains disqualified because it contains the superseded Geph binary. M0 now waits only for one short, user-scheduled workstation smoke with preflight and rollback prepared in advance. |
+| M0 - Safe Base | Workstation smoke executed; YouTube media regression under qualification | The exact PR #213 artifact installed transactionally, became active without Geph, preserved the user's DNS and Telegram proxy, and kept ChatGPT plus Discord API/CDN/updater and YouTube web reachable. Actual YouTube media then failed repeatably inside the fake-only Googlevideo path. The prepared one-shot uninstall removed the launchd job, listener, status, PF anchor/token, and owned processes cleanly. The current branch splits YouTube control to local fake-only and Googlevideo media to direct passthrough, adds shared contracts and packaged classification gates, and must pass exact-artifact media smoke before the app remains installed. |
 | M1 - Autonomous Routing V1 | Partial | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube local bypass and falls back only to the exact pre-PF system destination, which may represent ordinary direct access, user DNS selection, a user VPN, or their combination. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |

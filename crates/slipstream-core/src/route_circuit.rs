@@ -113,8 +113,16 @@ fn validate_config(config: &CircuitConfig) -> Result<(), String> {
 }
 
 fn protected_route_mismatch(key: &RouteCircuitKey) -> bool {
-    matches!(key.service_group.as_str(), "discord" | "youtube_video")
-        && (key.route_class != "local_bypass" || key.backend_id == "geph")
+    match key.service_group.as_str() {
+        "discord" => key.route_class != "local_bypass" || key.backend_id == "geph",
+        "youtube_video" => {
+            !matches!(
+                key.route_class.as_str(),
+                "local_bypass" | "direct_passthrough"
+            ) || key.backend_id == "geph"
+        }
+        _ => false,
+    }
 }
 
 fn store_state(

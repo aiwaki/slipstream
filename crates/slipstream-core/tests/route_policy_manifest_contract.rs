@@ -169,7 +169,7 @@ fn normalized_manifest_builds_the_same_first_match_tables() {
     let manifest = parse_route_policy_manifest(&contract["base_manifest"]).unwrap();
     let tables = manifest.routing_tables();
 
-    assert_eq!(tables.static_routes.len(), 4);
+    assert_eq!(tables.static_routes.len(), 5);
     assert_eq!(tables.geo_exit_routes.len(), 1);
     assert_eq!(tables.geo_exit_routes[0].domains, ["chatgpt.com"]);
 }

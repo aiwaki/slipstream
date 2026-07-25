@@ -151,12 +151,9 @@ pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp from any to any 
 pass out quick on lo0 inet proto tcp from any to any port 443 no state
 pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp from any to 127.0.0.1 port {port}
 """
-# NOTE: QUIC (UDP/443) is intentionally NOT blocked. YouTube/googlevideo video runs
-# over QUIC/HTTP3, and QUIC to those hosts WORKS on this TSPU (verified 2026-07-07:
-# Version-Negotiation replies in ~0.04s). The old QUIC block (Codex #11-#15) forced
-# the browser onto TCP, which IS DPI-dropped for googlevideo -> video died. Leaving
-# QUIC alone restores native HTTP3 playback. Slipstream therefore owns no UDP/443
-# block table at all.
+# QUIC (UDP/443) is intentionally not blocked. Slipstream does not own a global
+# UDP/443 policy; browsers may use HTTP/3 while TCP media delivery follows the
+# same direct-passthrough route classified for googlevideo hosts.
 
 _pf_applied = False
 _pf_fd = None
@@ -285,11 +282,10 @@ DISCORD_HOSTS = (
     "discordmerch.com", "discordpartygames.com", "discordsays.com",
     "discordsez.com", "discordstatus.com", "dis.gd",
 )
-GOOGLE_VIDEO = (
-    "googlevideo.com", "youtube.com", "youtu.be", "ytimg.com", "ggpht.com",
-    "gvt1.com", "gvt2.com",
+YOUTUBE_MEDIA_HOSTS = ("googlevideo.com",)
+YOUTUBE_CONTROL_HOSTS = (
+    "youtube.com", "youtu.be", "ytimg.com", "ggpht.com", "gvt1.com", "gvt2.com",
 )
-LOCAL_BYPASS_HOSTS = DISCORD_HOSTS + GOOGLE_VIDEO
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
 GOOGLE_DIRECT_FIRST_HOSTS = ("google.com",)
 SPOTIFY_DIRECT_FIRST_HOSTS = ("spotify.com", "spotifycdn.com", "scdn.co")
@@ -346,7 +342,13 @@ ROUTE_POLICY_TABLE = (
         "strategy_set": STRATEGY_FAKE_ONLY,
     },
     {
-        "domains": GOOGLE_VIDEO,
+        "domains": YOUTUBE_MEDIA_HOSTS,
+        "route_class": ROUTE_DIRECT,
+        "service_group": SERVICE_YOUTUBE,
+        "strategy_set": STRATEGY_DIRECT,
+    },
+    {
+        "domains": YOUTUBE_CONTROL_HOSTS,
         "route_class": ROUTE_LOCAL_BYPASS,
         "service_group": SERVICE_YOUTUBE,
         "strategy_set": STRATEGY_FAKE_ONLY,
@@ -493,7 +495,7 @@ def is_discord_host(host):
 
 
 def is_google_video_host(host):
-    return _host_matches(host, GOOGLE_VIDEO)
+    return _host_matches(host, YOUTUBE_MEDIA_HOSTS)
 
 
 def bundled_route_policy_manifest():
@@ -1664,11 +1666,25 @@ def route_policy_status_snapshot():
     for policy in manifest["static_routes"]:
         route_class = policy["route_class"]
         domains[route_class] = domains.get(route_class, 0) + len(policy["domains"])
-        groups[policy["service_group"]] = {
+        group = policy["service_group"]
+        summary = {
             "route_class": route_class,
             "strategy_set": policy["strategy_set"],
             "domains": len(policy["domains"]),
         }
+        existing = groups.get(group)
+        if existing is None:
+            groups[group] = summary
+            continue
+        routes = existing.setdefault("routes", [{
+            "route_class": existing["route_class"],
+            "strategy_set": existing["strategy_set"],
+            "domains": existing["domains"],
+        }])
+        routes.append(summary)
+        existing["route_class"] = "mixed"
+        existing["strategy_set"] = "mixed"
+        existing["domains"] += summary["domains"]
     for policy in manifest["geo_exit_routes"]:
         domains[ROUTE_GEO_EXIT] = domains.get(ROUTE_GEO_EXIT, 0) + len(policy["domains"])
         groups[policy["service_group"]] = {
@@ -3242,10 +3258,10 @@ CANARY_SPECS = (
     {
         "name": "youtube_video",
         "group": SERVICE_YOUTUBE,
+        "route_class": ROUTE_DIRECT,
         "host": "",
         "observed_domains": ("googlevideo.com",),
         "fallback_host": "redirector.googlevideo.com",
-        "transport_probe": "quic_version_negotiation",
     },
     {"name": "openai_core", "group": SERVICE_OPENAI, "host": "chatgpt.com"},
     {"name": "anthropic_core", "group": SERVICE_ANTHROPIC, "host": "claude.ai"},
@@ -3618,12 +3634,13 @@ def _canary_host(spec):
 
 
 async def _run_local_bypass_canary(spec):
+    expected_route = spec.get("route_class", ROUTE_LOCAL_BYPASS)
     host = _canary_host(spec)
     if not host:
-        canary_health_unknown(spec, ROUTE_LOCAL_BYPASS)
+        canary_health_unknown(spec, expected_route)
         return None
     policy = route_policy(host)
-    if policy["route_class"] != ROUTE_LOCAL_BYPASS:
+    if policy["route_class"] != expected_route:
         canary_health_event(
             spec,
             policy["route_class"],
@@ -3639,7 +3656,7 @@ async def _run_local_bypass_canary(spec):
     if not ips:
         canary_health_event(
             spec,
-            ROUTE_LOCAL_BYPASS,
+            expected_route,
             host,
             False,
             "dns failed",
@@ -3651,11 +3668,11 @@ async def _run_local_bypass_canary(spec):
         return False
     if spec.get("transport_probe") == "quic_version_negotiation":
         if await _run_quic_version_negotiation_probe(ips):
-            canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
+            canary_health_event(spec, expected_route, host, True)
             return True
         canary_health_event(
             spec,
-            ROUTE_LOCAL_BYPASS,
+            expected_route,
             host,
             False,
             "quic probe failed",
@@ -3670,7 +3687,7 @@ async def _run_local_bypass_canary(spec):
     min_payload_bytes = _local_payload_min_bytes(spec)
     for strat in strategy_order(host):
         strat_ok = False
-        if not strat.get("fake"):
+        if expected_route == ROUTE_LOCAL_BYPASS and not strat.get("fake"):
             continue
         for ip in ips[:ip_attempt_limit(host)]:
             # Do not preflight with build_fake_clienthello(): its TLS 1.2
@@ -3688,7 +3705,7 @@ async def _run_local_bypass_canary(spec):
             _record_strategy_result(host, strat["name"], True)
             if _strat_cache.get(host) != strat["name"]:
                 remember_strategy(host, strat["name"])
-            canary_health_event(spec, ROUTE_LOCAL_BYPASS, host, True)
+            canary_health_event(spec, expected_route, host, True)
             return True
         if not strat_ok:
             _record_strategy_result(host, strat["name"], False)
@@ -3697,7 +3714,7 @@ async def _run_local_bypass_canary(spec):
         reason = "payload throughput below threshold" if payload_short else "payload probe failed"
         canary_health_event(
             spec,
-            ROUTE_LOCAL_BYPASS,
+            expected_route,
             host,
             False,
             reason,
@@ -3712,7 +3729,7 @@ async def _run_local_bypass_canary(spec):
         return False
     canary_health_event(
         spec,
-        ROUTE_LOCAL_BYPASS,
+        expected_route,
         host,
         False,
         "strategy probe failed",
@@ -5597,7 +5614,7 @@ STRAT_BY_NAME = {s["name"]: s for s in STRATEGIES}
 _STRAT_PATH = "/var/run/slipstream-strat.json"
 STRAT_CACHE_MAX = 2048
 STRAT_CACHE_VERSION = 4             # bump on strategy-logic changes -> discard stale
-                                    # v4: Discord uses decoy fake; video uses poison fake
+                                    # v4: protected fake-only routes ignore stale non-fake winners
 _strat_cache = OrderedDict()       # host -> winning strategy name
 STRAT_SCORE_MAX_HOSTS = 2048
 STRAT_SCORE_Z = 1.0                # light Wilson lower bound; avoids overreacting
@@ -5740,14 +5757,10 @@ def _rank_strategy_names(host, names, now=None):
 
 
 DISCORD_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
-# YouTube/googlevideo video edges are hard-blocked by SNI like Discord. The TLS probe
-# can PASS on a non-fake split (record-splitting alone completes the handshake to the
-# CDN), so the adaptive cache happily pins these hosts to "split64" — yet real video
-# traffic still stalls (infinite load) because only the fake decoy hides the SNI from
-# the TSPU. So force fake-ONLY here and ignore any stale non-fake cache winner. Matches
-# Windows zapret "general (ALT)", which always fakes google/youtube instead of probing.
-# Session edges rotate (rrN---sn-XXXX.googlevideo.com, *.c.youtube.com) so match by suffix.
-GOOGLE_VIDEO_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
+# YouTube control and static hosts still need the protected local fake-only
+# ladder. Googlevideo media is classified separately as direct passthrough and
+# returns before this branch.
+YOUTUBE_CONTROL_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # Default order is FAKE-FIRST for every host: the TSPU throttles many services by
 # SNI (Discord, Anthropic, Shopify stores, ...) even when the block is beaten, and
 # the TLS probe can't see the throttle — so try fake first everywhere (the decoy
@@ -5778,7 +5791,7 @@ def strategy_order(host):
         names = (
             DISCORD_STRATS
             if policy["service_group"] == SERVICE_DISCORD
-            else GOOGLE_VIDEO_STRATS
+            else YOUTUBE_CONTROL_STRATS
         )
         names = _rank_strategy_names(h, names)
         return [STRAT_BY_NAME[n] for n in names]
@@ -8623,6 +8636,7 @@ def main():
                     help=argparse.SUPPRESS)
     ap.add_argument("--status", action="store_true",
                     help="print daemon status JSON and exit (no root needed)")
+    ap.add_argument("--classify-host", default="", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-resolve", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-probe", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--baseline-host", default="", help=argparse.SUPPRESS)
@@ -8670,6 +8684,10 @@ def main():
             print(line)
         except Exception:
             print('{"state": "off"}')
+        return
+
+    if args.classify_host:
+        print(json.dumps(route_policy(args.classify_host), sort_keys=True))
         return
 
     if os.geteuid() != 0:

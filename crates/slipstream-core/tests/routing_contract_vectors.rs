@@ -160,8 +160,12 @@ fn protected_groups_have_no_geph_edge_in_shared_vectors() {
     for case in policy["vectors"].as_array().unwrap() {
         let expected = &case["expected"];
         if protected.contains(&expected["service_group"]) {
-            assert_eq!(expected["route_class"], "local_bypass");
-            assert_eq!(expected["strategy_set"], "fake_only");
+            assert!(
+                (expected["route_class"] == "local_bypass"
+                    && expected["strategy_set"] == "fake_only")
+                    || (expected["route_class"] == "direct_passthrough"
+                        && expected["strategy_set"] == "direct")
+            );
         }
     }
 

@@ -7,11 +7,32 @@ This page keeps operational checks short and current.
 Use local bypass for DPI/SNI interference:
 
 - Discord
-- YouTube/googlevideo
+- YouTube web and control hosts
 - other hosts listed as local-bypass policy
+
+YouTube media hosts under `googlevideo.com` use direct passthrough with an
+unmodified TLS first flight. They remain protected from Geph; this split avoids
+applying a DPI fake to media CDNs that already work over the user's system
+route.
 
 Use Geph only for services that need a foreign exit because the service rejects
 Russian IP addresses. Do not route Discord or YouTube through Geph as a fix.
+
+### YouTube page loads but video playback fails
+
+Check the effective packaged policy without starting or installing the daemon:
+
+```bash
+/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd \
+  --classify-host rr1---sn-test.googlevideo.com
+/Applications/Slipstream.app/Contents/Resources/slipstreamd/slipstreamd \
+  --classify-host www.youtube.com
+```
+
+The media host must report `direct_passthrough/direct`; the web host must report
+`local_bypass/fake_only`. Either host reporting `geo_exit/geph`, or a media host
+reporting `local_bypass/fake_only`, means the packaged daemon is stale or
+misqualified. Do not compensate by enabling Geph for YouTube.
 
 ## Basic Checks
 

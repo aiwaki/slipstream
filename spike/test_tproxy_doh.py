@@ -3535,9 +3535,12 @@ def test_route_policy_classifies_service_groups():
         "service_group": tproxy.SERVICE_DISCORD,
         "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
     }
-    assert tproxy.route_policy("rr2---sn-ntq7yner.googlevideo.com")["service_group"] == (
-        tproxy.SERVICE_YOUTUBE
-    )
+    assert tproxy.route_policy("rr2---sn-ntq7yner.googlevideo.com") == {
+        "host": "rr2---sn-ntq7yner.googlevideo.com",
+        "route_class": tproxy.ROUTE_DIRECT,
+        "service_group": tproxy.SERVICE_YOUTUBE,
+        "strategy_set": tproxy.STRATEGY_DIRECT,
+    }
     assert tproxy.route_policy("youtu.be")["service_group"] == tproxy.SERVICE_YOUTUBE
     assert tproxy.route_policy("yt3.ggpht.com")["service_group"] == tproxy.SERVICE_YOUTUBE
     assert tproxy.route_policy("billing.openai.com")["route_class"] == tproxy.ROUTE_GEO_EXIT
@@ -3634,6 +3637,9 @@ def test_direct_passthrough_hosts_use_plain_strategy_only():
         assert [s["name"] for s in tproxy.strategy_order("github.com")] == ["plain"]
         assert [s["name"] for s in tproxy.strategy_order("t.me")] == ["plain"]
         assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
+        assert [s["name"] for s in tproxy.strategy_order(
+            "rr2---sn-ntq7yner.googlevideo.com"
+        )] == ["plain"]
         assert [s["name"] for s in tproxy.strategy_order("www.google.com")][:2] == [
             "plain", "split64+fake",
         ]
@@ -3678,13 +3684,15 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
     assert tproxy.SERVICE_YOUTUBE not in geo_groups
 
     assert status["domains"][tproxy.ROUTE_DIRECT] == (
-        len(tproxy.TELEGRAM_HOSTS) + len(tproxy.GITHUB_HOSTS)
+        len(tproxy.TELEGRAM_HOSTS)
+        + len(tproxy.GITHUB_HOSTS)
+        + len(tproxy.YOUTUBE_MEDIA_HOSTS)
     )
     assert status["domains"][tproxy.ROUTE_DIRECT_FIRST] == (
         len(tproxy.DIRECT_FIRST_HOSTS)
     )
     assert status["domains"][tproxy.ROUTE_LOCAL_BYPASS] == (
-        len(tproxy.DISCORD_HOSTS) + len(tproxy.GOOGLE_VIDEO)
+        len(tproxy.DISCORD_HOSTS) + len(tproxy.YOUTUBE_CONTROL_HOSTS)
     )
     assert status["domains"][tproxy.ROUTE_GEO_EXIT] == len(tproxy.GEPH_HOSTS)
     assert status["groups"][tproxy.SERVICE_DISCORD] == {
@@ -3706,6 +3714,23 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
         "route_class": tproxy.ROUTE_DIRECT_FIRST,
         "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
         "domains": len(tproxy.SPOTIFY_DIRECT_FIRST_HOSTS),
+    }
+    assert status["groups"][tproxy.SERVICE_YOUTUBE] == {
+        "route_class": "mixed",
+        "strategy_set": "mixed",
+        "domains": len(tproxy.YOUTUBE_MEDIA_HOSTS) + len(tproxy.YOUTUBE_CONTROL_HOSTS),
+        "routes": [
+            {
+                "route_class": tproxy.ROUTE_DIRECT,
+                "strategy_set": tproxy.STRATEGY_DIRECT,
+                "domains": len(tproxy.YOUTUBE_MEDIA_HOSTS),
+            },
+            {
+                "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+                "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+                "domains": len(tproxy.YOUTUBE_CONTROL_HOSTS),
+            },
+        ],
     }
     assert status["groups"][tproxy.SERVICE_OPENAI] == {
         "route_class": tproxy.ROUTE_GEO_EXIT,
@@ -3737,6 +3762,24 @@ def test_route_policy_manifest_rejects_protected_group_geph_route():
 
     with pytest.raises(ValueError, match="discord.*local_bypass"):
         tproxy.validate_route_policy_manifest(manifest)
+
+
+def test_classify_host_cli_is_read_only_and_does_not_require_root(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [
+        "tproxy.py",
+        "--classify-host",
+        "RR1---SN-Test.GoogleVideo.Com.",
+    ])
+    monkeypatch.setattr(tproxy.os, "geteuid", lambda: 501)
+
+    tproxy.main()
+
+    assert json.loads(capsys.readouterr().out) == {
+        "host": "rr1---sn-test.googlevideo.com",
+        "route_class": tproxy.ROUTE_DIRECT,
+        "service_group": tproxy.SERVICE_YOUTUBE,
+        "strategy_set": tproxy.STRATEGY_DIRECT,
+    }
 
 
 def test_route_policy_manifest_requires_direct_first_for_google_and_spotify():
@@ -4616,7 +4659,7 @@ def test_ip_attempt_limits_follow_route_policy():
         tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT
     )
     assert tproxy.ip_attempt_limit("rr2---sn-ntq7yner.googlevideo.com") == (
-        tproxy.LOCAL_BYPASS_IP_ATTEMPT_LIMIT
+        tproxy.DEFAULT_IP_ATTEMPT_LIMIT
     )
     assert tproxy.ip_attempt_limit("chatgpt.com") == tproxy.DEFAULT_IP_ATTEMPT_LIMIT
     assert tproxy.ip_attempt_limit("example.net") == tproxy.DEFAULT_IP_ATTEMPT_LIMIT
@@ -4738,22 +4781,18 @@ def test_discord_api_canary_stays_local_bypass_and_fake_only():
     ]
 
 
-def test_youtube_redirector_canary_stays_local_bypass_and_fake_only():
+def test_youtube_redirector_canary_uses_direct_passthrough():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
     host = spec["fallback_host"]
 
     assert tproxy.route_policy(host) == {
         "host": "redirector.googlevideo.com",
-        "route_class": tproxy.ROUTE_LOCAL_BYPASS,
+        "route_class": tproxy.ROUTE_DIRECT,
         "service_group": tproxy.SERVICE_YOUTUBE,
-        "strategy_set": tproxy.STRATEGY_FAKE_ONLY,
+        "strategy_set": tproxy.STRATEGY_DIRECT,
     }
     assert not tproxy.is_geo_exit_route(host)
-    assert [s["name"] for s in tproxy.strategy_order(host)] == [
-        "split64+fake",
-        "split16+fake",
-        "fake5",
-    ]
+    assert [s["name"] for s in tproxy.strategy_order(host)] == ["plain"]
 
 
 def test_youtube_web_canary_stays_local_bypass_and_fake_only():
@@ -5375,6 +5414,44 @@ def test_local_bypass_canary_uses_modern_payload_probe_without_synthetic_preflig
         q.extend(original_window)
 
 
+def test_youtube_media_canary_probes_plain_tcp_passthrough(monkeypatch):
+    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
+    host = spec["fallback_host"]
+    original = dict(tproxy._route_health[tproxy.SERVICE_YOUTUBE])
+    original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE])
+    payload_calls = []
+
+    async def ips(_host, _fallback_ip):
+        return ["203.0.113.10"]
+
+    async def payload(ip, sni, strat, received_spec):
+        payload_calls.append((ip, sni, strat["name"], received_spec["name"]))
+        return tproxy.LOCAL_PAYLOAD_CANARY_MIN_BYTES
+
+    try:
+        tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE].clear()
+        tproxy._strat_cache.clear()
+        monkeypatch.setattr(tproxy, "resolve_connection_ips", ips)
+        monkeypatch.setattr(tproxy, "_run_local_payload_probe", payload)
+
+        assert asyncio.run(tproxy._run_local_bypass_canary(spec))
+
+        assert payload_calls == [
+            ("203.0.113.10", host, "plain", "youtube_video")
+        ]
+        assert tproxy._strat_cache[host] == "plain"
+        health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
+        assert health["state"] == tproxy.HEALTH_OK
+        assert health["last_route_class"] == tproxy.ROUTE_DIRECT
+        assert health["last_failure"] == ""
+    finally:
+        tproxy._strat_cache.clear()
+        tproxy._route_health[tproxy.SERVICE_YOUTUBE] = original
+        q = tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE]
+        q.clear()
+        q.extend(original_window)
+
+
 def test_local_bypass_canary_payload_failure_warns_before_degraded(monkeypatch):
     host = "updates.discord.com"
     original = dict(tproxy._route_health[tproxy.SERVICE_DISCORD])
@@ -5582,46 +5659,6 @@ def test_youtube_web_canary_failure_is_warning_only(monkeypatch):
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
         assert health["state"] != tproxy.HEALTH_DEGRADED
     finally:
-        tproxy._route_health[tproxy.SERVICE_YOUTUBE] = original
-        q = tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE]
-        q.clear()
-        q.extend(original_window)
-
-
-def test_youtube_canary_uses_quic_transport_probe(monkeypatch):
-    spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
-    original = dict(tproxy._route_health[tproxy.SERVICE_YOUTUBE])
-    original_window = deque(tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE])
-    tproxy._strat_cache.clear()
-    calls = []
-
-    async def fake_resolve(host, fallback_ip):
-        calls.append(("resolve", host, fallback_ip))
-        return ["203.0.113.10"]
-
-    async def fake_quic(ips):
-        calls.append(("quic", tuple(ips)))
-        return True
-
-    async def unexpected_dial_strategy(*args, **kwargs):
-        raise AssertionError("YouTube canary should not use the TCP strategy probe")
-
-    monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_resolve)
-    monkeypatch.setattr(tproxy, "_run_quic_version_negotiation_probe", fake_quic)
-    monkeypatch.setattr(tproxy, "dial_strategy", unexpected_dial_strategy)
-
-    try:
-        assert asyncio.run(tproxy._run_local_bypass_canary(spec)) is True
-
-        assert calls == [
-            ("resolve", "redirector.googlevideo.com", None),
-            ("quic", ("203.0.113.10",)),
-        ]
-        health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
-        assert health["state"] == tproxy.HEALTH_OK
-        assert health["last_host"] == "redirector.googlevideo.com"
-    finally:
-        tproxy._strat_cache.clear()
         tproxy._route_health[tproxy.SERVICE_YOUTUBE] = original
         q = tproxy._route_failure_windows[tproxy.SERVICE_YOUTUBE]
         q.clear()
@@ -6027,7 +6064,7 @@ def test_pf_rules_leave_quic_unblocked():
     assert "block return quick inet proto udp from any to any port 443" not in tproxy.PF_RULES
 
 
-def test_youtube_video_hosts_ignore_stale_non_fake_strategy_cache():
+def test_youtube_media_hosts_ignore_stale_strategy_cache_and_stay_plain():
     host = "rr2---sn-ntq7yner.googlevideo.com"
     tproxy._strat_cache.clear()
     tproxy._strat_cache[host] = "split64"
@@ -6035,7 +6072,7 @@ def test_youtube_video_hosts_ignore_stale_non_fake_strategy_cache():
     try:
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names == ["split64+fake", "split16+fake", "fake5"]
+        assert names == ["plain"]
     finally:
         tproxy._strat_cache.clear()
 

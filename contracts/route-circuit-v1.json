@@ -152,6 +152,16 @@
       "expected_states": []
     },
     {
+      "name": "youtube-media-direct-key-is-allowed",
+      "events": [
+        {"kind": "before_request", "key": {"service_group": "youtube_video", "route_class": "direct_passthrough", "backend_id": "direct"}, "now_ms": 0}
+      ],
+      "expected_decisions": [
+        {"kind": "allow", "reason": "closed", "phase": "closed"}
+      ],
+      "expected_states": []
+    },
+    {
       "name": "closed-success-resets-consecutive-failures",
       "events": [
         {"kind": "record_failure", "key": {"service_group": "openai", "route_class": "geo_exit", "backend_id": "geph"}, "now_ms": 0},

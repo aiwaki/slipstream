@@ -34,13 +34,13 @@
       }
     },
     {
-      "name": "youtube-video-stays-local",
+      "name": "youtube-media-is-direct-passthrough",
       "host": "rr2---sn-ntq7yner.googlevideo.com",
       "expected": {
         "host": "rr2---sn-ntq7yner.googlevideo.com",
-        "route_class": "local_bypass",
+        "route_class": "direct_passthrough",
         "service_group": "youtube_video",
-        "strategy_set": "fake_only"
+        "strategy_set": "direct"
       }
     },
     {

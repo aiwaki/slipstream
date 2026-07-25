@@ -60,14 +60,17 @@ fn russian_direct_route_precedes_geo_exit_table() {
 }
 
 #[test]
-fn bundled_protected_groups_have_only_local_policy_edges() {
+fn bundled_protected_groups_have_no_geph_policy_edges() {
     for policy in bundled_policy_v1()
         .static_routes
         .into_iter()
         .filter(|policy| policy.service_group.is_protected_local_bypass())
     {
-        assert_eq!(policy.route_class, RouteClass::LocalBypass);
-        assert_eq!(policy.strategy_set, StrategySet::FakeOnly);
+        assert!(matches!(
+            (policy.route_class, policy.strategy_set),
+            (RouteClass::LocalBypass, StrategySet::FakeOnly)
+                | (RouteClass::DirectPassthrough, StrategySet::Direct)
+        ));
     }
 }
 

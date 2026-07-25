@@ -377,13 +377,27 @@ fn parse_route_entry(
             ),
         ));
     }
-    if service_group.is_protected_local_bypass()
-        && (route_class != RouteClass::LocalBypass || strategy_set != StrategySet::FakeOnly)
-    {
+    let protected_route_allowed = match service_group {
+        ServiceGroup::Discord => {
+            route_class == RouteClass::LocalBypass && strategy_set == StrategySet::FakeOnly
+        }
+        ServiceGroup::YoutubeVideo => matches!(
+            (route_class, strategy_set),
+            (RouteClass::LocalBypass, StrategySet::FakeOnly)
+                | (RouteClass::DirectPassthrough, StrategySet::Direct)
+        ),
+        _ => true,
+    };
+    if !protected_route_allowed {
+        let allowed = if service_group == ServiceGroup::Discord {
+            "local_bypass/fake_only"
+        } else {
+            "local_bypass/fake_only or direct_passthrough/direct"
+        };
         return Err(RoutePolicyManifestError::new(
             RoutePolicyManifestErrorCode::ProtectedLocalBypass,
             path,
-            format!("{service_group} must stay local_bypass/fake_only"),
+            format!("{service_group} must stay {allowed}"),
         ));
     }
     if is_static && route_class == RouteClass::GeoExit {
@@ -720,6 +734,16 @@ fn validate_protected_routes(
                     "$.static_routes",
                     format!(
                         "protected direct-first domains missing or shadowed: {candidate}{protected_suffix}"
+                    ),
+                ));
+            }
+            if expected.route_class == RouteClass::DirectPassthrough {
+                return Err(RoutePolicyManifestError::new(
+                    RoutePolicyManifestErrorCode::ProtectedRouteMismatch,
+                    "$.static_routes",
+                    format!(
+                        "protected direct-passthrough domain missing or shadowed: {candidate}{protected_suffix} must stay direct_passthrough/direct as {}",
+                        expected.service_group
                     ),
                 ));
             }
