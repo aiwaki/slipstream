@@ -506,6 +506,11 @@ instead of returning immediately to the first system route. The retry can still
 use the same IP when resolvers agree, so recovery is evidence-gated rather than a
 guaranteed alternate route.
 
+A synthetic uncompressed HTTP probe can stall even when a browser-like
+compressed request completes. Do not classify that probe alone as a browser
+outage or evidence that the host needs geo-exit; capture the browser-specific
+transport result first.
+
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale
 exceptions in status/diagnostics, but still treats the system proxy as off.
