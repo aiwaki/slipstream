@@ -2040,7 +2040,10 @@ _geph_fail_log = {}           # (host, reason) -> last log monotonic
 XBOX_DNS_CANDIDATE_TTL = 10 * 60.0
 _xbox_dns_candidates = {}     # host -> monotonic expiry
 XBOX_DNS_ATTEMPT_TTL = 10 * 60.0
-_xbox_dns_attempts = {}       # host -> monotonic expiry after one direct lookup
+_xbox_dns_attempts = {}       # host -> monotonic expiry after Xbox DNS is exhausted
+UNKNOWN_RECOVERY_SYSTEM = "system"
+UNKNOWN_RECOVERY_XBOX_DNS = "xbox_dns"
+UNKNOWN_RECOVERY_LOCAL_LADDER = "local_ladder"
 XBOX_DNS_STATE_MAX = 4096
 _clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
 
@@ -6616,9 +6619,9 @@ def note_clean_eof_stream_stall(
         _record_strategy_result(h, strategy_name, False)
         if _strat_cache.get(h) == strategy_name:
             _strat_cache.pop(h, None)
-        _clear_xbox_dns_candidate(h)
+        _mark_xbox_dns_exhausted(h, now)
         return True
-    return note_local_stream_stall(h, strategy_name)
+    return note_local_stream_stall(h, strategy_name, now=now)
 
 
 def _mark_xbox_dns_candidate(host, now=None):
@@ -6673,13 +6676,34 @@ def _clear_xbox_dns_candidate(host):
     _xbox_dns_candidates.pop(normalize_host(host), None)
 
 
-def note_local_stream_stall(host, strategy_name):
+def unknown_recovery_stage(host, now=None):
+    """Return the bounded local recovery stage for one generic unknown host."""
+    h = normalize_host(host)
+    if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
+        return UNKNOWN_RECOVERY_SYSTEM
+    if _xbox_dns_attempted_recently(h, now):
+        return UNKNOWN_RECOVERY_LOCAL_LADDER
+    if _xbox_dns_candidate_active(h, now):
+        return UNKNOWN_RECOVERY_XBOX_DNS
+    return UNKNOWN_RECOVERY_SYSTEM
+
+
+def _mark_xbox_dns_exhausted(host, now=None):
+    """Advance one generic host from Xbox DNS to the local strategy ladder."""
+    if not _note_xbox_dns_attempt(host, now):
+        return False
+    _clear_xbox_dns_candidate(host)
+    return True
+
+
+def note_local_stream_stall(host, strategy_name, now=None):
     """Demote only the exact generic strategy after a partial stream stall.
 
     A partial TLS response is not proof that a service needs a foreign exit.
-    On the next connection, use an app-owned Xbox DNS lookup before the normal
-    local ladder. Protected local groups stay entirely outside this recovery
-    path, and no host is learned for Geph here.
+    The first failure selects an app-owned Xbox DNS lookup; a later strategy
+    failure remains on the local ladder after Xbox DNS has been exhausted.
+    Protected local groups stay entirely outside this recovery path, and no
+    host is learned for Geph here.
     """
     h = normalize_host(host)
     if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
@@ -6689,7 +6713,8 @@ def note_local_stream_stall(host, strategy_name):
     _record_strategy_result(h, strategy_name, False)
     if _strat_cache.get(h) == strategy_name:
         _strat_cache.pop(h, None)
-    _mark_xbox_dns_candidate(h)
+    if not _xbox_dns_attempted_recently(h, now):
+        _mark_xbox_dns_candidate(h, now)
     return True
 
 
@@ -7191,7 +7216,6 @@ async def _try_xbox_dns_local_connect(host, port, head, body):
     """Try the app-owned Xbox DNS answer locally, never through Geph."""
     if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
         return None
-    _note_xbox_dns_attempt(host)
     ips = await xbox_dns_resolve_async(host)
     plain = STRAT_BY_NAME["plain"]
     raced, _attempted = await _race_probe_addresses(
@@ -7540,11 +7564,16 @@ async def _handle_impl(reader, writer):
 
     policy = route_policy(host)
     route_class = policy["route_class"]
+    unknown_stage = (
+        unknown_recovery_stage(host)
+        if is_tls and host and route_class == ROUTE_UNKNOWN
+        else UNKNOWN_RECOVERY_SYSTEM
+    )
     unknown_recovery_ready = bool(
         is_tls
         and host
         and route_class == ROUTE_UNKNOWN
-        and _xbox_dns_candidate_active(host)
+        and unknown_stage != UNKNOWN_RECOVERY_SYSTEM
     )
     preserve_system_route = (
         not is_tls
@@ -7567,8 +7596,6 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
-    # de-poison: resolve the SNI over DoH/system DNS -> LIST of real IPs
-    # (fallback dst_ip). Some CDN edges are bad while neighbors work.
     if not runtime_route_circuit_allows(policy, BACKEND_LOCAL_ENGINE):
         if VERBOSE:
             print(
@@ -7577,18 +7604,20 @@ async def _handle_impl(reader, writer):
             )
         writer.close()
         return
-    real_ips = await resolve_connection_ips(host, dst_ip)
-    ip_limit = ip_attempt_limit(host)
 
     # Adaptive strategy ladder (auto-sweep / self-tuning). Try strategies in
     # order — cached winner for this host first — across up to a couple of real
     # IPs (some Cloudflare IPs are IP-blocked while others work). First success
     # is cached per host so a decayed strategy auto-rolls to the next that works.
     result = None
-    chosen = real_ips[0]
+    chosen = dst_ip
     chosen_name = None
     via_xbox_dns = False
-    if is_tls and host and _xbox_dns_candidate_active(host):
+    if (
+        is_tls
+        and host
+        and unknown_stage == UNKNOWN_RECOVERY_XBOX_DNS
+    ):
         xbox = await _try_xbox_dns_local_connect(host, dst_port, head, body)
         if xbox:
             chosen, result = xbox
@@ -7596,7 +7625,16 @@ async def _handle_impl(reader, writer):
             via_xbox_dns = True
             _record_strategy_result(host, chosen_name, True)
         else:
-            _clear_xbox_dns_candidate(host)
+            _mark_xbox_dns_exhausted(host)
+
+    # De-poison only after the dedicated Xbox-DNS stage has failed or was
+    # already exhausted: resolve the SNI over DoH/system DNS -> LIST of real
+    # IPs (fallback dst_ip). Some CDN edges are bad while neighbors work.
+    real_ips = [dst_ip]
+    ip_limit = ip_attempt_limit(host)
+    if result is None:
+        real_ips = await resolve_connection_ips(host, dst_ip)
+        chosen = real_ips[0]
 
     if result is None and not is_tls:
         raced, _attempted = await _race_probe_addresses(
@@ -7653,26 +7691,6 @@ async def _handle_impl(reader, writer):
             if len(_dead) > 4096:
                 _dead.clear()
 
-    # A full local ladder miss can still recover this intercepted connection
-    # through Xbox DNS, using its answer locally with plain TLS. This never
-    # opens Geph and does not modify macOS DNS.
-    if (
-        result is None
-        and is_tls
-        and host
-        and policy["route_class"] == ROUTE_UNKNOWN
-    ):
-        xbox = await _try_xbox_dns_local_connect(host, dst_port, head, body)
-        if xbox:
-            chosen, result = xbox
-            chosen_name = "plain"
-            via_xbox_dns = True
-            _mark_xbox_dns_candidate(host)
-            _record_strategy_result(host, chosen_name, True)
-            _dead.pop(host, None)
-            if _strat_cache.get(host) != chosen_name:
-                remember_strategy(host, chosen_name)
-
     if not result:
         runtime_route_circuit_record_result(
             policy,
@@ -7725,7 +7743,7 @@ async def _handle_impl(reader, writer):
                 _record_strategy_result(host, chosen_name, False)
                 if _strat_cache.get(host) == chosen_name:
                     _strat_cache.pop(host, None)
-                _clear_xbox_dns_candidate(host)
+                _mark_xbox_dns_exhausted(host)
             else:
                 note_local_stream_stall(host, chosen_name)
         elif _clean_eof_stream_stalled(activity, now=t0 + duration):
