@@ -431,6 +431,11 @@ jobs:
             -verify_arch arm64
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
+          daemon="$app/Contents/Resources/slipstreamd/slipstreamd"
+          test "$("$daemon" --classify-host rr1---sn-test.googlevideo.com)" = \
+            '{"host": "rr1---sn-test.googlevideo.com", "route_class": "direct_passthrough", "service_group": "youtube_video", "strategy_set": "direct"}'
+          test "$("$daemon" --classify-host www.youtube.com)" = \
+            '{"host": "www.youtube.com", "route_class": "local_bypass", "service_group": "youtube_video", "strategy_set": "fake_only"}'
 
       - name: Packaged lifecycle, tray-crash, Chrome, and Safari sentinel smoke
         env:

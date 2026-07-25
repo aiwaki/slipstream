@@ -55,7 +55,7 @@
       }
     },
     {
-      "name": "youtube-quic-is-local-bypass-policy-only",
+      "name": "youtube-media-quic-is-direct-passthrough-policy-only",
       "now_ms": 2200,
       "observation": {
         "capture_generation": 7,
@@ -71,10 +71,8 @@
         }
       },
       "expected": {
-        "disposition": "policy_classified",
-        "route_class": "local_bypass",
-        "service_group": "youtube_video",
-        "normalized_host": "rr1---sn-ab5szn7s.googlevideo.com"
+        "disposition": "direct_passthrough",
+        "reason": "direct_policy"
       }
     },
     {

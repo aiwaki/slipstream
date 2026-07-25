@@ -139,7 +139,10 @@ pub fn validate_windows_data_plane_request(
     let classified_policy = classify_route_policy(host, policy_tables);
     if classified_policy.service_group.is_protected_local_bypass()
         && (request.policy != classified_policy
-            || request.backend != WindowsDataPlaneBackend::LocalEngine)
+            || matches!(
+                request.backend,
+                WindowsDataPlaneBackend::SmartDns | WindowsDataPlaneBackend::Geph
+            ))
     {
         return Err(WindowsDataPlaneRequestErrorCode::ProtectedRouteMismatch);
     }
@@ -1310,6 +1313,24 @@ mod tests {
                 Err(WindowsDataPlaneRequestErrorCode::ProtectedRouteMismatch)
             );
         }
+    }
+
+    #[test]
+    fn youtube_media_accepts_exact_direct_policy_and_backend() {
+        let policy_tables = bundled_policy_v1();
+        let policy = classify_route_policy("video.googlevideo.com", &policy_tables);
+        let request = WindowsDataPlaneRequest {
+            request_id: "youtube-media-direct".to_owned(),
+            policy,
+            backend: WindowsDataPlaneBackend::Direct,
+            started_at_ms: 1,
+            first_payload_deadline_at_ms: 100,
+        };
+
+        assert_eq!(
+            validate_windows_data_plane_request(&request, &policy_tables),
+            Ok(())
+        );
     }
 
     #[test]

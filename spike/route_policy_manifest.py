@@ -57,6 +57,20 @@ ALLOWED_STRATEGY_BY_ROUTE = {
 }
 
 
+def _protected_route_allowed(group, route_class, strategy_set):
+    if group == SERVICE_DISCORD:
+        return route_class == ROUTE_LOCAL_BYPASS and strategy_set == STRATEGY_FAKE_ONLY
+    if group == SERVICE_YOUTUBE:
+        return (
+            route_class == ROUTE_LOCAL_BYPASS
+            and strategy_set == STRATEGY_FAKE_ONLY
+        ) or (
+            route_class == ROUTE_DIRECT
+            and strategy_set == STRATEGY_DIRECT
+        )
+    return True
+
+
 class RoutePolicyManifestError(ValueError):
     """Stable policy-manifest validation failure shared by contract vectors."""
 
@@ -229,13 +243,16 @@ def _normalize_entry(
             f"{name}.strategy_set does not match route_class",
         )
 
-    if group in PROTECTED_LOCAL_BYPASS_GROUPS and (
-        route_class != ROUTE_LOCAL_BYPASS or strategy_set != STRATEGY_FAKE_ONLY
-    ):
+    if not _protected_route_allowed(group, route_class, strategy_set):
+        allowed = (
+            "local_bypass/fake_only"
+            if group == SERVICE_DISCORD
+            else "local_bypass/fake_only or direct_passthrough/direct"
+        )
         _error(
             "protected_local_bypass",
             path,
-            f"{group} must stay local_bypass/fake_only",
+            f"{group} must stay {allowed}",
         )
     if static_table and route_class == ROUTE_GEO_EXIT:
         _error(
@@ -314,6 +331,14 @@ def _validate_protected_routes(normalized, bundled_static_routes):
                     "$.static_routes",
                     "protected direct-first domains missing or shadowed: "
                     f"{candidate}{protected_suffix}",
+                )
+            if expected["route_class"] == ROUTE_DIRECT:
+                _error(
+                    "protected_route_mismatch",
+                    "$.static_routes",
+                    "protected direct-passthrough domain missing or shadowed: "
+                    f"{candidate}{protected_suffix} must stay "
+                    f"direct_passthrough/direct as {expected['service_group']}",
                 )
             _error(
                 "protected_route_mismatch",

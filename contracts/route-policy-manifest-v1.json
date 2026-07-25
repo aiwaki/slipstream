@@ -51,8 +51,13 @@
         "strategy_set": "fake_only"
       },
       {
+        "domains": ["googlevideo.com"],
+        "route_class": "direct_passthrough",
+        "service_group": "youtube_video",
+        "strategy_set": "direct"
+      },
+      {
         "domains": [
-          "googlevideo.com",
           "youtube.com",
           "youtu.be",
           "ytimg.com",
@@ -126,8 +131,13 @@
         "strategy_set": "fake_only"
       },
       {
+        "domains": ["googlevideo.com"],
+        "route_class": "direct_passthrough",
+        "service_group": "youtube_video",
+        "strategy_set": "direct"
+      },
+      {
         "domains": [
-          "googlevideo.com",
           "youtube.com",
           "youtu.be",
           "ytimg.com",
@@ -290,6 +300,19 @@
         "error_code": "protected_local_bypass",
         "path": "$.static_routes[2]",
         "message_contains": "discord must stay local_bypass/fake_only"
+      }
+    },
+    {
+      "name": "youtube-media-cannot-be-rewritten-to-local-fake",
+      "mutations": [
+        {"op": "set", "path": ["static_routes", 3, "route_class"], "value": "local_bypass"},
+        {"op": "set", "path": ["static_routes", 3, "strategy_set"], "value": "fake_only"}
+      ],
+      "expected": {
+        "ok": false,
+        "error_code": "protected_route_mismatch",
+        "path": "$.static_routes",
+        "message_contains": "protected direct-passthrough domain missing or shadowed: googlevideo.com"
       }
     },
     {

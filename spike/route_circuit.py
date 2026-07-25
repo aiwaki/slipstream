@@ -77,9 +77,14 @@ def _validate_config(config):
 
 
 def _protected_route_mismatch(key):
-    return key.service_group in PROTECTED_LOCAL_BYPASS_GROUPS and (
-        key.route_class != "local_bypass" or key.backend_id == "geph"
-    )
+    if key.service_group == "discord":
+        return key.route_class != "local_bypass" or key.backend_id == "geph"
+    if key.service_group == "youtube_video":
+        return (
+            key.route_class not in ("local_bypass", "direct_passthrough")
+            or key.backend_id == "geph"
+        )
+    return False
 
 
 def _store_state(states, key, state):
