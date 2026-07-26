@@ -530,9 +530,11 @@ configuration. Recovery is ordered and bounded:
 3. If that route also fails, continue through the local DoH/strategy ladder.
 4. Recheck the original system route after the ten-minute recovery window.
 
-None of these stages may select Geph. Discord, YouTube control, Googlevideo
-media, reviewed geo-exit services, direct routes, and traffic without usable SNI
-keep their own policies and never enter this generic sequence.
+Ordinary connection failures in these stages may not select Geph. Discord,
+YouTube control, Googlevideo media, reviewed geo-exit services, direct routes,
+and traffic without usable SNI keep their own policies and never enter this
+generic sequence. A generic exact host can advance beyond the local ladder only
+under the separate partial-stream proof described below.
 
 For a partial page that becomes blank after a long wait, one orderly browser
 close is intentionally treated as ambiguous. The generic local relay records
@@ -545,10 +547,21 @@ instead of returning immediately to the first system route. The retry can still
 use the same IP when resolvers agree, so recovery is evidence-gated rather than a
 guaranteed alternate route.
 
-A synthetic uncompressed HTTP probe can stall even when a browser-like
-compressed request completes. Do not classify that probe alone as a browser
-outage or evidence that the host needs geo-exit; capture the browser-specific
-transport result first.
+A synthetic uncompressed HTTP probe can stall even when a compressed main
+document completes. Neither result alone proves browser health. A blank page
+can be caused by mandatory same-origin CSS or JavaScript stopping after an
+initial TLS record, so qualification must include those resources and a
+nonblank browser DOM.
+
+When the exact system destination, app-owned Xbox DNS route, and at least two
+distinct local strategies each deliver one TLS-record-sized prefix and then
+make no downstream progress, Slipstream can run one stronger confirmation for
+that exact unknown host. It requires a clear network-wide failure guard and a
+real HTTPS payload through the explicitly enabled, ownership-verified bundled
+Geph. Only then may the daemon remember a private, expiring exact-host
+`geo_exit` overlay. Static policy remains authoritative, and repeated Geph
+runtime misses discard the overlay. This path does not use or stop external
+Geph and does not change system DNS, proxy, PAC, VPN, or PF policy.
 
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale
@@ -668,18 +681,20 @@ generic desync ladder.
 
 ## Unknown-Host Recovery
 
-Slipstream does not turn an unknown host into `geo_exit` from a local failure
-plus a successful Geph probe. That result cannot prove that a foreign exit is
-needed.
+Slipstream does not turn an unknown host into `geo_exit` from an ordinary local
+failure plus a successful Geph probe. That result cannot prove that a foreign
+exit is needed.
 
 For a repeated exact-host local stall, Slipstream may make one local retry via a
-Slipstream-issued Xbox DNS query. It neither changes the system resolver nor routes
-the host through Geph. Existing legacy auto-Geph cache entries are cleared when
-the daemon starts.
+Slipstream-issued Xbox DNS query, then continue through distinct local
+strategies. It never changes the system resolver.
 
-If a browser-only page still stalls, collect diagnostics and the exact hostname.
-The appropriate next step is an evidence-backed direct, local-bypass, or
-geo-exit policy change, not automatic foreign-exit promotion.
+If every local stage delivers only one TLS-record-sized prefix and then goes
+idle, the daemon may confirm a real HTTPS payload through its verified owned
+Geph and learn only that exact unknown hostname temporarily. A network-wide
+failure, an unavailable or unowned backend, an explicit policy, or a different
+failure shape cannot authorize this overlay. This avoids per-site rules while
+keeping local bypass and direct routes out of Geph.
 
 Google and Spotify use `direct_first`: the next connection always starts with
 plain TLS, then can use bounded local desync only if direct did not work. They

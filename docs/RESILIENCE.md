@@ -8,8 +8,9 @@ daemon should recover from routine macOS and network changes automatically.
 Slipstream separates local DPI bypass from foreign-exit routing.
 
 Local DPI bypass is for services affected by DPI/SNI interference. Discord and
-YouTube/googlevideo are in this category. They stay on the normal route and use
-local desync/fake strategies.
+YouTube web/control traffic stay on the normal route and use local desync/fake
+strategies. Googlevideo media remains protected from Geph but uses reviewed
+direct passthrough because its former fake-only path broke real media payload.
 
 Geph is for application-layer geo-blocks, where the service rejects the user's
 Russian IP address. It is intentionally not the fallback for Discord or
@@ -38,7 +39,8 @@ YouTube/googlevideo.
 | Tray independence | packaged CI launches the exact tray as the original user, verifies fresh non-root HTTPS clients, clean-profile Chrome processes, and fresh UID/path-verified Safari processes with isolated WebDriver sessions, crashes and restarts only verified processes, and requires the same daemon PID, private PF anchor, sibling anchor, and live sentinel connection to survive; a protected main-only workflow adds account-backed owned-Geph payload and `KeepAlive` recovery | complete the first protected account-backed run and the physical transition soak |
 | Full-tunnel VPN | daemon becomes dormant on `utun*` default route | more visible tray detail |
 | Local bypass strategy decay | strategy ladder, per-host cache, runtime failure-triggered recheck, route-health HTTPS payload canaries, and Discord CDN throughput threshold | signed strategy updates, broader endpoint-safe local-bypass checks |
-| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss pauses the private PF anchor so clients do not retry through a dead local path; owned Geph runs as a user LaunchAgent and live restart is daemon-coordinated after the private anchor is paused and sessions drain; the protected qualification gate repeats a real Steam payload after tray crash and owned PID replacement | first protected run plus account-backed physical sleep/wake soak on a disposable Mac |
+| Generic partial-stream recovery | unknown hosts retain the exact system destination, then app-owned Xbox DNS and distinct local strategies; only a repeated one-TLS-record idle shape plus a clear network-wide guard and exact HTTPS payload through verified owned Geph can create a private expiring exact-host overlay | exact-artifact Safari/Chrome qualification and longer false-positive soak |
+| Geo-exit payload stalls | Steam Store canary verifies real HTTPS payload through Geph; backend loss cools only the failed owned Geph path while local bypass remains active; owned Geph runs as a user LaunchAgent and live restart is daemon-coordinated after new owned sessions are blocked and existing sessions drain; the protected qualification gate repeats a real Steam payload after tray crash and owned PID replacement | first protected run plus account-backed physical sleep/wake soak on a disposable Mac |
 | Recovery decisions | normalized `ConnectionOutcome` evidence and a pure reducer keep local re-sweep, learned-route reset, owned-Geph restart evidence, unknown-host recheck, and external warnings separate; the bounded aggregate action is exposed through `StatusV2` | retain language-neutral vectors while splitting runtime adapters |
 | Geph coexistence | owned `:9954` listener requires PID/executable/config/listener proof; external `:9909` is diagnostics-only | explicit user opt-in contract for any external backend |
 | Secret storage | account secret in Keychain; Geph directory `0700`; config/cache/ownership files `0600` and atomic | verify the same contract in the protected disposable account-backed gate |
