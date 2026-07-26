@@ -2015,6 +2015,11 @@ TLS_RECORD_CONTENT_TYPES = frozenset((20, 21, 22, 23, 24))
 CLEAN_EOF_STALL_WINDOW = 5 * 60.0
 CLEAN_EOF_STALL_STORM = 2     # repeated client-first clean EOFs before recovery
 CLEAN_EOF_STALL_STATE_MAX = 4096
+SERVER_FIRST_CLOSE_WINDOW = 5 * 60.0
+SERVER_FIRST_CLOSE_STORM = 2
+SERVER_FIRST_CLOSE_MAX_BYTES = 32 * 1024
+SERVER_FIRST_CLOSE_MAX_DURATION = 10.0
+SERVER_FIRST_CLOSE_STATE_MAX = 4096
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
 AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
@@ -2073,6 +2078,7 @@ UNKNOWN_RECOVERY_XBOX_DNS = "xbox_dns"
 UNKNOWN_RECOVERY_LOCAL_LADDER = "local_ladder"
 XBOX_DNS_STATE_MAX = 4096
 _clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
+_server_first_closes = {}     # (host, stage) -> deque[monotonic] early closes
 
 # Runtime local-bypass failures start a private exact-host re-sweep. The state is
 # deliberately process-local and aggregate-free: status must not become browsing
@@ -6814,6 +6820,7 @@ class _RelayActivity:
     client_eof: bool = False
     client_half_closed: bool = False
     client_read_failed: bool = False
+    server_read_failed: bool = False
     downstream_write_failed: bool = False
     client_ended_first: bool = False
     server_ended_first: bool = False
@@ -6982,6 +6989,108 @@ def note_clean_eof_stream_stall(
     return note_local_stream_stall(h, strategy_name, now=now)
 
 
+def _prune_server_first_closes(now):
+    cutoff = now - SERVER_FIRST_CLOSE_WINDOW
+    for key, events in list(_server_first_closes.items()):
+        while events and events[0] <= cutoff:
+            events.popleft()
+        if not events:
+            _server_first_closes.pop(key, None)
+    while len(_server_first_closes) > SERVER_FIRST_CLOSE_STATE_MAX:
+        _server_first_closes.pop(next(iter(_server_first_closes)))
+
+
+def _clear_server_first_closes(host, stage=None):
+    h = normalize_host(host)
+    if stage is not None:
+        _server_first_closes.pop((h, stage), None)
+        return
+    for key in tuple(_server_first_closes):
+        if key[0] == h:
+            _server_first_closes.pop(key, None)
+
+
+def _suspicious_server_first_close(activity, duration):
+    """Detect a bounded TLS stream cut before the client closes its side."""
+    if not (
+        activity.server_ended_first
+        and not activity.client_ended_first
+        and activity.server_end_at
+        and activity.downstream_bytes > 0
+        and not activity.downstream_write_failed
+        and activity.tls_framing_valid
+        and activity.tls_complete_records > 0
+    ):
+        return False
+    if (
+        duration > SERVER_FIRST_CLOSE_MAX_DURATION
+        or activity.downstream_bytes > SERVER_FIRST_CLOSE_MAX_BYTES
+    ):
+        return False
+    return True
+
+
+def note_server_first_route_close(
+    host,
+    stage,
+    activity,
+    *,
+    duration,
+    now=None,
+    confirmation_runner=None,
+):
+    """Advance one unknown host after repeated early server-side TLS closes.
+
+    A server can legitimately close a completed short response, so an orderly
+    EOF needs two bounded exact-host observations. A reset or an EOF inside a
+    TLS record is already explicit transport evidence and can advance the next
+    client retry immediately. The current connection is never replayed after
+    payload reached the client.
+    """
+    h = normalize_host(host)
+    if (
+        not h
+        or route_policy(h)["route_class"] != ROUTE_UNKNOWN
+        or not _valid_auto_geph_stage(stage)
+    ):
+        return False
+    if not _suspicious_server_first_close(activity, duration):
+        _clear_server_first_closes(h, stage)
+        return False
+
+    now = time.monotonic() if now is None else now
+    _prune_server_first_closes(now)
+    key = (h, stage)
+    events = _server_first_closes.setdefault(key, deque())
+    events.append(now)
+    _prune_server_first_closes(now)
+    strong_transport_failure = bool(
+        activity.server_read_failed or _incomplete_tls_record_visible(activity)
+    )
+    if not strong_transport_failure and len(events) < SERVER_FIRST_CLOSE_STORM:
+        return False
+    _server_first_closes.pop(key, None)
+
+    note_partial_tls_stall(
+        h,
+        stage,
+        now=now,
+        confirmation_runner=confirmation_runner,
+    )
+    if stage == AUTO_GEPH_STAGE_SYSTEM:
+        _mark_xbox_dns_candidate(h, now)
+        return True
+    if stage == AUTO_GEPH_STAGE_XBOX_DNS:
+        _mark_xbox_dns_exhausted(h, now)
+        return True
+
+    strategy_name = stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
+    _record_strategy_result(h, strategy_name, False)
+    if _strat_cache.get(h) == strategy_name:
+        _strat_cache.pop(h, None)
+    return True
+
+
 def _mark_xbox_dns_candidate(host, now=None):
     h = normalize_host(host)
     if not h or route_policy(h)["route_class"] != ROUTE_UNKNOWN:
@@ -7115,6 +7224,8 @@ async def splice(src, dst, activity=None):
             try:
                 data = await src.read(65536)
             except (ConnectionResetError, BrokenPipeError, OSError):
+                if activity is not None:
+                    activity.server_read_failed = True
                 break
             if not data:
                 break
@@ -7233,12 +7344,25 @@ async def relay_local_stream(
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
             pending = {task for task in tasks if not task.done()}
-        relay_activity.client_ended_first = (
-            client_task in done and server_task not in done
-        )
-        relay_activity.server_ended_first = (
-            server_task in done and client_task not in done
-        )
+        client_done = client_task in done
+        server_done = server_task in done
+        relay_activity.client_ended_first = client_done and not server_done
+        relay_activity.server_ended_first = server_done and not client_done
+        if client_done and server_done:
+            if (
+                relay_activity.server_end_at
+                and relay_activity.client_end_at
+                and relay_activity.server_end_at
+                < relay_activity.client_end_at
+            ):
+                relay_activity.server_ended_first = True
+            elif (
+                relay_activity.client_end_at
+                and relay_activity.server_end_at
+                and relay_activity.client_end_at
+                < relay_activity.server_end_at
+            ):
+                relay_activity.client_ended_first = True
         if relay_activity.client_ended_first and relay_activity.client_half_closed:
             while not server_task.done():
                 last_progress_at = max(
@@ -8440,6 +8564,14 @@ async def _handle_impl(reader, writer):
         detect_partial_tls_stall=detect_partial_tls_stall,
     )
     duration = time.monotonic() - t0
+    observed_stage = None
+    if route_class == ROUTE_UNKNOWN:
+        if via_system_exact:
+            observed_stage = AUTO_GEPH_STAGE_SYSTEM
+        elif via_xbox_dns:
+            observed_stage = AUTO_GEPH_STAGE_XBOX_DNS
+        elif chosen_name in GENERAL_STRATS:
+            observed_stage = f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{chosen_name}"
     # A partial local stream stall demotes only the exact generic strategy. It
     # teaches the next client retry to use app-owned Xbox DNS locally. Only
     # after Xbox and distinct local strategies show the same one-record stall
@@ -8483,6 +8615,16 @@ async def _handle_impl(reader, writer):
             )
         elif activity.server_ended_first:
             _clear_clean_eof_stalls(host)
+            if observed_stage is not None:
+                note_server_first_route_close(
+                    host,
+                    observed_stage,
+                    activity,
+                    duration=duration,
+                    now=t0 + duration,
+                )
+        elif observed_stage is not None:
+            _clear_server_first_closes(host, observed_stage)
         if not via_system_exact:
             note_local_result(
                 host,
