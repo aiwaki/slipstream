@@ -12,8 +12,14 @@ Last evidence audit: 2026-07-26, through main commit
 `8b4aa52c9a4be77186dfeb525448f89922c17dcf`. PR #219 merged the bounded
 exact-host partial-stream recovery after all required `checks`,
 `windows-adapter-contract`, `packaged-app-lifecycle`, dependency, and vendored
-Geph audits passed. The earlier intermittent uninstall race from PR #218 remains
-a separate retained lifecycle finding.
+Geph audits passed. PR #220 is open at
+`49cc31ded485f200e46a33b612996c288893a141`: `checks`,
+`windows-adapter-contract`, dependency, and vendored-Geph audits passed, while
+the first packaged lifecycle exposed the retained uninstall race as a concrete
+plist-path `launchctl bootout` failure. The working tree now prefers the exact
+`system/dev.slipstream.tproxy` service target, keeps plist-path bootout only as a
+fallback, and requires bounded proof that the job is absent before signalling
+any verified process. Requalification is pending.
 
 The workstation has an active exact-main `0.1.9` daemon with its private PF
 anchor, an ownership-verified Geph listener on `:9954`, no system proxy/PAC, and
@@ -32,7 +38,7 @@ network-wide guard, and a real payload from the currently owned listener.
 Protected local, direct, reviewed geo-exit, no-SNI, external Geph, and external
 DNS/proxy/PAC/VPN stay excluded. Focused Python contracts pass; full CI,
 exact-artifact installation, fresh-browser subresource/DOM qualification, and a
-separate scoped QUIC design remain open. The current tree passes `715` Python
+separate scoped QUIC design remain open. The current tree passes `716` Python
 tests plus `32` subtests and all `70` macOS tray Rust tests locally.
 
 ## Resume Protocol
@@ -57,7 +63,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Root daemon and corrected tray active; required gates green with an intermittent uninstall race retained | PR #218 closed the hidden-root-listener watchdog gap and passed every required PR check. The installed daemon/tray remain active without PID replacement and preserve DNS/proxy/PAC state. The first post-merge packaged lifecycle attempt reported `cleanup incomplete: launchd job remains loaded`; the unchanged failed-job rerun passed the complete lifecycle/browser smoke. Keep that first failure as a separate lifecycle defect rather than hiding it, but it no longer blocks the current exact-main evidence. A real Steam download still gates stale-status recovery behavior. |
+| M0 - Safe Base | Root daemon and corrected tray active; launchd unload hardening under packaged requalification | PR #218 closed the hidden-root-listener watchdog gap, but PR #220 reproduced the retained intermittent uninstall failure after its qualification plist rewrite: two plist-path `bootout` attempts left the exact KeepAlive job loaded. The current working tree addresses that concrete boundary with exact service-target bootout, plist fallback, bounded absence polling, and the existing prohibition on signalling any PID while launchd remains loaded. Local contracts pass; packaged lifecycle must pass before merge or workstation installation. A real Steam download still gates stale-status recovery behavior. |
 | M1 - Autonomous Routing V1 | Partial; partial-stream recovery merged, zero-payload same-request recovery under test | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube routing and falls back only to the exact pre-PF system destination. Generic unknown recovery uses one shared bounded sequence rather than per-site rules. PR #219 merged the later-record truncation path. The current branch adds the complementary zero-server-byte path: while the original TLS first flight is still replay-safe, one request may continue from the exact system destination through app-owned Xbox DNS and distinct local strategies, then use only a currently verified owned Geph after complete exact-host evidence and a clear network-wide guard. The first server byte commits the route and forbids replay. Static policy always wins, so protected local, direct, reviewed geo-exit, no-SNI, external Geph, and external DNS/proxy/PAC/VPN remain excluded. Full CI, exact artifact installation, complete CSS/JS, nonblank fresh Safari/Chrome DOM, and scoped QUIC qualification are still required. Full-tunnel `utun*` dormancy is qualified; split/per-app VPN equivalence, the protected owned-Geph workflow, and a physical lid/default-route transition remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |

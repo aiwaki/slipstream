@@ -8589,6 +8589,34 @@ def _launchd_job_absent(result):
     return "could not find service" in detail
 
 
+def _wait_for_launchd_job_absent(attempts=20, delay=0.25):
+    for attempt in range(max(1, attempts)):
+        loaded = _run("/bin/launchctl", "print", _launchd_target())
+        if _launchd_job_absent(loaded):
+            return True
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+    return False
+
+
+def _bootout_installed_launchd_job():
+    # Prefer the exact service target. Unlike plist-path bootout, this remains
+    # stable when a qualification or migration rewrites the on-disk plist after
+    # the job was loaded. Keep the path form as a compatibility fallback.
+    commands = (
+        ("/bin/launchctl", "bootout", _launchd_target()),
+        ("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST),
+    )
+    for command in commands:
+        result = _run(*command)
+        if result.returncode == 0:
+            if _wait_for_launchd_job_absent():
+                return True
+        elif _wait_for_launchd_job_absent(attempts=1, delay=0):
+            return True
+    return False
+
+
 def _command_failure(action, result):
     detail = (result.stderr or result.stdout or "command returned an error").strip()
     raise RuntimeError(f"{action}: {detail[:400]}")
@@ -8850,23 +8878,19 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
         and _installed_daemon_command_owned(_process_command_for_pid(pid))
     ):
         owned_pids.add(pid)
-    bootout_result = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
-    if bootout_result.returncode != 0:
-        retry = _run("/bin/launchctl", "bootout", "system", LAUNCHD_PLIST)
-        if retry.returncode != 0:
-            loaded = _run("/bin/launchctl", "print", _launchd_target())
-            if not _launchd_job_absent(loaded):
-                # The loaded KeepAlive job may have re-armed after the first
-                # cleanup. Restore the network boundary again, but do not
-                # signal its process until launchd is proven quiescent.
-                _flush_private_pf_with_retry(attempts=10, delay=0.2)
-                _restore_pf_loopback_skip()
-                reason = (
-                    "launchd job remains loaded"
-                    if loaded.returncode == 0
-                    else "launchd job absence could not be verified"
-                )
-                return _cleanup_install_incomplete(reason)
+    if not _bootout_installed_launchd_job():
+        # The loaded KeepAlive job may have re-armed after the first cleanup.
+        # Restore the network boundary again, but do not signal its process
+        # until launchd is proven quiescent.
+        _flush_private_pf_with_retry(attempts=10, delay=0.2)
+        _restore_pf_loopback_skip()
+        loaded = _run("/bin/launchctl", "print", _launchd_target())
+        reason = (
+            "launchd job remains loaded"
+            if loaded.returncode == 0
+            else "launchd job absence could not be verified"
+        )
+        return _cleanup_install_incomplete(reason)
     owned_pids.update(_owned_listener_pids(port))
     process_results = []
     for owned_pid in sorted(owned_pids):

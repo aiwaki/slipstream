@@ -620,6 +620,7 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
     monkeypatch.setattr(
         tproxy,
@@ -680,6 +681,7 @@ def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_
         "_run",
         lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
+    monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242])
     monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
     monkeypatch.setattr(tproxy, "_installed_daemon_command_owned", lambda _cmd: True)
@@ -718,6 +720,7 @@ def test_uninstall_reports_owned_daemon_that_did_not_stop(monkeypatch, tmp_path)
         "_run",
         lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
+    monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     stopped = []
     monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [4242, 4343])
     monkeypatch.setattr(tproxy, "_process_command_for_pid", lambda _pid: "owned")
@@ -785,11 +788,24 @@ def test_uninstall_clears_pf_and_boots_out_before_stopping_survivor(
         lambda: {"state": "active", "pid": 4242},
     )
 
+    booted_out = {"value": False}
+
     def fake_run(*args):
         if args[1:2] == ("disable",):
             events.append("disable")
         elif args[1:2] == ("bootout",):
             events.append("bootout")
+            booted_out["value"] = True
+        elif args[1:2] == ("print",) and booted_out["value"]:
+            events.append("print")
+            return SimpleNamespace(
+                returncode=113,
+                stdout="",
+                stderr=(
+                    'Could not find service "dev.slipstream.tproxy" '
+                    "in domain for system"
+                ),
+            )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
@@ -825,6 +841,7 @@ def test_uninstall_clears_pf_and_boots_out_before_stopping_survivor(
         "pf_cleared",
         "skip_restored",
         "bootout",
+        "print",
         "stopped",
         "pf_cleared",
         "skip_restored",
@@ -891,10 +908,67 @@ def test_uninstall_never_signals_daemon_while_launchd_remains_loaded(
         "pf_cleared",
         "skip_restored",
         "bootout",
+        "print",
         "bootout",
         "print",
         "pf_cleared",
         "skip_restored",
+        "print",
+    ]
+
+
+def test_uninstall_falls_back_to_plist_bootout_for_loaded_service(
+    monkeypatch, tmp_path
+):
+    install = tmp_path / "install"
+    install.mkdir()
+    plist = tmp_path / "daemon.plist"
+    plist.write_text("plist")
+    loaded = {"value": True}
+    events = []
+
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
+    monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: {})
+
+    def fake_run(*args):
+        action = args[1] if len(args) > 1 else ""
+        if action == "disable":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if action == "bootout":
+            events.append(args[2:])
+            if args[2:] == ("system", str(plist)):
+                loaded["value"] = False
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=1, stdout="", stderr="busy")
+        if action == "print":
+            if loaded["value"]:
+                return SimpleNamespace(returncode=0, stdout="loaded", stderr="")
+            return SimpleNamespace(
+                returncode=113,
+                stdout="",
+                stderr=(
+                    'Could not find service "dev.slipstream.tproxy" '
+                    "in domain for system"
+                ),
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_flush_private_pf_with_retry", lambda **_kwargs: True)
+    monkeypatch.setattr(tproxy, "_restore_pf_loopback_skip", lambda: True)
+    monkeypatch.setattr(tproxy, "_owned_listener_pids", lambda _port: [])
+    monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
+    monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+
+    assert tproxy.do_uninstall()
+    assert events == [
+        ("system/dev.slipstream.tproxy",),
+        ("system", str(plist)),
     ]
 
 
@@ -937,6 +1011,15 @@ def test_uninstall_accepts_daemon_exit_caused_by_bootout(monkeypatch, tmp_path):
     def fake_run(*args):
         if args[1:2] == ("bootout",):
             alive["value"] = False
+        if args[1:2] == ("print",) and not alive["value"]:
+            return SimpleNamespace(
+                returncode=113,
+                stdout="",
+                stderr=(
+                    'Could not find service "dev.slipstream.tproxy" '
+                    "in domain for system"
+                ),
+            )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
@@ -1024,6 +1107,7 @@ def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tm
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
     monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
@@ -1152,6 +1236,7 @@ def test_reinstall_quiescence_preserves_runtime_but_removes_stale_status(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(
         tproxy,
         "_flush_private_pf_with_retry",
@@ -1185,7 +1270,6 @@ def test_reinstall_quiescence_preserves_runtime_but_removes_stale_status(
         "disable",
         "pf_cleared",
         "skip_restored",
-        "bootout",
         "stopped",
         "pf_cleared",
         "skip_restored",
@@ -1284,6 +1368,7 @@ def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
     monkeypatch.setattr(tproxy, "_run", fake_run)
+    monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
     monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
