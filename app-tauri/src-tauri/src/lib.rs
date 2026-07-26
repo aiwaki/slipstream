@@ -725,14 +725,21 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
         && matches!(daemon_label_disabled(), Some(false))
 }
 
+fn daemon_listener_reachable() -> bool {
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 1080));
+    std::net::TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
+}
+
 fn should_recover_daemon(
     missing_status_polls: u8,
     has_seen_status: bool,
     startup_grace_elapsed: bool,
     cooldown_ready: bool,
     installed: bool,
+    listener_reachable: bool,
 ) -> bool {
     installed
+        && !listener_reachable
         && cooldown_ready
         && missing_status_polls >= DAEMON_WATCHDOG_MISSES
         && (has_seen_status || startup_grace_elapsed)
@@ -750,16 +757,24 @@ fn daemon_recovery_shell() -> String {
              > \"$recovery_status\"; \
            /bin/chmod 644 \"$recovery_status\"; \
          }}; \
+         daemon_available() {{ \
+           status=$({daemon} --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
+           if printf '%s\\n' \"$status\" \
+              | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
+           then return 0; fi; \
+           /usr/bin/nc -z -w 1 127.0.0.1 1080 >/dev/null 2>&1; \
+         }}; \
+         if daemon_available; \
+         then write_recovery daemon_already_available; exit 0; fi; \
          /bin/launchctl kickstart -k {label} >/dev/null 2>&1 \
          || /bin/launchctl bootstrap system {plist} >/dev/null 2>&1 \
          || true; \
-         /bin/sleep 3; \
-         status=$({daemon} --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
-         if printf '%s\\n' \"$status\" \
-            | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
-         then write_recovery daemon_recovered; exit 0; fi; \
-         if ! /bin/launchctl disable {label} >/dev/null 2>&1; \
-         then write_recovery cleanup_incomplete; exit 1; fi; \
+         attempt=0; \
+         while [ \"$attempt\" -lt 15 ]; do \
+           if daemon_available; \
+           then write_recovery daemon_recovered; exit 0; fi; \
+           /bin/sleep 1; attempt=$((attempt + 1)); \
+         done; \
          /bin/launchctl bootout system {plist} >/dev/null 2>&1 || true; \
          launchd_probe=$(/bin/launchctl print {label} 2>&1); launchd_rc=$?; \
          if [ \"$launchd_rc\" -eq 0 ]; \
@@ -2758,6 +2773,7 @@ pub fn run() {
                             >= Duration::from_secs(DAEMON_WATCHDOG_STARTUP_GRACE_SECS),
                         now >= next_daemon_recovery,
                         daemon_installed_for_watchdog(&app_handle),
+                        status.is_none() && daemon_listener_reachable(),
                     ) {
                         next_daemon_recovery =
                             now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
@@ -3685,27 +3701,31 @@ mod tests {
             true,
             false,
             true,
-            true
+            true,
+            false
         ));
         assert!(!should_recover_daemon(
             DAEMON_WATCHDOG_MISSES,
             false,
             false,
             true,
-            true
+            true,
+            false
         ));
         assert!(!should_recover_daemon(
             DAEMON_WATCHDOG_MISSES,
             true,
             false,
             false,
-            true
+            true,
+            false
         ));
         assert!(!should_recover_daemon(
             DAEMON_WATCHDOG_MISSES,
             true,
             false,
             true,
+            false,
             false
         ));
         assert!(should_recover_daemon(
@@ -3713,11 +3733,25 @@ mod tests {
             true,
             false,
             true,
-            true
+            true,
+            false
         ));
         assert!(should_recover_daemon(
             DAEMON_WATCHDOG_MISSES,
             false,
+            true,
+            true,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn watchdog_never_restarts_a_reachable_listener_for_stale_status() {
+        assert!(!should_recover_daemon(
+            u8::MAX,
+            true,
+            true,
             true,
             true,
             true
@@ -3731,19 +3765,23 @@ mod tests {
         assert!(shell.contains("/bin/launchctl kickstart -k 'system/dev.slipstream.tproxy'"));
         assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
         assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
+        assert!(shell.contains("daemon_already_available"));
         assert!(shell.contains("daemon_recovered"));
         assert!(shell.contains("network_recovered"));
         assert!(shell.contains("cleanup_incomplete"));
-        assert!(shell.contains("/bin/launchctl disable 'system/dev.slipstream.tproxy'"));
+        assert!(!shell.contains("/bin/launchctl disable"));
         assert!(shell.contains("/bin/launchctl bootout system"));
+        assert!(shell.contains("/usr/bin/nc -z -w 1 127.0.0.1 1080"));
+        assert!(shell.contains("while [ \"$attempt\" -lt 15 ]"));
         assert!(shell.contains("Could not find service"));
         assert!(shell.contains("/usr/local/slipstream/slipstreamd' --recover-network"));
         assert!(!shell.contains("pfctl"));
         assert!(!shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(!shell.contains("/sbin/pfctl -d"));
-        assert!(shell.find("kickstart").unwrap() < shell.find("--status").unwrap());
-        assert!(shell.find("--status").unwrap() < shell.find("disable").unwrap());
-        assert!(shell.find("disable").unwrap() < shell.find("bootout").unwrap());
+        assert!(shell.find("--status").unwrap() < shell.find("kickstart").unwrap());
+        assert!(shell.find("127.0.0.1 1080").unwrap() < shell.find("kickstart").unwrap());
+        assert!(shell.find("kickstart").unwrap() < shell.find("while").unwrap());
+        assert!(shell.find("while").unwrap() < shell.find("bootout").unwrap());
         assert!(shell.find("bootout").unwrap() < shell.find("launchctl print").unwrap());
         assert!(shell.find("launchctl print").unwrap() < shell.find("--recover-network").unwrap());
         assert!(std::process::Command::new("/bin/sh")

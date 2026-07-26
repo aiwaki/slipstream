@@ -4433,13 +4433,34 @@ def write_status(state, iface, voice_iface):
 # found and the daemon silently does nothing — force the system dirs onto PATH.
 _RUN_ENV = dict(os.environ)
 _RUN_ENV["PATH"] = "/sbin:/usr/sbin:/bin:/usr/bin:" + _RUN_ENV.get("PATH", "")
+for _debug_env_name in tuple(_RUN_ENV):
+    if _debug_env_name.startswith("Malloc"):
+        _RUN_ENV.pop(_debug_env_name, None)
+
+RUN_COMMAND_TIMEOUT_SECONDS = 5
 
 
 def _run(*args):
     try:
-        return subprocess.run(list(args), capture_output=True, text=True, env=_RUN_ENV)
+        return subprocess.run(
+            list(args),
+            capture_output=True,
+            text=True,
+            env=_RUN_ENV,
+            timeout=RUN_COMMAND_TIMEOUT_SECONDS,
+        )
     except FileNotFoundError:
         return subprocess.CompletedProcess(args, 127, "", f"not found: {args[0]}")
+    except subprocess.TimeoutExpired as error:
+        stdout = error.stdout if isinstance(error.stdout, str) else ""
+        stderr = error.stderr if isinstance(error.stderr, str) else ""
+        detail = f"timed out after {RUN_COMMAND_TIMEOUT_SECONDS}s"
+        return subprocess.CompletedProcess(
+            args,
+            124,
+            stdout,
+            f"{stderr}\n{detail}".strip(),
+        )
 
 
 def _pf_parent_declarations(text):

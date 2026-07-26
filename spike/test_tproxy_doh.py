@@ -352,6 +352,23 @@ def test_repo_script_is_not_running_from_install_dir():
     )
 
 
+def test_system_command_runner_is_bounded_and_strips_malloc_debug_env(monkeypatch):
+    observed = {}
+
+    def timeout_run(args, **kwargs):
+        observed.update(kwargs)
+        raise tproxy.subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(tproxy.subprocess, "run", timeout_run)
+
+    result = tproxy._run("scutil", "--proxy")
+
+    assert result.returncode == 124
+    assert "timed out after 5s" in result.stderr
+    assert observed["timeout"] == tproxy.RUN_COMMAND_TIMEOUT_SECONDS
+    assert not any(name.startswith("Malloc") for name in observed["env"])
+
+
 def test_copy_file_resilient_skips_identical_and_replaces_changed_file(tmp_path):
     src = tmp_path / "src"
     dst = tmp_path / "dst"
