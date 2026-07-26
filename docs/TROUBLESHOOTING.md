@@ -422,13 +422,16 @@ unknown, non-TLS, and TLS-without-SNI connections still entered the generic
 local engine. That engine could replace the original destination with a DoH
 answer, select desync for an unclassified host, and wait for a first server
 payload before relaying. Installing Slipstream therefore changed ordinary HTTPS
-even when no policy requested a bypass. The transparent baseline now opens the
-exact pre-PF numeric destination, sends the buffered bytes unchanged, and starts
-bidirectional relay immediately. If an unknown connection fails, local recovery
-is deferred to a later client retry so a consumed TLS first flight is not
-replayed. A server-first close with zero downstream bytes arms that next retry;
-an orderly client EOF is propagated as a bounded TCP half-close so a delayed
-server response is still delivered.
+even when no policy requested a bypass. The transparent baseline first tries the
+exact pre-PF numeric destination. For non-TLS, no-SNI, direct, and protected
+routes it remains a byte-transparent passthrough. For an eligible unknown TLS
+request, a zero-server-byte close means the buffered first flight has not been
+exposed downstream and is still safe to retry. That same request may therefore
+continue through per-connection app-owned DNS and the local strategy ladder. It
+may reach verified owned Geph only after every local stage has closed before
+payload and the complete exact-host evidence gate passes. The first server byte
+commits the route and forbids replay. An orderly client EOF is still propagated
+as a bounded TCP half-close so a delayed server response is delivered.
 
 A later doc-only CI rerun reproduced the broad outage before this repair was
 merged: packaged Safari reported `You Are Not Connected to the Internet` at
@@ -475,9 +478,10 @@ Required behavior:
   original destination selected by the user's DNS/VPN/system route;
 - never move a geo-exit host into the local desync ladder merely because an
   app-owned backend is absent;
-- preserve direct, unknown, non-TLS, and no-SNI traffic on the exact pre-PF
+- preserve direct, protected, non-TLS, and no-SNI traffic on the exact pre-PF
   destination without alternate DNS, desync, or first-payload probing; an
-  unknown-host recovery may begin only on a later client retry;
+  eligible unknown TLS request may continue through the bounded recovery ladder
+  only while zero server bytes have reached the client;
 - do not let tray polling restart a live Geph process from endpoint failures;
 - on uninstall, clear the private PF anchor before closing its listener, then
   perform a bounded accepted-stream drain while the verified owned Geph backend
@@ -523,18 +527,23 @@ qualification boundary and is not inferred from full-tunnel behavior.
 Slipstream's on-demand Xbox DNS fallback is separate from that external state:
 after a local failure for one generic hostname, it can make one verified DoH
 query and try the returned address locally. It never changes the system resolver
-configuration. Recovery is ordered and bounded:
+configuration. Recovery is ordered and bounded for every eligible unknown TLS
+hostname; it is not a per-site list:
 
 1. Preserve the exact destination selected by the user's current system route.
 2. After evidence of a failed generic stream, try app-owned Xbox DNS locally.
 3. If that route also fails, continue through the local DoH/strategy ladder.
-4. Recheck the original system route after the ten-minute recovery window.
+4. Only after the exact host exhausts system, app DNS, and at least two distinct
+   local strategies without receiving a server byte, confirm a real payload
+   through the currently verified owned Geph and remember a temporary route.
+5. Recheck the original system route after the bounded recovery/overlay window.
 
-Ordinary connection failures in these stages may not select Geph. Discord,
-YouTube control, Googlevideo media, reviewed geo-exit services, direct routes,
-and traffic without usable SNI keep their own policies and never enter this
-generic sequence. A generic exact host can advance beyond the local ladder only
-under the separate partial-stream proof described below.
+One failed route, a successful Geph probe by itself, or a network-wide outage
+cannot select Geph. Discord, YouTube control, Googlevideo media, reviewed
+geo-exit services, direct routes, and traffic without usable SNI keep their own
+policies and never enter this generic sequence. A generic exact host advances
+beyond the local ladder only under the complete zero-payload gate above or the
+separate framed-record proof below.
 
 For a partial page that becomes blank after a long wait, one orderly browser
 close is intentionally treated as ambiguous. The generic local relay records
@@ -550,8 +559,11 @@ guaranteed alternate route.
 A synthetic uncompressed HTTP probe can stall even when a compressed main
 document completes. Neither result alone proves browser health. A blank page
 can be caused by mandatory same-origin CSS or JavaScript stopping after an
-initial TLS record, so qualification must include those resources and a
-nonblank browser DOM.
+initial TLS record, while a bare-HTML view can also survive in browser cache
+after the network path is healthy. Qualification therefore uses a fresh
+owner-only profile, rejects browser error pages, and requires the main document,
+mandatory CSS/JavaScript, and a nonblank DOM. Reopening the user's existing
+profile is diagnostic context, not a routing pass.
 
 When the exact system destination, app-owned Xbox DNS route, and at least two
 distinct local strategies each complete at least one TLS record but leave the

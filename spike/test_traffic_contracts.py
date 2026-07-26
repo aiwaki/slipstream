@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
+import time
 from collections import deque
 from dataclasses import dataclass
 
@@ -222,6 +223,7 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_auto_geph", {})
     monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
     monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
+    monkeypatch.setattr(tproxy, "_local_zero_payload_failures", {})
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
@@ -306,6 +308,14 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
             calls.append(("direct", ip, port, first_flight))
             return streaming_upstream_response(contract.response)
 
+        async def fake_system_probe(ip, port, first_flight):
+            assert first_flight == expected_first_flight
+            calls.append(("direct", ip, port, first_flight))
+            return (
+                tproxy.SYSTEM_PROBE_PAYLOAD,
+                probed_upstream_response(contract.response),
+            )
+
         async def no_geph(*args, **kwargs):
             await forbidden_backend("Geph", *args, **kwargs)
 
@@ -316,6 +326,7 @@ def test_core_tls_traffic_contracts(monkeypatch, contract):
             await forbidden_backend("DNS resolution", *args, **kwargs)
 
         monkeypatch.setattr(tproxy, "dial_plain", fake_direct)
+        monkeypatch.setattr(tproxy, "_try_exact_system_probe", fake_system_probe)
         monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
         monkeypatch.setattr(tproxy, "dial_strategy", no_local)
         monkeypatch.setattr(tproxy, "resolve_connection_ips", no_dns)
@@ -443,32 +454,45 @@ def test_tls_without_sni_preserves_exact_system_destination(monkeypatch):
     assert bytes(writer.payload) == response
 
 
-def test_unknown_direct_connect_failure_defers_recovery_to_next_retry(monkeypatch):
-    """Never replay a possibly consumed TLS first flight through another route."""
+def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
+    monkeypatch,
+):
+    """A first-flight-only route can be retried before any server byte is exposed."""
     isolate_runtime_state(monkeypatch)
     host = "temporarily-blocked.example"
-    client, _first_flight = tls_client(host, block_after_hello=False)
+    response = b"Xbox DNS local recovery payload"
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     calls = []
 
     async def failed_direct(ip, port, first_flight):
         calls.append((ip, port, first_flight))
-        return None
+        return tproxy.SYSTEM_PROBE_CLOSED, None
+
+    async def healthy_xbox(actual_host, port, head, body):
+        calls.append(("xbox", actual_host, port, head + body))
+        return "198.51.100.31", probed_upstream_response(response)
 
     async def no_backend(name, *args, **kwargs):
         await forbidden_backend(name, *args, **kwargs)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.31", 443))
-    monkeypatch.setattr(tproxy, "dial_plain", failed_direct)
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_direct)
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", healthy_xbox)
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_allows",
+        lambda *_args, **_kwargs: False,
+    )
     monkeypatch.setattr(
         tproxy,
         "resolve_connection_ips",
-        lambda *args, **kwargs: no_backend("same-stream DNS", *args, **kwargs),
+        lambda *args, **kwargs: no_backend("local DNS", *args, **kwargs),
     )
     monkeypatch.setattr(
         tproxy,
         "dial_strategy",
-        lambda *args, **kwargs: no_backend("same-stream retry", *args, **kwargs),
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
     )
     monkeypatch.setattr(
         tproxy,
@@ -478,9 +502,85 @@ def test_unknown_direct_connect_failure_defers_recovery_to_next_retry(monkeypatc
 
     asyncio.run(run_handler(client, writer))
 
-    assert len(calls) == 1
-    assert writer.closed is True
-    assert tproxy._xbox_dns_candidate_active(host)
+    assert calls == [
+        ("203.0.113.31", 443, expected_first_flight),
+        ("xbox", host, 443, expected_first_flight),
+    ]
+    assert bytes(writer.payload) == response
+
+
+def test_exact_system_probe_timeout_commits_the_original_stream(monkeypatch):
+    upstream_reader = ScriptedReader(block_when_empty=True)
+    upstream_writer = CaptureWriter()
+
+    async def exact_direct(_ip, _port, _first_flight):
+        return upstream_reader, upstream_writer
+
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+
+    state, result = asyncio.run(
+        tproxy._try_exact_system_probe(
+            "203.0.113.32",
+            443,
+            b"client hello",
+            probe_timeout=0.01,
+        )
+    )
+
+    assert state == tproxy.SYSTEM_PROBE_PENDING
+    assert result == (upstream_reader, upstream_writer, b"")
+    assert upstream_writer.closed is False
+
+
+def test_exact_system_probe_eof_is_replay_safe(monkeypatch):
+    upstream_reader = ScriptedReader()
+    upstream_writer = CaptureWriter()
+
+    async def exact_direct(_ip, _port, _first_flight):
+        return upstream_reader, upstream_writer
+
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+
+    state, result = asyncio.run(
+        tproxy._try_exact_system_probe(
+            "203.0.113.33",
+            443,
+            b"client hello",
+            probe_timeout=0.01,
+        )
+    )
+
+    assert state == tproxy.SYSTEM_PROBE_CLOSED
+    assert result is None
+    assert upstream_writer.closed is True
+
+
+def test_exact_system_probe_cancellation_closes_the_owned_stream(monkeypatch):
+    upstream_reader = ScriptedReader(block_when_empty=True)
+    upstream_writer = CaptureWriter()
+
+    async def exact_direct(_ip, _port, _first_flight):
+        return upstream_reader, upstream_writer
+
+    monkeypatch.setattr(tproxy, "dial_plain", exact_direct)
+
+    async def scenario():
+        task = asyncio.create_task(
+            tproxy._try_exact_system_probe(
+                "203.0.113.34",
+                443,
+                b"client hello",
+                probe_timeout=30.0,
+            )
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+    assert upstream_writer.closed is True
 
 
 def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch):
@@ -543,6 +643,179 @@ def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch)
 
     assert [call[0] for call in calls] == ["dns", "local"]
     assert bytes(retry_writer.payload) == response
+
+
+def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "foreign-ip-only.example"
+    local_ip = "198.51.100.61"
+    response = b"\x16\x03\x03\x00\x60" + (b"G" * 96)
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    calls = []
+    strategies = (
+        tproxy.STRAT_BY_NAME["split64+fake"],
+        tproxy.STRAT_BY_NAME["split16+fake"],
+    )
+
+    async def failed_system(ip, port, first_flight):
+        calls.append(("system", ip, port, first_flight))
+        return tproxy.SYSTEM_PROBE_CLOSED, None
+
+    async def failed_xbox(actual_host, port, head, body):
+        calls.append(("xbox", actual_host, port, head + body))
+        return None
+
+    async def local_dns(actual_host, fallback_ip):
+        calls.append(("dns", actual_host, fallback_ip))
+        return [local_ip]
+
+    async def failed_local(ip, port, head, body, actual_host, strategy):
+        calls.append(("local", ip, port, actual_host, strategy["name"]))
+        assert head + body == expected_first_flight
+        return None
+
+    async def healthy_owned_geph(actual_host, port, first_flight):
+        calls.append(("geph", actual_host, port, first_flight))
+        return streaming_upstream_response(response)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.61", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_system)
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", failed_xbox)
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
+    monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
+    monkeypatch.setattr(tproxy, "dial_strategy", failed_local)
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert [call[0] for call in calls] == [
+        "system",
+        "xbox",
+        "dns",
+        "local",
+        "local",
+        "geph",
+    ]
+    assert bytes(writer.payload) == response
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_unknown_first_server_payload_forbids_route_replay(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "healthy-system-route.example"
+    response = b"\x16\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+
+    async def healthy_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            probed_upstream_response(response),
+        )
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.62", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", healthy_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_try_xbox_dns_local_connect",
+        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "slow-system-route.example"
+    response = b"\x16\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+
+    async def pending_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PENDING,
+            (ScriptedReader(stream=(response,)), CaptureWriter(), b""),
+        )
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.63", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_try_xbox_dns_local_connect",
+        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_unknown_recovery_never_uses_an_external_geph_listener(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "external-geph-is-not-owned.example"
+    dialled = []
+    tproxy._auto_geph_candidates[host] = time.monotonic() + 60.0
+
+    async def external_geph(*args, **kwargs):
+        dialled.append((args, kwargs))
+        return streaming_upstream_response(b"G" * 128)
+
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_EXTERNAL_PORT)
+    monkeypatch.setattr(tproxy, "dial_via_geph", external_geph)
+
+    handled = asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            b"client hello",
+            ScriptedReader(),
+            CaptureWriter(),
+        )
+    )
+
+    assert handled is False
+    assert dialled == []
+    assert tproxy.geph_active_session_count() == 0
 
 
 def test_unknown_zero_byte_server_close_arms_next_retry_recovery(monkeypatch):
@@ -1361,8 +1634,8 @@ def test_geph_half_open_recovers_on_first_payload_before_long_relay_ends(
     assert tproxy.geph_active_session_count() == 0
 
 
-def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
-    """Ordinary connection failures alone never authorize a foreign exit."""
+def test_incomplete_unknown_local_evidence_does_not_promote_to_geph(monkeypatch):
+    """One local strategy is insufficient evidence for a foreign exit."""
     isolate_runtime_state(monkeypatch)
     host = "unclassified.example"
     calls = []
@@ -1373,7 +1646,7 @@ def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
 
     async def failed_direct(_ip, _port, _first_flight):
         calls.append(("direct", host))
-        return None
+        return tproxy.SYSTEM_PROBE_CLOSED, None
 
     async def failed_strategy(_ip, _port, _head, _body, actual_host, _strategy):
         calls.append(("local", actual_host))
@@ -1383,7 +1656,7 @@ def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
         await forbidden_backend("Geph", *args, **kwargs)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.42", 443))
-    monkeypatch.setattr(tproxy, "dial_plain", failed_direct)
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_direct)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", fake_dns)
     monkeypatch.setattr(
         tproxy,
@@ -1401,8 +1674,9 @@ def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
         asyncio.run(run_handler(client, writer))
 
     assert [call[0] for call in calls].count("direct") == 1
-    assert [call[0] for call in calls].count("dns") == 1
-    assert [call[0] for call in calls].count("local") == 1
+    assert [call[0] for call in calls].count("dns") == 2
+    assert [call[0] for call in calls].count("local") == 2
+    assert host not in tproxy._auto_geph
     assert tproxy.runtime_route_circuit_snapshot() == ()
 
 

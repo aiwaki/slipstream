@@ -46,6 +46,10 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     partial_stalls = {
         host: dict(values) for host, values in tproxy._local_partial_stalls.items()
     }
+    zero_payload_failures = {
+        host: dict(values)
+        for host, values in tproxy._local_zero_payload_failures.items()
+    }
     xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
     xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
     clean_eof_stalls = {
@@ -122,6 +126,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_geph_runtime_failures.clear()
         tproxy._auto_geph_candidates.clear()
         tproxy._local_partial_stalls.clear()
+        tproxy._local_zero_payload_failures.clear()
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
@@ -200,6 +205,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_geph_candidates.update(auto_candidates)
         tproxy._local_partial_stalls.clear()
         tproxy._local_partial_stalls.update(partial_stalls)
+        tproxy._local_zero_payload_failures.clear()
+        tproxy._local_zero_payload_failures.update(zero_payload_failures)
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
         tproxy._xbox_dns_attempts.clear()
@@ -7422,6 +7429,59 @@ def test_local_strategy_stalls_without_system_and_xbox_proof_do_not_confirm(
 
     assert confirmations == []
     assert host not in tproxy._auto_geph_candidates
+
+
+def test_zero_payload_route_exhaustion_requires_all_local_stages(monkeypatch):
+    host = "foreign-exit-candidate.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert not tproxy.note_zero_payload_route_failure(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        now=100.0,
+    )
+    assert not tproxy.note_zero_payload_route_failure(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        now=101.0,
+    )
+    assert not tproxy.note_zero_payload_route_failure(
+        host,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        now=102.0,
+    )
+    assert tproxy.note_zero_payload_route_failure(
+        host,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+        now=103.0,
+    )
+    assert tproxy._auto_geph_candidate_allowed(host, now=104.0)
+
+
+def test_network_wide_zero_payload_failures_do_not_authorize_geph(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    stages = (
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+    )
+
+    for index in range(tproxy.AUTO_GEPH_NET_BAD):
+        host = f"network-wide-{index}.example"
+        for offset, stage in enumerate(stages):
+            tproxy.note_zero_payload_route_failure(
+                host,
+                stage,
+                now=100.0 + offset,
+            )
+
+    last_host = f"network-wide-{tproxy.AUTO_GEPH_NET_BAD - 1}.example"
+    assert not tproxy._auto_geph_candidate_allowed(last_host, now=105.0)
 
 
 def test_auto_geph_confirmation_learns_only_proven_exact_unknown_host(
