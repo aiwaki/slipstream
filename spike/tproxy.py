@@ -1996,23 +1996,32 @@ def prune_telegram_direct_failures(now=None):
     while _tg_direct_failures and now - _tg_direct_failures[0] > TG_DIRECT_FAIL_WINDOW:
         _tg_direct_failures.popleft()
 
-# Adaptive auto-routing: learn geo-blocked hosts the way the engine learns desync
-# strategies, but only after proof. A host the app keeps reconnecting to that
-# returns no real content over local desync becomes a candidate. It is promoted
-# only if a separate HTTPS payload probe through Geph succeeds. We count
-# low-content closes, not raw connects, so a normal page's parallel burst does
-# not trip it. Guard: if many distinct hosts fail at once, it is a network
-# problem, not a per-host geo-block, so don't promote.
+# Adaptive auto-routing: learn a temporary exact-host foreign-exit overlay only
+# after every bounded local stage shows the same partial-stream failure and a
+# separate HTTPS payload probe through verified owned Geph succeeds. This does
+# not claim the host is geo-blocked. A network-wide guard prevents a general
+# outage from moving many hosts into the tunnel.
 AUTO_GEPH_WINDOW = 60.0       # seconds to accumulate a host's failures over
 AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = STUCK
 AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 LOCAL_STREAM_IDLE = 15.0      # client-visible downstream silence after payload
+PARTIAL_TLS_RECORD_IDLE = 6.0
+TLS_RECORD_HEADER_SIZE = 5
+TLS_RECORD_MAX_CIPHERTEXT = (1 << 14) + 2048
+TLS_RECORD_CONTENT_TYPES = frozenset((20, 21, 22, 23, 24))
 CLEAN_EOF_STALL_WINDOW = 5 * 60.0
 CLEAN_EOF_STALL_STORM = 2     # repeated client-first clean EOFs before recovery
 CLEAN_EOF_STALL_STATE_MAX = 4096
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
-AUTO_GEPH_TTL = 7 * 86400.0   # remember a learned host for a week
+AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
+AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
+AUTO_GEPH_PARTIAL_STALL_WINDOW = 5 * 60.0
+AUTO_GEPH_PARTIAL_STRATEGIES = 2
+AUTO_GEPH_STAGE_SYSTEM = "system"
+AUTO_GEPH_STAGE_XBOX_DNS = "xbox_dns"
+AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
+AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
@@ -2023,6 +2032,8 @@ _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _auto_geph_confirming = {}    # host -> monotonic start time
 _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
+_auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
+_local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -2933,50 +2944,89 @@ def execute_owned_geph_restart(
 
 
 def prune_auto_geph(now=None):
-    del now
-    if _auto_geph:
-        _auto_geph.clear()
+    wall_now = time.time() if now is None else now
+    removed = False
+    for host, expiry in list(_auto_geph.items()):
+        if expiry <= wall_now or not _auto_geph_base_host_allowed(host):
+            _auto_geph.pop(host, None)
+            removed = True
+    while len(_auto_geph) > AUTO_GEPH_STATE_MAX:
+        oldest = min(_auto_geph, key=_auto_geph.get)
+        _auto_geph.pop(oldest, None)
+        removed = True
+    if removed:
         save_auto_geph()
 
 
 def load_auto_geph():
     global _auto_geph
-    had_legacy_entries = False
+    loaded = {}
+    raw_data = {}
+    wall_now = time.time()
     try:
         with open(_AUTO_GEPH_PATH) as f:
-            data = json.load(f)
-        had_legacy_entries = isinstance(data, dict) and bool(data)
+            raw_data = json.load(f)
+        if isinstance(raw_data, dict):
+            for raw_host, raw_expiry in raw_data.items():
+                host = normalize_host(raw_host)
+                try:
+                    expiry = float(raw_expiry)
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    expiry > wall_now
+                    and _auto_geph_base_host_allowed(host)
+                    and len(loaded) < AUTO_GEPH_STATE_MAX
+                ):
+                    loaded[host] = expiry
     except Exception:
         pass
-    _auto_geph = {}
-    if had_legacy_entries:
+    _auto_geph = loaded
+    try:
+        if os.path.exists(_AUTO_GEPH_PATH):
+            os.chmod(_AUTO_GEPH_PATH, 0o600)
+    except OSError:
+        pass
+    if loaded != raw_data:
         save_auto_geph()
 
 
 def save_auto_geph():
     try:
-        with open(_AUTO_GEPH_PATH, "w") as f:
-            json.dump(_auto_geph, f)
+        _atomic_write_json(_AUTO_GEPH_PATH, _auto_geph, mode=0o600)
     except Exception:
         pass
 
 
-# A successful payload through a foreign exit does not prove that a service
-# requires one. Generic local failures therefore never promote a host to Geph.
-# Keep the status surface for one transition release while legacy state is pruned.
-AUTO_GEPH_ENABLED = False
+# A successful foreign-exit payload alone is never routing evidence. Runtime
+# learning is enabled only after an exact unknown host has exhausted the system
+# and Xbox-DNS stages and then stalled on multiple local strategies.
+AUTO_GEPH_ENABLED = True
 
 
-def _auto_geph_candidate_allowed(host):
-    del host
-    return False
-
-
-def _unknown_local_recovery_candidate_allowed(host):
+def _auto_geph_base_host_allowed(host):
     h = normalize_host(host)
     return bool(h) and not _is_geph_infra(h) and (
         route_policy(h)["route_class"] == ROUTE_UNKNOWN
     )
+
+
+def _auto_geph_candidate_allowed(host, now=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    return bool(
+        AUTO_GEPH_ENABLED
+        and GEPH_ENABLED
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
+        and _auto_geph_base_host_allowed(h)
+        and _auto_geph_candidates.get(h, 0.0) > now
+    )
+
+
+def _unknown_local_recovery_candidate_allowed(host):
+    return _auto_geph_base_host_allowed(host)
 
 
 def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
@@ -3077,11 +3127,13 @@ def _confirm_auto_geph(host):
             return False
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
+        _auto_geph_candidates.pop(h, None)
+        _local_partial_stalls.pop(h, None)
         save_auto_geph()
         _set_auto_geph_status("learned", h, "geph payload confirmed", bytes_read)
     print(
         f">> auto-route: {h} works through Geph after local stalls "
-        f"(remembered {AUTO_GEPH_TTL / 86400:.0f}d)",
+        f"(remembered {AUTO_GEPH_TTL / 3600:.0f}h)",
         file=sys.stderr,
     )
     return True
@@ -3107,6 +3159,22 @@ def _auto_geph_learned_exact_host(host, now=None):
     return True
 
 
+def runtime_route_policy(host, now=None):
+    """Overlay a proven exact-host foreign exit without changing static policy."""
+    policy = route_policy(host)
+    if (
+        policy["route_class"] == ROUTE_UNKNOWN
+        and _auto_geph_learned_exact_host(host, now)
+    ):
+        return {
+            **policy,
+            "route_class": ROUTE_GEO_EXIT,
+            "strategy_set": STRATEGY_GEPH,
+            "runtime_learned": True,
+        }
+    return policy
+
+
 def _forget_auto_geph_host(host, reason):
     h = normalize_host(host)
     if not h:
@@ -3116,6 +3184,8 @@ def _forget_auto_geph_host(host, reason):
             return False
         _auto_geph.pop(h, None)
         _auto_fail.pop(h, None)
+        _auto_geph_candidates.pop(h, None)
+        _local_partial_stalls.pop(h, None)
         _auto_geph_runtime_failures.pop(h, None)
         save_auto_geph()
         _set_auto_geph_status("reset", h, reason)
@@ -3147,17 +3217,149 @@ def note_auto_geph_runtime_failure(host, reason, now=None):
     return True
 
 
+def _prune_local_partial_stalls(now):
+    cutoff = now - AUTO_GEPH_PARTIAL_STALL_WINDOW
+    for host, strategies in list(_local_partial_stalls.items()):
+        fresh = {
+            name: observed_at
+            for name, observed_at in strategies.items()
+            if observed_at >= cutoff
+        }
+        if fresh:
+            _local_partial_stalls[host] = fresh
+        else:
+            _local_partial_stalls.pop(host, None)
+    while len(_local_partial_stalls) > AUTO_GEPH_STATE_MAX:
+        _local_partial_stalls.pop(next(iter(_local_partial_stalls)))
+    for host, expiry in list(_auto_geph_candidates.items()):
+        if expiry <= now or not _auto_geph_base_host_allowed(host):
+            _auto_geph_candidates.pop(host, None)
+    while len(_auto_geph_candidates) > AUTO_GEPH_STATE_MAX:
+        _auto_geph_candidates.pop(next(iter(_auto_geph_candidates)))
+
+
+def note_partial_tls_stall(
+    host,
+    stage,
+    *,
+    now=None,
+    confirmation_runner=None,
+):
+    """Record one framed TLS truncation without treating attempts as proof."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    valid_strategy_stage = (
+        stage.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
+        and stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):] in GENERAL_STRATS
+    )
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or (
+            stage not in {AUTO_GEPH_STAGE_SYSTEM, AUTO_GEPH_STAGE_XBOX_DNS}
+            and not valid_strategy_stage
+        )
+    ):
+        return False
+    _prune_local_partial_stalls(now)
+    observations = _local_partial_stalls.setdefault(h, {})
+    observations[stage] = now
+    local_strategies = {
+        name[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
+        for name in observations
+        if name.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
+    }
+    if (
+        AUTO_GEPH_STAGE_SYSTEM not in observations
+        or AUTO_GEPH_STAGE_XBOX_DNS not in observations
+        or len(local_strategies) < AUTO_GEPH_PARTIAL_STRATEGIES
+    ):
+        return False
+    noisy_hosts = sum(
+        1
+        for host_observations in _local_partial_stalls.values()
+        if host_observations
+    )
+    if noisy_hosts >= AUTO_GEPH_NET_BAD:
+        return False
+    _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
+    return _schedule_auto_geph_confirmation(
+        h,
+        now=now,
+        runner=confirmation_runner,
+    )
+
+
+def note_local_ladder_partial_stall(
+    host,
+    strategy_name,
+    *,
+    now=None,
+    confirmation_runner=None,
+):
+    """Record one distinct strategy's framed TLS truncation."""
+    if strategy_name not in GENERAL_STRATS:
+        return False
+    return note_partial_tls_stall(
+        host,
+        f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strategy_name}",
+        now=now,
+        confirmation_runner=confirmation_runner,
+    )
+
+
+def _prune_auto_geph_confirmation_state(now):
+    stale_confirmation = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
+    for host, started in list(_auto_geph_confirming.items()):
+        if started < stale_confirmation:
+            _auto_geph_confirming.pop(host, None)
+
+    expired_probe = now - AUTO_GEPH_CONFIRM_COOLDOWN
+    for host, attempted_at in list(_auto_geph_last_probe.items()):
+        if attempted_at < expired_probe and host not in _auto_geph_confirming:
+            _auto_geph_last_probe.pop(host, None)
+
+    while len(_auto_geph_last_probe) > AUTO_GEPH_STATE_MAX:
+        evictable = (
+            (attempted_at, host)
+            for host, attempted_at in _auto_geph_last_probe.items()
+            if host not in _auto_geph_confirming
+        )
+        try:
+            _, oldest = min(evictable)
+        except ValueError:
+            break
+        _auto_geph_last_probe.pop(oldest, None)
+
+
 def _schedule_auto_geph_confirmation(host, now=None, runner=None):
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
-    if not h:
+    if not _auto_geph_candidate_allowed(h, now):
         return False
     with _auto_geph_lock:
+        _prune_auto_geph_confirmation_state(now)
         last = _auto_geph_last_probe.get(h, 0.0)
         if last and now - last < AUTO_GEPH_CONFIRM_COOLDOWN:
             return False
         started = _auto_geph_confirming.get(h)
         if started is not None and now - started < AUTO_GEPH_CONFIRM_TIMEOUT * 2:
+            return False
+        if h not in _auto_geph_last_probe:
+            while len(_auto_geph_last_probe) >= AUTO_GEPH_STATE_MAX:
+                evictable = (
+                    (attempted_at, host)
+                    for host, attempted_at in _auto_geph_last_probe.items()
+                    if host not in _auto_geph_confirming
+                )
+                try:
+                    _, oldest = min(evictable)
+                except ValueError:
+                    return False
+                _auto_geph_last_probe.pop(oldest, None)
+        if (
+            h not in _auto_geph_confirming
+            and len(_auto_geph_confirming) >= AUTO_GEPH_STATE_MAX
+        ):
             return False
         _auto_geph_last_probe[h] = now
         _auto_geph_confirming[h] = now
@@ -6522,6 +6724,7 @@ def ip_attempt_limit(host):
 @dataclass
 class _RelayActivity:
     last_downstream_at: float
+    downstream_bytes: int = 0
     client_end_at: float = 0.0
     server_end_at: float = 0.0
     client_eof: bool = False
@@ -6531,7 +6734,55 @@ class _RelayActivity:
     client_ended_first: bool = False
     server_ended_first: bool = False
     first_downstream_seen: bool = False
+    partial_tls_record_stalled: bool = False
+    tls_record_buffer: object = None
+    tls_record_expected: int = 0
+    tls_complete_records: int = 0
+    tls_framing_valid: bool = True
+    track_tls_records: bool = False
     on_first_downstream: object = None
+
+
+def _track_tls_records(activity, data):
+    """Track complete TLSCiphertext frames using only their public headers."""
+    if not data or not activity.tls_framing_valid:
+        return
+    if activity.tls_record_buffer is None:
+        activity.tls_record_buffer = bytearray()
+    buffer = activity.tls_record_buffer
+    buffer.extend(data)
+    while True:
+        if not activity.tls_record_expected:
+            if len(buffer) < TLS_RECORD_HEADER_SIZE:
+                return
+            content_type = buffer[0]
+            version_major = buffer[1]
+            record_length = struct.unpack("!H", buffer[3:5])[0]
+            if (
+                content_type not in TLS_RECORD_CONTENT_TYPES
+                or version_major != 3
+                or record_length > TLS_RECORD_MAX_CIPHERTEXT
+            ):
+                activity.tls_framing_valid = False
+                buffer.clear()
+                return
+            activity.tls_record_expected = TLS_RECORD_HEADER_SIZE + record_length
+        if len(buffer) < activity.tls_record_expected:
+            return
+        del buffer[:activity.tls_record_expected]
+        activity.tls_record_expected = 0
+        activity.tls_complete_records += 1
+
+
+def _incomplete_tls_record_visible(activity):
+    buffer = activity.tls_record_buffer
+    return bool(
+        activity.tls_framing_valid
+        and activity.tls_complete_records > 0
+        and activity.tls_record_expected > 0
+        and buffer is not None
+        and TLS_RECORD_HEADER_SIZE <= len(buffer) < activity.tls_record_expected
+    )
 
 
 def _local_stream_stalled(activity, now=None):
@@ -6543,6 +6794,8 @@ def _local_stream_stalled(activity, now=None):
     after a long lack of server progress can trigger recovery.
     """
     now = time.monotonic() if now is None else now
+    if activity.partial_tls_record_stalled:
+        return True
     if not activity.client_end_at:
         return False
     return (
@@ -6791,6 +7044,9 @@ async def splice(src, dst, activity=None):
                 break
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
+                activity.downstream_bytes += len(data)
+                if activity.track_tls_records:
+                    _track_tls_records(activity, data)
                 if not activity.first_downstream_seen:
                     activity.first_downstream_seen = True
                     if activity.on_first_downstream is not None:
@@ -6834,7 +7090,31 @@ async def pump(reader, up_w, activity=None):
     return total
 
 
-async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
+async def _watch_partial_tls_record(activity, idle_timeout):
+    while True:
+        if not activity.first_downstream_seen:
+            await asyncio.sleep(idle_timeout)
+            continue
+        if not _incomplete_tls_record_visible(activity):
+            await asyncio.sleep(idle_timeout)
+            continue
+        idle_for = time.monotonic() - activity.last_downstream_at
+        if idle_for < idle_timeout:
+            await asyncio.sleep(idle_timeout - idle_for)
+            continue
+        activity.partial_tls_record_stalled = True
+        return
+
+
+async def relay_local_stream(
+    reader,
+    up_w,
+    up_r,
+    writer,
+    activity=None,
+    *,
+    detect_partial_tls_stall=False,
+):
     """Relay both directions with bounded support for an orderly half-close.
 
     A client EOF is propagated upstream when the transport supports TCP
@@ -6844,14 +7124,31 @@ async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
     the bounded cancellation behavior so no pair of FDs remains indefinitely.
     """
     relay_activity = activity or _RelayActivity(last_downstream_at=time.monotonic())
+    relay_activity.track_tls_records = detect_partial_tls_stall
     client_task = asyncio.create_task(pump(reader, up_w, relay_activity))
     server_task = asyncio.create_task(splice(up_r, writer, relay_activity))
     tasks = (client_task, server_task)
+    watchdog_task = (
+        asyncio.create_task(
+            _watch_partial_tls_record(
+                relay_activity,
+                PARTIAL_TLS_RECORD_IDLE,
+            )
+        )
+        if detect_partial_tls_stall
+        else None
+    )
     try:
         done, pending = await asyncio.wait(
-            tasks,
+            tasks + ((watchdog_task,) if watchdog_task is not None else ()),
             return_when=asyncio.FIRST_COMPLETED,
         )
+        if watchdog_task is not None and watchdog_task in done:
+            pending = {task for task in tasks if not task.done()}
+        elif watchdog_task is not None:
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+            pending = {task for task in tasks if not task.done()}
         relay_activity.client_ended_first = (
             client_task in done and server_task not in done
         )
@@ -6893,12 +7190,18 @@ async def relay_local_stream(reader, up_w, up_r, writer, activity=None):
                 totals.append(result)
         return tuple(totals)
     except BaseException:
+        if watchdog_task is not None and not watchdog_task.done():
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
         for task in tasks:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
     finally:
+        if watchdog_task is not None and not watchdog_task.done():
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
         if relay_activity.client_half_closed:
             await _close_stream_writer(up_w)
 
@@ -7273,10 +7576,23 @@ async def _try_exact_system_passthrough(
     up_r, up_w = direct
     started_at = time.monotonic()
     activity = _RelayActivity(last_downstream_at=started_at)
-    result = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    result = await relay_local_stream(
+        reader,
+        up_w,
+        up_r,
+        writer,
+        activity,
+        detect_partial_tls_stall=track_unknown,
+    )
     duration = time.monotonic() - started_at
     if track_unknown and host:
         if _local_stream_stalled(activity, now=started_at + duration):
+            if activity.partial_tls_record_stalled:
+                note_partial_tls_stall(
+                    host,
+                    AUTO_GEPH_STAGE_SYSTEM,
+                    now=started_at + duration,
+                )
             note_local_stream_stall(host, "plain")
         elif _clean_eof_stream_stalled(activity, now=started_at + duration):
             note_clean_eof_stream_stall(
@@ -7414,9 +7730,15 @@ async def _handle_impl(reader, writer):
     # preserve the destination chosen by the user's own DNS/VPN/system route;
     # never move the host into the local desync ladder and never disarm the
     # independent Discord/YouTube path.
-    if is_tls and is_geo_exit_route(host):
-        policy = route_policy(host)
+    runtime_policy = runtime_route_policy(host)
+    if is_tls and runtime_policy["route_class"] == ROUTE_GEO_EXIT:
+        policy = runtime_policy
         geph_owned = bool(_geph_owned)
+        learned_owned_only = bool(policy.get("runtime_learned"))
+        geph_runtime_eligible = bool(
+            not learned_owned_only
+            or (geph_owned and _geph_port == GEPH_OWNED_PORT)
+        )
         if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
             policy,
             GEO_BACKEND_SMART_DNS,
@@ -7458,10 +7780,22 @@ async def _handle_impl(reader, writer):
                 "smart dns runtime probe failed",
                 policy["service_group"],
             )
-        geph_expected = bool(GEPH_ENABLED and (_geph_up or _geph_port or _geph_owned))
+        geph_expected = bool(
+            GEPH_ENABLED
+            and geph_runtime_eligible
+            and (
+                learned_owned_only
+                or _geph_up
+                or _geph_port
+                or _geph_owned
+            )
+        )
         geph_now = time.time()
         geph_cooling = geph_now < _geph_backend_hold_until
-        geph_ready = geo_exit_backend_ready(now=geph_now)
+        geph_ready = bool(
+            geph_runtime_eligible
+            and geo_exit_backend_ready(now=geph_now)
+        )
         geph_failure = "tunnel down"
         geph_suspend = "geo-exit tunnel down"
         if geph_ready and _geph_session_started():
@@ -7583,7 +7917,7 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
 
-    policy = route_policy(host)
+    policy = runtime_policy
     route_class = policy["route_class"]
     unknown_stage = (
         unknown_recovery_stage(host)
@@ -7752,21 +8086,48 @@ async def _handle_impl(reader, writer):
         writer.close()
         return
     t0 = time.monotonic()
-    activity = _RelayActivity(last_downstream_at=t0)
-    res = await relay_local_stream(reader, up_w, up_r, writer, activity)
+    activity = _RelayActivity(
+        last_downstream_at=t0,
+        downstream_bytes=len(server_first),
+        first_downstream_seen=bool(server_first),
+    )
+    detect_partial_tls_stall = route_class == ROUTE_UNKNOWN
+    if detect_partial_tls_stall:
+        _track_tls_records(activity, server_first)
+    res = await relay_local_stream(
+        reader,
+        up_w,
+        up_r,
+        writer,
+        activity,
+        detect_partial_tls_stall=detect_partial_tls_stall,
+    )
     duration = time.monotonic() - t0
     # A partial local stream stall demotes only the exact generic strategy. It
-    # teaches the next client retry to use app-owned Xbox DNS locally; protected
-    # local groups never enter this path and no host is learned for Geph here.
+    # teaches the next client retry to use app-owned Xbox DNS locally. Only
+    # after Xbox and distinct local strategies show the same one-record stall
+    # may a separate owned-Geph payload proof learn a temporary exact overlay.
+    # Protected and direct groups never enter this path.
     if is_tls and host:
         if _local_stream_stalled(activity, now=t0 + duration):
             if via_xbox_dns:
+                if activity.partial_tls_record_stalled:
+                    note_partial_tls_stall(
+                        host,
+                        AUTO_GEPH_STAGE_XBOX_DNS,
+                        now=t0 + duration,
+                    )
                 _record_strategy_result(host, chosen_name, False)
                 if _strat_cache.get(host) == chosen_name:
                     _strat_cache.pop(host, None)
                 _mark_xbox_dns_exhausted(host)
             else:
                 note_local_stream_stall(host, chosen_name)
+                if (
+                    activity.partial_tls_record_stalled
+                    and unknown_stage == UNKNOWN_RECOVERY_LOCAL_LADDER
+                ):
+                    note_local_ladder_partial_stall(host, chosen_name)
         elif _clean_eof_stream_stalled(activity, now=t0 + duration):
             note_clean_eof_stream_stall(
                 host,

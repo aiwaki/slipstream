@@ -219,6 +219,9 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_xbox_dns_candidates", {})
     monkeypatch.setattr(tproxy, "_xbox_dns_attempts", {})
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
+    monkeypatch.setattr(tproxy, "_auto_geph", {})
+    monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
+    monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
@@ -233,6 +236,11 @@ def isolate_runtime_state(monkeypatch):
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(tproxy, "note_local_stream_stall", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_ladder_partial_stall",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(
         tproxy,
         "note_clean_eof_stream_stall",
@@ -546,7 +554,14 @@ def test_unknown_zero_byte_server_close_arms_next_retry_recovery(monkeypatch):
     async def exact_direct(_ip, _port, _first_flight):
         return object(), object()
 
-    async def zero_byte_close(_reader, _up_w, _up_r, _writer, activity):
+    async def zero_byte_close(
+        _reader,
+        _up_w,
+        _up_r,
+        _writer,
+        activity,
+        **_kwargs,
+    ):
         activity.server_ended_first = True
         activity.server_end_at = activity.last_downstream_at
         return 0, 0
@@ -576,7 +591,14 @@ def test_healthy_low_volume_exact_stream_does_not_feed_recovery(monkeypatch):
     async def exact_direct(_ip, _port, _first_flight):
         return object(), object()
 
-    async def healthy_quiet_stream(_reader, _up_w, _up_r, _writer, activity):
+    async def healthy_quiet_stream(
+        _reader,
+        _up_w,
+        _up_r,
+        _writer,
+        activity,
+        **_kwargs,
+    ):
         activity.first_downstream_seen = True
         activity.last_downstream_at += 20.0
         activity.server_ended_first = True
@@ -811,6 +833,120 @@ def test_smart_dns_runtime_miss_falls_back_to_geph_without_local_desync(monkeypa
         ("geph", host),
         ("clear_geph",),
     ]
+
+
+def test_proven_exact_unknown_host_uses_owned_geph_without_local_replay(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "partial-stall.example"
+    client, expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"
+    calls = []
+
+    async def fake_geph(actual_host, port, first_flight):
+        assert (actual_host, port, first_flight) == (
+            host,
+            443,
+            expected_first_flight,
+        )
+        calls.append(("geph", actual_host))
+        return streaming_upstream_response(response)
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.19", 443))
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    tproxy._auto_geph[host] = tproxy.time.time() + 3600
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "dial_via_geph", fake_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_plain",
+        lambda *args, **kwargs: no_backend("direct dial", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "clear_geph_route_failure",
+        lambda: calls.append(("clear_geph",)),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert calls == [("geph", host), ("clear_geph",)]
+
+
+@pytest.mark.parametrize(
+    ("geph_owned", "geph_port"),
+    (
+        (True, tproxy.GEPH_OWNED_PORT),
+        (False, tproxy.GEPH_EXTERNAL_PORT),
+    ),
+)
+def test_learned_unknown_host_without_ready_owned_geph_uses_exact_system_route(
+    monkeypatch,
+    geph_owned,
+    geph_port,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "partial-stall.example"
+    client, _expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"
+    destination = ("203.0.113.19", 443)
+    calls = []
+
+    async def fake_direct(ip, port, first_flight):
+        assert (ip, port) == destination
+        calls.append(("system", ip, port, first_flight))
+        return streaming_upstream_response(response)
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: destination)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", geph_owned)
+    monkeypatch.setattr(tproxy, "_geph_port", geph_port)
+    tproxy._auto_geph[host] = tproxy.time.time() + 3600
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(tproxy, "dial_plain", fake_direct)
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert len(calls) == 1
+    assert calls[0][:3] == ("system", *destination)
 
 
 def test_geo_exit_early_close_cools_only_geph_without_replaying_the_stream(monkeypatch):
@@ -1226,7 +1362,7 @@ def test_geph_half_open_recovers_on_first_payload_before_long_relay_ends(
 
 
 def test_unknown_local_failures_do_not_persist_or_promote_to_geph(monkeypatch):
-    """Unknown recovery starts on a later retry and never promotes to Geph."""
+    """Ordinary connection failures alone never authorize a foreign exit."""
     isolate_runtime_state(monkeypatch)
     host = "unclassified.example"
     calls = []

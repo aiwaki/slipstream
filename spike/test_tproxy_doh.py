@@ -27,7 +27,7 @@ _REAL_RESTORE_PF_LOOPBACK_SKIP = tproxy._restore_pf_loopback_skip
 
 
 @pytest.fixture(autouse=True)
-def reset_smart_dns_state(monkeypatch):
+def reset_smart_dns_state(monkeypatch, tmp_path):
     shutdown_started = tproxy._shutdown_started.is_set()
     pf_teardown_complete = tproxy._pf_teardown_complete.is_set()
     route_policy_trial_generation = tproxy._route_policy_trial_generation
@@ -41,6 +41,10 @@ def reset_smart_dns_state(monkeypatch):
     auto_runtime_failures = {
         host: list(values)
         for host, values in tproxy._auto_geph_runtime_failures.items()
+    }
+    auto_candidates = dict(tproxy._auto_geph_candidates)
+    partial_stalls = {
+        host: dict(values) for host, values in tproxy._local_partial_stalls.items()
     }
     xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
     xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
@@ -92,6 +96,12 @@ def reset_smart_dns_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_restore_pf_loopback_skip", lambda: True)
     monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: False)
     monkeypatch.setattr(tproxy, "_daemon_recovery_record", lambda: None)
+    monkeypatch.setattr(tproxy, "PF_TOKEN_PATH", str(tmp_path / "pf.token"))
+    monkeypatch.setattr(
+        tproxy,
+        "PF_SKIP_LEASE_PATH",
+        str(tmp_path / "pf-skip.lease"),
+    )
     try:
         tproxy._shutdown_started.clear()
         tproxy._pf_teardown_complete.clear()
@@ -110,6 +120,8 @@ def reset_smart_dns_state(monkeypatch):
         tproxy._auto_geph_confirming.clear()
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_runtime_failures.clear()
+        tproxy._auto_geph_candidates.clear()
+        tproxy._local_partial_stalls.clear()
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
@@ -184,6 +196,10 @@ def reset_smart_dns_state(monkeypatch):
         tproxy._auto_geph_last_probe.update(auto_last_probe)
         tproxy._auto_geph_runtime_failures.clear()
         tproxy._auto_geph_runtime_failures.update(auto_runtime_failures)
+        tproxy._auto_geph_candidates.clear()
+        tproxy._auto_geph_candidates.update(auto_candidates)
+        tproxy._local_partial_stalls.clear()
+        tproxy._local_partial_stalls.update(partial_stalls)
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
         tproxy._xbox_dns_attempts.clear()
@@ -1391,7 +1407,7 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
     assert status["backends"]["geph"]["state"] == "up"
     assert status["backends"]["geph"]["active_sessions"] == 0
     auto_geo_exit = status["backends"]["geph"]["auto_geo_exit"]
-    assert auto_geo_exit["enabled"] is False
+    assert auto_geo_exit["enabled"] is True
     assert auto_geo_exit["learned"] == 0
     assert auto_geo_exit["pending"] >= 0
     assert "last_host" not in auto_geo_exit
@@ -3465,7 +3481,7 @@ def test_geo_exit_tunnel_down_cools_geph_but_keeps_private_pf(monkeypatch):
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", False)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
-    monkeypatch.setattr(tproxy, "dial_and_probe", direct_miss)
+    monkeypatch.setattr(tproxy, "dial_plain", direct_miss)
 
     asyncio.run(tproxy._handle_impl(Reader(), writer))
 
@@ -6523,7 +6539,10 @@ def test_geph_restart_drain_blocks_new_sessions(monkeypatch):
     tproxy._geph_session_finished()
 
 
-def test_stale_auto_geph_cache_never_overrides_explicit_policy():
+def test_learned_auto_geph_cache_never_overrides_explicit_policy(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     tproxy._auto_geph.clear()
     tproxy._auto_geph["updates.discord.com"] = tproxy.time.time() + 3600
     tproxy._auto_geph["rr2---sn-ntq7yner.googlevideo.com"] = tproxy.time.time() + 3600
@@ -6538,13 +6557,52 @@ def test_stale_auto_geph_cache_never_overrides_explicit_policy():
         assert not tproxy.is_geo_exit_route("api.spotify.com")
         assert not tproxy.is_geo_exit_route("payments.example.com")
         assert tproxy.is_geo_exit_route("chatgpt.com")
+        assert (
+            tproxy.runtime_route_policy("payments.example.com")["route_class"]
+            == tproxy.ROUTE_GEO_EXIT
+        )
+        assert tproxy.runtime_route_policy(
+            "www.google.com"
+        ) == tproxy.route_policy("www.google.com")
+        assert tproxy.runtime_route_policy(
+            "updates.discord.com"
+        ) == tproxy.route_policy("updates.discord.com")
     finally:
         tproxy._auto_geph.clear()
 
 
-def test_auto_geph_candidate_is_disabled_for_every_host():
-    for host in (
-        "payments.example.com",
+def test_learned_auto_geph_policy_survives_without_current_owned_listener(
+    monkeypatch,
+):
+    host = "payments.example.com"
+    tproxy._auto_geph[host] = tproxy.time.time() + 3600
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_EXTERNAL_PORT)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+
+    try:
+        policy = tproxy.runtime_route_policy(host)
+        assert policy["route_class"] == tproxy.ROUTE_GEO_EXIT
+        assert policy["strategy_set"] == tproxy.STRATEGY_GEPH
+        assert policy["runtime_learned"] is True
+        assert tproxy._auto_geph_learned_exact_host(host)
+    finally:
+        tproxy._auto_geph.clear()
+
+
+def test_auto_geph_candidate_requires_owned_backend_and_exact_local_evidence(
+    monkeypatch,
+):
+    host = "payments.example.com"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
+    tproxy._auto_geph_candidates[host] = 200.0
+    assert tproxy._auto_geph_candidate_allowed(host, now=100.0)
+
+    for protected in (
         "updates.discord.com",
         "rr2---sn-ntq7yner.googlevideo.com",
         "t.me",
@@ -6552,7 +6610,54 @@ def test_auto_geph_candidate_is_disabled_for_every_host():
         "api.spotify.com",
         "chatgpt.com",
     ):
-        assert not tproxy._auto_geph_candidate_allowed(host)
+        tproxy._auto_geph_candidates[protected] = 200.0
+        assert not tproxy._auto_geph_candidate_allowed(protected, now=100.0)
+
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
+
+
+def test_auto_geph_confirmation_cooldown_state_is_bounded(monkeypatch):
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_STATE_MAX", 2)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda _host, _now: True,
+    )
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+    tproxy._auto_geph_last_probe.clear()
+    tproxy._auto_geph_confirming.clear()
+
+    try:
+        for host, now in (
+            ("one.example", 100.0),
+            ("two.example", 101.0),
+            ("three.example", 102.0),
+        ):
+            assert tproxy._schedule_auto_geph_confirmation(
+                host,
+                now=now,
+                runner=lambda _host: None,
+            )
+        assert set(tproxy._auto_geph_last_probe) == {
+            "two.example",
+            "three.example",
+        }
+        assert not tproxy._schedule_auto_geph_confirmation(
+            "two.example",
+            now=103.0,
+            runner=lambda _host: None,
+        )
+
+        assert tproxy._schedule_auto_geph_confirmation(
+            "four.example",
+            now=500.0,
+            runner=lambda _host: None,
+        )
+        assert tproxy._auto_geph_last_probe == {"four.example": 500.0}
+    finally:
+        tproxy._auto_geph_last_probe.clear()
+        tproxy._auto_geph_confirming.clear()
 
 
 def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle():
@@ -6900,6 +7005,118 @@ def test_relay_local_stream_server_first_does_not_become_clean_eof_stall():
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.0)
 
 
+def test_relay_detects_incomplete_tls_record_then_idle_without_client_abort(
+    monkeypatch,
+):
+    class BlockingReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    complete_record = b"\x17\x03\x03\x00\x08" + b"a" * 8
+    partial_record = b"\x17\x03\x03\x40\x11" + b"b" * 128
+    framed_prefix = complete_record + partial_record
+
+    class IncompleteRecordThenBlock:
+        def __init__(self):
+            self.sent = False
+
+        async def read(self, _size):
+            if not self.sent:
+                self.sent = True
+                return framed_prefix
+            await asyncio.Event().wait()
+
+    class Writer:
+        def __init__(self):
+            self.payload = bytearray()
+
+        def write(self, data):
+            self.payload.extend(data)
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    monkeypatch.setattr(tproxy, "PARTIAL_TLS_RECORD_IDLE", 0.01)
+    downstream = Writer()
+    activity = tproxy._RelayActivity(last_downstream_at=tproxy.time.monotonic())
+
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            BlockingReader(),
+            Writer(),
+            IncompleteRecordThenBlock(),
+            downstream,
+            activity,
+            detect_partial_tls_stall=True,
+        ),
+        timeout=0.2,
+    ))
+
+    assert result == (0, 0)
+    assert bytes(downstream.payload) == framed_prefix
+    assert activity.downstream_bytes == len(framed_prefix)
+    assert activity.tls_complete_records == 1
+    assert activity.tls_record_expected == 5 + 0x4011
+    assert activity.partial_tls_record_stalled
+    assert tproxy._local_stream_stalled(activity)
+
+
+def test_complete_quiet_tls_record_is_not_a_partial_stall():
+    record = b"\x17\x03\x03\x40\x11" + b"x" * 0x4011
+    activity = tproxy._RelayActivity(
+        last_downstream_at=tproxy.time.monotonic(),
+        first_downstream_seen=True,
+    )
+    tproxy._track_tls_records(activity, record)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(asyncio.wait_for(
+            tproxy._watch_partial_tls_record(activity, 0.01),
+            timeout=0.04,
+        ))
+
+    assert activity.tls_complete_records == 1
+    assert activity.tls_record_expected == 0
+    assert not activity.partial_tls_record_stalled
+
+
+def test_splice_skips_tls_framing_when_partial_detector_is_disabled():
+    record = b"\x17\x03\x03\x00\x08" + b"x" * 8
+
+    class Reader:
+        def __init__(self):
+            self.payload = record
+
+        async def read(self, _size):
+            payload, self.payload = self.payload, b""
+            return payload
+
+    class Writer:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=tproxy.time.monotonic())
+    assert asyncio.run(tproxy.splice(Reader(), Writer(), activity)) == len(record)
+    assert activity.downstream_bytes == len(record)
+    assert activity.tls_record_buffer is None
+    assert activity.tls_complete_records == 0
+
+
 def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
     host = "crystalidea.example"
     tproxy._strat_cache[host] = "split64+fake"
@@ -7143,55 +7360,124 @@ def test_low_content_stall_schedules_xbox_dns_without_geph(monkeypatch):
     assert not tproxy.is_geo_exit_route(host)
 
 
-def test_unknown_stalls_never_promote_to_geph_after_xbox_dns_attempt(monkeypatch):
+def test_distinct_local_partial_stalls_schedule_owned_geph_confirmation(monkeypatch):
     confirmations = []
     host = "payments.example.com"
     monkeypatch.setattr(tproxy, "_geph_up", True)
-    tproxy._xbox_dns_attempts[host] = 1_000.0
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
-    for idx in range(tproxy.AUTO_GEPH_STORM):
-        tproxy.note_local_result(
-            host,
-            down_bytes=100,
-            duration=tproxy.AUTO_GEPH_HANG + 1,
-            now=100.0 + idx,
-            confirmation_runner=lambda value: confirmations.append(value),
-        )
+    assert not tproxy.note_partial_tls_stall(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        now=100.0,
+        confirmation_runner=confirmations.append,
+    )
+    assert not tproxy.note_partial_tls_stall(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        now=101.0,
+        confirmation_runner=confirmations.append,
+    )
+    assert not tproxy.note_local_ladder_partial_stall(
+        host,
+        "split64+fake",
+        now=102.0,
+        confirmation_runner=confirmations.append,
+    )
+    assert tproxy.note_local_ladder_partial_stall(
+        host,
+        "split16+fake",
+        now=103.0,
+        confirmation_runner=confirmations.append,
+    )
 
-    assert confirmations == []
+    assert confirmations == [host]
     assert not tproxy.is_geo_exit_route(host)
     assert not tproxy._auto_geph
-    snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["enabled"] is False
-    assert snap["learned"] == 0
+    assert tproxy._auto_geph_candidates[host] > 101.0
 
 
-def test_auto_geph_confirmation_never_dials_unknown_host(monkeypatch):
-    probes = []
+def test_local_strategy_stalls_without_system_and_xbox_proof_do_not_confirm(
+    monkeypatch,
+):
+    confirmations = []
+    host = "payments.example.com"
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert not tproxy.note_local_ladder_partial_stall(
+        host,
+        "split64+fake",
+        now=100.0,
+        confirmation_runner=confirmations.append,
+    )
+    assert not tproxy.note_local_ladder_partial_stall(
+        host,
+        "split16+fake",
+        now=101.0,
+        confirmation_runner=confirmations.append,
+    )
+
+    assert confirmations == []
+    assert host not in tproxy._auto_geph_candidates
+
+
+def test_auto_geph_confirmation_learns_only_proven_exact_unknown_host(
+    monkeypatch,
+    tmp_path,
+):
+    probes = []
+    host = "payments.example.com"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_AUTO_GEPH_PATH",
+        str(tmp_path / "autogeph.json"),
+    )
     monkeypatch.setattr(
         tproxy,
         "_auto_geph_payload_probe",
         lambda host: probes.append(host) or 128,
     )
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
 
-    assert not tproxy._confirm_auto_geph("payments.example.com")
-    assert probes == []
+    assert tproxy._confirm_auto_geph(host)
+    assert probes == [host]
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert tproxy.runtime_route_policy(host)["route_class"] == tproxy.ROUTE_GEO_EXIT
+    assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_UNKNOWN
     snap = tproxy.auto_geo_exit_status_snapshot()
-    assert snap["last_state"] == "skipped"
-    assert snap["last_reason"] == "not eligible"
+    assert snap["enabled"] is True
+    assert snap["last_state"] == "learned"
+    assert snap["learned"] == 1
 
 
-def test_load_auto_geph_discards_legacy_learned_routes(tmp_path, monkeypatch):
+def test_load_auto_geph_keeps_only_fresh_unknown_exact_hosts(tmp_path, monkeypatch):
     path = tmp_path / "autogeph.json"
-    path.write_text(json.dumps({"www.google.com": tproxy.time.time() + 3600}))
+    path.write_text(json.dumps({
+        "payments.example.com": tproxy.time.time() + 3600,
+        "www.google.com": tproxy.time.time() + 3600,
+        "expired.example.com": tproxy.time.time() - 1,
+    }))
     monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(path))
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
     tproxy.load_auto_geph()
 
-    assert tproxy._auto_geph == {}
-    assert json.loads(path.read_text()) == {}
-    assert not tproxy.is_geo_exit_route("www.google.com")
+    assert set(tproxy._auto_geph) == {"payments.example.com"}
+    assert set(json.loads(path.read_text())) == {"payments.example.com"}
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert not tproxy.is_geo_exit_route("payments.example.com")
+    assert (
+        tproxy.runtime_route_policy("payments.example.com")["route_class"]
+        == tproxy.ROUTE_GEO_EXIT
+    )
 
 
 def test_network_wide_unknown_stalls_do_not_schedule_foreign_exit(monkeypatch):
@@ -7215,7 +7501,50 @@ def test_network_wide_unknown_stalls_do_not_schedule_foreign_exit(monkeypatch):
     assert not tproxy.is_geo_exit_route("payments.example.com")
 
 
-def test_prune_auto_geph_discards_legacy_learned_hosts(monkeypatch):
+def test_network_wide_partial_stalls_do_not_schedule_foreign_exit(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    now = 100.0
+
+    for idx in range(tproxy.AUTO_GEPH_NET_BAD - 1):
+        host = f"noisy-{idx}.example.com"
+        tproxy._local_partial_stalls[host] = {
+            tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
+            tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+            f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
+            f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
+        }
+    host = "payments.example.com"
+    tproxy.note_partial_tls_stall(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        now=now,
+    )
+    tproxy.note_partial_tls_stall(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        now=now,
+    )
+    tproxy.note_local_ladder_partial_stall(
+        host,
+        "split64+fake",
+        now=now,
+        confirmation_runner=calls.append,
+    )
+    assert not tproxy.note_local_ladder_partial_stall(
+        host,
+        "split16+fake",
+        now=now + 1,
+        confirmation_runner=calls.append,
+    )
+
+    assert calls == []
+    assert host not in tproxy._auto_geph_candidates
+
+
+def test_prune_auto_geph_keeps_fresh_unknown_exact_hosts(monkeypatch):
     saves = []
     tproxy._auto_geph["old.example.com"] = 100.0
     tproxy._auto_geph["fresh.example.com"] = 300.0
@@ -7223,8 +7552,8 @@ def test_prune_auto_geph_discards_legacy_learned_hosts(monkeypatch):
 
     snap = tproxy.auto_geo_exit_status_snapshot(now=200.0)
 
-    assert tproxy._auto_geph == {}
-    assert snap["learned"] == 0
+    assert tproxy._auto_geph == {"fresh.example.com": 300.0}
+    assert snap["learned"] == 1
     assert saves
 
 
