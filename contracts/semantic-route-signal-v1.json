@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.semantic-route-signal",
+  "contract_version": 1,
+  "limits": {
+    "max_payload_bytes": 2048,
+    "max_age_ms": 120000,
+    "max_future_skew_ms": 5000,
+    "cooldown_ms": 300000,
+    "min_confidence_bps": 9000
+  },
+  "privacy": {
+    "allowed_fields": [
+      "schema_version",
+      "signal_id",
+      "source",
+      "host",
+      "category",
+      "confidence_bps",
+      "observed_at_unix_ms",
+      "top_level"
+    ],
+    "forbidden_fields": [
+      "url",
+      "path",
+      "query",
+      "title",
+      "text",
+      "body",
+      "cookies",
+      "form_data"
+    ]
+  },
+  "signal_defaults": {
+    "schema_version": 1,
+    "signal_id": "0123456789abcdef0123456789abcdef",
+    "source": "browser_extension",
+    "host": "weather.com",
+    "category": "regional_access_denied",
+    "confidence_bps": 9500,
+    "observed_at_unix_ms": 1000000,
+    "top_level": true
+  },
+  "context_defaults": {
+    "now_unix_ms": 1050000,
+    "route_class": "unknown",
+    "owned_geph_payload_ready": true,
+    "last_accepted_at_unix_ms": null,
+    "signal_id_seen": false
+  },
+  "parser_vectors": [
+    {
+      "name": "missing-required-field",
+      "remove": "top_level",
+      "expected_error": "invalid_shape"
+    },
+    {
+      "name": "privacy-expanding-url-field",
+      "add": {
+        "url": "https://weather.com/private/path?token=secret"
+      },
+      "expected_error": "invalid_shape"
+    },
+    {
+      "name": "unsupported-version",
+      "replace": {
+        "schema_version": 2
+      },
+      "expected_error": "unsupported_version"
+    },
+    {
+      "name": "invalid-signal-id",
+      "replace": {
+        "signal_id": "ABCDEF"
+      },
+      "expected_error": "invalid_signal_id"
+    },
+    {
+      "name": "invalid-source",
+      "replace": {
+        "source": "web_page"
+      },
+      "expected_error": "invalid_source"
+    },
+    {
+      "name": "ip-literal-is-not-a-hostname",
+      "replace": {
+        "host": "127.0.0.1"
+      },
+      "expected_error": "invalid_host"
+    },
+    {
+      "name": "invalid-category",
+      "replace": {
+        "category": "free_form_page_text"
+      },
+      "expected_error": "invalid_category"
+    },
+    {
+      "name": "invalid-confidence",
+      "replace": {
+        "confidence_bps": 10001
+      },
+      "expected_error": "invalid_confidence"
+    },
+    {
+      "name": "invalid-observation-time",
+      "replace": {
+        "observed_at_unix_ms": 0
+      },
+      "expected_error": "invalid_observed_at"
+    },
+    {
+      "name": "invalid-top-level-type",
+      "replace": {
+        "top_level": "yes"
+      },
+      "expected_error": "invalid_top_level"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "eligible-unknown-host-requires-independent-confirmation",
+      "signal": {
+        "host": "Weather.COM."
+      },
+      "expected": {
+        "accepted": true,
+        "action": "confirm_exact_host_geo_exit",
+        "reason": "accepted",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "subframe-signal-is-rejected",
+      "signal": {
+        "top_level": false
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "not_top_level",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "low-confidence-signal-is-rejected",
+      "signal": {
+        "confidence_bps": 8999
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "low_confidence",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "stale-signal-is-rejected",
+      "signal": {
+        "observed_at_unix_ms": 929999
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "stale",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "future-signal-is-rejected",
+      "signal": {
+        "observed_at_unix_ms": 1055001
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "future",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "replayed-signal-is-rejected",
+      "context": {
+        "signal_id_seen": true
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "replay",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "local-bypass-route-is-protected",
+      "signal": {
+        "host": "gateway.discord.gg"
+      },
+      "context": {
+        "route_class": "local_bypass"
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "protected_route",
+        "host": "gateway.discord.gg"
+      }
+    },
+    {
+      "name": "direct-route-is-protected",
+      "signal": {
+        "host": "www.google.com"
+      },
+      "context": {
+        "route_class": "direct_passthrough"
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "protected_route",
+        "host": "www.google.com"
+      }
+    },
+    {
+      "name": "direct-first-route-is-protected",
+      "signal": {
+        "host": "open.spotify.com"
+      },
+      "context": {
+        "route_class": "direct_first"
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "protected_route",
+        "host": "open.spotify.com"
+      }
+    },
+    {
+      "name": "existing-geo-exit-needs-no-overlay",
+      "signal": {
+        "host": "chatgpt.com"
+      },
+      "context": {
+        "route_class": "geo_exit"
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "already_geo_exit",
+        "host": "chatgpt.com"
+      }
+    },
+    {
+      "name": "unhealthy-owned-backend-cannot-confirm",
+      "context": {
+        "owned_geph_payload_ready": false
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "backend_unavailable",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "host-cooldown-prevents-reload-loop",
+      "context": {
+        "last_accepted_at_unix_ms": 900000
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "rate_limited",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "age-boundary-is-accepted",
+      "signal": {
+        "observed_at_unix_ms": 930000
+      },
+      "expected": {
+        "accepted": true,
+        "action": "confirm_exact_host_geo_exit",
+        "reason": "accepted",
+        "host": "weather.com"
+      }
+    },
+    {
+      "name": "future-skew-boundary-is-accepted",
+      "signal": {
+        "observed_at_unix_ms": 1055000
+      },
+      "expected": {
+        "accepted": true,
+        "action": "confirm_exact_host_geo_exit",
+        "reason": "accepted",
+        "host": "weather.com"
+      }
+    }
+  ]
+}

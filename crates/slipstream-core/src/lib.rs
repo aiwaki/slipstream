@@ -14,4 +14,5 @@ pub mod route_policy_bundle;
 pub mod route_policy_manifest;
 pub mod routing_policy;
 pub mod routing_recovery;
+pub mod semantic_route_signal;
 pub mod status_v2;
