@@ -90,6 +90,13 @@
       "expected_error": "invalid_host"
     },
     {
+      "name": "unicode-case-folding-is-not-host-normalization",
+      "replace": {
+        "host": "weather.KOM"
+      },
+      "expected_error": "invalid_host"
+    },
+    {
       "name": "invalid-category",
       "replace": {
         "category": "free_form_page_text"

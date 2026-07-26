@@ -88,7 +88,7 @@ class SemanticRouteSignalDecision:
 
 
 def _normalize_hostname(value):
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not value.isascii():
         raise SemanticSignalError("invalid_host")
     host = value.lower()
     if host.endswith("."):
