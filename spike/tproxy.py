@@ -2045,6 +2045,7 @@ AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
+AUTO_GEPH_RECOVERY_RETRY_MAX = 4
 AUTO_GEPH_RUNTIME_MISS_WINDOW = 120.0
 AUTO_GEPH_RUNTIME_MISS_STORM = 2
 _auto_fail = {}               # host -> list[monotonic] recent stuck closes
@@ -2724,7 +2725,12 @@ def log_geph_route_failure(host, reason, now=None):
         if action.kind == RECOVERY_INVALIDATE_STRATEGY:
             _forget_auto_geph_host(action.target, "geph runtime retries")
         elif action.kind == RECOVERY_RESTART_OWNED_GEPH:
-            request_owned_geph_restart(host, reason, now=wall_now)
+            request_owned_geph_restart(
+                host,
+                reason,
+                now=wall_now,
+                recommendation_reason=restart_evidence["recommendation_reason"],
+            )
     if not host:
         return
     now = time.monotonic() if now is None else now
@@ -2758,15 +2764,27 @@ def _prune_geph_restart_failures(now):
 
 
 def note_geph_restart_failure(host, reason, now=None):
-    evidence = {"recommended": False, "rate_limited": False}
+    evidence = {
+        "recommended": False,
+        "rate_limited": False,
+        "recommendation_reason": "",
+    }
     now = time.time() if now is None else now
-    if not _geph_up:
+    if (
+        not _geph_up
+        or not _geph_owned
+        or _geph_port != GEPH_OWNED_PORT
+    ):
         return evidence
-    if reason not in {"SOCKS connect failed", "remote closed without response"}:
+    if reason not in {
+        "SOCKS connect failed",
+        "remote closed without response",
+        "payload probe failed",
+        "payload throughput below threshold",
+    }:
         return evidence
     wake_at = _geph_restart_hint.get("last_wake_at", 0.0)
-    if not wake_at or now - wake_at > GEPH_RESTART_WAKE_WINDOW:
-        return evidence
+    recent_wake = bool(wake_at and now - wake_at <= GEPH_RESTART_WAKE_WINDOW)
 
     normalized = normalize_host(host)
     _geph_restart_failures.append((now, normalized, reason[:200]))
@@ -2781,6 +2799,11 @@ def note_geph_restart_failure(host, reason, now=None):
         evidence["rate_limited"] = True
         return evidence
     evidence["recommended"] = True
+    evidence["recommendation_reason"] = (
+        "geo-exit tunnel stale after wake"
+        if recent_wake
+        else "owned geo-exit tunnel payload unhealthy"
+    )
     return evidence
 
 
@@ -2819,13 +2842,18 @@ def _finish_geph_restart_drain():
         _geph_restart_draining = False
 
 
-def request_owned_geph_restart(host, reason, now=None):
+def request_owned_geph_restart(
+    host,
+    reason,
+    now=None,
+    recommendation_reason="owned geo-exit tunnel payload unhealthy",
+):
     if not _geph_owned:
         return False
     now = time.time() if now is None else now
     _geph_restart_hint.update({
         "recommended": True,
-        "reason": "geo-exit tunnel stale after wake",
+        "reason": recommendation_reason,
         "last_failure_host": normalize_host(host),
         "last_failure_reason": reason[:200],
         "last_failure_at": now,
@@ -3467,6 +3495,39 @@ def _schedule_auto_geph_confirmation(host, now=None, runner=None):
         return True
     threading.Thread(target=run, daemon=True).start()
     return True
+
+
+def retry_pending_auto_geph_confirmations(now=None, runner=None):
+    """Retry bounded exact-host proofs once an owned Geph backend recovers."""
+    now = time.monotonic() if now is None else now
+    if (
+        not AUTO_GEPH_ENABLED
+        or not GEPH_ENABLED
+        or not _geph_up
+        or not _geph_owned
+        or _geph_port != GEPH_OWNED_PORT
+    ):
+        return 0
+    with _auto_geph_lock:
+        _prune_local_partial_stalls(now)
+        _prune_local_zero_payload_failures(now)
+        _prune_auto_geph_confirmation_state(now)
+        candidates = [
+            host
+            for host, expiry in sorted(_auto_geph_candidates.items())
+            if expiry > now
+            and host not in _auto_geph_confirming
+            and _auto_geph_candidate_allowed(host, now)
+        ][:AUTO_GEPH_RECOVERY_RETRY_MAX]
+        for host in candidates:
+            # A backend outage must not consume the host's full confirmation
+            # cooldown. This is cleared only on a verified down -> up transition.
+            _auto_geph_last_probe.pop(host, None)
+    retried = 0
+    for host in candidates:
+        if _schedule_auto_geph_confirmation(host, now=now, runner=runner):
+            retried += 1
+    return retried
 
 
 def auto_geo_exit_status_snapshot(now=None):
@@ -4170,6 +4231,7 @@ async def _run_geo_exit_canary(spec):
         health = canary_health_snapshot().get(_canary_key(spec), {})
         if health.get("state") != HEALTH_DEGRADED:
             return "warning"
+        log_geph_route_failure(host, reason)
         return False
     result = await dial_via_geph(host, 443, build_fake_clienthello(host))
     if result:
@@ -4191,6 +4253,7 @@ async def _run_geo_exit_canary(spec):
     health = canary_health_snapshot().get(_canary_key(spec), {})
     if health.get("state") != HEALTH_DEGRADED:
         return "warning"
+    log_geph_route_failure(host, "SOCKS connect failed")
     return False
 
 
@@ -6480,6 +6543,8 @@ def network_monitor(port, voice=True):
                   file=sys.stderr)
             if not first_tick:
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
+            if _geph_up:
+                retry_pending_auto_geph_confirmations()
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
