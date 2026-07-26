@@ -730,14 +730,42 @@ fn listener_pid(port: u16) -> Option<u32> {
         .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
         .output()
         .ok()?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
+    if output.status.success() {
+        if let Some(pid) = String::from_utf8_lossy(&output.stdout)
             .lines()
-            .next()?
-            .trim()
-            .parse()
-            .ok()
-    })?
+            .find_map(|line| line.trim().parse().ok())
+        {
+            return Some(pid);
+        }
+    }
+
+    // Current macOS can hide a root listener from an unprivileged lsof even
+    // though netstat still exposes the owner PID. The PID is verified below.
+    let output = Command::new("/usr/sbin/netstat")
+        .args(["-anv", "-p", "tcp"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| listener_pid_from_netstat(&String::from_utf8_lossy(&output.stdout), port))?
+}
+
+fn listener_pid_from_netstat(raw: &str, port: u16) -> Option<u32> {
+    let endpoint = format!("127.0.0.1.{port}");
+    raw.lines().find_map(|line| {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if !fields
+            .first()
+            .is_some_and(|protocol| protocol.starts_with("tcp"))
+            || fields.get(3).copied() != Some(endpoint.as_str())
+        {
+            return None;
+        }
+        let state = fields.iter().position(|field| *field == "LISTEN")?;
+        let owner = fields.get(state + 5)?;
+        owner.rsplit_once(':')?.1.parse().ok()
+    })
 }
 
 fn process_command(pid: u32) -> Option<String> {
@@ -750,6 +778,18 @@ fn process_command(pid: u32) -> Option<String> {
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .filter(|command| !command.is_empty())
+}
+
+fn process_user(pid: u32) -> Option<String> {
+    let output = Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "user="])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|user| !user.is_empty())
 }
 
 fn process_executable(pid: u32) -> Option<String> {
@@ -774,12 +814,23 @@ fn command_matches_daemon(command: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with(' '))
 }
 
+fn daemon_process_owned(user: &str, command: &str, executable: Option<&str>) -> bool {
+    user == "root"
+        && command_matches_daemon(command)
+        && executable.map_or(true, |path| path == INSTALLED_DAEMON)
+}
+
 fn daemon_listener_owned() -> bool {
     let Some(pid) = listener_pid(1080) else {
         return false;
     };
-    process_executable(pid).as_deref() == Some(INSTALLED_DAEMON)
-        && process_command(pid).is_some_and(|command| command_matches_daemon(&command))
+    let Some(user) = process_user(pid) else {
+        return false;
+    };
+    let Some(command) = process_command(pid) else {
+        return false;
+    };
+    daemon_process_owned(&user, &command, process_executable(pid).as_deref())
 }
 
 fn should_recover_daemon(
@@ -2903,22 +2954,24 @@ mod tests {
     use super::{
         admin_shell_script, app_bundle_for_bundled_daemon, baseline_recovery_detail,
         begin_exit_menu_refresh, command_matches_daemon, command_matches_geph,
-        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
-        daemon_recovery_status_value, daemon_state_text, diagnostic_log_tail,
-        diagnostic_log_tail_from_path, diagnostic_snapshot_value, diagnostic_summary_value,
-        exit_catalog, exit_catalog_availability, finish_exit_menu_refresh, geph_launch_agent_paths,
-        geph_launch_agent_plist, geph_launch_domain, geph_launch_target, geph_launcher_script,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_process_owned,
+        daemon_recovery_shell, daemon_recovery_status_value, daemon_state_text,
+        diagnostic_log_tail, diagnostic_log_tail_from_path, diagnostic_snapshot_value,
+        diagnostic_summary_value, exit_catalog, exit_catalog_availability,
+        finish_exit_menu_refresh, geph_launch_agent_paths, geph_launch_agent_plist,
+        geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_launcher_script_with_log_limits, geph_lifecycle_diagnostic_value, harden_geph_dir,
         install_diagnostic_value, launchd_label_disabled_from_output,
-        launchd_plist_uses_bundled_daemon, log_snapshot_shell, osascript_dialog_args,
-        redact_sensitive_text, remove_owned_geph_runtime, route_class_health,
-        routing_health_summary, shell_quote, should_recover_daemon, should_request_daemon_install,
-        signal_uninstall_ready, sync_private_executable, system_proxy_active_from_scutil,
-        system_proxy_from_status, telegram_proxy_detail, uninstall_dialog_script_for,
-        uninstall_ready_path, uninstall_shell_for_paths, valid_bundled_daemon,
-        write_atomic_if_changed, write_diagnostic_snapshot_file, write_private_atomic,
-        ExitCatalogAvailability, ExitMenuRefreshState, DAEMON_RECOVERY_STATUS_PATH,
-        DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
+        launchd_plist_uses_bundled_daemon, listener_pid_from_netstat, log_snapshot_shell,
+        osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
+        route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
+        should_request_daemon_install, signal_uninstall_ready, sync_private_executable,
+        system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
+        uninstall_dialog_script_for, uninstall_ready_path, uninstall_shell_for_paths,
+        valid_bundled_daemon, write_atomic_if_changed, write_diagnostic_snapshot_file,
+        write_private_atomic, ExitCatalogAvailability, ExitMenuRefreshState,
+        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL,
+        GEPH_STDERR_LOG_FILE,
     };
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -3790,6 +3843,43 @@ mod tests {
             "/usr/local/slipstream/slipstreamd-other --port 1080"
         ));
         assert!(!command_matches_daemon("/tmp/slipstreamd --port 1080"));
+    }
+
+    #[test]
+    fn daemon_listener_ownership_accepts_root_when_mapped_path_is_hidden() {
+        assert!(daemon_process_owned(
+            "root",
+            "/usr/local/slipstream/slipstreamd --port 1080",
+            None
+        ));
+        assert!(daemon_process_owned(
+            "root",
+            "/usr/local/slipstream/slipstreamd --port 1080",
+            Some("/usr/local/slipstream/slipstreamd")
+        ));
+        assert!(!daemon_process_owned(
+            "aiwaki",
+            "/usr/local/slipstream/slipstreamd --port 1080",
+            None
+        ));
+        assert!(!daemon_process_owned(
+            "root",
+            "/usr/local/slipstream/slipstreamd --port 1080",
+            Some("/tmp/slipstreamd")
+        ));
+    }
+
+    #[test]
+    fn listener_pid_falls_back_to_macos_netstat_owner() {
+        let output = "\
+tcp4 0 0 127.0.0.1.9954 *.* LISTEN 0 0 131072 131072 geph5-client:46452 00100
+tcp4 0 0 127.0.0.1.1080 *.* LISTEN 0 0 131072 131072 slipstreamd:50691 00180
+tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 slipstreamd:50691 00182
+";
+
+        assert_eq!(listener_pid_from_netstat(output, 1080), Some(50691));
+        assert_eq!(listener_pid_from_netstat(output, 9954), Some(46452));
+        assert_eq!(listener_pid_from_netstat(output, 9909), None);
     }
 
     #[test]
