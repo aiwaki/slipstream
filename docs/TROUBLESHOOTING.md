@@ -562,24 +562,38 @@ can be caused by mandatory same-origin CSS or JavaScript stopping after an
 initial TLS record, while a bare-HTML view can also survive in browser cache
 after the network path is healthy. Qualification therefore uses a fresh
 owner-only profile, rejects browser error pages, and requires the main document,
-mandatory CSS/JavaScript, and a nonblank DOM. Reopening the user's existing
-profile is diagnostic context, not a routing pass.
+mandatory CSS/JavaScript/images, and a nonblank styled DOM. Reopening the user's
+existing profile is diagnostic context, not a routing pass. A successful
+connect, first TLS payload, or main-document `200` is not enough.
+
+An unknown route can also end immediately after one or more complete TLS
+records. Slipstream cannot decrypt the response to compare HTTP
+`Content-Length`, and it cannot safely replay a request after any server byte
+has reached the browser. It therefore adapts only the next connection. An
+upstream reset or incomplete TLS record inside the first 32 KiB and 10 seconds
+is exact host-and-stage evidence; an orderly short server-first EOF requires
+two observations for the same host and stage inside five minutes. A larger,
+later, client-first, or otherwise healthy completion clears provisional state.
+This advances only the existing system, app-owned Xbox DNS, and local-strategy
+sequence. It is not a per-site rule and one early close cannot select Geph.
 
 When the exact system destination, app-owned Xbox DNS route, and at least two
 distinct local strategies each complete at least one TLS record but leave the
 next syntactically valid framed record incomplete beyond the idle bound,
 Slipstream can run one stronger confirmation for that exact unknown host. A
-connection failure, attempted stage, small response, or complete quiet TLS
-record is not this proof. The confirmation requires a clear network-wide
-failure guard and a real HTTPS payload through the explicitly enabled,
-ownership-verified bundled Geph. Only then may the daemon remember a private,
-expiring exact-host `geo_exit` overlay. The classification remains active during
-an owned-Geph cooldown so the next client retry uses the exact pre-PF system
-destination instead of replaying the failed local ladder. The learned route may
-dial Geph only while the current listener remains verified as Slipstream-owned
-on the owned port. Static policy remains authoritative, and repeated owned-Geph
-runtime misses discard the overlay. This path does not use or stop external
-Geph and does not change system DNS, proxy, PAC, VPN, or PF policy.
+connection failure, attempted stage, or one orderly complete-record close is
+not this proof. The bounded repeated server-first evidence above can contribute
+the same stage observation without weakening the remaining gate. Confirmation
+requires a clear network-wide failure guard and a real HTTPS payload through
+the explicitly enabled, ownership-verified bundled Geph. Only then may the
+daemon remember a private, expiring exact-host `geo_exit` overlay. The
+classification remains active during an owned-Geph cooldown so the next client
+retry uses the exact pre-PF system destination instead of replaying the failed
+local ladder. The learned route may dial Geph only while the current listener
+remains verified as Slipstream-owned on the owned port. Static policy remains
+authoritative, and repeated owned-Geph runtime misses discard the overlay. This
+path does not use or stop external Geph and does not change system DNS, proxy,
+PAC, VPN, or PF policy.
 
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale

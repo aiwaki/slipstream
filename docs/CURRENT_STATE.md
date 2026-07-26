@@ -9,40 +9,40 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-26, through main commit
-`8b4aa52c9a4be77186dfeb525448f89922c17dcf`. PR #219 merged the bounded
-exact-host partial-stream recovery after all required `checks`,
+`f18d8d8190979056f854d186a96db6b0e21b0519`. PR #220 merged the bounded
+same-request recovery for unknown TLS routes after all required `checks`,
 `windows-adapter-contract`, `packaged-app-lifecycle`, dependency, and vendored
-Geph audits passed. PR #220 is open. Its first run exposed the retained
-uninstall race as a concrete plist-path `launchctl bootout` failure. Exact
-service-target bootout, plist fallback, and bounded job-absence proof then
-passed the complete packaged lifecycle. Review subsequently found that local
-strategy address races still collapsed first-payload timeout and confirmed EOF
-into the same `None` result. The current tree records per-candidate
-`payload/closed/pending/failed` outcomes and admits only complete confirmed-close
-evidence to unknown-host Geph promotion. Requalification of that daemon change
-is pending.
+Geph audits passed. The exact main artifact was downloaded, verified, and
+installed; the installed daemon and owned Geph hashes match the bundle. The
+private PF anchor is ready, the Geph listener on `:9954` is ownership-verified,
+no system proxy/PAC is active, and user-managed `111.88.96.50/51` DNS remains
+unchanged.
 
-The workstation has an active exact-main `0.1.9` daemon with its private PF
-anchor, an ownership-verified Geph listener on `:9954`, no system proxy/PAC, and
-unchanged user-managed `111.88.96.50/51` DNS. The reported Crystalidea bare-HTML
-view disappeared after fresh browser state and is now classified as stale
-browser cache rather than current routing evidence. A separate fresh-profile
-Modrinth qualification exposed the next general gap: the system TCP route closes
-before TLS payload, the normal Chrome path reports `ERR_QUIC_PROTOCOL_ERROR`,
-and the verified owned Geph path returns HTTP/2 200. The current
-`codex/unknown-same-request-recovery` branch changes no static host policy. It
-lets any eligible unknown TLS request continue, before any server byte reaches
-the client, through the bounded order `exact system destination -> app-owned
-Xbox DNS -> local strategy ladder -> verified owned Geph`. Geph remains gated
-by confirmed closes from every preceding stage, two distinct local strategies,
-a clear network-wide guard, and a real payload from the currently owned
-listener. Timeout, cancellation, connect failure, and incomplete address-race
-evidence do not count as a close.
-Protected local, direct, reviewed geo-exit, no-SNI, external Geph, and external
-DNS/proxy/PAC/VPN stay excluded. Focused Python contracts pass; full CI,
-exact-artifact installation, fresh-browser subresource/DOM qualification, and a
-separate scoped QUIC design remain open. The current tree passes `718` Python
-tests plus `32` subtests and all `70` macOS tray Rust tests locally.
+Fresh Chrome qualification now loads Modrinth completely through the generic
+unknown-host ladder: document, Nuxt CSS/JS, API, fonts, images, and nonblank DOM
+all succeeded. No Modrinth policy entry was added. Crystalidea exposed a
+different general gap that a main-document or first-payload probe cannot detect:
+the document and stylesheet can succeed while later same-origin JavaScript and
+images end with `ERR_CONNECTION_CLOSED`. A direct transfer of
+`assets/js/all.js` ended with curl code 18 after 16,105 body bytes plus 279
+header bytes, exactly 16 KiB, with 167,039 bytes still declared. The relay
+previously swallowed an upstream reset and `_handle_impl` treated any
+server-first end after complete TLS records as healthy.
+
+The current `codex/unknown-server-early-close-recovery` branch changes no static
+host policy. For eligible unknown TLS traffic only, it records an upstream
+reset or incomplete TLS record inside the first 32 KiB and 10 seconds as exact
+host-and-stage evidence; an orderly short server-first EOF requires two
+observations within five minutes. Evidence advances only the next connection
+through the existing `system -> app-owned Xbox DNS -> local strategies ->
+verified owned Geph` sequence. Once bytes reached the browser, the current
+stream is never replayed. Geph still requires complete evidence from every
+preceding stage, two distinct local strategies, a clear network-wide guard, and
+a real payload from the currently owned listener. Protected local, direct,
+reviewed geo-exit, no-SNI, external Geph, and external DNS/proxy/PAC/VPN remain
+excluded. The current tree passes `725` Python tests plus `32` subtests and all
+`70` macOS tray Rust tests locally; CI, exact-artifact installation, and
+fresh-browser requalification remain open.
 
 ## Resume Protocol
 
@@ -67,7 +67,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon and corrected tray active; launchd unload hardening under packaged requalification | PR #218 closed the hidden-root-listener watchdog gap, but PR #220 reproduced the retained intermittent uninstall failure after its qualification plist rewrite: two plist-path `bootout` attempts left the exact KeepAlive job loaded. The current working tree addresses that concrete boundary with exact service-target bootout, plist fallback, bounded absence polling, and the existing prohibition on signalling any PID while launchd remains loaded. Local contracts pass; packaged lifecycle must pass before merge or workstation installation. A real Steam download still gates stale-status recovery behavior. |
-| M1 - Autonomous Routing V1 | Partial; partial-stream recovery merged, zero-payload same-request recovery under test | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube routing and falls back only to the exact pre-PF system destination. Generic unknown recovery uses one shared bounded sequence rather than per-site rules. PR #219 merged the later-record truncation path. The current branch adds the complementary zero-server-byte path: while the original TLS first flight is still replay-safe, one request may continue from the exact system destination through app-owned Xbox DNS and distinct local strategies, then use only a currently verified owned Geph after complete exact-host evidence and a clear network-wide guard. The first server byte commits the route and forbids replay. Static policy always wins, so protected local, direct, reviewed geo-exit, no-SNI, external Geph, and external DNS/proxy/PAC/VPN remain excluded. Full CI, exact artifact installation, complete CSS/JS, nonblank fresh Safari/Chrome DOM, and scoped QUIC qualification are still required. Full-tunnel `utun*` dormancy is qualified; split/per-app VPN equivalence, the protected owned-Geph workflow, and a physical lid/default-route transition remain open. |
+| M1 - Autonomous Routing V1 | Partial; zero-payload recovery merged, bounded post-payload close evidence under test | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube routing and falls back only to the exact pre-PF system destination. Generic unknown recovery uses one shared bounded sequence rather than per-site rules. PR #219 merged incomplete-record recovery and PR #220 merged replay-safe same-request recovery before the first server byte. The current branch covers the complementary early server-first reset/EOF after payload: only unknown routes, first 32 KiB/10 seconds, repeated evidence for orderly EOF, and next-connection adaptation only. Static policy always wins, so protected local, direct, reviewed geo-exit, no-SNI, external Geph, and external DNS/proxy/PAC/VPN remain excluded. Full CI, exact artifact installation, complete CSS/JS/image plus nonblank fresh Safari/Chrome DOM, and scoped QUIC qualification are still required. Full-tunnel `utun*` dormancy is qualified; split/per-app VPN equivalence, the protected owned-Geph workflow, and a physical lid/default-route transition remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |

@@ -220,6 +220,7 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_xbox_dns_candidates", {})
     monkeypatch.setattr(tproxy, "_xbox_dns_attempts", {})
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
+    monkeypatch.setattr(tproxy, "_server_first_closes", {})
     monkeypatch.setattr(tproxy, "_auto_geph", {})
     monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
     monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
@@ -246,6 +247,11 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "note_clean_eof_stream_stall",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "note_server_first_route_close",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(tproxy, "note_local_result", lambda *_args, **_kwargs: None)
@@ -821,6 +827,66 @@ def test_unknown_first_server_payload_forbids_route_replay(monkeypatch):
 
     assert bytes(writer.payload) == response
     assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "short-server-close.example"
+    response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    observations = []
+
+    async def short_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            probed_upstream_response(response),
+        )
+
+    def record_close(actual_host, stage, activity, **kwargs):
+        observations.append((
+            actual_host,
+            stage,
+            activity.server_ended_first,
+            activity.downstream_bytes,
+            kwargs["duration"],
+        ))
+        return False
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.64", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
+    monkeypatch.setattr(tproxy, "note_server_first_route_close", record_close)
+    monkeypatch.setattr(
+        tproxy,
+        "_try_xbox_dns_local_connect",
+        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert len(observations) == 1
+    actual_host, stage, server_ended_first, downstream_bytes, duration = (
+        observations[0]
+    )
+    assert actual_host == host
+    assert stage == tproxy.AUTO_GEPH_STAGE_SYSTEM
+    assert server_ended_first
+    assert downstream_bytes == len(response)
+    assert duration >= 0
 
 
 def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):

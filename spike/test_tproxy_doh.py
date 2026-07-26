@@ -55,6 +55,9 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     clean_eof_stalls = {
         host: deque(values) for host, values in tproxy._clean_eof_stalls.items()
     }
+    server_first_closes = {
+        key: deque(values) for key, values in tproxy._server_first_closes.items()
+    }
     auto_last_status = dict(tproxy._auto_geph_last_status)
     local_resweep_active = dict(tproxy._local_bypass_resweep_active)
     local_resweep_last = dict(tproxy._local_bypass_resweep_last)
@@ -130,6 +133,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
+        tproxy._server_first_closes.clear()
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
@@ -213,6 +217,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._xbox_dns_attempts.update(xbox_dns_attempts)
         tproxy._clean_eof_stalls.clear()
         tproxy._clean_eof_stalls.update(clean_eof_stalls)
+        tproxy._server_first_closes.clear()
+        tproxy._server_first_closes.update(server_first_closes)
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_active.update(local_resweep_active)
         tproxy._local_bypass_resweep_last.clear()
@@ -7263,6 +7269,172 @@ def test_splice_skips_tls_framing_when_partial_detector_is_disabled():
     assert activity.downstream_bytes == len(record)
     assert activity.tls_record_buffer is None
     assert activity.tls_complete_records == 0
+
+
+def test_splice_records_upstream_transport_reset():
+    class ResetReader:
+        async def read(self, _size):
+            raise ConnectionResetError("reset")
+
+    class Writer:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=tproxy.time.monotonic())
+    assert asyncio.run(tproxy.splice(ResetReader(), Writer(), activity)) == 0
+    assert activity.server_read_failed
+    assert activity.server_end_at > 0
+
+
+def _short_server_first_activity(*, read_failed=False, downstream_bytes=16384):
+    return tproxy._RelayActivity(
+        last_downstream_at=100.1,
+        downstream_bytes=downstream_bytes,
+        server_end_at=100.2,
+        server_ended_first=True,
+        first_downstream_seen=True,
+        server_read_failed=read_failed,
+        tls_record_buffer=bytearray(),
+        tls_complete_records=2,
+    )
+
+
+def test_repeated_short_server_first_closes_advance_exact_unknown_host():
+    host = "large-transfer.example"
+    activity = _short_server_first_activity()
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.2,
+    )
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.3,
+    )
+    assert tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert (
+        tproxy.AUTO_GEPH_STAGE_SYSTEM
+        in tproxy._local_partial_stalls[host]
+    )
+    assert not tproxy.is_geo_exit_route(host)
+
+    for protected in (
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "www.google.com",
+    ):
+        assert not tproxy.note_server_first_route_close(
+            protected,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=0.2,
+            now=100.4,
+        )
+        assert not tproxy._xbox_dns_candidate_active(protected, now=100.4)
+
+
+def test_server_reset_advances_unknown_host_without_waiting_for_repeat():
+    host = "reset-after-record.example"
+    activity = _short_server_first_activity(read_failed=True)
+
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.2,
+    )
+    assert tproxy._xbox_dns_candidate_active(host, now=100.2)
+
+
+def test_late_server_reset_does_not_advance_unknown_host():
+    host = "late-reset.example"
+    activity = _short_server_first_activity(
+        read_failed=True,
+        downstream_bytes=tproxy.SERVER_FIRST_CLOSE_MAX_BYTES + 1,
+    )
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.2,
+    )
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._server_first_closes
+
+
+def test_large_completed_server_close_clears_provisional_evidence():
+    host = "short-close.example"
+    short = _short_server_first_activity()
+    large = _short_server_first_activity(
+        downstream_bytes=tproxy.SERVER_FIRST_CLOSE_MAX_BYTES + 1
+    )
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        short,
+        duration=0.2,
+        now=100.2,
+    )
+    assert tproxy._server_first_closes
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        large,
+        duration=0.2,
+        now=100.3,
+    )
+    assert not tproxy._server_first_closes
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+
+
+def test_repeated_xbox_server_closes_advance_to_local_ladder():
+    host = "xbox-transfer.example"
+    activity = _short_server_first_activity()
+    tproxy._mark_xbox_dns_candidate(host, now=100.0)
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        activity,
+        duration=0.2,
+        now=100.2,
+    )
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        activity,
+        duration=0.2,
+        now=100.3,
+    )
+    assert (
+        tproxy.unknown_recovery_stage(host, now=100.3)
+        == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
+    )
+    assert (
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS
+        in tproxy._local_partial_stalls[host]
+    )
+    assert not tproxy.is_geo_exit_route(host)
 
 
 def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
