@@ -561,10 +561,13 @@ connection failure, attempted stage, small response, or complete quiet TLS
 record is not this proof. The confirmation requires a clear network-wide
 failure guard and a real HTTPS payload through the explicitly enabled,
 ownership-verified bundled Geph. Only then may the daemon remember a private,
-expiring exact-host `geo_exit` overlay, and it applies that overlay only while
-the current listener remains owned. Static policy remains authoritative, and
-repeated Geph runtime misses discard the overlay. This path does not use or stop
-external Geph and does not change system DNS, proxy, PAC, VPN, or PF policy.
+expiring exact-host `geo_exit` overlay. The classification remains active during
+an owned-Geph cooldown so the next client retry uses the exact pre-PF system
+destination instead of replaying the failed local ladder. The learned route may
+dial Geph only while the current listener remains verified as Slipstream-owned
+on the owned port. Static policy remains authoritative, and repeated owned-Geph
+runtime misses discard the overlay. This path does not use or stop external
+Geph and does not change system DNS, proxy, PAC, VPN, or PF policy.
 
 External proxy tools may also leave disabled `ExceptionsList` entries after
 their proxy is turned off. Slipstream reports this as `system_proxy` stale

@@ -3165,15 +3165,12 @@ def runtime_route_policy(host, now=None):
     if (
         policy["route_class"] == ROUTE_UNKNOWN
         and _auto_geph_learned_exact_host(host, now)
-        and GEPH_ENABLED
-        and _geph_up
-        and _geph_owned
-        and _geph_port == GEPH_OWNED_PORT
     ):
         return {
             **policy,
             "route_class": ROUTE_GEO_EXIT,
             "strategy_set": STRATEGY_GEPH,
+            "runtime_learned": True,
         }
     return policy
 
@@ -7695,6 +7692,11 @@ async def _handle_impl(reader, writer):
     if is_tls and runtime_policy["route_class"] == ROUTE_GEO_EXIT:
         policy = runtime_policy
         geph_owned = bool(_geph_owned)
+        learned_owned_only = bool(policy.get("runtime_learned"))
+        geph_runtime_eligible = bool(
+            not learned_owned_only
+            or (geph_owned and _geph_port == GEPH_OWNED_PORT)
+        )
         if smart_dns_route_enabled(host) and runtime_route_circuit_allows(
             policy,
             GEO_BACKEND_SMART_DNS,
@@ -7736,10 +7738,22 @@ async def _handle_impl(reader, writer):
                 "smart dns runtime probe failed",
                 policy["service_group"],
             )
-        geph_expected = bool(GEPH_ENABLED and (_geph_up or _geph_port or _geph_owned))
+        geph_expected = bool(
+            GEPH_ENABLED
+            and geph_runtime_eligible
+            and (
+                learned_owned_only
+                or _geph_up
+                or _geph_port
+                or _geph_owned
+            )
+        )
         geph_now = time.time()
         geph_cooling = geph_now < _geph_backend_hold_until
-        geph_ready = geo_exit_backend_ready(now=geph_now)
+        geph_ready = bool(
+            geph_runtime_eligible
+            and geo_exit_backend_ready(now=geph_now)
+        )
         geph_failure = "tunnel down"
         geph_suspend = "geo-exit tunnel down"
         if geph_ready and _geph_session_started():

@@ -30,9 +30,10 @@ main-document probe: mandatory same-origin CSS completes one TLS record, then
 receives the header of a second `16401`-byte TLS record whose ciphertext never
 finishes on the system, Xbox DNS, and every local strategy. Verified owned Geph
 delivers the complete resource. PR #219 implements the bounded exact-host
-evidence path. Review caught and the branch now fixes three unsafe assumptions:
-attempted stages are not partial-record proof, a retained overlay requires the
-currently verified owned listener, and an idle complete record is not a
+evidence path. Review caught and the branch now fixes four unsafe assumptions:
+attempted stages are not partial-record proof, a learned route may dial only the
+currently verified owned listener, its classification survives backend cooldown
+to preserve exact-system fallback, and an idle complete record is not a
 truncation. The corrected head still needs full CI, merge, exact-artifact
 installation, and browser qualification.
 

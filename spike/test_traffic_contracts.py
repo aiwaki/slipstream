@@ -890,6 +890,65 @@ def test_proven_exact_unknown_host_uses_owned_geph_without_local_replay(monkeypa
     assert calls == [("geph", host), ("clear_geph",)]
 
 
+@pytest.mark.parametrize(
+    ("geph_owned", "geph_port"),
+    (
+        (True, tproxy.GEPH_OWNED_PORT),
+        (False, tproxy.GEPH_EXTERNAL_PORT),
+    ),
+)
+def test_learned_unknown_host_without_ready_owned_geph_uses_exact_system_route(
+    monkeypatch,
+    geph_owned,
+    geph_port,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "partial-stall.example"
+    client, _expected_first_flight = tls_client(host, block_after_hello=False)
+    writer = CaptureWriter()
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"
+    destination = ("203.0.113.19", 443)
+    calls = []
+
+    async def fake_direct(ip, port, first_flight):
+        assert (ip, port) == destination
+        calls.append(("system", ip, port, first_flight))
+        return streaming_upstream_response(response)
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: destination)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", geph_owned)
+    monkeypatch.setattr(tproxy, "_geph_port", geph_port)
+    tproxy._auto_geph[host] = tproxy.time.time() + 3600
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local desync", *args, **kwargs),
+    )
+    monkeypatch.setattr(tproxy, "dial_plain", fake_direct)
+    monkeypatch.setattr(
+        tproxy,
+        "resolve_connection_ips",
+        lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert len(calls) == 1
+    assert calls[0][:3] == ("system", *destination)
+
+
 def test_geo_exit_early_close_cools_only_geph_without_replaying_the_stream(monkeypatch):
     """A consumed zero-byte stream cannot be replayed, but local PF stays active."""
     isolate_runtime_state(monkeypatch)

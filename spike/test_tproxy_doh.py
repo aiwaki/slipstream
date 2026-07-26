@@ -6571,7 +6571,9 @@ def test_learned_auto_geph_cache_never_overrides_explicit_policy(monkeypatch):
         tproxy._auto_geph.clear()
 
 
-def test_learned_auto_geph_cache_requires_current_owned_listener(monkeypatch):
+def test_learned_auto_geph_policy_survives_without_current_owned_listener(
+    monkeypatch,
+):
     host = "payments.example.com"
     tproxy._auto_geph[host] = tproxy.time.time() + 3600
     monkeypatch.setattr(tproxy, "_geph_up", True)
@@ -6579,7 +6581,10 @@ def test_learned_auto_geph_cache_requires_current_owned_listener(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_owned", False)
 
     try:
-        assert tproxy.runtime_route_policy(host) == tproxy.route_policy(host)
+        policy = tproxy.runtime_route_policy(host)
+        assert policy["route_class"] == tproxy.ROUTE_GEO_EXIT
+        assert policy["strategy_set"] == tproxy.STRATEGY_GEPH
+        assert policy["runtime_learned"] is True
         assert tproxy._auto_geph_learned_exact_host(host)
     finally:
         tproxy._auto_geph.clear()
