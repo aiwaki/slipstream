@@ -9,17 +9,25 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-26, through main commit
-`b00381c141ae45f57ba0fe4bc325219060aac79a`. The exact PR #215 artifact was
-runtime-qualified on 2026-07-25 and recorded by PR #216, but it is no longer an
-active workstation installation. On 2026-07-26 its tray watchdog mistook stale
-status under load for a dead daemon, ran privileged recovery, then durably
-disabled and booted out the still-installed launchd job. The private PF anchor
-was cleared and the root listener stopped; the tray and owned Geph LaunchAgent
-remained. Do not re-enable that artifact. The watchdog/load-resilience fix must
-pass review, required CI, exact-artifact installation, and a controlled
-Steam/web/Discord smoke before this checkpoint may again claim an active
-installation. Live PR and `main` state still take precedence over this recorded
-evidence boundary.
+`dcee547bac99ea955799028d9d4522c20c9c7644`. PR #217 removed destructive
+watchdog disable, bounded daemon system commands, and added exact privileged
+listener ownership checks. Its required CI and audits passed. The downloaded
+artifact was built from PR merge tree
+`3f100bb4a41f50422653410fd2faafe9e456dafe`, exactly equal to the merged main
+tree, and its root daemon is currently installed and active on the workstation.
+It preserved the user's `111.88.96.50/51` DNS and disabled proxy/PAC state;
+Crystalidea, Discord API, Steam Store, YouTube web, and Spotify API all returned
+payload through the live daemon without PID replacement or recovery.
+
+Exact installation also found that unprivileged `lsof` omits the root-owned
+TCP/1080 listener on this macOS release even though `netstat` identifies its PID
+and the socket is reachable. The current follow-up implements a `netstat` PID
+fallback plus root/exact-command verification and has passed its local contract
+tests. The root daemon remains active, but the tray is intentionally not running
+until the exact follow-up artifact passes required CI, merges, and replaces the
+installed bundle. A real Steam download with that corrected tray still gates
+full runtime qualification. Live PR and `main` state take precedence over this
+recorded evidence boundary.
 
 ## Resume Protocol
 
@@ -43,7 +51,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Previously qualified artifact is disabled after a reproduced tray-watchdog lifecycle defect | The exact PR #215 artifact installed transactionally and passed the 2026-07-25 workstation smoke while preserving the user's `111.88.96.50/51` DNS and disabled proxy/PAC state. On 2026-07-26 a stale StatusV2 snapshot under Steam activity caused the tray to run `kickstart -k`, then `launchctl disable` and `bootout` after a three-second deadline. The private PF anchor cleared normally, but the root daemon stopped while the tray and owned Geph sidecar remained. Current work makes listener reachability independent liveness evidence, bounds daemon system probes, removes durable disable from automatic recovery, and requires exact runtime requalification before installation is called safe again. |
+| M0 - Safe Base | Corrected root daemon active; exact follow-up tray installation and Steam-load gate remain | PR #217 removed durable watchdog disable and bounded daemon system probes. Its exact-tree artifact installed transactionally and the active root daemon preserved DNS/proxy/PAC state while passing Crystalidea, Discord API, Steam Store, YouTube web, and Spotify API payload probes. Live installation proved that unprivileged `lsof` can omit the root TCP/1080 listener. The current follow-up implements a narrow `netstat` PID fallback with root/exact-command verification; after merge, its exact artifact must replace the installed tray. Full qualification still requires that tray to survive a real Steam download without stale-status recovery, PID replacement, or connectivity loss. |
 | M1 - Autonomous Routing V1 | Partial; generic ordered recovery runtime-qualified | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube routing and falls back only to the exact pre-PF system destination, which may represent direct access, user DNS selection, a user VPN, or their combination. Generic unknown recovery now progresses through the exact system destination, app-owned Xbox DNS, then the local DoH/adaptive ladder instead of looping back after Xbox failure; all three stages were observed on the installed exact-main artifact and no stage may select Geph. `crystalidea.com` resolved to the same address through system, Xbox, and public DNS: its synthetic uncompressed HTTP/2 response still stalled externally after 16,366 of 21,726 bytes, while a browser-like compressed HTTP/2 request completed with 5,605 bytes in 0.819 seconds. This does not justify a site-specific or Geph rule. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |

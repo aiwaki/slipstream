@@ -87,6 +87,13 @@ from child commands. Automatic watchdog cleanup no longer writes
 log timestamps before using `Restart Proxy`; do not infer that Steam, DNS, or
 the log viewer directly disabled routing.
 
+During exact-artifact installation on the same workstation, unprivileged
+`lsof` omitted the live root-owned TCP/1080 listener while `netstat` reported
+`slipstreamd:<pid>` and the socket was reachable. The tray now uses `netstat`
+only as a PID fallback, then requires that PID's exact installed command to run
+as root; a mapped executable returned by `lsof` must still match. Unknown or
+user-owned listeners are never accepted or terminated.
+
 ### Install rolls back with `status missing`
 
 The 2026-07-20 controlled workstation validation found a startup ordering bug.
