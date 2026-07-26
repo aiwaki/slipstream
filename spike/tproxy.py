@@ -3307,17 +3307,59 @@ def note_local_ladder_partial_stall(
     )
 
 
+def _prune_auto_geph_confirmation_state(now):
+    stale_confirmation = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
+    for host, started in list(_auto_geph_confirming.items()):
+        if started < stale_confirmation:
+            _auto_geph_confirming.pop(host, None)
+
+    expired_probe = now - AUTO_GEPH_CONFIRM_COOLDOWN
+    for host, attempted_at in list(_auto_geph_last_probe.items()):
+        if attempted_at < expired_probe and host not in _auto_geph_confirming:
+            _auto_geph_last_probe.pop(host, None)
+
+    while len(_auto_geph_last_probe) > AUTO_GEPH_STATE_MAX:
+        evictable = (
+            (attempted_at, host)
+            for host, attempted_at in _auto_geph_last_probe.items()
+            if host not in _auto_geph_confirming
+        )
+        try:
+            _, oldest = min(evictable)
+        except ValueError:
+            break
+        _auto_geph_last_probe.pop(oldest, None)
+
+
 def _schedule_auto_geph_confirmation(host, now=None, runner=None):
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
     if not _auto_geph_candidate_allowed(h, now):
         return False
     with _auto_geph_lock:
+        _prune_auto_geph_confirmation_state(now)
         last = _auto_geph_last_probe.get(h, 0.0)
         if last and now - last < AUTO_GEPH_CONFIRM_COOLDOWN:
             return False
         started = _auto_geph_confirming.get(h)
         if started is not None and now - started < AUTO_GEPH_CONFIRM_TIMEOUT * 2:
+            return False
+        if h not in _auto_geph_last_probe:
+            while len(_auto_geph_last_probe) >= AUTO_GEPH_STATE_MAX:
+                evictable = (
+                    (attempted_at, host)
+                    for host, attempted_at in _auto_geph_last_probe.items()
+                    if host not in _auto_geph_confirming
+                )
+                try:
+                    _, oldest = min(evictable)
+                except ValueError:
+                    return False
+                _auto_geph_last_probe.pop(oldest, None)
+        if (
+            h not in _auto_geph_confirming
+            and len(_auto_geph_confirming) >= AUTO_GEPH_STATE_MAX
+        ):
             return False
         _auto_geph_last_probe[h] = now
         _auto_geph_confirming[h] = now

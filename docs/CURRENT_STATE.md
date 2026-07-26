@@ -33,9 +33,9 @@ delivers the complete resource. PR #219 implements the bounded exact-host
 evidence path. Review caught and the branch now fixes four unsafe assumptions:
 attempted stages are not partial-record proof, a learned route may dial only the
 currently verified owned listener, its classification survives backend cooldown
-to preserve exact-system fallback, and an idle complete record is not a
-truncation. The corrected head still needs full CI, merge, exact-artifact
-installation, and browser qualification.
+to preserve exact-system fallback, an idle complete record is not a truncation,
+and confirmation cooldown state is capped and expired. The corrected head still
+needs full CI, merge, exact-artifact installation, and browser qualification.
 
 ## Resume Protocol
 

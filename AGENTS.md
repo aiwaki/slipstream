@@ -40,7 +40,10 @@
 
 - Discord and YouTube/googlevideo stay on local bypass. Never route them through
   Geph, including `updates.discord.com` and `gateway.discord.gg`.
-- Geph is only for geo-exit cases where the service rejects Russian IPs.
+- Geph is for reviewed geo-exit policy. A generic unknown host may use only the
+  separately documented, bounded exact-host fallback in `docs/DECISIONS.md`
+  after independent system, app-owned DNS, and multiple local-strategy failures
+  plus a verified owned-Geph payload; this is never a broad local-failure rule.
 - Do not globally block QUIC or UDP/443.
 - Do not mutate external DNS, proxy, PAC, VPN, or user-managed DNS such as
   `xbox-dns.ru`. Its app-owned direct DoH fallback is allowed only for one

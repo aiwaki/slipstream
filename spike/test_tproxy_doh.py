@@ -6617,6 +6617,49 @@ def test_auto_geph_candidate_requires_owned_backend_and_exact_local_evidence(
     assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
 
 
+def test_auto_geph_confirmation_cooldown_state_is_bounded(monkeypatch):
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_STATE_MAX", 2)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda _host, _now: True,
+    )
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+    tproxy._auto_geph_last_probe.clear()
+    tproxy._auto_geph_confirming.clear()
+
+    try:
+        for host, now in (
+            ("one.example", 100.0),
+            ("two.example", 101.0),
+            ("three.example", 102.0),
+        ):
+            assert tproxy._schedule_auto_geph_confirmation(
+                host,
+                now=now,
+                runner=lambda _host: None,
+            )
+        assert set(tproxy._auto_geph_last_probe) == {
+            "two.example",
+            "three.example",
+        }
+        assert not tproxy._schedule_auto_geph_confirmation(
+            "two.example",
+            now=103.0,
+            runner=lambda _host: None,
+        )
+
+        assert tproxy._schedule_auto_geph_confirmation(
+            "four.example",
+            now=500.0,
+            runner=lambda _host: None,
+        )
+        assert tproxy._auto_geph_last_probe == {"four.example": 500.0}
+    finally:
+        tproxy._auto_geph_last_probe.clear()
+        tproxy._auto_geph_confirming.clear()
+
+
 def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle():
     activity = tproxy._RelayActivity(
         last_downstream_at=100.0,
