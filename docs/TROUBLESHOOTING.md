@@ -48,12 +48,44 @@ the tray recovery path relies on this check before touching Slipstream's private
 PF anchor.
 
 After install or upgrade, the tray gives the daemon a short startup grace before
-watchdog recovery. Repeated missing snapshots after that grace still trigger the
-normal daemon repair path.
+watchdog recovery. A missing or stale snapshot does not authorize a restart
+while the daemon's owned loopback listener is still reachable. If both status
+and listener remain unavailable, repair waits for a bounded fresh-status window;
+failure may clear only Slipstream's owned network state and must not write a
+durable disabled override.
 
 The watchdog runs only when launchd reports the Slipstream label explicitly
 enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
 is the explicit action that may reinstall or re-enable it.
+
+### Steam activity is followed by broad failures and an administrator prompt
+
+The 2026-07-26 workstation incident began with a working root daemon carrying
+large Steam flows. Status publication then fell behind while the process and
+listener were still alive. The tray treated three missing two-second polls as a
+dead daemon, opened a privileged repair prompt, ran `kickstart -k`, waited only
+three seconds, then executed `launchctl disable` and `bootout`. The daemon's
+normal shutdown cleared `com.apple/slipstream`; Discord local bypass and every
+other transparent route disappeared together. Slipstream's owned Geph
+LaunchAgent remained alive because this was watchdog recovery, not uninstall.
+
+The decisive launchd sequence was:
+
+```text
+osascript -> authtrampoline -> launchctl kickstart
+launchctl disable system/dev.slipstream.tproxy
+launchctl bootout system /Library/LaunchDaemons/dev.slipstream.tproxy.plist
+```
+
+This sequence occurred before the diagnostic log-copy prompt. Reading or copying
+the root log did not disable the daemon.
+
+Current behavior treats the listener as independent liveness evidence, bounds
+every daemon system command, and strips inherited `Malloc*` debugging variables
+from child commands. Automatic watchdog cleanup no longer writes
+`launchctl disable`. If the same symptom returns, preserve the launchd and root
+log timestamps before using `Restart Proxy`; do not infer that Steam, DNS, or
+the log viewer directly disabled routing.
 
 ### Install rolls back with `status missing`
 

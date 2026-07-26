@@ -8,15 +8,18 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-25, through merged
-[PR #215](https://github.com/aiwaki/slipstream/pull/215) at main commit
-`a679a47cea896cf9dc2d1319b30ce0a5f8f98185`. All required checks, the
-packaged lifecycle, and the Windows adapter qualification passed in
-[run 30161789515](https://github.com/aiwaki/slipstream/actions/runs/30161789515),
-and dependency plus vendored-Geph audits passed in
-[run 30161789500](https://github.com/aiwaki/slipstream/actions/runs/30161789500).
-Live PR and `main` state still take precedence over this recorded evidence
-boundary.
+Last evidence audit: 2026-07-26, through main commit
+`b00381c141ae45f57ba0fe4bc325219060aac79a`. The exact PR #215 artifact was
+runtime-qualified on 2026-07-25 and recorded by PR #216, but it is no longer an
+active workstation installation. On 2026-07-26 its tray watchdog mistook stale
+status under load for a dead daemon, ran privileged recovery, then durably
+disabled and booted out the still-installed launchd job. The private PF anchor
+was cleared and the root listener stopped; the tray and owned Geph LaunchAgent
+remained. Do not re-enable that artifact. The watchdog/load-resilience fix must
+pass review, required CI, exact-artifact installation, and a controlled
+Steam/web/Discord smoke before this checkpoint may again claim an active
+installation. Live PR and `main` state still take precedence over this recorded
+evidence boundary.
 
 ## Resume Protocol
 
@@ -40,7 +43,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Exact-main artifact installed and retained active after workstation smoke | The exact PR #215 artifact installed transactionally, became active without Geph, preserved the user's `111.88.96.50/51` DNS and disabled proxy/PAC state, and kept ChatGPT, Discord API/updater, YouTube web, real `yt-dlp --test` Googlevideo media, and Spotify reachable. The daemon and tray are the only owned processes; Geph remains off. The packaged lifecycle and prior prepared rollback passed, so the qualified artifact remains installed instead of being removed after smoke. |
+| M0 - Safe Base | Previously qualified artifact is disabled after a reproduced tray-watchdog lifecycle defect | The exact PR #215 artifact installed transactionally and passed the 2026-07-25 workstation smoke while preserving the user's `111.88.96.50/51` DNS and disabled proxy/PAC state. On 2026-07-26 a stale StatusV2 snapshot under Steam activity caused the tray to run `kickstart -k`, then `launchctl disable` and `bootout` after a three-second deadline. The private PF anchor cleared normally, but the root daemon stopped while the tray and owned Geph sidecar remained. Current work makes listener reachability independent liveness evidence, bounds daemon system probes, removes durable disable from automatic recovery, and requires exact runtime requalification before installation is called safe again. |
 | M1 - Autonomous Routing V1 | Partial; generic ordered recovery runtime-qualified | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube routing and falls back only to the exact pre-PF system destination, which may represent direct access, user DNS selection, a user VPN, or their combination. Generic unknown recovery now progresses through the exact system destination, app-owned Xbox DNS, then the local DoH/adaptive ladder instead of looping back after Xbox failure; all three stages were observed on the installed exact-main artifact and no stage may select Geph. `crystalidea.com` resolved to the same address through system, Xbox, and public DNS: its synthetic uncompressed HTTP/2 response still stalled externally after 16,366 of 21,726 bytes, while a browser-like compressed HTTP/2 request completed with 5,605 bytes in 0.819 seconds. This does not justify a site-specific or Geph rule. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
