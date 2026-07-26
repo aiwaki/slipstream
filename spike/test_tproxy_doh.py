@@ -6005,6 +6005,88 @@ def test_steam_store_canary_spec_requires_payload_probe():
     assert spec["degrade_after"] == tproxy.GEO_EXIT_RUNTIME_DEGRADE_AFTER
 
 
+def test_owned_geph_backend_canaries_require_three_distinct_payload_hosts():
+    specs = tproxy.OWNED_GEPH_PAYLOAD_CANARY_SPECS
+
+    assert len(specs) >= tproxy.GEPH_RESTART_FAILURE_THRESHOLD
+    assert len({item["host"] for item in specs}) >= tproxy.GEPH_RESTART_MIN_HOSTS
+    assert all(item["payload_method"] == "GET" for item in specs)
+    assert all(item["payload_min_bytes"] > 0 for item in specs)
+
+
+def test_owned_geph_backend_canaries_restart_only_after_all_payloads_fail(
+    monkeypatch,
+):
+    original_geph_up = tproxy._geph_up
+    original_geph_owned = tproxy._geph_owned
+    original_geph_port = tproxy._geph_port
+    original_hint = dict(tproxy._geph_restart_hint)
+    tproxy._geph_restart_failures.clear()
+    tproxy._geph_restart_hint.update({
+        "recommended": False,
+        "last_wake_at": 0.0,
+        "last_requested_at": 0.0,
+    })
+
+    async def no_payload(_host, _spec):
+        return 0
+
+    try:
+        tproxy._geph_up = True
+        tproxy._geph_owned = True
+        tproxy._geph_port = tproxy.GEPH_OWNED_PORT
+        monkeypatch.setattr(tproxy, "_run_geph_payload_probe", no_payload)
+
+        assert not asyncio.run(tproxy._run_owned_geph_payload_canaries())
+
+        hint = tproxy.geph_restart_hint_snapshot()
+        assert hint["recommended"] is True
+        assert hint["reason"] == "owned geo-exit tunnel payload unhealthy"
+        assert hint["failures_5m"] == len(tproxy.OWNED_GEPH_PAYLOAD_CANARY_SPECS)
+        assert hint["hosts_5m"] == len(tproxy.OWNED_GEPH_PAYLOAD_CANARY_SPECS)
+    finally:
+        tproxy._geph_up = original_geph_up
+        tproxy._geph_owned = original_geph_owned
+        tproxy._geph_port = original_geph_port
+        tproxy._geph_restart_failures.clear()
+        tproxy._geph_restart_hint.clear()
+        tproxy._geph_restart_hint.update(original_hint)
+
+
+def test_owned_geph_backend_canary_success_clears_failed_batch(monkeypatch):
+    original_geph_up = tproxy._geph_up
+    original_geph_owned = tproxy._geph_owned
+    original_geph_port = tproxy._geph_port
+    original_hint = dict(tproxy._geph_restart_hint)
+    tproxy._geph_restart_failures.clear()
+
+    async def one_healthy_payload(host, spec):
+        if host == "claude.ai":
+            return spec["payload_min_bytes"]
+        return 0
+
+    try:
+        tproxy._geph_up = True
+        tproxy._geph_owned = True
+        tproxy._geph_port = tproxy.GEPH_OWNED_PORT
+        monkeypatch.setattr(
+            tproxy,
+            "_run_geph_payload_probe",
+            one_healthy_payload,
+        )
+
+        assert asyncio.run(tproxy._run_owned_geph_payload_canaries())
+        assert not tproxy._geph_restart_failures
+        assert not tproxy.geph_restart_hint_snapshot()["recommended"]
+    finally:
+        tproxy._geph_up = original_geph_up
+        tproxy._geph_owned = original_geph_owned
+        tproxy._geph_port = original_geph_port
+        tproxy._geph_restart_failures.clear()
+        tproxy._geph_restart_hint.clear()
+        tproxy._geph_restart_hint.update(original_hint)
+
+
 def test_geo_exit_payload_canary_warns_on_short_payload(monkeypatch):
     original = dict(tproxy._route_health[tproxy.SERVICE_STEAM_STORE])
     original_window = list(tproxy._route_failure_windows[tproxy.SERVICE_STEAM_STORE])
@@ -6174,6 +6256,40 @@ def test_geo_exit_canary_warns_before_degrade_threshold(monkeypatch):
         q = tproxy._route_failure_windows[tproxy.SERVICE_OPENAI]
         q.clear()
         q.extend(original_window)
+
+
+def test_socks_only_geo_canary_never_contributes_payload_restart_evidence(
+    monkeypatch,
+):
+    original = dict(tproxy._route_health[tproxy.SERVICE_OPENAI])
+    original_geph_up = tproxy._geph_up
+    original_geph_owned = tproxy._geph_owned
+    original_geph_port = tproxy._geph_port
+    tproxy._geph_restart_failures.clear()
+
+    async def no_connect(_host, _port, _first_flight):
+        return None
+
+    try:
+        tproxy._geph_up = True
+        tproxy._geph_owned = True
+        tproxy._geph_port = tproxy.GEPH_OWNED_PORT
+        monkeypatch.setattr(tproxy, "smart_dns_available", lambda: False)
+        monkeypatch.setattr(tproxy, "dial_via_geph", no_connect)
+        spec = {
+            "name": "openai_socks_only",
+            "group": tproxy.SERVICE_OPENAI,
+            "host": "chatgpt.com",
+        }
+
+        assert not asyncio.run(tproxy._run_geo_exit_canary(spec))
+        assert not tproxy._geph_restart_failures
+    finally:
+        tproxy._route_health[tproxy.SERVICE_OPENAI] = original
+        tproxy._geph_up = original_geph_up
+        tproxy._geph_owned = original_geph_owned
+        tproxy._geph_port = original_geph_port
+        tproxy._geph_restart_failures.clear()
 
 
 def test_runtime_geo_exit_failures_require_repeated_signal():

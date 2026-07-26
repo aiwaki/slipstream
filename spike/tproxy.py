@@ -3635,6 +3635,30 @@ CANARY_SPECS = (
     {"name": "telegram_proxy", "group": SERVICE_TELEGRAM, "host": ""},
 )
 
+OWNED_GEPH_PAYLOAD_CANARY_SPECS = (
+    {
+        "name": "owned_geph_openai_payload",
+        "host": "chatgpt.com",
+        "payload_method": "GET",
+        "payload_path": "/",
+        "payload_min_bytes": 512,
+    },
+    {
+        "name": "owned_geph_anthropic_payload",
+        "host": "claude.ai",
+        "payload_method": "GET",
+        "payload_path": "/",
+        "payload_min_bytes": 512,
+    },
+    {
+        "name": "owned_geph_steam_payload",
+        "host": "store.steampowered.com",
+        "payload_method": "GET",
+        "payload_path": "/",
+        "payload_min_bytes": 2048,
+    },
+)
+
 
 def _canary_delay(now=None):
     now = time.monotonic() if now is None else now
@@ -4253,7 +4277,75 @@ async def _run_geo_exit_canary(spec):
     health = canary_health_snapshot().get(_canary_key(spec), {})
     if health.get("state") != HEALTH_DEGRADED:
         return "warning"
-    log_geph_route_failure(host, "SOCKS connect failed")
+    return False
+
+
+def _request_owned_geph_restart_from_payload_failures(failures, now=None):
+    if not failures:
+        return False
+    wall_now = time.time() if now is None else now
+    restart_evidence = {
+        "recommended": False,
+        "rate_limited": False,
+        "recommendation_reason": "",
+    }
+    for host, reason in failures:
+        restart_evidence = note_geph_restart_failure(host, reason, now=wall_now)
+    last_host, last_reason = failures[-1]
+    outcome = connection_outcome_for_host(
+        last_host,
+        False,
+        GEO_BACKEND_GEPH,
+        failure_phase=FAILURE_PHASE_FIRST_PAYLOAD,
+        reason=last_reason,
+    )
+    recovery = reduce_connection_outcome(
+        outcome,
+        RecoveryContext(
+            backend_owned=bool(_geph_owned),
+            restart_recommended=restart_evidence["recommended"],
+            restart_rate_limited=restart_evidence["rate_limited"],
+        ),
+    )
+    for action in recovery:
+        if action.kind == RECOVERY_RESTART_OWNED_GEPH:
+            return request_owned_geph_restart(
+                last_host,
+                last_reason,
+                now=wall_now,
+                recommendation_reason=restart_evidence["recommendation_reason"],
+            )
+    return False
+
+
+async def _run_owned_geph_payload_canaries():
+    if (
+        not GEPH_ENABLED
+        or not _geph_up
+        or not _geph_owned
+        or _geph_port != GEPH_OWNED_PORT
+    ):
+        return None
+    results = await asyncio.gather(
+        *(
+            _run_geph_payload_probe(spec["host"], spec)
+            for spec in OWNED_GEPH_PAYLOAD_CANARY_SPECS
+        ),
+        return_exceptions=True,
+    )
+    failures = []
+    for spec, result in zip(OWNED_GEPH_PAYLOAD_CANARY_SPECS, results):
+        payload_bytes = result if isinstance(result, int) else 0
+        if payload_bytes >= _local_payload_min_bytes(spec):
+            clear_geph_route_failure()
+            return True
+        reason = (
+            "payload throughput below threshold"
+            if payload_bytes > 0
+            else "payload probe failed"
+        )
+        failures.append((spec["host"], reason))
+    _request_owned_geph_restart_from_payload_failures(failures)
     return False
 
 
@@ -4302,6 +4394,10 @@ async def run_route_canaries(reason="periodic"):
                 ok=False,
                 reason=f"canary error: {e}",
             )
+    try:
+        await _run_owned_geph_payload_canaries()
+    except Exception as e:
+        print(f">> owned Geph payload canary failed: {e}", file=sys.stderr)
     _canary_state.update({
         "last_run": time.time(),
         "last_reason": reason,

@@ -30,7 +30,7 @@ restart path only for the ownership-verified bundled listener. Soft canaries
 remain warnings. A verified owned-Geph down-to-up transition retries at most
 four still-eligible exact-host confirmations and never admits protected
 Discord, YouTube, Googlevideo, direct, reviewed geo-exit, or no-SNI traffic.
-The current tree passes `731` Python tests plus `32` subtests and all `70`
+The current tree passes `735` Python tests plus `32` subtests and all `70`
 macOS tray Rust tests locally; CI, merge, and exact-artifact qualification
 remain open. Semantic regional-denial pages remain a separate
 browser-observation contract because transparent TLS routing cannot inspect
