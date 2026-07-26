@@ -19,6 +19,12 @@ Slipstream routing decisions and bounded recovery primitives.
   adapters without touching the network.
 - `status-v2-v1.json` freezes one complete privacy-bounded StatusV2 payload and
   its legacy tray projection, including additive-field preservation.
+- `semantic-route-signal-v1.json` freezes the strict browser-companion signal
+  parser and pure decision boundary. Only a fresh, high-confidence top-level
+  regional-denial category for an unknown host may request independent
+  geo-exit confirmation. URL paths, queries, page text, cookies, and arbitrary
+  fields are rejected; direct, local-bypass, and existing geo-exit policy
+  remains authoritative.
 - `route-policy-manifest-v1.json` freezes manifest normalization, structured
   validation failures, bounded input limits, and effective first-match
   protection for local-bypass and direct-first domains.
