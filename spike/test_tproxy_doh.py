@@ -6938,6 +6938,62 @@ def test_failed_async_dials_close_and_wait_for_the_open_writer(monkeypatch):
     assert all((writer.closed, writer.waited) == (1, 1) for writer in writers)
 
 
+def test_route_probe_distinguishes_confirmed_eof_from_timeout(monkeypatch):
+    class Reader:
+        def __init__(self, blocks):
+            self.blocks = blocks
+
+        async def read(self, _size):
+            if self.blocks:
+                await asyncio.Event().wait()
+            return b""
+
+    class Writer:
+        def __init__(self):
+            self.closed = 0
+            self.waited = 0
+
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            self.closed += 1
+
+        async def wait_closed(self):
+            self.waited += 1
+
+    readers = [Reader(False), Reader(True)]
+    writers = []
+
+    async def open_connection(*_args, **_kwargs):
+        writer = Writer()
+        writers.append(writer)
+        return readers.pop(0), writer
+
+    monkeypatch.setattr(tproxy.asyncio, "open_connection", open_connection)
+
+    async def probe(block_timeout):
+        outcomes = []
+        token = tproxy._ROUTE_PROBE_OUTCOME_SINK.set(outcomes.append)
+        try:
+            assert await tproxy.dial_and_probe(
+                "127.0.0.1",
+                443,
+                b"hello",
+                probe_timeout=0.01 if block_timeout else 1.0,
+            ) is None
+        finally:
+            tproxy._ROUTE_PROBE_OUTCOME_SINK.reset(token)
+        return outcomes
+
+    assert asyncio.run(probe(False)) == [tproxy.ROUTE_PROBE_CLOSED]
+    assert asyncio.run(probe(True)) == [tproxy.ROUTE_PROBE_PENDING]
+    assert all((writer.closed, writer.waited) == (1, 1) for writer in writers)
+
+
 def test_relay_soak_leaves_no_half_open_tasks():
     class EofReader:
         async def read(self, _size):

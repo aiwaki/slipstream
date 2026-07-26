@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import atexit
 import base64
+import contextvars
 import errno
 import filecmp
 import fcntl
@@ -2027,6 +2028,14 @@ AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
 SYSTEM_PROBE_PAYLOAD = "payload"
 SYSTEM_PROBE_CLOSED = "closed"
 SYSTEM_PROBE_PENDING = "pending"
+ROUTE_PROBE_PAYLOAD = "payload"
+ROUTE_PROBE_CLOSED = "closed"
+ROUTE_PROBE_PENDING = "pending"
+ROUTE_PROBE_FAILED = "failed"
+_ROUTE_PROBE_OUTCOME_SINK = contextvars.ContextVar(
+    "slipstream_route_probe_outcome_sink",
+    default=None,
+)
 AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
@@ -7518,18 +7527,35 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
     try:
         up_r, up_w = await asyncio.wait_for(
             asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
+    except asyncio.CancelledError:
+        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+        raise
     except Exception:
+        _publish_route_probe_outcome(ROUTE_PROBE_FAILED)
         return None
     connected = False
+    flight_sent = False
     try:
         up_w.write(first_blob)
         await up_w.drain()
+        flight_sent = True
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
+            _publish_route_probe_outcome(ROUTE_PROBE_PAYLOAD)
             connected = True
             return up_r, up_w, data
-    except (asyncio.TimeoutError, OSError):
-        pass
+        _publish_route_probe_outcome(ROUTE_PROBE_CLOSED)
+    except asyncio.CancelledError:
+        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+        raise
+    except asyncio.TimeoutError:
+        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+    except ConnectionResetError:
+        _publish_route_probe_outcome(
+            ROUTE_PROBE_CLOSED if flight_sent else ROUTE_PROBE_FAILED
+        )
+    except OSError:
+        _publish_route_probe_outcome(ROUTE_PROBE_FAILED)
     finally:
         if not connected:
             await _close_stream_writer(up_w)
@@ -7543,8 +7569,13 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
     try:
         up_r, up_w = await asyncio.wait_for(
             asyncio.open_connection(real_ip, port, family=socket.AF_INET), timeout=5)
+    except asyncio.CancelledError:
+        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+        raise
     except Exception:
+        _publish_route_probe_outcome(ROUTE_PROBE_FAILED)
         return None
+    flight_sent = False
     try:
         s = up_w.get_extra_info("socket")
         src_ip, src_port = s.getsockname()
@@ -7554,12 +7585,24 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         )
         up_w.write(first_blob)
         await up_w.drain()
+        flight_sent = True
         data = await asyncio.wait_for(up_r.read(65536), probe_timeout)
         if data:
+            _publish_route_probe_outcome(ROUTE_PROBE_PAYLOAD)
             connected = True
             return up_r, up_w, data
-    except (asyncio.TimeoutError, OSError):
-        pass
+        _publish_route_probe_outcome(ROUTE_PROBE_CLOSED)
+    except asyncio.CancelledError:
+        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+        raise
+    except asyncio.TimeoutError:
+        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+    except ConnectionResetError:
+        _publish_route_probe_outcome(
+            ROUTE_PROBE_CLOSED if flight_sent else ROUTE_PROBE_FAILED
+        )
+    except OSError:
+        _publish_route_probe_outcome(ROUTE_PROBE_FAILED)
     finally:
         if not connected:
             await _close_stream_writer(up_w)
@@ -7573,6 +7616,20 @@ async def dial_strategy(ip, port, head, body, host, strat):
     return await dial_and_probe(ip, port, blob)
 
 
+def _publish_route_probe_outcome(outcome):
+    sink = _ROUTE_PROBE_OUTCOME_SINK.get()
+    if sink is not None:
+        sink(outcome)
+
+
+def _probe_attempts_confirm_close(outcomes, attempted):
+    return (
+        attempted > 0
+        and len(outcomes) == attempted
+        and all(outcome == ROUTE_PROBE_CLOSED for outcome in outcomes.values())
+    )
+
+
 async def _race_probe_addresses(
     host,
     port,
@@ -7581,16 +7638,38 @@ async def _race_probe_addresses(
     *,
     policy,
     backend,
+    attempt_outcomes=None,
 ):
     """Race complete first-payload probes within one preselected route."""
     candidates = tuple(addresses)
     if not candidates:
         return None, 0
+    async def tracked_dial_candidate(address):
+        if attempt_outcomes is None:
+            return await dial_candidate(address)
+
+        def record_outcome(outcome):
+            attempt_outcomes[address] = outcome
+
+        token = _ROUTE_PROBE_OUTCOME_SINK.set(record_outcome)
+        try:
+            result = await dial_candidate(address)
+            attempt_outcomes.setdefault(address, ROUTE_PROBE_FAILED)
+            return result
+        except asyncio.CancelledError:
+            attempt_outcomes.setdefault(address, ROUTE_PROBE_PENDING)
+            raise
+        except Exception:
+            attempt_outcomes.setdefault(address, ROUTE_PROBE_FAILED)
+            raise
+        finally:
+            _ROUTE_PROBE_OUTCOME_SINK.reset(token)
+
     raced = await connection_probe.race_probe_dials(
         host or candidates[0],
         port,
         candidates,
-        dial_candidate,
+        tracked_dial_candidate,
         service_group=policy.get("service_group") or SERVICE_GENERIC,
         route_class=policy.get("route_class") or ROUTE_UNKNOWN,
         backend_id=backend,
@@ -7611,20 +7690,32 @@ async def _race_probe_addresses(
     ), attempted
 
 
-async def _try_xbox_dns_local_connect(host, port, head, body):
+async def _try_xbox_dns_local_connect(
+    host,
+    port,
+    head,
+    body,
+    *,
+    attempt_summary=None,
+):
     """Try the app-owned Xbox DNS answer locally, never through Geph."""
     if route_policy(host)["route_class"] != ROUTE_UNKNOWN:
         return None
     ips = await xbox_dns_resolve_async(host)
     plain = STRAT_BY_NAME["plain"]
-    raced, _attempted = await _race_probe_addresses(
+    outcomes = {}
+    raced, attempted = await _race_probe_addresses(
         host,
         port,
         ips[:DEFAULT_IP_ATTEMPT_LIMIT],
         lambda ip: dial_strategy(ip, port, head, body, host, plain),
         policy=route_policy(host),
         backend=BACKEND_LOCAL_ENGINE,
+        attempt_outcomes=outcomes,
     )
+    if attempt_summary is not None:
+        attempt_summary["attempted"] = attempted
+        attempt_summary["outcomes"] = outcomes
     return raced
 
 
@@ -8150,14 +8241,25 @@ async def _handle_impl(reader, writer):
         and host
         and unknown_stage == UNKNOWN_RECOVERY_XBOX_DNS
     ):
-        xbox = await _try_xbox_dns_local_connect(host, dst_port, head, body)
+        xbox_summary = {}
+        xbox = await _try_xbox_dns_local_connect(
+            host,
+            dst_port,
+            head,
+            body,
+            attempt_summary=xbox_summary,
+        )
         if xbox:
             chosen, result = xbox
             chosen_name = "plain"
             via_xbox_dns = True
             _record_strategy_result(host, chosen_name, True)
         else:
-            note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_XBOX_DNS)
+            if _probe_attempts_confirm_close(
+                xbox_summary.get("outcomes") or {},
+                int(xbox_summary.get("attempted") or 0),
+            ):
+                note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_XBOX_DNS)
             _mark_xbox_dns_exhausted(host)
             unknown_stage = UNKNOWN_RECOVERY_LOCAL_LADDER
 
@@ -8217,6 +8319,7 @@ async def _handle_impl(reader, writer):
         attempts = 0
         for strat in strategy_order(host):
             strat_ok = False
+            strategy_outcomes = {}
             remaining = max_attempts - attempts
             candidates = real_ips[:min(ip_limit, remaining)]
             raced, attempted = await _race_probe_addresses(
@@ -8233,6 +8336,7 @@ async def _handle_impl(reader, writer):
                 ),
                 policy=policy,
                 backend=BACKEND_LOCAL_ENGINE,
+                attempt_outcomes=strategy_outcomes,
             )
             attempts += max(1, attempted) if candidates else 0
             if raced:
@@ -8242,7 +8346,13 @@ async def _handle_impl(reader, writer):
                 _record_strategy_result(host, strat["name"], True)
             if not strat_ok:
                 _record_strategy_result(host, strat["name"], False)
-                if route_class == ROUTE_UNKNOWN:
+                if (
+                    route_class == ROUTE_UNKNOWN
+                    and _probe_attempts_confirm_close(
+                        strategy_outcomes,
+                        attempted,
+                    )
+                ):
                     note_zero_payload_route_failure(
                         host,
                         f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strat['name']}",

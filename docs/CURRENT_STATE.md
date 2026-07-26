@@ -12,14 +12,15 @@ Last evidence audit: 2026-07-26, through main commit
 `8b4aa52c9a4be77186dfeb525448f89922c17dcf`. PR #219 merged the bounded
 exact-host partial-stream recovery after all required `checks`,
 `windows-adapter-contract`, `packaged-app-lifecycle`, dependency, and vendored
-Geph audits passed. PR #220 is open at
-`49cc31ded485f200e46a33b612996c288893a141`: `checks`,
-`windows-adapter-contract`, dependency, and vendored-Geph audits passed, while
-the first packaged lifecycle exposed the retained uninstall race as a concrete
-plist-path `launchctl bootout` failure. The working tree now prefers the exact
-`system/dev.slipstream.tproxy` service target, keeps plist-path bootout only as a
-fallback, and requires bounded proof that the job is absent before signalling
-any verified process. Requalification is pending.
+Geph audits passed. PR #220 is open. Its first run exposed the retained
+uninstall race as a concrete plist-path `launchctl bootout` failure. Exact
+service-target bootout, plist fallback, and bounded job-absence proof then
+passed the complete packaged lifecycle. Review subsequently found that local
+strategy address races still collapsed first-payload timeout and confirmed EOF
+into the same `None` result. The current tree records per-candidate
+`payload/closed/pending/failed` outcomes and admits only complete confirmed-close
+evidence to unknown-host Geph promotion. Requalification of that daemon change
+is pending.
 
 The workstation has an active exact-main `0.1.9` daemon with its private PF
 anchor, an ownership-verified Geph listener on `:9954`, no system proxy/PAC, and
@@ -33,12 +34,14 @@ and the verified owned Geph path returns HTTP/2 200. The current
 lets any eligible unknown TLS request continue, before any server byte reaches
 the client, through the bounded order `exact system destination -> app-owned
 Xbox DNS -> local strategy ladder -> verified owned Geph`. Geph remains gated
-by failures from every preceding stage, two distinct local strategies, a clear
-network-wide guard, and a real payload from the currently owned listener.
+by confirmed closes from every preceding stage, two distinct local strategies,
+a clear network-wide guard, and a real payload from the currently owned
+listener. Timeout, cancellation, connect failure, and incomplete address-race
+evidence do not count as a close.
 Protected local, direct, reviewed geo-exit, no-SNI, external Geph, and external
 DNS/proxy/PAC/VPN stay excluded. Focused Python contracts pass; full CI,
 exact-artifact installation, fresh-browser subresource/DOM qualification, and a
-separate scoped QUIC design remain open. The current tree passes `716` Python
+separate scoped QUIC design remain open. The current tree passes `718` Python
 tests plus `32` subtests and all `70` macOS tray Rust tests locally.
 
 ## Resume Protocol
