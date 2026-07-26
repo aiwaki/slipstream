@@ -6700,6 +6700,7 @@ class _RelayActivity:
     tls_record_expected: int = 0
     tls_complete_records: int = 0
     tls_framing_valid: bool = True
+    track_tls_records: bool = False
     on_first_downstream: object = None
 
 
@@ -7005,7 +7006,8 @@ async def splice(src, dst, activity=None):
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
                 activity.downstream_bytes += len(data)
-                _track_tls_records(activity, data)
+                if activity.track_tls_records:
+                    _track_tls_records(activity, data)
                 if not activity.first_downstream_seen:
                     activity.first_downstream_seen = True
                     if activity.on_first_downstream is not None:
@@ -7083,6 +7085,7 @@ async def relay_local_stream(
     the bounded cancellation behavior so no pair of FDs remains indefinitely.
     """
     relay_activity = activity or _RelayActivity(last_downstream_at=time.monotonic())
+    relay_activity.track_tls_records = detect_partial_tls_stall
     client_task = asyncio.create_task(pump(reader, up_w, relay_activity))
     server_task = asyncio.create_task(splice(up_r, writer, relay_activity))
     tasks = (client_task, server_task)
@@ -8032,14 +8035,16 @@ async def _handle_impl(reader, writer):
         downstream_bytes=len(server_first),
         first_downstream_seen=bool(server_first),
     )
-    _track_tls_records(activity, server_first)
+    detect_partial_tls_stall = route_class == ROUTE_UNKNOWN
+    if detect_partial_tls_stall:
+        _track_tls_records(activity, server_first)
     res = await relay_local_stream(
         reader,
         up_w,
         up_r,
         writer,
         activity,
-        detect_partial_tls_stall=(route_class == ROUTE_UNKNOWN),
+        detect_partial_tls_stall=detect_partial_tls_stall,
     )
     duration = time.monotonic() - t0
     # A partial local stream stall demotes only the exact generic strategy. It

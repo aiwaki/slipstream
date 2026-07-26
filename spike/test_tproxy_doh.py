@@ -7038,6 +7038,37 @@ def test_complete_quiet_tls_record_is_not_a_partial_stall():
     assert not activity.partial_tls_record_stalled
 
 
+def test_splice_skips_tls_framing_when_partial_detector_is_disabled():
+    record = b"\x17\x03\x03\x00\x08" + b"x" * 8
+
+    class Reader:
+        def __init__(self):
+            self.payload = record
+
+        async def read(self, _size):
+            payload, self.payload = self.payload, b""
+            return payload
+
+    class Writer:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    activity = tproxy._RelayActivity(last_downstream_at=tproxy.time.monotonic())
+    assert asyncio.run(tproxy.splice(Reader(), Writer(), activity)) == len(record)
+    assert activity.downstream_bytes == len(record)
+    assert activity.tls_record_buffer is None
+    assert activity.tls_complete_records == 0
+
+
 def test_partial_stream_stall_marks_exact_xbox_dns_candidate():
     host = "crystalidea.example"
     tproxy._strat_cache[host] = "split64+fake"
