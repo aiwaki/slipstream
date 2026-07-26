@@ -9,29 +9,34 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-26, through main commit
-`474d0fee031f5d63bc1ac9be31e5e60c724188cf`. PR #222 merged
-ownership-verified Geph payload recovery after all required `checks`,
-`windows-adapter-contract`, `packaged-app-lifecycle`, dependency, and vendored
-Geph audits passed. Control RPC and listener readiness are no longer treated as
-payload health: repeated independent hard canaries may restart only the exact
-owned Geph, and a verified recovery reschedules at most four still-eligible
-exact-host confirmations. Soft canaries and external Geph never contribute
-restart evidence. No static policy, PF, DNS, proxy, PAC, VPN, or user-managed
-`111.88.96.50/51` DNS behavior changed.
-
-The current `codex/browser-semantic-route-signal` branch is effect-free. It
-freezes a strict language-neutral browser-companion signal parser and reducer
-for the transport-blind case where a page loads successfully but displays a
-regional-denial message. The contract carries only normalized hostname, fixed
-category, confidence, freshness, top-level scope, and replay identity. It
+`f4e4956b9933e96a55725d6072f097766b10dc96`. PR #223 merged the strict
+language-neutral browser semantic signal parser and reducer after all required
+`checks`, `windows-adapter-contract`, `packaged-app-lifecycle`, dependency, and
+vendored Geph audits passed. The contract carries only normalized hostname,
+fixed category, confidence, freshness, top-level scope, and replay identity. It
 rejects arbitrary fields, URL/path/query, text/body, cookies, form data, IP
 literals, stale/replayed/subframe evidence, and all direct, direct-first,
 local-bypass, or already-reviewed geo-exit routes. An eligible unknown host may
 only request independent exact-host geo-exit confirmation; it cannot select or
-mutate a route. No browser adapter, native messaging host, daemon IPC, learned
-overlay, PF, DNS, proxy, PAC, VPN, process, or workstation effect exists yet.
-The current tree passes `747` Python tests plus `32` subtests, all `29`
-`slipstream-core` Rust tests, and all `70` macOS tray Rust tests locally.
+mutate a route.
+
+The current `codex/daemon-semantic-route-signal` branch composes that frozen
+contract with a bounded daemon runtime and owner-only local IPC. A lifetime
+supervisor follows the current non-root console session and creates or rebinds
+the four-byte-framed Unix listener after login or user switching only after
+ownership and mode `0600` are verified. Replay and same-host cooldown state are
+bounded and expiring; responses expose no hostname. The daemon reclassifies
+every hostname through current policy, requires the exact owned Geph
+control/listener state, and keeps semantic evidence out of the existing
+transport-failure candidate map. A separate exact-host HTTPS GET through owned
+Geph must return a usable response without the same bounded regional-denial
+semantics before an expiring route is learned. Shutdown closes this auxiliary
+listener before PF teardown, while install and uninstall copy or remove only
+the exact owned module and socket paths. No
+browser extension, native messaging host, installed artifact, PF, DNS, proxy,
+PAC, VPN, or workstation effect is present yet. The current tree passes `765`
+Python tests plus `32` subtests, all `29` `slipstream-core` Rust tests, and all
+`70` macOS tray Rust tests locally.
 
 ## Resume Protocol
 
@@ -56,16 +61,16 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Partial; generic transport and owned-Geph payload recovery merged, semantic observation contract under test | PRs #219-#222 cover incomplete TLS records, replay-safe zero-payload continuation, bounded early server-first cuts, and the control-plane/payload-health mismatch without site rules. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. The current pure contract lets a future authenticated browser companion request only independent confirmation for a fresh, high-confidence regional-denial signal on an unknown top-level host. Browser adapter/authentication, daemon composition, exact-artifact installation, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
+| M1 - Autonomous Routing V1 | Partial; generic transport, owned-Geph payload recovery, and semantic observation contract merged; daemon adapter under review | PRs #219-#223 cover incomplete TLS records, replay-safe zero-payload continuation, bounded early server-first cuts, the control-plane/payload-health mismatch, and the strict language-neutral semantic signal contract without site rules. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. The current branch accepts the frozen contract only through lifetime-supervised owner-only local IPC, reclassifies current policy, and keeps regional-denial evidence separate from the transport-failure candidate map. Learning requires an independent exact-host owned-Geph HTTPS response that is both usable and free of the bounded denial semantics. Browser exact-origin authentication, the extension/native host, exact-artifact installation, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
 
 The required `checks`, `windows-adapter-contract`, and
 `packaged-app-lifecycle` jobs passed for the audited main commit in
-[CI run 30220593082](https://github.com/aiwaki/slipstream/actions/runs/30220593082).
+[CI run 30222086902](https://github.com/aiwaki/slipstream/actions/runs/30222086902).
 The dependency and vendored-Geph audits passed in
-[audit run 30220593139](https://github.com/aiwaki/slipstream/actions/runs/30220593139).
+[audit run 30222086885](https://github.com/aiwaki/slipstream/actions/runs/30222086885).
 The following entries retain historical gate evidence for the components they
 describe; they are not the current-main locator.
 The Windows ownership collector and its disposable owner-only fixture passed in
