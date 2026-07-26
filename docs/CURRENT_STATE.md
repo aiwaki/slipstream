@@ -21,11 +21,13 @@ payload through the live daemon without PID replacement or recovery.
 
 Exact installation also found that unprivileged `lsof` omits the root-owned
 TCP/1080 listener on this macOS release even though `netstat` identifies its PID
-and the socket is reachable. The root daemon remains active, but the tray is
-intentionally not running until a follow-up adds a `netstat` PID fallback plus
-root/exact-command verification. A real Steam download with the corrected tray
-still gates full runtime qualification. Live PR and `main` state take precedence
-over this recorded evidence boundary.
+and the socket is reachable. The current follow-up implements a `netstat` PID
+fallback plus root/exact-command verification and has passed its local contract
+tests. The root daemon remains active, but the tray is intentionally not running
+until the exact follow-up artifact passes required CI, merges, and replaces the
+installed bundle. A real Steam download with that corrected tray still gates
+full runtime qualification. Live PR and `main` state take precedence over this
+recorded evidence boundary.
 
 ## Resume Protocol
 
@@ -49,7 +51,7 @@ Before continuing existing work, including after context compaction or a bare
 
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
-| M0 - Safe Base | Corrected root daemon active; follow-up tray ownership patch and Steam-load gate remain | PR #217 removed durable watchdog disable and bounded daemon system probes. Its exact-tree artifact installed transactionally and the active root daemon preserved DNS/proxy/PAC state while passing Crystalidea, Discord API, Steam Store, YouTube web, and Spotify API payload probes. Live installation proved that unprivileged `lsof` can omit the root TCP/1080 listener, so the tray is withheld while a narrow `netstat` PID fallback with root/exact-command verification passes review and exact-artifact installation. Full qualification still requires the corrected tray to survive a real Steam download without stale-status recovery, PID replacement, or connectivity loss. |
+| M0 - Safe Base | Corrected root daemon active; exact follow-up tray installation and Steam-load gate remain | PR #217 removed durable watchdog disable and bounded daemon system probes. Its exact-tree artifact installed transactionally and the active root daemon preserved DNS/proxy/PAC state while passing Crystalidea, Discord API, Steam Store, YouTube web, and Spotify API payload probes. Live installation proved that unprivileged `lsof` can omit the root TCP/1080 listener. The current follow-up implements a narrow `netstat` PID fallback with root/exact-command verification; after merge, its exact artifact must replace the installed tray. Full qualification still requires that tray to survive a real Steam download without stale-status recovery, PID replacement, or connectivity loss. |
 | M1 - Autonomous Routing V1 | Partial; generic ordered recovery runtime-qualified | Runtime recovery, tray-independent owned Geph, browser restart, wake/network simulation, and deterministic traffic contracts exist. Local PF readiness is independent of optional Geph. Geo-exit backend loss preserves Discord/YouTube routing and falls back only to the exact pre-PF system destination, which may represent direct access, user DNS selection, a user VPN, or their combination. Generic unknown recovery now progresses through the exact system destination, app-owned Xbox DNS, then the local DoH/adaptive ladder instead of looping back after Xbox failure; all three stages were observed on the installed exact-main artifact and no stage may select Geph. `crystalidea.com` resolved to the same address through system, Xbox, and public DNS: its synthetic uncompressed HTTP/2 response still stalled externally after 16,366 of 21,726 bytes, while a browser-like compressed HTTP/2 request completed with 5,605 bytes in 0.819 seconds. This does not justify a site-specific or Geph rule. Owned-Geph cooldown and transient Keychain unavailability cannot force a Geph redial or erase opt-in state. A user full-tunnel `utun*` default route keeps Slipstream dormant and untouched; split/per-app VPN equivalence is not yet physically qualified. The protected `owned-geph-qualification` workflow has no passing run, and a physical default-route/lid-close transition on a disposable Mac is still unverified. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
