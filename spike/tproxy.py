@@ -7017,6 +7017,7 @@ def _suspicious_server_first_close(activity, duration):
         and not activity.client_ended_first
         and activity.server_end_at
         and activity.downstream_bytes > 0
+        and not activity.downstream_write_failed
         and activity.tls_framing_valid
         and activity.tls_complete_records > 0
     ):
@@ -7343,12 +7344,25 @@ async def relay_local_stream(
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
             pending = {task for task in tasks if not task.done()}
-        relay_activity.client_ended_first = (
-            client_task in done and server_task not in done
-        )
-        relay_activity.server_ended_first = (
-            server_task in done and client_task not in done
-        )
+        client_done = client_task in done
+        server_done = server_task in done
+        relay_activity.client_ended_first = client_done and not server_done
+        relay_activity.server_ended_first = server_done and not client_done
+        if client_done and server_done:
+            if (
+                relay_activity.server_end_at
+                and relay_activity.client_end_at
+                and relay_activity.server_end_at
+                < relay_activity.client_end_at
+            ):
+                relay_activity.server_ended_first = True
+            elif (
+                relay_activity.client_end_at
+                and relay_activity.server_end_at
+                and relay_activity.client_end_at
+                < relay_activity.server_end_at
+            ):
+                relay_activity.client_ended_first = True
         if relay_activity.client_ended_first and relay_activity.client_half_closed:
             while not server_task.done():
                 last_progress_at = max(

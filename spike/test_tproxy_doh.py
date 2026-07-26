@@ -7159,6 +7159,70 @@ def test_relay_local_stream_server_first_does_not_become_clean_eof_stall():
     assert not tproxy._clean_eof_stream_stalled(activity, now=130.0)
 
 
+def test_real_loopback_upstream_eof_preserves_server_first_order():
+    async def run():
+        async def upstream_handler(_reader, writer):
+            writer.write(b"server payload")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        upstream = await asyncio.start_server(
+            upstream_handler,
+            "127.0.0.1",
+            0,
+        )
+        upstream_port = upstream.sockets[0].getsockname()[1]
+        relay_done = asyncio.get_running_loop().create_future()
+
+        async def relay_handler(client_reader, client_writer):
+            try:
+                upstream_reader, upstream_writer = await asyncio.open_connection(
+                    "127.0.0.1",
+                    upstream_port,
+                )
+                activity = tproxy._RelayActivity(
+                    last_downstream_at=tproxy.time.monotonic()
+                )
+                result = await tproxy.relay_local_stream(
+                    client_reader,
+                    upstream_writer,
+                    upstream_reader,
+                    client_writer,
+                    activity,
+                )
+                relay_done.set_result((result, activity))
+            except BaseException as exc:
+                if not relay_done.done():
+                    relay_done.set_exception(exc)
+
+        relay = await asyncio.start_server(relay_handler, "127.0.0.1", 0)
+        relay_port = relay.sockets[0].getsockname()[1]
+        browser_reader, browser_writer = await asyncio.open_connection(
+            "127.0.0.1",
+            relay_port,
+        )
+        try:
+            payload = await asyncio.wait_for(browser_reader.read(), timeout=1.0)
+            result, activity = await asyncio.wait_for(relay_done, timeout=1.0)
+        finally:
+            browser_writer.close()
+            await browser_writer.wait_closed()
+            relay.close()
+            await relay.wait_closed()
+            upstream.close()
+            await upstream.wait_closed()
+        return payload, result, activity
+
+    payload, result, activity = asyncio.run(run())
+
+    assert payload == b"server payload"
+    assert result == (0, len(payload))
+    assert activity.server_ended_first
+    assert not activity.client_ended_first
+    assert activity.server_end_at < activity.client_end_at
+
+
 def test_relay_detects_incomplete_tls_record_then_idle_without_client_abort(
     monkeypatch,
 ):
@@ -7361,6 +7425,22 @@ def test_server_reset_advances_unknown_host_without_waiting_for_repeat():
         now=100.2,
     )
     assert tproxy._xbox_dns_candidate_active(host, now=100.2)
+
+
+def test_downstream_write_failure_is_not_server_close_evidence():
+    host = "client-cancelled.example"
+    activity = _short_server_first_activity()
+    activity.downstream_write_failed = True
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.2,
+    )
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert not tproxy._server_first_closes
 
 
 def test_late_server_reset_does_not_advance_unknown_host():

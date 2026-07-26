@@ -40,7 +40,7 @@ stream is never replayed. Geph still requires complete evidence from every
 preceding stage, two distinct local strategies, a clear network-wide guard, and
 a real payload from the currently owned listener. Protected local, direct,
 reviewed geo-exit, no-SNI, external Geph, and external DNS/proxy/PAC/VPN remain
-excluded. The current tree passes `725` Python tests plus `32` subtests and all
+excluded. The current tree passes `727` Python tests plus `32` subtests and all
 `70` macOS tray Rust tests locally; CI, exact-artifact installation, and
 fresh-browser requalification remain open.
 
