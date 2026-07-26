@@ -725,9 +725,61 @@ fn daemon_installed_for_watchdog(app: &AppHandle) -> bool {
         && matches!(daemon_label_disabled(), Some(false))
 }
 
-fn daemon_listener_reachable() -> bool {
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 1080));
-    std::net::TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
+fn listener_pid(port: u16) -> Option<u32> {
+    let output = Command::new("/usr/sbin/lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+        .output()
+        .ok()?;
+    output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()?
+            .trim()
+            .parse()
+            .ok()
+    })?
+}
+
+fn process_command(pid: u32) -> Option<String> {
+    let output = Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|command| !command.is_empty())
+}
+
+fn process_executable(pid: u32) -> Option<String> {
+    let output = Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "txt", "-Fn"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix('n'))
+        .map(str::to_string)
+}
+
+fn command_matches_daemon(command: &str) -> bool {
+    command.trim() == INSTALLED_DAEMON
+        || command
+            .trim()
+            .strip_prefix(INSTALLED_DAEMON)
+            .is_some_and(|suffix| suffix.starts_with(' '))
+}
+
+fn daemon_listener_owned() -> bool {
+    let Some(pid) = listener_pid(1080) else {
+        return false;
+    };
+    process_executable(pid).as_deref() == Some(INSTALLED_DAEMON)
+        && process_command(pid).is_some_and(|command| command_matches_daemon(&command))
 }
 
 fn should_recover_daemon(
@@ -736,10 +788,10 @@ fn should_recover_daemon(
     startup_grace_elapsed: bool,
     cooldown_ready: bool,
     installed: bool,
-    listener_reachable: bool,
+    listener_owned: bool,
 ) -> bool {
     installed
-        && !listener_reachable
+        && !listener_owned
         && cooldown_ready
         && missing_status_polls >= DAEMON_WATCHDOG_MISSES
         && (has_seen_status || startup_grace_elapsed)
@@ -751,18 +803,28 @@ fn daemon_recovery_shell() -> String {
     let daemon = shell_quote(INSTALLED_DAEMON);
     let recovery = shell_quote(DAEMON_RECOVERY_STATUS_PATH);
     format!(
-        "recovery_status={recovery}; \
+        "daemon_path={daemon}; recovery_status={recovery}; \
          write_recovery() {{ \
            /bin/printf '{{\"result\":\"%s\",\"ts\":%s}}\\n' \"$1\" \"$(/bin/date +%s)\" \
              > \"$recovery_status\"; \
            /bin/chmod 644 \"$recovery_status\"; \
          }}; \
          daemon_available() {{ \
-           status=$({daemon} --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
+           status=$(\"$daemon_path\" --status 2>/dev/null || echo '{{\"state\":\"off\"}}'); \
            if printf '%s\\n' \"$status\" \
               | /usr/bin/grep -Eq '\"state\"[[:space:]]*:[[:space:]]*\"(active|dormant)\"'; \
            then return 0; fi; \
-           /usr/bin/nc -z -w 1 127.0.0.1 1080 >/dev/null 2>&1; \
+           listener_pid=$(/usr/sbin/lsof -nP -iTCP:1080 -sTCP:LISTEN -t 2>/dev/null \
+             | /usr/bin/head -n 1); \
+           case \"$listener_pid\" in ''|*[!0-9]*) return 1 ;; esac; \
+           listener_executable=$(/usr/sbin/lsof -a -p \"$listener_pid\" -d txt -Fn 2>/dev/null \
+             | /usr/bin/sed -n 's/^n//p' | /usr/bin/head -n 1); \
+           if [ \"$listener_executable\" != \"$daemon_path\" ]; then return 1; fi; \
+           listener_command=$(/bin/ps -p \"$listener_pid\" -o command= 2>/dev/null); \
+           case \"$listener_command\" in \
+             \"$daemon_path\"|\"$daemon_path \"*) return 0 ;; \
+             *) return 1 ;; \
+           esac; \
          }}; \
          if daemon_available; \
          then write_recovery daemon_already_available; exit 0; fi; \
@@ -783,7 +845,7 @@ fn daemon_recovery_shell() -> String {
            *'Could not find service'*) ;; \
            *) write_recovery cleanup_incomplete; exit 1 ;; \
          esac; \
-         if {daemon} --recover-network >/dev/null 2>&1; \
+         if \"$daemon_path\" --recover-network >/dev/null 2>&1; \
          then write_recovery network_recovered; exit 0; fi; \
          write_recovery cleanup_incomplete; exit 1"
     )
@@ -2213,18 +2275,6 @@ fn geph_launch_agent_kickstart(uid: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn geph_process_command(pid: u32) -> Option<String> {
-    let output = Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|command| !command.is_empty())
-}
-
 fn command_matches_geph(command: &str, executable: &Path, config: &Path) -> bool {
     let executable = executable.to_string_lossy();
     let config = config.to_string_lossy();
@@ -2232,23 +2282,7 @@ fn command_matches_geph(command: &str, executable: &Path, config: &Path) -> bool
 }
 
 fn geph_listener_pid() -> Option<u32> {
-    let output = Command::new("/usr/sbin/lsof")
-        .args([
-            "-nP",
-            &format!("-iTCP:{GEPH_SOCKS_PORT}"),
-            "-sTCP:LISTEN",
-            "-t",
-        ])
-        .output()
-        .ok()?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .next()?
-            .trim()
-            .parse()
-            .ok()
-    })?
+    listener_pid(GEPH_SOCKS_PORT)
 }
 
 /// Stop only a process whose PID, executable, config, and listener all match the
@@ -2280,7 +2314,7 @@ fn geph_kill_owned(dir: &Path) {
             .zip(config.as_deref())
             .is_some_and(|(executable, config)| {
                 geph_listener_pid() == Some(pid)
-                    && geph_process_command(pid)
+                    && process_command(pid)
                         .is_some_and(|command| command_matches_geph(&command, executable, config))
             });
     if !initially_owned {
@@ -2305,7 +2339,7 @@ fn geph_kill_owned(dir: &Path) {
     if let (Some(executable), Some(config), Some(command)) = (
         executable.as_deref(),
         config.as_deref(),
-        geph_process_command(pid),
+        process_command(pid),
     ) {
         // Revalidate immediately before SIGKILL so a rapidly recycled PID can
         // never turn an owned-process shutdown into a broad process kill.
@@ -2773,7 +2807,7 @@ pub fn run() {
                             >= Duration::from_secs(DAEMON_WATCHDOG_STARTUP_GRACE_SECS),
                         now >= next_daemon_recovery,
                         daemon_installed_for_watchdog(&app_handle),
-                        status.is_none() && daemon_listener_reachable(),
+                        status.is_none() && daemon_listener_owned(),
                     ) {
                         next_daemon_recovery =
                             now + Duration::from_secs(DAEMON_WATCHDOG_COOLDOWN_SECS);
@@ -2868,11 +2902,11 @@ pub fn run() {
 mod tests {
     use super::{
         admin_shell_script, app_bundle_for_bundled_daemon, baseline_recovery_detail,
-        begin_exit_menu_refresh, command_matches_geph, copy_log_snapshot_direct,
-        daemon_binary_format, daemon_recovery_shell, daemon_recovery_status_value,
-        daemon_state_text, diagnostic_log_tail, diagnostic_log_tail_from_path,
-        diagnostic_snapshot_value, diagnostic_summary_value, exit_catalog,
-        exit_catalog_availability, finish_exit_menu_refresh, geph_launch_agent_paths,
+        begin_exit_menu_refresh, command_matches_daemon, command_matches_geph,
+        copy_log_snapshot_direct, daemon_binary_format, daemon_recovery_shell,
+        daemon_recovery_status_value, daemon_state_text, diagnostic_log_tail,
+        diagnostic_log_tail_from_path, diagnostic_snapshot_value, diagnostic_summary_value,
+        exit_catalog, exit_catalog_availability, finish_exit_menu_refresh, geph_launch_agent_paths,
         geph_launch_agent_plist, geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_launcher_script_with_log_limits, geph_lifecycle_diagnostic_value, harden_geph_dir,
         install_diagnostic_value, launchd_label_disabled_from_output,
@@ -3747,7 +3781,19 @@ mod tests {
     }
 
     #[test]
-    fn watchdog_never_restarts_a_reachable_listener_for_stale_status() {
+    fn daemon_listener_ownership_requires_the_exact_installed_command() {
+        assert!(command_matches_daemon("/usr/local/slipstream/slipstreamd"));
+        assert!(command_matches_daemon(
+            "/usr/local/slipstream/slipstreamd --port 1080"
+        ));
+        assert!(!command_matches_daemon(
+            "/usr/local/slipstream/slipstreamd-other --port 1080"
+        ));
+        assert!(!command_matches_daemon("/tmp/slipstreamd --port 1080"));
+    }
+
+    #[test]
+    fn watchdog_never_restarts_an_owned_listener_for_stale_status() {
         assert!(!should_recover_daemon(
             u8::MAX,
             true,
@@ -3763,7 +3809,8 @@ mod tests {
         let shell = daemon_recovery_shell();
 
         assert!(shell.contains("/bin/launchctl kickstart -k 'system/dev.slipstream.tproxy'"));
-        assert!(shell.contains("/usr/local/slipstream/slipstreamd' --status"));
+        assert!(shell.contains("daemon_path='/usr/local/slipstream/slipstreamd'"));
+        assert!(shell.contains("\"$daemon_path\" --status"));
         assert!(shell.contains(DAEMON_RECOVERY_STATUS_PATH));
         assert!(shell.contains("daemon_already_available"));
         assert!(shell.contains("daemon_recovered"));
@@ -3771,15 +3818,19 @@ mod tests {
         assert!(shell.contains("cleanup_incomplete"));
         assert!(!shell.contains("/bin/launchctl disable"));
         assert!(shell.contains("/bin/launchctl bootout system"));
-        assert!(shell.contains("/usr/bin/nc -z -w 1 127.0.0.1 1080"));
+        assert!(shell.contains("/usr/sbin/lsof -nP -iTCP:1080 -sTCP:LISTEN -t"));
+        assert!(shell.contains("/usr/sbin/lsof -a -p \"$listener_pid\" -d txt -Fn"));
+        assert!(shell.contains("[ \"$listener_executable\" != \"$daemon_path\" ]"));
+        assert!(shell.contains("/bin/ps -p \"$listener_pid\" -o command="));
+        assert!(shell.contains("\"$daemon_path\"|\"$daemon_path \"*"));
         assert!(shell.contains("while [ \"$attempt\" -lt 15 ]"));
         assert!(shell.contains("Could not find service"));
-        assert!(shell.contains("/usr/local/slipstream/slipstreamd' --recover-network"));
+        assert!(shell.contains("\"$daemon_path\" --recover-network"));
         assert!(!shell.contains("pfctl"));
         assert!(!shell.contains("/sbin/pfctl -f /etc/pf.conf"));
         assert!(!shell.contains("/sbin/pfctl -d"));
         assert!(shell.find("--status").unwrap() < shell.find("kickstart").unwrap());
-        assert!(shell.find("127.0.0.1 1080").unwrap() < shell.find("kickstart").unwrap());
+        assert!(shell.find("-iTCP:1080").unwrap() < shell.find("kickstart").unwrap());
         assert!(shell.find("kickstart").unwrap() < shell.find("while").unwrap());
         assert!(shell.find("while").unwrap() < shell.find("bootout").unwrap());
         assert!(shell.find("bootout").unwrap() < shell.find("launchctl print").unwrap());
