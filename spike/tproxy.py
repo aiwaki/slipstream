@@ -2007,8 +2007,9 @@ AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 LOCAL_STREAM_IDLE = 15.0      # client-visible downstream silence after payload
 PARTIAL_TLS_RECORD_IDLE = 6.0
-PARTIAL_TLS_RECORD_MIN = 16 * 1024
-PARTIAL_TLS_RECORD_MAX = PARTIAL_TLS_RECORD_MIN + 512
+TLS_RECORD_HEADER_SIZE = 5
+TLS_RECORD_MAX_CIPHERTEXT = (1 << 14) + 2048
+TLS_RECORD_CONTENT_TYPES = frozenset((20, 21, 22, 23, 24))
 CLEAN_EOF_STALL_WINDOW = 5 * 60.0
 CLEAN_EOF_STALL_STORM = 2     # repeated client-first clean EOFs before recovery
 CLEAN_EOF_STALL_STATE_MAX = 4096
@@ -2017,6 +2018,9 @@ AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
 AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
 AUTO_GEPH_PARTIAL_STALL_WINDOW = 5 * 60.0
 AUTO_GEPH_PARTIAL_STRATEGIES = 2
+AUTO_GEPH_STAGE_SYSTEM = "system"
+AUTO_GEPH_STAGE_XBOX_DNS = "xbox_dns"
+AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
 AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
@@ -2029,7 +2033,7 @@ _auto_geph_confirming = {}    # host -> monotonic start time
 _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
-_local_partial_stalls = {}    # host -> {strategy: monotonic observation}
+_local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -3015,6 +3019,7 @@ def _auto_geph_candidate_allowed(host, now=None):
         and GEPH_ENABLED
         and _geph_up
         and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
         and _auto_geph_base_host_allowed(h)
         and _auto_geph_candidates.get(h, 0.0) > now
     )
@@ -3160,6 +3165,10 @@ def runtime_route_policy(host, now=None):
     if (
         policy["route_class"] == ROUTE_UNKNOWN
         and _auto_geph_learned_exact_host(host, now)
+        and GEPH_ENABLED
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
     ):
         return {
             **policy,
@@ -3232,31 +3241,46 @@ def _prune_local_partial_stalls(now):
         _auto_geph_candidates.pop(next(iter(_auto_geph_candidates)))
 
 
-def note_local_ladder_partial_stall(
+def note_partial_tls_stall(
     host,
-    strategy_name,
+    stage,
     *,
     now=None,
     confirmation_runner=None,
 ):
-    """Confirm a foreign-exit candidate only after distinct local stalls."""
+    """Record one framed TLS truncation without treating attempts as proof."""
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
+    valid_strategy_stage = (
+        stage.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
+        and stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):] in GENERAL_STRATS
+    )
     if (
         not _auto_geph_base_host_allowed(h)
-        or strategy_name not in GENERAL_STRATS
-        or not _xbox_dns_attempted_recently(h, now)
+        or (
+            stage not in {AUTO_GEPH_STAGE_SYSTEM, AUTO_GEPH_STAGE_XBOX_DNS}
+            and not valid_strategy_stage
+        )
     ):
         return False
     _prune_local_partial_stalls(now)
     observations = _local_partial_stalls.setdefault(h, {})
-    observations[strategy_name] = now
-    if len(observations) < AUTO_GEPH_PARTIAL_STRATEGIES:
+    observations[stage] = now
+    local_strategies = {
+        name[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
+        for name in observations
+        if name.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
+    }
+    if (
+        AUTO_GEPH_STAGE_SYSTEM not in observations
+        or AUTO_GEPH_STAGE_XBOX_DNS not in observations
+        or len(local_strategies) < AUTO_GEPH_PARTIAL_STRATEGIES
+    ):
         return False
     noisy_hosts = sum(
         1
-        for strategies in _local_partial_stalls.values()
-        if len(strategies) >= AUTO_GEPH_PARTIAL_STRATEGIES
+        for host_observations in _local_partial_stalls.values()
+        if host_observations
     )
     if noisy_hosts >= AUTO_GEPH_NET_BAD:
         return False
@@ -3265,6 +3289,24 @@ def note_local_ladder_partial_stall(
         h,
         now=now,
         runner=confirmation_runner,
+    )
+
+
+def note_local_ladder_partial_stall(
+    host,
+    strategy_name,
+    *,
+    now=None,
+    confirmation_runner=None,
+):
+    """Record one distinct strategy's framed TLS truncation."""
+    if strategy_name not in GENERAL_STRATS:
+        return False
+    return note_partial_tls_stall(
+        host,
+        f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strategy_name}",
+        now=now,
+        confirmation_runner=confirmation_runner,
     )
 
 
@@ -6654,7 +6696,53 @@ class _RelayActivity:
     server_ended_first: bool = False
     first_downstream_seen: bool = False
     partial_tls_record_stalled: bool = False
+    tls_record_buffer: object = None
+    tls_record_expected: int = 0
+    tls_complete_records: int = 0
+    tls_framing_valid: bool = True
     on_first_downstream: object = None
+
+
+def _track_tls_records(activity, data):
+    """Track complete TLSCiphertext frames using only their public headers."""
+    if not data or not activity.tls_framing_valid:
+        return
+    if activity.tls_record_buffer is None:
+        activity.tls_record_buffer = bytearray()
+    buffer = activity.tls_record_buffer
+    buffer.extend(data)
+    while True:
+        if not activity.tls_record_expected:
+            if len(buffer) < TLS_RECORD_HEADER_SIZE:
+                return
+            content_type = buffer[0]
+            version_major = buffer[1]
+            record_length = struct.unpack("!H", buffer[3:5])[0]
+            if (
+                content_type not in TLS_RECORD_CONTENT_TYPES
+                or version_major != 3
+                or record_length > TLS_RECORD_MAX_CIPHERTEXT
+            ):
+                activity.tls_framing_valid = False
+                buffer.clear()
+                return
+            activity.tls_record_expected = TLS_RECORD_HEADER_SIZE + record_length
+        if len(buffer) < activity.tls_record_expected:
+            return
+        del buffer[:activity.tls_record_expected]
+        activity.tls_record_expected = 0
+        activity.tls_complete_records += 1
+
+
+def _incomplete_tls_record_visible(activity):
+    buffer = activity.tls_record_buffer
+    return bool(
+        activity.tls_framing_valid
+        and activity.tls_complete_records > 0
+        and activity.tls_record_expected > 0
+        and buffer is not None
+        and TLS_RECORD_HEADER_SIZE <= len(buffer) < activity.tls_record_expected
+    )
 
 
 def _local_stream_stalled(activity, now=None):
@@ -6917,6 +7005,7 @@ async def splice(src, dst, activity=None):
             if activity is not None:
                 activity.last_downstream_at = time.monotonic()
                 activity.downstream_bytes += len(data)
+                _track_tls_records(activity, data)
                 if not activity.first_downstream_seen:
                     activity.first_downstream_seen = True
                     if activity.on_first_downstream is not None:
@@ -6965,11 +7054,7 @@ async def _watch_partial_tls_record(activity, idle_timeout):
         if not activity.first_downstream_seen:
             await asyncio.sleep(idle_timeout)
             continue
-        if not (
-            PARTIAL_TLS_RECORD_MIN
-            <= activity.downstream_bytes
-            <= PARTIAL_TLS_RECORD_MAX
-        ):
+        if not _incomplete_tls_record_visible(activity):
             await asyncio.sleep(idle_timeout)
             continue
         idle_for = time.monotonic() - activity.last_downstream_at
@@ -7460,6 +7545,12 @@ async def _try_exact_system_passthrough(
     duration = time.monotonic() - started_at
     if track_unknown and host:
         if _local_stream_stalled(activity, now=started_at + duration):
+            if activity.partial_tls_record_stalled:
+                note_partial_tls_stall(
+                    host,
+                    AUTO_GEPH_STAGE_SYSTEM,
+                    now=started_at + duration,
+                )
             note_local_stream_stall(host, "plain")
         elif _clean_eof_stream_stalled(activity, now=started_at + duration):
             note_clean_eof_stream_stall(
@@ -7941,6 +8032,7 @@ async def _handle_impl(reader, writer):
         downstream_bytes=len(server_first),
         first_downstream_seen=bool(server_first),
     )
+    _track_tls_records(activity, server_first)
     res = await relay_local_stream(
         reader,
         up_w,
@@ -7958,13 +8050,22 @@ async def _handle_impl(reader, writer):
     if is_tls and host:
         if _local_stream_stalled(activity, now=t0 + duration):
             if via_xbox_dns:
+                if activity.partial_tls_record_stalled:
+                    note_partial_tls_stall(
+                        host,
+                        AUTO_GEPH_STAGE_XBOX_DNS,
+                        now=t0 + duration,
+                    )
                 _record_strategy_result(host, chosen_name, False)
                 if _strat_cache.get(host) == chosen_name:
                     _strat_cache.pop(host, None)
                 _mark_xbox_dns_exhausted(host)
             else:
                 note_local_stream_stall(host, chosen_name)
-                if unknown_stage == UNKNOWN_RECOVERY_LOCAL_LADDER:
+                if (
+                    activity.partial_tls_record_stalled
+                    and unknown_stage == UNKNOWN_RECOVERY_LOCAL_LADDER
+                ):
                     note_local_ladder_partial_stall(host, chosen_name)
         elif _clean_eof_stream_stalled(activity, now=t0 + duration):
             note_clean_eof_stream_stall(
