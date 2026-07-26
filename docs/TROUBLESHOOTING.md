@@ -609,14 +609,23 @@ SleepService/DarkWake cycles. In daemon logs this appears as:
 >> woke from sleep (gap 903s) -> re-arming
 ```
 
-After wake, a Geph process can keep its local SOCKS port open while the tunnel
-inside it returns `SOCKS connect failed` or closes payload probes without a
-response. Slipstream records this under `geph_detail`; repeated post-wake
-geo-exit failures across multiple hosts schedule owned recovery. The daemon
-blocks new owned-Geph sessions, cools only that backend, waits for active
-owned-Geph streams to drain, and kickstarts the exact verified user LaunchAgent.
-The private PF anchor and local bypass remain active; the tray is not required.
-LaunchAgent `KeepAlive` still handles a process that exits on its own.
+After wake or an unrelated tunnel failure, a Geph process can keep its control
+RPC and local SOCKS port open while payload probes stall or close without a
+response. Slipstream records this under `geph_detail`; process/listener
+readiness alone is not a healthy result. Repeated hard payload failures across
+multiple geo-exit hosts may schedule owned recovery. Soft/optional canaries do
+not. The daemon blocks new owned-Geph sessions, cools only that backend, waits
+for active owned-Geph streams to drain, and kickstarts only the exact verified
+user LaunchAgent. External or ownership-mismatched listeners contribute no
+restart evidence. The private PF anchor and local bypass remain active; the
+tray is not required. LaunchAgent `KeepAlive` still handles a process that exits
+on its own.
+
+When the owned backend becomes verified ready again, Slipstream retries only a
+small bounded set of still-valid exact-host confirmations whose earlier attempt
+was consumed by backend failure. It does not reset all routing evidence and it
+does not admit Discord, YouTube, Googlevideo, direct routes, or static policy
+into Geph.
 
 While a long-lived Geph stream is active, StatusV2 may briefly report
 `owned_geph_restart_waiting_for_idle`. This is a bounded safe wait, not a request
