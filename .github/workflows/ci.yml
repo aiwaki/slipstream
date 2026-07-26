@@ -106,6 +106,8 @@ jobs:
             spike/route_policy_activation_adapter.py \
             spike/routing_policy.py \
             spike/routing_recovery.py \
+            spike/semantic_route_signal.py \
+            spike/semantic_route_signal_runtime.py \
             spike/tproxy.py \
             spike/xbox_dns.py \
             spike/test_recovery.py \
@@ -116,6 +118,8 @@ jobs:
             spike/test_connection_probe.py \
             spike/test_install_guard.py \
             spike/test_routing_contract_vectors.py \
+            spike/test_semantic_route_signal.py \
+            spike/test_semantic_route_signal_runtime.py \
             spike/test_traffic_contracts.py \
             spike/test_baseline_startup.py \
             spike/test_tproxy_doh.py \

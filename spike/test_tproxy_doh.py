@@ -468,7 +468,9 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "route_policy_manifest.py": "VALUE = 14\n",
     "routing_policy.py": "VALUE = 15\n",
     "routing_recovery.py": "VALUE = 16\n",
-    "xbox_dns.py": "VALUE = 17\n",
+    "semantic_route_signal.py": "VALUE = 17\n",
+    "semantic_route_signal_runtime.py": "VALUE = 18\n",
+    "xbox_dns.py": "VALUE = 19\n",
 }
 
 
@@ -550,6 +552,23 @@ def test_copy_script_runtime_requires_policy_module_before_install(tmp_path):
     _write_script_runtime_fixture(source, missing={"routing_policy.py"})
 
     with pytest.raises(FileNotFoundError, match="routing_policy.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_semantic_signal_runtime_before_install(
+    tmp_path,
+):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(
+        source,
+        missing={"semantic_route_signal_runtime.py"},
+    )
+
+    with pytest.raises(FileNotFoundError, match="semantic_route_signal_runtime.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()
@@ -2926,6 +2945,10 @@ def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
         async def wait_closed(self):
             calls.append("listener_waited")
 
+    class AuxiliaryServer:
+        async def close(self):
+            calls.append("auxiliary_closed")
+
     async def wait_for_drain(timeout):
         calls.append(("drain", timeout))
         return False
@@ -2937,7 +2960,12 @@ def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
     async def exercise():
         shutdown = asyncio.Event()
         shutdown.set()
-        return await tproxy.serve_until_shutdown(Server(), shutdown, drain_timeout=3.5)
+        return await tproxy.serve_until_shutdown(
+            Server(),
+            shutdown,
+            drain_timeout=3.5,
+            auxiliary_servers=(AuxiliaryServer(),),
+        )
 
     monkeypatch.setattr(
         tproxy,
@@ -2950,6 +2978,7 @@ def test_shutdown_clears_pf_before_draining_accepted_connections(monkeypatch):
     assert not asyncio.run(exercise())
     assert calls == [
         "enter",
+        "auxiliary_closed",
         "pf_cleared",
         "listener_closed",
         "listener_waited",
@@ -6962,6 +6991,178 @@ def test_auto_geph_candidate_requires_owned_backend_and_exact_local_evidence(
 
     monkeypatch.setattr(tproxy, "_geph_owned", False)
     assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
+
+
+def test_semantic_signal_schedules_only_exact_unknown_host_confirmation(
+    monkeypatch,
+):
+    host = "regional-denial.example"
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert tproxy._request_semantic_geo_exit_confirmation(
+        host,
+        now=100.0,
+        confirmation_runner=confirmations.append,
+    )
+
+    assert confirmations == [host]
+    assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
+    assert host not in tproxy._auto_geph_candidates
+    assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_UNKNOWN
+    assert not tproxy.is_geo_exit_route(host)
+    assert not tproxy._auto_geph
+    assert tproxy._auto_geph_last_status["reason"] == "regional denial observed"
+
+
+def test_semantic_signal_never_authorizes_protected_routes(monkeypatch):
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for host in (
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "www.google.com",
+        "api.spotify.com",
+        "chatgpt.com",
+    ):
+        assert not tproxy._request_semantic_geo_exit_confirmation(
+            host,
+            now=100.0,
+            confirmation_runner=confirmations.append,
+        )
+        assert host not in tproxy._auto_geph_candidates
+
+    assert confirmations == []
+
+
+def test_semantic_signal_requires_owned_geph(monkeypatch):
+    host = "regional-denial.example"
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_EXTERNAL_PORT)
+
+    assert not tproxy._request_semantic_geo_exit_confirmation(
+        host,
+        now=100.0,
+        confirmation_runner=confirmations.append,
+    )
+
+    assert confirmations == []
+    assert host not in tproxy._auto_geph_candidates
+
+
+def test_semantic_geph_response_requires_usable_non_denial_http():
+    assert tproxy._semantic_geph_response_usable(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+        b"<html><main>Weather forecast</main></html>"
+    )
+    assert not tproxy._semantic_geph_response_usable(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+        b"This content is no longer available in your area"
+    )
+    assert not tproxy._semantic_geph_response_usable(
+        b"HTTP/1.1 451 Unavailable For Legal Reasons\r\n\r\n"
+    )
+    assert not tproxy._semantic_geph_response_usable(
+        b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
+        b"\x1f\x8bopaque"
+    )
+
+
+def test_semantic_confirmation_learns_only_after_denial_clears_through_owned_geph(
+    monkeypatch,
+    tmp_path,
+):
+    host = "regional-denial.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_AUTO_GEPH_PATH",
+        str(tmp_path / "autogeph.json"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_semantic_geph_payload_probe",
+        lambda candidate: 512 if candidate == host else 0,
+    )
+
+    assert tproxy._confirm_semantic_geo_exit(host)
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert host not in tproxy._auto_geph_candidates
+    assert (
+        tproxy._auto_geph_last_status["reason"]
+        == "regional denial cleared through owned Geph"
+    )
+
+
+def test_semantic_confirmation_rejects_same_denial_response(monkeypatch):
+    host = "regional-denial.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_semantic_geph_payload_probe", lambda _host: 0)
+
+    assert not tproxy._confirm_semantic_geo_exit(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert host not in tproxy._auto_geph_candidates
+    assert (
+        tproxy._auto_geph_last_status["reason"]
+        == "owned Geph did not clear regional denial"
+    )
+
+
+def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
+    confirmations = []
+    route_class = {"value": tproxy.ROUTE_UNKNOWN}
+    monkeypatch.setattr(tproxy, "_semantic_route_signal_runtime", None)
+    monkeypatch.setattr(
+        tproxy,
+        "route_policy",
+        lambda _host: {"route_class": route_class["value"]},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_geph_ready_for_semantic_confirmation",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_request_semantic_geo_exit_confirmation",
+        lambda host: confirmations.append(host) or True,
+    )
+    monkeypatch.setattr(
+        tproxy.semantic_route_signal_runtime.time,
+        "time",
+        lambda: 1_050.0,
+    )
+    runtime = tproxy._get_semantic_route_signal_runtime()
+    signal = {
+        "schema_version": 1,
+        "signal_id": "0123456789abcdef0123456789abcdef",
+        "source": "browser_extension",
+        "host": "regional-denial.example",
+        "category": "regional_access_denied",
+        "confidence_bps": 9500,
+        "observed_at_unix_ms": 1_000_000,
+        "top_level": True,
+    }
+
+    assert runtime.handle(json.dumps(signal).encode())["accepted"] is True
+    route_class["value"] = tproxy.ROUTE_DIRECT
+    signal["signal_id"] = "fedcba9876543210fedcba9876543210"
+    response = runtime.handle(json.dumps(signal).encode())
+
+    assert response["accepted"] is False
+    assert response["reason"] == "protected_route"
+    assert confirmations == ["regional-denial.example"]
 
 
 def test_auto_geph_confirmation_cooldown_state_is_bounded(monkeypatch):

@@ -62,6 +62,7 @@ import route_policy_activation as route_policy_activation_contract
 import route_policy_activation_adapter
 import route_policy_bundle as route_policy_bundle_contract
 import route_policy_manifest as route_policy_manifest_contract
+import semantic_route_signal_runtime
 from primes import build_fake_stun, classify as classify_voice_payload
 from routing_recovery import (
     ConnectionOutcome,
@@ -177,6 +178,7 @@ _dead = {}                     # host -> expiry_monotonic
 # Public status the menu-bar app polls. It intentionally carries only a compact
 # health contract; raw host-level evidence stays in the owner-only log.
 STATUS_PATH = "/var/run/slipstream.status"
+SEMANTIC_SIGNAL_SOCKET_PATH = "/var/run/slipstream-semantic.sock"
 STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
 DAEMON_VERSION = "0.1.9"
@@ -185,6 +187,8 @@ _connection_tasks = set()
 _status_write_lock = threading.RLock()
 _shutdown_started = threading.Event()
 _pf_teardown_complete = threading.Event()
+_semantic_route_signal_runtime = None
+_semantic_route_signal_runtime_lock = threading.Lock()
 SHUTDOWN_DRAIN_SECONDS = 10.0
 SHUTDOWN_DRAIN_QUIET_SECONDS = 0.1
 
@@ -2045,6 +2049,22 @@ AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
+SEMANTIC_GEPH_PROBE_MAX_BYTES = 65536
+SEMANTIC_GEO_DENIAL_MARKERS = (
+    b"no longer available in your area",
+    b"no longer available in your region",
+    b"no longer available in your country",
+    b"not available in your area",
+    b"not available in your region",
+    b"not available in your country",
+    b"unavailable in your area",
+    b"unavailable in your region",
+    b"unavailable in your country",
+    b"access is not available in your country",
+    "недоступен в вашем регионе".encode(),
+    "недоступно в вашем регионе".encode(),
+    "контент недоступен в вашем регионе".encode(),
+)
 AUTO_GEPH_RECOVERY_RETRY_MAX = 4
 AUTO_GEPH_RUNTIME_MISS_WINDOW = 120.0
 AUTO_GEPH_RUNTIME_MISS_STORM = 2
@@ -3075,6 +3095,58 @@ def _auto_geph_candidate_allowed(host, now=None):
     )
 
 
+def _owned_geph_ready_for_semantic_confirmation():
+    return bool(
+        AUTO_GEPH_ENABLED
+        and GEPH_ENABLED
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
+    )
+
+
+def _request_semantic_geo_exit_confirmation(
+    host,
+    *,
+    now=None,
+    confirmation_runner=None,
+):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+    ):
+        return False
+    return _schedule_bounded_geph_confirmation(
+        h,
+        now=now,
+        runner=confirmation_runner,
+        confirmation=_confirm_semantic_geo_exit,
+        eligible=lambda candidate, _now: (
+            _auto_geph_base_host_allowed(candidate)
+            and _owned_geph_ready_for_semantic_confirmation()
+        ),
+        evidence_reason="regional denial observed",
+    )
+
+
+def _get_semantic_route_signal_runtime():
+    global _semantic_route_signal_runtime
+    with _semantic_route_signal_runtime_lock:
+        if _semantic_route_signal_runtime is None:
+            _semantic_route_signal_runtime = (
+                semantic_route_signal_runtime.SemanticRouteSignalRuntime(
+                    route_class_for_host=lambda host: route_policy(host)[
+                        "route_class"
+                    ],
+                    owned_geph_ready=_owned_geph_ready_for_semantic_confirmation,
+                    request_confirmation=_request_semantic_geo_exit_confirmation,
+                )
+            )
+        return _semantic_route_signal_runtime
+
+
 def _unknown_local_recovery_candidate_allowed(host):
     return _auto_geph_base_host_allowed(host)
 
@@ -3160,6 +3232,122 @@ def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
             (tls_sock or sock).close()
         except Exception:
             pass
+
+
+def _semantic_geph_response_usable(data):
+    if not isinstance(data, bytes) or not data.startswith(b"HTTP/"):
+        return False
+    try:
+        headers, _ = data.split(b"\r\n\r\n", 1)
+    except ValueError:
+        return False
+    first_line = headers.split(b"\r\n", 1)[0].split()
+    if len(first_line) < 2:
+        return False
+    try:
+        status = int(first_line[1])
+    except ValueError:
+        return False
+    if status < 200 or status >= 400:
+        return False
+    for header in headers.split(b"\r\n")[1:]:
+        name, separator, value = header.partition(b":")
+        if (
+            separator
+            and name.strip().lower() == b"content-encoding"
+            and value.strip().lower() not in {b"", b"identity"}
+        ):
+            return False
+    lowered = data.lower()
+    return not any(marker in lowered for marker in SEMANTIC_GEO_DENIAL_MARKERS)
+
+
+def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
+    sock = _socks5_connect_blocking(host, 443, timeout)
+    if sock is None:
+        return 0
+    tls_sock = None
+    try:
+        ctx = _local_payload_ssl_context()
+        tls_sock = ctx.wrap_socket(sock, server_hostname=host)
+        tls_sock.settimeout(timeout)
+        request = (
+            "GET / HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            "User-Agent: SlipstreamSemanticGeo/1\r\n"
+            "Accept: text/html,application/xhtml+xml\r\n"
+            "Accept-Encoding: identity\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii", "ignore")
+        tls_sock.sendall(request)
+        chunks = []
+        size = 0
+        while size < SEMANTIC_GEPH_PROBE_MAX_BYTES:
+            try:
+                chunk = tls_sock.recv(
+                    min(4096, SEMANTIC_GEPH_PROBE_MAX_BYTES - size)
+                )
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        data = b"".join(chunks)
+        if _semantic_geph_response_usable(data):
+            return len(data)
+        return 0
+    except Exception:
+        return 0
+    finally:
+        try:
+            (tls_sock or sock).close()
+        except Exception:
+            pass
+
+
+def _confirm_semantic_geo_exit(host):
+    h = normalize_host(host)
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+    ):
+        _set_auto_geph_status("skipped", h, "not eligible")
+        return False
+    bytes_read = _semantic_geph_payload_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        _set_auto_geph_status(
+            "rejected",
+            h,
+            "owned Geph did not clear regional denial",
+            bytes_read,
+        )
+        return False
+    with _auto_geph_lock:
+        if (
+            not _auto_geph_base_host_allowed(h)
+            or not _owned_geph_ready_for_semantic_confirmation()
+        ):
+            _set_auto_geph_status("skipped", h, "route changed")
+            return False
+        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+        _auto_fail.pop(h, None)
+        _local_partial_stalls.pop(h, None)
+        _local_zero_payload_failures.pop(h, None)
+        save_auto_geph()
+        _set_auto_geph_status(
+            "learned",
+            h,
+            "regional denial cleared through owned Geph",
+            bytes_read,
+        )
+    print(
+        f">> auto-route: {h} cleared a regional denial through owned Geph "
+        f"(remembered {AUTO_GEPH_TTL / 3600:.0f}h)",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _remember_auto_geph_host(host, bytes_read, reason):
@@ -3449,10 +3637,17 @@ def _prune_auto_geph_confirmation_state(now):
         _auto_geph_last_probe.pop(oldest, None)
 
 
-def _schedule_auto_geph_confirmation(host, now=None, runner=None):
+def _schedule_bounded_geph_confirmation(
+    host,
+    *,
+    now,
+    runner,
+    confirmation,
+    eligible,
+    evidence_reason,
+):
     h = normalize_host(host)
-    now = time.monotonic() if now is None else now
-    if not _auto_geph_candidate_allowed(h, now):
+    if not eligible(h, now):
         return False
     with _auto_geph_lock:
         _prune_auto_geph_confirmation_state(now)
@@ -3481,11 +3676,11 @@ def _schedule_auto_geph_confirmation(host, now=None, runner=None):
             return False
         _auto_geph_last_probe[h] = now
         _auto_geph_confirming[h] = now
-        _set_auto_geph_status("checking", h, "local stalls observed")
+        _set_auto_geph_status("checking", h, evidence_reason)
 
     def run():
         try:
-            (runner or _confirm_auto_geph)(h)
+            (runner or confirmation)(h)
         finally:
             with _auto_geph_lock:
                 _auto_geph_confirming.pop(h, None)
@@ -3495,6 +3690,23 @@ def _schedule_auto_geph_confirmation(host, now=None, runner=None):
         return True
     threading.Thread(target=run, daemon=True).start()
     return True
+
+
+def _schedule_auto_geph_confirmation(
+    host,
+    now=None,
+    runner=None,
+    evidence_reason="local stalls observed",
+):
+    now = time.monotonic() if now is None else now
+    return _schedule_bounded_geph_confirmation(
+        host,
+        now=now,
+        runner=runner,
+        confirmation=_confirm_auto_geph,
+        eligible=_auto_geph_candidate_allowed,
+        evidence_reason=evidence_reason,
+    )
 
 
 def retry_pending_auto_geph_confirmations(now=None, runner=None):
@@ -5295,6 +5507,13 @@ def _console_probe_identity():
     return (uid, account.pw_gid, account.pw_dir)
 
 
+def _log_semantic_signal_server_error(error):
+    print(
+        f">> browser semantic signal socket unavailable: {error}",
+        file=sys.stderr,
+    )
+
+
 def _baseline_probe_command(candidate):
     if getattr(sys, "frozen", False):
         command = [sys.executable]
@@ -5799,7 +6018,19 @@ def request_daemon_shutdown(shutdown):
     shutdown.set()
 
 
-async def serve_until_shutdown(server, shutdown, drain_timeout=SHUTDOWN_DRAIN_SECONDS):
+async def _close_auxiliary_servers(auxiliary_servers):
+    await asyncio.gather(
+        *(server.close() for server in auxiliary_servers if server is not None),
+        return_exceptions=True,
+    )
+
+
+async def serve_until_shutdown(
+    server,
+    shutdown,
+    drain_timeout=SHUTDOWN_DRAIN_SECONDS,
+    auxiliary_servers=(),
+):
     """Stop new interception before giving accepted streams time to finish."""
     async with server:
         serving = asyncio.create_task(server.serve_forever())
@@ -5811,9 +6042,11 @@ async def serve_until_shutdown(server, shutdown, drain_timeout=SHUTDOWN_DRAIN_SE
         if serving in done:
             stopping.cancel()
             await asyncio.gather(stopping, return_exceptions=True)
+            await _close_auxiliary_servers(auxiliary_servers)
             await serving
             return True
 
+        await _close_auxiliary_servers(auxiliary_servers)
         # Keep the listener alive until the private anchor is definitely gone.
         # Closing it first turns a transient pfctl failure into a TCP/443 black
         # hole for every redirected application.
@@ -5921,6 +6154,14 @@ def _script_runtime_payload(source_file):
         ),
         (os.path.join(source_dir, "routing_policy.py"), "routing_policy.py"),
         (os.path.join(source_dir, "routing_recovery.py"), "routing_recovery.py"),
+        (
+            os.path.join(source_dir, "semantic_route_signal.py"),
+            "semantic_route_signal.py",
+        ),
+        (
+            os.path.join(source_dir, "semantic_route_signal_runtime.py"),
+            "semantic_route_signal_runtime.py",
+        ),
         (os.path.join(source_dir, "xbox_dns.py"), "xbox_dns.py"),
     )
     missing = [src for src, _ in payload if not os.path.isfile(src)]
@@ -9248,6 +9489,9 @@ def _remove_install_runtime_artifacts():
             pass
         except OSError:
             pass
+    semantic_route_signal_runtime.remove_stale_owned_socket(
+        SEMANTIC_SIGNAL_SOCKET_PATH
+    )
 
 
 def _cleanup_install_incomplete(reason):
@@ -9263,7 +9507,9 @@ def _remove_daemon_status_artifacts():
             pass
         except OSError:
             return False
-    return True
+    return semantic_route_signal_runtime.remove_stale_owned_socket(
+        SEMANTIC_SIGNAL_SOCKET_PATH
+    )
 
 
 def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
@@ -9347,6 +9593,7 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
         _STRAT_PATH,
         STATUS_PATH,
         TGWS_LINK_PATH,
+        SEMANTIC_SIGNAL_SOCKET_PATH,
         PF_SKIP_LEASE_PATH,
     ))
     clean = all((
@@ -9552,17 +9799,35 @@ async def amain(port, voice=True):
     write_status(startup_state, startup_iface, None)
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
     _start_network_monitor(port, voice)
+    semantic_server = None
+    try:
+        semantic_server = (
+            await semantic_route_signal_runtime.start_semantic_signal_server_supervisor(
+                SEMANTIC_SIGNAL_SOCKET_PATH,
+                _console_probe_identity,
+                _get_semantic_route_signal_runtime(),
+                error_handler=_log_semantic_signal_server_error,
+            )
+        )
+    except Exception as error:
+        _log_semantic_signal_server_error(error)
     print(f">> transparent tlsrec+DoH proxy on 127.0.0.1:{port}  (root)")
     print(">> quit + reopen Discord normally; its updater is captured too")
     print(">> Ctrl-C (or close terminal) to stop and restore pf")
     try:
-        drained = await serve_until_shutdown(server, shutdown)
+        drained = await serve_until_shutdown(
+            server,
+            shutdown,
+            auxiliary_servers=(semantic_server,),
+        )
         if not drained:
             print(
                 f">> shutdown drain expired with {_conn_count} active connection(s)",
                 file=sys.stderr,
             )
     finally:
+        if semantic_server is not None:
+            await semantic_server.close()
         for shutdown_signal in shutdown_signals:
             loop.remove_signal_handler(shutdown_signal)
 
