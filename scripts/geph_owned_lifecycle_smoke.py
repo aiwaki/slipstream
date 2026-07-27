@@ -36,6 +36,7 @@ PAYLOAD_PATH = "/"
 PAYLOAD_MIN_BYTES = 2048
 START_TIMEOUT = 180.0
 PROCESS_STOP_TIMEOUT = 10.0
+COORDINATION_TIMEOUT = 600.0
 
 
 class QualificationError(RuntimeError):
@@ -62,6 +63,12 @@ class OwnedGephState:
     executable: Path
     config: Path
     launchd_label: str
+
+
+@dataclass(frozen=True)
+class CoordinationPaths:
+    ready: Path
+    release: Path
 
 
 def geph_paths(home: Path) -> GephPaths:
@@ -102,6 +109,64 @@ def _take_secret() -> str:
     if not secret:
         raise QualificationError(f"missing protected {GEPH_SECRET_ENV} secret")
     return secret
+
+
+def _validate_coordination_paths(
+    ready: Path | None,
+    release: Path | None,
+) -> CoordinationPaths | None:
+    if ready is None and release is None:
+        return None
+    if ready is None or release is None:
+        raise QualificationError("--ready-file and --release-file must be used together")
+    ready = ready.expanduser().resolve()
+    release = release.expanduser().resolve()
+    if ready == release or ready.parent != release.parent:
+        raise QualificationError("coordination files must be distinct siblings")
+    if ready.exists() or release.exists():
+        raise QualificationError("coordination files must not already exist")
+    return CoordinationPaths(ready=ready, release=release)
+
+
+def _publish_ready_and_wait(
+    coordination: CoordinationPaths | None,
+    paths: GephPaths,
+    uid: int,
+    state: OwnedGephState,
+    *,
+    timeout: float = COORDINATION_TIMEOUT,
+) -> None:
+    if coordination is None:
+        return
+    coordination.ready.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(
+        coordination.ready,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+        0o600,
+    )
+    try:
+        os.write(fd, b"owned-geph-ready\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.chmod(coordination.ready, 0o600)
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if coordination.release.exists():
+            metadata = coordination.release.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != uid
+                or stat.S_IMODE(metadata.st_mode) & 0o077
+            ):
+                raise QualificationError(
+                    "coordination release file is not an owner-private regular file"
+                )
+            _assert_owned_geph(paths, uid, state)
+            return
+        time.sleep(0.25)
+    raise QualificationError("timed out waiting for the semantic qualification")
 
 
 def _run(
@@ -609,7 +674,10 @@ def _preflight(app_bundle: Path, paths: GephPaths) -> Path:
     return executable
 
 
-def run_qualification(app_bundle: Path) -> dict[str, object]:
+def run_qualification(
+    app_bundle: Path,
+    coordination: CoordinationPaths | None = None,
+) -> dict[str, object]:
     _require_disposable_ci()
     secret = _take_secret()
     home = Path.home().resolve()
@@ -633,6 +701,7 @@ def run_qualification(app_bundle: Path) -> dict[str, object]:
         initial = _wait_for_owned_geph(paths, uid)
         initial_payload = _wait_for_payload()
         sentinel.check()
+        _publish_ready_and_wait(coordination, paths, uid, initial)
 
         tray.crash()
         _assert_owned_geph(paths, uid, initial)
@@ -680,6 +749,9 @@ def run_qualification(app_bundle: Path) -> dict[str, object]:
             if paths.config_dir.exists():
                 shutil.rmtree(paths.config_dir)
             paths.plist.unlink(missing_ok=True)
+            if coordination is not None:
+                coordination.ready.unlink(missing_ok=True)
+                coordination.release.unlink(missing_ok=True)
         except Exception as exc:
             cleanup_errors.append(f"private runtime cleanup: {exc}")
         try:
@@ -735,6 +807,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", type=Path)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--ready-file", type=Path)
+    parser.add_argument("--release-file", type=Path)
     args = parser.parse_args(argv)
     if args.dry_run:
         print(json.dumps(dry_run(), indent=2, sort_keys=True))
@@ -742,7 +816,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.app_bundle is None:
         parser.error("--app-bundle is required outside --dry-run")
     try:
-        result = run_qualification(args.app_bundle)
+        coordination = _validate_coordination_paths(
+            args.ready_file,
+            args.release_file,
+        )
+        result = run_qualification(args.app_bundle, coordination)
     except Exception as exc:
         print(f"owned Geph qualification failed: {exc}", file=sys.stderr)
         return 1

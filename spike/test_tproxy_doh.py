@@ -630,7 +630,8 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
     status = tmp_path / "status"
     tgws_link = tmp_path / "tgws.link"
     strategy = tmp_path / "strategies.json"
-    for path in (plist, status, tgws_link, strategy):
+    auto_geph = tmp_path / "auto-geph.json"
+    for path in (plist, status, tgws_link, strategy, auto_geph):
         path.write_text("state")
 
     monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
@@ -638,6 +639,7 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tgws_link))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(strategy))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(auto_geph))
     commands = []
 
     def fake_run(*args):
@@ -663,6 +665,7 @@ def test_uninstall_removes_runtime_artifacts(monkeypatch, tmp_path):
     assert not status.exists()
     assert not tgws_link.exists()
     assert not strategy.exists()
+    assert not auto_geph.exists()
     assert (
         "/bin/launchctl",
         "disable",
@@ -701,6 +704,7 @@ def test_uninstall_stops_owned_listener_when_status_is_missing(monkeypatch, tmp_
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "missing-status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(
         tproxy,
         "_run",
@@ -740,6 +744,7 @@ def test_uninstall_reports_owned_daemon_that_did_not_stop(monkeypatch, tmp_path)
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "missing-status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(
         tproxy,
         "_run",
@@ -775,6 +780,7 @@ def test_uninstall_reports_incomplete_pf_token_release(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(
         tproxy,
         "_run",
@@ -807,6 +813,7 @@ def test_uninstall_clears_pf_and_boots_out_before_stopping_survivor(
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(
         tproxy,
         "_daemon_status_record",
@@ -888,6 +895,7 @@ def test_uninstall_never_signals_daemon_while_launchd_remains_loaded(
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(
         tproxy,
         "_daemon_status_record",
@@ -957,6 +965,7 @@ def test_uninstall_falls_back_to_plist_bootout_for_loaded_service(
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(tproxy, "_daemon_status_record", lambda: {})
 
     def fake_run(*args):
@@ -1027,6 +1036,7 @@ def test_uninstall_accepts_daemon_exit_caused_by_bootout(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(
         tproxy,
         "_daemon_status_record",
@@ -1131,6 +1141,7 @@ def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tm
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(status))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
@@ -1392,6 +1403,7 @@ def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "STATUS_PATH", str(tmp_path / "status.json"))
     monkeypatch.setattr(tproxy, "TGWS_LINK_PATH", str(tmp_path / "tgws.link"))
     monkeypatch.setattr(tproxy, "_STRAT_PATH", str(tmp_path / "strategies.json"))
+    monkeypatch.setattr(tproxy, "_AUTO_GEPH_PATH", str(tmp_path / "auto-geph.json"))
     monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)

@@ -9482,7 +9482,7 @@ def _write_launchd_plist_atomic(text):
 
 def _remove_install_runtime_artifacts():
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-    for path in (_STRAT_PATH, STATUS_PATH, TGWS_LINK_PATH):
+    for path in (_STRAT_PATH, _AUTO_GEPH_PATH, STATUS_PATH, TGWS_LINK_PATH):
         try:
             os.remove(path)
         except FileNotFoundError:

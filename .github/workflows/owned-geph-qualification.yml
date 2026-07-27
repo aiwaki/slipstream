@@ -132,8 +132,49 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$SLIPSTREAM_GEPH_ACCOUNT_SECRET"
+          app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
+          ready="$RUNNER_TEMP/slipstream-owned-geph.ready"
+          release="$RUNNER_TEMP/slipstream-owned-geph.release"
+          geph_log="$RUNNER_TEMP/slipstream-owned-geph.log"
+          rm -f "$ready" "$release" "$geph_log"
+
           python3 scripts/geph_owned_lifecycle_smoke.py \
-            --app-bundle "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
+            --app-bundle "$app" \
+            --ready-file "$ready" \
+            --release-file "$release" >"$geph_log" 2>&1 &
+          geph_pid=$!
+
+          cleanup() {
+            if kill -0 "$geph_pid" 2>/dev/null; then
+              /usr/bin/install -m 600 /dev/null "$release"
+              wait "$geph_pid" || true
+            fi
+            cat "$geph_log" || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 720); do
+            if test -f "$ready"; then
+              break
+            fi
+            if ! kill -0 "$geph_pid" 2>/dev/null; then
+              wait "$geph_pid" || true
+              cat "$geph_log"
+              exit 1
+            fi
+            sleep 0.25
+          done
+          test -f "$ready"
+
+          env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E python3 \
+            scripts/chromium_semantic_packaged_smoke.py \
+            --app-bundle "$app"
+
+          /usr/bin/install -m 600 /dev/null "$release"
+          wait "$geph_pid"
+          cat "$geph_log"
+          trap - EXIT
+          rm -f "$ready" "$release" "$geph_log"
 
       - name: Verify the user-level gate left no system path
         if: always()
@@ -146,9 +187,12 @@ jobs:
           test ! -e /var/run/slipstream-pf.token
           test ! -e /var/run/slipstream-pf-lo0-skip.json
           test ! -e /var/run/slipstream.status
+          test ! -e /var/run/slipstream-autogeph.json
+          test ! -e /var/run/slipstream-semantic.sock
           test -z "$(/usr/sbin/lsof -nP -t -iTCP@127.0.0.1:9954 -sTCP:LISTEN || true)"
           ! launchctl print "gui/$(id -u)/dev.slipstream.geph" >/dev/null 2>&1
           test ! -e "$HOME/Library/LaunchAgents/dev.slipstream.geph.plist"
           test ! -e "$HOME/Library/Application Support/dev.slipstream.tray"
+          test ! -e "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.slipstream.semantic.json"
           ! security find-generic-password \
             -s dev.slipstream.geph -a account-secret >/dev/null 2>&1
