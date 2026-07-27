@@ -101,8 +101,11 @@ native-host manifest into the fresh profile's `NativeMessagingHosts` directory;
 it does not synthesize or relax the manifest. The harness writes one
 owner-private temporary plist and bootstraps it under the exact
 `gui/<console-uid>` domain. User launchd starts Chrome with `Aqua` and
-`Interactive` session constraints, which supplies the login, audit, and Mach
-bootstrap context required by Chrome's sandboxed network-service children.
+`Interactive` session constraints and `SessionCreate=true`, which asks launchd
+to create the security audit session required by Chrome's sandboxed
+network-service children. Protected run `30279476090` proved that the exact
+user LaunchAgent and Aqua constraint alone were insufficient: without
+`SessionCreate`, the children still received Mach lookup error `1100`.
 The bootstrap command itself is inside the exact-target cleanup boundary, so a
 job accepted before a command error is still killed, booted out, and verified.
 Root execution followed by `launchctl asuser` and a manual UID/GID drop was

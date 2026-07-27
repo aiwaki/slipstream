@@ -526,6 +526,7 @@ def _chrome_launch_agent_payload(
         "RunAtLoad": True,
         "ProcessType": "Interactive",
         "LimitLoadToSessionType": "Aqua",
+        "SessionCreate": True,
         "AbandonProcessGroup": False,
         "WorkingDirectory": str(home),
         "EnvironmentVariables": dict(environment),
