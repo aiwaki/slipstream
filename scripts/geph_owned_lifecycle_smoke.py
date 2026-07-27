@@ -575,31 +575,48 @@ def _payload_probe(target: PayloadTarget) -> dict[str, str | int]:
         raise
 
 
+def _redact_geph_log_text(text: str, secret: str) -> str:
+    if secret:
+        text = text.replace(secret, "<redacted>")
+    text = re.sub(
+        r"(?im)(\bauthorization\b\s*[:=]\s*)[^\r\n]+",
+        r"\1<redacted>",
+        text,
+    )
+    text = re.sub(
+        r"(?i)([\"']?(?:secret|password|credential|token|api[_-]?key|"
+        r"access[_-]?token|refresh[_-]?token)[\"']?\s*[:=]\s*)"
+        r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)",
+        r"\1<redacted>",
+        text,
+    )
+    return re.sub(
+        r"(?i)([?&](?:secret|password|auth|authorization|token|key|"
+        r"api[_-]?key|access[_-]?token|refresh[_-]?token)=)[^&\s]+",
+        r"\1<redacted>",
+        text,
+    )
+
+
 def _safe_geph_log_tail(path: Path, secret: str, limit: int = 8192) -> str:
+    if limit <= 0:
+        return ""
+    secret_overlap = max(0, len(secret.encode("utf-8")) - 1) if secret else 0
     try:
         with path.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
-            handle.seek(max(0, size - limit))
-            text = handle.read(limit).decode("utf-8", errors="replace")
+            handle.seek(max(0, size - limit - secret_overlap))
+            text = handle.read(limit + secret_overlap).decode(
+                "utf-8",
+                errors="replace",
+            )
     except OSError:
         return ""
 
-    if secret:
-        text = text.replace(secret, "<redacted>")
-    text = re.sub(
-        r"(?i)\b(secret|password|authorization|credential|token)"
-        r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
-        r"\1\2<redacted>",
-        text,
-    )
-    text = re.sub(
-        r"(?i)([?&](?:secret|password|auth|token|key)=)[^&\s]+",
-        r"\1<redacted>",
-        text,
-    )
+    text = _redact_geph_log_text(text, secret)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return " | ".join(lines[-24:])
+    return " | ".join(lines[-24:])[-limit:]
 
 
 def _geph_failure_diagnostics(paths: GephPaths, secret: str) -> str:
@@ -921,7 +938,12 @@ def run_qualification(
     except Exception as exc:
         cleanup_errors.append(f"root daemon boundary verification: {exc}")
     if cleanup_errors:
-        raise QualificationError("; ".join(cleanup_errors)) from failure
+        cleanup_detail = "; ".join(cleanup_errors)
+        if failure is not None:
+            raise QualificationError(
+                f"primary failure: {failure}; cleanup failure: {cleanup_detail}"
+            ) from failure
+        raise QualificationError(cleanup_detail)
     if failure is not None:
         raise failure
     return result

@@ -253,6 +253,36 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         self.assertNotIn("opaque-token", tail)
         self.assertGreaterEqual(tail.count("<redacted>"), 2)
 
+    def test_geph_log_tail_redacts_secret_crossing_tail_boundary(self) -> None:
+        secret = "boundary-secret-value"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "geph.stderr.log"
+            path.write_text(
+                ("x" * 80) + secret + ("z" * 50),
+                encoding="utf-8",
+            )
+            tail = smoke._safe_geph_log_tail(path, secret, limit=64)
+
+        self.assertNotIn(secret, tail)
+        self.assertNotIn(secret[8:], tail)
+        self.assertIn("<redacted>", tail)
+        self.assertLessEqual(len(tail), 64)
+
+    def test_geph_log_tail_redacts_json_and_authorization_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "geph.stderr.log"
+            path.write_text(
+                '{"token":"opaque-token","status":"retrying"}\n'
+                "Authorization: Bearer bearer-token\n",
+                encoding="utf-8",
+            )
+            tail = smoke._safe_geph_log_tail(path, "")
+
+        self.assertNotIn("opaque-token", tail)
+        self.assertNotIn("bearer-token", tail)
+        self.assertNotIn("Bearer", tail)
+        self.assertEqual(tail.count("<redacted>"), 2)
+
     def test_native_host_cleanup_removes_only_the_exact_packaged_manifest(
         self,
     ) -> None:
@@ -374,12 +404,14 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 smoke, "DAEMON_PLIST", Path(tmp) / "daemon.plist"
             ):
-                with self.assertRaisesRegex(
-                    smoke.QualificationError,
-                    "Keychain cleanup: security timeout",
-                ):
+                with self.assertRaises(smoke.QualificationError) as raised:
                     smoke.run_qualification(app_bundle)
 
+            self.assertIn("primary failure: startup failed", str(raised.exception))
+            self.assertIn(
+                "cleanup failure: Keychain cleanup: security timeout",
+                str(raised.exception),
+            )
             keychain_delete.assert_called_once_with()
             tray.close.assert_called_once_with()
             sentinel.close.assert_called_once_with()
