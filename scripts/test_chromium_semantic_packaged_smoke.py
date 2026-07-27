@@ -221,6 +221,59 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ),
         )
 
+    def test_bootstrap_failure_still_kills_and_boots_out_the_exact_target(self) -> None:
+        absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        bootstrap_error = smoke.QualificationError("bootstrap returned an error")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            side_effect=(absent, bootstrap_error, success, success),
+        ) as run, mock.patch.object(
+            smoke,
+            "_wait_for_launch_agent_absence",
+        ) as wait_absent:
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "bootstrap returned an error",
+            ):
+                smoke._bootstrap_chrome_launch_agent(
+                    501,
+                    "dev.slipstream.chromium-semantic.4242",
+                    Path("/tmp/profile/chrome-launch-agent.plist"),
+                )
+
+        self.assertEqual(
+            tuple(call.args[0] for call in run.call_args_list),
+            (
+                (
+                    "/bin/launchctl",
+                    "print",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootstrap",
+                    "gui/501",
+                    "/tmp/profile/chrome-launch-agent.plist",
+                ),
+                (
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGKILL",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootout",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+            ),
+        )
+        wait_absent.assert_called_once_with(
+            "gui/501/dev.slipstream.chromium-semantic.4242"
+        )
+
     def test_launch_agent_cleanup_targets_only_the_exact_job_and_group(self) -> None:
         launch = smoke.ChromeLaunch(
             "gui/501/dev.slipstream.chromium-semantic.4242",

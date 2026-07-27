@@ -625,9 +625,9 @@ def _bootstrap_chrome_launch_agent(
     target = f"gui/{uid}/{label}"
     if _run(("/bin/launchctl", "print", target), check=False).returncode == 0:
         raise QualificationError(f"Chrome LaunchAgent already exists: {target}")
-    _run(("/bin/launchctl", "bootstrap", f"gui/{uid}", str(plist_path)))
 
     try:
+        _run(("/bin/launchctl", "bootstrap", f"gui/{uid}", str(plist_path)))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             pid = _launch_agent_pid(target)

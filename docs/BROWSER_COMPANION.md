@@ -103,6 +103,8 @@ owner-private temporary plist and bootstraps it under the exact
 `gui/<console-uid>` domain. User launchd starts Chrome with `Aqua` and
 `Interactive` session constraints, which supplies the login, audit, and Mach
 bootstrap context required by Chrome's sandboxed network-service children.
+The bootstrap command itself is inside the exact-target cleanup boundary, so a
+job accepted before a command error is still killed, booted out, and verified.
 Root execution followed by `launchctl asuser` and a manual UID/GID drop was
 explicitly rejected after protected runs still produced Mach lookup error
 `1100`. No shell or `sudo` is involved. Cleanup sends signals and `bootout`
