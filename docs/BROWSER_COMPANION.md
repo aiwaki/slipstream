@@ -90,15 +90,19 @@ Chromium preview with the existing protected account-backed Geph gate. It
 starts the packaged tray and its exact user LaunchAgent, then runs a separate
 root-only harness against the packaged daemon.
 
-The browser side uses real Chrome, a fresh owner-only profile, the unpacked
-frozen-origin extension, the registered packaged Rust native host, and the
-daemon's owner-only semantic socket. A scoped local HTTPS fixture mapped only
-inside that Chrome profile serves a strong regional-denial page first and a
-styled page on the next request. The daemon does not trust that fixture:
+The browser side uses real GUI Chrome in the disposable runner's user session,
+a fresh owner-only profile, the unpacked frozen-origin extension, the registered
+packaged Rust native host, and the daemon's owner-only semantic socket. A scoped
+local HTTPS fixture mapped only inside that Chrome profile serves a strong
+regional-denial page first and a styled page on the next request. Headless
+Chrome is intentionally excluded because the protected run showed that it can
+render the page without activating the MV3 native-messaging path. The daemon
+does not trust the fixture:
 confirmation is a separate real HTTPS request for the same generic hostname
 through the ownership-verified account-backed Geph. Success requires the
 learned exact-host route, exactly one browser reload, a marked nonblank DOM,
-and fetched CSS, JavaScript, and image resources.
+fetched CSS, JavaScript, and image resources, and one same-origin `/ready`
+callback emitted by page JavaScript only after those resources are usable.
 
 The fixture uses an untrusted one-day certificate accepted only by the
 disposable Chrome process. It does not install a certificate, alter system DNS,

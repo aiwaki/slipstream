@@ -56,16 +56,23 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
         _, _, script = smoke._fixture_response("/app.js", root_visit=2)
         self.assertIn(smoke.STYLED_MARKER.encode(), script)
+        self.assertIn(b"fetch('/ready'", script)
+        ready_status, _, ready = smoke._fixture_response("/ready", root_visit=2)
+        self.assertEqual((ready_status, ready), (204, b""))
         smoke._assert_fixture_complete(
-            smoke.FixtureSnapshot(2, 1, 1, 1)
+            smoke.FixtureSnapshot(2, 1, 1, 1, 1)
         )
         with self.assertRaisesRegex(smoke.QualificationError, "exactly once"):
             smoke._assert_fixture_complete(
-                smoke.FixtureSnapshot(3, 1, 1, 1)
+                smoke.FixtureSnapshot(3, 1, 1, 1, 1)
             )
         with self.assertRaisesRegex(smoke.QualificationError, "mandatory resource"):
             smoke._assert_fixture_complete(
-                smoke.FixtureSnapshot(2, 1, 0, 1)
+                smoke.FixtureSnapshot(2, 1, 0, 1, 1)
+            )
+        with self.assertRaisesRegex(smoke.QualificationError, "ready callback"):
+            smoke._assert_fixture_complete(
+                smoke.FixtureSnapshot(2, 1, 1, 1, 0)
             )
 
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
@@ -75,7 +82,9 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             Path("/repo/browser-companion/chromium"),
             18443,
         )
-        self.assertIn("--headless=new", command)
+        self.assertNotIn("--headless=new", command)
+        self.assertNotIn("--dump-dom", command)
+        self.assertIn("--new-window", command)
         self.assertIn(
             "--disable-extensions-except=/repo/browser-companion/chromium",
             command,
