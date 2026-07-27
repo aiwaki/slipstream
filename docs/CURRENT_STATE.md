@@ -23,8 +23,10 @@ The active follow-up loads Chrome for Testing as an exact temporary LaunchAgent
 in `gui/<console-uid>`. The owner-private plist carries the already validated
 browser command, clean environment, working directory, capture paths, and
 `Aqua`/`Interactive` constraints. User launchd owns the GUI process context;
-cleanup kills and boots out only the unique job label, then verifies that no
-console-user member remains in its recorded process group. No shell, `sudo`,
+cleanup kills and boots out only the unique job label, retries that exact target
+after a transient failure, then verifies both launchd absence and that no
+console-user member remains in its recorded process group. The disposable
+profile and plist are removed only after both proofs succeed. No shell, `sudo`,
 broad process match, workstation execution, or product routing change is
 involved. Completion still requires the independently confirmed future
 exact-host route, exactly one reload, every CSS/JavaScript/image request, and

@@ -670,41 +670,56 @@ def _stop_chrome_launch_agent(
     gid: int,
     supplementary_groups: tuple[int, ...],
 ) -> None:
-    _run(("/bin/launchctl", "kill", "SIGTERM", launch.target), check=False)
-    result = _run(("/bin/launchctl", "bootout", launch.target), check=False)
-    if result.returncode != 0:
-        still_loaded = _run(
-            ("/bin/launchctl", "print", launch.target),
+    launchd_error: Exception | None = None
+    for signal_name in ("SIGTERM", "SIGKILL"):
+        _run(
+            ("/bin/launchctl", "kill", signal_name, launch.target),
             check=False,
         )
-        if not lifecycle.launchd_job_absent(still_loaded):
-            raise QualificationError(
-                f"Chrome LaunchAgent bootout failed: {launch.target}"
-            )
-    _wait_for_launch_agent_absence(launch.target)
+        _run(("/bin/launchctl", "bootout", launch.target), check=False)
+        try:
+            _wait_for_launch_agent_absence(launch.target)
+            launchd_error = None
+            break
+        except Exception as exc:
+            launchd_error = exc
 
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
         members = lifecycle._chrome_process_group_members(launch.process_group)
         if not any(member.uid == uid for member in members):
-            return
+            break
         time.sleep(0.1)
-    lifecycle._signal_owned_chrome_processes(
-        launch.process_group,
-        signal.SIGKILL,
-        uid=uid,
-        gid=gid,
-        supplementary_groups=supplementary_groups,
-    )
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
+    else:
+        lifecycle._signal_owned_chrome_processes(
+            launch.process_group,
+            signal.SIGKILL,
+            uid=uid,
+            gid=gid,
+            supplementary_groups=supplementary_groups,
+        )
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            members = lifecycle._chrome_process_group_members(launch.process_group)
+            if not any(member.uid == uid for member in members):
+                break
+            time.sleep(0.1)
+        else:
+            raise QualificationError(
+                "Chrome process group survived exact LaunchAgent cleanup: "
+                f"{launch.process_group}"
+            )
+
+    if launchd_error is not None:
         members = lifecycle._chrome_process_group_members(launch.process_group)
-        if not any(member.uid == uid for member in members):
-            return
-        time.sleep(0.1)
-    raise QualificationError(
-        f"Chrome process group survived exact LaunchAgent cleanup: {launch.process_group}"
-    )
+        if any(member.uid == uid for member in members):
+            raise QualificationError(
+                "Chrome LaunchAgent and process group survived cleanup: "
+                f"{launch.target}"
+            ) from launchd_error
+        raise QualificationError(
+            f"Chrome LaunchAgent survived exact cleanup: {launch.target}"
+        ) from launchd_error
 
 
 def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
@@ -783,6 +798,7 @@ def _run_chrome(
     plist_path = profile / "chrome-launch-agent.plist"
     label = f"{CHROME_JOB_PREFIX}.{os.getpid()}"
     launch: ChromeLaunch | None = None
+    bootstrap_started = False
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -815,6 +831,7 @@ def _run_chrome(
             uid,
             gid,
         )
+        bootstrap_started = True
         launch = _bootstrap_chrome_launch_agent(
             uid,
             label,
@@ -840,6 +857,7 @@ def _run_chrome(
     except BaseException as exc:
         failure = exc
     finally:
+        launch_agent_absent = not bootstrap_started
         try:
             if launch is not None:
                 _stop_chrome_launch_agent(
@@ -848,6 +866,10 @@ def _run_chrome(
                     gid=gid,
                     supplementary_groups=supplementary_groups,
                 )
+                launch_agent_absent = True
+            elif bootstrap_started:
+                _wait_for_launch_agent_absence(f"gui/{uid}/{label}")
+                launch_agent_absent = True
         except Exception as exc:
             cleanup_errors.append(f"Chrome LaunchAgent cleanup: {exc}")
         try:
@@ -857,10 +879,15 @@ def _run_chrome(
         except Exception as exc:
             stderr = b""
             cleanup_errors.append(f"Chrome diagnostic capture: {exc}")
-        try:
-            _remove_owned_profile(profile)
-        except Exception as exc:
-            cleanup_errors.append(f"Chrome profile cleanup: {exc}")
+        if launch_agent_absent:
+            try:
+                _remove_owned_profile(profile)
+            except Exception as exc:
+                cleanup_errors.append(f"Chrome profile cleanup: {exc}")
+        else:
+            cleanup_errors.append(
+                f"Chrome profile retained until LaunchAgent cleanup: {profile}"
+            )
 
     if cleanup_errors:
         raise QualificationError("; ".join(cleanup_errors)) from failure

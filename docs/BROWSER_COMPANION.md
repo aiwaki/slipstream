@@ -106,9 +106,11 @@ bootstrap context required by Chrome's sandboxed network-service children.
 Root execution followed by `launchctl asuser` and a manual UID/GID drop was
 explicitly rejected after protected runs still produced Mach lookup error
 `1100`. No shell or `sudo` is involved. Cleanup sends signals and `bootout`
-only to the unique temporary job label, then verifies that no console-user
-member remains in its recorded process group. A scoped local HTTPS fixture
-mapped only inside that browser profile serves a strong
+only to the unique temporary job label, retries the same target after a
+transient failure, then verifies both launchd absence and that no console-user
+member remains in its recorded process group. The fresh profile and its plist
+are removed only after both proofs succeed. A scoped local HTTPS fixture mapped
+only inside that browser profile serves a strong
 regional-denial page first and a styled page on the next request. Headless
 execution is also excluded because an
 earlier protected run rendered the page without activating the MV3
