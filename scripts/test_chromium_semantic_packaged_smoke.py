@@ -155,7 +155,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertNotIn("/usr/bin/sudo", command)
         self.assertNotIn("/bin/launchctl", command)
 
-    def test_launchservices_aliases_an_extensionless_bundle_in_the_profile(
+    def test_launchservices_wraps_an_extensionless_bundle_in_the_profile(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,17 +163,22 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             executable = _fake_extensionless_chrome_for_testing(root)
             profile = root / "profile"
             profile.mkdir(mode=0o700)
-            alias = smoke._launchservices_app_bundle(
+            wrapper = smoke._launchservices_app_bundle(
                 executable,
                 profile,
                 os.getuid(),
                 os.getgid(),
             )
 
-            self.assertTrue(alias.is_symlink())
-            self.assertEqual(alias.parent, profile)
-            self.assertEqual(alias.suffix, ".app")
-            self.assertEqual(alias.resolve(), executable.parents[2].resolve())
+            self.assertTrue(wrapper.is_dir())
+            self.assertFalse(wrapper.is_symlink())
+            self.assertEqual(wrapper.parent, profile)
+            self.assertEqual(wrapper.suffix, ".app")
+            self.assertTrue((wrapper / "Contents").is_symlink())
+            self.assertEqual(
+                (wrapper / "Contents").resolve(),
+                executable.parents[2].resolve() / "Contents",
+            )
 
             payload = smoke._chrome_launch_agent_payload(
                 "dev.slipstream.chromium-semantic.4242",
@@ -187,11 +192,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 profile,
                 Path("/repo/browser-companion/chromium"),
                 18443,
-                alias,
+                wrapper,
             )
 
         command = payload["ProgramArguments"]
-        self.assertEqual(command[command.index("-a") + 1], str(alias))
+        self.assertEqual(command[command.index("-a") + 1], str(wrapper))
 
     def test_launchservices_uses_an_existing_app_bundle_without_an_alias(
         self,

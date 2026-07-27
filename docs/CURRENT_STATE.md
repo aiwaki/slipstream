@@ -9,25 +9,25 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-27, through main commit
-`de153cefc53215da8b72cf718c7c5f720a3064c5`. PR #237 replaced direct
+`294922c8697395b617f68da8f04f88ab586365c9`. PR #237 replaced direct
 LaunchAgent Chrome execution with sandboxed LaunchServices launch in the
 console Aqua session and hardened exact browser/launcher ownership and cleanup.
-Exact-main CI run `30295085145` and audit run `30295083249` passed, including
-the packaged app lifecycle sentinel. Protected run `30295751995` again passed
-real account-backed owned-Geph initial, trayless, and recovered TLS payload
-(`HTTP/1.1 200 OK`, 68103 bytes each), preserved the external listener, restored
+PR #238 added the first extensionless runner-bundle adapter. Exact-main CI run
+`30298212955` and audit run `30298213087` passed, including the packaged app
+lifecycle sentinel. Protected run `30298855867` again passed real
+account-backed owned-Geph initial, trayless, and recovered TLS payload
+(`HTTP/1.1 200 OK`, 67973 bytes each), preserved the external listener, restored
 system state, and left the root daemon absent and disabled.
 
-The protected browser half failed before launch with
-`kLSNoExecutableErr (-10827)`. `setup-chrome` supplied a valid
-`Contents/MacOS/Google Chrome for Testing` tree whose application root was the
-extensionless directory `arm64`; the harness passed that directory directly to
-LaunchServices, which requires an application-form path. The active narrow
-follow-up creates an owner-private `.app` symlink inside the already temporary
-Chrome profile only when the source bundle lacks the suffix. LaunchServices
-receives that alias, while process admission and cleanup remain bound to the
+The protected browser half still failed before launch with
+`kLSNoExecutableErr (-10827)`: LaunchServices canonicalized the whole-bundle
+`.app` symlink back to the extensionless `arm64` directory. The active narrow
+follow-up instead creates a real owner-private `.app` directory inside the
+temporary Chrome profile and links only its `Contents` entry to the source
+bundle. A local LaunchServices launch of the same extensionless-wrapper shape
+completed with status zero. Process admission and cleanup remain bound to the
 real resolved executable, UID, bundle helper family, unique profile, retained
-process group, and exact launcher label. The alias is removed only with the
+process group, and exact launcher label. The wrapper is removed only with the
 profile after browser and launcher absence are proven.
 
 No shell, broad process match, workstation execution, product route, or

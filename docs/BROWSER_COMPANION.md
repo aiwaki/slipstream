@@ -105,13 +105,15 @@ LaunchServices to create sandboxed Chrome in the console user's actual Aqua
 application session and keeps the exact launcher job alive until that
 application exits. When Chrome for Testing is distributed as a valid
 `Contents/` tree under an extensionless architecture directory, the harness
-creates one `.app` symlink inside the fresh owner-private profile and gives
-only that alias to LaunchServices. Process admission and cleanup still resolve
-against the real executable and bundle family; the alias disappears with the
-profile only after exact process absence is proven. Protected run
-`30295751995` isolated this requirement with `kLSNoExecutableErr (-10827)`
-while independently passing the complete owned-Geph lifecycle and final
-system cleanup. Protected runs `30279476090` and `30282319977` proved that
+creates one real `.app` directory inside the fresh owner-private profile and
+links only its `Contents` entry to the source bundle. A whole-bundle symlink is
+not sufficient because LaunchServices canonicalizes it back to the
+extensionless path. Process admission and cleanup still resolve against the
+real executable and bundle family; the wrapper disappears with the profile
+only after exact process absence is proven. Protected runs `30295751995` and
+`30298855867` isolated these two requirements while independently passing the
+complete owned-Geph lifecycle and final system cleanup. Protected runs
+`30279476090` and `30282319977` proved that
 direct browser execution from an Aqua LaunchAgent, with or without
 `SessionCreate`, gives sandboxed network-service children Mach lookup error
 `1100`. Run `30284938688` proved that `--no-sandbox` merely changed this to

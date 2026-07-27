@@ -544,18 +544,21 @@ def _launchservices_app_bundle(
     if bundle.suffix.lower() == ".app":
         return bundle
 
-    alias = profile / "Chrome for Testing.app"
-    if alias.exists() or alias.is_symlink():
+    wrapper = profile / "Chrome for Testing.app"
+    if wrapper.exists() or wrapper.is_symlink():
         raise QualificationError(
-            f"private LaunchServices application alias already exists: {alias}"
+            f"private LaunchServices application wrapper already exists: {wrapper}"
         )
-    os.symlink(bundle, alias, target_is_directory=True)
-    os.lchown(alias, uid, gid)
-    if not (alias / "Contents" / "Info.plist").is_file():
+    wrapper.mkdir(mode=0o700)
+    os.chown(wrapper, uid, gid)
+    contents = wrapper / "Contents"
+    os.symlink(bundle / "Contents", contents, target_is_directory=True)
+    os.lchown(contents, uid, gid)
+    if not (contents / "Info.plist").is_file():
         raise QualificationError(
-            f"LaunchServices application alias has no bundle metadata: {alias}"
+            f"LaunchServices application wrapper has no bundle metadata: {wrapper}"
         )
-    return alias
+    return wrapper
 
 
 def _chrome_open_command(
