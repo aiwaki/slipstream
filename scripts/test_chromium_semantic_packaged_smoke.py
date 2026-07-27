@@ -124,8 +124,18 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             profile = root / "profile"
             profile.mkdir()
             source = root / "native-host.json"
-            payload = b'{"name":"dev.slipstream.semantic"}'
+            expected_executable = root / "Slipstream.app/Contents/MacOS/slipstream"
+            payload = json.dumps(
+                {
+                    "name": smoke.NATIVE_HOST_NAME,
+                    "path": str(expected_executable),
+                    "type": "stdio",
+                    "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
+                },
+                separators=(",", ":"),
+            ).encode()
             source.write_bytes(payload)
+            source.chmod(0o600)
             real_write = os.write
             writes = 0
 
@@ -140,6 +150,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     source,
                     os.getuid(),
                     os.getgid(),
+                    expected_executable,
                 )
             self.assertEqual(destination.read_bytes(), payload)
             self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
@@ -148,6 +159,22 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 destination.relative_to(profile),
                 smoke.PROFILE_NATIVE_HOST_RELATIVE_PATH,
             )
+
+            source.unlink()
+            foreign = root / "foreign.json"
+            foreign.write_bytes(payload)
+            foreign.chmod(0o600)
+            source.symlink_to(foreign)
+            second_profile = root / "second-profile"
+            second_profile.mkdir()
+            with self.assertRaises(OSError):
+                smoke._install_profile_native_host(
+                    second_profile,
+                    source,
+                    os.getuid(),
+                    os.getgid(),
+                    expected_executable,
+                )
 
     def test_native_manifest_must_be_private_exact_origin_and_packaged_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

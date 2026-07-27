@@ -108,7 +108,7 @@ def _run(
     return result
 
 
-def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
+def _read_private_bytes(path: Path, expected_uid: int) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags)
     try:
@@ -121,15 +121,45 @@ def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
             or metadata.st_size > 64 * 1024
         ):
             raise QualificationError(f"{path} is not a bounded owner-private file")
-        with os.fdopen(fd, encoding="utf-8") as handle:
-            fd = -1
-            payload = json.load(handle)
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 16 * 1024))
+            if not chunk:
+                raise QualificationError(f"{path} changed while being read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise QualificationError(f"{path} changed while being read")
     finally:
-        if fd >= 0:
-            os.close(fd)
-    if not isinstance(payload, dict):
+        os.close(fd)
+    return b"".join(chunks)
+
+
+def _decode_json_object(payload: bytes, path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QualificationError(f"{path} does not contain valid JSON") from exc
+    if not isinstance(value, dict):
         raise QualificationError(f"{path} does not contain a JSON object")
-    return payload
+    return value
+
+
+def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
+    return _decode_json_object(_read_private_bytes(path, expected_uid), path)
+
+
+def _is_exact_native_host(
+    payload: dict[str, object],
+    expected_executable: Path,
+) -> bool:
+    return (
+        payload.get("name") == NATIVE_HOST_NAME
+        and payload.get("path") == str(expected_executable)
+        and payload.get("type") == "stdio"
+        and payload.get("allowed_origins") == [NATIVE_HOST_ORIGIN]
+    )
 
 
 def _fixture_response(
@@ -376,12 +406,7 @@ def _wait_for_native_host(
     while time.monotonic() < deadline:
         try:
             payload = _read_private_json(path, uid)
-            if (
-                payload.get("name") == NATIVE_HOST_NAME
-                and payload.get("path") == str(expected_executable)
-                and payload.get("type") == "stdio"
-                and payload.get("allowed_origins") == [NATIVE_HOST_ORIGIN]
-            ):
+            if _is_exact_native_host(payload, expected_executable):
                 return path
             last_error = f"invalid manifest metadata or payload: {payload!r}"
         except (FileNotFoundError, OSError, ValueError, QualificationError) as exc:
@@ -396,12 +421,7 @@ def _remove_exact_native_host(
     uid: int,
 ) -> None:
     payload = _read_private_json(path, uid)
-    if (
-        payload.get("name") != NATIVE_HOST_NAME
-        or payload.get("path") != str(expected_executable)
-        or payload.get("type") != "stdio"
-        or payload.get("allowed_origins") != [NATIVE_HOST_ORIGIN]
-    ):
+    if not _is_exact_native_host(payload, expected_executable):
         raise QualificationError("refusing to remove a foreign native host manifest")
     path.unlink()
     if path.exists():
@@ -504,11 +524,15 @@ def _install_profile_native_host(
     source: Path,
     uid: int,
     gid: int,
+    expected_executable: Path,
 ) -> Path:
     destination = profile / PROFILE_NATIVE_HOST_RELATIVE_PATH
     destination.parent.mkdir(mode=0o700)
     os.chown(destination.parent, uid, gid)
-    payload = source.read_bytes()
+    payload = _read_private_bytes(source, uid)
+    manifest = _decode_json_object(payload, source)
+    if not _is_exact_native_host(manifest, expected_executable):
+        raise QualificationError("refusing to copy a foreign native host manifest")
     fd = os.open(
         destination,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -538,6 +562,7 @@ def _run_chrome(
     fixture: SemanticHttpsFixture,
     executable: Path,
     native_host_manifest: Path,
+    native_host_executable: Path,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -558,6 +583,7 @@ def _run_chrome(
             native_host_manifest,
             uid,
             gid,
+            native_host_executable,
         )
         process = subprocess.Popen(
             _chrome_command(executable, profile, extension, fixture.port),
@@ -711,6 +737,7 @@ def run_qualification(
             fixture,
             chrome_executable,
             native_host_path,
+            target.tray_executable,
         )
         expiry = _wait_for_learned_host(FIXTURE_HOST)
         _assert_fixture_complete(snapshot)
