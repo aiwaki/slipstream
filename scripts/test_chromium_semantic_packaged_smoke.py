@@ -173,6 +173,21 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             self.assertGreater(expiry, smoke.time.time())
             read.assert_called_once_with(state, 0)
 
+    def test_fresh_chrome_profile_cleanup_is_mandatory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            smoke._remove_owned_profile(profile)
+            self.assertFalse(profile.exists())
+
+            profile.mkdir()
+            with mock.patch.object(smoke.shutil, "rmtree"):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "profile survived cleanup",
+                ):
+                    smoke._remove_owned_profile(profile)
+
     def test_dry_run_describes_real_composition_without_production_override(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

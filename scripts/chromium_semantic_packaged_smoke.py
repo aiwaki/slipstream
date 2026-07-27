@@ -474,6 +474,12 @@ def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
     raise QualificationError(f"semantic route was not learned for {host}: {last!r}")
 
 
+def _remove_owned_profile(profile: Path) -> None:
+    shutil.rmtree(profile)
+    if profile.exists():
+        raise QualificationError("fresh Chrome profile survived cleanup")
+
+
 def _run_chrome(
     uid: int,
     gid: int,
@@ -498,7 +504,7 @@ def _run_chrome(
             timeout=CHROME_TIMEOUT,
         )
     finally:
-        shutil.rmtree(profile, ignore_errors=True)
+        _remove_owned_profile(profile)
     output = capture.stdout
     if capture.timed_out or capture.returncode != 0 or STYLED_MARKER.encode() not in output:
         detail = (capture.stdout + b"\n" + capture.stderr).decode(
