@@ -483,8 +483,10 @@ def _chrome_command(
     profile: Path,
     extension: Path,
     fixture_port: int,
+    *,
+    disable_sandbox: bool = False,
 ) -> tuple[str, ...]:
-    return (
+    command = [
         str(executable),
         "--disable-background-networking",
         "--disable-component-update",
@@ -504,7 +506,10 @@ def _chrome_command(
         f"--host-resolver-rules=MAP {FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
         f"--user-data-dir={profile}",
         f"https://{FIXTURE_HOST}:{fixture_port}/?slipstream-semantic=1",
-    )
+    ]
+    if disable_sandbox:
+        command.insert(1, "--no-sandbox")
+    return tuple(command)
 
 
 def _chrome_launch_agent_payload(
@@ -517,11 +522,19 @@ def _chrome_launch_agent_payload(
     profile: Path,
     extension: Path,
     fixture_port: int,
+    *,
+    disable_sandbox: bool = False,
 ) -> dict[str, object]:
     return {
         "Label": label,
         "ProgramArguments": list(
-            _chrome_command(executable, profile, extension, fixture_port)
+            _chrome_command(
+                executable,
+                profile,
+                extension,
+                fixture_port,
+                disable_sandbox=disable_sandbox,
+            )
         ),
         "RunAtLoad": True,
         "ProcessType": "Interactive",
@@ -789,6 +802,8 @@ def _run_chrome(
     executable: Path,
     native_host_manifest: Path,
     native_host_executable: Path,
+    *,
+    disable_sandbox: bool = False,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -825,6 +840,7 @@ def _run_chrome(
             profile,
             extension,
             fixture.port,
+            disable_sandbox=disable_sandbox,
         )
         _write_owner_private_file(
             plist_path,
@@ -937,6 +953,8 @@ def run_qualification(
     app_bundle: Path,
     chrome_executable: Path,
     extension: Path = DEFAULT_EXTENSION,
+    *,
+    disable_chrome_sandbox: bool = False,
 ) -> dict[str, object]:
     uid, gid = _require_disposable_ci()
     chrome_executable = _validate_chrome_for_testing(chrome_executable)
@@ -983,6 +1001,7 @@ def run_qualification(
             chrome_executable,
             native_host_path,
             target.tray_executable,
+            disable_sandbox=disable_chrome_sandbox,
         )
         expiry = _wait_for_learned_host(FIXTURE_HOST)
         _assert_fixture_complete(snapshot)
@@ -990,6 +1009,11 @@ def run_qualification(
             "result": "pass",
             "restricted_to": "protected disposable GitHub Actions macOS runner",
             "browser": "Chrome for Testing with a fresh owner-only profile",
+            "chrome_sandbox": (
+                "disabled only for disposable GitHub Actions compatibility"
+                if disable_chrome_sandbox
+                else "enabled"
+            ),
             "extension": "unpacked frozen-origin Chromium companion",
             "native_host": "packaged exact-origin Rust host",
             "daemon_ipc": "owner-only semantic socket",
@@ -1061,6 +1085,9 @@ def dry_run() -> dict[str, object]:
             "exact packaged manifest copied into the disposable browser profile"
         ),
         "success": "styled DOM plus CSS, JavaScript, and image",
+        "ci_sandbox_boundary": (
+            "sandboxed by default; explicit opt-out only in protected disposable CI"
+        ),
         "production_overrides": "none",
     }
 
@@ -1073,6 +1100,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--app-bundle", type=Path)
     parser.add_argument("--chrome-executable", type=Path)
     parser.add_argument("--extension", type=Path, default=DEFAULT_EXTENSION)
+    parser.add_argument("--ci-disable-chrome-sandbox", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     if args.dry_run:
@@ -1087,6 +1115,7 @@ def main(argv: list[str] | None = None) -> int:
             args.app_bundle,
             args.chrome_executable,
             args.extension,
+            disable_chrome_sandbox=args.ci_disable_chrome_sandbox,
         )
     except Exception as exc:
         print(f"Chromium semantic qualification failed: {exc}", file=sys.stderr)
