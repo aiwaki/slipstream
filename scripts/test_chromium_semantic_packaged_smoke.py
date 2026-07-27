@@ -97,6 +97,22 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         )
         self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
 
+    def test_gui_chrome_enters_the_exact_console_user_bootstrap(self) -> None:
+        command = smoke._gui_chrome_command(
+            501,
+            Path("/Applications/Google Chrome for Testing"),
+            Path("/tmp/profile"),
+            Path("/repo/browser-companion/chromium"),
+            18443,
+        )
+        self.assertEqual(command[:3], ("/bin/launchctl", "asuser", "501"))
+        self.assertEqual(
+            command[3],
+            "/Applications/Google Chrome for Testing",
+        )
+        self.assertNotIn("/bin/sh", command)
+        self.assertNotIn("/usr/bin/sudo", command)
+
     def test_chrome_for_testing_validation_rejects_branded_chrome(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             executable = Path(tmp) / "Google Chrome"

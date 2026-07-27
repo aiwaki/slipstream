@@ -497,6 +497,21 @@ def _chrome_command(
     )
 
 
+def _gui_chrome_command(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    extension: Path,
+    fixture_port: int,
+) -> tuple[str, ...]:
+    return (
+        "/bin/launchctl",
+        "asuser",
+        str(uid),
+        *_chrome_command(executable, profile, extension, fixture_port),
+    )
+
+
 def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
     deadline = time.monotonic() + timeout
     last = None
@@ -586,7 +601,13 @@ def _run_chrome(
             native_host_executable,
         )
         process = subprocess.Popen(
-            _chrome_command(executable, profile, extension, fixture.port),
+            _gui_chrome_command(
+                uid,
+                executable,
+                profile,
+                extension,
+                fixture.port,
+            ),
             cwd=home,
             env=environment,
             stdin=subprocess.DEVNULL,
