@@ -9,30 +9,33 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-27, through main commit
-`a140fb4df0f6fbde9237385035d682dcb2ba8f88`. PRs #225 and #226 merged the
-Chromium and unsigned Safari semantic companions after all required PR checks
-passed. Their shared bounded detector recognizes strong regional-denial
-language locally and sends only category plus confidence. Each service worker
-derives hostname from browser-owned top-level sender metadata. Chromium uses an
-exact-origin Rust native host; Safari uses Apple's containing-app/app-extension
-boundary and a strict Swift bridge. Both revalidate the frozen contract and
-forward it to the daemon's owner-only socket. Static direct, direct-first,
-local-bypass, and reviewed geo-exit policy remains authoritative; semantic
-evidence never enters the transport-failure candidate map or selects a route by
-itself. When daemon confirmation is scheduled, the same tab may reload once
-after the bounded confirmation budget, only if its hostname is unchanged.
+`7c189e1b6d1b3fb5acfba7e53e8bde67ae61b539`. PRs #225-#227 merged the
+Chromium and unsigned Safari semantic companions plus bounded, fail-closed
+cleanup of their temporary Safari build registration. Their shared bounded
+detector recognizes strong regional-denial language locally and sends only
+category plus confidence. Each service worker derives hostname from
+browser-owned top-level sender metadata. Chromium uses an exact-origin Rust
+native host; Safari uses Apple's containing-app/app-extension boundary and a
+strict Swift bridge. Both revalidate the frozen contract and forward it to the
+daemon's owner-only socket. Static direct, direct-first, local-bypass, and
+reviewed geo-exit policy remains authoritative; semantic evidence never enters
+the transport-failure candidate map or selects a route by itself. When daemon
+confirmation is scheduled, the same tab may reload once after the bounded
+confirmation budget, only if its hostname is unchanged.
 
 The Safari packaging path creates a fresh Xcode project and compiles a macOS 13
 app plus `.appex` without signing. The build script immediately unregisters
 only its generated containing app, including its embedded extension, from
 LaunchServices and never opens or enables either one. Exact-main run
 `30230210126` exposed that one unregister plus a three-second poll was not a
-stable absence proof even though the same PR job passed. The current
-`codex/safari-semantic-checkpoint` branch unregisters the exact embedded
-`.appex` and containing `.app` with bounded retries and still fails closed if
-their generated path remains registered. No companion has been installed on a
-workstation. Chrome Web Store publication, real packaged Chrome qualification,
-and a disposable signed Safari sandbox/socket qualification remain open.
+stable absence proof even though the same PR job passed. PR #227 now
+unregisters the exact embedded `.appex` and containing `.app` with bounded
+retries, accepts absence only after a successful LaunchServices dump, and fails
+closed if their generated path remains registered. Exact-main CI run
+`30231226271` passed the unsigned Safari build, packaged lifecycle, and cleanup
+gates on the merged commit. No companion has been installed on a workstation.
+Chrome Web Store publication, real packaged Chrome qualification, and a
+disposable signed Safari sandbox/socket qualification remain open.
 
 ## Resume Protocol
 
@@ -57,7 +60,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Partial; generic transport, owned-Geph payload recovery, daemon semantic confirmation, and Chromium/Safari preview sources merged; exact-main Safari cleanup fix in progress | PRs #219-#226 cover incomplete TLS records, replay-safe zero-payload continuation, bounded early server-first cuts, the control-plane/payload-health mismatch, the strict language-neutral semantic contract, owner-only session-aware daemon IPC, independent exact-host owned-Geph confirmation without site rules, exact Chromium-origin authentication, one bounded same-host reload after confirmation scheduling, and a separately packaged unsigned Safari app extension with a strict Swift bridge. Exact-main run `30230210126` found delayed LaunchServices unregister convergence after the PR gate passed; the current branch keeps cleanup exact and bounded while extending its absence proof. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Packaged real-browser qualification, reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
+| M1 - Autonomous Routing V1 | Partial; generic transport, owned-Geph payload recovery, daemon semantic confirmation, and Chromium/Safari preview sources with bounded cleanup merged on main | PRs #219-#227 cover incomplete TLS records, replay-safe zero-payload continuation, bounded early server-first cuts, the control-plane/payload-health mismatch, the strict language-neutral semantic contract, owner-only session-aware daemon IPC, independent exact-host owned-Geph confirmation without site rules, exact Chromium-origin authentication, one bounded same-host reload after confirmation scheduling, a separately packaged unsigned Safari app extension with a strict Swift bridge, and exact fail-closed cleanup of its temporary LaunchServices registration. Exact-main CI `30231226271` and audit `30231226301` passed on the merged commit. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Packaged real-browser qualification, reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
@@ -65,10 +68,12 @@ Before continuing existing work, including after context compaction or a bare
 The exact-main
 [CI run 30230210126](https://github.com/aiwaki/slipstream/actions/runs/30230210126)
 passed the ordinary checks but failed the Safari build's retained
-LaunchServices-registration gate after compilation; the current branch fixes
-that bounded cleanup proof.
-The dependency and vendored-Geph audits passed in
-[audit run 30230210155](https://github.com/aiwaki/slipstream/actions/runs/30230210155).
+LaunchServices-registration gate after compilation. PR #227 repaired that
+bounded cleanup proof, and the exact merged commit passed `checks`,
+`windows-adapter-contract`, and `packaged-app-lifecycle` in
+[CI run 30231226271](https://github.com/aiwaki/slipstream/actions/runs/30231226271).
+Its dependency and vendored-Geph audits passed in
+[audit run 30231226301](https://github.com/aiwaki/slipstream/actions/runs/30231226301).
 The following entries retain historical gate evidence for the components they
 describe; they are not the current-main locator.
 The Windows ownership collector and its disposable owner-only fixture passed in
