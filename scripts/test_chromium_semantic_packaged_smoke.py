@@ -97,96 +97,328 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         )
         self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
 
-    def test_gui_chrome_enters_the_exact_console_user_bootstrap(self) -> None:
-        command = smoke._gui_chrome_command(
-            501,
-            20,
-            (12, 61),
+    def test_launch_agent_payload_requires_the_aqua_user_domain(self) -> None:
+        payload = smoke._chrome_launch_agent_payload(
+            "dev.slipstream.chromium-semantic.4242",
+            {"HOME": "/Users/runner", "USER": "runner"},
+            Path("/Users/runner"),
+            Path("/tmp/profile/chrome.stdout"),
+            Path("/tmp/profile/chrome.stderr"),
             Path("/Applications/Google Chrome for Testing"),
             Path("/tmp/profile"),
             Path("/repo/browser-companion/chromium"),
             18443,
         )
-        self.assertEqual(command[:3], ("/bin/launchctl", "asuser", "501"))
+        command = payload["ProgramArguments"]
         self.assertEqual(
-            command[9],
-            "/Applications/Google Chrome for Testing",
+            payload["Label"],
+            "dev.slipstream.chromium-semantic.4242",
         )
-        self.assertEqual(command[3], str(Path(smoke.sys.executable).resolve()))
-        self.assertEqual(command[4], str(Path(smoke.__file__).resolve()))
+        self.assertEqual(payload["LimitLoadToSessionType"], "Aqua")
+        self.assertEqual(payload["ProcessType"], "Interactive")
+        self.assertTrue(payload["RunAtLoad"])
+        self.assertFalse(payload["AbandonProcessGroup"])
+        self.assertEqual(payload["WorkingDirectory"], "/Users/runner")
         self.assertEqual(
-            command[5:9],
-            (smoke.CHROME_USER_HELPER_FLAG, "501", "20", "12,61"),
+            command[0],
+            "/Applications/Google Chrome for Testing",
         )
         self.assertNotIn("/bin/sh", command)
         self.assertNotIn("/usr/bin/sudo", command)
+        self.assertNotIn("/bin/launchctl", command)
 
-    def test_chrome_user_helper_drops_privileges_before_exec(self) -> None:
-        environment = {
-            "CI": "true",
-            "GITHUB_ACTIONS": "true",
-            "SLIPSTREAM_DISPOSABLE_CI": "1",
-        }
-
-        class ExecCalled(Exception):
-            pass
-
+    def test_owner_private_capture_is_exact_and_tail_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            executable = Path(tmp) / "Google Chrome for Testing"
-            executable.write_text("binary", encoding="utf-8")
-            executable.chmod(0o700)
-            arguments = [
-                "501",
-                "20",
-                "12,61",
-                str(executable.resolve()),
-                "--user-data-dir=/tmp/profile",
-            ]
-            with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
-                smoke.sys, "platform", "darwin"
-            ), mock.patch.object(
-                smoke.os, "geteuid", side_effect=(0, 501)
-            ), mock.patch.object(
-                smoke.os, "getegid", return_value=20
-            ), mock.patch.object(
-                smoke.os, "setgroups"
-            ) as setgroups, mock.patch.object(
-                smoke.os, "setgid"
-            ) as setgid, mock.patch.object(
-                smoke.os, "setuid"
-            ) as setuid, mock.patch.object(
-                smoke.os, "execve", side_effect=ExecCalled
-            ) as execve:
-                with self.assertRaises(ExecCalled):
-                    smoke._exec_chrome_as_user(arguments)
+            path = Path(tmp) / "capture"
+            smoke._write_owner_private_file(
+                path,
+                b"0123456789",
+                os.getuid(),
+                os.getgid(),
+            )
+            self.assertEqual(smoke._read_owner_private_tail(path, os.getuid(), 4), b"6789")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
-            setgroups.assert_called_once_with([12, 61])
-            setgid.assert_called_once_with(20)
-            setuid.assert_called_once_with(501)
-            execve.assert_called_once_with(
-                str(executable.resolve()),
-                (str(executable.resolve()), "--user-data-dir=/tmp/profile"),
-                environment,
+    def test_bootstrap_targets_the_exact_gui_domain_and_verifies_uid(self) -> None:
+        absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            side_effect=(absent, success),
+        ) as run, mock.patch.object(
+            smoke,
+            "_launch_agent_pid",
+            return_value=4242,
+        ), mock.patch.object(
+            smoke,
+            "_process_identity",
+            return_value=(501, 4242),
+        ):
+            launch = smoke._bootstrap_chrome_launch_agent(
+                501,
+                "dev.slipstream.chromium-semantic.4242",
+                Path("/tmp/profile/chrome-launch-agent.plist"),
             )
 
-    def test_chrome_user_helper_rejects_non_root_execution(self) -> None:
-        environment = {
-            "CI": "true",
-            "GITHUB_ACTIONS": "true",
-            "SLIPSTREAM_DISPOSABLE_CI": "1",
-        }
-        with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
-            smoke.sys, "platform", "darwin"
-        ), mock.patch.object(smoke.os, "geteuid", return_value=501):
+        self.assertEqual(
+            launch,
+            smoke.ChromeLaunch(
+                "gui/501/dev.slipstream.chromium-semantic.4242",
+                4242,
+                4242,
+            ),
+        )
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            (
+                "/bin/launchctl",
+                "bootstrap",
+                "gui/501",
+                "/tmp/profile/chrome-launch-agent.plist",
+            ),
+        )
+
+    def test_bootstrap_rejects_a_launchd_identity_mismatch(self) -> None:
+        absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            side_effect=(absent, success, success, success),
+        ) as run, mock.patch.object(
+            smoke,
+            "_launch_agent_pid",
+            return_value=4242,
+        ), mock.patch.object(
+            smoke,
+            "_process_identity",
+            return_value=(0, 4242),
+        ), mock.patch.object(
+            smoke,
+            "_wait_for_launch_agent_absence",
+        ):
+            with self.assertRaisesRegex(smoke.QualificationError, "wrong identity"):
+                smoke._bootstrap_chrome_launch_agent(
+                    501,
+                    "dev.slipstream.chromium-semantic.4242",
+                    Path("/tmp/profile/chrome-launch-agent.plist"),
+                )
+        self.assertEqual(
+            tuple(call.args[0] for call in run.call_args_list[-2:]),
+            (
+                (
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGKILL",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootout",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+            ),
+        )
+
+    def test_bootstrap_failure_still_kills_and_boots_out_the_exact_target(self) -> None:
+        absent = smoke.subprocess.CompletedProcess((), 113, "", "not found")
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        bootstrap_error = smoke.QualificationError("bootstrap returned an error")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            side_effect=(absent, bootstrap_error, success, success),
+        ) as run, mock.patch.object(
+            smoke,
+            "_wait_for_launch_agent_absence",
+        ) as wait_absent:
             with self.assertRaisesRegex(
                 smoke.QualificationError,
-                "requires root",
+                "bootstrap returned an error",
             ):
-                smoke._exec_chrome_as_user(
-                    ["501", "20", "-", "/Applications/Google Chrome for Testing"]
+                smoke._bootstrap_chrome_launch_agent(
+                    501,
+                    "dev.slipstream.chromium-semantic.4242",
+                    Path("/tmp/profile/chrome-launch-agent.plist"),
                 )
 
-    def test_run_chrome_keeps_launchctl_privileged_until_helper(self) -> None:
+        self.assertEqual(
+            tuple(call.args[0] for call in run.call_args_list),
+            (
+                (
+                    "/bin/launchctl",
+                    "print",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootstrap",
+                    "gui/501",
+                    "/tmp/profile/chrome-launch-agent.plist",
+                ),
+                (
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGKILL",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootout",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+            ),
+        )
+        wait_absent.assert_called_once_with(
+            "gui/501/dev.slipstream.chromium-semantic.4242"
+        )
+
+    def test_launch_agent_cleanup_targets_only_the_exact_job_and_group(self) -> None:
+        launch = smoke.ChromeLaunch(
+            "gui/501/dev.slipstream.chromium-semantic.4242",
+            4242,
+            4242,
+        )
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            return_value=success,
+        ) as run, mock.patch.object(
+            smoke,
+            "_wait_for_launch_agent_absence",
+        ) as wait_absent, mock.patch.object(
+            smoke.lifecycle,
+            "_chrome_process_group_members",
+            return_value=(),
+        ), mock.patch.object(
+            smoke.lifecycle,
+            "_signal_owned_chrome_processes",
+        ) as signal_owned:
+            smoke._stop_chrome_launch_agent(
+                launch,
+                uid=501,
+                gid=20,
+                supplementary_groups=(12, 61),
+            )
+
+        self.assertEqual(
+            tuple(call.args[0] for call in run.call_args_list),
+            (
+                (
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGTERM",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootout",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+            ),
+        )
+        wait_absent.assert_called_once_with(launch.target)
+        signal_owned.assert_not_called()
+
+    def test_launch_agent_cleanup_retries_bootout_before_reporting_failure(self) -> None:
+        launch = smoke.ChromeLaunch(
+            "gui/501/dev.slipstream.chromium-semantic.4242",
+            4242,
+            4242,
+        )
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            return_value=success,
+        ) as run, mock.patch.object(
+            smoke,
+            "_wait_for_launch_agent_absence",
+            side_effect=(
+                smoke.QualificationError("transient bootout failure"),
+                None,
+            ),
+        ) as wait_absent, mock.patch.object(
+            smoke.lifecycle,
+            "_chrome_process_group_members",
+            return_value=(),
+        ), mock.patch.object(
+            smoke.lifecycle,
+            "_signal_owned_chrome_processes",
+        ) as signal_owned:
+            smoke._stop_chrome_launch_agent(
+                launch,
+                uid=501,
+                gid=20,
+                supplementary_groups=(12, 61),
+            )
+
+        self.assertEqual(
+            tuple(call.args[0] for call in run.call_args_list),
+            (
+                (
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGTERM",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootout",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGKILL",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+                (
+                    "/bin/launchctl",
+                    "bootout",
+                    "gui/501/dev.slipstream.chromium-semantic.4242",
+                ),
+            ),
+        )
+        self.assertEqual(wait_absent.call_count, 2)
+        signal_owned.assert_not_called()
+
+    def test_launch_agent_cleanup_verifies_group_after_bootout_failure(self) -> None:
+        launch = smoke.ChromeLaunch(
+            "gui/501/dev.slipstream.chromium-semantic.4242",
+            4242,
+            4242,
+        )
+        success = smoke.subprocess.CompletedProcess((), 0, "", "")
+        with mock.patch.object(
+            smoke,
+            "_run",
+            return_value=success,
+        ), mock.patch.object(
+            smoke,
+            "_wait_for_launch_agent_absence",
+            side_effect=smoke.QualificationError("persistent bootout failure"),
+        ), mock.patch.object(
+            smoke.lifecycle,
+            "_chrome_process_group_members",
+            return_value=(),
+        ) as members:
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "LaunchAgent survived exact cleanup",
+            ):
+                smoke._stop_chrome_launch_agent(
+                    launch,
+                    uid=501,
+                    gid=20,
+                    supplementary_groups=(12, 61),
+                )
+
+        self.assertGreaterEqual(members.call_count, 1)
+
+    def test_run_chrome_uses_an_exact_temporary_launch_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             executable = root / "Google Chrome for Testing"
@@ -194,8 +426,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             executable.chmod(0o700)
             profile = root / "profile"
             profile.mkdir()
-            process = mock.Mock(pid=4242)
-            process.poll.return_value = None
+            launch = smoke.ChromeLaunch(
+                "gui/501/dev.slipstream.chromium-semantic.4242",
+                4242,
+                4242,
+            )
             fixture = mock.Mock(
                 port=18443,
                 snapshot=mock.Mock(
@@ -217,9 +452,6 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke,
                 "_remove_owned_profile",
             ), mock.patch.object(
-                smoke.lifecycle,
-                "_stop_owned_chrome_process_group",
-            ), mock.patch.object(
                 smoke.tempfile,
                 "mkdtemp",
                 return_value=str(profile),
@@ -227,14 +459,24 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke.os,
                 "chown",
             ), mock.patch.object(
-                smoke.os,
-                "getpgid",
+                smoke,
+                "_write_owner_private_file",
+            ) as write_private, mock.patch.object(
+                smoke,
+                "_bootstrap_chrome_launch_agent",
+                return_value=launch,
+            ), mock.patch.object(
+                smoke,
+                "_launch_agent_pid",
                 return_value=4242,
             ), mock.patch.object(
-                smoke.subprocess,
-                "Popen",
-                return_value=process,
-            ) as popen:
+                smoke,
+                "_stop_chrome_launch_agent",
+            ) as stop, mock.patch.object(
+                smoke,
+                "_read_owner_private_tail",
+                return_value=b"",
+            ), mock.patch.object(smoke.subprocess, "Popen") as popen:
                 snapshot = smoke._run_chrome(
                     501,
                     20,
@@ -246,12 +488,161 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 )
 
             self.assertEqual(snapshot.ready_requests, 1)
-            command = popen.call_args.args[0]
-            options = popen.call_args.kwargs
-            self.assertEqual(command[:3], ("/bin/launchctl", "asuser", "501"))
-            self.assertNotIn("user", options)
-            self.assertNotIn("group", options)
-            self.assertNotIn("extra_groups", options)
+            popen.assert_not_called()
+            stop.assert_called_once_with(
+                launch,
+                uid=501,
+                gid=20,
+                supplementary_groups=(12, 61),
+            )
+            plist_payload = smoke.plistlib.loads(
+                write_private.call_args_list[2].args[1]
+            )
+            self.assertEqual(plist_payload["LimitLoadToSessionType"], "Aqua")
+            self.assertEqual(
+                plist_payload["Label"],
+                f"{smoke.CHROME_JOB_PREFIX}.{os.getpid()}",
+            )
+
+    def test_run_chrome_retains_profile_until_launch_agent_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = root / "Google Chrome for Testing"
+            executable.write_text("binary", encoding="utf-8")
+            executable.chmod(0o700)
+            profile = root / "profile"
+            profile.mkdir()
+            launch = smoke.ChromeLaunch(
+                "gui/501/dev.slipstream.chromium-semantic.4242",
+                4242,
+                4242,
+            )
+            fixture = mock.Mock(
+                port=18443,
+                snapshot=mock.Mock(
+                    return_value=smoke.FixtureSnapshot(2, 1, 1, 1, 1)
+                ),
+            )
+            with mock.patch.object(
+                smoke.lifecycle,
+                "_user_environment",
+                return_value=({"HOME": str(root)}, root),
+            ), mock.patch.object(
+                smoke.lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            ), mock.patch.object(
+                smoke,
+                "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_remove_owned_profile",
+            ) as remove_profile, mock.patch.object(
+                smoke.tempfile,
+                "mkdtemp",
+                return_value=str(profile),
+            ), mock.patch.object(
+                smoke.os,
+                "chown",
+            ), mock.patch.object(
+                smoke,
+                "_write_owner_private_file",
+            ), mock.patch.object(
+                smoke,
+                "_bootstrap_chrome_launch_agent",
+                return_value=launch,
+            ), mock.patch.object(
+                smoke,
+                "_launch_agent_pid",
+                return_value=4242,
+            ), mock.patch.object(
+                smoke,
+                "_stop_chrome_launch_agent",
+                side_effect=smoke.QualificationError("job still loaded"),
+            ), mock.patch.object(
+                smoke,
+                "_read_owner_private_tail",
+                return_value=b"",
+            ):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "profile retained until LaunchAgent cleanup",
+                ):
+                    smoke._run_chrome(
+                        501,
+                        20,
+                        Path("/repo/browser-companion/chromium"),
+                        fixture,
+                        executable,
+                        Path("/tmp/native-host.json"),
+                        Path("/tmp/Slipstream.app/Contents/MacOS/slipstream"),
+                    )
+
+            remove_profile.assert_not_called()
+
+    def test_run_chrome_retains_profile_without_a_verified_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = root / "Google Chrome for Testing"
+            executable.write_text("binary", encoding="utf-8")
+            executable.chmod(0o700)
+            profile = root / "profile"
+            profile.mkdir()
+            fixture = mock.Mock(port=18443)
+            with mock.patch.object(
+                smoke.lifecycle,
+                "_user_environment",
+                return_value=({"HOME": str(root)}, root),
+            ), mock.patch.object(
+                smoke.lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            ), mock.patch.object(
+                smoke,
+                "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_remove_owned_profile",
+            ) as remove_profile, mock.patch.object(
+                smoke.tempfile,
+                "mkdtemp",
+                return_value=str(profile),
+            ), mock.patch.object(
+                smoke.os,
+                "chown",
+            ), mock.patch.object(
+                smoke,
+                "_write_owner_private_file",
+            ), mock.patch.object(
+                smoke,
+                "_bootstrap_chrome_launch_agent",
+                side_effect=smoke.QualificationError("identity polling failed"),
+            ), mock.patch.object(
+                smoke,
+                "_wait_for_launch_agent_absence",
+            ) as wait_absent, mock.patch.object(
+                smoke,
+                "_read_owner_private_tail",
+                return_value=b"",
+            ):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "profile retained until LaunchAgent cleanup",
+                ):
+                    smoke._run_chrome(
+                        501,
+                        20,
+                        Path("/repo/browser-companion/chromium"),
+                        fixture,
+                        executable,
+                        Path("/tmp/native-host.json"),
+                        Path("/tmp/Slipstream.app/Contents/MacOS/slipstream"),
+                    )
+
+            wait_absent.assert_called_once_with(
+                f"gui/501/{smoke.CHROME_JOB_PREFIX}.{os.getpid()}"
+            )
+            remove_profile.assert_not_called()
 
     def test_chrome_for_testing_validation_rejects_branded_chrome(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

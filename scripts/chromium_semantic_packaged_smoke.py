@@ -14,8 +14,10 @@ import argparse
 import http.server
 import json
 import os
+import plistlib
 import pwd
 import shutil
+import signal
 import ssl
 import stat
 import subprocess
@@ -46,7 +48,7 @@ AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
 FIXTURE_HOST = "example.org"
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
-CHROME_USER_HELPER_FLAG = "--exec-chrome-as-user"
+CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
 
 
 class QualificationError(RuntimeError):
@@ -60,6 +62,13 @@ class FixtureSnapshot:
     script_requests: int
     image_requests: int
     ready_requests: int
+
+
+@dataclass(frozen=True)
+class ChromeLaunch:
+    target: str
+    pid: int
+    process_group: int
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -498,77 +507,219 @@ def _chrome_command(
     )
 
 
-def _gui_chrome_command(
-    uid: int,
-    gid: int,
-    supplementary_groups: tuple[int, ...],
+def _chrome_launch_agent_payload(
+    label: str,
+    environment: dict[str, str],
+    home: Path,
+    stdout_path: Path,
+    stderr_path: Path,
     executable: Path,
     profile: Path,
     extension: Path,
     fixture_port: int,
-) -> tuple[str, ...]:
-    groups = ",".join(str(group) for group in supplementary_groups) or "-"
-    return (
-        "/bin/launchctl",
-        "asuser",
-        str(uid),
-        str(Path(sys.executable).resolve(strict=True)),
-        str(Path(__file__).resolve(strict=True)),
-        CHROME_USER_HELPER_FLAG,
-        str(uid),
-        str(gid),
-        groups,
-        *_chrome_command(executable, profile, extension, fixture_port),
-    )
-
-
-def _exec_chrome_as_user(arguments: list[str]) -> None:
-    required = {
-        "CI": "true",
-        "GITHUB_ACTIONS": "true",
-        "SLIPSTREAM_DISPOSABLE_CI": "1",
+) -> dict[str, object]:
+    return {
+        "Label": label,
+        "ProgramArguments": list(
+            _chrome_command(executable, profile, extension, fixture_port)
+        ),
+        "RunAtLoad": True,
+        "ProcessType": "Interactive",
+        "LimitLoadToSessionType": "Aqua",
+        "AbandonProcessGroup": False,
+        "WorkingDirectory": str(home),
+        "EnvironmentVariables": dict(environment),
+        "StandardOutPath": str(stdout_path),
+        "StandardErrorPath": str(stderr_path),
     }
-    if (
-        sys.platform != "darwin"
-        or os.geteuid() != 0
-        or any(os.environ.get(key) != value for key, value in required.items())
-    ):
-        raise QualificationError(
-            "Chrome user helper requires root disposable macOS CI"
-        )
-    if len(arguments) < 4:
-        raise QualificationError("Chrome user helper received an incomplete command")
+
+
+def _write_owner_private_file(
+    path: Path,
+    payload: bytes,
+    uid: int,
+    gid: int,
+) -> None:
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    fd = os.open(path, flags, 0o600)
     try:
-        uid = int(arguments[0])
-        gid = int(arguments[1])
-        supplementary_groups = (
-            ()
-            if arguments[2] == "-"
-            else tuple(int(group) for group in arguments[2].split(","))
-        )
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise QualificationError(f"private file write made no progress: {path}")
+            remaining = remaining[written:]
+        os.fsync(fd)
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+
+
+def _read_owner_private_tail(path: Path, uid: int, limit: int = 4000) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != uid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise QualificationError(f"{path} is not an owner-private capture")
+        length = min(metadata.st_size, limit)
+        return os.pread(fd, length, max(0, metadata.st_size - length))
+    finally:
+        os.close(fd)
+
+
+def _launch_agent_pid(target: str) -> int | None:
+    result = _run(("/bin/launchctl", "print", target), check=False)
+    if result.returncode != 0:
+        return None
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if line.startswith("pid = "):
+            try:
+                pid = int(line.removeprefix("pid = "))
+            except ValueError as exc:
+                raise QualificationError(
+                    f"Chrome LaunchAgent exposed an invalid pid: {line!r}"
+                ) from exc
+            return pid if pid > 0 else None
+    return None
+
+
+def _process_identity(pid: int) -> tuple[int, int]:
+    result = _run(
+        ("/bin/ps", "-p", str(pid), "-o", "uid=,pgid="),
+        check=False,
+    )
+    fields = result.stdout.strip().split()
+    if result.returncode != 0 or len(fields) != 2:
+        raise QualificationError(f"cannot verify Chrome process identity for pid {pid}")
+    try:
+        uid, process_group = (int(field) for field in fields)
     except ValueError as exc:
-        raise QualificationError("Chrome user helper identity is invalid") from exc
-    if (
-        uid <= 0
-        or gid < 0
-        or any(group < 0 for group in supplementary_groups)
-        or gid in supplementary_groups
-        or supplementary_groups != tuple(sorted(set(supplementary_groups)))
-    ):
-        raise QualificationError("Chrome user helper identity is not canonical")
+        raise QualificationError(
+            f"Chrome process identity is invalid for pid {pid}: {fields!r}"
+        ) from exc
+    if process_group <= 0:
+        raise QualificationError(f"Chrome process group is invalid for pid {pid}")
+    return uid, process_group
 
-    command = tuple(arguments[3:])
-    executable = Path(command[0]).resolve(strict=True)
-    if str(executable) != command[0] or not executable.is_file():
-        raise QualificationError("Chrome user helper executable is not exact")
 
-    os.setgroups(list(supplementary_groups))
-    os.setgid(gid)
-    os.setuid(uid)
-    if os.geteuid() != uid or os.getegid() != gid:
-        raise QualificationError("Chrome user helper did not drop privileges")
-    os.execve(str(executable), command, dict(os.environ))
-    raise QualificationError("Chrome user helper exec unexpectedly returned")
+def _bootstrap_chrome_launch_agent(
+    uid: int,
+    label: str,
+    plist_path: Path,
+    *,
+    timeout: float = 10.0,
+) -> ChromeLaunch:
+    target = f"gui/{uid}/{label}"
+    if _run(("/bin/launchctl", "print", target), check=False).returncode == 0:
+        raise QualificationError(f"Chrome LaunchAgent already exists: {target}")
+
+    try:
+        _run(("/bin/launchctl", "bootstrap", f"gui/{uid}", str(plist_path)))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            pid = _launch_agent_pid(target)
+            if pid is not None:
+                observed_uid, process_group = _process_identity(pid)
+                if observed_uid != uid:
+                    raise QualificationError(
+                        "Chrome LaunchAgent started with the wrong identity: "
+                        f"expected uid={uid}, observed uid={observed_uid}"
+                    )
+                return ChromeLaunch(target, pid, process_group)
+            time.sleep(0.1)
+        raise QualificationError(f"Chrome LaunchAgent did not publish a pid: {target}")
+    except BaseException:
+        _run(("/bin/launchctl", "kill", "SIGKILL", target), check=False)
+        _run(("/bin/launchctl", "bootout", target), check=False)
+        try:
+            _wait_for_launch_agent_absence(target)
+        except Exception as cleanup_exc:
+            raise QualificationError(
+                f"Chrome LaunchAgent bootstrap cleanup failed: {target}"
+            ) from cleanup_exc
+        raise
+
+
+def _wait_for_launch_agent_absence(target: str, *, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = _run(("/bin/launchctl", "print", target), check=False)
+        if lifecycle.launchd_job_absent(result):
+            return
+        time.sleep(0.1)
+    raise QualificationError(f"Chrome LaunchAgent survived bootout: {target}")
+
+
+def _stop_chrome_launch_agent(
+    launch: ChromeLaunch,
+    *,
+    uid: int,
+    gid: int,
+    supplementary_groups: tuple[int, ...],
+) -> None:
+    launchd_error: Exception | None = None
+    for signal_name in ("SIGTERM", "SIGKILL"):
+        _run(
+            ("/bin/launchctl", "kill", signal_name, launch.target),
+            check=False,
+        )
+        _run(("/bin/launchctl", "bootout", launch.target), check=False)
+        try:
+            _wait_for_launch_agent_absence(launch.target)
+            launchd_error = None
+            break
+        except Exception as exc:
+            launchd_error = exc
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        members = lifecycle._chrome_process_group_members(launch.process_group)
+        if not any(member.uid == uid for member in members):
+            break
+        time.sleep(0.1)
+    else:
+        lifecycle._signal_owned_chrome_processes(
+            launch.process_group,
+            signal.SIGKILL,
+            uid=uid,
+            gid=gid,
+            supplementary_groups=supplementary_groups,
+        )
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            members = lifecycle._chrome_process_group_members(launch.process_group)
+            if not any(member.uid == uid for member in members):
+                break
+            time.sleep(0.1)
+        else:
+            raise QualificationError(
+                "Chrome process group survived exact LaunchAgent cleanup: "
+                f"{launch.process_group}"
+            )
+
+    if launchd_error is not None:
+        members = lifecycle._chrome_process_group_members(launch.process_group)
+        if any(member.uid == uid for member in members):
+            raise QualificationError(
+                "Chrome LaunchAgent and process group survived cleanup: "
+                f"{launch.target}"
+            ) from launchd_error
+        raise QualificationError(
+            f"Chrome LaunchAgent survived exact cleanup: {launch.target}"
+        ) from launchd_error
 
 
 def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
@@ -642,10 +793,12 @@ def _run_chrome(
     environment, home = lifecycle._user_environment(uid)
     supplementary_groups = lifecycle._user_supplementary_groups(uid, gid)
     profile = Path(tempfile.mkdtemp(prefix="slipstream-semantic-chrome-"))
-    stdout_capture = tempfile.TemporaryFile()
-    stderr_capture = tempfile.TemporaryFile()
-    process: subprocess.Popen[bytes] | None = None
-    process_group: int | None = None
+    stdout_path = profile / "chrome.stdout"
+    stderr_path = profile / "chrome.stderr"
+    plist_path = profile / "chrome-launch-agent.plist"
+    label = f"{CHROME_JOB_PREFIX}.{os.getpid()}"
+    launch: ChromeLaunch | None = None
+    bootstrap_started = False
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -659,26 +812,31 @@ def _run_chrome(
             gid,
             native_host_executable,
         )
-        process = subprocess.Popen(
-            _gui_chrome_command(
-                uid,
-                gid,
-                supplementary_groups,
-                executable,
-                profile,
-                extension,
-                fixture.port,
-            ),
-            cwd=home,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_capture,
-            stderr=stderr_capture,
-            start_new_session=True,
+        _write_owner_private_file(stdout_path, b"", uid, gid)
+        _write_owner_private_file(stderr_path, b"", uid, gid)
+        payload = _chrome_launch_agent_payload(
+            label,
+            environment,
+            home,
+            stdout_path,
+            stderr_path,
+            executable,
+            profile,
+            extension,
+            fixture.port,
         )
-        process_group = process.pid
-        if os.getpgid(process.pid) != process_group:
-            raise QualificationError("Chrome did not retain its dedicated process group")
+        _write_owner_private_file(
+            plist_path,
+            plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=True),
+            uid,
+            gid,
+        )
+        bootstrap_started = True
+        launch = _bootstrap_chrome_launch_agent(
+            uid,
+            label,
+            plist_path,
+        )
 
         deadline = time.monotonic() + CHROME_TIMEOUT
         while time.monotonic() < deadline:
@@ -689,9 +847,9 @@ def _run_chrome(
                 raise QualificationError(
                     f"Chrome emitted duplicate semantic ready callbacks: {snapshot!r}"
                 )
-            if process.poll() is not None:
+            if _launch_agent_pid(launch.target) != launch.pid:
                 raise QualificationError(
-                    f"Chrome exited before semantic completion ({process.returncode})"
+                    "Chrome LaunchAgent exited before semantic completion"
                 )
             time.sleep(0.1)
         else:
@@ -699,36 +857,43 @@ def _run_chrome(
     except BaseException as exc:
         failure = exc
     finally:
+        profile_cleanup_safe = not bootstrap_started
         try:
-            if process is not None and process_group is not None:
-                lifecycle._stop_owned_chrome_process_group(
-                    process,
-                    process_group,
+            if launch is not None:
+                _stop_chrome_launch_agent(
+                    launch,
                     uid=uid,
                     gid=gid,
                     supplementary_groups=supplementary_groups,
                 )
+                profile_cleanup_safe = True
+            elif bootstrap_started:
+                _wait_for_launch_agent_absence(f"gui/{uid}/{label}")
+                # Without a verified ChromeLaunch there is no recorded PGID.
+                # launchd absence alone cannot prove that descendants are gone.
         except Exception as exc:
-            cleanup_errors.append(f"Chrome process cleanup: {exc}")
+            cleanup_errors.append(f"Chrome LaunchAgent cleanup: {exc}")
         try:
-            stderr = lifecycle._read_capture(stderr_capture, tail=True)
+            stderr = _read_owner_private_tail(stderr_path, uid)
+        except FileNotFoundError:
+            stderr = b""
         except Exception as exc:
             stderr = b""
             cleanup_errors.append(f"Chrome diagnostic capture: {exc}")
-        try:
-            stdout_capture.close()
-            stderr_capture.close()
-        except Exception as exc:
-            cleanup_errors.append(f"Chrome capture cleanup: {exc}")
-        try:
-            _remove_owned_profile(profile)
-        except Exception as exc:
-            cleanup_errors.append(f"Chrome profile cleanup: {exc}")
+        if profile_cleanup_safe:
+            try:
+                _remove_owned_profile(profile)
+            except Exception as exc:
+                cleanup_errors.append(f"Chrome profile cleanup: {exc}")
+        else:
+            cleanup_errors.append(
+                f"Chrome profile retained until LaunchAgent cleanup: {profile}"
+            )
 
     if cleanup_errors:
         raise QualificationError("; ".join(cleanup_errors)) from failure
     if failure is not None:
-        detail = stderr.decode("utf-8", errors="replace")[-4000:]
+        detail = stderr.decode("utf-8", errors="replace")
         raise QualificationError(
             f"Chrome semantic page did not qualify: {failure}\n{detail}"
         ) from failure
@@ -902,13 +1067,6 @@ def dry_run() -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    if argv and argv[0] == CHROME_USER_HELPER_FLAG:
-        try:
-            _exec_chrome_as_user(argv[1:])
-        except Exception as exc:
-            print(f"Chrome user helper failed: {exc}", file=sys.stderr)
-            return 1
-        return 1
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", type=Path)
