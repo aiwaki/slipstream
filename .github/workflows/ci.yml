@@ -52,6 +52,12 @@ jobs:
       - name: Test release metadata scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Browser companion contract
+        run: |
+          node --check browser-companion/chromium/content.js
+          node --check browser-companion/chromium/service-worker.js
+          node --test browser-companion/chromium/tests/*.test.mjs
+
       - name: Appcast CLI smoke
         run: |
           set -euo pipefail
@@ -141,6 +147,7 @@ jobs:
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \
+            scripts/test_browser_companion.py \
             scripts/test_slipstream_core.py \
             scripts/test_verify_release_artifacts.py
 

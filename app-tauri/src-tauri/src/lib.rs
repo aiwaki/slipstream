@@ -9,8 +9,10 @@
 
 mod diagnostics;
 mod geph_config;
+mod native_messaging;
 mod status_client;
 
+pub use native_messaging::run_native_messaging_if_requested;
 pub use slipstream_core::{
     address_attempts, connection_race, route_circuit, route_circuit_registry,
 };
@@ -2528,6 +2530,9 @@ pub fn run() {
             // First launch: self-install the background service (one password
             // prompt). Everything after this is automatic.
             ensure_daemon_installed(app.handle());
+            if let Err(error) = native_messaging::register_chromium_native_host() {
+                eprintln!("Chromium native host registration unavailable: {error}");
+            }
 
             let state_item = MenuItemBuilder::with_id("state", "…")
                 .enabled(false)
@@ -2799,6 +2804,9 @@ pub fn run() {
                                 return;
                             }
                             geph_config_set(app, "enabled", "0");
+                            if let Err(error) = native_messaging::unregister_chromium_native_host() {
+                                eprintln!("Chromium native host uninstall unavailable: {error}");
+                            }
                             if !signal_uninstall_ready(std::process::id()) {
                                 notify(app, "Unable to remove Slipstream application");
                                 return;

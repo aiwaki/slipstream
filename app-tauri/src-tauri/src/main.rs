@@ -6,5 +6,8 @@
 )]
 
 fn main() {
+    if slipstream_lib::run_native_messaging_if_requested() {
+        return;
+    }
     slipstream_lib::run()
 }
