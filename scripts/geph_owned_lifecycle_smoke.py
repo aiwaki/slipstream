@@ -19,6 +19,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 APP_CONFIG_RELATIVE = Path("Library/Application Support/dev.slipstream.tray")
@@ -39,6 +40,8 @@ NATIVE_HOST_RELATIVE_PATH = Path(
 START_TIMEOUT = 180.0
 PROCESS_STOP_TIMEOUT = 10.0
 COORDINATION_TIMEOUT = 600.0
+GEPH_BROKER_RATE_LIMIT_MARKER = "cannot get token: rate limited"
+GEPH_BROKER_RATE_LIMIT_PLACEHOLDER = "__SLIPSTREAM_GEPH_RATE_LIMIT__"
 
 
 class QualificationError(RuntimeError):
@@ -155,9 +158,12 @@ def _publish_ready_and_wait(
     state: OwnedGephState,
     *,
     timeout: float = COORDINATION_TIMEOUT,
+    abort_reason: Callable[[], str | None] | None = None,
 ) -> None:
     if coordination is None:
         return
+    if abort_reason is not None and (reason := abort_reason()):
+        raise QualificationError(reason)
     coordination.ready.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(
         coordination.ready,
@@ -173,6 +179,8 @@ def _publish_ready_and_wait(
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if abort_reason is not None and (reason := abort_reason()):
+            raise QualificationError(reason)
         if coordination.release.exists():
             metadata = coordination.release.lstat()
             if (
@@ -183,6 +191,8 @@ def _publish_ready_and_wait(
                 raise QualificationError(
                     "coordination release file is not an owner-private regular file"
                 )
+            if abort_reason is not None and (reason := abort_reason()):
+                raise QualificationError(reason)
             _assert_owned_geph(paths, uid, state)
             return
         time.sleep(0.25)
@@ -579,6 +589,12 @@ def _redact_geph_log_text(text: str, secret: str) -> str:
     if secret:
         text = text.replace(secret, "<redacted>")
     text = re.sub(
+        re.escape(GEPH_BROKER_RATE_LIMIT_MARKER),
+        GEPH_BROKER_RATE_LIMIT_PLACEHOLDER,
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
         r"(?im)(\bauthorization\b\s*[:=]\s*)[^\r\n]+",
         r"\1<redacted>",
         text,
@@ -590,11 +606,15 @@ def _redact_geph_log_text(text: str, secret: str) -> str:
         r"\1<redacted>",
         text,
     )
-    return re.sub(
+    text = re.sub(
         r"(?i)([?&](?:secret|password|auth|authorization|token|key|"
         r"api[_-]?key|access[_-]?token|refresh[_-]?token)=)[^&\s]+",
         r"\1<redacted>",
         text,
+    )
+    return text.replace(
+        GEPH_BROKER_RATE_LIMIT_PLACEHOLDER,
+        GEPH_BROKER_RATE_LIMIT_MARKER,
     )
 
 
@@ -631,22 +651,42 @@ def _geph_failure_diagnostics(paths: GephPaths, secret: str) -> str:
     return " || ".join(diagnostics) or "private Geph logs were empty"
 
 
+def _owned_geph_abort_reason(paths: GephPaths, secret: str) -> str | None:
+    for path in (paths.stdout_log, paths.stderr_log):
+        tail = _safe_geph_log_tail(path, secret)
+        if GEPH_BROKER_RATE_LIMIT_MARKER in tail.lower():
+            return (
+                "owned Geph broker rate limited account authentication; "
+                "retry after the broker day resets"
+            )
+    return None
+
+
 def _wait_for_payload(
     timeout: float = START_TIMEOUT,
     targets: tuple[PayloadTarget, ...] = PAYLOAD_TARGETS,
+    abort_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str | int]:
     if not targets:
         raise QualificationError("owned Geph payload targets are empty")
     deadline = time.monotonic() + timeout
     last_errors = {target.host: "payload probe not attempted" for target in targets}
     while time.monotonic() < deadline:
+        if abort_reason is not None and (reason := abort_reason()):
+            raise QualificationError(reason)
         for target in targets:
             if time.monotonic() >= deadline:
                 break
             try:
-                return _payload_probe(target)
+                payload = _payload_probe(target)
             except (OSError, ssl.SSLError, QualificationError) as exc:
                 last_errors[target.host] = str(exc)
+                if abort_reason is not None and (reason := abort_reason()):
+                    raise QualificationError(reason) from exc
+            else:
+                if abort_reason is not None and (reason := abort_reason()):
+                    raise QualificationError(reason)
+                return payload
         if time.monotonic() < deadline:
             time.sleep(2)
     detail = "; ".join(
@@ -840,18 +880,25 @@ def run_qualification(
 
         tray.start()
         initial = _wait_for_owned_geph(paths, uid)
-        initial_payload = _wait_for_payload()
+        abort_reason = lambda: _owned_geph_abort_reason(paths, redaction_secret)
+        initial_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
-        _publish_ready_and_wait(coordination, paths, uid, initial)
+        _publish_ready_and_wait(
+            coordination,
+            paths,
+            uid,
+            initial,
+            abort_reason=abort_reason,
+        )
 
         tray.crash()
         _assert_owned_geph(paths, uid, initial)
-        trayless_payload = _wait_for_payload()
+        trayless_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
 
         _kill_owned_geph(paths, uid, initial)
         recovered = _wait_for_owned_geph(paths, uid, previous_pid=initial.pid)
-        recovered_payload = _wait_for_payload()
+        recovered_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
 
         result = {
