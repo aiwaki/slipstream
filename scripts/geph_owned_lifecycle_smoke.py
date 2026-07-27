@@ -31,9 +31,11 @@ GEPH_KEYCHAIN_ACCOUNT = "account-secret"
 GEPH_SECRET_ENV = "SLIPSTREAM_GEPH_ACCOUNT_SECRET"
 GEPH_SOCKS_PORT = 9954
 EXTERNAL_GEPH_PORT = 9909
-PAYLOAD_HOST = "store.steampowered.com"
-PAYLOAD_PATH = "/"
-PAYLOAD_MIN_BYTES = 2048
+NATIVE_HOST_NAME = "dev.slipstream.semantic"
+NATIVE_HOST_ORIGIN = "chrome-extension://cecdingohhpfggapnlbghppcegbaciam/"
+NATIVE_HOST_RELATIVE_PATH = Path(
+    "Library/Application Support/Google/Chrome/NativeMessagingHosts"
+) / f"{NATIVE_HOST_NAME}.json"
 START_TIMEOUT = 180.0
 PROCESS_STOP_TIMEOUT = 10.0
 COORDINATION_TIMEOUT = 600.0
@@ -69,6 +71,20 @@ class OwnedGephState:
 class CoordinationPaths:
     ready: Path
     release: Path
+
+
+@dataclass(frozen=True)
+class PayloadTarget:
+    host: str
+    path: str
+    minimum_bytes: int = 2048
+
+
+PAYLOAD_TARGETS = (
+    PayloadTarget("store.steampowered.com", "/"),
+    PayloadTarget("www.cloudflare.com", "/"),
+    PayloadTarget("www.wikipedia.org", "/"),
+)
 
 
 def geph_paths(home: Path) -> GephPaths:
@@ -282,6 +298,39 @@ def _write_private_json(path: Path, value: dict[str, str]) -> None:
         raise
 
 
+def _native_host_path(home: Path) -> Path:
+    return home / NATIVE_HOST_RELATIVE_PATH
+
+
+def _remove_exact_native_host(home: Path, expected_executable: Path, uid: int) -> None:
+    path = _native_host_path(home)
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != uid
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise QualificationError("refusing to remove an unowned native host manifest")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("invalid native host manifest") from exc
+    if not isinstance(payload, dict) or (
+        payload.get("name") != NATIVE_HOST_NAME
+        or payload.get("path") != str(expected_executable)
+        or payload.get("type") != "stdio"
+        or payload.get("allowed_origins") != [NATIVE_HOST_ORIGIN]
+    ):
+        raise QualificationError("refusing to remove a foreign native host manifest")
+    path.unlink()
+    if path.exists() or path.is_symlink():
+        raise QualificationError("owned native host manifest survived cleanup")
+
+
 def _keychain_exists() -> bool:
     result = _run(
         (
@@ -474,14 +523,14 @@ def _socks_connect(host: str, port: int, timeout: float = 20.0) -> socket.socket
         raise
 
 
-def _payload_probe() -> dict[str, str | int]:
-    raw = _socks_connect(PAYLOAD_HOST, 443)
+def _payload_probe(target: PayloadTarget) -> dict[str, str | int]:
+    raw = _socks_connect(target.host, 443)
     try:
         context = ssl.create_default_context()
-        with context.wrap_socket(raw, server_hostname=PAYLOAD_HOST) as tls:
+        with context.wrap_socket(raw, server_hostname=target.host) as tls:
             request = (
-                f"GET {PAYLOAD_PATH} HTTP/1.1\r\n"
-                f"Host: {PAYLOAD_HOST}\r\n"
+                f"GET {target.path} HTTP/1.1\r\n"
+                f"Host: {target.host}\r\n"
                 "User-Agent: Slipstream-owned-Geph-qualification/1\r\n"
                 "Accept: text/html,*/*;q=0.1\r\n"
                 "Connection: close\r\n\r\n"
@@ -494,10 +543,11 @@ def _payload_probe() -> dict[str, str | int]:
                     break
                 payload.extend(chunk)
             first_line = bytes(payload).split(b"\r\n", 1)[0]
-            if len(payload) < PAYLOAD_MIN_BYTES or not first_line.startswith(b"HTTP/"):
+            if len(payload) < target.minimum_bytes or not first_line.startswith(b"HTTP/"):
                 raise QualificationError("owned Geph returned an incomplete HTTPS payload")
             return {
                 "bytes": len(payload),
+                "canary": target.host,
                 "protocol": tls.version() or "unknown",
                 "status": first_line.decode("ascii", errors="replace"),
             }
@@ -506,16 +556,28 @@ def _payload_probe() -> dict[str, str | int]:
         raise
 
 
-def _wait_for_payload(timeout: float = START_TIMEOUT) -> dict[str, str | int]:
+def _wait_for_payload(
+    timeout: float = START_TIMEOUT,
+    targets: tuple[PayloadTarget, ...] = PAYLOAD_TARGETS,
+) -> dict[str, str | int]:
+    if not targets:
+        raise QualificationError("owned Geph payload targets are empty")
     deadline = time.monotonic() + timeout
-    last_error = "payload probe not attempted"
+    last_errors = {target.host: "payload probe not attempted" for target in targets}
     while time.monotonic() < deadline:
-        try:
-            return _payload_probe()
-        except (OSError, ssl.SSLError, QualificationError) as exc:
-            last_error = str(exc)
-        time.sleep(2)
-    raise QualificationError(f"owned Geph payload did not become ready: {last_error}")
+        for target in targets:
+            if time.monotonic() >= deadline:
+                break
+            try:
+                return _payload_probe(target)
+            except (OSError, ssl.SSLError, QualificationError) as exc:
+                last_errors[target.host] = str(exc)
+        if time.monotonic() < deadline:
+            time.sleep(2)
+    detail = "; ".join(
+        f"{target.host}: {last_errors[target.host]}" for target in targets
+    )
+    raise QualificationError(f"owned Geph payload did not become ready: {detail}")
 
 
 class ExternalListenerSentinel:
@@ -667,6 +729,9 @@ def _preflight(app_bundle: Path, paths: GephPaths) -> Path:
         raise QualificationError("root daemon plist exists before user-level qualification")
     if paths.config_dir.exists() or paths.plist.exists():
         raise QualificationError("disposable Slipstream user state is not clean")
+    native_host = _native_host_path(Path.home().resolve())
+    if native_host.exists() or native_host.is_symlink():
+        raise QualificationError("disposable Chromium native host state is not clean")
     if _keychain_exists():
         raise QualificationError("disposable Slipstream Keychain state is not clean")
     if _listener_pids(GEPH_SOCKS_PORT):
@@ -736,6 +801,10 @@ def run_qualification(
         except Exception as exc:
             cleanup_errors.append(f"tray cleanup: {exc}")
         try:
+            _remove_exact_native_host(home, executable, uid)
+        except Exception as exc:
+            cleanup_errors.append(f"native host cleanup: {exc}")
+        try:
             _bootout_owned_geph(uid)
             _wait_for_listener_gone()
         except Exception as exc:
@@ -774,6 +843,12 @@ def run_qualification(
             cleanup_errors.append("owned Geph artifacts survived cleanup")
     except Exception as exc:
         cleanup_errors.append(f"private runtime cleanup verification: {exc}")
+    try:
+        native_host = _native_host_path(home)
+        if native_host.exists() or native_host.is_symlink():
+            cleanup_errors.append("owned native host manifest survived cleanup")
+    except Exception as exc:
+        cleanup_errors.append(f"native host cleanup verification: {exc}")
     try:
         if _listener_pids(GEPH_SOCKS_PORT):
             cleanup_errors.append("owned Geph listener survived cleanup")
