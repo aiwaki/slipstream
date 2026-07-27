@@ -46,6 +46,7 @@ AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
 FIXTURE_HOST = "example.org"
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
+CHROME_USER_HELPER_FLAG = "--exec-chrome-as-user"
 
 
 class QualificationError(RuntimeError):
@@ -499,17 +500,75 @@ def _chrome_command(
 
 def _gui_chrome_command(
     uid: int,
+    gid: int,
+    supplementary_groups: tuple[int, ...],
     executable: Path,
     profile: Path,
     extension: Path,
     fixture_port: int,
 ) -> tuple[str, ...]:
+    groups = ",".join(str(group) for group in supplementary_groups) or "-"
     return (
         "/bin/launchctl",
         "asuser",
         str(uid),
+        str(Path(sys.executable).resolve(strict=True)),
+        str(Path(__file__).resolve(strict=True)),
+        CHROME_USER_HELPER_FLAG,
+        str(uid),
+        str(gid),
+        groups,
         *_chrome_command(executable, profile, extension, fixture_port),
     )
+
+
+def _exec_chrome_as_user(arguments: list[str]) -> None:
+    required = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+    }
+    if (
+        sys.platform != "darwin"
+        or os.geteuid() != 0
+        or any(os.environ.get(key) != value for key, value in required.items())
+    ):
+        raise QualificationError(
+            "Chrome user helper requires root disposable macOS CI"
+        )
+    if len(arguments) < 4:
+        raise QualificationError("Chrome user helper received an incomplete command")
+    try:
+        uid = int(arguments[0])
+        gid = int(arguments[1])
+        supplementary_groups = (
+            ()
+            if arguments[2] == "-"
+            else tuple(int(group) for group in arguments[2].split(","))
+        )
+    except ValueError as exc:
+        raise QualificationError("Chrome user helper identity is invalid") from exc
+    if (
+        uid <= 0
+        or gid < 0
+        or any(group < 0 for group in supplementary_groups)
+        or gid in supplementary_groups
+        or supplementary_groups != tuple(sorted(set(supplementary_groups)))
+    ):
+        raise QualificationError("Chrome user helper identity is not canonical")
+
+    command = tuple(arguments[3:])
+    executable = Path(command[0]).resolve(strict=True)
+    if str(executable) != command[0] or not executable.is_file():
+        raise QualificationError("Chrome user helper executable is not exact")
+
+    os.setgroups(list(supplementary_groups))
+    os.setgid(gid)
+    os.setuid(uid)
+    if os.geteuid() != uid or os.getegid() != gid:
+        raise QualificationError("Chrome user helper did not drop privileges")
+    os.execve(str(executable), command, dict(os.environ))
+    raise QualificationError("Chrome user helper exec unexpectedly returned")
 
 
 def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
@@ -603,6 +662,8 @@ def _run_chrome(
         process = subprocess.Popen(
             _gui_chrome_command(
                 uid,
+                gid,
+                supplementary_groups,
                 executable,
                 profile,
                 extension,
@@ -614,9 +675,6 @@ def _run_chrome(
             stdout=stdout_capture,
             stderr=stderr_capture,
             start_new_session=True,
-            user=uid,
-            group=gid,
-            extra_groups=supplementary_groups,
         )
         process_group = process.pid
         if os.getpgid(process.pid) != process_group:
@@ -842,6 +900,16 @@ def dry_run() -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == CHROME_USER_HELPER_FLAG:
+        try:
+            _exec_chrome_as_user(argv[1:])
+        except Exception as exc:
+            print(f"Chrome user helper failed: {exc}", file=sys.stderr)
+            return 1
+        return 1
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", type=Path)
     parser.add_argument("--chrome-executable", type=Path)

@@ -98,14 +98,15 @@ packaged Rust native host, and the daemon's owner-only semantic socket. Branded
 Chrome 137 and later ignore the unpacked-extension `--load-extension` switch, so
 it cannot drive this automation gate. The harness copies the exact installed
 native-host manifest into the fresh profile's `NativeMessagingHosts` directory;
-it does not synthesize or relax the manifest. The browser command executes
-through `launchctl asuser` for the exact console UID after the subprocess has
-already dropped to that UID, GID, and supplementary groups. This provides the
-GUI Mach bootstrap namespace required by Chrome's network-service rendezvous
-without a shell, `sudo`, or broader process ownership; the dedicated process
-group remains the cleanup boundary. A scoped local HTTPS fixture mapped only
-inside that browser profile serves a strong regional-denial page first and a
-styled page on the next request. Headless execution is also excluded because an
+it does not synthesize or relax the manifest. Root executes `launchctl asuser`
+for the exact console UID so the process enters the GUI Mach bootstrap
+namespace required by Chrome's network-service rendezvous. A fixed internal
+helper then sets the already resolved supplementary groups, GID, and UID before
+directly executing Chrome. No shell or `sudo` is involved, and the dedicated
+process group remains the user-owned browser cleanup boundary. A scoped local
+HTTPS fixture mapped only inside that browser profile serves a strong
+regional-denial page first and a styled page on the next request. Headless
+execution is also excluded because an
 earlier protected run rendered the page without activating the MV3
 native-messaging path. The daemon does not trust the fixture: confirmation is a
 separate real HTTPS request for the same generic hostname through the

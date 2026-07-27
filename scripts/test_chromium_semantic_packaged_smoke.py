@@ -100,6 +100,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def test_gui_chrome_enters_the_exact_console_user_bootstrap(self) -> None:
         command = smoke._gui_chrome_command(
             501,
+            20,
+            (12, 61),
             Path("/Applications/Google Chrome for Testing"),
             Path("/tmp/profile"),
             Path("/repo/browser-companion/chromium"),
@@ -107,11 +109,149 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         )
         self.assertEqual(command[:3], ("/bin/launchctl", "asuser", "501"))
         self.assertEqual(
-            command[3],
+            command[9],
             "/Applications/Google Chrome for Testing",
+        )
+        self.assertEqual(command[3], str(Path(smoke.sys.executable).resolve()))
+        self.assertEqual(command[4], str(Path(smoke.__file__).resolve()))
+        self.assertEqual(
+            command[5:9],
+            (smoke.CHROME_USER_HELPER_FLAG, "501", "20", "12,61"),
         )
         self.assertNotIn("/bin/sh", command)
         self.assertNotIn("/usr/bin/sudo", command)
+
+    def test_chrome_user_helper_drops_privileges_before_exec(self) -> None:
+        environment = {
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "SLIPSTREAM_DISPOSABLE_CI": "1",
+        }
+
+        class ExecCalled(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Google Chrome for Testing"
+            executable.write_text("binary", encoding="utf-8")
+            executable.chmod(0o700)
+            arguments = [
+                "501",
+                "20",
+                "12,61",
+                str(executable.resolve()),
+                "--user-data-dir=/tmp/profile",
+            ]
+            with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
+                smoke.sys, "platform", "darwin"
+            ), mock.patch.object(
+                smoke.os, "geteuid", side_effect=(0, 501)
+            ), mock.patch.object(
+                smoke.os, "getegid", return_value=20
+            ), mock.patch.object(
+                smoke.os, "setgroups"
+            ) as setgroups, mock.patch.object(
+                smoke.os, "setgid"
+            ) as setgid, mock.patch.object(
+                smoke.os, "setuid"
+            ) as setuid, mock.patch.object(
+                smoke.os, "execve", side_effect=ExecCalled
+            ) as execve:
+                with self.assertRaises(ExecCalled):
+                    smoke._exec_chrome_as_user(arguments)
+
+            setgroups.assert_called_once_with([12, 61])
+            setgid.assert_called_once_with(20)
+            setuid.assert_called_once_with(501)
+            execve.assert_called_once_with(
+                str(executable.resolve()),
+                (str(executable.resolve()), "--user-data-dir=/tmp/profile"),
+                environment,
+            )
+
+    def test_chrome_user_helper_rejects_non_root_execution(self) -> None:
+        environment = {
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "SLIPSTREAM_DISPOSABLE_CI": "1",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
+            smoke.sys, "platform", "darwin"
+        ), mock.patch.object(smoke.os, "geteuid", return_value=501):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "requires root",
+            ):
+                smoke._exec_chrome_as_user(
+                    ["501", "20", "-", "/Applications/Google Chrome for Testing"]
+                )
+
+    def test_run_chrome_keeps_launchctl_privileged_until_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = root / "Google Chrome for Testing"
+            executable.write_text("binary", encoding="utf-8")
+            executable.chmod(0o700)
+            profile = root / "profile"
+            profile.mkdir()
+            process = mock.Mock(pid=4242)
+            process.poll.return_value = None
+            fixture = mock.Mock(
+                port=18443,
+                snapshot=mock.Mock(
+                    return_value=smoke.FixtureSnapshot(2, 1, 1, 1, 1)
+                ),
+            )
+            with mock.patch.object(
+                smoke.lifecycle,
+                "_user_environment",
+                return_value=({"HOME": str(root)}, root),
+            ), mock.patch.object(
+                smoke.lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            ), mock.patch.object(
+                smoke,
+                "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_remove_owned_profile",
+            ), mock.patch.object(
+                smoke.lifecycle,
+                "_stop_owned_chrome_process_group",
+            ), mock.patch.object(
+                smoke.tempfile,
+                "mkdtemp",
+                return_value=str(profile),
+            ), mock.patch.object(
+                smoke.os,
+                "chown",
+            ), mock.patch.object(
+                smoke.os,
+                "getpgid",
+                return_value=4242,
+            ), mock.patch.object(
+                smoke.subprocess,
+                "Popen",
+                return_value=process,
+            ) as popen:
+                snapshot = smoke._run_chrome(
+                    501,
+                    20,
+                    Path("/repo/browser-companion/chromium"),
+                    fixture,
+                    executable,
+                    Path("/tmp/native-host.json"),
+                    Path("/tmp/Slipstream.app/Contents/MacOS/slipstream"),
+                )
+
+            self.assertEqual(snapshot.ready_requests, 1)
+            command = popen.call_args.args[0]
+            options = popen.call_args.kwargs
+            self.assertEqual(command[:3], ("/bin/launchctl", "asuser", "501"))
+            self.assertNotIn("user", options)
+            self.assertNotIn("group", options)
+            self.assertNotIn("extra_groups", options)
 
     def test_chrome_for_testing_validation_rejects_branded_chrome(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
