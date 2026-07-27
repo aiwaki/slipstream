@@ -36,6 +36,39 @@ The extension does not transmit path, query, page text, cookies, storage,
 forms, account data, or arbitrary script output. It does not change DNS,
 proxy, PAC, VPN, PF, or browser settings.
 
+## Safari Preview
+
+The Safari preview under `browser-companion/safari/` reuses the same bounded
+detector and service-worker contract. Safari supplies messages only to the
+native app extension embedded in its containing app, so there is no
+Chrome-style external native-host origin to register. The service worker still
+derives the hostname from Safari-owned top-level sender metadata; the native
+extension accepts exactly the frozen eight-field signal, forwards one
+little-endian bounded frame to the owner-only daemon socket, and returns only
+the fixed four-field private response. Apple currently ignores the application
+identifier argument to `sendNativeMessage` and dispatches to that embedded
+native extension; Slipstream nevertheless keeps the argument equal to the
+generated containing-app bundle identifier and enforces the equality in tests.
+
+The source is packaged with Apple's `safari-web-extension-packager`, falling
+back to its Xcode 15 name `safari-web-extension-converter`. The repository build
+creates a fresh Xcode project, inserts the reviewed Swift bridge, and compiles
+an unsigned macOS 13 app plus `.appex`. Xcode registers normal app build
+products with LaunchServices even when signing is disabled, so the script
+unregisters only its exact generated containing app, including its embedded
+`.appex`, on every exit:
+
+```bash
+bash scripts/build_safari_companion.sh /tmp/slipstream-safari-companion
+```
+
+This build does not install, launch, enable, or sign the extension, and it does
+not retain LaunchServices registration. It is a compile and packaging
+qualification only. Apple requires a containing app and app extension for
+native messaging; secure distribution requires a signed container. Sandbox
+access from a real Safari extension to the owner-only daemon socket must be
+proven on a disposable signed build before the companion can ship.
+
 ## Native Host Lifecycle
 
 The tray registers the native host only when its executable is inside a real
@@ -55,25 +88,29 @@ preview extension ID stable.
 ```bash
 node --check browser-companion/chromium/content.js
 node --check browser-companion/chromium/service-worker.js
+node --check browser-companion/safari/service-worker.js
 node --test browser-companion/chromium/tests/*.test.mjs
+swift test --package-path browser-companion/safari
+bash scripts/build_safari_companion.sh /tmp/slipstream-safari-companion
 cargo test --manifest-path app-tauri/src-tauri/Cargo.toml native_messaging
 python3 -m unittest scripts.test_browser_companion
 ```
 
-The tests cover the observed weather.com denial phrase, multiple languages,
-ordinary non-geographic errors, rich-page false-positive bounds, exact sender
-ownership, forbidden extra fields, stable extension identity, native framing,
-origin authentication, manifest permissions, private responses, atomic
-registration, and owned uninstall.
+The tests cover the observed denial phrase, multiple languages, ordinary
+non-geographic errors, rich-page false-positive bounds, exact sender ownership,
+forbidden extra fields, stable Chromium identity, native framing, Chromium
+origin authentication, both manifests' permissions, private responses, atomic
+registration, owned uninstall, and an unsigned Safari app-extension build.
 
 ## Remaining Gates
 
 - Chrome Web Store packaging, privacy disclosure, and update provenance.
 - A disposable packaged-app test with real Chrome, the registered host, daemon
   socket, owned Geph confirmation, one reload, and successful styled DOM.
-- Safari requires a separately signed Safari Web Extension container and
-  browser-specific lifecycle qualification. The detector and frozen signal
-  contract are reusable, but the Chromium artifact does not run in Safari.
+- Safari requires a signed container, browser enablement, and a disposable
+  runtime proof that the sandboxed app extension can reach the owner-only
+  daemon socket. The unsigned source and package build exist, but are not
+  bundled into Slipstream or installed on user machines.
 - Semantic matching remains deliberately conservative. New languages or phrase
   families require generic positive and negative fixtures, never hostname
   rules.

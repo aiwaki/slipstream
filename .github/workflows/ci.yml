@@ -56,6 +56,7 @@ jobs:
         run: |
           node --check browser-companion/chromium/content.js
           node --check browser-companion/chromium/service-worker.js
+          node --check browser-companion/safari/service-worker.js
           node --test browser-companion/chromium/tests/*.test.mjs
 
       - name: Appcast CLI smoke
@@ -378,6 +379,13 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
+
+      - name: Build the unsigned Safari companion
+        run: |
+          set -euo pipefail
+          swift test --package-path browser-companion/safari
+          bash scripts/build_safari_companion.sh \
+            "$RUNNER_TEMP/slipstream-safari-companion"
 
       - name: Build the frozen daemon
         run: |
