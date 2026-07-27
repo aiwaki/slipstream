@@ -33,14 +33,14 @@ import pf_installed_lifecycle_smoke as lifecycle
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXTENSION = ROOT / "browser-companion" / "chromium"
-CHROME_EXECUTABLE = Path(
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-)
 NATIVE_HOST_NAME = "dev.slipstream.semantic"
 NATIVE_HOST_ORIGIN = "chrome-extension://cecdingohhpfggapnlbghppcegbaciam/"
 NATIVE_HOST_RELATIVE_PATH = Path(
     "Library/Application Support/Google/Chrome/NativeMessagingHosts"
 ) / f"{NATIVE_HOST_NAME}.json"
+PROFILE_NATIVE_HOST_RELATIVE_PATH = (
+    Path("NativeMessagingHosts") / f"{NATIVE_HOST_NAME}.json"
+)
 SEMANTIC_SOCKET = Path("/var/run/slipstream-semantic.sock")
 AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
 FIXTURE_HOST = "example.org"
@@ -108,7 +108,7 @@ def _run(
     return result
 
 
-def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
+def _read_private_bytes(path: Path, expected_uid: int) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags)
     try:
@@ -121,15 +121,45 @@ def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
             or metadata.st_size > 64 * 1024
         ):
             raise QualificationError(f"{path} is not a bounded owner-private file")
-        with os.fdopen(fd, encoding="utf-8") as handle:
-            fd = -1
-            payload = json.load(handle)
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 16 * 1024))
+            if not chunk:
+                raise QualificationError(f"{path} changed while being read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise QualificationError(f"{path} changed while being read")
     finally:
-        if fd >= 0:
-            os.close(fd)
-    if not isinstance(payload, dict):
+        os.close(fd)
+    return b"".join(chunks)
+
+
+def _decode_json_object(payload: bytes, path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QualificationError(f"{path} does not contain valid JSON") from exc
+    if not isinstance(value, dict):
         raise QualificationError(f"{path} does not contain a JSON object")
-    return payload
+    return value
+
+
+def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
+    return _decode_json_object(_read_private_bytes(path, expected_uid), path)
+
+
+def _is_exact_native_host(
+    payload: dict[str, object],
+    expected_executable: Path,
+) -> bool:
+    return (
+        payload.get("name") == NATIVE_HOST_NAME
+        and payload.get("path") == str(expected_executable)
+        and payload.get("type") == "stdio"
+        and payload.get("allowed_origins") == [NATIVE_HOST_ORIGIN]
+    )
 
 
 def _fixture_response(
@@ -349,6 +379,20 @@ def _validate_extension(path: Path) -> Path:
     return path
 
 
+def _validate_chrome_for_testing(path: Path) -> Path:
+    path = path.expanduser().resolve(strict=True)
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise QualificationError(f"Chrome for Testing is not runnable: {path}")
+    result = _run((str(path), "--version"), check=False)
+    version = (result.stdout + "\n" + result.stderr).strip()
+    if result.returncode != 0 or "Google Chrome for Testing" not in version:
+        raise QualificationError(
+            "semantic qualification requires Google Chrome for Testing; "
+            "branded Chrome 137+ ignores --load-extension"
+        )
+    return path
+
+
 def _wait_for_native_host(
     home: Path,
     expected_executable: Path,
@@ -362,12 +406,7 @@ def _wait_for_native_host(
     while time.monotonic() < deadline:
         try:
             payload = _read_private_json(path, uid)
-            if (
-                payload.get("name") == NATIVE_HOST_NAME
-                and payload.get("path") == str(expected_executable)
-                and payload.get("type") == "stdio"
-                and payload.get("allowed_origins") == [NATIVE_HOST_ORIGIN]
-            ):
+            if _is_exact_native_host(payload, expected_executable):
                 return path
             last_error = f"invalid manifest metadata or payload: {payload!r}"
         except (FileNotFoundError, OSError, ValueError, QualificationError) as exc:
@@ -382,12 +421,7 @@ def _remove_exact_native_host(
     uid: int,
 ) -> None:
     payload = _read_private_json(path, uid)
-    if (
-        payload.get("name") != NATIVE_HOST_NAME
-        or payload.get("path") != str(expected_executable)
-        or payload.get("type") != "stdio"
-        or payload.get("allowed_origins") != [NATIVE_HOST_ORIGIN]
-    ):
+    if not _is_exact_native_host(payload, expected_executable):
         raise QualificationError("refusing to remove a foreign native host manifest")
     path.unlink()
     if path.exists():
@@ -485,12 +519,50 @@ def _remove_owned_profile(profile: Path) -> None:
         raise QualificationError("fresh Chrome profile survived cleanup")
 
 
+def _install_profile_native_host(
+    profile: Path,
+    source: Path,
+    uid: int,
+    gid: int,
+    expected_executable: Path,
+) -> Path:
+    destination = profile / PROFILE_NATIVE_HOST_RELATIVE_PATH
+    destination.parent.mkdir(mode=0o700)
+    os.chown(destination.parent, uid, gid)
+    payload = _read_private_bytes(source, uid)
+    manifest = _decode_json_object(payload, source)
+    if not _is_exact_native_host(manifest, expected_executable):
+        raise QualificationError("refusing to copy a foreign native host manifest")
+    fd = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+    )
+    try:
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise QualificationError("profile native host write made no progress")
+            remaining = remaining[written:]
+        os.fsync(fd)
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    if destination.read_bytes() != payload:
+        raise QualificationError("profile native host differs from packaged manifest")
+    return destination
+
+
 def _run_chrome(
     uid: int,
     gid: int,
     extension: Path,
     fixture: SemanticHttpsFixture,
-    executable: Path = CHROME_EXECUTABLE,
+    executable: Path,
+    native_host_manifest: Path,
+    native_host_executable: Path,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -506,6 +578,13 @@ def _run_chrome(
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
+        _install_profile_native_host(
+            profile,
+            native_host_manifest,
+            uid,
+            gid,
+            native_host_executable,
+        )
         process = subprocess.Popen(
             _chrome_command(executable, profile, extension, fixture.port),
             cwd=home,
@@ -611,9 +690,11 @@ def _assert_daemon_absent_and_disabled() -> None:
 
 def run_qualification(
     app_bundle: Path,
+    chrome_executable: Path,
     extension: Path = DEFAULT_EXTENSION,
 ) -> dict[str, object]:
     uid, gid = _require_disposable_ci()
+    chrome_executable = _validate_chrome_for_testing(chrome_executable)
     extension = _validate_extension(extension)
     app_bundle = app_bundle.expanduser().resolve(strict=True)
     target = lifecycle.packaged_app_target(app_bundle)
@@ -649,13 +730,21 @@ def run_qualification(
         _wait_for_owned_geph_backend()
 
         fixture.start()
-        snapshot = _run_chrome(uid, gid, extension, fixture)
+        snapshot = _run_chrome(
+            uid,
+            gid,
+            extension,
+            fixture,
+            chrome_executable,
+            native_host_path,
+            target.tray_executable,
+        )
         expiry = _wait_for_learned_host(FIXTURE_HOST)
         _assert_fixture_complete(snapshot)
         result = {
             "result": "pass",
             "restricted_to": "protected disposable GitHub Actions macOS runner",
-            "browser": "real Chrome with a fresh owner-only profile",
+            "browser": "Chrome for Testing with a fresh owner-only profile",
             "extension": "unpacked frozen-origin Chromium companion",
             "native_host": "packaged exact-origin Rust host",
             "daemon_ipc": "owner-only semantic socket",
@@ -719,6 +808,13 @@ def dry_run() -> dict[str, object]:
             "regional denial -> Chromium extension -> packaged native host -> "
             "owner-only daemon IPC -> real owned Geph confirmation -> one reload"
         ),
+        "browser": (
+            "Chrome for Testing; branded Chrome 137+ ignores unpacked "
+            "--load-extension"
+        ),
+        "native_host_registration": (
+            "exact packaged manifest copied into the disposable browser profile"
+        ),
         "success": "styled DOM plus CSS, JavaScript, and image",
         "production_overrides": "none",
     }
@@ -727,6 +823,7 @@ def dry_run() -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", type=Path)
+    parser.add_argument("--chrome-executable", type=Path)
     parser.add_argument("--extension", type=Path, default=DEFAULT_EXTENSION)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -735,8 +832,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.app_bundle is None:
         parser.error("--app-bundle is required outside --dry-run")
+    if args.chrome_executable is None:
+        parser.error("--chrome-executable is required outside --dry-run")
     try:
-        result = run_qualification(args.app_bundle, args.extension)
+        result = run_qualification(
+            args.app_bundle,
+            args.chrome_executable,
+            args.extension,
+        )
     except Exception as exc:
         print(f"Chromium semantic qualification failed: {exc}", file=sys.stderr)
         return 1

@@ -31,6 +31,13 @@ jobs:
           cache: npm
           cache-dependency-path: app-tauri/package-lock.json
 
+      - name: Install stable Chrome for Testing
+        id: chrome-for-testing
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        with:
+          chrome-version: stable
+          install-chromedriver: false
+
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13.14"
@@ -168,7 +175,8 @@ jobs:
 
           env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E python3 \
             scripts/chromium_semantic_packaged_smoke.py \
-            --app-bundle "$app"
+            --app-bundle "$app" \
+            --chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"
 
           /usr/bin/install -m 600 /dev/null "$release"
           wait "$geph_pid"
