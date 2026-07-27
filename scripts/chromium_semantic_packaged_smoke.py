@@ -58,6 +58,7 @@ class FixtureSnapshot:
     css_requests: int
     script_requests: int
     image_requests: int
+    ready_requests: int
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -174,6 +175,7 @@ def _fixture_response(
                 "if(image.complete&&image.naturalWidth>0&&styled){"
                 f"document.getElementById('result').textContent='{STYLED_MARKER}';"
                 "document.documentElement.dataset.slipstreamReady='true';"
+                "fetch('/ready',{cache:'no-store'}).catch(()=>{});"
                 "}});"
             ).encode("utf-8"),
         )
@@ -186,6 +188,8 @@ def _fixture_response(
                 '<rect width="32" height="32" fill="#4f7cff"/></svg>'
             ).encode("utf-8"),
         )
+    if path == "/ready":
+        return 204, "text/plain; charset=utf-8", b""
     return 404, "text/plain; charset=utf-8", b"not found\n"
 
 
@@ -200,6 +204,7 @@ class SemanticHttpsFixture:
         self.css_requests = 0
         self.script_requests = 0
         self.image_requests = 0
+        self.ready_requests = 0
 
     @property
     def port(self) -> int:
@@ -275,6 +280,8 @@ class SemanticHttpsFixture:
                         fixture.script_requests += 1
                     elif path == "/proof.svg":
                         fixture.image_requests += 1
+                    elif path == "/ready":
+                        fixture.ready_requests += 1
                 status, content_type, body = _fixture_response(
                     path,
                     root_visit=root_visit,
@@ -309,6 +316,7 @@ class SemanticHttpsFixture:
                 css_requests=self.css_requests,
                 script_requests=self.script_requests,
                 image_requests=self.image_requests,
+                ready_requests=self.ready_requests,
             )
 
     def close(self) -> None:
@@ -434,7 +442,6 @@ def _chrome_command(
 ) -> tuple[str, ...]:
     return (
         str(executable),
-        "--headless=new",
         "--disable-background-networking",
         "--disable-component-update",
         "--disable-default-apps",
@@ -445,15 +452,13 @@ def _chrome_command(
         "--no-default-browser-check",
         "--no-first-run",
         "--no-proxy-server",
+        "--new-window",
         "--password-store=basic",
         "--ignore-certificate-errors",
         f"--disable-extensions-except={extension}",
         f"--load-extension={extension}",
         f"--host-resolver-rules=MAP {FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
         f"--user-data-dir={profile}",
-        "--virtual-time-budget=20000",
-        "--run-all-compositor-stages-before-draw",
-        "--dump-dom",
         f"https://{FIXTURE_HOST}:{fixture_port}/?slipstream-semantic=1",
     )
 
@@ -484,35 +489,94 @@ def _run_chrome(
     uid: int,
     gid: int,
     extension: Path,
-    fixture_port: int,
+    fixture: SemanticHttpsFixture,
     executable: Path = CHROME_EXECUTABLE,
-) -> bytes:
+) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
     supplementary_groups = lifecycle._user_supplementary_groups(uid, gid)
     profile = Path(tempfile.mkdtemp(prefix="slipstream-semantic-chrome-"))
+    stdout_capture = tempfile.TemporaryFile()
+    stderr_capture = tempfile.TemporaryFile()
+    process: subprocess.Popen[bytes] | None = None
+    process_group: int | None = None
+    snapshot: FixtureSnapshot | None = None
+    failure: BaseException | None = None
+    cleanup_errors: list[str] = []
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
-        capture = lifecycle._capture_chrome_output(
-            _chrome_command(executable, profile, extension, fixture_port),
+        process = subprocess.Popen(
+            _chrome_command(executable, profile, extension, fixture.port),
             cwd=home,
-            environment=environment,
-            uid=uid,
-            gid=gid,
-            supplementary_groups=supplementary_groups,
-            timeout=CHROME_TIMEOUT,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_capture,
+            stderr=stderr_capture,
+            start_new_session=True,
+            user=uid,
+            group=gid,
+            extra_groups=supplementary_groups,
         )
+        process_group = process.pid
+        if os.getpgid(process.pid) != process_group:
+            raise QualificationError("Chrome did not retain its dedicated process group")
+
+        deadline = time.monotonic() + CHROME_TIMEOUT
+        while time.monotonic() < deadline:
+            snapshot = fixture.snapshot()
+            if snapshot.ready_requests == 1:
+                break
+            if snapshot.ready_requests > 1:
+                raise QualificationError(
+                    f"Chrome emitted duplicate semantic ready callbacks: {snapshot!r}"
+                )
+            if process.poll() is not None:
+                raise QualificationError(
+                    f"Chrome exited before semantic completion ({process.returncode})"
+                )
+            time.sleep(0.1)
+        else:
+            raise QualificationError("Chrome semantic page timed out")
+    except BaseException as exc:
+        failure = exc
     finally:
-        _remove_owned_profile(profile)
-    output = capture.stdout
-    if capture.timed_out or capture.returncode != 0 or STYLED_MARKER.encode() not in output:
-        detail = (capture.stdout + b"\n" + capture.stderr).decode(
-            "utf-8",
-            errors="replace",
-        )[-4000:]
-        raise QualificationError(f"Chrome semantic page did not qualify: {detail}")
-    return output
+        try:
+            if process is not None and process_group is not None:
+                lifecycle._stop_owned_chrome_process_group(
+                    process,
+                    process_group,
+                    uid=uid,
+                    gid=gid,
+                    supplementary_groups=supplementary_groups,
+                )
+        except Exception as exc:
+            cleanup_errors.append(f"Chrome process cleanup: {exc}")
+        try:
+            stderr = lifecycle._read_capture(stderr_capture, tail=True)
+        except Exception as exc:
+            stderr = b""
+            cleanup_errors.append(f"Chrome diagnostic capture: {exc}")
+        try:
+            stdout_capture.close()
+            stderr_capture.close()
+        except Exception as exc:
+            cleanup_errors.append(f"Chrome capture cleanup: {exc}")
+        try:
+            _remove_owned_profile(profile)
+        except Exception as exc:
+            cleanup_errors.append(f"Chrome profile cleanup: {exc}")
+
+    if cleanup_errors:
+        raise QualificationError("; ".join(cleanup_errors)) from failure
+    if failure is not None:
+        detail = stderr.decode("utf-8", errors="replace")[-4000:]
+        raise QualificationError(
+            f"Chrome semantic page did not qualify: {failure}\n{detail}"
+        ) from failure
+    if snapshot is None:
+        raise QualificationError("Chrome semantic page produced no fixture evidence")
+    return snapshot
 
 
 def _assert_fixture_complete(snapshot: FixtureSnapshot) -> None:
@@ -527,6 +591,10 @@ def _assert_fixture_complete(snapshot: FixtureSnapshot) -> None:
     ) < 1:
         raise QualificationError(
             f"styled semantic page omitted a mandatory resource: {snapshot!r}"
+        )
+    if snapshot.ready_requests != 1:
+        raise QualificationError(
+            f"styled semantic page did not emit one ready callback: {snapshot!r}"
         )
 
 
@@ -581,9 +649,8 @@ def run_qualification(
         _wait_for_owned_geph_backend()
 
         fixture.start()
-        output = _run_chrome(uid, gid, extension, fixture.port)
+        snapshot = _run_chrome(uid, gid, extension, fixture)
         expiry = _wait_for_learned_host(FIXTURE_HOST)
-        snapshot = fixture.snapshot()
         _assert_fixture_complete(snapshot)
         result = {
             "result": "pass",
@@ -594,7 +661,8 @@ def run_qualification(
             "daemon_ipc": "owner-only semantic socket",
             "confirmation": "real account-backed owned Geph",
             "reloads": snapshot.root_visits - 1,
-            "styled_dom_bytes": len(output),
+            "styled_dom": "browser callback after CSS, JavaScript, and image readiness",
+            "browser_ready_callbacks": snapshot.ready_requests,
             "mandatory_resources": {
                 "css": snapshot.css_requests,
                 "javascript": snapshot.script_requests,
