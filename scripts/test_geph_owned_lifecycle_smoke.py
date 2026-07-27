@@ -137,6 +137,8 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(paths.config, paths.config_dir / "geph-active.yaml")
         self.assertEqual(paths.cache, paths.config_dir / "geph-cache.db")
         self.assertEqual(paths.ownership, paths.config_dir / "geph-owned.json")
+        self.assertEqual(paths.stdout_log, paths.config_dir / "geph.stdout.log")
+        self.assertEqual(paths.stderr_log, paths.config_dir / "geph.stderr.log")
         self.assertEqual(
             paths.plist,
             home / "Library/LaunchAgents/dev.slipstream.geph.plist",
@@ -232,6 +234,54 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             [call.args for call in probe.call_args_list],
             [(targets[0],), (targets[1],)],
         )
+
+    def test_geph_log_tail_redacts_exact_and_labeled_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "geph.stderr.log"
+            path.write_text(
+                "connecting broker\n"
+                "secret: exact-ci-secret\n"
+                "token=opaque-token\n"
+                "request failed: transport timed out\n",
+                encoding="utf-8",
+            )
+            tail = smoke._safe_geph_log_tail(path, "exact-ci-secret")
+
+        self.assertIn("connecting broker", tail)
+        self.assertIn("request failed: transport timed out", tail)
+        self.assertNotIn("exact-ci-secret", tail)
+        self.assertNotIn("opaque-token", tail)
+        self.assertGreaterEqual(tail.count("<redacted>"), 2)
+
+    def test_geph_log_tail_redacts_secret_crossing_tail_boundary(self) -> None:
+        secret = "boundary-secret-value"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "geph.stderr.log"
+            path.write_text(
+                ("x" * 80) + secret + ("z" * 50),
+                encoding="utf-8",
+            )
+            tail = smoke._safe_geph_log_tail(path, secret, limit=64)
+
+        self.assertNotIn(secret, tail)
+        self.assertNotIn(secret[8:], tail)
+        self.assertIn("<redacted>", tail)
+        self.assertLessEqual(len(tail), 64)
+
+    def test_geph_log_tail_redacts_json_and_authorization_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "geph.stderr.log"
+            path.write_text(
+                '{"token":"opaque-token","status":"retrying"}\n'
+                "Authorization: Bearer bearer-token\n",
+                encoding="utf-8",
+            )
+            tail = smoke._safe_geph_log_tail(path, "")
+
+        self.assertNotIn("opaque-token", tail)
+        self.assertNotIn("bearer-token", tail)
+        self.assertNotIn("Bearer", tail)
+        self.assertEqual(tail.count("<redacted>"), 2)
 
     def test_native_host_cleanup_removes_only_the_exact_packaged_manifest(
         self,
@@ -354,12 +404,14 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 smoke, "DAEMON_PLIST", Path(tmp) / "daemon.plist"
             ):
-                with self.assertRaisesRegex(
-                    smoke.QualificationError,
-                    "Keychain cleanup: security timeout",
-                ):
+                with self.assertRaises(smoke.QualificationError) as raised:
                     smoke.run_qualification(app_bundle)
 
+            self.assertIn("primary failure: startup failed", str(raised.exception))
+            self.assertIn(
+                "cleanup failure: Keychain cleanup: security timeout",
+                str(raised.exception),
+            )
             keychain_delete.assert_called_once_with()
             tray.close.assert_called_once_with()
             sentinel.close.assert_called_once_with()
