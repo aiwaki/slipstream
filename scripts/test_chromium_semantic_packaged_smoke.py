@@ -25,6 +25,16 @@ def _fake_chrome_for_testing(root: Path) -> Path:
     return executable
 
 
+def _fake_extensionless_chrome_for_testing(root: Path) -> Path:
+    bundle = root / "arm64"
+    executable = bundle / "Contents" / "MacOS" / "Google Chrome for Testing"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("binary", encoding="utf-8")
+    executable.chmod(0o700)
+    (bundle / "Contents" / "Info.plist").write_text("plist", encoding="utf-8")
+    return executable
+
+
 class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def test_disposable_guard_requires_root_macos_and_original_user(self) -> None:
         environment = {
@@ -144,6 +154,62 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertNotIn("/bin/sh", command)
         self.assertNotIn("/usr/bin/sudo", command)
         self.assertNotIn("/bin/launchctl", command)
+
+    def test_launchservices_aliases_an_extensionless_bundle_in_the_profile(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = _fake_extensionless_chrome_for_testing(root)
+            profile = root / "profile"
+            profile.mkdir(mode=0o700)
+            alias = smoke._launchservices_app_bundle(
+                executable,
+                profile,
+                os.getuid(),
+                os.getgid(),
+            )
+
+            self.assertTrue(alias.is_symlink())
+            self.assertEqual(alias.parent, profile)
+            self.assertEqual(alias.suffix, ".app")
+            self.assertEqual(alias.resolve(), executable.parents[2].resolve())
+
+            payload = smoke._chrome_launch_agent_payload(
+                "dev.slipstream.chromium-semantic.4242",
+                {"HOME": "/Users/runner", "USER": "runner"},
+                Path("/Users/runner"),
+                profile / "chrome.stdout",
+                profile / "chrome.stderr",
+                profile / "launcher.stdout",
+                profile / "launcher.stderr",
+                executable,
+                profile,
+                Path("/repo/browser-companion/chromium"),
+                18443,
+                alias,
+            )
+
+        command = payload["ProgramArguments"]
+        self.assertEqual(command[command.index("-a") + 1], str(alias))
+
+    def test_launchservices_uses_an_existing_app_bundle_without_an_alias(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = _fake_chrome_for_testing(root)
+            profile = root / "profile"
+            profile.mkdir(mode=0o700)
+            bundle = smoke._launchservices_app_bundle(
+                executable,
+                profile,
+                os.getuid(),
+                os.getgid(),
+            )
+
+            self.assertEqual(bundle, executable.parents[2].resolve())
+            self.assertFalse((profile / "Chrome for Testing.app").exists())
 
     def test_owner_private_capture_is_exact_and_tail_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
