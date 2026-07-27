@@ -97,6 +97,58 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         )
         self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
 
+    def test_chrome_for_testing_validation_rejects_branded_chrome(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Google Chrome"
+            executable.write_text("binary", encoding="utf-8")
+            executable.chmod(0o700)
+            with mock.patch.object(
+                smoke,
+                "_run",
+                return_value=smoke.subprocess.CompletedProcess(
+                    (str(executable), "--version"),
+                    0,
+                    stdout="Google Chrome 148.0.0.0\n",
+                    stderr="",
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "requires Google Chrome for Testing",
+                ):
+                    smoke._validate_chrome_for_testing(executable)
+
+    def test_profile_native_host_is_exact_private_owner_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "profile"
+            profile.mkdir()
+            source = root / "native-host.json"
+            payload = b'{"name":"dev.slipstream.semantic"}'
+            source.write_bytes(payload)
+            real_write = os.write
+            writes = 0
+
+            def partial_write(fd: int, data: bytes | memoryview) -> int:
+                nonlocal writes
+                writes += 1
+                return real_write(fd, data[:3])
+
+            with mock.patch.object(smoke.os, "write", side_effect=partial_write):
+                destination = smoke._install_profile_native_host(
+                    profile,
+                    source,
+                    os.getuid(),
+                    os.getgid(),
+                )
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+            self.assertGreater(writes, 1)
+            self.assertEqual(
+                destination.relative_to(profile),
+                smoke.PROFILE_NATIVE_HOST_RELATIVE_PATH,
+            )
+
     def test_native_manifest_must_be_private_exact_origin_and_packaged_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -203,6 +255,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             self.assertEqual(smoke.main(["--dry-run"]), 0)
         payload = json.loads(output.getvalue())
         self.assertIn("packaged native host", payload["path"])
+        self.assertIn("Chrome for Testing", payload["browser"])
+        self.assertIn(
+            "disposable browser profile",
+            payload["native_host_registration"],
+        )
         self.assertEqual(payload["production_overrides"], "none")
 
         source = (
@@ -220,6 +277,15 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertIn("geph_owned_lifecycle_smoke.py", workflow)
         self.assertIn("chromium_semantic_packaged_smoke.py", workflow)
+        self.assertIn(
+            "browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd",
+            workflow,
+        )
+        self.assertIn("chrome-version: stable", workflow)
+        self.assertIn(
+            '--chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"',
+            workflow,
+        )
         self.assertIn("env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E", workflow)
         self.assertEqual(
             workflow.count("secrets.SLIPSTREAM_GEPH_ACCOUNT_SECRET"),

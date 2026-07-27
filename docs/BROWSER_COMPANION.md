@@ -81,7 +81,9 @@ foreign file or symlink is refused without blocking removal of the application.
 The extension is not yet published to the Chrome Web Store. For development,
 load `browser-companion/chromium/` with Chrome's **Load unpacked** action after
 starting a packaged Slipstream app. The public key in `manifest.json` keeps the
-preview extension ID stable.
+preview extension ID stable. Production distribution in branded Chrome requires
+a reviewed Chrome Web Store package; the disposable CI gate does not replace
+that distribution path.
 
 ## Protected Chromium Qualification
 
@@ -90,14 +92,17 @@ Chromium preview with the existing protected account-backed Geph gate. It
 starts the packaged tray and its exact user LaunchAgent, then runs a separate
 root-only harness against the packaged daemon.
 
-The browser side uses real GUI Chrome in the disposable runner's user session,
-a fresh owner-only profile, the unpacked frozen-origin extension, the registered
-packaged Rust native host, and the daemon's owner-only semantic socket. A scoped
-local HTTPS fixture mapped only inside that Chrome profile serves a strong
-regional-denial page first and a styled page on the next request. Headless
-Chrome is intentionally excluded because the protected run showed that it can
-render the page without activating the MV3 native-messaging path. The daemon
-does not trust the fixture:
+The browser side uses GUI Chrome for Testing in the disposable runner's user
+session, a fresh owner-only profile, the unpacked frozen-origin extension, the
+packaged Rust native host, and the daemon's owner-only semantic socket. Branded
+Chrome 137 and later ignore the unpacked-extension `--load-extension` switch, so
+it cannot drive this automation gate. The harness copies the exact installed
+native-host manifest into the fresh profile's `NativeMessagingHosts` directory;
+it does not synthesize or relax the manifest. A scoped local HTTPS fixture
+mapped only inside that browser profile serves a strong regional-denial page
+first and a styled page on the next request. Headless execution is also
+excluded because an earlier protected run rendered the page without activating
+the MV3 native-messaging path. The daemon does not trust the fixture:
 confirmation is a separate real HTTPS request for the same generic hostname
 through the ownership-verified account-backed Geph. Success requires the
 learned exact-host route, exactly one browser reload, a marked nonblank DOM,
@@ -135,8 +140,9 @@ registration, owned uninstall, and an unsigned Safari app-extension build.
 ## Remaining Gates
 
 - Chrome Web Store packaging, privacy disclosure, and update provenance.
-- The protected packaged Chromium harness must pass on an exact merged main
-  commit before the preview is considered runtime-qualified.
+- The Chrome for Testing packaged Chromium harness must pass on an exact merged
+  main commit before the preview is considered runtime-qualified. Branded
+  Chrome still requires reviewed Chrome Web Store distribution.
 - Safari requires a signed container, browser enablement, and a disposable
   runtime proof that the sandboxed app extension can reach the owner-only
   daemon socket. The unsigned source and package build exist, but are not

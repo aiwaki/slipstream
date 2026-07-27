@@ -9,25 +9,26 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-27, through main commit
-`fa29eada0923b60352222698c15a04b47e92b658`. PR #229 added the protected
-packaged Chromium semantic harness and made uninstall clear temporary learned
-geo-exit state. Exact-main CI run `30257588567` and audit run `30257588512`
-passed. The protected account-backed run `30258690591` then proved that owned
-Geph payload and recovery were healthy, but rejected headless Chrome as a
-semantic-companion gate: Chrome rendered the first denial page without
-activating the unpacked MV3 native-messaging path, so no learned route or reload
-occurred. Cleanup still proved that the root daemon, private PF state, semantic
-runtime, native host manifest, user Geph lifecycle, and fresh profile were
-absent afterward.
+`0582f7cf777ac472ae7b5f560535e46fd6442b6c`. PR #231 moved the protected
+packaged Chromium semantic harness into GUI Chrome. Exact-main CI run
+`30260764455` and audit run `30260764458` passed. Protected run `30261221677`
+independently passed the real owned-Geph payload, trayless continuity, recovery,
+and fail-closed cleanup gates, but the browser fixture received no request.
+The runner used branded Chrome 148, while branded Chrome 137 and later ignore
+the unpacked-extension `--load-extension` switch. The result therefore rejects
+that browser composition; it is not evidence against the packaged native host,
+daemon semantic contract, or owned Geph.
 
-PR #231 replaces only that test composition with GUI Chrome in the disposable
-runner's real user session. Completion requires the independently confirmed
-future exact-host route, exactly one reload, all CSS/JavaScript/image requests,
-and one same-origin browser callback emitted only after computed style, image
-readiness, and the DOM marker succeed. Static policy remains authoritative;
-Discord and YouTube never enter Geph, and external DNS/proxy/PAC/VPN remain
-read-only. No companion has been installed on a workstation. The next action is
-to merge PR #231 after required CI, pass exact-main CI, rerun the protected GUI
+The active follow-up replaces only the qualification browser with pinned Chrome
+for Testing and copies the exact packaged native-host manifest into that
+disposable browser profile. Product routing, the frozen extension, static
+policy, and external network ownership do not change. Completion still requires
+the independently confirmed future exact-host route, exactly one reload, every
+CSS/JavaScript/image request, and one same-origin callback emitted only after
+computed style, image readiness, and the DOM marker succeed. Discord and
+YouTube never enter Geph, and external DNS/proxy/PAC/VPN remain read-only. No
+companion has been installed on a workstation. The next action is to merge the
+follow-up after required CI, pass exact-main CI, rerun the protected
 qualification on that exact merge commit, and record the resulting run ID.
 
 ## Resume Protocol
@@ -53,7 +54,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Partial; protected packaged Chromium GUI qualification is the active gate | PRs #219-#229 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, and fail-closed cleanup. Exact-main CI `30257588567` passed on `fa29ead`. Protected run `30258690591` rejected headless Chrome while independently passing real owned-Geph payload/recovery and cleanup, so headless rendering is not accepted as MV3 runtime evidence. PR #231 moves the same frozen extension and packaged path into GUI Chrome and requires a learned route, one reload, CSS/JavaScript/image completion, DOM mutation, and one browser-ready callback. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
+| M1 - Autonomous Routing V1 | Partial; protected packaged Chromium qualification is the active gate | PRs #219-#231 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, GUI execution, and fail-closed cleanup. Exact-main CI `30260764455` passed on `0582f7c`. Protected run `30261221677` passed real owned-Geph payload, trayless continuity, recovery, and cleanup, but branded Chrome 148 ignored the unpacked-extension launch switch and never requested the fixture. The active follow-up uses pinned Chrome for Testing plus the exact packaged native-host manifest inside its disposable profile; it must still prove a learned route, one reload, CSS/JavaScript/image completion, DOM mutation, and one browser-ready callback. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |

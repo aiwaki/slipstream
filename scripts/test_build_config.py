@@ -31,6 +31,10 @@ ACTION_PINS = {
         "820762786026740c76f36085b0efc47a31fe5020",
         "v7.0.0",
     ),
+    "browser-actions/setup-chrome": (
+        "2e1d749697dd1612b833dba4a722266286fbefcd",
+        "v2.1.2",
+    ),
     "actions/cache": (
         "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         "v6.1.0",
