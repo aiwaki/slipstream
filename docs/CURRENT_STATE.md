@@ -9,40 +9,34 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-27, through main commit
-`433ec6ebaf69346212d42945dd12c1510b64b77c`. PR #236 isolated an explicit
-CI-only `--no-sandbox` diagnostic. Exact-main CI run `30284480903` and audit run
-`30284481070` passed. Protected run `30284938688` proved that removing the
-Chromium sandbox does not repair the direct-LaunchAgent composition: the
-network-service failure changed from `Permission denied (1100)` to
-`Unknown service name (1102)`. The parent browser and its children still
-occupied incompatible bootstrap namespaces. The independent account-backed
-owned-Geph lifecycle passed real initial, trayless, and recovered TLS payload,
-preserved the external listener, restored system state, and left the root
-daemon absent and disabled.
+`de153cefc53215da8b72cf718c7c5f720a3064c5`. PR #237 replaced direct
+LaunchAgent Chrome execution with sandboxed LaunchServices launch in the
+console Aqua session and hardened exact browser/launcher ownership and cleanup.
+Exact-main CI run `30295085145` and audit run `30295083249` passed, including
+the packaged app lifecycle sentinel. Protected run `30295751995` again passed
+real account-backed owned-Geph initial, trayless, and recovered TLS payload
+(`HTTP/1.1 200 OK`, 68103 bytes each), preserved the external listener, restored
+system state, and left the root daemon absent and disabled.
 
-The active follow-up keeps Chrome sandboxed and changes only the disposable
-qualification harness to ask LaunchServices to open Chrome in the console
-user's Aqua session. The owner-private LaunchAgent waits on that exact
-LaunchServices instance; the browser is admitted only when its UID, bundle
-executable family, and unique owner-only `--user-data-dir` all match. Cleanup
-retains the proven browser process group so same-UID bundle helpers without the
-profile switch cannot outlive it, revalidates identity before every signal,
-boots out only the unique launcher label, captures both launcher and browser
-stderr, and verifies browser and launcher absence before removing the profile.
-A partial bootstrap additionally requires a bounded stable browser-absence
-window so an asynchronous LaunchServices request cannot outlive the profile;
-that post-bootout window also applies when launcher identity succeeded but
-browser admission timed out.
-No shell, `sudo`, broad process match, workstation execution, or product
-routing change is involved.
-Completion still requires the independently confirmed future
-exact-host route, exactly one reload, every CSS/JavaScript/image request, and
-one same-origin callback emitted only after computed style, image readiness,
-and the DOM marker succeed. Discord and YouTube never enter Geph, and external
-DNS/proxy/PAC/VPN remain read-only. No companion has been installed on a
-workstation. The next action is to pass the LaunchServices composition through
-PR and exact-main gates, rerun protected qualification on that exact merge
-commit, and require both the sandboxed browser result and complete cleanup.
+The protected browser half failed before launch with
+`kLSNoExecutableErr (-10827)`. `setup-chrome` supplied a valid
+`Contents/MacOS/Google Chrome for Testing` tree whose application root was the
+extensionless directory `arm64`; the harness passed that directory directly to
+LaunchServices, which requires an application-form path. The active narrow
+follow-up creates an owner-private `.app` symlink inside the already temporary
+Chrome profile only when the source bundle lacks the suffix. LaunchServices
+receives that alias, while process admission and cleanup remain bound to the
+real resolved executable, UID, bundle helper family, unique profile, retained
+process group, and exact launcher label. The alias is removed only with the
+profile after browser and launcher absence are proven.
+
+No shell, broad process match, workstation execution, product route, or
+external DNS/proxy/PAC/VPN change is involved. Discord and YouTube never enter
+Geph. Completion still requires ordinary PR and exact-main gates followed by a
+protected run proving the independently confirmed future exact-host route,
+exactly one reload, every CSS/JavaScript/image request, one same-origin ready
+callback, and complete cleanup. No companion or current development build has
+been installed on a workstation.
 
 ## Resume Protocol
 

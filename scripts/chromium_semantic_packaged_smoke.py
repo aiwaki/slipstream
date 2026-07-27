@@ -534,6 +534,30 @@ def _chrome_app_bundle(executable: Path) -> Path:
     return bundle
 
 
+def _launchservices_app_bundle(
+    executable: Path,
+    profile: Path,
+    uid: int,
+    gid: int,
+) -> Path:
+    bundle = _chrome_app_bundle(executable).resolve(strict=True)
+    if bundle.suffix.lower() == ".app":
+        return bundle
+
+    alias = profile / "Chrome for Testing.app"
+    if alias.exists() or alias.is_symlink():
+        raise QualificationError(
+            f"private LaunchServices application alias already exists: {alias}"
+        )
+    os.symlink(bundle, alias, target_is_directory=True)
+    os.lchown(alias, uid, gid)
+    if not (alias / "Contents" / "Info.plist").is_file():
+        raise QualificationError(
+            f"LaunchServices application alias has no bundle metadata: {alias}"
+        )
+    return alias
+
+
 def _chrome_open_command(
     executable: Path,
     profile: Path,
@@ -541,6 +565,7 @@ def _chrome_open_command(
     fixture_port: int,
     stdout_path: Path,
     stderr_path: Path,
+    application_bundle: Path | None = None,
 ) -> tuple[str, ...]:
     chrome = _chrome_command(
         executable,
@@ -558,7 +583,7 @@ def _chrome_open_command(
         "--stderr",
         str(stderr_path),
         "-a",
-        str(_chrome_app_bundle(executable)),
+        str(application_bundle or _chrome_app_bundle(executable)),
         "--args",
         *chrome[1:],
     )
@@ -576,6 +601,7 @@ def _chrome_launch_agent_payload(
     profile: Path,
     extension: Path,
     fixture_port: int,
+    application_bundle: Path | None = None,
 ) -> dict[str, object]:
     return {
         "Label": label,
@@ -587,6 +613,7 @@ def _chrome_launch_agent_payload(
                 fixture_port,
                 chrome_stdout_path,
                 chrome_stderr_path,
+                application_bundle,
             )
         ),
         "RunAtLoad": True,
@@ -1124,6 +1151,12 @@ def _run_chrome(
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
+        application_bundle = _launchservices_app_bundle(
+            executable,
+            profile,
+            uid,
+            gid,
+        )
         _install_profile_native_host(
             profile,
             native_host_manifest,
@@ -1147,6 +1180,7 @@ def _run_chrome(
             profile,
             extension,
             fixture.port,
+            application_bundle,
         )
         _write_owner_private_file(
             plist_path,
