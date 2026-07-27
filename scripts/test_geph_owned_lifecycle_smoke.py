@@ -141,6 +141,12 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             paths.plist,
             home / "Library/LaunchAgents/dev.slipstream.geph.plist",
         )
+        self.assertEqual(
+            smoke._native_host_path(home),
+            home
+            / "Library/Application Support/Google/Chrome/NativeMessagingHosts"
+            / "dev.slipstream.semantic.json",
+        )
 
     def test_private_json_is_atomic_owner_only_and_string_typed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,6 +205,64 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         self.assertEqual(request[-2:], b"\x01\xbb")
         with self.assertRaises(smoke.QualificationError):
             smoke._socks_connect_request("x" * 256, 443)
+
+    def test_payload_probe_rotates_canaries_until_real_https_payload_succeeds(
+        self,
+    ) -> None:
+        targets = (
+            smoke.PayloadTarget("first.example", "/", 512),
+            smoke.PayloadTarget("second.example", "/health", 1024),
+        )
+        expected = {
+            "bytes": 4096,
+            "canary": "second.example",
+            "protocol": "TLSv1.3",
+            "status": "HTTP/1.1 200 OK",
+        }
+        with mock.patch.object(
+            smoke,
+            "_payload_probe",
+            side_effect=[TimeoutError("first timed out"), expected],
+        ) as probe:
+            self.assertEqual(
+                smoke._wait_for_payload(timeout=1, targets=targets),
+                expected,
+            )
+        self.assertEqual(
+            [call.args for call in probe.call_args_list],
+            [(targets[0],), (targets[1],)],
+        )
+
+    def test_native_host_cleanup_removes_only_the_exact_packaged_manifest(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            executable = home / "Slipstream.app/Contents/MacOS/slipstream"
+            path = smoke._native_host_path(home)
+            path.parent.mkdir(parents=True)
+            payload = {
+                "name": smoke.NATIVE_HOST_NAME,
+                "description": "Slipstream Browser Companion",
+                "path": str(executable),
+                "type": "stdio",
+                "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            path.chmod(0o600)
+
+            smoke._remove_exact_native_host(home, executable, os.getuid())
+            self.assertFalse(path.exists())
+
+            payload["path"] = "/Applications/Foreign.app/Contents/MacOS/foreign"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            path.chmod(0o600)
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "foreign native host",
+            ):
+                smoke._remove_exact_native_host(home, executable, os.getuid())
+            self.assertTrue(path.exists())
 
     def test_launchd_disabled_parser_accepts_current_and_legacy_states(self) -> None:
         completed = mock.Mock(

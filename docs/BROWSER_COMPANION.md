@@ -150,6 +150,14 @@ route, exactly one browser reload, a marked nonblank DOM, fetched CSS,
 JavaScript, and image resources, and one same-origin `/ready` callback emitted
 by page JavaScript only after those resources are usable.
 
+Protected run `30301572440` stopped before this browser phase because its sole
+Steam HTTPS canary timed out. The user-level gate now rotates through a bounded
+set of independent real HTTPS payload canaries; SOCKS CONNECT or TLS alone
+still cannot pass. If tray startup fails before the browser harness assumes
+ownership, cleanup removes the Chromium native-host manifest only after
+verifying its owner, mode, packaged executable path, host name, transport, and
+frozen extension origin. A foreign manifest is never removed.
+
 The fixture uses an untrusted one-day certificate accepted only by the
 disposable Chrome process. It does not install a certificate, alter system DNS,
 or add a production daemon override. Cleanup must remove the root daemon,
