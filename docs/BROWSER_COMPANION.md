@@ -98,13 +98,17 @@ packaged Rust native host, and the daemon's owner-only semantic socket. Branded
 Chrome 137 and later ignore the unpacked-extension `--load-extension` switch, so
 it cannot drive this automation gate. The harness copies the exact installed
 native-host manifest into the fresh profile's `NativeMessagingHosts` directory;
-it does not synthesize or relax the manifest. Root executes `launchctl asuser`
-for the exact console UID so the process enters the GUI Mach bootstrap
-namespace required by Chrome's network-service rendezvous. A fixed internal
-helper then sets the already resolved supplementary groups, GID, and UID before
-directly executing Chrome. No shell or `sudo` is involved, and the dedicated
-process group remains the user-owned browser cleanup boundary. A scoped local
-HTTPS fixture mapped only inside that browser profile serves a strong
+it does not synthesize or relax the manifest. The harness writes one
+owner-private temporary plist and bootstraps it under the exact
+`gui/<console-uid>` domain. User launchd starts Chrome with `Aqua` and
+`Interactive` session constraints, which supplies the login, audit, and Mach
+bootstrap context required by Chrome's sandboxed network-service children.
+Root execution followed by `launchctl asuser` and a manual UID/GID drop was
+explicitly rejected after protected runs still produced Mach lookup error
+`1100`. No shell or `sudo` is involved. Cleanup sends signals and `bootout`
+only to the unique temporary job label, then verifies that no console-user
+member remains in its recorded process group. A scoped local HTTPS fixture
+mapped only inside that browser profile serves a strong
 regional-denial page first and a styled page on the next request. Headless
 execution is also excluded because an
 earlier protected run rendered the page without activating the MV3
