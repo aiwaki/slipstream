@@ -158,9 +158,12 @@ def _publish_ready_and_wait(
     state: OwnedGephState,
     *,
     timeout: float = COORDINATION_TIMEOUT,
+    abort_reason: Callable[[], str | None] | None = None,
 ) -> None:
     if coordination is None:
         return
+    if abort_reason is not None and (reason := abort_reason()):
+        raise QualificationError(reason)
     coordination.ready.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(
         coordination.ready,
@@ -176,6 +179,8 @@ def _publish_ready_and_wait(
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if abort_reason is not None and (reason := abort_reason()):
+            raise QualificationError(reason)
         if coordination.release.exists():
             metadata = coordination.release.lstat()
             if (
@@ -186,6 +191,8 @@ def _publish_ready_and_wait(
                 raise QualificationError(
                     "coordination release file is not an owner-private regular file"
                 )
+            if abort_reason is not None and (reason := abort_reason()):
+                raise QualificationError(reason)
             _assert_owned_geph(paths, uid, state)
             return
         time.sleep(0.25)
@@ -671,11 +678,15 @@ def _wait_for_payload(
             if time.monotonic() >= deadline:
                 break
             try:
-                return _payload_probe(target)
+                payload = _payload_probe(target)
             except (OSError, ssl.SSLError, QualificationError) as exc:
                 last_errors[target.host] = str(exc)
                 if abort_reason is not None and (reason := abort_reason()):
                     raise QualificationError(reason) from exc
+            else:
+                if abort_reason is not None and (reason := abort_reason()):
+                    raise QualificationError(reason)
+                return payload
         if time.monotonic() < deadline:
             time.sleep(2)
     detail = "; ".join(
@@ -872,7 +883,13 @@ def run_qualification(
         abort_reason = lambda: _owned_geph_abort_reason(paths, redaction_secret)
         initial_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
-        _publish_ready_and_wait(coordination, paths, uid, initial)
+        _publish_ready_and_wait(
+            coordination,
+            paths,
+            uid,
+            initial,
+            abort_reason=abort_reason,
+        )
 
         tray.crash()
         _assert_owned_geph(paths, uid, initial)

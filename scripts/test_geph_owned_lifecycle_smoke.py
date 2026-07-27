@@ -124,6 +124,44 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(coordination.ready.stat().st_mode), 0o600)
             validate.assert_called_once_with(paths, os.getuid(), state)
 
+    def test_coordination_wait_aborts_on_late_broker_rate_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination = smoke.CoordinationPaths(
+                ready=root / "ready",
+                release=root / "release",
+            )
+            paths = smoke.geph_paths(root / "home")
+            state = smoke.OwnedGephState(
+                pid=4242,
+                uid=os.getuid(),
+                executable=paths.executable,
+                config=paths.config,
+                launchd_label=smoke.GEPH_LABEL,
+            )
+            abort_reason = mock.Mock(
+                side_effect=[
+                    None,
+                    "owned Geph broker rate limited account authentication",
+                ]
+            )
+
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "broker rate limited account authentication",
+            ):
+                smoke._publish_ready_and_wait(
+                    coordination,
+                    paths,
+                    os.getuid(),
+                    state,
+                    timeout=2,
+                    abort_reason=abort_reason,
+                )
+
+            self.assertTrue(coordination.ready.exists())
+            self.assertEqual(abort_reason.call_count, 2)
+
     def test_paths_are_scoped_to_the_app_config_and_user_launch_agent(self) -> None:
         home = Path("/Users/runner")
         paths = smoke.geph_paths(home)
@@ -310,6 +348,38 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             smoke,
             "_payload_probe",
             side_effect=smoke.QualificationError("SOCKS CONNECT timed out"),
+        ) as probe:
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "broker rate limited account authentication",
+            ):
+                smoke._wait_for_payload(
+                    timeout=10,
+                    targets=(target,),
+                    abort_reason=abort_reason,
+                )
+
+        probe.assert_called_once_with(target)
+        self.assertEqual(abort_reason.call_count, 2)
+
+    def test_payload_wait_rechecks_rate_limit_after_success(self) -> None:
+        target = smoke.PayloadTarget("first.example", "/", 512)
+        expected = {
+            "bytes": 4096,
+            "canary": target.host,
+            "protocol": "TLSv1.3",
+            "status": "HTTP/1.1 200 OK",
+        }
+        abort_reason = mock.Mock(
+            side_effect=[
+                None,
+                "owned Geph broker rate limited account authentication",
+            ]
+        )
+        with mock.patch.object(
+            smoke,
+            "_payload_probe",
+            return_value=expected,
         ) as probe:
             with self.assertRaisesRegex(
                 smoke.QualificationError,
