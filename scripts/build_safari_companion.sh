@@ -35,21 +35,34 @@ cleanup() {
   local status=$?
   local cleanup_status=0
   local real_app=""
-  local registration_present=0
+  local real_appex=""
+  local registration_present=1
+  local -a dump_status=()
 
   trap - EXIT
   rm -rf "$STAGE"
   if [[ -x "$LSREGISTER" && -d "$APP" ]]; then
     real_app="$(realpath "$APP")"
-    "$LSREGISTER" -u "$real_app" >/dev/null 2>&1 \
-      || cleanup_status=1
-    for _ in 1 2 3; do
-      sleep 1
-      if ! "$LSREGISTER" -dump | grep -F "$real_app" >/dev/null; then
+    if [[ -d "$APPEX" ]]; then
+      real_appex="$(realpath "$APPEX")"
+    fi
+    for _ in 1 2 3 4 5 6 7 8; do
+      if [[ -n "$real_appex" ]]; then
+        "$LSREGISTER" -u "$real_appex" >/dev/null || \
+          echo "warning: failed to unregister temporary Safari extension" >&2
+      fi
+      "$LSREGISTER" -u "$real_app" >/dev/null || \
+        echo "warning: failed to unregister temporary Safari app" >&2
+      if "$LSREGISTER" -dump | grep -F "$real_app" >/dev/null; then
+        dump_status=(0 0)
+      else
+        dump_status=("${PIPESTATUS[@]}")
+      fi
+      if (( dump_status[0] == 0 && dump_status[1] == 1 )); then
         registration_present=0
         break
       fi
-      registration_present=1
+      sleep 1
     done
     (( registration_present == 0 )) || cleanup_status=1
   fi

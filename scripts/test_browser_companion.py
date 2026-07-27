@@ -72,7 +72,17 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertIn("safari-web-extension-converter", source)
         self.assertIn('LSREGISTER="', source)
         self.assertIn('real_app="$(realpath "$APP")"', source)
+        self.assertIn('real_appex="$(realpath "$APPEX")"', source)
+        self.assertIn('"$LSREGISTER" -u "$real_appex"', source)
         self.assertIn('"$LSREGISTER" -u "$real_app"', source)
+        self.assertIn('dump_status=("${PIPESTATUS[@]}")', source)
+        self.assertIn(
+            "dump_status[0] == 0 && dump_status[1] == 1",
+            source,
+        )
+        self.assertIn("for _ in 1 2 3 4 5 6 7 8; do", source)
+        for forbidden in ('"$LSREGISTER" -delete', '"$LSREGISTER" -kill', '"$LSREGISTER" -gc'):
+            self.assertNotIn(forbidden, source)
         for forbidden in ("launchctl", "pluginkit", "defaults write", "open -a"):
             self.assertNotIn(forbidden, source)
 
