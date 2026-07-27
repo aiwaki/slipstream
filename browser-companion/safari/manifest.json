@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Slipstream Browser Companion",
+  "short_name": "Slipstream",
+  "version": "0.1.0",
+  "description": "Reports strong regional access-denial pages to the local Slipstream app.",
+  "permissions": [
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
+        "detector.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "icons": {
+    "32": "icon-32.png",
+    "64": "icon-64.png",
+    "128": "icon-128.png"
+  }
+}
