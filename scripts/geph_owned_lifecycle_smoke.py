@@ -55,6 +55,8 @@ class GephPaths:
     config: Path
     cache: Path
     ownership: Path
+    stdout_log: Path
+    stderr_log: Path
     plist: Path
 
 
@@ -99,6 +101,8 @@ def geph_paths(home: Path) -> GephPaths:
         config=config_dir / "geph-active.yaml",
         cache=config_dir / "geph-cache.db",
         ownership=config_dir / "geph-owned.json",
+        stdout_log=config_dir / "geph.stdout.log",
+        stderr_log=config_dir / "geph.stderr.log",
         plist=home / "Library/LaunchAgents" / GEPH_PLIST_NAME,
     )
 
@@ -518,6 +522,9 @@ def _socks_connect(host: str, port: int, timeout: float = 20.0) -> socket.socket
             raise QualificationError("owned Geph returned an invalid SOCKS address")
         _recv_exact(sock, 2)
         return sock
+    except TimeoutError as exc:
+        sock.close()
+        raise QualificationError("SOCKS CONNECT timed out") from exc
     except BaseException:
         sock.close()
         raise
@@ -527,7 +534,11 @@ def _payload_probe(target: PayloadTarget) -> dict[str, str | int]:
     raw = _socks_connect(target.host, 443)
     try:
         context = ssl.create_default_context()
-        with context.wrap_socket(raw, server_hostname=target.host) as tls:
+        try:
+            tls = context.wrap_socket(raw, server_hostname=target.host)
+        except TimeoutError as exc:
+            raise QualificationError("TLS handshake timed out") from exc
+        with tls:
             request = (
                 f"GET {target.path} HTTP/1.1\r\n"
                 f"Host: {target.host}\r\n"
@@ -535,10 +546,18 @@ def _payload_probe(target: PayloadTarget) -> dict[str, str | int]:
                 "Accept: text/html,*/*;q=0.1\r\n"
                 "Connection: close\r\n\r\n"
             ).encode("ascii")
-            tls.sendall(request)
+            try:
+                tls.sendall(request)
+            except TimeoutError as exc:
+                raise QualificationError("HTTPS request write timed out") from exc
             payload = bytearray()
             while len(payload) < 65536:
-                chunk = tls.recv(8192)
+                try:
+                    chunk = tls.recv(8192)
+                except TimeoutError as exc:
+                    raise QualificationError(
+                        f"HTTPS response timed out after {len(payload)} bytes"
+                    ) from exc
                 if not chunk:
                     break
                 payload.extend(chunk)
@@ -554,6 +573,45 @@ def _payload_probe(target: PayloadTarget) -> dict[str, str | int]:
     except BaseException:
         raw.close()
         raise
+
+
+def _safe_geph_log_tail(path: Path, secret: str, limit: int = 8192) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - limit))
+            text = handle.read(limit).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+    if secret:
+        text = text.replace(secret, "<redacted>")
+    text = re.sub(
+        r"(?i)\b(secret|password|authorization|credential|token)"
+        r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+        r"\1\2<redacted>",
+        text,
+    )
+    text = re.sub(
+        r"(?i)([?&](?:secret|password|auth|token|key)=)[^&\s]+",
+        r"\1<redacted>",
+        text,
+    )
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return " | ".join(lines[-24:])
+
+
+def _geph_failure_diagnostics(paths: GephPaths, secret: str) -> str:
+    diagnostics = []
+    for label, path in (
+        ("stdout", paths.stdout_log),
+        ("stderr", paths.stderr_log),
+    ):
+        tail = _safe_geph_log_tail(path, secret)
+        if tail:
+            diagnostics.append(f"{label}: {tail}")
+    return " || ".join(diagnostics) or "private Geph logs were empty"
 
 
 def _wait_for_payload(
@@ -745,6 +803,7 @@ def run_qualification(
 ) -> dict[str, object]:
     _require_disposable_ci()
     secret = _take_secret()
+    redaction_secret = secret
     home = Path.home().resolve()
     uid = os.getuid()
     paths = geph_paths(home)
@@ -793,9 +852,11 @@ def run_qualification(
             "system_network_state": "not mutated",
         }
     except BaseException as exc:
-        failure = exc
+        diagnostics = _geph_failure_diagnostics(paths, redaction_secret)
+        failure = QualificationError(f"{exc}; Geph diagnostics: {diagnostics}")
     finally:
         secret = ""
+        redaction_secret = ""
         try:
             tray.close()
         except Exception as exc:
