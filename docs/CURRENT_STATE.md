@@ -26,9 +26,11 @@ browser command, clean environment, working directory, capture paths, and
 cleanup kills and boots out only the unique job label, retries that exact target
 after a transient failure, then verifies both launchd absence and that no
 console-user member remains in its recorded process group. The disposable
-profile and plist are removed only after both proofs succeed. No shell, `sudo`,
-broad process match, workstation execution, or product routing change is
-involved. Completion still requires the independently confirmed future
+profile and plist are removed only after both proofs succeed; when bootstrap
+does not yield a verified process group, they are retained rather than treating
+launchd absence as descendant-process proof. No shell, `sudo`, broad process
+match, workstation execution, or product routing change is involved.
+Completion still requires the independently confirmed future
 exact-host route, exactly one reload, every CSS/JavaScript/image request, and
 one same-origin callback emitted only after computed style, image readiness,
 and the DOM marker succeed. Discord and YouTube never enter Geph, and external

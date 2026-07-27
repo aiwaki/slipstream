@@ -111,8 +111,10 @@ explicitly rejected after protected runs still produced Mach lookup error
 only to the unique temporary job label, retries the same target after a
 transient failure, then verifies both launchd absence and that no console-user
 member remains in its recorded process group. The fresh profile and its plist
-are removed only after both proofs succeed. A scoped local HTTPS fixture mapped
-only inside that browser profile serves a strong
+are removed only after both proofs succeed. If bootstrap never yields a
+verified process group, the profile is retained even after launchd absence;
+the harness does not infer descendant cleanup. A scoped local HTTPS fixture
+mapped only inside that browser profile serves a strong
 regional-denial page first and a styled page on the next request. Headless
 execution is also excluded because an
 earlier protected run rendered the page without activating the MV3

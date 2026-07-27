@@ -857,7 +857,7 @@ def _run_chrome(
     except BaseException as exc:
         failure = exc
     finally:
-        launch_agent_absent = not bootstrap_started
+        profile_cleanup_safe = not bootstrap_started
         try:
             if launch is not None:
                 _stop_chrome_launch_agent(
@@ -866,10 +866,11 @@ def _run_chrome(
                     gid=gid,
                     supplementary_groups=supplementary_groups,
                 )
-                launch_agent_absent = True
+                profile_cleanup_safe = True
             elif bootstrap_started:
                 _wait_for_launch_agent_absence(f"gui/{uid}/{label}")
-                launch_agent_absent = True
+                # Without a verified ChromeLaunch there is no recorded PGID.
+                # launchd absence alone cannot prove that descendants are gone.
         except Exception as exc:
             cleanup_errors.append(f"Chrome LaunchAgent cleanup: {exc}")
         try:
@@ -879,7 +880,7 @@ def _run_chrome(
         except Exception as exc:
             stderr = b""
             cleanup_errors.append(f"Chrome diagnostic capture: {exc}")
-        if launch_agent_absent:
+        if profile_cleanup_safe:
             try:
                 _remove_owned_profile(profile)
             except Exception as exc:

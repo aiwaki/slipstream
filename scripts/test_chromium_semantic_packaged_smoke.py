@@ -580,6 +580,70 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
             remove_profile.assert_not_called()
 
+    def test_run_chrome_retains_profile_without_a_verified_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = root / "Google Chrome for Testing"
+            executable.write_text("binary", encoding="utf-8")
+            executable.chmod(0o700)
+            profile = root / "profile"
+            profile.mkdir()
+            fixture = mock.Mock(port=18443)
+            with mock.patch.object(
+                smoke.lifecycle,
+                "_user_environment",
+                return_value=({"HOME": str(root)}, root),
+            ), mock.patch.object(
+                smoke.lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            ), mock.patch.object(
+                smoke,
+                "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_remove_owned_profile",
+            ) as remove_profile, mock.patch.object(
+                smoke.tempfile,
+                "mkdtemp",
+                return_value=str(profile),
+            ), mock.patch.object(
+                smoke.os,
+                "chown",
+            ), mock.patch.object(
+                smoke,
+                "_write_owner_private_file",
+            ), mock.patch.object(
+                smoke,
+                "_bootstrap_chrome_launch_agent",
+                side_effect=smoke.QualificationError("identity polling failed"),
+            ), mock.patch.object(
+                smoke,
+                "_wait_for_launch_agent_absence",
+            ) as wait_absent, mock.patch.object(
+                smoke,
+                "_read_owner_private_tail",
+                return_value=b"",
+            ):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "profile retained until LaunchAgent cleanup",
+                ):
+                    smoke._run_chrome(
+                        501,
+                        20,
+                        Path("/repo/browser-companion/chromium"),
+                        fixture,
+                        executable,
+                        Path("/tmp/native-host.json"),
+                        Path("/tmp/Slipstream.app/Contents/MacOS/slipstream"),
+                    )
+
+            wait_absent.assert_called_once_with(
+                f"gui/501/{smoke.CHROME_JOB_PREFIX}.{os.getpid()}"
+            )
+            remove_profile.assert_not_called()
+
     def test_chrome_for_testing_validation_rejects_branded_chrome(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             executable = Path(tmp) / "Google Chrome"
