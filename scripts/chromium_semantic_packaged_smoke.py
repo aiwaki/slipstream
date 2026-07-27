@@ -71,6 +71,18 @@ class ChromeLaunch:
     process_group: int
 
 
+@dataclass(frozen=True)
+class ChromeProcess:
+    pid: int
+    process_group: int
+    command: str
+
+
+@dataclass
+class ChromeOwnership:
+    process_groups: set[int]
+
+
 def _require_disposable_ci() -> tuple[int, int]:
     required = {
         "CI": "true",
@@ -483,10 +495,8 @@ def _chrome_command(
     profile: Path,
     extension: Path,
     fixture_port: int,
-    *,
-    disable_sandbox: bool = False,
 ) -> tuple[str, ...]:
-    command = [
+    return (
         str(executable),
         "--disable-background-networking",
         "--disable-component-update",
@@ -506,45 +516,87 @@ def _chrome_command(
         f"--host-resolver-rules=MAP {FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
         f"--user-data-dir={profile}",
         f"https://{FIXTURE_HOST}:{fixture_port}/?slipstream-semantic=1",
-    ]
-    if disable_sandbox:
-        command.insert(1, "--no-sandbox")
-    return tuple(command)
+    )
+
+
+def _chrome_app_bundle(executable: Path) -> Path:
+    try:
+        bundle = executable.parents[2]
+    except IndexError as exc:
+        raise QualificationError(
+            f"Chrome executable is not inside an application bundle: {executable}"
+        ) from exc
+    info = bundle / "Contents" / "Info.plist"
+    if not info.is_file():
+        raise QualificationError(
+            f"Chrome executable has no application bundle metadata: {executable}"
+        )
+    return bundle
+
+
+def _chrome_open_command(
+    executable: Path,
+    profile: Path,
+    extension: Path,
+    fixture_port: int,
+    stdout_path: Path,
+    stderr_path: Path,
+) -> tuple[str, ...]:
+    chrome = _chrome_command(
+        executable,
+        profile,
+        extension,
+        fixture_port,
+    )
+    return (
+        "/usr/bin/open",
+        "-n",
+        "-W",
+        "-j",
+        "--stdout",
+        str(stdout_path),
+        "--stderr",
+        str(stderr_path),
+        "-a",
+        str(_chrome_app_bundle(executable)),
+        "--args",
+        *chrome[1:],
+    )
 
 
 def _chrome_launch_agent_payload(
     label: str,
     environment: dict[str, str],
     home: Path,
-    stdout_path: Path,
-    stderr_path: Path,
+    chrome_stdout_path: Path,
+    chrome_stderr_path: Path,
+    launcher_stdout_path: Path,
+    launcher_stderr_path: Path,
     executable: Path,
     profile: Path,
     extension: Path,
     fixture_port: int,
-    *,
-    disable_sandbox: bool = False,
 ) -> dict[str, object]:
     return {
         "Label": label,
         "ProgramArguments": list(
-            _chrome_command(
+            _chrome_open_command(
                 executable,
                 profile,
                 extension,
                 fixture_port,
-                disable_sandbox=disable_sandbox,
+                chrome_stdout_path,
+                chrome_stderr_path,
             )
         ),
         "RunAtLoad": True,
         "ProcessType": "Interactive",
         "LimitLoadToSessionType": "Aqua",
-        "SessionCreate": True,
         "AbandonProcessGroup": False,
         "WorkingDirectory": str(home),
         "EnvironmentVariables": dict(environment),
-        "StandardOutPath": str(stdout_path),
-        "StandardErrorPath": str(stderr_path),
+        "StandardOutPath": str(launcher_stdout_path),
+        "StandardErrorPath": str(launcher_stderr_path),
     }
 
 
@@ -629,6 +681,216 @@ def _process_identity(pid: int) -> tuple[int, int]:
     return uid, process_group
 
 
+def _owned_chrome_processes(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+) -> tuple[ChromeProcess, ...]:
+    executable = executable.resolve(strict=True)
+    bundle = _chrome_app_bundle(executable).resolve(strict=True)
+    profile_argument = f"--user-data-dir={profile}"
+    main_prefix = f"{executable} "
+    helper_prefix = f"{bundle}/Contents/Frameworks/"
+    result = _run(
+        ("/bin/ps", "-ww", "-axo", "pid=,uid=,pgid=,command="),
+        check=False,
+    )
+    if result.returncode != 0:
+        raise QualificationError("cannot enumerate exact Chrome processes")
+
+    candidates: list[tuple[ChromeProcess, bool, bool]] = []
+    for raw_line in result.stdout.splitlines():
+        fields = raw_line.strip().split(None, 3)
+        if len(fields) != 4:
+            continue
+        try:
+            pid, observed_uid, process_group = (
+                int(fields[0]),
+                int(fields[1]),
+                int(fields[2]),
+            )
+        except ValueError:
+            continue
+        command = fields[3]
+        is_main = command == str(executable) or command.startswith(main_prefix)
+        if (
+            observed_uid != uid
+            or process_group <= 0
+            or not (is_main or command.startswith(helper_prefix))
+        ):
+            continue
+        candidates.append(
+            (
+                ChromeProcess(pid, process_group, command),
+                profile_argument in command.split(),
+                is_main,
+            )
+        )
+
+    rooted_groups = {
+        process.process_group
+        for process, has_profile_argument, is_main in candidates
+        if has_profile_argument and is_main
+    }
+    if ownership is not None:
+        ownership.process_groups.update(rooted_groups)
+        rooted_groups.update(ownership.process_groups)
+    matches = [
+        process
+        for process, has_profile_argument, is_main in candidates
+        if (
+            (is_main and has_profile_argument)
+            or (not is_main and process.process_group in rooted_groups)
+        )
+    ]
+    return tuple(sorted(matches, key=lambda process: process.pid))
+
+
+def _wait_for_owned_chrome_process(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+    *,
+    timeout: float = 15.0,
+) -> ChromeProcess:
+    executable_prefix = f"{executable.resolve(strict=True)} "
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        main = tuple(
+            process
+            for process in _owned_chrome_processes(
+                uid,
+                executable,
+                profile,
+                ownership,
+            )
+            if process.command == str(executable)
+            or process.command.startswith(executable_prefix)
+        )
+        if len(main) == 1:
+            return main[0]
+        if len(main) > 1:
+            raise QualificationError(
+                "fresh Chrome profile is owned by multiple browser processes"
+            )
+        time.sleep(0.1)
+    raise QualificationError("LaunchServices did not publish the exact Chrome process")
+
+
+def _owned_chrome_process_alive(
+    expected: ChromeProcess,
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+) -> bool:
+    return any(
+        process == expected
+        for process in _owned_chrome_processes(
+            uid,
+            executable,
+            profile,
+            ownership,
+        )
+    )
+
+
+def _signal_owned_chrome_processes(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    signal_number: int,
+    ownership: ChromeOwnership | None = None,
+) -> None:
+    observed = _owned_chrome_processes(uid, executable, profile, ownership)
+    for process in reversed(observed):
+        if not _owned_chrome_process_alive(
+            process,
+            uid,
+            executable,
+            profile,
+            ownership,
+        ):
+            continue
+        try:
+            os.kill(process.pid, signal_number)
+        except ProcessLookupError:
+            continue
+
+
+def _wait_for_owned_chrome_absence(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+    *,
+    timeout: float = 5.0,
+    settle_time: float = 0.0,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    absent_since: float | None = None
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            return False
+        if _owned_chrome_processes(uid, executable, profile, ownership):
+            absent_since = None
+        else:
+            if absent_since is None:
+                absent_since = now
+            if now - absent_since >= settle_time:
+                return True
+        time.sleep(0.1)
+
+
+def _stop_owned_chrome_processes(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+    *,
+    timeout: float = 5.0,
+    settle_time: float = 0.0,
+) -> None:
+    if ownership is None:
+        ownership = ChromeOwnership(set())
+    _signal_owned_chrome_processes(
+        uid,
+        executable,
+        profile,
+        signal.SIGTERM,
+        ownership,
+    )
+    if not _wait_for_owned_chrome_absence(
+        uid,
+        executable,
+        profile,
+        ownership,
+        timeout=timeout,
+        settle_time=settle_time,
+    ):
+        _signal_owned_chrome_processes(
+            uid,
+            executable,
+            profile,
+            signal.SIGKILL,
+            ownership,
+        )
+        if not _wait_for_owned_chrome_absence(
+            uid,
+            executable,
+            profile,
+            ownership,
+            timeout=timeout,
+            settle_time=settle_time,
+        ):
+            raise QualificationError(
+                "exact LaunchServices Chrome processes survived cleanup"
+            )
+
+
 def _bootstrap_chrome_launch_agent(
     uid: int,
     label: str,
@@ -683,7 +945,24 @@ def _stop_chrome_launch_agent(
     uid: int,
     gid: int,
     supplementary_groups: tuple[int, ...],
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+    post_bootout_settle_time: float = 0.0,
 ) -> None:
+    if ownership is None:
+        ownership = ChromeOwnership(set())
+    browser_error: Exception | None = None
+    try:
+        _stop_owned_chrome_processes(
+            uid,
+            executable,
+            profile,
+            ownership,
+        )
+    except Exception as exc:
+        browser_error = exc
+
     launchd_error: Exception | None = None
     for signal_name in ("SIGTERM", "SIGKILL"):
         _run(
@@ -724,6 +1003,20 @@ def _stop_chrome_launch_agent(
                 f"{launch.process_group}"
             )
 
+    if post_bootout_settle_time > 0:
+        try:
+            _stop_owned_chrome_processes(
+                uid,
+                executable,
+                profile,
+                ownership,
+                timeout=10.0,
+                settle_time=post_bootout_settle_time,
+            )
+        except Exception as exc:
+            if browser_error is None:
+                browser_error = exc
+
     if launchd_error is not None:
         members = lifecycle._chrome_process_group_members(launch.process_group)
         if any(member.uid == uid for member in members):
@@ -734,6 +1027,14 @@ def _stop_chrome_launch_agent(
         raise QualificationError(
             f"Chrome LaunchAgent survived exact cleanup: {launch.target}"
         ) from launchd_error
+    if _owned_chrome_processes(uid, executable, profile, ownership):
+        raise QualificationError(
+            "exact LaunchServices Chrome processes appeared after cleanup"
+        )
+    if browser_error is not None:
+        raise QualificationError(
+            "exact LaunchServices Chrome process cleanup could not be verified"
+        ) from browser_error
 
 
 def _wait_for_learned_host(host: str, *, timeout: float = 30.0) -> float:
@@ -802,8 +1103,6 @@ def _run_chrome(
     executable: Path,
     native_host_manifest: Path,
     native_host_executable: Path,
-    *,
-    disable_sandbox: bool = False,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -811,9 +1110,13 @@ def _run_chrome(
     profile = Path(tempfile.mkdtemp(prefix="slipstream-semantic-chrome-"))
     stdout_path = profile / "chrome.stdout"
     stderr_path = profile / "chrome.stderr"
+    launcher_stdout_path = profile / "launcher.stdout"
+    launcher_stderr_path = profile / "launcher.stderr"
     plist_path = profile / "chrome-launch-agent.plist"
     label = f"{CHROME_JOB_PREFIX}.{os.getpid()}"
     launch: ChromeLaunch | None = None
+    browser: ChromeProcess | None = None
+    ownership = ChromeOwnership(set())
     bootstrap_started = False
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
@@ -830,17 +1133,20 @@ def _run_chrome(
         )
         _write_owner_private_file(stdout_path, b"", uid, gid)
         _write_owner_private_file(stderr_path, b"", uid, gid)
+        _write_owner_private_file(launcher_stdout_path, b"", uid, gid)
+        _write_owner_private_file(launcher_stderr_path, b"", uid, gid)
         payload = _chrome_launch_agent_payload(
             label,
             environment,
             home,
             stdout_path,
             stderr_path,
+            launcher_stdout_path,
+            launcher_stderr_path,
             executable,
             profile,
             extension,
             fixture.port,
-            disable_sandbox=disable_sandbox,
         )
         _write_owner_private_file(
             plist_path,
@@ -854,6 +1160,12 @@ def _run_chrome(
             label,
             plist_path,
         )
+        browser = _wait_for_owned_chrome_process(
+            uid,
+            executable,
+            profile,
+            ownership,
+        )
 
         deadline = time.monotonic() + CHROME_TIMEOUT
         while time.monotonic() < deadline:
@@ -864,9 +1176,18 @@ def _run_chrome(
                 raise QualificationError(
                     f"Chrome emitted duplicate semantic ready callbacks: {snapshot!r}"
                 )
-            if _launch_agent_pid(launch.target) != launch.pid:
+            if (
+                _launch_agent_pid(launch.target) != launch.pid
+                or not _owned_chrome_process_alive(
+                    browser,
+                    uid,
+                    executable,
+                    profile,
+                    ownership,
+                )
+            ):
                 raise QualificationError(
-                    "Chrome LaunchAgent exited before semantic completion"
+                    "LaunchServices Chrome exited before semantic completion"
                 )
             time.sleep(0.1)
         else:
@@ -882,21 +1203,49 @@ def _run_chrome(
                     uid=uid,
                     gid=gid,
                     supplementary_groups=supplementary_groups,
+                    executable=executable,
+                    profile=profile,
+                    ownership=ownership,
+                    post_bootout_settle_time=5.0 if browser is None else 0.0,
                 )
                 profile_cleanup_safe = True
             elif bootstrap_started:
-                _wait_for_launch_agent_absence(f"gui/{uid}/{label}")
-                # Without a verified ChromeLaunch there is no recorded PGID.
-                # launchd absence alone cannot prove that descendants are gone.
+                partial_errors: list[Exception] = []
+                try:
+                    _wait_for_launch_agent_absence(f"gui/{uid}/{label}")
+                except Exception as exc:
+                    partial_errors.append(exc)
+                try:
+                    _stop_owned_chrome_processes(
+                        uid,
+                        executable,
+                        profile,
+                        ownership,
+                        timeout=10.0,
+                        settle_time=5.0,
+                    )
+                except Exception as exc:
+                    partial_errors.append(exc)
+                if partial_errors:
+                    raise QualificationError(
+                        "partial Chrome bootstrap cleanup could not be verified"
+                    ) from partial_errors[0]
+                profile_cleanup_safe = True
         except Exception as exc:
             cleanup_errors.append(f"Chrome LaunchAgent cleanup: {exc}")
-        try:
-            stderr = _read_owner_private_tail(stderr_path, uid)
-        except FileNotFoundError:
-            stderr = b""
-        except Exception as exc:
-            stderr = b""
-            cleanup_errors.append(f"Chrome diagnostic capture: {exc}")
+        diagnostics: list[tuple[str, bytes]] = []
+        for name, path in (
+            ("LaunchServices", launcher_stderr_path),
+            ("Chrome", stderr_path),
+        ):
+            try:
+                captured = _read_owner_private_tail(path, uid)
+            except FileNotFoundError:
+                captured = b""
+            except Exception as exc:
+                captured = b""
+                cleanup_errors.append(f"{name} diagnostic capture: {exc}")
+            diagnostics.append((name, captured))
         if profile_cleanup_safe:
             try:
                 _remove_owned_profile(profile)
@@ -910,7 +1259,11 @@ def _run_chrome(
     if cleanup_errors:
         raise QualificationError("; ".join(cleanup_errors)) from failure
     if failure is not None:
-        detail = stderr.decode("utf-8", errors="replace")
+        detail = "\n".join(
+            f"{name} stderr:\n{captured.decode('utf-8', errors='replace')}"
+            for name, captured in diagnostics
+            if captured
+        )
         raise QualificationError(
             f"Chrome semantic page did not qualify: {failure}\n{detail}"
         ) from failure
@@ -953,8 +1306,6 @@ def run_qualification(
     app_bundle: Path,
     chrome_executable: Path,
     extension: Path = DEFAULT_EXTENSION,
-    *,
-    disable_chrome_sandbox: bool = False,
 ) -> dict[str, object]:
     uid, gid = _require_disposable_ci()
     chrome_executable = _validate_chrome_for_testing(chrome_executable)
@@ -1001,7 +1352,6 @@ def run_qualification(
             chrome_executable,
             native_host_path,
             target.tray_executable,
-            disable_sandbox=disable_chrome_sandbox,
         )
         expiry = _wait_for_learned_host(FIXTURE_HOST)
         _assert_fixture_complete(snapshot)
@@ -1009,11 +1359,8 @@ def run_qualification(
             "result": "pass",
             "restricted_to": "protected disposable GitHub Actions macOS runner",
             "browser": "Chrome for Testing with a fresh owner-only profile",
-            "chrome_sandbox": (
-                "disabled only for disposable GitHub Actions compatibility"
-                if disable_chrome_sandbox
-                else "enabled"
-            ),
+            "chrome_sandbox": "enabled",
+            "browser_launch": "LaunchServices in the console user's Aqua session",
             "extension": "unpacked frozen-origin Chromium companion",
             "native_host": "packaged exact-origin Rust host",
             "daemon_ipc": "owner-only semantic socket",
@@ -1085,9 +1432,8 @@ def dry_run() -> dict[str, object]:
             "exact packaged manifest copied into the disposable browser profile"
         ),
         "success": "styled DOM plus CSS, JavaScript, and image",
-        "ci_sandbox_boundary": (
-            "sandboxed by default; explicit opt-out only in protected disposable CI"
-        ),
+        "browser_launch": "LaunchServices in the console user's Aqua session",
+        "chrome_sandbox": "enabled",
         "production_overrides": "none",
     }
 
@@ -1100,7 +1446,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--app-bundle", type=Path)
     parser.add_argument("--chrome-executable", type=Path)
     parser.add_argument("--extension", type=Path, default=DEFAULT_EXTENSION)
-    parser.add_argument("--ci-disable-chrome-sandbox", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     if args.dry_run:
@@ -1115,7 +1460,6 @@ def main(argv: list[str] | None = None) -> int:
             args.app_bundle,
             args.chrome_executable,
             args.extension,
-            disable_chrome_sandbox=args.ci_disable_chrome_sandbox,
         )
     except Exception as exc:
         print(f"Chromium semantic qualification failed: {exc}", file=sys.stderr)

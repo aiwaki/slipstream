@@ -100,30 +100,36 @@ it cannot drive this automation gate. The harness copies the exact installed
 native-host manifest into the fresh profile's `NativeMessagingHosts` directory;
 it does not synthesize or relax the manifest. The harness writes one
 owner-private temporary plist and bootstraps it under the exact
-`gui/<console-uid>` domain. User launchd starts Chrome with `Aqua` and
-`Interactive` session constraints and `SessionCreate=true`, which asks launchd
-to create the security audit session required by Chrome's sandboxed
-network-service children. Protected runs `30279476090` and `30282319977`
-proved that neither the exact user LaunchAgent alone nor the same job with
-`SessionCreate` lets sandboxed Chrome children resolve their Mach rendezvous
-service on the GitHub-hosted runner. The protected workflow therefore passes an
-explicit disposable-CI-only `--no-sandbox` switch. The harness defaults to a
-sandboxed browser everywhere else and cannot execute at all outside its
-root/macOS/GitHub/disposable guard. A successful hosted run qualifies the
-companion, route, and complete-page composition, not the production Chrome
-sandbox; that requires a real Aqua or self-hosted runner.
+`gui/<console-uid>` domain. User launchd runs `/usr/bin/open -n -W`, which asks
+LaunchServices to create sandboxed Chrome in the console user's actual Aqua
+application session and keeps the exact launcher job alive until that
+application exits. Protected runs `30279476090` and `30282319977` proved that
+direct browser execution from an Aqua LaunchAgent, with or without
+`SessionCreate`, gives sandboxed network-service children Mach lookup error
+`1100`. Run `30284938688` proved that `--no-sandbox` merely changed this to
+`1102`; the direct-launch bootstrap namespace was still wrong. The sandbox
+opt-out is therefore removed. The harness cannot execute outside its
+root/macOS/GitHub/disposable guard.
 The bootstrap command itself is inside the exact-target cleanup boundary, so a
 job accepted before a command error is still killed, booted out, and verified.
 Root execution followed by `launchctl asuser` and a manual UID/GID drop was
 explicitly rejected after protected runs still produced Mach lookup error
-`1100`. No shell or `sudo` is involved. Cleanup sends signals and `bootout`
-only to the unique temporary job label, retries the same target after a
-transient failure, then verifies both launchd absence and that no console-user
-member remains in its recorded process group. The fresh profile and its plist
-are removed only after both proofs succeed. If bootstrap never yields a
-verified process group, the profile is retained even after launchd absence;
-the harness does not infer descendant cleanup. A scoped local HTTPS fixture
-mapped only inside that browser profile serves a strong
+`1100`. No shell or `sudo` is involved in the browser launch. A browser process
+is owned only when its UID, Chrome bundle executable family, and exact unique
+owner-only profile argument match. Its proven process group is then retained
+so same-UID helpers from the same bundle remain owned even when they omit the
+browser-only profile switch. Cleanup revalidates the complete observed process
+identity immediately before each signal, boots out only the unique temporary
+launcher label, retries that exact target after a transient failure, and
+verifies browser, launcher, and process-group absence. Launcher and browser
+stderr are captured before profile removal. When bootstrap submitted a
+LaunchServices request before launcher
+identity could be verified, browser absence must remain stable for a bounded
+quiet window before the fresh profile can be removed. The same post-bootout
+window is required when the launcher was verified but browser admission timed
+out. If either proof fails, the profile is retained rather than inferring
+descendant cleanup. A scoped local
+HTTPS fixture mapped only inside that browser profile serves a strong
 regional-denial page first and a styled page on the next request. Headless
 execution is also excluded because an
 earlier protected run rendered the page without activating the MV3
