@@ -9,39 +9,40 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-27, through main commit
-`ac7095cdc8bf1ad136f24d7a48680eccd94a59ec`. PR #235 added
-`SessionCreate=true` to the exact temporary Chrome LaunchAgent. Exact-main CI
-run `30281672076` and audit run `30281672096` passed. Protected run
-`30282319977` still recorded the same sandboxed network-service Mach
-rendezvous failure, `Permission denied (1100)`. The evidence rejects root
-credential drop, an exact Aqua user LaunchAgent, and an explicit security audit
-session as solutions on the GitHub-hosted macOS runner.
+`433ec6ebaf69346212d42945dd12c1510b64b77c`. PR #236 isolated an explicit
+CI-only `--no-sandbox` diagnostic. Exact-main CI run `30284480903` and audit run
+`30284481070` passed. Protected run `30284938688` proved that removing the
+Chromium sandbox does not repair the direct-LaunchAgent composition: the
+network-service failure changed from `Permission denied (1100)` to
+`Unknown service name (1102)`. The parent browser and its children still
+occupied incompatible bootstrap namespaces. The independent account-backed
+owned-Geph lifecycle passed real initial, trayless, and recovered TLS payload,
+preserved the external listener, restored system state, and left the root
+daemon absent and disabled.
 
-The active follow-up retains the exact user LaunchAgent and cleanup contract
-but explicitly disables Chrome's sandbox only in the existing disposable,
-main-only protected workflow. This can qualify the extension, packaged native
-host, owner-only daemon IPC, real owned-Geph confirmation, learned route,
-single reload, and complete page resources. It is not evidence that production
-Chrome's sandbox works; that remains a separate real-Aqua or self-hosted runner
-gate. The owner-private plist carries the validated browser command, clean
-environment, working directory, capture paths, and `Aqua`/`Interactive`
-constraints. User launchd owns the GUI process context;
-cleanup kills and boots out only the unique job label, retries that exact target
-after a transient failure, then verifies both launchd absence and that no
-console-user member remains in its recorded process group. The disposable
-profile and plist are removed only after both proofs succeed; when bootstrap
-does not yield a verified process group, they are retained rather than treating
-launchd absence as descendant-process proof. No shell, `sudo`, broad process
-match, workstation execution, or product routing change is involved.
+The active follow-up keeps Chrome sandboxed and changes only the disposable
+qualification harness to ask LaunchServices to open Chrome in the console
+user's Aqua session. The owner-private LaunchAgent waits on that exact
+LaunchServices instance; the browser is admitted only when its UID, bundle
+executable family, and unique owner-only `--user-data-dir` all match. Cleanup
+retains the proven browser process group so same-UID bundle helpers without the
+profile switch cannot outlive it, revalidates identity before every signal,
+boots out only the unique launcher label, captures both launcher and browser
+stderr, and verifies browser and launcher absence before removing the profile.
+A partial bootstrap additionally requires a bounded stable browser-absence
+window so an asynchronous LaunchServices request cannot outlive the profile;
+that post-bootout window also applies when launcher identity succeeded but
+browser admission timed out.
+No shell, `sudo`, broad process match, workstation execution, or product
+routing change is involved.
 Completion still requires the independently confirmed future
 exact-host route, exactly one reload, every CSS/JavaScript/image request, and
 one same-origin callback emitted only after computed style, image readiness,
 and the DOM marker succeed. Discord and YouTube never enter Geph, and external
 DNS/proxy/PAC/VPN remain read-only. No companion has been installed on a
-workstation. The next action is to pass the explicit CI sandbox boundary through
+workstation. The next action is to pass the LaunchServices composition through
 PR and exact-main gates, rerun protected qualification on that exact merge
-commit, and record both its functional evidence and remaining production
-sandbox gap.
+commit, and require both the sandboxed browser result and complete cleanup.
 
 ## Resume Protocol
 
@@ -66,7 +67,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Partial; protected packaged Chromium functional qualification is the active gate | PRs #219-#235 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, pinned Chrome for Testing, exact profile-local native-host composition, exact temporary LaunchAgent ownership, and fail-closed cleanup. Exact-main CI `30281672076` and audit `30281672096` passed on `ac7095c`. Protected run `30282319977` proved that even `SessionCreate=true` cannot make sandboxed Chrome network-service children resolve their Mach rendezvous service on the GitHub-hosted runner. The active follow-up uses an explicit disposable-CI-only no-sandbox mode to qualify the learned route, one reload, CSS/JavaScript/image completion, DOM mutation, and one browser-ready callback; it does not close the separate production sandbox gate. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, real-Aqua/self-hosted Chrome sandbox qualification, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
+| M1 - Autonomous Routing V1 | Partial; protected packaged Chromium functional qualification is the active gate | PRs #219-#236 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, pinned Chrome for Testing, exact profile-local native-host composition, exact temporary LaunchAgent ownership, and fail-closed cleanup. Exact-main CI `30284480903` and audit `30284481070` passed on `433ec6e`. Protected run `30284938688` proved that `--no-sandbox` still leaves direct-LaunchAgent Chrome children outside the parent's Mach rendezvous namespace, now with error `1102`; owned-Geph payload and cleanup independently passed. The active follow-up keeps the browser sandboxed and launches it through LaunchServices in the exact Aqua user session, with UID, bundle, profile, launcher, and process cleanup ownership. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
