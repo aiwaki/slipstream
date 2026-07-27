@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -62,6 +63,66 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(smoke.QualificationError, "missing protected"):
                 smoke._take_secret()
+
+    def test_coordination_requires_distinct_absent_sibling_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ready = root / "ready"
+            release = root / "release"
+            coordination = smoke._validate_coordination_paths(ready, release)
+            self.assertEqual(
+                coordination,
+                smoke.CoordinationPaths(
+                    ready=ready.resolve(),
+                    release=release.resolve(),
+                ),
+            )
+            with self.assertRaisesRegex(smoke.QualificationError, "used together"):
+                smoke._validate_coordination_paths(ready, None)
+            with self.assertRaisesRegex(smoke.QualificationError, "distinct siblings"):
+                smoke._validate_coordination_paths(ready, ready)
+            ready.write_text("occupied", encoding="utf-8")
+            with self.assertRaisesRegex(smoke.QualificationError, "must not already"):
+                smoke._validate_coordination_paths(ready, release)
+
+    def test_coordination_wait_revalidates_geph_after_private_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination = smoke.CoordinationPaths(
+                ready=root / "ready",
+                release=root / "release",
+            )
+            paths = smoke.geph_paths(root / "home")
+            state = smoke.OwnedGephState(
+                pid=4242,
+                uid=os.getuid(),
+                executable=paths.executable,
+                config=paths.config,
+                launchd_label=smoke.GEPH_LABEL,
+            )
+
+            def release() -> None:
+                for _ in range(100):
+                    if coordination.ready.exists():
+                        coordination.release.write_text("done\n", encoding="utf-8")
+                        coordination.release.chmod(0o600)
+                        return
+                    smoke.time.sleep(0.01)
+
+            worker = threading.Thread(target=release)
+            worker.start()
+            with mock.patch.object(smoke, "_assert_owned_geph") as validate:
+                smoke._publish_ready_and_wait(
+                    coordination,
+                    paths,
+                    os.getuid(),
+                    state,
+                    timeout=2,
+                )
+            worker.join(timeout=2)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(stat.S_IMODE(coordination.ready.stat().st_mode), 0o600)
+            validate.assert_called_once_with(paths, os.getuid(), state)
 
     def test_paths_are_scoped_to_the_app_config_and_user_launch_agent(self) -> None:
         home = Path("/Users/runner")

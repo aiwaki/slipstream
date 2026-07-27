@@ -83,6 +83,31 @@ load `browser-companion/chromium/` with Chrome's **Load unpacked** action after
 starting a packaged Slipstream app. The public key in `manifest.json` keeps the
 preview extension ID stable.
 
+## Protected Chromium Qualification
+
+The manual, main-only `owned-geph-qualification` workflow composes the
+Chromium preview with the existing protected account-backed Geph gate. It
+starts the packaged tray and its exact user LaunchAgent, then runs a separate
+root-only harness against the packaged daemon.
+
+The browser side uses real Chrome, a fresh owner-only profile, the unpacked
+frozen-origin extension, the registered packaged Rust native host, and the
+daemon's owner-only semantic socket. A scoped local HTTPS fixture mapped only
+inside that Chrome profile serves a strong regional-denial page first and a
+styled page on the next request. The daemon does not trust that fixture:
+confirmation is a separate real HTTPS request for the same generic hostname
+through the ownership-verified account-backed Geph. Success requires the
+learned exact-host route, exactly one browser reload, a marked nonblank DOM,
+and fetched CSS, JavaScript, and image resources.
+
+The fixture uses an untrusted one-day certificate accepted only by the
+disposable Chrome process. It does not install a certificate, alter system DNS,
+or add a production daemon override. Cleanup must remove the root daemon,
+private PF anchor, enable token, semantic socket, temporary learned-route file,
+fresh browser profile, native host manifest, owned Geph LaunchAgent, Keychain
+item, and user runtime. This protected workflow is completion evidence only
+after it passes on the exact merged main commit.
+
 ## Verification
 
 ```bash
@@ -94,6 +119,7 @@ swift test --package-path browser-companion/safari
 bash scripts/build_safari_companion.sh /tmp/slipstream-safari-companion
 cargo test --manifest-path app-tauri/src-tauri/Cargo.toml native_messaging
 python3 -m unittest scripts.test_browser_companion
+python3 scripts/chromium_semantic_packaged_smoke.py --dry-run
 ```
 
 The tests cover the observed denial phrase, multiple languages, ordinary
@@ -105,8 +131,8 @@ registration, owned uninstall, and an unsigned Safari app-extension build.
 ## Remaining Gates
 
 - Chrome Web Store packaging, privacy disclosure, and update provenance.
-- A disposable packaged-app test with real Chrome, the registered host, daemon
-  socket, owned Geph confirmation, one reload, and successful styled DOM.
+- The protected packaged Chromium harness must pass on an exact merged main
+  commit before the preview is considered runtime-qualified.
 - Safari requires a signed container, browser enablement, and a disposable
   runtime proof that the sandboxed app extension can reach the owner-only
   daemon socket. The unsigned source and package build exist, but are not

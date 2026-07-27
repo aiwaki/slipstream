@@ -53,6 +53,7 @@ INSTALLED_FROZEN_DAEMON = INSTALL_DIR / "slipstreamd"
 LAUNCHD_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 LAUNCHD_LABEL = "system/dev.slipstream.tproxy"
 STATUS_PATH = Path("/var/run/slipstream.status")
+AUTO_GEPH_STATE_PATH = Path("/var/run/slipstream-autogeph.json")
 PF_TOKEN_PATH = Path("/var/run/slipstream-pf.token")
 PF_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
 TGWS_LINK_PATH = Path("/var/run/slipstream-tgws.link")
@@ -1911,6 +1912,7 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
     for path in (
         LAUNCHD_PLIST,
         STATUS_PATH,
+        AUTO_GEPH_STATE_PATH,
         PF_TOKEN_PATH,
         PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
@@ -1930,6 +1932,7 @@ def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
     for path in (
         LAUNCHD_PLIST,
         STATUS_PATH,
+        AUTO_GEPH_STATE_PATH,
         PF_TOKEN_PATH,
         PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
