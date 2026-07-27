@@ -176,6 +176,7 @@ jobs:
           env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E python3 \
             scripts/chromium_semantic_packaged_smoke.py \
             --app-bundle "$app" \
+            --ci-disable-chrome-sandbox \
             --chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"
 
           /usr/bin/install -m 600 /dev/null "$release"

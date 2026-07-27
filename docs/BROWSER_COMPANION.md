@@ -103,9 +103,15 @@ owner-private temporary plist and bootstraps it under the exact
 `gui/<console-uid>` domain. User launchd starts Chrome with `Aqua` and
 `Interactive` session constraints and `SessionCreate=true`, which asks launchd
 to create the security audit session required by Chrome's sandboxed
-network-service children. Protected run `30279476090` proved that the exact
-user LaunchAgent and Aqua constraint alone were insufficient: without
-`SessionCreate`, the children still received Mach lookup error `1100`.
+network-service children. Protected runs `30279476090` and `30282319977`
+proved that neither the exact user LaunchAgent alone nor the same job with
+`SessionCreate` lets sandboxed Chrome children resolve their Mach rendezvous
+service on the GitHub-hosted runner. The protected workflow therefore passes an
+explicit disposable-CI-only `--no-sandbox` switch. The harness defaults to a
+sandboxed browser everywhere else and cannot execute at all outside its
+root/macOS/GitHub/disposable guard. A successful hosted run qualifies the
+companion, route, and complete-page composition, not the production Chrome
+sandbox; that requires a real Aqua or self-hosted runner.
 The bootstrap command itself is inside the exact-target cleanup boundary, so a
 job accepted before a command error is still killed, booted out, and verified.
 Root execution followed by `launchctl asuser` and a manual UID/GID drop was

@@ -84,6 +84,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         )
         self.assertNotIn("--headless=new", command)
         self.assertNotIn("--dump-dom", command)
+        self.assertNotIn("--no-sandbox", command)
         self.assertIn("--new-window", command)
         self.assertIn(
             "--disable-extensions-except=/repo/browser-companion/chromium",
@@ -96,6 +97,15 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             command,
         )
         self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
+
+        ci_command = smoke._chrome_command(
+            Path("/Applications/Google Chrome"),
+            Path("/tmp/profile"),
+            Path("/repo/browser-companion/chromium"),
+            18443,
+            disable_sandbox=True,
+        )
+        self.assertEqual(ci_command[1], "--no-sandbox")
 
     def test_launch_agent_payload_requires_the_aqua_user_domain(self) -> None:
         payload = smoke._chrome_launch_agent_payload(
@@ -486,6 +496,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     executable,
                     Path("/tmp/native-host.json"),
                     Path("/tmp/Slipstream.app/Contents/MacOS/slipstream"),
+                    disable_sandbox=True,
                 )
 
             self.assertEqual(snapshot.ready_requests, 1)
@@ -500,6 +511,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 write_private.call_args_list[2].args[1]
             )
             self.assertEqual(plist_payload["LimitLoadToSessionType"], "Aqua")
+            self.assertIn("--no-sandbox", plist_payload["ProgramArguments"])
             self.assertEqual(
                 plist_payload["Label"],
                 f"{smoke.CHROME_JOB_PREFIX}.{os.getpid()}",
@@ -836,12 +848,41 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             payload["native_host_registration"],
         )
         self.assertEqual(payload["production_overrides"], "none")
+        self.assertIn("sandboxed by default", payload["ci_sandbox_boundary"])
 
         source = (
             ROOT / "scripts/chromium_semantic_packaged_smoke.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("SLIP_GEPH_PORT", source)
         self.assertNotIn("Math.random", source)
+
+    def test_cli_propagates_the_explicit_disposable_ci_sandbox_boundary(self) -> None:
+        output = io.StringIO()
+        with mock.patch.object(
+            smoke,
+            "run_qualification",
+            return_value={"result": "pass"},
+        ) as qualify, redirect_stdout(output):
+            self.assertEqual(
+                smoke.main(
+                    [
+                        "--app-bundle",
+                        "/tmp/Slipstream.app",
+                        "--chrome-executable",
+                        "/tmp/Chrome for Testing",
+                        "--ci-disable-chrome-sandbox",
+                    ]
+                ),
+                0,
+            )
+
+        qualify.assert_called_once_with(
+            Path("/tmp/Slipstream.app"),
+            Path("/tmp/Chrome for Testing"),
+            smoke.DEFAULT_EXTENSION,
+            disable_chrome_sandbox=True,
+        )
+        self.assertEqual(json.loads(output.getvalue()), {"result": "pass"})
 
     def test_protected_workflow_composes_geph_and_semantic_gates_without_secret_leak(self) -> None:
         workflow = (
@@ -861,6 +902,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             '--chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"',
             workflow,
         )
+        self.assertIn("--ci-disable-chrome-sandbox", workflow)
         self.assertIn("env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E", workflow)
         self.assertEqual(
             workflow.count("secrets.SLIPSTREAM_GEPH_ACCOUNT_SECRET"),
