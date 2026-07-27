@@ -115,6 +115,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             "dev.slipstream.chromium-semantic.4242",
         )
         self.assertEqual(payload["LimitLoadToSessionType"], "Aqua")
+        self.assertTrue(payload["SessionCreate"])
         self.assertEqual(payload["ProcessType"], "Interactive")
         self.assertTrue(payload["RunAtLoad"])
         self.assertFalse(payload["AbandonProcessGroup"])
