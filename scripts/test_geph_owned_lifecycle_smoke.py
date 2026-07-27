@@ -283,6 +283,61 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         self.assertNotIn("Bearer", tail)
         self.assertEqual(tail.count("<redacted>"), 2)
 
+    def test_geph_log_tail_preserves_safe_rate_limit_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "geph.stderr.log"
+            path.write_text(
+                "cannot get token: rate limited\n"
+                "request token: opaque-inline-token\n"
+                '{"token":"opaque-token","status":"retrying"}\n',
+                encoding="utf-8",
+            )
+            tail = smoke._safe_geph_log_tail(path, "")
+
+        self.assertIn(smoke.GEPH_BROKER_RATE_LIMIT_MARKER, tail)
+        self.assertNotIn("opaque-token", tail)
+        self.assertNotIn("opaque-inline-token", tail)
+
+    def test_payload_wait_aborts_when_broker_is_rate_limited(self) -> None:
+        target = smoke.PayloadTarget("first.example", "/", 512)
+        abort_reason = mock.Mock(
+            side_effect=[
+                None,
+                "owned Geph broker rate limited account authentication",
+            ]
+        )
+        with mock.patch.object(
+            smoke,
+            "_payload_probe",
+            side_effect=smoke.QualificationError("SOCKS CONNECT timed out"),
+        ) as probe:
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "broker rate limited account authentication",
+            ):
+                smoke._wait_for_payload(
+                    timeout=10,
+                    targets=(target,),
+                    abort_reason=abort_reason,
+                )
+
+        probe.assert_called_once_with(target)
+        self.assertEqual(abort_reason.call_count, 2)
+
+    def test_owned_geph_abort_reason_uses_redacted_private_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = smoke.geph_paths(Path(tmp))
+            paths.config_dir.mkdir(parents=True)
+            paths.stderr_log.write_text(
+                "cannot get token: rate limited\n",
+                encoding="utf-8",
+            )
+
+            self.assertIn(
+                "retry after the broker day resets",
+                smoke._owned_geph_abort_reason(paths, "secret") or "",
+            )
+
     def test_native_host_cleanup_removes_only_the_exact_packaged_manifest(
         self,
     ) -> None:
