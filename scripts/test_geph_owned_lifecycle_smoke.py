@@ -574,6 +574,23 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
         )
         self.assertIn("geph_owned_lifecycle_smoke.py", workflow)
 
+    def test_protected_workflow_publishes_only_after_cleanup_proof(self) -> None:
+        workflow = (
+            ROOT / ".github/workflows/owned-geph-qualification.yml"
+        ).read_text(encoding="utf-8")
+        cleanup = workflow.index("Verify the user-level gate left no system path")
+        package = workflow.index("Package the exact qualified app")
+        upload = workflow.index(
+            "name: Slipstream-owned-geph-qualified-${{ github.sha }}"
+        )
+        self.assertLess(cleanup, package)
+        self.assertLess(package, upload)
+        self.assertIn(
+            "dist-qualified/Slipstream-owned-geph-qualified.zip.sha256",
+            workflow,
+        )
+        self.assertIn("if-no-files-found: error", workflow[upload:])
+
 
 if __name__ == "__main__":
     unittest.main()

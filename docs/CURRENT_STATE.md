@@ -9,54 +9,37 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-28, through main commit
-`2b2b2529f3c81be168273b0bf3d0bdab27c1c407`. PR #246 completed generic
-exact-host re-admission across a transient exact-owned Geph recovery.
-Exact-main CI run `30364706410`, audit run `30364706201`, and account-backed
-protected runtime qualification `30365257118` passed on that exact SHA with
-complete cleanup.
+`c608ed087d1f5f8d0fce6e21080653254dd77faf`. PR #247 completed the generic
+local-only Googlevideo correction: plain TLS remains first on every connection,
+then one bounded local desync fallback remains available even during dead-host
+cooldown. Googlevideo is still excluded from Geph, Smart DNS, app-owned Xbox
+DNS, semantic promotion, and generic unknown-host learning.
 
-Artifact `8690435788`,
-`Slipstream-packaged-lifecycle-2b2b2529f3c81be168273b0bf3d0bdab27c1c407`,
-matched GitHub container SHA-256
-`9e679662eaadb7af6678890482dbb1d2dc412d11dc940b4b787748ba6f28e3c8`.
-Its internal release ZIP matched SHA-256
-`07e0960e7409fd564947d5021043b904651950c253cbf62f7aa9286df124d9fd`.
+The full local suite passed with `839` Python tests and `32` subtests before
+merge. Exact-main CI run `30375134192` and audit run `30375133959` passed.
+Packaged lifecycle artifact `8694774920` has GitHub SHA-256
+`bc816b82c052e37989e0fe869aeb4db91352e96453045096484708280c07ed58`;
+its disposable privileged lifecycle proved active local routing, clean
+uninstall, preserved sentinel state, and unchanged global PF.
 
-A bounded workstation transaction downloaded only that exact artifact and
-verified its bundle and component identities. Two early attempts found
-transaction-harness defects rather than product routing evidence: the first
-used an obsolete unavailable YouTube video, and the second accepted only the
-installed daemon pathname even though the valid persistent attestation may
-report its hard-link inode witness. Both attempts completed exact rollback.
+The single protected account-backed run `30375772962` then passed on the same
+exact SHA. It proved real owned-Geph HTTPS payload before tray loss, without
+the tray, and after LaunchAgent `KeepAlive` replaced the verified PID. The
+Chromium semantic gate used sandboxed Chrome in the console user's Aqua
+session and required one callback, one reload, CSS, JavaScript, an image, and
+styled DOM. Final cleanup proved the root daemon disabled and absent, the
+private PF anchor empty, and no token, status, semantic socket, owned listener,
+LaunchAgent, user runtime, native-host manifest, or Keychain item. System
+network state was not mutated.
 
-The corrected transaction installed and launched the exact artifact, reached
-fresh active StatusV2 and private-PF state, and preserved DNS
-`111.88.96.50/51`, proxy/PAC, external PF owners, and the existing owned-Geph
-LaunchAgent. Discord gateway and YouTube web/control returned payload. A valid
-`yt-dlp` probe for `dQw4w9WgXcQ` loaded the YouTube page, Android player API,
-and JavaScript challenge, selected format 18, then timed out on both
-`manifest.googlevideo.com` and the exact
-`rr5---sn-ug5onuxaxjvh-n8v6.googlevideo.com` media edge. The installed
-`direct_passthrough/direct` policy therefore had no recovery after its one
-system-route attempt stalled.
-
-The transaction immediately restored the previous `0.1.9` app at tray
-SHA-256
-`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`
-and removed the exact root daemon, service, plist, private PF state, token,
-status, socket, attestation, witness, and root runtime. The service remains
-disabled. DNS and proxy/PAC stayed unchanged; the pre-existing owned-Geph
-LaunchAgent remained on its original PID and executable identity.
-
-The current branch changes no site list or foreign-exit policy. It moves the
-existing `googlevideo.com` family to the general local-only `direct_first`
-class: plain TLS remains first on every connection, then only the bounded
-local desync ladder may run. Googlevideo remains excluded from Geph, Smart DNS,
-app-owned Xbox DNS, semantic promotion, and generic unknown-host learning.
-Shared Python/Rust policy, manifest, circuit, packaged-classifier, canary, and
-real-handler contracts are updated. Required gates are full local checks, PR
-CI/audit, exact-main CI/audit, one protected account-backed run, and only then
-another exact-artifact workstation smoke requiring real media payload.
+That protected run exposed a release-control gap rather than a product failure:
+it built and qualified the exact app but uploaded no artifact. A sibling build
+from exact-main CI is not treated as interchangeable. The current branch
+packages the in-job qualified app only after the cleanup proof succeeds,
+publishes an inner SHA-256 manifest, and has a regression test freezing that
+step order. After this branch merges, the new exact main must pass ordinary
+CI/audit and exactly one protected qualification. Only that protected artifact
+may enter the bounded workstation transaction.
 
 The following paragraphs retain earlier transaction history.
 
