@@ -549,16 +549,41 @@ def _launchservices_app_bundle(
         raise QualificationError(
             f"private LaunchServices application wrapper already exists: {wrapper}"
         )
-    wrapper.mkdir(mode=0o700)
-    os.chown(wrapper, uid, gid)
-    contents = wrapper / "Contents"
-    os.symlink(bundle / "Contents", contents, target_is_directory=True)
-    os.lchown(contents, uid, gid)
-    if not (contents / "Info.plist").is_file():
+    shutil.copytree(
+        bundle,
+        wrapper,
+        symlinks=True,
+        copy_function=shutil.copy2,
+    )
+    for root, directories, files in os.walk(wrapper, followlinks=False):
+        os.chown(root, uid, gid, follow_symlinks=False)
+        for name in (*directories, *files):
+            os.chown(Path(root) / name, uid, gid, follow_symlinks=False)
+    wrapper.chmod(0o700)
+    if not (wrapper / "Contents" / "Info.plist").is_file():
         raise QualificationError(
             f"LaunchServices application wrapper has no bundle metadata: {wrapper}"
         )
     return wrapper
+
+
+def _launchservices_executable(
+    source_executable: Path,
+    application_bundle: Path,
+) -> Path:
+    source_bundle = _chrome_app_bundle(source_executable).resolve(strict=True)
+    try:
+        relative = source_executable.resolve(strict=True).relative_to(source_bundle)
+    except ValueError as exc:
+        raise QualificationError(
+            "Chrome executable escaped its validated application bundle"
+        ) from exc
+    executable = application_bundle / relative
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise QualificationError(
+            f"LaunchServices application executable is unavailable: {executable}"
+        )
+    return executable
 
 
 def _chrome_open_command(
@@ -1159,6 +1184,10 @@ def _run_chrome(
             profile,
             uid,
             gid,
+        )
+        executable = _launchservices_executable(
+            executable,
+            application_bundle,
         )
         _install_profile_native_host(
             profile,

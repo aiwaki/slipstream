@@ -155,7 +155,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertNotIn("/usr/bin/sudo", command)
         self.assertNotIn("/bin/launchctl", command)
 
-    def test_launchservices_wraps_an_extensionless_bundle_in_the_profile(
+    def test_launchservices_copies_an_extensionless_bundle_into_the_profile(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -174,10 +174,19 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             self.assertFalse(wrapper.is_symlink())
             self.assertEqual(wrapper.parent, profile)
             self.assertEqual(wrapper.suffix, ".app")
-            self.assertTrue((wrapper / "Contents").is_symlink())
+            self.assertFalse((wrapper / "Contents").is_symlink())
+            copied_executable = smoke._launchservices_executable(
+                executable,
+                wrapper,
+            )
             self.assertEqual(
-                (wrapper / "Contents").resolve(),
-                executable.parents[2].resolve() / "Contents",
+                copied_executable,
+                wrapper / "Contents" / "MacOS" / "Google Chrome for Testing",
+            )
+            self.assertEqual(copied_executable.read_bytes(), executable.read_bytes())
+            self.assertNotEqual(
+                copied_executable.resolve(),
+                executable.resolve(),
             )
 
             payload = smoke._chrome_launch_agent_payload(
@@ -188,7 +197,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 profile / "chrome.stderr",
                 profile / "launcher.stdout",
                 profile / "launcher.stderr",
-                executable,
+                copied_executable,
                 profile,
                 Path("/repo/browser-companion/chromium"),
                 18443,
@@ -215,6 +224,10 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
             self.assertEqual(bundle, executable.parents[2].resolve())
             self.assertFalse((profile / "Chrome for Testing.app").exists())
+            self.assertEqual(
+                smoke._launchservices_executable(executable, bundle),
+                executable.resolve(),
+            )
 
     def test_owner_private_capture_is_exact_and_tail_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
