@@ -70,6 +70,7 @@ fn bundled_protected_groups_have_no_geph_policy_edges() {
             (policy.route_class, policy.strategy_set),
             (RouteClass::LocalBypass, StrategySet::FakeOnly)
                 | (RouteClass::DirectPassthrough, StrategySet::Direct)
+                | (RouteClass::DirectFirst, StrategySet::DirectFirst)
         ));
     }
 }

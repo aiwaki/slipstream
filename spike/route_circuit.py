@@ -81,7 +81,8 @@ def _protected_route_mismatch(key):
         return key.route_class != "local_bypass" or key.backend_id == "geph"
     if key.service_group == "youtube_video":
         return (
-            key.route_class not in ("local_bypass", "direct_passthrough")
+            key.route_class
+            not in ("local_bypass", "direct_passthrough", "direct_first")
             or key.backend_id == "geph"
         )
     return False

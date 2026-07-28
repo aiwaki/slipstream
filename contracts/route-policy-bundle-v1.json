@@ -5,42 +5,42 @@
   "manifest_contract": "route-policy-manifest-v1.json",
   "test_key": {
     "key_id": "fixture-ed25519-v1",
-    "public_key_base64": "iodf/x6zhFFXes1a/uQFRWVo3XyJ4JCGOgVXvHr0nxc=",
+    "public_key_base64": "ukYdWIvjNtPiIXlrrBvscOnuOqNkgCV9qeG2g9JKMSU=",
     "purpose": "deterministic contract fixture only; never a production trust key"
   },
   "canonical_vectors": [
     {
       "name": "normalized-manifest",
       "source": "contract-fixture",
-      "expected_sha256": "54d07408335aa3b4f095773b9eb162bcd3574e351a5059283a00b13f76368b77"
+      "expected_sha256": "8a347ecb6aba13403dd71691190da04b0f1b6fd4485abd4a21d9465f885386f5"
     },
     {
       "name": "unicode-source-uses-python-ascii-escaping",
       "source": "fixture-π-😀",
-      "expected_sha256": "28a05b0e62a70be4aace5aa3645f258ab269c6eea28a5376924625e2353435b0"
+      "expected_sha256": "7d5ec7ac473723b1aa244c155e577f6d4a194f0f6fd9a9e1de6b08c7db6c7692"
     },
     {
       "name": "control-quotes-and-backslash-are-stable",
       "source": "line\n\"slash\\\t\u0001",
-      "expected_sha256": "4e4b0ad01818ee16920d0d07c26fd5ced01b62c9fe69121b5585da4303e37b61"
+      "expected_sha256": "c4b4d1cbe139316cb4ecbfad2ea5a377dbf4fcfd4ce1b899d2c737712e16e0f4"
     },
     {
       "name": "delete-control-uses-python-ascii-escaping",
       "source": "del-\u007f",
-      "expected_sha256": "abbfbf047894ae3ba6d3164a7b8115070398171b5296567446b05728dcb29aff"
+      "expected_sha256": "bf25b27a11e0786fd09e7324462fa5a5435832be63ea0be9e27ebe6edfbf07af"
     }
   ],
   "base_bundle": {
     "schema": 1,
     "key_id": "fixture-ed25519-v1",
-    "signature": "DQnG66wQMIQG9/M+bgGX3JkY8QSXGlTV9I3wS2lfJ4nnB3vEXrIyFynVu6sv6sZNDwy74MfIfYLepHSVAqzrCw==",
-    "sha256": "54d07408335aa3b4f095773b9eb162bcd3574e351a5059283a00b13f76368b77",
+    "signature": "JvhKTBrmts/0nvAWHTE9tGFKCaupBG7zGsDfnlF9BoAvULWKIoVLy0KAlGb7w03qnc5rycHoGLFSWSmbSHqOAg==",
+    "sha256": "8a347ecb6aba13403dd71691190da04b0f1b6fd4485abd4a21d9465f885386f5",
     "manifest": {
       "$ref": "route-policy-manifest-v1.json#/normalized_manifest"
     }
   },
   "trusted_keys": {
-    "fixture-ed25519-v1": "iodf/x6zhFFXes1a/uQFRWVo3XyJ4JCGOgVXvHr0nxc="
+    "fixture-ed25519-v1": "ukYdWIvjNtPiIXlrrBvscOnuOqNkgCV9qeG2g9JKMSU="
   },
   "vectors": [
     {

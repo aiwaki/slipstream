@@ -67,6 +67,9 @@ def _protected_route_allowed(group, route_class, strategy_set):
         ) or (
             route_class == ROUTE_DIRECT
             and strategy_set == STRATEGY_DIRECT
+        ) or (
+            route_class == ROUTE_DIRECT_FIRST
+            and strategy_set == STRATEGY_DIRECT_FIRST
         )
     return True
 
@@ -247,7 +250,10 @@ def _normalize_entry(
         allowed = (
             "local_bypass/fake_only"
             if group == SERVICE_DISCORD
-            else "local_bypass/fake_only or direct_passthrough/direct"
+            else (
+                "local_bypass/fake_only, direct_passthrough/direct, "
+                "or direct_first/direct_first"
+            )
         )
         _error(
             "protected_local_bypass",

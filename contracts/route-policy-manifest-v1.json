@@ -52,9 +52,9 @@
       },
       {
         "domains": ["googlevideo.com"],
-        "route_class": "direct_passthrough",
+        "route_class": "direct_first",
         "service_group": "youtube_video",
-        "strategy_set": "direct"
+        "strategy_set": "direct_first"
       },
       {
         "domains": [
@@ -132,9 +132,9 @@
       },
       {
         "domains": ["googlevideo.com"],
-        "route_class": "direct_passthrough",
+        "route_class": "direct_first",
         "service_group": "youtube_video",
-        "strategy_set": "direct"
+        "strategy_set": "direct_first"
       },
       {
         "domains": [
@@ -303,16 +303,16 @@
       }
     },
     {
-      "name": "youtube-media-cannot-be-rewritten-to-local-fake",
+      "name": "youtube-media-cannot-be-rewritten-to-direct-only",
       "mutations": [
-        {"op": "set", "path": ["static_routes", 3, "route_class"], "value": "local_bypass"},
-        {"op": "set", "path": ["static_routes", 3, "strategy_set"], "value": "fake_only"}
+        {"op": "set", "path": ["static_routes", 3, "route_class"], "value": "direct_passthrough"},
+        {"op": "set", "path": ["static_routes", 3, "strategy_set"], "value": "direct"}
       ],
       "expected": {
         "ok": false,
-        "error_code": "protected_route_mismatch",
+        "error_code": "protected_direct_first",
         "path": "$.static_routes",
-        "message_contains": "protected direct-passthrough domain missing or shadowed: googlevideo.com"
+        "message_contains": "protected direct-first domains missing or shadowed: googlevideo.com"
       }
     },
     {

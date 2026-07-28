@@ -165,6 +165,8 @@ fn protected_groups_have_no_geph_edge_in_shared_vectors() {
                     && expected["strategy_set"] == "fake_only")
                     || (expected["route_class"] == "direct_passthrough"
                         && expected["strategy_set"] == "direct")
+                    || (expected["route_class"] == "direct_first"
+                        && expected["strategy_set"] == "direct_first")
             );
         }
     }

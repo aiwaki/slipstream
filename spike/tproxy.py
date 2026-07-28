@@ -154,8 +154,8 @@ pass out quick on lo0 inet proto tcp from any to any port 443 no state
 pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp from any to 127.0.0.1 port {port}
 """
 # QUIC (UDP/443) is intentionally not blocked. Slipstream does not own a global
-# UDP/443 policy; browsers may use HTTP/3 while TCP media delivery follows the
-# same direct-passthrough route classified for googlevideo hosts.
+# UDP/443 policy; browsers may use HTTP/3 while TCP media delivery tries plain
+# direct transport first and may fall back only to bounded local desync.
 
 _pf_applied = False
 _pf_fd = None
@@ -296,7 +296,11 @@ YOUTUBE_CONTROL_HOSTS = (
 TELEGRAM_HOSTS = ("telegram.org", "telegram.me", "telegram.dog", "t.me", "telegra.ph")
 GOOGLE_DIRECT_FIRST_HOSTS = ("google.com",)
 SPOTIFY_DIRECT_FIRST_HOSTS = ("spotify.com", "spotifycdn.com", "scdn.co")
-DIRECT_FIRST_HOSTS = GOOGLE_DIRECT_FIRST_HOSTS + SPOTIFY_DIRECT_FIRST_HOSTS
+DIRECT_FIRST_HOSTS = (
+    GOOGLE_DIRECT_FIRST_HOSTS
+    + SPOTIFY_DIRECT_FIRST_HOSTS
+    + YOUTUBE_MEDIA_HOSTS
+)
 GITHUB_HOSTS = (
     "github.com",
     "githubassets.com",
@@ -350,9 +354,9 @@ ROUTE_POLICY_TABLE = (
     },
     {
         "domains": YOUTUBE_MEDIA_HOSTS,
-        "route_class": ROUTE_DIRECT,
+        "route_class": ROUTE_DIRECT_FIRST,
         "service_group": SERVICE_YOUTUBE,
-        "strategy_set": STRATEGY_DIRECT,
+        "strategy_set": STRATEGY_DIRECT_FIRST,
     },
     {
         "domains": YOUTUBE_CONTROL_HOSTS,
@@ -3931,7 +3935,7 @@ CANARY_SPECS = (
     {
         "name": "youtube_video",
         "group": SERVICE_YOUTUBE,
-        "route_class": ROUTE_DIRECT,
+        "route_class": ROUTE_DIRECT_FIRST,
         "host": "",
         "observed_domains": ("googlevideo.com",),
         "fallback_host": "redirector.googlevideo.com",
@@ -8970,14 +8974,24 @@ async def _handle_impl(reader, writer):
             chosen, result = raced
     elif result is None:
         now = time.monotonic()
-        # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
-        max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
+        # A known-dead host normally gets one fast-fail attempt instead of the
+        # full seven-attempt ladder. Direct-first keeps one additional bounded
+        # attempt so its plain-first contract cannot collapse back to
+        # direct-only during the cooldown.
+        dead_cooldown = bool(host and _dead.get(host, 0) > now)
+        direct_first_cooldown = (
+            dead_cooldown and route_class == ROUTE_DIRECT_FIRST
+        )
+        max_attempts = (
+            2 if direct_first_cooldown else 1 if dead_cooldown else 7
+        )
         attempts = 0
         for strat in strategy_order(host):
             strat_ok = False
             strategy_outcomes = {}
             remaining = max_attempts - attempts
-            candidates = real_ips[:min(ip_limit, remaining)]
+            strategy_ip_limit = 1 if direct_first_cooldown else ip_limit
+            candidates = real_ips[:min(strategy_ip_limit, remaining)]
             raced, attempted = await _race_probe_addresses(
                 host,
                 dst_port,
