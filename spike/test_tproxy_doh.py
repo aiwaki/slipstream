@@ -7466,6 +7466,14 @@ def test_incomplete_response_confirmation_rejects_unproven_payload(monkeypatch):
             ],
             True,
         ),
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Encoding: gzip\r\nContent-Length: 93\r\n\r\n",
+                b"\x1f\x8b" + b"x" * 91,
+            ],
+            False,
+        ),
     ],
 )
 def test_incomplete_response_probe_requires_complete_http_response(
