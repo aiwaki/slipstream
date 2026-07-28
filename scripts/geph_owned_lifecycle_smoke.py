@@ -178,9 +178,14 @@ def _publish_ready_and_wait(
     os.chmod(coordination.ready, 0o600)
 
     deadline = time.monotonic() + timeout
+    deferred_abort_reason: str | None = None
     while time.monotonic() < deadline:
-        if abort_reason is not None and (reason := abort_reason()):
-            raise QualificationError(reason)
+        if (
+            deferred_abort_reason is None
+            and abort_reason is not None
+            and (reason := abort_reason())
+        ):
+            deferred_abort_reason = reason
         if coordination.release.exists():
             metadata = coordination.release.lstat()
             if (
@@ -191,11 +196,15 @@ def _publish_ready_and_wait(
                 raise QualificationError(
                     "coordination release file is not an owner-private regular file"
                 )
+            if deferred_abort_reason is not None:
+                raise QualificationError(deferred_abort_reason)
             if abort_reason is not None and (reason := abort_reason()):
                 raise QualificationError(reason)
             _assert_owned_geph(paths, uid, state)
             return
         time.sleep(0.25)
+    if deferred_abort_reason is not None:
+        raise QualificationError(deferred_abort_reason)
     raise QualificationError("timed out waiting for the semantic qualification")
 
 

@@ -9,13 +9,26 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-28, through main commit
-`49a79d0332e96c067acdaeaf9983433f8fcaff7d`. PR #250 added the frozen
-semantic-signal v2 path for generic incomplete top-level responses without a
-hostname rule. Exact-main CI `30392495460` and audit `30392494245` passed.
-Protected account-backed run `30393151116` proved owned-Geph payload initially,
-without the tray, and after KeepAlive recovery, but its Chromium page timed out.
-Final cleanup passed, no qualified artifact was published, and no workstation
-installation was attempted.
+`8c6814fd6130d7b08e339d6d41eb37922a66973a`. PR #251 moved Chromium and
+macOS Safari incomplete-response observation to read-only
+`webRequest.onErrorOccurred`. Exact-main CI `30396785782` and audit
+`30396784419` passed. The sole protected account-backed run `30397332251`
+built and verified the exact bundle and established the daemon-free boundary,
+but the upstream Geph broker again reported `cannot get token: rate limited`.
+The independent always-run cleanup passed, no qualified artifact was
+published, and no workstation installation was attempted.
+
+That protected run also exposed a coordination defect rather than a routing
+regression. The owned-Geph producer published `ready`, then a late broker abort
+made it clean user resources while the Chromium consumer still owned the root
+daemon and native-host manifest. This produced secondary boundary and
+missing-manifest errors. Branch `codex/protected-gate-coordination` retains a
+late abort until the consumer publishes the exact private `release`, then
+reports the original fail-closed reason and begins producer cleanup. This
+change requires focused and full tests, PR CI/audit, exact-main CI/audit, and
+one protected run on the new main SHA after the upstream daily budget resets.
+No workstation install is authorized before that full run publishes its exact
+qualified artifact.
 
 The full local suite passed with `840` Python tests and `32` subtests before
 PR #248 merged. Exact-main CI run `30378302132` and audit run `30378302209`
