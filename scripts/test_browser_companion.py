@@ -36,9 +36,9 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertEqual(manifest["manifest_version"], 3)
         self.assertEqual(
             manifest["permissions"],
-            ["nativeMessaging", "webNavigation"],
+            ["nativeMessaging", "webRequest"],
         )
-        self.assertNotIn("host_permissions", manifest)
+        self.assertEqual(manifest["host_permissions"], ["https://*/*"])
         self.assertNotIn("externally_connectable", manifest)
         self.assertNotIn("web_accessible_resources", manifest)
         self.assertEqual(manifest["content_scripts"][0]["matches"], ["https://*/*"])
@@ -121,7 +121,7 @@ class BrowserCompanionContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertNotIn("innerText", (COMPANION / "content.js").read_text())
 
-    def test_incomplete_navigation_errors_are_exact_and_privacy_bounded(self):
+    def test_incomplete_request_errors_are_exact_and_privacy_bounded(self):
         core = (COMPANION / "service-worker-core.js").read_text()
 
         self.assertIn('"net::ERR_CONTENT_LENGTH_MISMATCH"', core)

@@ -24,7 +24,7 @@ function createWorker({
     native: [],
     reload: [],
     timeout: [],
-    webNavigationListener: null
+    webRequestListener: null
   };
   const chrome = {
     runtime: {
@@ -45,11 +45,11 @@ function createWorker({
         return Promise.resolve();
       }
     },
-    webNavigation: {
+    webRequest: {
       onErrorOccurred: {
         addListener(listener, filter) {
-          calls.webNavigationListener = listener;
-          calls.webNavigationFilter = filter;
+          calls.webRequestListener = listener;
+          calls.webRequestFilter = filter;
         }
       }
     }
@@ -83,7 +83,7 @@ function createWorker({
   vm.runInContext(workerSource, context, {
     filename: "service-worker.js"
   });
-  return { calls, listener: calls.webNavigationListener };
+  return { calls, listener: calls.webRequestListener };
 }
 
 async function settleWorkerPromises() {
@@ -96,19 +96,23 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test("incomplete top-frame navigation confirms and reloads the same host once", async () => {
+test("incomplete top-frame request confirms and reloads the same host once", async () => {
   const { calls, listener } = createWorker();
 
   listener({
     error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    method: "GET",
     frameId: 0,
+    parentFrameId: -1,
     tabId: 17,
     url: "https://Partial.Example/download?secret=ignored"
   });
   await settleWorkerPromises();
 
-  assert.deepEqual(plain(calls.webNavigationFilter), {
-    url: [{ schemes: ["https"] }]
+  assert.deepEqual(plain(calls.webRequestFilter), {
+    urls: ["https://*/*"],
+    types: ["main_frame"]
   });
   assert.equal(calls.native.length, 1);
   assert.equal(calls.native[0].host, "dev.slipstream.semantic");
@@ -133,7 +137,10 @@ test("accepted confirmation does not reload after the tab changes host", async (
 
   listener({
     error: "net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    type: "main_frame",
+    method: "GET",
     frameId: 0,
+    parentFrameId: -1,
     tabId: 18,
     url: "https://partial.example/"
   });
@@ -154,7 +161,10 @@ test("rejected confirmation never schedules a reload", async () => {
 
   listener({
     error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    method: "GET",
     frameId: 0,
+    parentFrameId: -1,
     tabId: 19,
     url: "https://partial.example/"
   });
@@ -165,12 +175,15 @@ test("rejected confirmation never schedules a reload", async () => {
   assert.deepEqual(calls.reload, []);
 });
 
-test("ambiguous navigation errors never cross native messaging", async () => {
+test("ambiguous request errors never cross native messaging", async () => {
   const { calls, listener } = createWorker();
 
   listener({
     error: "net::ERR_CONNECTION_RESET",
+    type: "main_frame",
+    method: "GET",
     frameId: 0,
+    parentFrameId: -1,
     tabId: 20,
     url: "https://partial.example/"
   });

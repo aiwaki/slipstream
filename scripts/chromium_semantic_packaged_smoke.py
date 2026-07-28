@@ -1312,7 +1312,10 @@ def _run_chrome(
                 )
             time.sleep(0.1)
         else:
-            raise QualificationError("Chrome semantic page timed out")
+            raise QualificationError(
+                f"Chrome semantic page timed out with fixture evidence: "
+                f"{fixture.snapshot()!r}"
+            )
     except BaseException as exc:
         failure = exc
     finally:
@@ -1482,15 +1485,20 @@ def run_qualification(
         scenario_results: dict[str, dict[str, object]] = {}
         for scenario, fixture in fixtures:
             fixture.start()
-            snapshot = _run_chrome(
-                uid,
-                gid,
-                extension,
-                fixture,
-                chrome_executable,
-                native_host_path,
-                target.tray_executable,
-            )
+            try:
+                snapshot = _run_chrome(
+                    uid,
+                    gid,
+                    extension,
+                    fixture,
+                    chrome_executable,
+                    native_host_path,
+                    target.tray_executable,
+                )
+            except BaseException as exc:
+                raise QualificationError(
+                    f"{scenario} browser qualification failed: {exc}"
+                ) from exc
             expiry = _wait_for_learned_host(fixture.host)
             _assert_fixture_complete(snapshot)
             scenario_results[scenario] = {

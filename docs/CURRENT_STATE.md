@@ -9,12 +9,13 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-28, through main commit
-`981002ea7291ffde62244a3bff0df9a65bd9009a`. PR #247 completed the
-Googlevideo `direct_first` local-only correction. PR #248 made the protected
-owned-Geph workflow publish only the exact in-job app after its account-backed
-payload, semantic Chromium, and complete cleanup gates pass. PR #249 recorded
-the exact-artifact workstation transaction and rollback. Exact-main CI
-`30384181967` and audit `30384182997` passed for this checkpoint.
+`49a79d0332e96c067acdaeaf9983433f8fcaff7d`. PR #250 added the frozen
+semantic-signal v2 path for generic incomplete top-level responses without a
+hostname rule. Exact-main CI `30392495460` and audit `30392494245` passed.
+Protected account-backed run `30393151116` proved owned-Geph payload initially,
+without the tray, and after KeepAlive recovery, but its Chromium page timed out.
+Final cleanup passed, no qualified artifact was published, and no workstation
+installation was attempted.
 
 The full local suite passed with `840` Python tests and `32` subtests before
 PR #248 merged. Exact-main CI run `30378302132` and audit run `30378302209`
@@ -52,17 +53,18 @@ same connection cannot be moved to another backend. The runtime may retain this
 evidence only for a subsequent client connection; a browser companion may
 request one bounded reload only through an explicit replay-safe signal.
 
-Branch `codex/browser-incomplete-response-signal` implements that additive
-semantic-signal v2 without adding a hostname rule or changing frozen v1. It
-accepts only Chromium's browser-owned top-level content-length mismatch and
-incomplete chunked-encoding navigation failures, keeps URL/error detail inside
-the extension, and requires a distinct complete bounded 2xx/3xx HTTP response
-through the ownership-verified bundled Geph before one same-host reload. Static
-policy remains authoritative, Discord/YouTube remain excluded, and the failed
-transparent request is never replayed. This implementation is not qualified
-or installed: it must pass full local checks, PR CI/audit, exact-main CI/audit,
-and one main-only account-backed protected run covering both frozen v1 and
-additive v2 browser scenarios.
+Main contains additive semantic-signal v2 without a hostname rule or a frozen
+v1 change. Protected run `30393151116` showed that
+`webNavigation.onErrorOccurred` did not expose the fixture's post-commit body
+truncation. Branch `codex/chromium-incomplete-webrequest` replaces only
+Chromium's event source with read-only `webRequest.onErrorOccurred`, scoped to
+HTTPS `main_frame` GET requests with frame ID `0` and no parent. The same two
+exact incomplete-response error values, fixed v2 payload, owned-Geph complete
+HTTP proof, static-policy precedence, Discord/YouTube exclusion, and one
+same-host reload remain unchanged. The harness now identifies the failing
+scenario and its bounded request counters. This branch is not qualified or
+installed: it requires full local checks, PR CI/audit, exact-main CI/audit, and
+one main-only account-backed protected run covering frozen v1 and additive v2.
 
 Rollback removed and disabled the exact root daemon, removed its plist,
 listener, runtime, token, status, socket, attestation, and witness, and emptied
