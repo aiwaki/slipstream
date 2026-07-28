@@ -9,37 +9,53 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-28, through main commit
-`c608ed087d1f5f8d0fce6e21080653254dd77faf`. PR #247 completed the generic
-local-only Googlevideo correction: plain TLS remains first on every connection,
-then one bounded local desync fallback remains available even during dead-host
-cooldown. Googlevideo is still excluded from Geph, Smart DNS, app-owned Xbox
-DNS, semantic promotion, and generic unknown-host learning.
+`8436ddfcfda6d3657912ec05674fb16ad17750d3`. PR #247 completed the
+Googlevideo `direct_first` local-only correction. PR #248 made the protected
+owned-Geph workflow publish only the exact in-job app after its account-backed
+payload, semantic Chromium, and complete cleanup gates pass.
 
-The full local suite passed with `839` Python tests and `32` subtests before
-merge. Exact-main CI run `30375134192` and audit run `30375133959` passed.
-Packaged lifecycle artifact `8694774920` has GitHub SHA-256
-`bc816b82c052e37989e0fe869aeb4db91352e96453045096484708280c07ed58`;
-its disposable privileged lifecycle proved active local routing, clean
-uninstall, preserved sentinel state, and unchanged global PF.
+The full local suite passed with `840` Python tests and `32` subtests before
+PR #248 merged. Exact-main CI run `30378302132` and audit run `30378302209`
+passed. The one protected run `30379005119` then passed on the exact main SHA:
+real owned-Geph Steam payload completed initially, without the tray, and after
+LaunchAgent recovery; sandboxed Chromium produced one semantic callback and
+one reload with complete CSS, JavaScript, image, and styled-DOM evidence; final
+cleanup removed every owned user and system component without changing system
+network state.
 
-The single protected account-backed run `30375772962` then passed on the same
-exact SHA. It proved real owned-Geph HTTPS payload before tray loss, without
-the tray, and after LaunchAgent `KeepAlive` replaced the verified PID. The
-Chromium semantic gate used sandboxed Chrome in the console user's Aqua
-session and required one callback, one reload, CSS, JavaScript, an image, and
-styled DOM. Final cleanup proved the root daemon disabled and absent, the
-private PF anchor empty, and no token, status, semantic socket, owned listener,
-LaunchAgent, user runtime, native-host manifest, or Keychain item. System
-network state was not mutated.
+Protected artifact `8696275919`,
+`Slipstream-owned-geph-qualified-8436ddfcfda6d3657912ec05674fb16ad17750d3`,
+matched GitHub SHA-256
+`d1929ddfc190450bc390026fc4af73bfc71b0510de110b288a363b6e42d0c1ec`.
+Its inner app archive matched SHA-256
+`fc6b974d544b43ee8335251a5fdf3ecec30a8171a9d9d9a400438260ae22f6bf`.
 
-That protected run exposed a release-control gap rather than a product failure:
-it built and qualified the exact app but uploaded no artifact. A sibling build
-from exact-main CI is not treated as interchangeable. The current branch
-packages the in-job qualified app only after the cleanup proof succeeds,
-publishes an inner SHA-256 manifest, and has a regression test freezing that
-step order. After this branch merges, the new exact main must pass ordinary
-CI/audit and exactly one protected qualification. Only that protected artifact
-may enter the bounded workstation transaction.
+A controlled workstation transaction installed that exact app after preserving
+the previous app, user runtime, LaunchAgent, owned-Geph identity, and external
+network state. The installed root daemon matched the bundle SHA-256, StatusV2
+was active with all ten canaries healthy, and DNS `111.88.96.50/51`, proxy/PAC,
+default route, global PF rules, and the existing owned-Geph PID/hash remained
+unchanged. Discord updater returned HTTP 200 with payload; Discord gateway
+completed TLS/HTTP; YouTube control returned a 1.33 MB page and `yt-dlp`
+downloaded a real Googlevideo media fragment; ChatGPT returned HTTP; and
+CrystalIDEA, Modrinth, and Weather returned complete payloads.
+
+The first `xpersonatoy.com` request nevertheless ended with curl error 18,
+`Transferred a partial file`. The transaction immediately rolled back. A
+post-rollback direct request reproduced the underlying network failure more
+severely: it timed out after 35 seconds with only 13,672 bytes. This proves the
+host needs alternate-route recovery, while the qualified runtime still exposes
+the first partial response instead of recovering it transparently.
+
+Rollback removed and disabled the exact root daemon, removed its plist,
+listener, runtime, token, status, socket, attestation, and witness, and emptied
+only `com.apple/slipstream`. The previous app was restored at SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`
+and relaunched without reinstalling the daemon. Owned Geph remains PID `52893`
+with its previous hash. DNS, proxy/PAC, default route, global PF rules, and
+external anchors match the preflight snapshot. The next product gap is generic
+first-request incomplete-response recovery; no host-specific rule is
+authorized by this evidence.
 
 The following paragraphs retain earlier transaction history.
 
@@ -186,7 +202,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Qualified through PR #246; Googlevideo direct-only recovery gap is locally corrected and awaits full gates | PRs #219-#246 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, and persistent privileged artifact attestation. Exact-main CI `30364706410`, audit `30364706201`, and protected account-backed run `30365257118` passed on `2b2b2529f3c81be168273b0bf3d0bdab27c1c407`. The controlled exact artifact preserved every external network owner and passed Discord plus YouTube control, but a valid media probe timed out on its exact Googlevideo CDN edge because `direct_passthrough` closes after one system-route stall. Immediate exact rollback restored the previous app and removed every root-owned Slipstream component. The current branch changes Googlevideo to local-only `direct_first`: plain TLS always precedes bounded local desync, while Geph, Smart DNS, app-owned Xbox DNS, semantic promotion, and unknown-host learning remain forbidden. Focused handler and shared Python/Rust contract tests pass. Full local checks, PR CI/audit, exact-main CI/audit, one protected account-backed run, and another exact-artifact workstation smoke with real media payload remain required. |
+| M1 - Autonomous Routing V1 | Exact gates pass; generic first-request incomplete-response recovery remains open | PRs #219-#248 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, and exact protected-artifact publication. Exact-main CI `30378302132`, audit `30378302209`, and the sole protected run `30379005119` passed on `8436ddfcfda6d3657912ec05674fb16ad17750d3`. Its exact artifact passed controlled Discord, YouTube control and media, ChatGPT, CrystalIDEA, Modrinth, and Weather workstation smokes without mutating external network state. `xpersonatoy.com` then exposed a partial first response; direct routing after exact rollback stalled after 13,672 bytes. The next change must generalize bounded incomplete-response recovery without adding a host rule, routing Discord/YouTube through Geph, or mutating external DNS/proxy/PAC/VPN/PF owners. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
