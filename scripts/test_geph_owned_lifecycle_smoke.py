@@ -589,6 +589,12 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             "dist-qualified/Slipstream-owned-geph-qualified.zip.sha256",
             workflow,
         )
+        package_block = workflow[package:upload]
+        self.assertIn("cd dist-qualified", package_block)
+        self.assertIn(
+            "shasum -a 256 Slipstream-owned-geph-qualified.zip",
+            package_block,
+        )
         self.assertIn("if-no-files-found: error", workflow[upload:])
 
 
