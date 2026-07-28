@@ -8,7 +8,7 @@ use std::path::Path;
 pub(crate) const INSTALL_ATTESTATION_PATH: &str = "/var/run/slipstream-install-attestation.json";
 const INSTALL_ATTESTATION_SCHEMA_VERSION: u32 = 1;
 const INSTALL_ATTESTATION_MAX_BYTES: u64 = 4096;
-const INSTALLED_DAEMON_MODE: u32 = 0o711;
+const INSTALLED_DAEMON_MODE: u32 = 0o700;
 const EVIDENCE_MODE: u32 = 0o644;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -179,7 +179,7 @@ mod tests {
                 "sha256": bundled_sha256,
                 "uid": 0,
                 "gid": 0,
-                "mode": 0o711
+                "mode": 0o700
             },
             "launchd": {
                 "label": "dev.slipstream.tproxy",

@@ -62,9 +62,10 @@ closed by disposable lifecycle gates. Installed-artifact attestation now
 belongs to the same privileged transaction that copies and starts the daemon:
 it verifies the exact regular-file identity, SHA-256, owner, mode, launchd PID,
 exclusive listener, StatusV2 state, and private-PF state, then atomically emits
-only bounded evidence for the tray. Frozen installs use root-owned execute-only
-mode `0711`, which preserves the console-user baseline child without granting
-the tray read access. The packaged disposable gate must prove both
+only bounded evidence for the tray. Frozen installs remain root-only mode
+`0700`; the console-user baseline uses fixed macOS resolver and HTTPS tools
+instead of executing the installed PyInstaller daemon. The packaged disposable
+gate must prove both
 successful commit and injected post-verification rollback to a daemon-free
 baseline. After merge, exact-main CI/audit and the protected account-backed
 Geph/Chromium gate must pass on the new exact artifact before one short

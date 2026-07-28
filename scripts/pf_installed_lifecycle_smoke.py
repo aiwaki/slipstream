@@ -359,7 +359,7 @@ def script_target() -> LifecycleTarget:
         ),
         attested_installed_path=INSTALLED_DAEMON,
         attestation_source_path=SOURCE_DAEMON,
-        attested_mode=0o644,
+        attested_mode=0o600,
     )
 
 
@@ -389,7 +389,7 @@ def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
         tray_executable=tray,
         attested_installed_path=INSTALLED_FROZEN_DAEMON,
         attestation_source_path=daemon,
-        attested_mode=0o711,
+        attested_mode=0o700,
     )
 
 
@@ -1826,7 +1826,18 @@ def _daemon_pf_log_tail() -> tuple[str, ...]:
     selected = [
         line[-500:]
         for line in lines
-        if any(word in line.lower() for word in (" pf ", "anchor", "legacy", "cleanup"))
+        if any(
+            word in line.lower()
+            for word in (
+                "baseline",
+                "resolver",
+                "probe",
+                " pf ",
+                "anchor",
+                "legacy",
+                "cleanup",
+            )
+        )
     ]
     return tuple(selected[-20:])
 

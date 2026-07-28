@@ -67,9 +67,13 @@ pass; it has not been installed on the primary workstation. PR #245 CI run
 `30349298867` rejected the first implementation because mode `0700` also
 prevented the intentionally console-user baseline child from traversing and
 executing the frozen daemon. Both lifecycle jobs kept PF dormant and the
-workstation was untouched. The follow-up contract uses root-owned execute-only
-mode `0711`: execution remains available to the bounded child while
-unprivileged read, listing, and hashing remain denied.
+workstation was untouched. Follow-up run `30350707555` rejected execute-only
+mode `0711` because the PyInstaller bootloader reads its own executable while
+starting. It also kept PF dormant and touched no workstation. The current
+follow-up restores root-only `0700/0600` installed identities and moves
+console-user DNS and HTTPS qualification to fixed macOS `dscacheutil` and
+`curl` children, so baseline health no longer depends on executing or reading
+the installed daemon.
 
 ## Resume Protocol
 

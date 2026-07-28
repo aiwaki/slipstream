@@ -247,6 +247,8 @@ SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
 SYSTEM_DNS_DIAGNOSTIC_BUDGET = 5.0
 BASELINE_RESOLVE_TIMEOUT = 1.5
 BASELINE_PREFLIGHT_BUDGET = 10.0
+BASELINE_RESOLVER_BINARY = "/usr/bin/dscacheutil"
+BASELINE_PROBE_BINARY = "/usr/bin/curl"
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
@@ -5515,27 +5517,31 @@ def _log_semantic_signal_server_error(error):
 
 
 def _baseline_probe_command(candidate):
-    if getattr(sys, "frozen", False):
-        command = [sys.executable]
-    else:
-        command = [sys.executable, os.path.abspath(__file__)]
-    return command + [
-        "--baseline-probe",
-        "--baseline-host", candidate.host,
-        "--baseline-ip", candidate.ip,
-        "--baseline-path", candidate.path,
+    return [
+        BASELINE_PROBE_BINARY,
+        "--disable",
+        "--silent",
+        "--show-error",
+        "--noproxy",
+        "*",
+        "--proto",
+        "=https",
+        "--http1.1",
+        "--resolve",
+        f"{candidate.host}:443:{candidate.ip}",
+        "--range",
+        "0-0",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        '{"http_code":%{http_code},"bytes_received":%{size_header}}',
+        "--url",
+        f"https://{candidate.host}{candidate.path}",
     ]
 
 
 def _baseline_resolver_command(host):
-    if getattr(sys, "frozen", False):
-        command = [sys.executable]
-    else:
-        command = [sys.executable, os.path.abspath(__file__)]
-    return command + [
-        "--baseline-resolve",
-        "--baseline-host", host,
-    ]
+    return [BASELINE_RESOLVER_BINARY, "-q", "host", "-a", "name", host]
 
 
 def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIMEOUT):
@@ -5559,15 +5565,16 @@ def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIM
         return ()
     if result.returncode != 0:
         return ()
-    try:
-        addresses = json.loads(result.stdout).get("addresses", ())
-    except (AttributeError, json.JSONDecodeError):
-        return ()
-    if not isinstance(addresses, list):
-        return ()
     answers = []
-    for address in addresses[: install_guard.MAX_CANDIDATES]:
-        if not isinstance(address, str):
+    for line in result.stdout.splitlines():
+        key, separator, raw_address = line.partition(":")
+        if not separator or key.strip() != "ip_address":
+            continue
+        address = raw_address.strip()
+        try:
+            if ipaddress.ip_address(address).version != 4:
+                continue
+        except ValueError:
             continue
         answers.append((
             socket.AF_INET,
@@ -5576,6 +5583,8 @@ def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIM
             "",
             (address, port),
         ))
+        if len(answers) >= install_guard.MAX_CANDIDATES:
+            break
     return tuple(answers)
 
 
@@ -5637,13 +5646,26 @@ def _run_baseline_probe_candidate(
         result = subprocess.run(_baseline_probe_command(candidate), **kwargs)
     except (OSError, subprocess.TimeoutExpired):
         return install_guard.ProbeResult(False, "probe_process_unavailable")
-    if result.returncode == 0:
-        return install_guard.ProbeResult(True, "ok")
     try:
-        reason = json.loads(result.stdout).get("reason", "probe_failed")
-    except (AttributeError, json.JSONDecodeError):
-        reason = "probe_failed"
-    return install_guard.ProbeResult(False, str(reason)[:80])
+        payload = json.loads(result.stdout)
+        status_code = int(payload.get("http_code", 0))
+        bytes_received = int(payload.get("bytes_received", 0))
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return install_guard.ProbeResult(False, "probe_output_invalid")
+    if result.returncode != 0:
+        return install_guard.ProbeResult(False, "connection_unavailable")
+    if not 100 <= status_code <= 599 or bytes_received <= 0:
+        return install_guard.ProbeResult(
+            False,
+            "no_http_response",
+            bytes_received=max(0, bytes_received),
+        )
+    return install_guard.ProbeResult(
+        True,
+        "ok",
+        status_code=status_code,
+        bytes_received=bytes_received,
+    )
 
 
 def _baseline_preflight():
@@ -9633,16 +9655,9 @@ def _write_install_attestation(
     return record
 
 
-def _harden_installed_identity(
-    path,
-    mode,
-    directory_mode,
-    *,
-    owner_uid=0,
-    owner_gid=0,
-):
+def _harden_installed_identity(path, mode, *, owner_uid=0, owner_gid=0):
     os.chown(INSTALL_DIR, owner_uid, owner_gid)
-    os.chmod(INSTALL_DIR, directory_mode)
+    os.chmod(INSTALL_DIR, 0o700)
     os.chown(path, owner_uid, owner_gid)
     os.chmod(path, mode)
 
@@ -9820,17 +9835,13 @@ def do_install(port):
             _script_runtime_payload(__file__)
             source_identity = os.path.abspath(__file__)
             installed_identity_name = "tproxy.py"
-            installed_identity_mode = 0o644
-            installed_directory_mode = 0o755
+            installed_identity_mode = 0o600
         elif not os.path.isfile(sys.executable) or not os.access(sys.executable, os.X_OK):
             raise RuntimeError("frozen daemon payload is not executable")
         else:
             source_identity = os.path.abspath(sys.executable)
             installed_identity_name = os.path.basename(sys.executable)
-            # The console-user baseline child must be able to execute the frozen
-            # daemon, but it must not be able to read or hash the installed bytes.
-            installed_identity_mode = 0o711
-            installed_directory_mode = 0o711
+            installed_identity_mode = 0o700
         source_sha256 = _sha256_regular_file(source_identity)
     except Exception as error:
         print(f"install preflight failed: {error}", file=sys.stderr)
@@ -9888,11 +9899,7 @@ def do_install(port):
             prog_args = [py, script, "--port", str(port)]
             uninstall_hint = f"sudo {py} {script} --uninstall"
         installed_identity = os.path.join(INSTALL_DIR, installed_identity_name)
-        _harden_installed_identity(
-            installed_identity,
-            installed_identity_mode,
-            installed_directory_mode,
-        )
+        _harden_installed_identity(installed_identity, installed_identity_mode)
         if tgws_secret_backup:
             with open(secret_path, "w") as handle:
                 handle.write(tgws_secret_backup.strip())
