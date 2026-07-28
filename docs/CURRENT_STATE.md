@@ -8,27 +8,31 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-28, through main commit
-`8c6814fd6130d7b08e339d6d41eb37922a66973a`. PR #251 moved Chromium and
+Last evidence audit: 2026-07-28, through product commit
+`c9d3117fe2ab37946522ddcd16cddb64efe4b55d`. PR #251 moved Chromium and
 macOS Safari incomplete-response observation to read-only
-`webRequest.onErrorOccurred`. Exact-main CI `30396785782` and audit
-`30396784419` passed. The sole protected account-backed run `30397332251`
-built and verified the exact bundle and established the daemon-free boundary,
-but the upstream Geph broker again reported `cannot get token: rate limited`.
-The independent always-run cleanup passed, no qualified artifact was
-published, and no workstation installation was attempted.
+`webRequest.onErrorOccurred`. The sole protected account-backed run for its
+main SHA, `30397332251`, built and verified the exact bundle and established
+the daemon-free boundary, but the upstream Geph broker again reported
+`cannot get token: rate limited`. The independent always-run cleanup passed,
+no qualified artifact was published, and no workstation installation was
+attempted.
 
 That protected run also exposed a coordination defect rather than a routing
 regression. The owned-Geph producer published `ready`, then a late broker abort
 made it clean user resources while the Chromium consumer still owned the root
 daemon and native-host manifest. This produced secondary boundary and
-missing-manifest errors. Branch `codex/protected-gate-coordination` retains a
-late abort until the consumer publishes the exact private `release`, then
-reports the original fail-closed reason and begins producer cleanup. This
-change requires focused and full tests, PR CI/audit, exact-main CI/audit, and
-one protected run on the new main SHA after the upstream daily budget resets.
-No workstation install is authorized before that full run publishes its exact
-qualified artifact.
+missing-manifest errors. PR #252 now retains a late abort until the consumer
+publishes the exact private `release`, then reports the original fail-closed
+reason and begins producer cleanup. Its PR gates passed, and exact-main CI
+`30399287525` plus audit `30399287465` passed for
+`c9d3117fe2ab37946522ddcd16cddb64efe4b55d`.
+
+The next authorized action is exactly one protected main-only run after the
+upstream UTC-day authentication budget resets. Repeating it before reset would
+hot-loop the finite account budget and is prohibited. No workstation install
+is authorized until that full run proves owned-Geph payload, both Chromium
+semantic scenarios, exact cleanup, and publishes its exact qualified artifact.
 
 The full local suite passed with `840` Python tests and `32` subtests before
 PR #248 merged. Exact-main CI run `30378302132` and audit run `30378302209`
