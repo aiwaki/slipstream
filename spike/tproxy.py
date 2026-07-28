@@ -8974,14 +8974,24 @@ async def _handle_impl(reader, writer):
             chosen, result = raced
     elif result is None:
         now = time.monotonic()
-        # known-dead host -> 1 fast-fail attempt instead of the full 7-attempt ladder
-        max_attempts = 1 if (host and _dead.get(host, 0) > now) else 7
+        # A known-dead host normally gets one fast-fail attempt instead of the
+        # full seven-attempt ladder. Direct-first keeps one additional bounded
+        # attempt so its plain-first contract cannot collapse back to
+        # direct-only during the cooldown.
+        dead_cooldown = bool(host and _dead.get(host, 0) > now)
+        direct_first_cooldown = (
+            dead_cooldown and route_class == ROUTE_DIRECT_FIRST
+        )
+        max_attempts = (
+            2 if direct_first_cooldown else 1 if dead_cooldown else 7
+        )
         attempts = 0
         for strat in strategy_order(host):
             strat_ok = False
             strategy_outcomes = {}
             remaining = max_attempts - attempts
-            candidates = real_ips[:min(ip_limit, remaining)]
+            strategy_ip_limit = 1 if direct_first_cooldown else ip_limit
+            candidates = real_ips[:min(strategy_ip_limit, remaining)]
             raced, attempted = await _race_probe_addresses(
                 host,
                 dst_port,

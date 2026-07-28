@@ -1381,6 +1381,54 @@ def test_youtube_media_direct_stall_falls_back_locally_without_geph(monkeypatch)
     assert not tproxy.is_geo_exit_route(host)
 
 
+def test_youtube_media_dead_cooldown_preserves_one_local_fallback(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "rr5---sn-test.googlevideo.com"
+    destination_ips = ["203.0.113.42", "203.0.113.43"]
+    response = b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\n\r\nmedia"
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    calls = []
+
+    async def two_addresses(actual_host, fallback_ip):
+        assert (actual_host, fallback_ip) == (host, destination_ips[0])
+        return list(destination_ips)
+
+    async def local_route(ip, port, head, body, actual_host, strategy):
+        assert (port, head + body, actual_host) == (
+            443,
+            expected_first_flight,
+            host,
+        )
+        calls.append((ip, strategy["name"]))
+        if strategy["name"] == "plain":
+            return None
+        return probed_upstream_response(response)
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    tproxy._dead[host] = tproxy.time.monotonic() + 60
+    tproxy._strat_cache[host] = "split64+fake"
+    monkeypatch.setattr(
+        tproxy,
+        "orig_dst",
+        lambda _sock: (destination_ips[0], 443),
+    )
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", two_addresses)
+    monkeypatch.setattr(tproxy, "dial_strategy", local_route)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert calls == [
+        (destination_ips[0], "plain"),
+        (destination_ips[0], "split64+fake"),
+    ]
+    assert bytes(writer.payload) == response
+    assert host not in tproxy._dead
+
+
 def test_smart_dns_handler_races_proven_addresses_without_reaching_geph(
     monkeypatch,
 ):
