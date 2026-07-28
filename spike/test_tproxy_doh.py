@@ -2799,6 +2799,58 @@ def test_probe_geph_accepts_verified_owned_listener(monkeypatch):
     assert tproxy._geph_port_conflict is False
 
 
+@pytest.mark.parametrize(
+    ("listener_present", "listener_owned", "backend_live", "expected"),
+    (
+        (False, False, False, "down"),
+        (True, False, False, "conflict"),
+        (True, True, False, "down"),
+        (True, True, True, "ready"),
+    ),
+)
+def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
+    monkeypatch,
+    listener_present,
+    listener_owned,
+    backend_live,
+    expected,
+):
+    calls = []
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_tcp_listener_present",
+        lambda port, *, timeout: (
+            calls.append(("listener", port, timeout)) or listener_present
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda port: calls.append(("owned", port)) or listener_owned,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_live",
+        lambda port, *, timeout: (
+            calls.append(("live", port, timeout)) or backend_live
+        ),
+    )
+
+    assert tproxy._probe_owned_geph_recovery_state() == expected
+    assert calls[0] == (
+        "listener",
+        tproxy.GEPH_OWNED_PORT,
+        tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    )
+    assert ("owned", tproxy.GEPH_OWNED_PORT) in calls or not listener_present
+    assert (
+        "live",
+        tproxy.GEPH_OWNED_PORT,
+        tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    ) in calls or not (listener_present and listener_owned)
+
+
 def test_geph_probe_hysteresis_never_invents_cold_start_readiness():
     up, strikes = tproxy.reduce_geph_probe_state(
         previous_up=False,

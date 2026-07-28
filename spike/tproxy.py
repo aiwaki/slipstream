@@ -2053,6 +2053,7 @@ AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
 AUTO_GEPH_RECOVERY_GRACE = 5.0
 AUTO_GEPH_RECOVERY_POLL = 0.1
+AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 65536
 SEMANTIC_GEO_DENIAL_MARKERS = (
     b"no longer available in your area",
@@ -3105,16 +3106,36 @@ def _auto_geph_candidate_allowed(host, now=None):
     )
 
 
+def _probe_owned_geph_recovery_state():
+    """Observe the exact owned listener without waiting for monitor cadence."""
+    if not GEPH_ENABLED:
+        return "down"
+    if not _tcp_listener_present(
+        GEPH_OWNED_PORT,
+        timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    ):
+        return "down"
+    if not geph_listener_owned(GEPH_OWNED_PORT):
+        return "conflict"
+    if not _geph_live(
+        GEPH_OWNED_PORT,
+        timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    ):
+        return "down"
+    return "ready"
+
+
 async def _wait_for_owned_geph_candidate(host):
     """Let a proven exact host survive one brief owned-backend transition."""
+    global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
     h = normalize_host(host)
     if not _auto_geph_candidate_proven(h):
-        return False
-    if _geph_port_conflict or _geph_port not in (None, GEPH_OWNED_PORT):
         return False
     deadline = time.monotonic() + AUTO_GEPH_RECOVERY_GRACE
     while True:
         now = time.monotonic()
+        if _geph_port_conflict or _geph_port not in (None, GEPH_OWNED_PORT):
+            return False
         learned = _auto_geph_learned_exact_host(h)
         owned_ready = bool(
             AUTO_GEPH_ENABLED
@@ -3134,6 +3155,31 @@ async def _wait_for_owned_geph_candidate(host):
             not _auto_geph_candidate_proven(h, now)
             and not learned
         ):
+            return False
+        remaining = deadline - now
+        try:
+            recovery_state = await asyncio.wait_for(
+                asyncio.to_thread(_probe_owned_geph_recovery_state),
+                timeout=remaining,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            return False
+        if _geph_port_conflict or _geph_port not in (None, GEPH_OWNED_PORT):
+            return False
+        if recovery_state == "conflict":
+            _geph_port_conflict = True
+            _geph_port = None
+            _geph_owned = False
+            _geph_up = False
+            return False
+        if recovery_state == "ready":
+            _geph_port_conflict = False
+            _geph_port = GEPH_OWNED_PORT
+            _geph_owned = True
+            _geph_up = True
+            continue
+        now = time.monotonic()
+        if now >= deadline:
             return False
         await asyncio.sleep(min(AUTO_GEPH_RECOVERY_POLL, deadline - now))
 
