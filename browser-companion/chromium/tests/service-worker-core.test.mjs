@@ -97,12 +97,18 @@ test("rejects subframes, non-HTTPS pages, IP literals, and low confidence", () =
 });
 
 test("requests one bounded reload only after confirmation was scheduled", () => {
+  const signal = core.buildSemanticSignal(
+    message,
+    sender,
+    1_000_000,
+    new Uint8Array(16).fill(10)
+  );
   const instruction = core.reloadInstruction({
     schema_version: 1,
     accepted: true,
     action: "confirm_exact_host_geo_exit",
     reason: "accepted"
-  });
+  }, signal);
   assert.equal(instruction.action, "reload_after_confirmation");
   assert.equal(instruction.delay_ms, 7000);
   for (const response of [
@@ -115,6 +121,93 @@ test("requests one bounded reload only after confirmation was scheduled", () => 
       action: "confirm_exact_host_geo_exit"
     }
   ]) {
-    assert.equal(core.reloadInstruction(response), null);
+    assert.equal(core.reloadInstruction(response, signal), null);
   }
+});
+
+test("maps only exact top-level incomplete-response browser errors to v2", () => {
+  for (const error of [
+    "net::ERR_CONTENT_LENGTH_MISMATCH",
+    "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+  ]) {
+    const signal = core.buildIncompleteResponseSignal(
+      {
+        tabId: 7,
+        frameId: 0,
+        url: "https://Example.NET/private/path?token=secret",
+        error
+      },
+      1_000_000,
+      new Uint8Array(16).fill(11)
+    );
+
+    assert.equal(signal.schema_version, 2);
+    assert.equal(signal.category, "incomplete_response");
+    assert.equal(signal.host, "example.net");
+    assert.equal(signal.confidence_bps, 10000);
+    assert.equal(JSON.stringify(signal).includes("ERR_"), false);
+    assert.equal(JSON.stringify(signal).includes("/private/path"), false);
+    assert.equal(JSON.stringify(signal).includes("token=secret"), false);
+  }
+});
+
+test("rejects ambiguous, subframe, non-HTTPS, and IP navigation errors", () => {
+  const base = {
+    tabId: 7,
+    frameId: 0,
+    url: "https://example.net/",
+    error: "net::ERR_CONTENT_LENGTH_MISMATCH"
+  };
+  for (const details of [
+    { ...base, frameId: 2 },
+    { ...base, tabId: -1 },
+    { ...base, url: "http://example.net/" },
+    { ...base, url: "https://127.0.0.1/" },
+    { ...base, error: "net::ERR_CONNECTION_CLOSED" },
+    { ...base, error: "net::ERR_HTTP2_PROTOCOL_ERROR" }
+  ]) {
+    assert.equal(
+      core.buildIncompleteResponseSignal(
+        details,
+        1_000_000,
+        new Uint8Array(16)
+      ),
+      null
+    );
+  }
+});
+
+test("v2 reload follows completed confirmation and remains same-host scoped", () => {
+  const signal = core.buildIncompleteResponseSignal(
+    {
+      tabId: 7,
+      frameId: 0,
+      url: "https://example.net/",
+      error: "net::ERR_CONTENT_LENGTH_MISMATCH"
+    },
+    1_000_000,
+    new Uint8Array(16).fill(12)
+  );
+  const instruction = core.reloadInstruction(
+    {
+      schema_version: 1,
+      accepted: true,
+      action: "confirm_exact_host_geo_exit",
+      reason: "accepted"
+    },
+    signal
+  );
+
+  assert.equal(instruction.delay_ms, 250);
+  assert.equal(
+    core.tabStillOnSignalHost(
+      { url: "https://example.net/another/path?private=yes" },
+      signal
+    ),
+    true
+  );
+  assert.equal(
+    core.tabStillOnSignalHost({ url: "https://other.example/" }, signal),
+    false
+  );
 });

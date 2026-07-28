@@ -22,6 +22,19 @@ private func validSignal() -> [String: Any] {
   ]
 }
 
+private func validIncompleteResponseSignal() -> [String: Any] {
+  [
+    "schema_version": 2,
+    "signal_id": "fedcba9876543210fedcba9876543210",
+    "source": "browser_extension",
+    "host": "example.net",
+    "category": "incomplete_response",
+    "confidence_bps": 10_000,
+    "observed_at_unix_ms": 1_000_000,
+    "top_level": true,
+  ]
+}
+
 final class SemanticBridgeTests: XCTestCase {
   func testAcceptsExactSemanticSignal() throws {
     let data = try XCTUnwrap(
@@ -30,6 +43,16 @@ final class SemanticBridgeTests: XCTestCase {
     let value = try JSONSerialization.jsonObject(with: data)
     let object = try XCTUnwrap(value as? [String: Any])
     XCTAssertEqual(object["host"] as? String, "weather.com")
+  }
+
+  func testAcceptsAdditiveIncompleteResponseSignal() throws {
+    let data = try XCTUnwrap(
+      SemanticBridge.validatedSignalData(validIncompleteResponseSignal())
+    )
+    let value = try JSONSerialization.jsonObject(with: data)
+    let object = try XCTUnwrap(value as? [String: Any])
+    XCTAssertEqual(object["schema_version"] as? Int, 2)
+    XCTAssertEqual(object["category"] as? String, "incomplete_response")
   }
 
   func testRejectsExpandedOrMalformedSignal() {
@@ -48,6 +71,10 @@ final class SemanticBridgeTests: XCTestCase {
     var badID = validSignal()
     badID["signal_id"] = "NOT-A-SIGNAL-ID"
     XCTAssertNil(SemanticBridge.validatedSignalData(badID))
+
+    var wrongV2Category = validIncompleteResponseSignal()
+    wrongV2Category["category"] = "regional_access_denied"
+    XCTAssertNil(SemanticBridge.validatedSignalData(wrongV2Category))
   }
 
   func testNativeFrameIsLittleEndianAndBounded() throws {

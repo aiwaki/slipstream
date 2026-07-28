@@ -8,13 +8,16 @@ from semantic_route_signal import (
     MAX_SIGNAL_BYTES,
     SemanticRouteSignalContext,
     SemanticSignalError,
+    parse_semantic_route_signal,
     parse_semantic_route_signal_v1,
+    parse_semantic_route_signal_v2,
     reduce_semantic_route_signal,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts" / "semantic-route-signal-v1.json"
+CONTRACT_V2 = ROOT / "contracts" / "semantic-route-signal-v2.json"
 
 
 def _merged(defaults, override):
@@ -103,3 +106,43 @@ def test_rejected_signal_never_returns_an_action():
 
     assert not decision.accepted
     assert decision.action == ACTION_NONE
+
+
+def test_python_executes_semantic_route_signal_v2_contract():
+    contract = json.loads(CONTRACT_V2.read_text())
+
+    for vector in contract["vectors"]:
+        signal_payload = _merged(contract["signal_defaults"], vector.get("signal"))
+        signal = parse_semantic_route_signal_v2(json.dumps(signal_payload))
+        context = SemanticRouteSignalContext(
+            **_merged(contract["context_defaults"], vector.get("context"))
+        )
+
+        decision = reduce_semantic_route_signal(signal, context)
+
+        assert decision.__dict__ == vector["expected"], vector["name"]
+
+
+def test_python_executes_semantic_route_signal_v2_parser_contract():
+    contract = json.loads(CONTRACT_V2.read_text())
+    for vector in contract["parser_vectors"]:
+        payload = {
+            **contract["signal_defaults"],
+            **vector.get("replace", {}),
+            **vector.get("add", {}),
+        }
+        if field := vector.get("remove"):
+            payload.pop(field)
+
+        with pytest.raises(SemanticSignalError) as caught:
+            parse_semantic_route_signal_v2(json.dumps(payload))
+
+        assert caught.value.code == vector["expected_error"], vector["name"]
+
+
+def test_dispatcher_accepts_frozen_v1_and_additive_v2():
+    v1 = json.loads(CONTRACT.read_text())["signal_defaults"]
+    v2 = json.loads(CONTRACT_V2.read_text())["signal_defaults"]
+
+    assert parse_semantic_route_signal(json.dumps(v1)).schema_version == 1
+    assert parse_semantic_route_signal(json.dumps(v2)).schema_version == 2

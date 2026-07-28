@@ -13,11 +13,12 @@ import time
 
 from semantic_route_signal import (
     ACTION_NONE,
+    CATEGORY_INCOMPLETE_RESPONSE,
     MAX_SIGNAL_BYTES,
     ROUTE_UNKNOWN,
     SemanticRouteSignalContext,
     SemanticSignalError,
-    parse_semantic_route_signal_v1,
+    parse_semantic_route_signal,
     reduce_semantic_route_signal,
 )
 
@@ -53,6 +54,7 @@ class SemanticRouteSignalRuntime:
         route_class_for_host,
         owned_geph_ready,
         request_confirmation,
+        request_incomplete_confirmation=None,
         wall_clock_ms=None,
         monotonic_clock=None,
         max_entries=MAX_RUNTIME_ENTRIES,
@@ -63,6 +65,7 @@ class SemanticRouteSignalRuntime:
         self._route_class_for_host = route_class_for_host
         self._owned_geph_ready = owned_geph_ready
         self._request_confirmation = request_confirmation
+        self._request_incomplete_confirmation = request_incomplete_confirmation
         self._wall_clock_ms = wall_clock_ms or (lambda: int(time.time() * 1000))
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._max_entries = max_entries
@@ -89,7 +92,7 @@ class SemanticRouteSignalRuntime:
 
     def handle(self, payload):
         try:
-            signal = parse_semantic_route_signal_v1(payload)
+            signal = parse_semantic_route_signal(payload)
         except SemanticSignalError as error:
             return _response(False, ACTION_NONE, error.code)
 
@@ -137,8 +140,11 @@ class SemanticRouteSignalRuntime:
 
         if not decision.accepted:
             return _response(False, decision.action, decision.reason)
+        confirmation = self._request_confirmation
+        if signal.category == CATEGORY_INCOMPLETE_RESPONSE:
+            confirmation = self._request_incomplete_confirmation
         try:
-            scheduled = bool(self._request_confirmation(signal.host))
+            scheduled = bool(confirmation and confirmation(signal.host))
         except Exception:
             scheduled = False
         if not scheduled:
@@ -178,7 +184,7 @@ async def _read_frame(reader):
 async def handle_semantic_signal_client(reader, writer, runtime):
     try:
         payload = await _read_frame(reader)
-        response = runtime.handle(payload)
+        response = await asyncio.to_thread(runtime.handle, payload)
     except asyncio.TimeoutError:
         response = _response(False, ACTION_NONE, REASON_READ_TIMEOUT)
     except (asyncio.IncompleteReadError, struct.error):

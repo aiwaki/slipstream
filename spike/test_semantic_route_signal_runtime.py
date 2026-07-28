@@ -29,12 +29,24 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = json.loads(
     (ROOT / "contracts" / "semantic-route-signal-v1.json").read_text()
 )
+CONTRACT_V2 = json.loads(
+    (ROOT / "contracts" / "semantic-route-signal-v2.json").read_text()
+)
 
 
 def _payload(**overrides):
     return json.dumps(
         {
             **CONTRACT["signal_defaults"],
+            **overrides,
+        }
+    ).encode()
+
+
+def _payload_v2(**overrides):
+    return json.dumps(
+        {
+            **CONTRACT_V2["signal_defaults"],
             **overrides,
         }
     ).encode()
@@ -119,6 +131,44 @@ def test_runtime_does_not_claim_acceptance_when_scheduler_refuses():
         "action": ACTION_NONE,
         "reason": REASON_CONFIRMATION_NOT_SCHEDULED,
     }
+
+
+def test_v2_uses_only_the_complete_response_confirmation_effect():
+    regional = []
+    incomplete = []
+    runtime = SemanticRouteSignalRuntime(
+        route_class_for_host=lambda _host: ROUTE_UNKNOWN,
+        owned_geph_ready=lambda: True,
+        request_confirmation=lambda host: regional.append(host) is None,
+        request_incomplete_confirmation=lambda host: (
+            incomplete.append(host) is None
+        ),
+        wall_clock_ms=lambda: 1_050_000,
+        monotonic_clock=lambda: 10.0,
+    )
+
+    response = runtime.handle(_payload_v2(host="Example.NET."))
+
+    assert response["accepted"] is True
+    assert regional == []
+    assert incomplete == ["example.net"]
+
+
+def test_v2_never_falls_back_to_the_regional_confirmation_effect():
+    regional = []
+    runtime = SemanticRouteSignalRuntime(
+        route_class_for_host=lambda _host: ROUTE_UNKNOWN,
+        owned_geph_ready=lambda: True,
+        request_confirmation=lambda host: regional.append(host) is None,
+        wall_clock_ms=lambda: 1_050_000,
+        monotonic_clock=lambda: 10.0,
+    )
+
+    response = runtime.handle(_payload_v2())
+
+    assert response["accepted"] is False
+    assert response["reason"] == REASON_CONFIRMATION_NOT_SCHEDULED
+    assert regional == []
 
 
 def test_scheduler_refusal_does_not_rate_limit_a_new_signal():

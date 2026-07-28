@@ -464,6 +464,7 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "connection_race.py": "VALUE = 3\n",
     "connection_race_io.py": "VALUE = 4\n",
     "geph_backend.py": "VALUE = 5\n",
+    "http_response_completion.py": "VALUE = 20\n",
     "install_guard.py": "VALUE = 6\n",
     "pf_adapter.py": "VALUE = 7\n",
     "primes.py": "VALUE = 8\n",
@@ -576,6 +577,23 @@ def test_copy_script_runtime_requires_semantic_signal_runtime_before_install(
     )
 
     with pytest.raises(FileNotFoundError, match="semantic_route_signal_runtime.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_http_completion_parser_before_install(
+    tmp_path,
+):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(
+        source,
+        missing={"http_response_completion.py"},
+    )
+
+    with pytest.raises(FileNotFoundError, match="http_response_completion.py"):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()
@@ -7375,6 +7393,254 @@ def test_semantic_confirmation_rejects_same_denial_response(monkeypatch):
     )
 
 
+def test_incomplete_response_confirmation_requires_complete_owned_geph_payload(
+    monkeypatch,
+    tmp_path,
+):
+    host = "partial-response.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_AUTO_GEPH_PATH",
+        str(tmp_path / "autogeph.json"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_incomplete_response_geph_payload_probe",
+        lambda candidate: 4096 if candidate == host else 0,
+    )
+
+    assert tproxy._confirm_incomplete_response_geo_exit(host)
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert (
+        tproxy._auto_geph_last_status["reason"]
+        == "complete response confirmed through owned Geph"
+    )
+
+
+def test_incomplete_response_confirmation_rejects_unproven_payload(monkeypatch):
+    host = "partial-response.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_incomplete_response_geph_payload_probe",
+        lambda _host: 0,
+    )
+
+    assert not tproxy._confirm_incomplete_response_geo_exit(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert (
+        tproxy._auto_geph_last_status["reason"]
+        == "owned Geph response was not proven complete"
+    )
+
+
+@pytest.mark.parametrize(
+    ("response_chunks", "expected_positive"),
+    [
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Length: 93\r\n\r\n<html>",
+                b"x" * 80 + b"</html>",
+            ],
+            True,
+        ),
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Length: 200\r\n\r\n<html>",
+                b"x" * 80 + b"</html>",
+            ],
+            False,
+        ),
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n",
+                b"5d\r\n<html>" + b"x" * 80 + b"</html>\r\n0\r\n\r\n",
+            ],
+            True,
+        ),
+    ],
+)
+def test_incomplete_response_probe_requires_complete_http_response(
+    monkeypatch,
+    response_chunks,
+    expected_positive,
+):
+    class FakeTlsSocket:
+        def __init__(self, chunks):
+            self.chunks = deque(chunks + [b""])
+            self.closed = False
+            self.request = b""
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            self.request = request
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self, tls_socket):
+            self.tls_socket = tls_socket
+
+        def wrap_socket(self, _sock, server_hostname):
+            assert server_hostname == "partial-response.example"
+            return self.tls_socket
+
+    tls_socket = FakeTlsSocket(response_chunks)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: FakeContext(tls_socket),
+    )
+
+    result = tproxy._incomplete_response_geph_payload_probe(
+        "partial-response.example"
+    )
+
+    assert (result > 0) is expected_positive
+    assert b"Range: bytes=0-262143\r\n" in tls_socket.request
+    assert b"Accept-Encoding: identity\r\n" in tls_socket.request
+    assert tls_socket.closed
+
+
+def test_socks5_connect_uses_one_total_deadline(monkeypatch):
+    class FakeSocket:
+        def __init__(self):
+            self.timeouts = []
+            self.responses = deque(
+                [
+                    b"\x05\x00",
+                    b"\x05\x00\x00\x01",
+                    b"\x7f\x00\x00\x01",
+                    b"\x26\xe2",
+                ]
+            )
+            self.closed = False
+
+        def settimeout(self, timeout):
+            self.timeouts.append(timeout)
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            return self.responses.popleft()
+
+        def close(self):
+            self.closed = True
+
+    sock = FakeSocket()
+    clock = iter([0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.5, 4.75])
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda _address, timeout: sock,
+    )
+
+    assert tproxy._socks5_connect_blocking("example.com", 443, timeout=5.0) is sock
+    assert sock.timeouts == pytest.approx([4.0, 3.0, 2.0, 1.0, 0.5, 0.25])
+    assert not sock.closed
+
+
+def test_socks5_connect_fails_when_total_deadline_expires(monkeypatch):
+    class FakeSocket:
+        def __init__(self):
+            self.closed = False
+
+        def settimeout(self, _timeout):
+            raise AssertionError("expired socket must not receive a new timeout")
+
+        def close(self):
+            self.closed = True
+
+    sock = FakeSocket()
+    clock = iter([0.0, 0.0, 6.0])
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda _address, timeout: sock,
+    )
+
+    assert tproxy._socks5_connect_blocking("example.com", 443, timeout=5.0) is None
+    assert sock.closed
+
+
+def test_incomplete_response_probe_shares_deadline_across_socks_tls_and_http(
+    monkeypatch,
+):
+    class FakeSocket:
+        def __init__(self):
+            self.closed = False
+            self.recv_called = False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            self.recv_called = True
+            return b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self, tls_socket):
+            self.tls_socket = tls_socket
+
+        def wrap_socket(self, _sock, server_hostname):
+            assert server_hostname == "partial-response.example"
+            return self.tls_socket
+
+    tls_socket = FakeSocket()
+    clock = iter([0.0, 0.0, 1.0, 2.0, 7.0])
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: FakeContext(tls_socket),
+    )
+
+    assert (
+        tproxy._incomplete_response_geph_payload_probe(
+            "partial-response.example",
+            timeout=6.0,
+        )
+        == 0
+    )
+    assert not tls_socket.recv_called
+    assert tls_socket.closed
+
+
 def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
     confirmations = []
     route_class = {"value": tproxy.ROUTE_UNKNOWN}
@@ -7419,6 +7685,52 @@ def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
     assert response["accepted"] is False
     assert response["reason"] == "protected_route"
     assert confirmations == ["regional-denial.example"]
+
+
+def test_incomplete_response_runtime_uses_distinct_confirmation(monkeypatch):
+    regional = []
+    incomplete = []
+    monkeypatch.setattr(tproxy, "_semantic_route_signal_runtime", None)
+    monkeypatch.setattr(
+        tproxy,
+        "route_policy",
+        lambda _host: {"route_class": tproxy.ROUTE_UNKNOWN},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_geph_ready_for_semantic_confirmation",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_request_semantic_geo_exit_confirmation",
+        lambda host: regional.append(host) or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_confirm_incomplete_response_geo_exit",
+        lambda host: incomplete.append(host) or True,
+    )
+    monkeypatch.setattr(
+        tproxy.semantic_route_signal_runtime.time,
+        "time",
+        lambda: 1_050.0,
+    )
+    runtime = tproxy._get_semantic_route_signal_runtime()
+    signal = {
+        "schema_version": 2,
+        "signal_id": "0123456789abcdef0123456789abcdef",
+        "source": "browser_extension",
+        "host": "partial-response.example",
+        "category": "incomplete_response",
+        "confidence_bps": 10000,
+        "observed_at_unix_ms": 1_000_000,
+        "top_level": True,
+    }
+
+    assert runtime.handle(json.dumps(signal).encode())["accepted"] is True
+    assert regional == []
+    assert incomplete == ["partial-response.example"]
 
 
 def test_auto_geph_confirmation_cooldown_state_is_bounded(monkeypatch):

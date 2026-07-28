@@ -95,6 +95,38 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke.FixtureSnapshot(2, 1, 1, 1, 0)
             )
 
+    def test_incomplete_fixture_declares_more_bytes_only_on_first_root(self) -> None:
+        _, _, incomplete = smoke._fixture_response(
+            "/",
+            root_visit=1,
+            scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+        )
+        self.assertNotIn(b"no longer available in your area", incomplete)
+        self.assertEqual(
+            smoke._fixture_content_length(
+                "/",
+                root_visit=1,
+                scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+                body=incomplete,
+            ),
+            len(incomplete) + 4096,
+        )
+
+        _, _, success = smoke._fixture_response(
+            "/",
+            root_visit=2,
+            scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+        )
+        self.assertEqual(
+            smoke._fixture_content_length(
+                "/",
+                root_visit=2,
+                scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+                body=success,
+            ),
+            len(success),
+        )
+
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
         command = smoke._chrome_command(
             Path("/Applications/Google Chrome"),
@@ -117,6 +149,25 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             command,
         )
         self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
+
+    def test_chrome_command_maps_the_selected_fixture_host(self) -> None:
+        command = smoke._chrome_command(
+            Path("/Applications/Google Chrome"),
+            Path("/tmp/profile"),
+            Path("/repo/browser-companion/chromium"),
+            18443,
+            smoke.INCOMPLETE_FIXTURE_HOST,
+        )
+        self.assertIn(
+            "--host-resolver-rules=MAP "
+            f"{smoke.INCOMPLETE_FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
+            command,
+        )
+        self.assertTrue(
+            command[-1].startswith(
+                f"https://{smoke.INCOMPLETE_FIXTURE_HOST}:18443/"
+            )
+        )
 
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

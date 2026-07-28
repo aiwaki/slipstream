@@ -25,6 +25,13 @@ Slipstream routing decisions and bounded recovery primitives.
   geo-exit confirmation. URL paths, queries, page text, cookies, and arbitrary
   fields are rejected; direct, local-bypass, and existing geo-exit policy
   remains authoritative.
+- `semantic-route-signal-v2.json` adds a separate frozen
+  `incomplete_response` category for exact top-level browser navigation errors.
+  The wire object retains the same eight privacy-bounded fields and explicitly
+  rejects the raw browser error, URL, path, query, and body. Static route policy
+  remains authoritative; an eligible unknown host can be learned only after
+  the currently ownership-verified bundled Geph returns one syntactically
+  complete bounded HTTP response.
 - `route-policy-manifest-v1.json` freezes manifest normalization, structured
   validation failures, bounded input limits, and effective first-match
   protection for local-bypass and direct-first domains.

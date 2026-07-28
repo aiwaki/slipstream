@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use slipstream_core::semantic_route_signal::parse_semantic_route_signal_v1;
+use slipstream_core::semantic_route_signal::validate_semantic_route_signal;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -16,7 +16,7 @@ pub const SEMANTIC_SIGNAL_SOCKET_PATH: &str = "/var/run/slipstream-semantic.sock
 const FRAME_HEADER_BYTES: usize = 4;
 const MAX_SIGNAL_BYTES: usize = 1024;
 const MAX_DAEMON_RESPONSE_BYTES: usize = 1024;
-const IPC_TIMEOUT: Duration = Duration::from_secs(2);
+const IPC_TIMEOUT: Duration = Duration::from_secs(12);
 const CHROME_NATIVE_HOST_RELATIVE_PATH: &str =
     "Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.slipstream.semantic.json";
 
@@ -305,7 +305,7 @@ where
     if origin != CHROMIUM_EXTENSION_ORIGIN {
         return fixed_response(false, "none", "origin_forbidden");
     }
-    if payload.len() > MAX_SIGNAL_BYTES || parse_semantic_route_signal_v1(payload).is_err() {
+    if payload.len() > MAX_SIGNAL_BYTES || validate_semantic_route_signal(payload).is_err() {
         return fixed_response(false, "none", "invalid_signal");
     }
     let Ok(response) = forward(payload) else {
@@ -382,6 +382,20 @@ mod tests {
         .unwrap()
     }
 
+    fn incomplete_response_signal() -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "schema_version": 2,
+            "signal_id": "fedcba9876543210fedcba9876543210",
+            "source": "browser_extension",
+            "host": "example.net",
+            "category": "incomplete_response",
+            "confidence_bps": 10000,
+            "observed_at_unix_ms": 1_000_000,
+            "top_level": true,
+        }))
+        .unwrap()
+    }
+
     fn daemon_response() -> Vec<u8> {
         fixed_response(true, "confirm_exact_host_geo_exit", "accepted")
     }
@@ -406,6 +420,20 @@ mod tests {
     #[test]
     fn valid_signal_is_forwarded_byte_for_byte() {
         let payload = signal();
+        let observed = Cell::new(false);
+        let response = process_message(CHROMIUM_EXTENSION_ORIGIN, &payload, |forwarded| {
+            assert_eq!(forwarded, payload);
+            observed.set(true);
+            Ok(daemon_response())
+        });
+
+        assert!(observed.get());
+        assert_eq!(response, daemon_response());
+    }
+
+    #[test]
+    fn additive_incomplete_response_signal_is_forwarded_byte_for_byte() {
+        let payload = incomplete_response_signal();
         let observed = Cell::new(false);
         let response = process_message(CHROMIUM_EXTENSION_ORIGIN, &payload, |forwarded| {
             assert_eq!(forwarded, payload);
