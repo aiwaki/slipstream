@@ -124,7 +124,9 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(coordination.ready.stat().st_mode), 0o600)
             validate.assert_called_once_with(paths, os.getuid(), state)
 
-    def test_coordination_wait_aborts_on_late_broker_rate_limit(self) -> None:
+    def test_coordination_defers_late_broker_abort_until_private_release(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             coordination = smoke.CoordinationPaths(
@@ -146,20 +148,81 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
                 ]
             )
 
-            with self.assertRaisesRegex(
-                smoke.QualificationError,
-                "broker rate limited account authentication",
+            def publish_release(_seconds: float) -> None:
+                self.assertTrue(coordination.ready.exists())
+                coordination.release.write_text("release\n", encoding="utf-8")
+                coordination.release.chmod(0o600)
+
+            with mock.patch.object(
+                smoke.time,
+                "sleep",
+                side_effect=publish_release,
             ):
-                smoke._publish_ready_and_wait(
-                    coordination,
-                    paths,
-                    os.getuid(),
-                    state,
-                    timeout=2,
-                    abort_reason=abort_reason,
-                )
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "broker rate limited account authentication",
+                ):
+                    smoke._publish_ready_and_wait(
+                        coordination,
+                        paths,
+                        os.getuid(),
+                        state,
+                        timeout=2,
+                        abort_reason=abort_reason,
+                    )
 
             self.assertTrue(coordination.ready.exists())
+            self.assertTrue(coordination.release.exists())
+            self.assertEqual(abort_reason.call_count, 2)
+
+    def test_coordination_late_abort_remains_primary_after_release_timeout(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination = smoke.CoordinationPaths(
+                ready=root / "ready",
+                release=root / "release",
+            )
+            paths = smoke.geph_paths(root / "home")
+            state = smoke.OwnedGephState(
+                pid=4242,
+                uid=os.getuid(),
+                executable=paths.executable,
+                config=paths.config,
+                launchd_label=smoke.GEPH_LABEL,
+            )
+            abort_reason = mock.Mock(
+                side_effect=[
+                    None,
+                    "owned Geph broker rate limited account authentication",
+                ]
+            )
+
+            with (
+                mock.patch.object(
+                    smoke.time,
+                    "monotonic",
+                    side_effect=[0.0, 0.0, 3.0],
+                ),
+                mock.patch.object(smoke.time, "sleep") as sleep,
+            ):
+                with self.assertRaisesRegex(
+                    smoke.QualificationError,
+                    "broker rate limited account authentication",
+                ):
+                    smoke._publish_ready_and_wait(
+                        coordination,
+                        paths,
+                        os.getuid(),
+                        state,
+                        timeout=2,
+                        abort_reason=abort_reason,
+                    )
+
+            self.assertTrue(coordination.ready.exists())
+            self.assertFalse(coordination.release.exists())
+            sleep.assert_called_once_with(0.25)
             self.assertEqual(abort_reason.call_count, 2)
 
     def test_paths_are_scoped_to_the_app_config_and_user_launch_agent(self) -> None:
