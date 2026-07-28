@@ -286,9 +286,9 @@ pub fn bundled_policy_v1() -> RoutingPolicyTables {
             ),
             static_route(
                 YOUTUBE_MEDIA_HOSTS,
-                RouteClass::DirectPassthrough,
+                RouteClass::DirectFirst,
                 ServiceGroup::YoutubeVideo,
-                StrategySet::Direct,
+                StrategySet::DirectFirst,
             ),
             static_route(
                 YOUTUBE_CONTROL_HOSTS,

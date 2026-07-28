@@ -385,6 +385,7 @@ fn parse_route_entry(
             (route_class, strategy_set),
             (RouteClass::LocalBypass, StrategySet::FakeOnly)
                 | (RouteClass::DirectPassthrough, StrategySet::Direct)
+                | (RouteClass::DirectFirst, StrategySet::DirectFirst)
         ),
         _ => true,
     };

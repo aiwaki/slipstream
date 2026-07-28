@@ -118,7 +118,7 @@ fn protected_route_mismatch(key: &RouteCircuitKey) -> bool {
         "youtube_video" => {
             !matches!(
                 key.route_class.as_str(),
-                "local_bypass" | "direct_passthrough"
+                "local_bypass" | "direct_passthrough" | "direct_first"
             ) || key.backend_id == "geph"
         }
         _ => false,

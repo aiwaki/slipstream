@@ -152,12 +152,22 @@
       "expected_states": []
     },
     {
-      "name": "youtube-media-direct-key-is-allowed",
+      "name": "youtube-media-direct-first-local-key-is-allowed",
       "events": [
-        {"kind": "before_request", "key": {"service_group": "youtube_video", "route_class": "direct_passthrough", "backend_id": "direct"}, "now_ms": 0}
+        {"kind": "before_request", "key": {"service_group": "youtube_video", "route_class": "direct_first", "backend_id": "local_engine"}, "now_ms": 0}
       ],
       "expected_decisions": [
         {"kind": "allow", "reason": "closed", "phase": "closed"}
+      ],
+      "expected_states": []
+    },
+    {
+      "name": "youtube-media-direct-first-geph-key-is-rejected",
+      "events": [
+        {"kind": "before_request", "key": {"service_group": "youtube_video", "route_class": "direct_first", "backend_id": "geph"}, "now_ms": 0}
+      ],
+      "expected_decisions": [
+        {"kind": "reject", "reason": "protected_route_mismatch", "phase": "invalid"}
       ],
       "expected_states": []
     },

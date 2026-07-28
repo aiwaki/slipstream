@@ -452,7 +452,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict "$app"
           daemon="$app/Contents/Resources/slipstreamd/slipstreamd"
           test "$("$daemon" --classify-host rr1---sn-test.googlevideo.com)" = \
-            '{"host": "rr1---sn-test.googlevideo.com", "route_class": "direct_passthrough", "service_group": "youtube_video", "strategy_set": "direct"}'
+            '{"host": "rr1---sn-test.googlevideo.com", "route_class": "direct_first", "service_group": "youtube_video", "strategy_set": "direct_first"}'
           test "$("$daemon" --classify-host www.youtube.com)" = \
             '{"host": "www.youtube.com", "route_class": "local_bypass", "service_group": "youtube_video", "strategy_set": "fake_only"}'
 

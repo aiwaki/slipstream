@@ -3990,9 +3990,9 @@ def test_route_policy_classifies_service_groups():
     }
     assert tproxy.route_policy("rr2---sn-ntq7yner.googlevideo.com") == {
         "host": "rr2---sn-ntq7yner.googlevideo.com",
-        "route_class": tproxy.ROUTE_DIRECT,
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
         "service_group": tproxy.SERVICE_YOUTUBE,
-        "strategy_set": tproxy.STRATEGY_DIRECT,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
     }
     assert tproxy.route_policy("youtu.be")["service_group"] == tproxy.SERVICE_YOUTUBE
     assert tproxy.route_policy("yt3.ggpht.com")["service_group"] == tproxy.SERVICE_YOUTUBE
@@ -4083,7 +4083,7 @@ def test_route_policy_tables_are_explicit_and_keep_boundaries():
     assert "youtube.com" not in tproxy.GEPH_HOSTS
 
 
-def test_direct_passthrough_hosts_use_plain_strategy_only():
+def test_direct_and_direct_first_hosts_keep_plain_first():
     tproxy._strat_cache["www.google.com"] = "split64+fake"
     tproxy._strat_cache["api.spotify.com"] = "split64+fake"
     try:
@@ -4092,7 +4092,7 @@ def test_direct_passthrough_hosts_use_plain_strategy_only():
         assert [s["name"] for s in tproxy.strategy_order("yandex.ru")] == ["plain"]
         assert [s["name"] for s in tproxy.strategy_order(
             "rr2---sn-ntq7yner.googlevideo.com"
-        )] == ["plain"]
+        )][0] == "plain"
         assert [s["name"] for s in tproxy.strategy_order("www.google.com")][:2] == [
             "plain", "split64+fake",
         ]
@@ -4139,7 +4139,6 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
     assert status["domains"][tproxy.ROUTE_DIRECT] == (
         len(tproxy.TELEGRAM_HOSTS)
         + len(tproxy.GITHUB_HOSTS)
-        + len(tproxy.YOUTUBE_MEDIA_HOSTS)
     )
     assert status["domains"][tproxy.ROUTE_DIRECT_FIRST] == (
         len(tproxy.DIRECT_FIRST_HOSTS)
@@ -4174,8 +4173,8 @@ def test_route_policy_manifest_has_stable_diagnostic_shape():
         "domains": len(tproxy.YOUTUBE_MEDIA_HOSTS) + len(tproxy.YOUTUBE_CONTROL_HOSTS),
         "routes": [
             {
-                "route_class": tproxy.ROUTE_DIRECT,
-                "strategy_set": tproxy.STRATEGY_DIRECT,
+                "route_class": tproxy.ROUTE_DIRECT_FIRST,
+                "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
                 "domains": len(tproxy.YOUTUBE_MEDIA_HOSTS),
             },
             {
@@ -4229,9 +4228,9 @@ def test_classify_host_cli_is_read_only_and_does_not_require_root(monkeypatch, c
 
     assert json.loads(capsys.readouterr().out) == {
         "host": "rr1---sn-test.googlevideo.com",
-        "route_class": tproxy.ROUTE_DIRECT,
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
         "service_group": tproxy.SERVICE_YOUTUBE,
-        "strategy_set": tproxy.STRATEGY_DIRECT,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
     }
 
 
@@ -5234,18 +5233,18 @@ def test_discord_api_canary_stays_local_bypass_and_fake_only():
     ]
 
 
-def test_youtube_redirector_canary_uses_direct_passthrough():
+def test_youtube_redirector_canary_uses_direct_first():
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
     host = spec["fallback_host"]
 
     assert tproxy.route_policy(host) == {
         "host": "redirector.googlevideo.com",
-        "route_class": tproxy.ROUTE_DIRECT,
+        "route_class": tproxy.ROUTE_DIRECT_FIRST,
         "service_group": tproxy.SERVICE_YOUTUBE,
-        "strategy_set": tproxy.STRATEGY_DIRECT,
+        "strategy_set": tproxy.STRATEGY_DIRECT_FIRST,
     }
     assert not tproxy.is_geo_exit_route(host)
-    assert [s["name"] for s in tproxy.strategy_order(host)] == ["plain"]
+    assert [s["name"] for s in tproxy.strategy_order(host)][0] == "plain"
 
 
 def test_youtube_web_canary_stays_local_bypass_and_fake_only():
@@ -5867,7 +5866,7 @@ def test_local_bypass_canary_uses_modern_payload_probe_without_synthetic_preflig
         q.extend(original_window)
 
 
-def test_youtube_media_canary_probes_plain_tcp_passthrough(monkeypatch):
+def test_youtube_media_canary_probes_plain_before_local_fallback(monkeypatch):
     spec = next(item for item in tproxy.CANARY_SPECS if item["name"] == "youtube_video")
     host = spec["fallback_host"]
     original = dict(tproxy._route_health[tproxy.SERVICE_YOUTUBE])
@@ -5895,7 +5894,7 @@ def test_youtube_media_canary_probes_plain_tcp_passthrough(monkeypatch):
         assert tproxy._strat_cache[host] == "plain"
         health = tproxy.route_health_snapshot()[tproxy.SERVICE_YOUTUBE]
         assert health["state"] == tproxy.HEALTH_OK
-        assert health["last_route_class"] == tproxy.ROUTE_DIRECT
+        assert health["last_route_class"] == tproxy.ROUTE_DIRECT_FIRST
         assert health["last_failure"] == ""
     finally:
         tproxy._strat_cache.clear()
@@ -6633,7 +6632,7 @@ def test_pf_rules_leave_quic_unblocked():
     assert "block return quick inet proto udp from any to any port 443" not in tproxy.PF_RULES
 
 
-def test_youtube_media_hosts_ignore_stale_strategy_cache_and_stay_plain():
+def test_youtube_media_hosts_try_plain_before_cached_local_fallback():
     host = "rr2---sn-ntq7yner.googlevideo.com"
     tproxy._strat_cache.clear()
     tproxy._strat_cache[host] = "split64"
@@ -6641,7 +6640,7 @@ def test_youtube_media_hosts_ignore_stale_strategy_cache_and_stay_plain():
     try:
         names = [s["name"] for s in tproxy.strategy_order(host)]
 
-        assert names == ["plain"]
+        assert names[:2] == ["plain", "split64"]
     finally:
         tproxy._strat_cache.clear()
 

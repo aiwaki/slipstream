@@ -330,6 +330,7 @@ def test_protected_groups_have_no_geph_policy_or_recovery_edge():
             ) in {
                 ("local_bypass", "fake_only"),
                 ("direct_passthrough", "direct"),
+                ("direct_first", "direct_first"),
             }
 
     for case in RECOVERY["vectors"]:
