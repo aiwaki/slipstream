@@ -39,12 +39,12 @@ changing v1. Chrome's browser-owned `webRequest.onErrorOccurred` event is
 observed only for an HTTPS `main_frame` GET with frame ID `0` and no parent
 frame. It is accepted only for exact `net::ERR_CONTENT_LENGTH_MISMATCH` or
 `net::ERR_INCOMPLETE_CHUNKED_ENCODING` failures on a normalized HTTPS hostname.
-`webRequest` is used because Chrome guarantees a final `onCompleted` or
-`onErrorOccurred` event for each request, while `webNavigation` reports only
-an aborted navigation and did not report the protected fixture's post-commit
-body truncation. Chrome documents error strings as version-sensitive, so the
-two-value allowlist is frozen and the protected current-Chrome gate is required
-to detect upstream drift.
+`webRequest` is used because Chromium guarantees a final `onCompleted` or
+`onErrorOccurred` event for each observed request, while `webNavigation`
+reports only an aborted navigation and did not report the protected fixture's
+post-commit body truncation. Chromium documents error strings as
+version-sensitive, so the two-value allowlist is frozen and the protected
+current-Chrome gate is required to detect upstream drift.
 The extension converts either error locally into the fixed
 `incomplete_response` category; the raw error and URL never cross native
 messaging. Static direct, direct-first, local-bypass, and reviewed geo-exit
@@ -63,16 +63,17 @@ output. It does not change DNS, proxy, PAC, VPN, PF, or browser settings.
 ## Safari Preview
 
 The Safari preview under `browser-companion/safari/` reuses the same bounded
-detector and dual-reader service-worker contract. Safari supplies messages only to the
-native app extension embedded in its containing app, so there is no
-Chrome-style external native-host origin to register. The service worker still
-derives the hostname from Safari-owned top-level sender or navigation metadata;
-the native extension accepts either exact frozen eight-field signal, forwards one
-little-endian bounded frame to the owner-only daemon socket, and returns only
-the fixed four-field private response. Apple currently ignores the application
-identifier argument to `sendNativeMessage` and dispatches to that embedded
-native extension; Slipstream nevertheless keeps the argument equal to the
-generated containing-app bundle identifier and enforces the equality in tests.
+detector and dual-reader service-worker contract. Safari supplies messages only
+to the native app extension embedded in its containing app, so there is no
+Chrome-style external native-host origin to register. The service worker
+derives the hostname from Safari-owned top-level sender or read-only
+`webRequest` metadata. The native extension accepts either exact frozen
+eight-field signal, forwards one little-endian bounded frame to the owner-only
+daemon socket, and returns only the fixed four-field private response. Apple
+currently ignores the application identifier argument to `sendNativeMessage`
+and dispatches to that embedded native extension; Slipstream nevertheless
+keeps the argument equal to the generated containing-app bundle identifier and
+enforces the equality in tests.
 
 The source is packaged with Apple's `safari-web-extension-packager`, falling
 back to its Xcode 15 name `safari-web-extension-converter`. The repository build

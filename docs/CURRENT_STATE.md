@@ -56,12 +56,12 @@ request one bounded reload only through an explicit replay-safe signal.
 Main contains additive semantic-signal v2 without a hostname rule or a frozen
 v1 change. Protected run `30393151116` showed that
 `webNavigation.onErrorOccurred` did not expose the fixture's post-commit body
-truncation. Branch `codex/chromium-incomplete-webrequest` replaces only
-Chromium's event source with read-only `webRequest.onErrorOccurred`, scoped to
-HTTPS `main_frame` GET requests with frame ID `0` and no parent. The same two
-exact incomplete-response error values, fixed v2 payload, owned-Geph complete
-HTTP proof, static-policy precedence, Discord/YouTube exclusion, and one
-same-host reload remain unchanged. The harness now identifies the failing
+truncation. Branch `codex/chromium-incomplete-webrequest` replaces the Chromium
+and macOS Safari event sources with read-only `webRequest.onErrorOccurred`,
+scoped to HTTPS `main_frame` GET requests with frame ID `0` and no parent. The
+same two exact incomplete-response error values, fixed v2 payload, owned-Geph
+complete HTTP proof, static-policy precedence, Discord/YouTube exclusion, and
+one same-host reload remain unchanged. The harness now identifies the failing
 scenario and its bounded request counters. This branch is not qualified or
 installed: it requires full local checks, PR CI/audit, exact-main CI/audit, and
 one main-only account-backed protected run covering frozen v1 and additive v2.

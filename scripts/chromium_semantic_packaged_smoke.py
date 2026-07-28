@@ -439,7 +439,8 @@ def _validate_extension(path: Path) -> Path:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
         manifest.get("manifest_version") != 3
-        or manifest.get("permissions") != ["nativeMessaging", "webNavigation"]
+        or manifest.get("permissions") != ["nativeMessaging", "webRequest"]
+        or manifest.get("host_permissions") != ["https://*/*"]
         or not isinstance(manifest.get("key"), str)
         or not manifest["key"]
     ):

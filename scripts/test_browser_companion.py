@@ -60,14 +60,17 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertEqual(manifest["manifest_version"], 3)
         self.assertEqual(
             manifest["permissions"],
-            ["nativeMessaging", "webNavigation"],
+            ["nativeMessaging", "webRequest"],
         )
+        self.assertEqual(manifest["host_permissions"], ["https://*/*"])
         self.assertNotIn("key", manifest)
-        self.assertNotIn("host_permissions", manifest)
         self.assertNotIn("externally_connectable", manifest)
         self.assertNotIn("web_accessible_resources", manifest)
         self.assertEqual(manifest["content_scripts"][0]["matches"], ["https://*/*"])
         self.assertFalse(manifest["content_scripts"][0]["all_frames"])
+        worker_source = SAFARI_WORKER.read_text()
+        self.assertIn("webRequest.onErrorOccurred.addListener", worker_source)
+        self.assertNotIn("webNavigation", worker_source)
 
     def test_safari_build_is_unsigned_and_does_not_install(self):
         source = SAFARI_BUILD.read_text()
