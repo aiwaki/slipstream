@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import hashlib
 import http.client
 import json
 import os
@@ -50,6 +51,10 @@ INSTALLED_ROUTING_POLICY = INSTALL_DIR / "routing_policy.py"
 INSTALLED_ROUTING_RECOVERY = INSTALL_DIR / "routing_recovery.py"
 INSTALLED_XBOX_DNS = INSTALL_DIR / "xbox_dns.py"
 INSTALLED_FROZEN_DAEMON = INSTALL_DIR / "slipstreamd"
+INSTALL_ATTESTATION_DIR = Path(
+    "/Library/Application Support/dev.slipstream.tray"
+)
+INSTALL_ATTESTATION_PATH = INSTALL_ATTESTATION_DIR / "install-attestation.json"
 LAUNCHD_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 LAUNCHD_LABEL = "system/dev.slipstream.tproxy"
 STATUS_PATH = Path("/var/run/slipstream.status")
@@ -143,6 +148,9 @@ class LifecycleTarget:
     installed_program_prefix: tuple[str, ...]
     required_installed_paths: tuple[Path, ...]
     tray_executable: Path | None = None
+    attested_installed_path: Path | None = None
+    attestation_source_path: Path | None = None
+    attested_mode: int | None = None
 
 
 def _refresh_system_resolver_cache() -> None:
@@ -352,6 +360,9 @@ def script_target() -> LifecycleTarget:
             INSTALLED_ROUTING_RECOVERY,
             INSTALLED_XBOX_DNS,
         ),
+        attested_installed_path=INSTALLED_DAEMON,
+        attestation_source_path=SOURCE_DAEMON,
+        attested_mode=0o600,
     )
 
 
@@ -379,6 +390,9 @@ def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
         installed_program_prefix=(str(INSTALLED_FROZEN_DAEMON),),
         required_installed_paths=(INSTALLED_FROZEN_DAEMON,),
         tray_executable=tray,
+        attested_installed_path=INSTALLED_FROZEN_DAEMON,
+        attestation_source_path=daemon,
+        attested_mode=0o700,
     )
 
 
@@ -427,6 +441,7 @@ class SystemRunner:
         *,
         check: bool = True,
         timeout: int = 180,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = tuple(map(str, command))
         validate_system_command(command, self.target)
@@ -437,6 +452,7 @@ class SystemRunner:
             text=True,
             check=False,
             timeout=timeout,
+            env=env,
         )
         if check and result.returncode != 0:
             output = (result.stdout + "\n" + result.stderr).strip().splitlines()[-30:]
@@ -1813,7 +1829,18 @@ def _daemon_pf_log_tail() -> tuple[str, ...]:
     selected = [
         line[-500:]
         for line in lines
-        if any(word in line.lower() for word in (" pf ", "anchor", "legacy", "cleanup"))
+        if any(
+            word in line.lower()
+            for word in (
+                "baseline",
+                "resolver",
+                "probe",
+                " pf ",
+                "anchor",
+                "legacy",
+                "cleanup",
+            )
+        )
     ]
     return tuple(selected[-20:])
 
@@ -1881,6 +1908,129 @@ def _assert_private_raw_log(path: Path, expected_uid: int = 0) -> None:
         )
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _assert_install_attestation_runtime(evidence: dict, status: dict) -> None:
+    launchd = evidence.get("launchd")
+    listener = evidence.get("listener")
+    if not all(isinstance(item, dict) for item in (launchd, listener)):
+        raise LifecycleError("install attestation omitted required runtime records")
+    if (
+        launchd.get("label") != "dev.slipstream.tproxy"
+        or launchd.get("pid") != status.get("pid")
+        or not isinstance(launchd.get("pid"), int)
+        or launchd.get("pid") <= 0
+    ):
+        raise LifecycleError(f"launchd attestation mismatch: {launchd!r}")
+    if listener != {"host": "127.0.0.1", "port": 1080}:
+        raise LifecycleError(f"listener attestation mismatch: {listener!r}")
+    state = evidence.get("state")
+    if state not in {"active", "dormant"}:
+        raise LifecycleError(f"daemon state attestation mismatch: {state!r}")
+    if evidence.get("pf_active") != (state == "active"):
+        raise LifecycleError("install attestation PF state mismatch")
+
+
+def _assert_install_attestation(target: LifecycleTarget) -> None:
+    installed = target.attested_installed_path
+    source = target.attestation_source_path
+    expected_mode = target.attested_mode
+    if installed is None or source is None or expected_mode is None:
+        raise LifecycleError(f"{target.name} omitted its attestation contract")
+    try:
+        evidence_stat = INSTALL_ATTESTATION_PATH.lstat()
+        evidence = json.loads(INSTALL_ATTESTATION_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise LifecycleError(f"install attestation is unavailable: {exc}") from exc
+    if not stat.S_ISREG(evidence_stat.st_mode):
+        raise LifecycleError("install attestation is not a regular file")
+    if evidence_stat.st_uid != 0 or stat.S_IMODE(evidence_stat.st_mode) != 0o644:
+        raise LifecycleError(
+            "install attestation owner/mode mismatch: "
+            f"uid={evidence_stat.st_uid}, mode={stat.S_IMODE(evidence_stat.st_mode):04o}"
+        )
+    daemon = evidence.get("daemon")
+    witness = evidence.get("witness")
+    launchd = evidence.get("launchd")
+    listener = evidence.get("listener")
+    if not all(
+        isinstance(item, dict)
+        for item in (daemon, witness, launchd, listener)
+    ):
+        raise LifecycleError("install attestation omitted required records")
+    source_sha256 = _sha256_file(source)
+    expected_path = str(installed.resolve(strict=True))
+    if evidence.get("schema_version") != 2:
+        raise LifecycleError("install attestation schema mismatch")
+    if evidence.get("source_sha256") != source_sha256:
+        raise LifecycleError("install attestation source SHA-256 mismatch")
+    if (
+        daemon.get("path") != expected_path
+        or daemon.get("sha256") != source_sha256
+        or daemon.get("uid") != 0
+        or daemon.get("mode") != expected_mode
+    ):
+        raise LifecycleError(f"installed daemon attestation mismatch: {daemon!r}")
+    expected_witness = Path(f"{INSTALL_ATTESTATION_PATH}.daemon")
+    try:
+        installed_stat = installed.stat()
+        witness_stat = expected_witness.lstat()
+    except OSError as exc:
+        raise LifecycleError(
+            f"install attestation witness is unavailable: {exc}"
+        ) from exc
+    if (
+        witness.get("path") != str(expected_witness)
+        or witness.get("dev") != witness_stat.st_dev
+        or witness.get("ino") != witness_stat.st_ino
+        or witness.get("size") != witness_stat.st_size
+        or witness.get("mtime") != int(witness_stat.st_mtime)
+        or witness.get("mtime_nsec")
+        != witness_stat.st_mtime_ns % 1_000_000_000
+        or not stat.S_ISREG(witness_stat.st_mode)
+        or witness_stat.st_uid != 0
+        or stat.S_IMODE(witness_stat.st_mode) != expected_mode
+        or witness_stat.st_dev != installed_stat.st_dev
+        or witness_stat.st_ino != installed_stat.st_ino
+        or witness_stat.st_nlink < 2
+    ):
+        raise LifecycleError(
+            f"install attestation witness mismatch: {witness!r}"
+        )
+    status = _daemon_status(_read_status()) or {}
+    _assert_install_attestation_runtime(evidence, status)
+
+
+def _install_attestation_artifacts() -> tuple[Path, ...]:
+    parent = INSTALL_ATTESTATION_PATH.parent
+    name = INSTALL_ATTESTATION_PATH.name
+    if not parent.exists():
+        return ()
+    return tuple(
+        path
+        for path in parent.iterdir()
+        if path.name == name or path.name.startswith(f"{name}.")
+    )
+
+
+def _remove_install_attestation_artifacts() -> None:
+    for path in _install_attestation_artifacts():
+        path.unlink(missing_ok=True)
+    try:
+        INSTALL_ATTESTATION_DIR.rmdir()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        if not INSTALL_ATTESTATION_DIR.exists():
+            raise
+
+
 def _assert_installed_payload(target: LifecycleTarget) -> None:
     for path in target.required_installed_paths:
         if not path.is_file():
@@ -1892,6 +2042,7 @@ def _assert_installed_payload(target: LifecycleTarget) -> None:
         )
 
     _assert_private_raw_log(LOG_PATH)
+    _assert_install_attestation(target)
 
     try:
         with LAUNCHD_PLIST.open("rb") as handle:
@@ -1916,6 +2067,7 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
         PF_TOKEN_PATH,
         PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
+        INSTALL_ATTESTATION_PATH,
         INSTALLED_DAEMON,
         INSTALLED_PRIMES,
         INSTALLED_FROZEN_DAEMON,
@@ -1924,6 +2076,16 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
             raise LifecycleError(f"installed lifecycle residue remains: {path}")
     if INSTALL_DIR.exists() and any(INSTALL_DIR.iterdir()):
         raise LifecycleError(f"installed lifecycle residue remains: {INSTALL_DIR}")
+    artifacts = _install_attestation_artifacts()
+    if artifacts:
+        raise LifecycleError(
+            f"installed lifecycle attestation residue remains: {artifacts!r}"
+        )
+    if INSTALL_ATTESTATION_DIR.exists():
+        raise LifecycleError(
+            "installed lifecycle attestation directory remains: "
+            f"{INSTALL_ATTESTATION_DIR}"
+        )
 
 
 def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
@@ -1936,11 +2098,20 @@ def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
         PF_TOKEN_PATH,
         PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
+        INSTALL_ATTESTATION_PATH,
     ):
         if path.exists():
             raise LifecycleError(f"refusing existing Slipstream state: {path}")
     if INSTALL_DIR.exists():
         raise LifecycleError(f"refusing existing install directory: {INSTALL_DIR}")
+    artifacts = _install_attestation_artifacts()
+    if artifacts:
+        raise LifecycleError(f"refusing existing install attestation: {artifacts!r}")
+    if INSTALL_ATTESTATION_DIR.exists():
+        raise LifecycleError(
+            "refusing existing install attestation directory: "
+            f"{INSTALL_ATTESTATION_DIR}"
+        )
     pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
     pf._assert_empty_anchor(runner, pf.SENTINEL_ANCHOR)
     return pf._pf_snapshot(runner), uid, gid
@@ -2037,8 +2208,13 @@ def _fallback_uninstall(
         token_released,
     ))
     if cleanup_proven:
-        for path in (LAUNCHD_PLIST, STATUS_PATH, TGWS_LINK_PATH):
+        for path in (
+            LAUNCHD_PLIST,
+            STATUS_PATH,
+            TGWS_LINK_PATH,
+        ):
             path.unlink(missing_ok=True)
+        _remove_install_attestation_artifacts()
         shutil.rmtree(INSTALL_DIR, ignore_errors=True)
     return errors
 
@@ -2093,6 +2269,21 @@ def run_lifecycle(
         sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
+        if target.name == "packaged-app":
+            stage = "attestation-failure-rollback"
+            failure_env = os.environ.copy()
+            failure_env["SLIPSTREAM_CI_FORCE_INSTALL_ATTESTATION_FAILURE"] = "1"
+            rejected = system.run(
+                target.install_command,
+                check=False,
+                env=failure_env,
+            )
+            if rejected.returncode == 0:
+                raise LifecycleError(
+                    "injected install attestation failure unexpectedly committed"
+                )
+            _assert_clean_install_state(runner)
+            pf._assert_same_snapshot(before, pf._pf_snapshot(runner))
         test_token = _acquire_test_pf_reference(runner)
         stage = "sentinel-anchor"
         rules = pf.build_redirect_rules(
@@ -2325,6 +2516,11 @@ def run_lifecycle(
     return {
         "result": "pass",
         "target": target.name,
+        "privileged_attestation": (
+            "commit_and_daemon_free_rollback"
+            if target.name == "packaged-app"
+            else "commit"
+        ),
         "cold_install": "active_local_routing_without_geph",
         "reinstall": "new_pid_and_payload_replaced",
         "active_start": "private_anchor_loaded",
@@ -2349,6 +2545,11 @@ def dry_run(target_name: str = "script") -> dict:
         "result": "dry-run",
         "target": target_name,
         "restricted_to": "disposable GitHub Actions macOS runner",
+        "privileged_attestation": (
+            "commit and injected-failure daemon-free rollback"
+            if target_name == "packaged-app"
+            else "commit"
+        ),
         "cold_install": "Geph unavailable; local routing and private PF stay active",
         "active_phase": "production Geph state with test-only wake/voice options",
         "packaged_tray": (

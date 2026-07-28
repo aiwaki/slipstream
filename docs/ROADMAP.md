@@ -55,16 +55,24 @@ reinstall, restart, and uninstall with a sibling anchor and a long-lived
 sentinel PF state. Cross-version rollback starts only after a safety-qualified
 release exists; stable distribution remains a separate M3 gate.
 
-The primary-Mac delivery failures exposed both kernel `lo0 (skip)` state and an
-unbounded startup resolver call. PRs #178 and #180 now lease and restore the
-loopback state, publish safe dormant status before network qualification, and
-bound system-DNS helpers under one startup deadline. The `140598b` disposable
-gate proved the stalled-resolver, PF-sentinel, browser, restart, and cleanup
-behavior, but it packaged superseded `geph-vendor-0.3.0` while the recorded
-release input is `geph-vendor-0.3.0-r1`. The unlaunched artifact is therefore
-not a workstation candidate. M0 next requires the revisioned artifact to pass
-the same gate on the exact merge commit; only then may one short, prearranged
-workstation smoke run with immediate rollback on the first failure.
+The primary-Mac delivery failures exposed kernel `lo0 (skip)` state, an
+unbounded startup resolver call, and a temporary coordinator that tried to hash
+the deliberately unreadable installed daemon. The first two boundaries are
+closed by disposable lifecycle gates. Installed-artifact attestation now
+belongs to the same privileged transaction that copies and starts the daemon:
+it verifies the exact regular-file identity, SHA-256, owner, mode, launchd PID,
+exclusive listener, StatusV2 state, and private-PF state, then atomically emits
+only bounded evidence for the tray. The record lives in persistent system
+Application Support rather than reboot-volatile `/var/run`; a root-only
+hard-link witness detects removal or replacement of the installed path without
+letting the tray read daemon bytes. Frozen installs remain root-only mode
+`0700`; the console-user baseline uses fixed macOS resolver and HTTPS tools
+instead of executing the installed PyInstaller daemon. The packaged disposable
+gate must prove both
+successful commit and injected post-verification rollback to a daemon-free
+baseline. After merge, exact-main CI/audit and the protected account-backed
+Geph/Chromium gate must pass on the new exact artifact before one short
+user-present workstation smoke with immediate rollback on the first failure.
 
 ## M1 - Autonomous Routing V1
 

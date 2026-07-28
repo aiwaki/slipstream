@@ -44,10 +44,12 @@ def test_baseline_resolver_timeout_kills_real_child(monkeypatch, tmp_path):
 
 def test_baseline_resolver_parses_bounded_child_output(monkeypatch, tmp_path):
     child = (
-        "import json; "
-        "print(json.dumps({'addresses': "
-        "['0.0.0.0', '127.0.0.1', '203.0.113.10', "
-        "'203.0.113.11', '203.0.113.12']}))"
+        "print('name: fast.example\\n"
+        "ip_address: 0.0.0.0\\n"
+        "ip_address: 127.0.0.1\\n"
+        "ip_address: 203.0.113.10\\n"
+        "ip_address: 203.0.113.11\\n"
+        "ip_address: 203.0.113.12')"
     )
     monkeypatch.setattr(
         tproxy,
@@ -68,6 +70,59 @@ def test_baseline_resolver_parses_bounded_child_output(monkeypatch, tmp_path):
         ("203.0.113.10", 443),
         ("203.0.113.11", 443),
     ]
+
+
+def test_baseline_children_use_fixed_macos_tools():
+    candidate = tproxy.install_guard.BaselineCandidate(
+        "example.com",
+        "203.0.113.10",
+        "/health",
+    )
+
+    assert tproxy._baseline_resolver_command("example.com") == [
+        "/usr/bin/dscacheutil",
+        "-q",
+        "host",
+        "-a",
+        "name",
+        "example.com",
+    ]
+    command = tproxy._baseline_probe_command(candidate)
+    assert command[0:2] == ["/usr/bin/curl", "--disable"]
+    assert "--noproxy" in command
+    assert "example.com:443:203.0.113.10" in command
+    assert command[-1] == "https://example.com/health"
+    assert tproxy.sys.executable not in command
+    assert os.path.abspath(tproxy.__file__) not in command
+
+
+def test_baseline_probe_requires_child_http_evidence(monkeypatch, tmp_path):
+    child = (
+        "print('{\"http_code\":204,\"bytes_received\":128}')"
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_baseline_probe_command",
+        lambda _candidate: [sys.executable, "-c", child],
+    )
+    candidate = tproxy.install_guard.BaselineCandidate(
+        "example.com",
+        "203.0.113.10",
+        "/",
+    )
+
+    result = tproxy._run_baseline_probe_candidate(
+        candidate,
+        _identity(tmp_path),
+        timeout=1.0,
+    )
+
+    assert result == tproxy.install_guard.ProbeResult(
+        True,
+        "ok",
+        status_code=204,
+        bytes_received=128,
+    )
 
 
 def test_baseline_resolve_cli_preserves_local_answers_without_root_or_network():

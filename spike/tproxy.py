@@ -247,6 +247,8 @@ SYSTEM_DNS_RESOLUTION_TTL = 5 * 60.0
 SYSTEM_DNS_DIAGNOSTIC_BUDGET = 5.0
 BASELINE_RESOLVE_TIMEOUT = 1.5
 BASELINE_PREFLIGHT_BUDGET = 10.0
+BASELINE_RESOLVER_BINARY = "/usr/bin/dscacheutil"
+BASELINE_PROBE_BINARY = "/usr/bin/curl"
 
 DEFAULT_IP_ATTEMPT_LIMIT = 2
 LOCAL_BYPASS_IP_ATTEMPT_LIMIT = 4
@@ -5515,27 +5517,31 @@ def _log_semantic_signal_server_error(error):
 
 
 def _baseline_probe_command(candidate):
-    if getattr(sys, "frozen", False):
-        command = [sys.executable]
-    else:
-        command = [sys.executable, os.path.abspath(__file__)]
-    return command + [
-        "--baseline-probe",
-        "--baseline-host", candidate.host,
-        "--baseline-ip", candidate.ip,
-        "--baseline-path", candidate.path,
+    return [
+        BASELINE_PROBE_BINARY,
+        "--disable",
+        "--silent",
+        "--show-error",
+        "--noproxy",
+        "*",
+        "--proto",
+        "=https",
+        "--http1.1",
+        "--resolve",
+        f"{candidate.host}:443:{candidate.ip}",
+        "--range",
+        "0-0",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        '{"http_code":%{http_code},"bytes_received":%{size_header}}',
+        "--url",
+        f"https://{candidate.host}{candidate.path}",
     ]
 
 
 def _baseline_resolver_command(host):
-    if getattr(sys, "frozen", False):
-        command = [sys.executable]
-    else:
-        command = [sys.executable, os.path.abspath(__file__)]
-    return command + [
-        "--baseline-resolve",
-        "--baseline-host", host,
-    ]
+    return [BASELINE_RESOLVER_BINARY, "-q", "host", "-a", "name", host]
 
 
 def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIMEOUT):
@@ -5559,15 +5565,16 @@ def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIM
         return ()
     if result.returncode != 0:
         return ()
-    try:
-        addresses = json.loads(result.stdout).get("addresses", ())
-    except (AttributeError, json.JSONDecodeError):
-        return ()
-    if not isinstance(addresses, list):
-        return ()
     answers = []
-    for address in addresses[: install_guard.MAX_CANDIDATES]:
-        if not isinstance(address, str):
+    for line in result.stdout.splitlines():
+        key, separator, raw_address = line.partition(":")
+        if not separator or key.strip() != "ip_address":
+            continue
+        address = raw_address.strip()
+        try:
+            if ipaddress.ip_address(address).version != 4:
+                continue
+        except ValueError:
             continue
         answers.append((
             socket.AF_INET,
@@ -5576,6 +5583,8 @@ def _run_baseline_resolver(host, port, identity, *, timeout=BASELINE_RESOLVE_TIM
             "",
             (address, port),
         ))
+        if len(answers) >= install_guard.MAX_CANDIDATES:
+            break
     return tuple(answers)
 
 
@@ -5637,13 +5646,26 @@ def _run_baseline_probe_candidate(
         result = subprocess.run(_baseline_probe_command(candidate), **kwargs)
     except (OSError, subprocess.TimeoutExpired):
         return install_guard.ProbeResult(False, "probe_process_unavailable")
-    if result.returncode == 0:
-        return install_guard.ProbeResult(True, "ok")
     try:
-        reason = json.loads(result.stdout).get("reason", "probe_failed")
-    except (AttributeError, json.JSONDecodeError):
-        reason = "probe_failed"
-    return install_guard.ProbeResult(False, str(reason)[:80])
+        payload = json.loads(result.stdout)
+        status_code = int(payload.get("http_code", 0))
+        bytes_received = int(payload.get("bytes_received", 0))
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return install_guard.ProbeResult(False, "probe_output_invalid")
+    if result.returncode != 0:
+        return install_guard.ProbeResult(False, "connection_unavailable")
+    if not 100 <= status_code <= 599 or bytes_received <= 0:
+        return install_guard.ProbeResult(
+            False,
+            "no_http_response",
+            bytes_received=max(0, bytes_received),
+        )
+    return install_guard.ProbeResult(
+        True,
+        "ok",
+        status_code=status_code,
+        bytes_received=bytes_received,
+    )
 
 
 def _baseline_preflight():
@@ -9044,6 +9066,13 @@ LAUNCHD_PLIST = f"/Library/LaunchDaemons/{LAUNCHD_LABEL}.plist"
 LOG_PATH = "/var/log/slipstream.log"
 OBSOLETE_NEWSYSLOG_CONFIG_PATH = f"/etc/newsyslog.d/{LAUNCHD_LABEL}.conf"
 INSTALL_DIR = "/usr/local/slipstream"   # NOT under ~/Documents (TCC-protected)
+INSTALL_ATTESTATION_DIR = "/Library/Application Support/dev.slipstream.tray"
+INSTALL_ATTESTATION_PATH = os.path.join(
+    INSTALL_ATTESTATION_DIR,
+    "install-attestation.json",
+)
+INSTALL_ATTESTATION_SCHEMA_VERSION = 2
+_INSTALL_ATTESTATION_FAILURE_ENV = "SLIPSTREAM_CI_FORCE_INSTALL_ATTESTATION_FAILURE"
 LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 5
 
@@ -9417,35 +9446,50 @@ def _wait_for_listener_state(port, present, timeout=8.0):
     return _tcp_listener_present(port) == present
 
 
-def _installed_daemon_readiness(port):
+def _installed_daemon_readiness_snapshot(port):
     status = _daemon_status_record()
     if not status:
-        return False, "status missing"
+        return False, "status missing", None, False
     updated_at = status.get("updated_at", status.get("ts", 0))
     if not isinstance(updated_at, (int, float)) or time.time() - updated_at > 15:
-        return False, "status stale"
+        return False, "status stale", None, False
     if status.get("state") not in {"active", "dormant"}:
-        return False, f"unexpected state {status.get('state')!r}"
+        return False, f"unexpected state {status.get('state')!r}", None, False
     recovery = _daemon_recovery_record() or {}
     if recovery.get("reason") == BASELINE_GUARD_BLOCK_REASON:
-        return False, "daemon rolled back after baseline HTTPS qualification failed"
+        return (
+            False,
+            "daemon rolled back after baseline HTTPS qualification failed",
+            None,
+            False,
+        )
     if recovery.get("reason") == BASELINE_GUARD_ROLLBACK_REASON:
-        return False, "daemon is still restoring the system HTTPS path"
+        return False, "daemon is still restoring the system HTTPS path", None, False
     if recovery.get("reason") == PF_LOOPBACK_UNAVAILABLE_REASON:
-        return False, "daemon could not qualify the PF loopback path"
+        return False, "daemon could not qualify the PF loopback path", None, False
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
-        return False, "status pid is not the installed daemon"
+        return False, "status pid is not the installed daemon", None, False
     listener_pids = _listener_pids(port)
     if listener_pids != [pid]:
-        return False, (
-            f"listener 127.0.0.1:{port} is not owned exclusively by "
-            "the status pid"
+        return (
+            False,
+            (
+                f"listener 127.0.0.1:{port} is not owned exclusively by "
+                "the status pid"
+            ),
+            None,
+            False,
         )
     rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
     if rules_loaded != (status.get("state") == "active"):
-        return False, "PF state does not match daemon state"
-    return True, "ready"
+        return False, "PF state does not match daemon state", None, rules_loaded
+    return True, "ready", status, rules_loaded
+
+
+def _installed_daemon_readiness(port):
+    ready, reason, _status, _rules_loaded = _installed_daemon_readiness_snapshot(port)
+    return ready, reason
 
 
 def _installed_daemon_ready(port):
@@ -9480,9 +9524,293 @@ def _write_launchd_plist_atomic(text):
             pass
 
 
+def _sha256_regular_file(path):
+    path_stat = os.lstat(path)
+    if not stat.S_ISREG(path_stat.st_mode):
+        raise RuntimeError(f"attested daemon path is not a regular file: {path}")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        opened_stat = os.fstat(fd)
+        if (
+            not stat.S_ISREG(opened_stat.st_mode)
+            or opened_stat.st_dev != path_stat.st_dev
+            or opened_stat.st_ino != path_stat.st_ino
+        ):
+            raise RuntimeError(f"attested daemon identity changed before open: {path}")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        final_stat = os.fstat(fd)
+        if (
+            final_stat.st_dev != opened_stat.st_dev
+            or final_stat.st_ino != opened_stat.st_ino
+            or final_stat.st_size != opened_stat.st_size
+            or final_stat.st_mtime_ns != opened_stat.st_mtime_ns
+        ):
+            raise RuntimeError(f"attested daemon changed while hashing: {path}")
+        return digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def _install_attestation_record(
+    installed_path,
+    source_sha256,
+    expected_mode,
+    port,
+    *,
+    witness_path,
+    expected_uid=0,
+):
+    path_stat = os.lstat(installed_path)
+    witness_stat = os.lstat(witness_path)
+    mode = stat.S_IMODE(path_stat.st_mode)
+    if not stat.S_ISREG(path_stat.st_mode):
+        raise RuntimeError("installed daemon attestation rejected a non-regular path")
+    if path_stat.st_uid != expected_uid:
+        raise RuntimeError(
+            "installed daemon attestation rejected owner "
+            f"uid={path_stat.st_uid}, expected={expected_uid}"
+        )
+    if mode != expected_mode:
+        raise RuntimeError(
+            "installed daemon attestation rejected mode "
+            f"{mode:04o}, expected={expected_mode:04o}"
+        )
+    if (
+        not stat.S_ISREG(witness_stat.st_mode)
+        or witness_stat.st_uid != path_stat.st_uid
+        or witness_stat.st_gid != path_stat.st_gid
+        or stat.S_IMODE(witness_stat.st_mode) != mode
+        or witness_stat.st_dev != path_stat.st_dev
+        or witness_stat.st_ino != path_stat.st_ino
+        or witness_stat.st_nlink < 2
+    ):
+        raise RuntimeError(
+            "installed daemon attestation witness does not retain "
+            "the installed runtime identity"
+        )
+    installed_sha256 = _sha256_regular_file(installed_path)
+    if installed_sha256 != source_sha256:
+        raise RuntimeError("installed daemon SHA-256 does not match its source artifact")
+    deadline = time.monotonic() + 5.0
+    ready = False
+    reason = "status missing"
+    status = None
+    pf_active = False
+    while time.monotonic() < deadline:
+        ready, reason, status, pf_active = _installed_daemon_readiness_snapshot(
+            port
+        )
+        if ready:
+            break
+        if "baseline HTTPS qualification failed" in reason:
+            break
+        time.sleep(0.05)
+    if not ready or status is None:
+        raise RuntimeError(f"installed daemon lost readiness before attestation: {reason}")
+    state = status.get("state")
+    return {
+        "schema_version": INSTALL_ATTESTATION_SCHEMA_VERSION,
+        "source_sha256": source_sha256,
+        "daemon": {
+            "path": os.path.realpath(installed_path),
+            "sha256": installed_sha256,
+            "uid": path_stat.st_uid,
+            "gid": path_stat.st_gid,
+            "mode": mode,
+        },
+        "witness": {
+            "path": os.path.realpath(witness_path),
+            "dev": witness_stat.st_dev,
+            "ino": witness_stat.st_ino,
+            "size": witness_stat.st_size,
+            "mtime": int(witness_stat.st_mtime),
+            "mtime_nsec": witness_stat.st_mtime_ns % 1_000_000_000,
+        },
+        "launchd": {
+            "label": LAUNCHD_LABEL,
+            "pid": status.get("pid"),
+        },
+        "listener": {
+            "host": "127.0.0.1",
+            "port": port,
+        },
+        "state": state,
+        "pf_active": pf_active,
+    }
+
+
+def _install_attestation_witness_path(evidence_path):
+    return f"{evidence_path}.daemon"
+
+
+def _ensure_install_attestation_directory(
+    parent,
+    *,
+    expected_uid=0,
+    expected_gid=0,
+):
+    try:
+        os.mkdir(parent, 0o755)
+        os.chown(parent, expected_uid, expected_gid)
+    except FileExistsError:
+        pass
+    parent_stat = os.lstat(parent)
+    if not stat.S_ISDIR(parent_stat.st_mode):
+        raise RuntimeError(
+            f"install attestation parent is not a directory: {parent}"
+        )
+    if (
+        parent_stat.st_uid != expected_uid
+        or parent_stat.st_gid != expected_gid
+    ):
+        raise RuntimeError(
+            "install attestation parent has unexpected ownership: "
+            f"uid={parent_stat.st_uid}, gid={parent_stat.st_gid}"
+        )
+    os.chmod(parent, 0o755)
+
+
+def _write_install_attestation(
+    installed_path,
+    source_sha256,
+    expected_mode,
+    port,
+    *,
+    evidence_path=None,
+    expected_uid=0,
+    expected_gid=0,
+):
+    evidence_path = evidence_path or INSTALL_ATTESTATION_PATH
+    parent = os.path.dirname(evidence_path)
+    witness_path = _install_attestation_witness_path(evidence_path)
+    tmp = f"{evidence_path}.tmp.{os.getpid()}"
+    witness_tmp = f"{witness_path}.tmp.{os.getpid()}"
+    _ensure_install_attestation_directory(
+        parent,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+    )
+    try:
+        try:
+            os.remove(witness_tmp)
+        except FileNotFoundError:
+            pass
+        os.link(
+            installed_path,
+            witness_tmp,
+            follow_symlinks=False,
+        )
+        os.replace(witness_tmp, witness_path)
+        record = _install_attestation_record(
+            installed_path,
+            source_sha256,
+            expected_mode,
+            port,
+            witness_path=witness_path,
+            expected_uid=expected_uid,
+        )
+        if (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            and os.environ.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+            and os.environ.get(_INSTALL_ATTESTATION_FAILURE_ENV) == "1"
+        ):
+            raise RuntimeError("disposable install attestation failure injected")
+        payload = (
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, flags, 0o600)
+        try:
+            os.write(fd, payload)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.chown(tmp, expected_uid, expected_gid)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, evidence_path)
+        directory_flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            directory_flags |= os.O_NOFOLLOW
+        directory_fd = os.open(parent, directory_flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        for temporary in (tmp, witness_tmp):
+            try:
+                os.remove(temporary)
+            except FileNotFoundError:
+                pass
+    return record
+
+
+def _harden_installed_identity(path, mode, *, owner_uid=0, owner_gid=0):
+    os.chown(INSTALL_DIR, owner_uid, owner_gid)
+    os.chmod(INSTALL_DIR, 0o700)
+    os.chown(path, owner_uid, owner_gid)
+    os.chmod(path, mode)
+
+
+def _install_attestation_artifacts():
+    parent = os.path.dirname(INSTALL_ATTESTATION_PATH)
+    basename = os.path.basename(INSTALL_ATTESTATION_PATH)
+    try:
+        entries = os.scandir(parent)
+    except FileNotFoundError:
+        return []
+    with entries:
+        return [
+            entry.path
+            for entry in entries
+            if entry.name == basename or entry.name.startswith(f"{basename}.")
+        ]
+
+
+def _remove_install_attestation_artifacts():
+    clean = True
+    for path in _install_attestation_artifacts():
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            clean = False
+    parent = os.path.dirname(INSTALL_ATTESTATION_PATH)
+    try:
+        os.rmdir(parent)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+            clean = False
+    return clean
+
+
 def _remove_install_runtime_artifacts():
     shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-    for path in (_STRAT_PATH, _AUTO_GEPH_PATH, STATUS_PATH, TGWS_LINK_PATH):
+    for path in (
+        _STRAT_PATH,
+        _AUTO_GEPH_PATH,
+        STATUS_PATH,
+        TGWS_LINK_PATH,
+    ):
         try:
             os.remove(path)
         except FileNotFoundError:
@@ -9507,8 +9835,11 @@ def _remove_daemon_status_artifacts():
             pass
         except OSError:
             return False
-    return semantic_route_signal_runtime.remove_stale_owned_socket(
-        SEMANTIC_SIGNAL_SOCKET_PATH
+    return (
+        _remove_install_attestation_artifacts()
+        and semantic_route_signal_runtime.remove_stale_owned_socket(
+            SEMANTIC_SIGNAL_SOCKET_PATH
+        )
     )
 
 
@@ -9595,7 +9926,7 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
         TGWS_LINK_PATH,
         SEMANTIC_SIGNAL_SOCKET_PATH,
         PF_SKIP_LEASE_PATH,
-    ))
+    )) and not _install_attestation_artifacts()
     clean = all((
         disable_result.returncode == 0,
         processes_clean,
@@ -9616,8 +9947,16 @@ def do_install(port):
         if not frozen:
             # Validate before stopping a working installed daemon.
             _script_runtime_payload(__file__)
+            source_identity = os.path.abspath(__file__)
+            installed_identity_name = "tproxy.py"
+            installed_identity_mode = 0o600
         elif not os.path.isfile(sys.executable) or not os.access(sys.executable, os.X_OK):
             raise RuntimeError("frozen daemon payload is not executable")
+        else:
+            source_identity = os.path.abspath(sys.executable)
+            installed_identity_name = os.path.basename(sys.executable)
+            installed_identity_mode = 0o700
+        source_sha256 = _sha256_regular_file(source_identity)
     except Exception as error:
         print(f"install preflight failed: {error}", file=sys.stderr)
         return False
@@ -9673,6 +10012,8 @@ def do_install(port):
             )
             prog_args = [py, script, "--port", str(port)]
             uninstall_hint = f"sudo {py} {script} --uninstall"
+        installed_identity = os.path.join(INSTALL_DIR, installed_identity_name)
+        _harden_installed_identity(installed_identity, installed_identity_mode)
         if tgws_secret_backup:
             with open(secret_path, "w") as handle:
                 handle.write(tgws_secret_backup.strip())
@@ -9694,6 +10035,12 @@ def do_install(port):
                 "daemon did not publish a healthy active/dormant state: "
                 f"{reason}"
             )
+        _write_install_attestation(
+            installed_identity,
+            source_sha256,
+            installed_identity_mode,
+            port,
+        )
     except Exception as error:
         rollback_clean = True
         if mutated:

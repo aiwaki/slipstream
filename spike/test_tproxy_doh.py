@@ -9,8 +9,10 @@ import logging
 import os
 import plistlib
 import re
+import shutil
 import signal
 import ssl
+import stat
 import sys
 import threading
 from pathlib import Path
@@ -104,6 +106,11 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: False)
     monkeypatch.setattr(tproxy, "_daemon_recovery_record", lambda: None)
     monkeypatch.setattr(tproxy, "PF_TOKEN_PATH", str(tmp_path / "pf.token"))
+    monkeypatch.setattr(
+        tproxy,
+        "INSTALL_ATTESTATION_PATH",
+        str(tmp_path / "install-attestation.json"),
+    )
     monkeypatch.setattr(
         tproxy,
         "PF_SKIP_LEASE_PATH",
@@ -1145,6 +1152,7 @@ def test_install_bootstrap_failure_rolls_back_and_disables_label(monkeypatch, tm
     monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "_harden_installed_identity", lambda *_args: None)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
     monkeypatch.setattr(tproxy, "_pf_flush", lambda: SimpleNamespace(returncode=0))
     monkeypatch.setattr(tproxy, "_pf_release_enable_token", lambda: None)
@@ -1195,6 +1203,7 @@ def test_reinstall_quiesces_owned_daemon_before_replacing_runtime(
     monkeypatch.setattr(tproxy, "_disable_and_cleanup_install", quiesce)
     monkeypatch.setattr(tproxy, "_replace_tree_resilient", replace)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "_harden_installed_identity", lambda *_args: None)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
     monkeypatch.setattr(
         tproxy,
@@ -1202,6 +1211,7 @@ def test_reinstall_quiesces_owned_daemon_before_replacing_runtime(
         lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda *_args: True)
+    monkeypatch.setattr(tproxy, "_write_install_attestation", lambda *_args: None)
 
     assert tproxy.do_install(1080)
     assert events[:2] == [
@@ -1407,9 +1417,11 @@ def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
     monkeypatch.setattr(tproxy, "_run", fake_run)
     monkeypatch.setattr(tproxy, "_bootout_installed_launchd_job", lambda: True)
     monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(tproxy, "_harden_installed_identity", lambda *_args: None)
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
     monkeypatch.setattr(tproxy, "_wait_for_listener_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "_write_install_attestation", lambda *_args: None)
 
     assert tproxy.do_install(1080)
 
@@ -1426,6 +1438,183 @@ def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
         "system",
         str(plist),
     ) in commands
+
+
+def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
+    installed = tmp_path / "slipstreamd"
+    installed.write_bytes(b"qualified daemon")
+    installed.chmod(0o700)
+    evidence_dir = tmp_path / "attestation"
+    evidence = evidence_dir / "install-attestation.json"
+    source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        tproxy,
+        "_installed_daemon_readiness_snapshot",
+        lambda _port: (
+            True,
+            "ready",
+            {"state": "active", "pid": 4242},
+            True,
+        ),
+    )
+
+    record = tproxy._write_install_attestation(
+        str(installed),
+        source_sha256,
+        0o700,
+        1080,
+        evidence_path=str(evidence),
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+
+    assert record["daemon"]["sha256"] == source_sha256
+    assert record["launchd"] == {
+        "label": "dev.slipstream.tproxy",
+        "pid": 4242,
+    }
+    assert stat.S_IMODE(evidence.stat().st_mode) == 0o644
+    assert json.loads(evidence.read_text()) == record
+    witness = Path(record["witness"]["path"])
+    assert witness == Path(f"{evidence}.daemon")
+    assert witness.stat().st_ino == installed.stat().st_ino
+    assert witness.stat().st_nlink >= 2
+
+    installed.write_bytes(b"tampered daemon")
+    with pytest.raises(RuntimeError, match="does not match"):
+        tproxy._install_attestation_record(
+            str(installed),
+            source_sha256,
+            0o700,
+            1080,
+            witness_path=str(witness),
+            expected_uid=os.getuid(),
+        )
+
+
+def test_install_attestation_retries_a_dormant_to_active_transition(
+    monkeypatch, tmp_path
+):
+    installed = tmp_path / "slipstreamd"
+    installed.write_bytes(b"qualified daemon")
+    installed.chmod(0o700)
+    source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
+    witness = tmp_path / "attestation-witness"
+    os.link(installed, witness)
+    snapshots = iter(
+        (
+            (False, "PF state does not match daemon state", None, True),
+            (
+                True,
+                "ready",
+                {"state": "active", "pid": 4242},
+                True,
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_installed_daemon_readiness_snapshot",
+        lambda _port: next(snapshots),
+    )
+    monkeypatch.setattr(tproxy.time, "sleep", lambda _seconds: None)
+
+    record = tproxy._install_attestation_record(
+        str(installed),
+        source_sha256,
+        0o700,
+        1080,
+        witness_path=str(witness),
+        expected_uid=os.getuid(),
+    )
+
+    assert record["state"] == "active"
+    assert record["pf_active"] is True
+    assert record["launchd"]["pid"] == 4242
+
+
+def test_install_attestation_path_persists_across_reboot() -> None:
+    assert not tproxy.INSTALL_ATTESTATION_DIR.startswith("/var/run/")
+    assert not tproxy.INSTALL_ATTESTATION_DIR.startswith("/private/var/run/")
+    assert tproxy.INSTALL_ATTESTATION_DIR.startswith(
+        "/Library/Application Support/"
+    )
+
+
+def test_install_attestation_rejects_symlink_parent(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    parent = tmp_path / "attestation"
+    parent.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="not a directory"):
+        tproxy._ensure_install_attestation_directory(
+            str(parent),
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_install_attestation_cleanup_removes_witness_and_empty_parent(
+    monkeypatch, tmp_path
+) -> None:
+    parent = tmp_path / "attestation"
+    evidence = parent / "install-attestation.json"
+    parent.mkdir()
+    evidence.write_text("{}")
+    Path(f"{evidence}.daemon").write_text("witness")
+    Path(f"{evidence}.tmp.42").write_text("temporary")
+    monkeypatch.setattr(tproxy, "INSTALL_ATTESTATION_PATH", str(evidence))
+
+    assert tproxy._remove_install_attestation_artifacts()
+    assert not parent.exists()
+
+
+def test_install_attestation_failure_rolls_back_daemon_free(monkeypatch, tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    executable = bundle / "slipstreamd"
+    executable.write_bytes(b"qualified daemon")
+    executable.chmod(0o755)
+    install = tmp_path / "runtime" / "slipstream"
+    plist = tmp_path / "daemon.plist"
+    cleanup_calls = []
+
+    def cleanup(_port, remove_runtime=True):
+        cleanup_calls.append(remove_runtime)
+        if remove_runtime:
+            shutil.rmtree(install, ignore_errors=True)
+            plist.unlink(missing_ok=True)
+        return True
+
+    monkeypatch.setattr(tproxy.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tproxy.sys, "executable", str(executable))
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(plist))
+    monkeypatch.setattr(tproxy, "_disable_and_cleanup_install", cleanup)
+    monkeypatch.setattr(tproxy, "ensure_private_log_files", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_harden_installed_identity",
+        lambda path, mode: os.chmod(path, mode),
+    )
+    monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(tproxy, "_wait_for_installed_daemon", lambda *_args: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_write_install_attestation",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("attestation rejected")),
+    )
+
+    assert not tproxy.do_install(1080)
+    assert cleanup_calls == [False, True]
+    assert not install.exists()
+    assert not plist.exists()
 
 
 def test_installed_daemon_command_accepts_real_venv_interpreter(

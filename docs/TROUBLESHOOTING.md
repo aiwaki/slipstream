@@ -94,6 +94,41 @@ only as a PID fallback, then requires that PID's exact installed command to run
 as root; a mapped executable returned by `lsof` must still match. Unknown or
 user-owned listeners are never accepted or terminated.
 
+### Install validator reports `Permission denied` for `slipstreamd`
+
+The installed frozen daemon and its directory are root-only (`0700`). An
+unprivileged tray or temporary coordinator must never open
+`/usr/local/slipstream/slipstreamd` to compare its bytes. The 2026-07-28
+workstation transaction did that after an otherwise healthy install, received
+`Permission denied`, and correctly rolled back.
+
+PR #245 CI run `30349298867` also proved that mode `0700` is too restrictive:
+both installed lifecycle jobs kept the daemon safely dormant because the old
+console-user baseline child tried to execute the installed runtime. Run
+`30350707555` then proved that execute-only `0711` is still insufficient:
+PyInstaller reads its own executable while starting. No workstation was
+mutated in either run. The corrected boundary keeps the installed runtime
+root-only and runs bounded console-user DNS and HTTPS qualification through
+fixed `/usr/bin/dscacheutil` and `/usr/bin/curl` children instead. The curl
+child ignores user configuration and proxy environment and must return a
+verified HTTP status plus header bytes.
+
+The privileged installer now hashes the source before mutation, verifies the
+installed regular file after launch, and requires exact owner, mode, launchd
+PID, exclusive listener, fresh StatusV2 state, and matching private-PF state.
+Only then may it atomically publish
+`/Library/Application Support/dev.slipstream.tray/install-attestation.json`.
+That persistent root-owned record survives reboot. A sibling root-only hard-link
+witness retains the installed daemon inode without exposing its bytes; deleting
+or replacing the installed path reduces or changes that identity and invalidates
+the record even though the tray cannot traverse the `0700` install directory.
+The tray accepts the bounded record only when its source and installed SHA-256
+equal the current bundled daemon and the witness still has the exact attested
+device/inode with at least two links. Missing, oversized, symlinked, stale, or
+mismatched evidence requests a normal privileged reinstall. Any publication
+failure executes the same exact rollback and removes the evidence, witness, and
+temporary artifacts.
+
 ### Install rolls back with `status missing`
 
 The 2026-07-20 controlled workstation validation found a startup ordering bug.

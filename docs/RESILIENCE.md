@@ -30,7 +30,7 @@ YouTube/googlevideo.
 | Area | Current state | Remaining work |
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
-| Startup qualification | publishes a probe-free `dormant` snapshot before network probes; system-DNS lookups run in killable console-user child processes under per-host and total preflight deadlines; packaged CI blackholes the first neutral resolver target and requires a later target to activate; exact-main CI `30318303005` and protected account-backed browser run `30318687293` passed; a later workstation transaction rolled back safely when its unprivileged coordinator could not hash the root-only installed daemon | move installed-daemon attestation into the privileged transaction, prove commit and rollback on a disposable Mac, then complete one user-present workstation smoke |
+| Startup qualification | publishes a probe-free `dormant` snapshot before network probes; system DNS and HTTPS checks run in killable console-user `/usr/bin/dscacheutil` and `/usr/bin/curl` child processes under per-host and total preflight deadlines, without executing the installed daemon; the privileged installer verifies the root-only daemon's exact path, SHA-256, owner, mode, launchd PID, listener, StatusV2, and private-PF state before atomically publishing persistent bounded evidence plus a root-only hard-link inode witness for the tray; the unprivileged tray never opens the installed binary, and a removed or replaced runtime invalidates the witness | prove successful commit and injected attestation-failure rollback in packaged disposable CI, repeat exact-main and protected exact-artifact gates, then complete one user-present workstation smoke |
 | Crash restart | launchd `KeepAlive` | none |
 | PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | keep both privileged sentinel jobs required in CI and add cross-version rollback after the first safety-qualified release |
 | Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
@@ -62,6 +62,16 @@ because macOS includes the shared state table in that modifier.
 `scripts/pf_installed_lifecycle_smoke.py` is the second disposable gate. Its
 fast job installs the script-mode LaunchDaemon; a separate job builds the real
 arm64 Tauri `.app` and installs the frozen daemon embedded in its resources.
+Before the packaged cold install, the gate injects a failure after privileged
+identity verification and requires the installer to return nonzero, remove the
+exact launchd label, plist, private PF state, enable token, status, socket,
+attestation record, and root runtime, and restore the exact global PF snapshot.
+The successful path then requires a root-owned mode-`0644` evidence record whose
+source and installed hashes match the packaged daemon, whose installed identity
+is root-only mode `0700`, and whose launchd PID, listener, StatusV2 state, and PF
+state agree. The bounded console-user baseline children use fixed macOS system
+tools and never execute or read the installed daemon. The tray validates only
+that bounded record against its bundled daemon.
 Both modes prove a missing Geph backend leaves PF dormant, repeat installation,
 briefly activate the existing local-only mode, restart the daemon, and uninstall
 it. They then run two bounded lifecycle cycles: `SIGSTOP`/`SIGCONT` crosses a

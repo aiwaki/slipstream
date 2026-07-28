@@ -1337,6 +1337,35 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(lifecycle.LifecycleError, "not a regular file"):
                 lifecycle._assert_private_raw_log(log, expected_uid=os.getuid())
 
+    def test_install_attestation_state_is_a_coherent_install_snapshot(self) -> None:
+        evidence = {
+            "launchd": {
+                "label": "dev.slipstream.tproxy",
+                "pid": 4242,
+            },
+            "listener": {
+                "host": "127.0.0.1",
+                "port": 1080,
+            },
+            "state": "dormant",
+            "pf_active": False,
+        }
+
+        lifecycle._assert_install_attestation_runtime(
+            evidence,
+            {"state": "active", "pid": 4242},
+        )
+
+        evidence["pf_active"] = True
+        with self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "PF state mismatch",
+        ):
+            lifecycle._assert_install_attestation_runtime(
+                evidence,
+                {"state": "active", "pid": 4242},
+            )
+
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

@@ -9,6 +9,7 @@
 
 mod diagnostics;
 mod geph_config;
+mod install_attestation;
 mod native_messaging;
 mod status_client;
 
@@ -38,6 +39,9 @@ use diagnostics::{
 use geph_config::{
     geph_config_set, geph_enabled, geph_field, geph_secret, geph_secret_availability,
     keychain_delete, keychain_set, GephSecretAvailability,
+};
+use install_attestation::{
+    install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
 };
 use serde_json::{json, Value};
 use status_client::{read_status, STATUS_PATH};
@@ -80,6 +84,7 @@ const LOG_PATH: &str = "/var/log/slipstream.log";
 const LAUNCHD_LABEL: &str = "dev.slipstream.tproxy";
 const LAUNCHD_PLIST: &str = "/Library/LaunchDaemons/dev.slipstream.tproxy.plist";
 const INSTALLED_DAEMON: &str = "/usr/local/slipstream/slipstreamd";
+const DAEMON_PROXY_PORT: u16 = 1080;
 const TGWS_ACCEPTED_PATH: &str = "/var/tmp/dev.slipstream.tgws.accepted";
 const DAEMON_RECOVERY_STATUS_PATH: &str = "/var/tmp/dev.slipstream.daemon-recovery.json";
 const DAEMON_WATCHDOG_MISSES: u8 = 3;
@@ -285,6 +290,22 @@ fn install_diagnostic_value(
     installed_daemon: &Path,
     launchd_plist: &Path,
 ) -> Value {
+    install_diagnostic_value_at(
+        bundled_daemon,
+        installed_daemon,
+        launchd_plist,
+        Path::new(INSTALL_ATTESTATION_PATH),
+        0,
+    )
+}
+
+fn install_diagnostic_value_at(
+    bundled_daemon: Option<&Path>,
+    installed_daemon: &Path,
+    launchd_plist: &Path,
+    attestation_path: &Path,
+    expected_attestation_uid: u32,
+) -> Value {
     let bundled_daemon_path = bundled_daemon.map(|path| path.to_string_lossy().into_owned());
     let bundled_daemon_exists = bundled_daemon.map(|path| path.exists()).unwrap_or(false);
     let bundled_daemon_format = bundled_daemon.and_then(daemon_binary_format);
@@ -296,14 +317,19 @@ fn install_diagnostic_value(
             None
         }
     });
-    let installed_daemon_exists = installed_daemon.exists();
-    let installed_daemon_matches_bundle = bundled_daemon.and_then(|path| {
-        if path.exists() && installed_daemon_exists {
-            Some(same_file_bytes(path, installed_daemon))
-        } else {
-            None
-        }
+    let attestation = bundled_daemon.and_then(|path| {
+        install_attestation_at(
+            attestation_path,
+            path,
+            installed_daemon,
+            LAUNCHD_LABEL,
+            DAEMON_PROXY_PORT,
+            expected_attestation_uid,
+        )
     });
+    let installed_daemon_exists =
+        fs::symlink_metadata(installed_daemon).is_ok() || attestation.is_some();
+    let installed_daemon_matches_bundle = bundled_daemon.map(|_| attestation.is_some());
     let launchd_plist_uses_installed_daemon = fs::read_to_string(launchd_plist)
         .ok()
         .map(|raw| launchd_plist_uses_daemon(&raw, installed_daemon));
@@ -317,6 +343,9 @@ fn install_diagnostic_value(
         "bundled_daemon_executable": bundled_daemon_executable,
         "bundled_daemon_valid": bundled_daemon_valid,
         "installed_daemon_matches_bundle": installed_daemon_matches_bundle,
+        "install_attestation_path": attestation_path.to_string_lossy(),
+        "install_attestation_valid": attestation.is_some(),
+        "install_attestation": attestation,
         "launchd_label": LAUNCHD_LABEL,
         "launchd_plist": launchd_plist.to_string_lossy(),
         "launchd_plist_uses_installed_daemon": launchd_plist_uses_installed_daemon,
@@ -665,11 +694,13 @@ fn launchd_plist_uses_bundled_daemon(raw: &str) -> bool {
     launchd_plist_uses_daemon(raw, Path::new(INSTALLED_DAEMON))
 }
 
-fn same_file_bytes(left: &Path, right: &Path) -> bool {
-    match (fs::read(left), fs::read(right)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
+fn daemon_install_attestation(bundled: &Path) -> Option<InstallAttestation> {
+    install_attestation(
+        bundled,
+        Path::new(INSTALLED_DAEMON),
+        LAUNCHD_LABEL,
+        DAEMON_PROXY_PORT,
+    )
 }
 
 fn daemon_needs_install(bundled: &Path) -> bool {
@@ -679,7 +710,7 @@ fn daemon_needs_install(bundled: &Path) -> bool {
     if !launchd_plist_uses_bundled_daemon(&raw_plist) {
         return true;
     }
-    !same_file_bytes(bundled, Path::new(INSTALLED_DAEMON))
+    daemon_install_attestation(bundled).is_none()
 }
 
 fn launchd_label_disabled_from_output(raw: &str, label: &str) -> Option<bool> {
@@ -2969,7 +3000,7 @@ mod tests {
         finish_exit_menu_refresh, geph_launch_agent_paths, geph_launch_agent_plist,
         geph_launch_domain, geph_launch_target, geph_launcher_script,
         geph_launcher_script_with_log_limits, geph_lifecycle_diagnostic_value, harden_geph_dir,
-        install_diagnostic_value, launchd_label_disabled_from_output,
+        install_diagnostic_value_at, launchd_label_disabled_from_output,
         launchd_plist_uses_bundled_daemon, listener_pid_from_netstat, log_snapshot_shell,
         osascript_dialog_args, redact_sensitive_text, remove_owned_geph_runtime,
         route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
@@ -2982,7 +3013,7 @@ mod tests {
         GEPH_STDERR_LOG_FILE,
     };
     use serde_json::json;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
     use std::sync::Mutex;
 
@@ -3626,11 +3657,15 @@ mod tests {
         let bundled = dir.join("bundled-slipstreamd");
         let installed = dir.join("installed-slipstreamd");
         let plist = dir.join("dev.slipstream.tproxy.plist");
+        let attestation = dir.join("install-attestation.json");
+        let witness = std::path::PathBuf::from(format!("{}.daemon", attestation.display()));
         let daemon_v1 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 1];
         let daemon_v2 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 2];
         std::fs::write(&bundled, daemon_v1).unwrap();
         std::fs::set_permissions(&bundled, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(&installed, daemon_v1).unwrap();
+        std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::hard_link(&installed, &witness).unwrap();
         std::fs::write(
             &plist,
             format!(
@@ -3639,14 +3674,59 @@ mod tests {
             ),
         )
         .unwrap();
+        let daemon_sha256 = crate::install_attestation::file_sha256(&bundled).unwrap();
+        let witness_metadata = std::fs::symlink_metadata(&witness).unwrap();
+        std::fs::write(
+            &attestation,
+            serde_json::to_vec(&json!({
+                "schema_version": 2,
+                "source_sha256": daemon_sha256,
+                "daemon": {
+                    "path": installed,
+                    "sha256": daemon_sha256,
+                    "uid": 0,
+                    "gid": 0,
+                    "mode": 0o700
+                },
+                "witness": {
+                    "path": witness,
+                    "dev": witness_metadata.dev(),
+                    "ino": witness_metadata.ino(),
+                    "size": witness_metadata.len(),
+                    "mtime": witness_metadata.mtime(),
+                    "mtime_nsec": witness_metadata.mtime_nsec()
+                },
+                "launchd": {
+                    "label": "dev.slipstream.tproxy",
+                    "pid": 4242
+                },
+                "listener": {
+                    "host": "127.0.0.1",
+                    "port": 1080
+                },
+                "state": "active",
+                "pf_active": true
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::set_permissions(&attestation, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let attestation_uid = std::fs::symlink_metadata(&attestation).unwrap().uid();
 
-        let synced = install_diagnostic_value(Some(&bundled), &installed, &plist);
+        let synced = install_diagnostic_value_at(
+            Some(&bundled),
+            &installed,
+            &plist,
+            &attestation,
+            attestation_uid,
+        );
         assert_eq!(synced["bundled_daemon_exists"], true);
         assert_eq!(synced["installed_daemon_exists"], true);
         assert_eq!(synced["bundled_daemon_format"], "mach-o");
         assert_eq!(synced["bundled_daemon_executable"], true);
         assert_eq!(synced["bundled_daemon_valid"], true);
         assert_eq!(synced["installed_daemon_matches_bundle"], true);
+        assert_eq!(synced["install_attestation_valid"], true);
         assert_eq!(synced["launchd_plist_uses_installed_daemon"], true);
         assert_eq!(
             synced["bundled_daemon_path"],
@@ -3654,10 +3734,42 @@ mod tests {
         );
 
         std::fs::write(&installed, daemon_v2).unwrap();
-        let stale = install_diagnostic_value(Some(&bundled), &installed, &plist);
-        assert_eq!(stale["installed_daemon_matches_bundle"], false);
+        let still_attested = install_diagnostic_value_at(
+            Some(&bundled),
+            &installed,
+            &plist,
+            &attestation,
+            attestation_uid,
+        );
+        assert_eq!(still_attested["installed_daemon_matches_bundle"], false);
+        assert_eq!(still_attested["install_attestation_valid"], false);
 
-        let missing_bundle = install_diagnostic_value(None, &installed, &plist);
+        std::fs::remove_file(&installed).unwrap();
+        let missing_runtime = install_diagnostic_value_at(
+            Some(&bundled),
+            &installed,
+            &plist,
+            &attestation,
+            attestation_uid,
+        );
+        assert_eq!(missing_runtime["installed_daemon_exists"], false);
+        assert_eq!(missing_runtime["installed_daemon_matches_bundle"], false);
+        assert_eq!(missing_runtime["install_attestation_valid"], false);
+        std::fs::hard_link(&witness, &installed).unwrap();
+
+        std::fs::write(&bundled, daemon_v2).unwrap();
+        let stale = install_diagnostic_value_at(
+            Some(&bundled),
+            &installed,
+            &plist,
+            &attestation,
+            attestation_uid,
+        );
+        assert_eq!(stale["installed_daemon_matches_bundle"], false);
+        assert_eq!(stale["install_attestation_valid"], false);
+
+        let missing_bundle =
+            install_diagnostic_value_at(None, &installed, &plist, &attestation, attestation_uid);
         assert_eq!(missing_bundle["bundled_daemon_exists"], false);
         assert!(missing_bundle["bundled_daemon_format"].is_null());
         assert!(missing_bundle["bundled_daemon_valid"].is_null());
