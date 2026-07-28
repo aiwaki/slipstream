@@ -7,6 +7,7 @@ import re
 
 
 SCHEMA_VERSION = 1
+SCHEMA_VERSION_V2 = 2
 MAX_SIGNAL_BYTES = 2048
 MAX_SIGNAL_AGE_MS = 120_000
 MAX_FUTURE_SKEW_MS = 5_000
@@ -15,6 +16,7 @@ MIN_CONFIDENCE_BPS = 9_000
 
 SOURCE_BROWSER_EXTENSION = "browser_extension"
 CATEGORY_REGIONAL_ACCESS_DENIED = "regional_access_denied"
+CATEGORY_INCOMPLETE_RESPONSE = "incomplete_response"
 
 ACTION_NONE = "none"
 ACTION_CONFIRM_EXACT_HOST_GEO_EXIT = "confirm_exact_host_geo_exit"
@@ -68,6 +70,18 @@ class SemanticRouteSignalV1:
     source: str = SOURCE_BROWSER_EXTENSION
     category: str = CATEGORY_REGIONAL_ACCESS_DENIED
     schema_version: int = SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class SemanticRouteSignalV2:
+    signal_id: str
+    host: str
+    confidence_bps: int
+    observed_at_unix_ms: int
+    top_level: bool
+    source: str = SOURCE_BROWSER_EXTENSION
+    category: str = CATEGORY_INCOMPLETE_RESPONSE
+    schema_version: int = SCHEMA_VERSION_V2
 
 
 @dataclass(frozen=True)
@@ -149,6 +163,78 @@ def parse_semantic_route_signal_v1(payload):
         observed_at_unix_ms=observed_at,
         top_level=value["top_level"],
     )
+
+
+def parse_semantic_route_signal_v2(payload):
+    if isinstance(payload, str):
+        raw = payload.encode("utf-8")
+    elif isinstance(payload, bytes):
+        raw = payload
+    else:
+        raise SemanticSignalError("invalid_shape")
+    if not raw:
+        raise SemanticSignalError("empty_input")
+    if len(raw) > MAX_SIGNAL_BYTES:
+        raise SemanticSignalError("payload_too_large")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SemanticSignalError("invalid_json") from error
+    if not isinstance(value, dict) or frozenset(value) != _REQUIRED_FIELDS:
+        raise SemanticSignalError("invalid_shape")
+    if (
+        type(value["schema_version"]) is not int
+        or value["schema_version"] != SCHEMA_VERSION_V2
+    ):
+        raise SemanticSignalError("unsupported_version")
+    signal_id = value["signal_id"]
+    if not isinstance(signal_id, str) or not _SIGNAL_ID_RE.fullmatch(signal_id):
+        raise SemanticSignalError("invalid_signal_id")
+    if value["source"] != SOURCE_BROWSER_EXTENSION:
+        raise SemanticSignalError("invalid_source")
+    host = _normalize_hostname(value["host"])
+    if value["category"] != CATEGORY_INCOMPLETE_RESPONSE:
+        raise SemanticSignalError("invalid_category")
+    confidence = value["confidence_bps"]
+    if type(confidence) is not int or not 0 <= confidence <= 10_000:
+        raise SemanticSignalError("invalid_confidence")
+    observed_at = value["observed_at_unix_ms"]
+    if type(observed_at) is not int or observed_at <= 0:
+        raise SemanticSignalError("invalid_observed_at")
+    if type(value["top_level"]) is not bool:
+        raise SemanticSignalError("invalid_top_level")
+    return SemanticRouteSignalV2(
+        signal_id=signal_id,
+        host=host,
+        confidence_bps=confidence,
+        observed_at_unix_ms=observed_at,
+        top_level=value["top_level"],
+    )
+
+
+def parse_semantic_route_signal(payload):
+    if isinstance(payload, str):
+        raw = payload.encode("utf-8")
+    elif isinstance(payload, bytes):
+        raw = payload
+    else:
+        raise SemanticSignalError("invalid_shape")
+    if not raw:
+        raise SemanticSignalError("empty_input")
+    if len(raw) > MAX_SIGNAL_BYTES:
+        raise SemanticSignalError("payload_too_large")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SemanticSignalError("invalid_json") from error
+    if not isinstance(value, dict):
+        raise SemanticSignalError("invalid_shape")
+    version = value.get("schema_version")
+    if version == SCHEMA_VERSION:
+        return parse_semantic_route_signal_v1(raw)
+    if version == SCHEMA_VERSION_V2:
+        return parse_semantic_route_signal_v2(raw)
+    raise SemanticSignalError("unsupported_version")
 
 
 def _decision(signal, accepted, action, reason):

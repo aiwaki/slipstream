@@ -48,7 +48,10 @@ enum SemanticBridge {
     guard
       let object = value as? [String: Any],
       Set(object.keys) == signalFields,
-      integer(object["schema_version"]) == 1,
+      let version = integer(object["schema_version"]),
+      let category = object["category"] as? String,
+      (version == 1 && category == "regional_access_denied")
+        || (version == 2 && category == "incomplete_response"),
       let signalID = object["signal_id"] as? String,
       signalID.count == 32,
       signalID.utf8.allSatisfy({
@@ -57,7 +60,6 @@ enum SemanticBridge {
       object["source"] as? String == "browser_extension",
       let host = object["host"] as? String,
       normalizeHostname(host) == host,
-      object["category"] as? String == "regional_access_denied",
       let confidence = integer(object["confidence_bps"]),
       confidence <= 10_000,
       let observedAt = integer(object["observed_at_unix_ms"]),

@@ -8,7 +8,7 @@ without decrypting HTTPS or adding per-site rules.
 ## Chromium Preview
 
 The preview under `browser-companion/chromium/` is a Manifest V3 extension with
-one permission: `nativeMessaging`.
+two permissions: `nativeMessaging` and `webNavigation`.
 
 1. A top-frame content script observes the first ten seconds of an HTTPS page.
    It checks the title, visible dialogs, and a bounded sparse-page snapshot
@@ -32,18 +32,33 @@ one permission: `nativeMessaging`.
    hostname. Rejection, cooldown, navigation, or an unavailable daemon produces
    no reload loop.
 
+The additive semantic-signal v2 path handles a different failure class without
+changing v1. Chrome's browser-owned top-frame `webNavigation.onErrorOccurred`
+event is accepted only for exact `net::ERR_CONTENT_LENGTH_MISMATCH` or
+`net::ERR_INCOMPLETE_CHUNKED_ENCODING` failures on a normalized HTTPS hostname.
+The extension converts either error locally into the fixed
+`incomplete_response` category; the raw error and URL never cross native
+messaging. Static direct, direct-first, local-bypass, and reviewed geo-exit
+policy still wins. For an eligible unknown host, the daemon performs a distinct
+bounded request through the ownership-verified bundled Geph and requires a
+syntactically complete HTTP response: an exact `Content-Length`, a terminal
+chunked body, or a complete connection-close body. A partial, oversized,
+timed-out, compressed-denial, or non-success response fails closed. Only a
+successful confirmation permits one 250 ms same-host top-level reload; the
+request that already failed is never replayed by the transparent proxy.
+
 The extension does not transmit path, query, page text, cookies, storage,
-forms, account data, or arbitrary script output. It does not change DNS,
-proxy, PAC, VPN, PF, or browser settings.
+forms, account data, browser error strings, full URLs, or arbitrary script
+output. It does not change DNS, proxy, PAC, VPN, PF, or browser settings.
 
 ## Safari Preview
 
 The Safari preview under `browser-companion/safari/` reuses the same bounded
-detector and service-worker contract. Safari supplies messages only to the
+detector and dual-reader service-worker contract. Safari supplies messages only to the
 native app extension embedded in its containing app, so there is no
 Chrome-style external native-host origin to register. The service worker still
-derives the hostname from Safari-owned top-level sender metadata; the native
-extension accepts exactly the frozen eight-field signal, forwards one
+derives the hostname from Safari-owned top-level sender or navigation metadata;
+the native extension accepts either exact frozen eight-field signal, forwards one
 little-endian bounded frame to the owner-only daemon socket, and returns only
 the fixed four-field private response. Apple currently ignores the application
 identifier argument to `sendNativeMessage` and dispatches to that embedded
@@ -93,7 +108,7 @@ starts the packaged tray and its exact user LaunchAgent, then runs a separate
 root-only harness against the packaged daemon.
 
 The browser side uses GUI Chrome for Testing in the disposable runner's user
-session, a fresh owner-only profile, the unpacked frozen-origin extension, the
+session, fresh owner-only profiles, the unpacked frozen-origin extension, the
 packaged Rust native host, and the daemon's owner-only semantic socket. Branded
 Chrome 137 and later ignore the unpacked-extension `--load-extension` switch, so
 it cannot drive this automation gate. The harness copies the exact installed
@@ -144,16 +159,19 @@ quiet window before the fresh profile can be removed. The same post-bootout
 window is required when the launcher was verified but browser admission timed
 out. If either proof fails, the profile is retained rather than inferring
 descendant cleanup. A scoped local
-HTTPS fixture mapped only inside that browser profile serves a strong
-regional-denial page first and a styled page on the next request. Headless
-execution is also excluded because an
+HTTPS fixture mapped only inside each browser profile serves two independent
+generic scenarios. The frozen v1 scenario serves a strong regional-denial page
+first and a styled page on the next request. The additive v2 scenario aborts
+the first top-level response after declaring a longer `Content-Length`, then
+serves a complete styled page on the next request. The daemon does not trust
+either fixture: each generic hostname must independently complete the matching
+real HTTPS confirmation through the ownership-verified account-backed Geph.
+Success requires the learned exact-host route, exactly one browser reload, a
+marked nonblank DOM, fetched CSS, JavaScript, and image resources, and one
+same-origin `/ready` callback emitted by page JavaScript only after those
+resources are usable. Headless execution is also excluded because an
 earlier protected run rendered the page without activating the MV3
-native-messaging path. The daemon does not trust the fixture: confirmation is a
-separate real HTTPS request for the same generic hostname through the
-ownership-verified account-backed Geph. Success requires the learned exact-host
-route, exactly one browser reload, a marked nonblank DOM, fetched CSS,
-JavaScript, and image resources, and one same-origin `/ready` callback emitted
-by page JavaScript only after those resources are usable.
+native-messaging path. The daemon never accepts fixture output as route proof.
 
 Protected run `30301572440` stopped before this browser phase because its sole
 Steam HTTPS canary timed out. The user-level gate now rotates through a bounded
@@ -186,17 +204,20 @@ python3 scripts/chromium_semantic_packaged_smoke.py --dry-run
 ```
 
 The tests cover the observed denial phrase, multiple languages, ordinary
-non-geographic errors, rich-page false-positive bounds, exact sender ownership,
-forbidden extra fields, stable Chromium identity, native framing, Chromium
-origin authentication, both manifests' permissions, private responses, atomic
-registration, owned uninstall, and an unsigned Safari app-extension build.
+non-geographic errors, rich-page false-positive bounds, the two exact
+incomplete-navigation error classes, complete versus truncated HTTP framing,
+same-host reload ownership, exact sender ownership, forbidden extra fields,
+stable Chromium identity, native framing, Chromium origin authentication, both
+manifests' permissions, private responses, atomic registration, owned
+uninstall, and an unsigned Safari app-extension build.
 
 ## Remaining Gates
 
 - Chrome Web Store packaging, privacy disclosure, and update provenance.
-- The Chrome for Testing packaged Chromium harness must pass on an exact merged
-  main commit before the preview is considered runtime-qualified. Branded
-  Chrome still requires reviewed Chrome Web Store distribution.
+- Both Chrome for Testing scenarios must pass on an exact merged main commit
+  before v2 is runtime-qualified: frozen regional-denial v1 and additive
+  incomplete-response v2. Branded Chrome still requires reviewed Chrome Web
+  Store distribution.
 - Safari requires a signed container, browser enablement, and a disposable
   runtime proof that the sandboxed app extension can reach the owner-only
   daemon socket. The unsigned source and package build exist, but are not

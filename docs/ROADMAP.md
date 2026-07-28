@@ -112,8 +112,15 @@ anchor, state entry, and live connection remain unchanged. A protected,
 main-only account-backed gate now exercises the packaged tray, exact owned
 Geph listener, a real Steam HTTPS payload, tray-independent operation, and
 LaunchAgent `KeepAlive` PID replacement while preserving an unrelated `:9909`
-listener. The first protected passing run and a physical default-route/lid-close
-transition on a disposable Mac remain before the M1 gate is complete.
+listener. The account-backed protected gate and controlled exact-artifact
+workstation transaction have passed for frozen semantic v1. That transaction
+exposed a generic partial top-level response on one otherwise eligible unknown
+host. Additive semantic-signal v2 now models only Chromium-owned incomplete
+navigation evidence, requires a distinct complete response through exact-owned
+Geph, and permits one same-host reload without replaying the failed transparent
+request. It remains closed until full local, PR, exact-main, and protected
+two-scenario browser gates pass. A physical default-route/lid-close transition
+on a disposable Mac remains a separate M1 gate.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.

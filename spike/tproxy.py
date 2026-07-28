@@ -54,6 +54,7 @@ import urllib.request
 
 import connection_probe
 import geph_backend
+from http_response_completion import http_response_complete
 import install_guard
 import pf_adapter
 import route_circuit
@@ -2059,6 +2060,7 @@ AUTO_GEPH_RECOVERY_GRACE = 5.0
 AUTO_GEPH_RECOVERY_POLL = 0.1
 AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 65536
+INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 524288
 SEMANTIC_GEO_DENIAL_MARKERS = (
     b"no longer available in your area",
     b"no longer available in your region",
@@ -3235,6 +3237,9 @@ def _get_semantic_route_signal_runtime():
                     ],
                     owned_geph_ready=_owned_geph_ready_for_semantic_confirmation,
                     request_confirmation=_request_semantic_geo_exit_confirmation,
+                    request_incomplete_confirmation=(
+                        _confirm_incomplete_response_geo_exit
+                    ),
                 )
             )
         return _semantic_route_signal_runtime
@@ -3268,37 +3273,56 @@ def _clear_owned_geph_backend_hold_after_payload():
     return True
 
 
+def _set_socket_deadline_timeout(sock, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise socket.timeout("SOCKS deadline exceeded")
+    sock.settimeout(remaining)
+
+
 def _socks5_connect_blocking(host, port, timeout=3.0):
     socks_port = _geph_port
     if not socks_port:
         return None
     sock = None
+    deadline = time.monotonic() + max(float(timeout), 0.001)
     try:
-        sock = socket.create_connection(("127.0.0.1", socks_port), timeout=timeout)
-        sock.settimeout(timeout)
+        sock = socket.create_connection(
+            ("127.0.0.1", socks_port),
+            timeout=max(deadline - time.monotonic(), 0.001),
+        )
+        _set_socket_deadline_timeout(sock, deadline)
         sock.sendall(b"\x05\x01\x00")
+        _set_socket_deadline_timeout(sock, deadline)
         if sock.recv(2)[:2] != b"\x05\x00":
             raise IOError("socks5 no-auth refused")
         hb = host.encode("ascii", "ignore")[:255]
+        _set_socket_deadline_timeout(sock, deadline)
         sock.sendall(
             b"\x05\x01\x00\x03"
             + bytes([len(hb)])
             + hb
             + struct.pack("!H", port)
         )
+        _set_socket_deadline_timeout(sock, deadline)
         rep = sock.recv(4)
         if len(rep) < 4 or rep[1] != 0x00:
             raise IOError(f"socks5 connect rep={rep[1] if len(rep) >= 2 else 'short'}")
         atyp = rep[3]
         if atyp == 0x01:
+            _set_socket_deadline_timeout(sock, deadline)
             sock.recv(4)
         elif atyp == 0x03:
+            _set_socket_deadline_timeout(sock, deadline)
             ln = sock.recv(1)
             if not ln:
                 raise IOError("short socks5 domain reply")
+            _set_socket_deadline_timeout(sock, deadline)
             sock.recv(ln[0])
         elif atyp == 0x04:
+            _set_socket_deadline_timeout(sock, deadline)
             sock.recv(16)
+        _set_socket_deadline_timeout(sock, deadline)
         sock.recv(2)
         return sock
     except Exception:
@@ -3414,6 +3438,86 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
             pass
 
 
+def _incomplete_response_geph_payload_probe(
+    host,
+    timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
+):
+    deadline = time.monotonic() + max(float(timeout), 0.001)
+    sock = _socks5_connect_blocking(
+        host,
+        443,
+        max(deadline - time.monotonic(), 0.001),
+    )
+    if sock is None:
+        return 0
+    tls_sock = None
+    try:
+        ctx = _local_payload_ssl_context()
+        _set_socket_deadline_timeout(sock, deadline)
+        tls_sock = ctx.wrap_socket(sock, server_hostname=host)
+        _set_socket_deadline_timeout(tls_sock, deadline)
+        request = (
+            "GET / HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            "User-Agent: SlipstreamIncompleteResponse/1\r\n"
+            "Accept: text/html,application/xhtml+xml\r\n"
+            "Accept-Encoding: identity\r\n"
+            "Range: bytes=0-262143\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii", "ignore")
+        tls_sock.sendall(request)
+        chunks = []
+        size = 0
+        stream_closed = False
+        complete = False
+        while size < INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES:
+            try:
+                _set_socket_deadline_timeout(tls_sock, deadline)
+                chunk = tls_sock.recv(
+                    min(
+                        16384,
+                        INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES - size,
+                    )
+                )
+            except socket.timeout:
+                break
+            if not chunk:
+                stream_closed = True
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            data = b"".join(chunks)
+            if http_response_complete(
+                data,
+                stream_closed=False,
+                truncated=False,
+            ):
+                complete = True
+                break
+        data = b"".join(chunks)
+        truncated = (
+            size >= INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES and not complete
+        )
+        if (
+            (complete or http_response_complete(
+                data,
+                stream_closed=stream_closed,
+                truncated=truncated,
+            ))
+            and _semantic_geph_response_usable(data)
+        ):
+            return len(data)
+        return 0
+    except Exception:
+        return 0
+    finally:
+        try:
+            (tls_sock or sock).close()
+        except Exception:
+            pass
+
+
 def _confirm_semantic_geo_exit(host):
     h = normalize_host(host)
     if (
@@ -3454,6 +3558,49 @@ def _confirm_semantic_geo_exit(host):
         f">> auto-route: {h} cleared a regional denial through owned Geph "
         f"(remembered {AUTO_GEPH_TTL / 3600:.0f}h)",
         file=sys.stderr,
+    )
+    return True
+
+
+def _confirm_incomplete_response_geo_exit(host):
+    h = normalize_host(host)
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+    ):
+        _set_auto_geph_status("skipped", h, "not eligible")
+        return False
+    bytes_read = _incomplete_response_geph_payload_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        _set_auto_geph_status(
+            "rejected",
+            h,
+            "owned Geph response was not proven complete",
+            bytes_read,
+        )
+        return False
+    with _auto_geph_lock:
+        if (
+            not _auto_geph_base_host_allowed(h)
+            or not _owned_geph_ready_for_semantic_confirmation()
+        ):
+            _set_auto_geph_status("skipped", h, "route changed")
+            return False
+        _auto_geph[h] = time.time() + AUTO_GEPH_TTL
+        _auto_fail.pop(h, None)
+        _local_partial_stalls.pop(h, None)
+        _local_zero_payload_failures.pop(h, None)
+        save_auto_geph()
+        _clear_owned_geph_backend_hold_after_payload()
+        _set_auto_geph_status(
+            "learned",
+            h,
+            "complete response confirmed through owned Geph",
+            bytes_read,
+        )
+    print(
+        f">> auto-route: {h} completed through Geph after an incomplete "
+        f"browser response (remembered {AUTO_GEPH_TTL // 3600}h)"
     )
     return True
 
@@ -6257,6 +6404,10 @@ def _script_runtime_payload(source_file):
         (os.path.join(source_dir, "connection_race.py"), "connection_race.py"),
         (os.path.join(source_dir, "connection_race_io.py"), "connection_race_io.py"),
         (os.path.join(source_dir, "geph_backend.py"), "geph_backend.py"),
+        (
+            os.path.join(source_dir, "http_response_completion.py"),
+            "http_response_completion.py",
+        ),
         (os.path.join(source_dir, "install_guard.py"), "install_guard.py"),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),

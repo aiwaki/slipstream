@@ -34,7 +34,10 @@ class BrowserCompanionContractTests(unittest.TestCase):
 
         self.assertEqual(extension_id_from_public_key(manifest["key"]), EXPECTED_EXTENSION_ID)
         self.assertEqual(manifest["manifest_version"], 3)
-        self.assertEqual(manifest["permissions"], ["nativeMessaging"])
+        self.assertEqual(
+            manifest["permissions"],
+            ["nativeMessaging", "webNavigation"],
+        )
         self.assertNotIn("host_permissions", manifest)
         self.assertNotIn("externally_connectable", manifest)
         self.assertNotIn("web_accessible_resources", manifest)
@@ -55,7 +58,10 @@ class BrowserCompanionContractTests(unittest.TestCase):
         manifest = json.loads(SAFARI_MANIFEST.read_text())
 
         self.assertEqual(manifest["manifest_version"], 3)
-        self.assertEqual(manifest["permissions"], ["nativeMessaging"])
+        self.assertEqual(
+            manifest["permissions"],
+            ["nativeMessaging", "webNavigation"],
+        )
         self.assertNotIn("key", manifest)
         self.assertNotIn("host_permissions", manifest)
         self.assertNotIn("externally_connectable", manifest)
@@ -114,6 +120,20 @@ class BrowserCompanionContractTests(unittest.TestCase):
         for forbidden in ("cookie", "localStorage", "sessionStorage", "document.URL"):
             self.assertNotIn(forbidden, source)
         self.assertNotIn("innerText", (COMPANION / "content.js").read_text())
+
+    def test_incomplete_navigation_errors_are_exact_and_privacy_bounded(self):
+        core = (COMPANION / "service-worker-core.js").read_text()
+
+        self.assertIn('"net::ERR_CONTENT_LENGTH_MISMATCH"', core)
+        self.assertIn('"net::ERR_INCOMPLETE_CHUNKED_ENCODING"', core)
+        for ambiguous in (
+            "ERR_CONNECTION_CLOSED",
+            "ERR_HTTP2_PROTOCOL_ERROR",
+            "ERR_QUIC_PROTOCOL_ERROR",
+        ):
+            self.assertNotIn(ambiguous, core)
+        self.assertIn('category: "incomplete_response"', core)
+        self.assertNotIn("browser_error:", core)
 
 
 if __name__ == "__main__":

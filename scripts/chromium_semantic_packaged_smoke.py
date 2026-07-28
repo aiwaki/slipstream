@@ -46,6 +46,12 @@ PROFILE_NATIVE_HOST_RELATIVE_PATH = (
 SEMANTIC_SOCKET = Path("/var/run/slipstream-semantic.sock")
 AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
 FIXTURE_HOST = "example.org"
+INCOMPLETE_FIXTURE_HOST = "example.net"
+REGIONAL_DENIAL_SCENARIO = "regional_denial"
+INCOMPLETE_RESPONSE_SCENARIO = "incomplete_response"
+FIXTURE_SCENARIOS = frozenset(
+    (REGIONAL_DENIAL_SCENARIO, INCOMPLETE_RESPONSE_SCENARIO)
+)
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
 CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
@@ -188,15 +194,24 @@ def _fixture_response(
     path: str,
     *,
     root_visit: int,
+    scenario: str = REGIONAL_DENIAL_SCENARIO,
 ) -> tuple[int, str, bytes]:
     if path == "/":
         if root_visit == 1:
-            body = (
-                "<!doctype html><html><head>"
-                "<title>Unavailable in your area</title></head>"
-                "<body><main>This content is no longer available in your area"
-                "</main></body></html>"
-            ).encode("utf-8")
+            if scenario == REGIONAL_DENIAL_SCENARIO:
+                body = (
+                    "<!doctype html><html><head>"
+                    "<title>Unavailable in your area</title></head>"
+                    "<body><main>This content is no longer available in your area"
+                    "</main></body></html>"
+                ).encode("utf-8")
+            elif scenario == INCOMPLETE_RESPONSE_SCENARIO:
+                body = (
+                    "<!doctype html><html><head><title>Loading</title></head>"
+                    "<body><main>Incomplete response fixture</main></body></html>"
+                ).encode("utf-8")
+            else:
+                raise QualificationError(f"unknown fixture scenario: {scenario}")
         else:
             body = (
                 "<!doctype html><html><head><title>Semantic route ready</title>"
@@ -245,9 +260,32 @@ def _fixture_response(
     return 404, "text/plain; charset=utf-8", b"not found\n"
 
 
+def _fixture_content_length(
+    path: str,
+    *,
+    root_visit: int,
+    scenario: str,
+    body: bytes,
+) -> int:
+    if (
+        scenario == INCOMPLETE_RESPONSE_SCENARIO
+        and path == "/"
+        and root_visit == 1
+    ):
+        return len(body) + 4096
+    return len(body)
+
+
 class SemanticHttpsFixture:
-    def __init__(self, host: str = FIXTURE_HOST) -> None:
+    def __init__(
+        self,
+        host: str = FIXTURE_HOST,
+        scenario: str = REGIONAL_DENIAL_SCENARIO,
+    ) -> None:
+        if scenario not in FIXTURE_SCENARIOS:
+            raise QualificationError(f"unknown fixture scenario: {scenario}")
         self.host = host
+        self.scenario = scenario
         self.directory: Path | None = None
         self.server: http.server.ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
@@ -337,10 +375,21 @@ class SemanticHttpsFixture:
                 status, content_type, body = _fixture_response(
                     path,
                     root_visit=root_visit,
+                    scenario=fixture.scenario,
                 )
                 self.send_response(status)
                 self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(body)))
+                self.send_header(
+                    "Content-Length",
+                    str(
+                        _fixture_content_length(
+                            path,
+                            root_visit=root_visit,
+                            scenario=fixture.scenario,
+                            body=body,
+                        )
+                    ),
+                )
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Connection", "close")
                 self.end_headers()
@@ -390,11 +439,11 @@ def _validate_extension(path: Path) -> Path:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
         manifest.get("manifest_version") != 3
-        or manifest.get("permissions") != ["nativeMessaging"]
+        or manifest.get("permissions") != ["nativeMessaging", "webNavigation"]
         or not isinstance(manifest.get("key"), str)
         or not manifest["key"]
     ):
-        raise QualificationError("Chromium companion manifest is not the frozen v1 shape")
+        raise QualificationError("Chromium companion manifest is not the reviewed shape")
     for name in ("detector.js", "content.js", "service-worker.js", "service-worker-core.js"):
         if not (path / name).is_file():
             raise QualificationError(f"Chromium companion is missing {name}")
@@ -495,6 +544,7 @@ def _chrome_command(
     profile: Path,
     extension: Path,
     fixture_port: int,
+    fixture_host: str = FIXTURE_HOST,
 ) -> tuple[str, ...]:
     return (
         str(executable),
@@ -513,9 +563,9 @@ def _chrome_command(
         "--ignore-certificate-errors",
         f"--disable-extensions-except={extension}",
         f"--load-extension={extension}",
-        f"--host-resolver-rules=MAP {FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
+        f"--host-resolver-rules=MAP {fixture_host} 127.0.0.1, EXCLUDE localhost",
         f"--user-data-dir={profile}",
-        f"https://{FIXTURE_HOST}:{fixture_port}/?slipstream-semantic=1",
+        f"https://{fixture_host}:{fixture_port}/?slipstream-semantic=1",
     )
 
 
@@ -594,12 +644,14 @@ def _chrome_open_command(
     stdout_path: Path,
     stderr_path: Path,
     application_bundle: Path | None = None,
+    fixture_host: str = FIXTURE_HOST,
 ) -> tuple[str, ...]:
     chrome = _chrome_command(
         executable,
         profile,
         extension,
         fixture_port,
+        fixture_host,
     )
     return (
         "/usr/bin/open",
@@ -630,6 +682,7 @@ def _chrome_launch_agent_payload(
     extension: Path,
     fixture_port: int,
     application_bundle: Path | None = None,
+    fixture_host: str = FIXTURE_HOST,
 ) -> dict[str, object]:
     return {
         "Label": label,
@@ -642,6 +695,7 @@ def _chrome_launch_agent_payload(
                 chrome_stdout_path,
                 chrome_stderr_path,
                 application_bundle,
+                fixture_host,
             )
         ),
         "RunAtLoad": True,
@@ -1213,6 +1267,7 @@ def _run_chrome(
             extension,
             fixture.port,
             application_bundle,
+            fixture.host,
         )
         _write_owner_private_file(
             plist_path,
@@ -1395,7 +1450,22 @@ def run_qualification(
     )
 
     system = lifecycle.SystemRunner(target)
-    fixture = SemanticHttpsFixture()
+    fixtures = (
+        (
+            REGIONAL_DENIAL_SCENARIO,
+            SemanticHttpsFixture(
+                FIXTURE_HOST,
+                REGIONAL_DENIAL_SCENARIO,
+            ),
+        ),
+        (
+            INCOMPLETE_RESPONSE_SCENARIO,
+            SemanticHttpsFixture(
+                INCOMPLETE_FIXTURE_HOST,
+                INCOMPLETE_RESPONSE_SCENARIO,
+            ),
+        ),
+    )
     installed = False
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -1409,18 +1479,35 @@ def run_qualification(
         _wait_for_semantic_socket(uid)
         _wait_for_owned_geph_backend()
 
-        fixture.start()
-        snapshot = _run_chrome(
-            uid,
-            gid,
-            extension,
-            fixture,
-            chrome_executable,
-            native_host_path,
-            target.tray_executable,
-        )
-        expiry = _wait_for_learned_host(FIXTURE_HOST)
-        _assert_fixture_complete(snapshot)
+        scenario_results: dict[str, dict[str, object]] = {}
+        for scenario, fixture in fixtures:
+            fixture.start()
+            snapshot = _run_chrome(
+                uid,
+                gid,
+                extension,
+                fixture,
+                chrome_executable,
+                native_host_path,
+                target.tray_executable,
+            )
+            expiry = _wait_for_learned_host(fixture.host)
+            _assert_fixture_complete(snapshot)
+            scenario_results[scenario] = {
+                "host": fixture.host,
+                "reloads": snapshot.root_visits - 1,
+                "browser_ready_callbacks": snapshot.ready_requests,
+                "mandatory_resources": {
+                    "css": snapshot.css_requests,
+                    "javascript": snapshot.script_requests,
+                    "image": snapshot.image_requests,
+                },
+                "learned_route_ttl_seconds": max(
+                    0,
+                    int(expiry - time.time()),
+                ),
+            }
+            fixture.close()
         result = {
             "result": "pass",
             "restricted_to": "protected disposable GitHub Actions macOS runner",
@@ -1431,23 +1518,19 @@ def run_qualification(
             "native_host": "packaged exact-origin Rust host",
             "daemon_ipc": "owner-only semantic socket",
             "confirmation": "real account-backed owned Geph",
-            "reloads": snapshot.root_visits - 1,
-            "styled_dom": "browser callback after CSS, JavaScript, and image readiness",
-            "browser_ready_callbacks": snapshot.ready_requests,
-            "mandatory_resources": {
-                "css": snapshot.css_requests,
-                "javascript": snapshot.script_requests,
-                "image": snapshot.image_requests,
-            },
-            "learned_route_ttl_seconds": max(0, int(expiry - time.time())),
+            "semantic_scenarios": scenario_results,
+            "styled_dom": (
+                "each browser callback follows CSS, JavaScript, and image readiness"
+            ),
         }
     except BaseException as exc:
         failure = exc
     finally:
-        try:
-            fixture.close()
-        except Exception as exc:
-            cleanup_errors.append(f"fixture cleanup: {exc}")
+        for scenario, fixture in fixtures:
+            try:
+                fixture.close()
+            except Exception as exc:
+                cleanup_errors.append(f"{scenario} fixture cleanup: {exc}")
         try:
             _remove_exact_native_host(
                 native_host_path,
@@ -1487,8 +1570,9 @@ def dry_run() -> dict[str, object]:
         "result": "dry-run",
         "restricted_to": "protected disposable GitHub Actions macOS runner",
         "path": (
-            "regional denial -> Chromium extension -> packaged native host -> "
-            "owner-only daemon IPC -> real owned Geph confirmation -> one reload"
+            "regional denial and incomplete top-level response -> Chromium "
+            "extension -> packaged native host -> owner-only daemon IPC -> "
+            "distinct real owned Geph confirmation -> one reload per scenario"
         ),
         "browser": (
             "Chrome for Testing; branded Chrome 137+ ignores unpacked "
@@ -1497,7 +1581,10 @@ def dry_run() -> dict[str, object]:
         "native_host_registration": (
             "exact packaged manifest copied into the disposable browser profile"
         ),
-        "success": "styled DOM plus CSS, JavaScript, and image",
+        "success": (
+            "each scenario yields one reload and styled DOM plus CSS, "
+            "JavaScript, and image"
+        ),
         "browser_launch": "LaunchServices in the console user's Aqua session",
         "chrome_sandbox": "enabled",
         "production_overrides": "none",
