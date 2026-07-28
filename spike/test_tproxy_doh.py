@@ -2799,6 +2799,58 @@ def test_probe_geph_accepts_verified_owned_listener(monkeypatch):
     assert tproxy._geph_port_conflict is False
 
 
+@pytest.mark.parametrize(
+    ("listener_present", "listener_owned", "backend_live", "expected"),
+    (
+        (False, False, False, "down"),
+        (True, False, False, "conflict"),
+        (True, True, False, "down"),
+        (True, True, True, "ready"),
+    ),
+)
+def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
+    monkeypatch,
+    listener_present,
+    listener_owned,
+    backend_live,
+    expected,
+):
+    calls = []
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_tcp_listener_present",
+        lambda port, *, timeout: (
+            calls.append(("listener", port, timeout)) or listener_present
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda port: calls.append(("owned", port)) or listener_owned,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_live",
+        lambda port, *, timeout: (
+            calls.append(("live", port, timeout)) or backend_live
+        ),
+    )
+
+    assert tproxy._probe_owned_geph_recovery_state() == expected
+    assert calls[0] == (
+        "listener",
+        tproxy.GEPH_OWNED_PORT,
+        tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    )
+    assert ("owned", tproxy.GEPH_OWNED_PORT) in calls or not listener_present
+    assert (
+        "live",
+        tproxy.GEPH_OWNED_PORT,
+        tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    ) in calls or not (listener_present and listener_owned)
+
+
 def test_geph_probe_hysteresis_never_invents_cold_start_readiness():
     up, strikes = tproxy.reduce_geph_probe_state(
         previous_up=False,
@@ -7175,8 +7227,10 @@ def test_auto_geph_candidate_requires_owned_backend_and_exact_local_evidence(
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
+    assert not tproxy._auto_geph_candidate_proven(host, now=100.0)
     assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
     tproxy._auto_geph_candidates[host] = 200.0
+    assert tproxy._auto_geph_candidate_proven(host, now=100.0)
     assert tproxy._auto_geph_candidate_allowed(host, now=100.0)
 
     for protected in (
@@ -7188,9 +7242,11 @@ def test_auto_geph_candidate_requires_owned_backend_and_exact_local_evidence(
         "chatgpt.com",
     ):
         tproxy._auto_geph_candidates[protected] = 200.0
+        assert not tproxy._auto_geph_candidate_proven(protected, now=100.0)
         assert not tproxy._auto_geph_candidate_allowed(protected, now=100.0)
 
     monkeypatch.setattr(tproxy, "_geph_owned", False)
+    assert tproxy._auto_geph_candidate_proven(host, now=100.0)
     assert not tproxy._auto_geph_candidate_allowed(host, now=100.0)
 
 
@@ -8592,6 +8648,12 @@ def test_auto_geph_confirmation_learns_only_proven_exact_unknown_host(
         "_auto_geph_payload_probe",
         lambda host: probes.append(host) or 128,
     )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_backend_hold_until",
+        tproxy.time.time() + 30.0,
+    )
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "earlier payload miss")
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
 
     assert tproxy._confirm_auto_geph(host)
@@ -8603,6 +8665,30 @@ def test_auto_geph_confirmation_learns_only_proven_exact_unknown_host(
     assert snap["enabled"] is True
     assert snap["last_state"] == "learned"
     assert snap["learned"] == 1
+    assert tproxy._geph_backend_hold_until == 0.0
+    assert tproxy._geph_backend_hold_reason == ""
+
+
+def test_auto_geph_failed_payload_keeps_backend_hold(monkeypatch, tmp_path):
+    host = "still-unhealthy.example.com"
+    hold_until = tproxy.time.time() + 30.0
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", hold_until)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "payload miss")
+    monkeypatch.setattr(
+        tproxy,
+        "_AUTO_GEPH_PATH",
+        str(tmp_path / "autogeph.json"),
+    )
+    monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda _host: 0)
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
+
+    assert not tproxy._confirm_auto_geph(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert tproxy._geph_backend_hold_until == hold_until
+    assert tproxy._geph_backend_hold_reason == "payload miss"
 
 
 def test_load_auto_geph_keeps_only_fresh_unknown_exact_hosts(tmp_path, monkeypatch):

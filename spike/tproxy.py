@@ -2051,6 +2051,9 @@ AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
+AUTO_GEPH_RECOVERY_GRACE = 5.0
+AUTO_GEPH_RECOVERY_POLL = 0.1
+AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 65536
 SEMANTIC_GEO_DENIAL_MARKERS = (
     b"no longer available in your area",
@@ -3083,18 +3086,102 @@ def _auto_geph_base_host_allowed(host):
     )
 
 
-def _auto_geph_candidate_allowed(host, now=None):
+def _auto_geph_candidate_proven(host, now=None):
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
     return bool(
         AUTO_GEPH_ENABLED
         and GEPH_ENABLED
-        and _geph_up
-        and _geph_owned
-        and _geph_port == GEPH_OWNED_PORT
         and _auto_geph_base_host_allowed(h)
         and _auto_geph_candidates.get(h, 0.0) > now
     )
+
+
+def _auto_geph_candidate_allowed(host, now=None):
+    return bool(
+        _auto_geph_candidate_proven(host, now)
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
+    )
+
+
+def _probe_owned_geph_recovery_state():
+    """Observe the exact owned listener without waiting for monitor cadence."""
+    if not GEPH_ENABLED:
+        return "down"
+    if not _tcp_listener_present(
+        GEPH_OWNED_PORT,
+        timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    ):
+        return "down"
+    if not geph_listener_owned(GEPH_OWNED_PORT):
+        return "conflict"
+    if not _geph_live(
+        GEPH_OWNED_PORT,
+        timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
+    ):
+        return "down"
+    return "ready"
+
+
+async def _wait_for_owned_geph_candidate(host):
+    """Let a proven exact host survive one brief owned-backend transition."""
+    global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
+    h = normalize_host(host)
+    if not _auto_geph_candidate_proven(h):
+        return False
+    deadline = time.monotonic() + AUTO_GEPH_RECOVERY_GRACE
+    while True:
+        now = time.monotonic()
+        if _geph_port_conflict or _geph_port not in (None, GEPH_OWNED_PORT):
+            return False
+        learned = _auto_geph_learned_exact_host(h)
+        owned_ready = bool(
+            AUTO_GEPH_ENABLED
+            and GEPH_ENABLED
+            and _geph_up
+            and _geph_owned
+            and _geph_port == GEPH_OWNED_PORT
+        )
+        if owned_ready and (
+            _auto_geph_candidate_proven(h, now)
+            or learned
+        ):
+            return True
+        if _geph_up:
+            return False
+        if now >= deadline or (
+            not _auto_geph_candidate_proven(h, now)
+            and not learned
+        ):
+            return False
+        remaining = deadline - now
+        try:
+            recovery_state = await asyncio.wait_for(
+                asyncio.to_thread(_probe_owned_geph_recovery_state),
+                timeout=remaining,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            return False
+        if _geph_port_conflict or _geph_port not in (None, GEPH_OWNED_PORT):
+            return False
+        if recovery_state == "conflict":
+            _geph_port_conflict = True
+            _geph_port = None
+            _geph_owned = False
+            _geph_up = False
+            return False
+        if recovery_state == "ready":
+            _geph_port_conflict = False
+            _geph_port = GEPH_OWNED_PORT
+            _geph_owned = True
+            _geph_up = True
+            continue
+        now = time.monotonic()
+        if now >= deadline:
+            return False
+        await asyncio.sleep(min(AUTO_GEPH_RECOVERY_POLL, deadline - now))
 
 
 def _owned_geph_ready_for_semantic_confirmation():
@@ -3161,6 +3248,20 @@ def _set_auto_geph_status(state, host="", reason="", bytes_read=0):
         "ts": time.time(),
         "bytes": int(bytes_read or 0),
     })
+
+
+def _clear_owned_geph_backend_hold_after_payload():
+    global _geph_backend_hold_until, _geph_backend_hold_reason
+    if not (
+        GEPH_ENABLED
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
+    ):
+        return False
+    _geph_backend_hold_until = 0.0
+    _geph_backend_hold_reason = ""
+    return True
 
 
 def _socks5_connect_blocking(host, port, timeout=3.0):
@@ -3338,6 +3439,7 @@ def _confirm_semantic_geo_exit(host):
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         save_auto_geph()
+        _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
             "learned",
             h,
@@ -3367,6 +3469,7 @@ def _remember_auto_geph_host(host, bytes_read, reason):
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         save_auto_geph()
+        _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status("learned", h, reason, bytes_read)
     print(
         f">> auto-route: {h} works through Geph after bounded local routes "
@@ -8371,11 +8474,13 @@ async def _try_unknown_owned_geph_route(
     against owned-Geph restart until the relay finishes.
     """
     h = normalize_host(host)
-    if (
-        not _auto_geph_candidate_allowed(h)
-        or not geo_exit_backend_ready()
-        or not _geph_session_started()
-    ):
+    # A complete exact-host proof may outlive a short monitor transition.
+    # Its own bounded payload confirmation is allowed during the global backend
+    # hold, just like the independent background confirmation. Static and
+    # learned geo-exit traffic still obeys geo_exit_backend_ready().
+    if not await _wait_for_owned_geph_candidate(h):
+        return False
+    if not _geph_session_started():
         return False
     up_w = None
     try:
@@ -8399,10 +8504,13 @@ async def _try_unknown_owned_geph_route(
                 len(server_first),
             )
             return False
-        if not _remember_auto_geph_host(
-            h,
-            len(server_first),
-            "owned Geph payload confirmed after local route exhaustion",
+        if (
+            not _auto_geph_learned_exact_host(h)
+            and not _remember_auto_geph_host(
+                h,
+                len(server_first),
+                "owned Geph payload confirmed after local route exhaustion",
+            )
         ):
             return False
         try:

@@ -727,6 +727,195 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
     assert tproxy.geph_active_session_count() == 0
 
 
+def test_proven_unknown_waits_for_owned_geph_recovery_during_backend_hold(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "recovering-foreign-exit.example"
+    first_flight = static_tls_fixture_record(host)
+    response = b"\x16\x03\x03\x00\x60" + (b"R" * 96)
+    reader = ScriptedReader()
+    writer = CaptureWriter()
+    calls = []
+    probe_calls = []
+    now = time.monotonic()
+
+    async def healthy_owned_geph(actual_host, port, payload):
+        calls.append((actual_host, port, payload))
+        return streaming_upstream_response(response)
+
+    def observe_owned_geph_recovery():
+        probe_calls.append(True)
+        return "ready" if len(probe_calls) > 1 else "down"
+
+    monkeypatch.setattr(
+        tproxy,
+        "AUTO_GEPH_RECOVERY_GRACE",
+        0.05,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "AUTO_GEPH_RECOVERY_POLL",
+        0.001,
+        raising=False,
+    )
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        observe_owned_geph_recovery,
+    )
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_backend_hold_until",
+        time.time() + tproxy.GEPH_BACKEND_FAILURE_HOLD,
+    )
+    tproxy._auto_geph_candidates[host] = now + 10.0
+
+    assert asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            first_flight,
+            reader,
+            writer,
+        )
+    )
+    assert len(probe_calls) == 2
+    assert calls == [(host, 443, first_flight)]
+    assert bytes(writer.payload) == response
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert tproxy._geph_backend_hold_until == 0.0
+    assert tproxy._geph_backend_hold_reason == ""
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_proven_unknown_survives_background_confirmation_race(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "background-confirmed-foreign-exit.example"
+    first_flight = static_tls_fixture_record(host)
+    response = b"\x16\x03\x03\x00\x60" + (b"B" * 96)
+    writer = CaptureWriter()
+    now = time.monotonic()
+
+    async def healthy_owned_geph(_host, _port, _payload):
+        return streaming_upstream_response(response)
+
+    async def complete_background_confirmation():
+        await asyncio.sleep(0.005)
+        tproxy._auto_geph[host] = time.time() + 60.0
+        tproxy._auto_geph_candidates.pop(host, None)
+        tproxy._geph_up = True
+
+    monkeypatch.setattr(
+        tproxy,
+        "AUTO_GEPH_RECOVERY_GRACE",
+        0.05,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "AUTO_GEPH_RECOVERY_POLL",
+        0.001,
+    )
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda: "down",
+    )
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    tproxy._auto_geph_candidates[host] = now + 10.0
+
+    async def exercise():
+        confirmation = asyncio.create_task(complete_background_confirmation())
+        selected = await tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            first_flight,
+            ScriptedReader(),
+            writer,
+        )
+        await confirmation
+        return selected
+
+    assert asyncio.run(exercise())
+    assert bytes(writer.payload) == response
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_unproven_unknown_never_waits_for_owned_geph_recovery(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "unproven-foreign-exit.example"
+    sleep_calls = []
+
+    async def forbidden_sleep(delay):
+        sleep_calls.append(delay)
+        raise AssertionError("unproven host must not wait for Geph")
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    monkeypatch.setattr(tproxy.asyncio, "sleep", forbidden_sleep)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda: pytest.fail("unproven host must not probe Geph"),
+    )
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    selected = asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            static_tls_fixture_record(host),
+            ScriptedReader(),
+            CaptureWriter(),
+        )
+    )
+
+    assert not selected
+    assert sleep_calls == []
+    assert host not in tproxy._auto_geph
+
+
+def test_proven_unknown_stops_when_conflict_appears_during_recovery(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "conflicted-foreign-exit.example"
+
+    def observe_conflict():
+        tproxy._geph_port_conflict = True
+        tproxy._geph_port = None
+        return "down"
+
+    async def forbidden_sleep(_delay):
+        raise AssertionError("listener conflict must stop recovery immediately")
+
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        observe_conflict,
+    )
+    monkeypatch.setattr(tproxy.asyncio, "sleep", forbidden_sleep)
+    tproxy._auto_geph_candidates[host] = time.monotonic() + 10.0
+
+    assert not asyncio.run(tproxy._wait_for_owned_geph_candidate(host))
+    assert tproxy._geph_port_conflict
+
+
 def test_unknown_local_timeouts_do_not_become_owned_geph_proof(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "slow-but-not-closed.example"
@@ -943,6 +1132,11 @@ def test_unknown_recovery_never_uses_an_external_geph_listener(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_owned", False)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_EXTERNAL_PORT)
     monkeypatch.setattr(tproxy, "dial_via_geph", external_geph)
+    monkeypatch.setattr(
+        tproxy.asyncio,
+        "sleep",
+        lambda _delay: pytest.fail("external Geph must not enter recovery wait"),
+    )
 
     handled = asyncio.run(
         tproxy._try_unknown_owned_geph_route(
