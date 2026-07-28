@@ -9,31 +9,50 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-28, through main commit
-`3d5894213fa1bb740ee6dd26d782de20ddc950bc`. PR #242 made the protected
-harness stop immediately on the pinned broker's UTC-day authentication limit.
-Exact-main CI run `30311301652` and audit run `30311301661` passed, including
-the packaged app lifecycle sentinel.
+`dde722435887154632dc4a0d9ba69ec9fc1f9f17`. PR #243 replaced the
+symlink-backed extensionless Chrome for Testing wrapper with a complete
+owner-private bundle copy. Exact-main CI run `30318303005` and audit run
+`30318303014` passed, including the packaged app lifecycle sentinel.
 
-The single post-reset protected run `30316469657` passed checkout, packaging,
-resource validation, the daemon-free boundary, owned-Geph authentication, and
-final user/system cleanup. It did not complete browser qualification. Hosted
-Chrome for Testing lives in an extensionless `arm64` bundle; the harness exposed
-that bundle through a private `.app` whose `Contents` was a symlink. Chrome's
-sandboxed helper processes could not join the main process's Mach rendezvous
-service (`Permission denied`), the network service repeatedly exited, and the
-semantic page timed out. The current narrow follow-up copies the complete
-validated bundle into the private `.app` and uses the copied executable for
-LaunchServices, process admission, and exact cleanup. The workstation remains
-untouched until that revision passes ordinary PR, exact-main, and protected
-browser gates.
+The single protected run `30318687293` then passed on that exact main SHA. It
+proved account-backed owned-Geph initial, trayless, and recovered HTTPS payload;
+sandboxed Chrome for Testing in the console user's Aqua session; one semantic
+signal, one reload, CSS, JavaScript, image, styled DOM, and browser-ready
+callback; and complete final cleanup. The run left no root daemon, private PF
+state, token, loopback lease, status, semantic socket, learned route, Chrome
+profile, native-host manifest, owned-Geph process or LaunchAgent, Keychain item,
+or app runtime. System network state was unchanged.
 
-No shell, broad process match, workstation execution, product route, or
-external DNS/proxy/PAC/VPN change is involved. Discord and YouTube never enter
-Geph. Completion still requires ordinary PR and exact-main gates followed by a
-protected run proving the independently confirmed future exact-host route,
-exactly one reload, every CSS/JavaScript/image request, one same-origin ready
-callback, and complete cleanup. No companion or current development build has
-been installed on a workstation.
+Artifact `8673106618`,
+`Slipstream-packaged-lifecycle-dde722435887154632dc4a0d9ba69ec9fc1f9f17`,
+was downloaded by exact artifact ID and matched GitHub's SHA-256
+`1cee7cbd6c825e133522b9fbe2d56e9b60c13aefc5c6ecd30299b4037497e347`.
+A controlled workstation preflight found the earlier `0.1.9` app, root daemon,
+and owned-Geph LaunchAgent already active. It preserved the existing app before
+staging the qualified bundle and confirmed user DNS `111.88.96.50/51`, proxy
+and PAC off, no active VPN default route, and healthy StatusV2. The first
+bounded prompt expired while the user was away and performed no privileged
+mutation. Two later user-present attempts exposed defects in the temporary
+workstation transaction rather than a protected-gate or product-route failure.
+The first privileged attempt had not copied the previous bundled daemon into
+its rollback snapshot. It removed the newly installed daemon and restored the
+old app, but could not reinstall the previous root daemon. The second attempt
+started from that safe daemon-free baseline and installed the exact qualified
+daemon, but the unprivileged coordinator tried to hash its deliberately
+root-only installed binary and received `Permission denied`.
+
+The second attempt immediately requested rollback. The privileged transaction
+uninstalled the new daemon, cleared only `com.apple/slipstream`, disabled the
+exact launchd label, removed the plist, token, status, socket, and root runtime,
+restored and relaunched the previous app exactly, and published
+`root-rolled-back`. There was no rollback-failed marker. User DNS remained
+`111.88.96.50/51`, proxy/PAC remained off, the existing owned-Geph PID and hash
+were unchanged, and the restored tray executable matched the previous SHA-256.
+Post-rollback direct probes received HTTP from ChatGPT and CrystalIDEA; Discord
+timed out directly, as expected without Slipstream local bypass. The qualified
+app is not installed, no root daemon or private PF runtime remains, and no
+further workstation retry is permitted until root-only artifact attestation is
+performed inside a disposable privileged transaction.
 
 ## Resume Protocol
 
@@ -58,7 +77,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Partial; protected packaged Chromium functional qualification is the active gate | PRs #219-#242 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, pinned Chrome for Testing, exact profile-local native-host composition, sandboxed LaunchServices bootstrap, extensionless runner-bundle adaptation, an independent HTTPS canary portfolio, phase-specific private diagnostics, broker-rate-limit admission, and fail-closed cleanup. Exact-main CI `30311301652` and audit `30311301661` passed on `3d58942`. The single post-reset protected run `30316469657` authenticated owned Geph and left no user/system artifact, but the symlink-backed extensionless Chrome wrapper caused sandboxed helper Mach rendezvous denial and browser timeout. The narrow follow-up materializes a real private app bundle and admits only its copied executable. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, and physical sleep/default-route qualification remain open. |
+| M1 - Autonomous Routing V1 | Protected packaged Chromium and owned-Geph functional qualification passed; controlled workstation install remains pending | PRs #219-#243 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, pinned Chrome for Testing, exact profile-local native-host composition, sandboxed LaunchServices bootstrap, complete owner-private extensionless bundle materialization, an independent HTTPS canary portfolio, phase-specific private diagnostics, broker-rate-limit admission, and fail-closed cleanup. Exact-main CI `30318303005`, audit `30318303014`, and protected run `30318687293` passed on `dde7224`, including account-backed owned-Geph recovery, complete semantic page resources, and final cleanup. A user-present workstation transaction installed the exact daemon but its unprivileged validator could not read the root-only binary. Immediate privileged rollback restored the previous app and removed the daemon, exact launchd label, private PF state, token, status, socket, and runtime while preserving DNS, proxy/PAC, and owned Geph. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, physical sleep/default-route qualification, privileged artifact attestation, and one user-present exact-artifact smoke remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
@@ -527,20 +546,22 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not reinstall or re-arm Slipstream on the primary workstation while the user
-is away. The downloaded `140598b` app used a superseded Geph artifact and must
-not be launched. The exact revisioned `f22e475` packaged app has been downloaded,
-signature-verified, and inspected without launching any component. Actual
-installation still waits for one short, user-scheduled smoke with preflight and
-rollback prepared in advance. No repeated administrator prompts are acceptable.
-If the smoke fails, uninstall immediately and preserve the first failing
-evidence; do not improvise another install in the same session.
+Do not retry the controlled transaction on the primary workstation yet. Move
+installed-daemon SHA attestation into the privileged transaction and emit a
+bounded owner-readable evidence file; the coordinator must never read the
+root-only binary directly. Qualify both commit and rollback from a daemon-free
+baseline on a disposable Mac while proving absence of the exact launchd label,
+private PF rules, token, status, socket, and root runtime after rollback. Only
+then schedule one user-present workstation attempt using artifact `8673106618`
+from exact-main run `30318303005` for SHA
+`dde722435887154632dc4a0d9ba69ec9fc1f9f17`. Do not substitute a release,
+local build, or newer-main artifact, and do not repeat a failed workstation
+attempt in the same session.
 
-In parallel, qualify browser semantic adapters without touching the primary
-workstation. Chromium source and native-host lifecycle are merged. Safari may
-advance through deterministic source, Swift contract tests, and unsigned
-packaging, but the signed app-extension sandbox/socket path must be proven on a
-disposable build before it is bundled, enabled, or described as runtime-ready.
+The Chromium protected gate is complete. Safari may advance through
+deterministic source, Swift contract tests, and unsigned packaging, but the
+signed app-extension sandbox/socket path must be proven on a disposable build
+before it is bundled, enabled, or described as runtime-ready.
 
 Continue M4 on disposable systems. PRs #193 and #194 proved no-payload IPv4
 and IPv6 socket selection under competing exact Wintun routes on exact main,
