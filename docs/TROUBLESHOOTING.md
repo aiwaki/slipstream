@@ -773,6 +773,13 @@ unavailable or unowned backend, an explicit policy, or a different failure
 shape cannot authorize this overlay. This avoids per-site rules while keeping
 local bypass and direct routes out of Geph.
 
+If that complete exact-host proof coincides with a brief owned-Geph recovery,
+the replay-safe request waits for at most five seconds. A successful real
+payload through the exact owned `:9954` listener also clears an older backend
+hold so the page's following resources use the confirmed route immediately.
+Missing proof, a failed payload, an external listener, or an ownership conflict
+does not wait, clear the hold, or select Geph.
+
 Google and Spotify use `direct_first`: the next connection always starts with
 plain TLS, then can use bounded local desync only if direct did not work. They
 never fall through to Geph.
