@@ -118,9 +118,13 @@ exposed a generic partial top-level response on one otherwise eligible unknown
 host. Additive semantic-signal v2 now models only Chromium-owned incomplete
 navigation evidence, requires a distinct complete response through exact-owned
 Geph, and permits one same-host reload without replaying the failed transparent
-request. It remains closed until full local, PR, exact-main, and protected
-two-scenario browser gates pass. A physical default-route/lid-close transition
-on a disposable Mac remains a separate M1 gate.
+request. PR #250 and its exact-main gates passed, but protected run
+`30393151116` showed that `webNavigation` did not expose the post-commit
+truncated-body fixture even though owned Geph and cleanup passed. Chromium now
+uses a read-only top-level `webRequest` error observer and remains closed until
+its new local, PR, exact-main, and protected two-scenario browser gates pass. A
+physical default-route/lid-close transition on a disposable Mac remains a
+separate M1 gate.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.

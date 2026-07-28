@@ -4,8 +4,8 @@ importScripts("service-worker-core.js");
 
 const runtime = globalThis.browser?.runtime ?? globalThis.chrome?.runtime;
 const tabs = globalThis.browser?.tabs ?? globalThis.chrome?.tabs;
-const webNavigation =
-  globalThis.browser?.webNavigation ?? globalThis.chrome?.webNavigation;
+const webRequest =
+  globalThis.browser?.webRequest ?? globalThis.chrome?.webRequest;
 const core = globalThis.SlipstreamServiceWorkerCore;
 const CONTAINING_APP_ID = "dev.slipstream.Slipstream-Safari-Companion";
 
@@ -31,8 +31,8 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-if (webNavigation?.onErrorOccurred && tabs?.get && tabs?.reload) {
-  webNavigation.onErrorOccurred.addListener(
+if (webRequest?.onErrorOccurred && tabs?.get && tabs?.reload) {
+  webRequest.onErrorOccurred.addListener(
     (details) => {
       const randomBytes = new Uint8Array(16);
       crypto.getRandomValues(randomBytes);
@@ -63,6 +63,9 @@ if (webNavigation?.onErrorOccurred && tabs?.get && tabs?.reload) {
         })
         .catch(() => {});
     },
-    { url: [{ schemes: ["https"] }] }
+    {
+      urls: ["https://*/*"],
+      types: ["main_frame"]
+    }
   );
 }

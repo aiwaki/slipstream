@@ -36,6 +36,10 @@ def _fake_extensionless_chrome_for_testing(root: Path) -> Path:
 
 
 class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
+    def test_extension_validator_accepts_the_reviewed_webrequest_manifest(self) -> None:
+        extension = ROOT / "browser-companion" / "chromium"
+        self.assertEqual(smoke._validate_extension(extension), extension.resolve())
+
     def test_disposable_guard_requires_root_macos_and_original_user(self) -> None:
         environment = {
             "CI": "true",

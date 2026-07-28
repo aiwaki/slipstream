@@ -125,7 +125,7 @@ test("requests one bounded reload only after confirmation was scheduled", () => 
   }
 });
 
-test("maps only exact top-level incomplete-response browser errors to v2", () => {
+test("maps only exact top-level incomplete-response request errors to v2", () => {
   for (const error of [
     "net::ERR_CONTENT_LENGTH_MISMATCH",
     "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
@@ -133,7 +133,10 @@ test("maps only exact top-level incomplete-response browser errors to v2", () =>
     const signal = core.buildIncompleteResponseSignal(
       {
         tabId: 7,
+        type: "main_frame",
+        method: "GET",
         frameId: 0,
+        parentFrameId: -1,
         url: "https://Example.NET/private/path?token=secret",
         error
       },
@@ -151,15 +154,21 @@ test("maps only exact top-level incomplete-response browser errors to v2", () =>
   }
 });
 
-test("rejects ambiguous, subframe, non-HTTPS, and IP navigation errors", () => {
+test("rejects ambiguous, subframe, non-HTTPS, and IP request errors", () => {
   const base = {
     tabId: 7,
+    type: "main_frame",
+    method: "GET",
     frameId: 0,
+    parentFrameId: -1,
     url: "https://example.net/",
     error: "net::ERR_CONTENT_LENGTH_MISMATCH"
   };
   for (const details of [
     { ...base, frameId: 2 },
+    { ...base, parentFrameId: 2 },
+    { ...base, type: "xmlhttprequest" },
+    { ...base, method: "POST" },
     { ...base, tabId: -1 },
     { ...base, url: "http://example.net/" },
     { ...base, url: "https://127.0.0.1/" },
@@ -181,7 +190,10 @@ test("v2 reload follows completed confirmation and remains same-host scoped", ()
   const signal = core.buildIncompleteResponseSignal(
     {
       tabId: 7,
+      type: "main_frame",
+      method: "GET",
       frameId: 0,
+      parentFrameId: -1,
       url: "https://example.net/",
       error: "net::ERR_CONTENT_LENGTH_MISMATCH"
     },

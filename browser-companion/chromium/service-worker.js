@@ -27,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-chrome.webNavigation.onErrorOccurred.addListener(
+chrome.webRequest.onErrorOccurred.addListener(
   (details) => {
     const randomBytes = new Uint8Array(16);
     crypto.getRandomValues(randomBytes);
@@ -59,5 +59,8 @@ chrome.webNavigation.onErrorOccurred.addListener(
       })
       .catch(() => {});
   },
-  { url: [{ schemes: ["https"] }] }
+  {
+    urls: ["https://*/*"],
+    types: ["main_frame"]
+  }
 );

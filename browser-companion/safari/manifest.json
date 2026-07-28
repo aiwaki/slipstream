@@ -3,10 +3,13 @@
   "name": "Slipstream Browser Companion",
   "short_name": "Slipstream",
   "version": "0.2.0",
-  "description": "Reports bounded regional-denial and incomplete-navigation evidence to Slipstream.",
+  "description": "Reports bounded regional-denial and incomplete-response evidence to Slipstream.",
   "permissions": [
     "nativeMessaging",
-    "webNavigation"
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://*/*"
   ],
   "background": {
     "service_worker": "service-worker.js"

@@ -98,7 +98,10 @@
       !details ||
       typeof details !== "object" ||
       Array.isArray(details) ||
+      details.type !== "main_frame" ||
+      details.method !== "GET" ||
       details.frameId !== 0 ||
+      details.parentFrameId !== -1 ||
       !Number.isInteger(details.tabId) ||
       details.tabId < 0 ||
       !INCOMPLETE_RESPONSE_ERRORS.includes(details.error)
