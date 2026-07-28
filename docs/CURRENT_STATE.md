@@ -9,10 +9,11 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-28, through main commit
-`dde722435887154632dc4a0d9ba69ec9fc1f9f17`. PR #243 replaced the
-symlink-backed extensionless Chrome for Testing wrapper with a complete
-owner-private bundle copy. Exact-main CI run `30318303005` and audit run
-`30318303014` passed, including the packaged app lifecycle sentinel.
+`66c971d7bac5ea76572f9f5058a66e9274ef4deb`. PR #244 recorded the
+protected-gate and workstation-rollback evidence without changing runtime code.
+Exact-main CI run `30344881368` and audit run `30344882030` passed, including
+the packaged app lifecycle sentinel. The last account-backed protected runtime
+qualification remains run `30318687293` on `dde7224`.
 
 The single protected run `30318687293` then passed on that exact main SHA. It
 proved account-backed owned-Geph initial, trayless, and recovered HTTPS payload;
@@ -54,6 +55,16 @@ app is not installed, no root daemon or private PF runtime remains, and no
 further workstation retry is permitted until root-only artifact attestation is
 performed inside a disposable privileged transaction.
 
+The current root-attestation change moves installed-daemon hashing and identity
+verification into the privileged installer. It atomically publishes a bounded,
+root-owned evidence record only after the installed path, SHA-256, owner, mode,
+launchd PID, exclusive listener, fresh StatusV2 state, and private-PF state
+agree. The tray validates that record against its bundled daemon without
+opening the root-only installed binary. Injected attestation failure enters the
+same exact uninstall path and must leave a daemon-free baseline. This change is
+not qualified until its pull-request packaged lifecycle and exact-main gates
+pass; it has not been installed on the primary workstation.
+
 ## Resume Protocol
 
 Before continuing existing work, including after context compaction or a bare
@@ -77,7 +88,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Protected packaged Chromium and owned-Geph functional qualification passed; controlled workstation install remains pending | PRs #219-#243 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, pinned Chrome for Testing, exact profile-local native-host composition, sandboxed LaunchServices bootstrap, complete owner-private extensionless bundle materialization, an independent HTTPS canary portfolio, phase-specific private diagnostics, broker-rate-limit admission, and fail-closed cleanup. Exact-main CI `30318303005`, audit `30318303014`, and protected run `30318687293` passed on `dde7224`, including account-backed owned-Geph recovery, complete semantic page resources, and final cleanup. A user-present workstation transaction installed the exact daemon but its unprivileged validator could not read the root-only binary. Immediate privileged rollback restored the previous app and removed the daemon, exact launchd label, private PF state, token, status, socket, and runtime while preserving DNS, proxy/PAC, and owned Geph. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, physical sleep/default-route qualification, privileged artifact attestation, and one user-present exact-artifact smoke remain open. |
+| M1 - Autonomous Routing V1 | Protected packaged Chromium and owned-Geph functional qualification passed; controlled workstation install remains pending | PRs #219-#243 cover generic transport recovery, the strict semantic contract, owner-only daemon IPC, independent exact-host owned-Geph confirmation, exact Chromium-origin authentication, one bounded reload, unsigned Safari packaging, pinned Chrome for Testing, exact profile-local native-host composition, sandboxed LaunchServices bootstrap, complete owner-private extensionless bundle materialization, an independent HTTPS canary portfolio, phase-specific private diagnostics, broker-rate-limit admission, and fail-closed cleanup. Exact-main CI `30318303005`, audit `30318303014`, and protected run `30318687293` passed on `dde7224`, including account-backed owned-Geph recovery, complete semantic page resources, and final cleanup. A user-present workstation transaction installed the exact daemon but its unprivileged validator could not read the root-only binary. Immediate privileged rollback restored the previous app and removed the daemon, exact launchd label, private PF state, token, status, socket, and runtime while preserving DNS, proxy/PAC, and owned Geph. The current change implements privileged bounded artifact attestation and disposable failure injection, but its packaged lifecycle, exact-main, and protected exact-artifact gates remain pending. Static policy remains authoritative; Discord/YouTube never use Geph and external network owners remain read-only. Reviewed extension distribution, signed Safari sandbox qualification, scoped QUIC, split/per-app VPN, physical sleep/default-route qualification, and one user-present exact-artifact smoke remain open. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
@@ -546,17 +557,17 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not retry the controlled transaction on the primary workstation yet. Move
-installed-daemon SHA attestation into the privileged transaction and emit a
-bounded owner-readable evidence file; the coordinator must never read the
-root-only binary directly. Qualify both commit and rollback from a daemon-free
-baseline on a disposable Mac while proving absence of the exact launchd label,
-private PF rules, token, status, socket, and root runtime after rollback. Only
-then schedule one user-present workstation attempt using artifact `8673106618`
-from exact-main run `30318303005` for SHA
-`dde722435887154632dc4a0d9ba69ec9fc1f9f17`. Do not substitute a release,
-local build, or newer-main artifact, and do not repeat a failed workstation
-attempt in the same session.
+Do not retry the controlled transaction on the primary workstation yet. First
+qualify this root-attestation change in the pull-request packaged lifecycle:
+both a successful commit and an injected attestation failure must return from a
+daemon-free baseline while preserving the exact global PF snapshot. After
+merge, require exact-main CI and audit, then dispatch one protected
+account-backed owned-Geph and Chromium semantic qualification for that exact
+main SHA. Download only the artifact produced and qualified by those exact
+gates. A user-present workstation transaction may follow with its existing
+snapshot and immediate rollback boundary. Do not reuse artifact `8673106618`,
+substitute a release or local build, or repeat a failed workstation attempt in
+the same session.
 
 The Chromium protected gate is complete. Safari may advance through
 deterministic source, Swift contract tests, and unsigned packaging, but the

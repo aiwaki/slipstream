@@ -3612,6 +3612,7 @@ version = "0.1.9"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "slipstream-core",
  "tauri",
  "tauri-build",

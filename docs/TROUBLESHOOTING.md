@@ -94,6 +94,26 @@ only as a PID fallback, then requires that PID's exact installed command to run
 as root; a mapped executable returned by `lsof` must still match. Unknown or
 user-owned listeners are never accepted or terminated.
 
+### Install validator reports `Permission denied` for `slipstreamd`
+
+The installed frozen daemon and its directory are deliberately root-only. An
+unprivileged tray or temporary coordinator must never open
+`/usr/local/slipstream/slipstreamd` to compare its bytes. The 2026-07-28
+workstation transaction did that after an otherwise healthy install, received
+`Permission denied`, and correctly rolled back.
+
+The privileged installer now hashes the source before mutation, verifies the
+installed regular file after launch, and requires exact owner, mode, launchd
+PID, exclusive listener, fresh StatusV2 state, and matching private-PF state.
+Only then may it atomically publish
+`/var/run/slipstream-install-attestation.json`. The tray accepts that bounded
+root-owned record only when its source and installed SHA-256 both equal the
+current bundled daemon. Missing, oversized, symlinked, stale, or mismatched
+evidence requests a normal privileged reinstall; it never authorizes direct
+reading of the installed binary. Any failure to publish the record must execute
+the same exact rollback and remove the evidence file and its temporary
+artifacts.
+
 ### Install rolls back with `status missing`
 
 The 2026-07-20 controlled workstation validation found a startup ordering bug.
