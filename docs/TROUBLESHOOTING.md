@@ -117,13 +117,17 @@ The privileged installer now hashes the source before mutation, verifies the
 installed regular file after launch, and requires exact owner, mode, launchd
 PID, exclusive listener, fresh StatusV2 state, and matching private-PF state.
 Only then may it atomically publish
-`/var/run/slipstream-install-attestation.json`. The tray accepts that bounded
-root-owned record only when its source and installed SHA-256 both equal the
-current bundled daemon. Missing, oversized, symlinked, stale, or mismatched
-evidence requests a normal privileged reinstall; it never authorizes direct
-reading of the installed binary. Any failure to publish the record must execute
-the same exact rollback and remove the evidence file and its temporary
-artifacts.
+`/Library/Application Support/dev.slipstream.tray/install-attestation.json`.
+That persistent root-owned record survives reboot. A sibling root-only hard-link
+witness retains the installed daemon inode without exposing its bytes; deleting
+or replacing the installed path reduces or changes that identity and invalidates
+the record even though the tray cannot traverse the `0700` install directory.
+The tray accepts the bounded record only when its source and installed SHA-256
+equal the current bundled daemon and the witness still has the exact attested
+device/inode with at least two links. Missing, oversized, symlinked, stale, or
+mismatched evidence requests a normal privileged reinstall. Any publication
+failure executes the same exact rollback and removes the evidence, witness, and
+temporary artifacts.
 
 ### Install rolls back with `status missing`
 

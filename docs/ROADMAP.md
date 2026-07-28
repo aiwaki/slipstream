@@ -62,7 +62,10 @@ closed by disposable lifecycle gates. Installed-artifact attestation now
 belongs to the same privileged transaction that copies and starts the daemon:
 it verifies the exact regular-file identity, SHA-256, owner, mode, launchd PID,
 exclusive listener, StatusV2 state, and private-PF state, then atomically emits
-only bounded evidence for the tray. Frozen installs remain root-only mode
+only bounded evidence for the tray. The record lives in persistent system
+Application Support rather than reboot-volatile `/var/run`; a root-only
+hard-link witness detects removal or replacement of the installed path without
+letting the tray read daemon bytes. Frozen installs remain root-only mode
 `0700`; the console-user baseline uses fixed macOS resolver and HTTPS tools
 instead of executing the installed PyInstaller daemon. The packaged disposable
 gate must prove both

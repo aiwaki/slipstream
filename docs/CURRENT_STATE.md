@@ -82,6 +82,19 @@ the later lifecycle assertion incorrectly required it to equal the current
 `active` status. Both jobs completed exact cleanup and the workstation remained
 untouched. The current patch retries only an incoherent transition snapshot and
 checks later daemon/PF state independently from the immutable install evidence.
+That follow-up passed all PR jobs in CI run `30353331745` and dependency audit
+run `30353331739`, including successful privileged commit, daemon-free injected
+rollback, browser restarts, tray crash/restart, two wake/network-change cycles,
+and exact sentinel/global-PF preservation. Merge then remained correctly
+blocked by two unresolved review findings: reboot would erase evidence stored
+under `/var/run`, and stale evidence could outlive a manually removed installed
+runtime. The current review follow-up moves schema-v2 evidence to persistent
+root-owned system Application Support and creates a sibling root-only hard-link
+witness for the installed inode. The tray validates its exact device, inode,
+mode, owner, and minimum link count without reading daemon bytes; removal or
+replacement of the installed path therefore forces reinstall. This follow-up
+must repeat the full PR gates before review resolution or merge. No workstation
+component has been launched or changed.
 
 ## Resume Protocol
 

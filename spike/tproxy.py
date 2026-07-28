@@ -9066,8 +9066,12 @@ LAUNCHD_PLIST = f"/Library/LaunchDaemons/{LAUNCHD_LABEL}.plist"
 LOG_PATH = "/var/log/slipstream.log"
 OBSOLETE_NEWSYSLOG_CONFIG_PATH = f"/etc/newsyslog.d/{LAUNCHD_LABEL}.conf"
 INSTALL_DIR = "/usr/local/slipstream"   # NOT under ~/Documents (TCC-protected)
-INSTALL_ATTESTATION_PATH = "/var/run/slipstream-install-attestation.json"
-INSTALL_ATTESTATION_SCHEMA_VERSION = 1
+INSTALL_ATTESTATION_DIR = "/Library/Application Support/dev.slipstream.tray"
+INSTALL_ATTESTATION_PATH = os.path.join(
+    INSTALL_ATTESTATION_DIR,
+    "install-attestation.json",
+)
+INSTALL_ATTESTATION_SCHEMA_VERSION = 2
 _INSTALL_ATTESTATION_FAILURE_ENV = "SLIPSTREAM_CI_FORCE_INSTALL_ATTESTATION_FAILURE"
 LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 5
@@ -9561,9 +9565,11 @@ def _install_attestation_record(
     expected_mode,
     port,
     *,
+    witness_path,
     expected_uid=0,
 ):
     path_stat = os.lstat(installed_path)
+    witness_stat = os.lstat(witness_path)
     mode = stat.S_IMODE(path_stat.st_mode)
     if not stat.S_ISREG(path_stat.st_mode):
         raise RuntimeError("installed daemon attestation rejected a non-regular path")
@@ -9576,6 +9582,19 @@ def _install_attestation_record(
         raise RuntimeError(
             "installed daemon attestation rejected mode "
             f"{mode:04o}, expected={expected_mode:04o}"
+        )
+    if (
+        not stat.S_ISREG(witness_stat.st_mode)
+        or witness_stat.st_uid != path_stat.st_uid
+        or witness_stat.st_gid != path_stat.st_gid
+        or stat.S_IMODE(witness_stat.st_mode) != mode
+        or witness_stat.st_dev != path_stat.st_dev
+        or witness_stat.st_ino != path_stat.st_ino
+        or witness_stat.st_nlink < 2
+    ):
+        raise RuntimeError(
+            "installed daemon attestation witness does not retain "
+            "the installed runtime identity"
         )
     installed_sha256 = _sha256_regular_file(installed_path)
     if installed_sha256 != source_sha256:
@@ -9607,6 +9626,14 @@ def _install_attestation_record(
             "gid": path_stat.st_gid,
             "mode": mode,
         },
+        "witness": {
+            "path": os.path.realpath(witness_path),
+            "dev": witness_stat.st_dev,
+            "ino": witness_stat.st_ino,
+            "size": witness_stat.st_size,
+            "mtime": int(witness_stat.st_mtime),
+            "mtime_nsec": witness_stat.st_mtime_ns % 1_000_000_000,
+        },
         "launchd": {
             "label": LAUNCHD_LABEL,
             "pid": status.get("pid"),
@@ -9620,6 +9647,37 @@ def _install_attestation_record(
     }
 
 
+def _install_attestation_witness_path(evidence_path):
+    return f"{evidence_path}.daemon"
+
+
+def _ensure_install_attestation_directory(
+    parent,
+    *,
+    expected_uid=0,
+    expected_gid=0,
+):
+    try:
+        os.mkdir(parent, 0o755)
+        os.chown(parent, expected_uid, expected_gid)
+    except FileExistsError:
+        pass
+    parent_stat = os.lstat(parent)
+    if not stat.S_ISDIR(parent_stat.st_mode):
+        raise RuntimeError(
+            f"install attestation parent is not a directory: {parent}"
+        )
+    if (
+        parent_stat.st_uid != expected_uid
+        or parent_stat.st_gid != expected_gid
+    ):
+        raise RuntimeError(
+            "install attestation parent has unexpected ownership: "
+            f"uid={parent_stat.st_uid}, gid={parent_stat.st_gid}"
+        )
+    os.chmod(parent, 0o755)
+
+
 def _write_install_attestation(
     installed_path,
     source_sha256,
@@ -9631,28 +9689,46 @@ def _write_install_attestation(
     expected_gid=0,
 ):
     evidence_path = evidence_path or INSTALL_ATTESTATION_PATH
-    record = _install_attestation_record(
-        installed_path,
-        source_sha256,
-        expected_mode,
-        port,
-        expected_uid=expected_uid,
-    )
-    if (
-        os.environ.get("GITHUB_ACTIONS") == "true"
-        and os.environ.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
-        and os.environ.get(_INSTALL_ATTESTATION_FAILURE_ENV) == "1"
-    ):
-        raise RuntimeError("disposable install attestation failure injected")
     parent = os.path.dirname(evidence_path)
+    witness_path = _install_attestation_witness_path(evidence_path)
     tmp = f"{evidence_path}.tmp.{os.getpid()}"
-    payload = (
-        json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    witness_tmp = f"{witness_path}.tmp.{os.getpid()}"
+    _ensure_install_attestation_directory(
+        parent,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+    )
     try:
+        try:
+            os.remove(witness_tmp)
+        except FileNotFoundError:
+            pass
+        os.link(
+            installed_path,
+            witness_tmp,
+            follow_symlinks=False,
+        )
+        os.replace(witness_tmp, witness_path)
+        record = _install_attestation_record(
+            installed_path,
+            source_sha256,
+            expected_mode,
+            port,
+            witness_path=witness_path,
+            expected_uid=expected_uid,
+        )
+        if (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            and os.environ.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+            and os.environ.get(_INSTALL_ATTESTATION_FAILURE_ENV) == "1"
+        ):
+            raise RuntimeError("disposable install attestation failure injected")
+        payload = (
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         try:
             os.remove(tmp)
         except FileNotFoundError:
@@ -9666,16 +9742,22 @@ def _write_install_attestation(
         os.chown(tmp, expected_uid, expected_gid)
         os.chmod(tmp, 0o644)
         os.replace(tmp, evidence_path)
-        directory_fd = os.open(parent, os.O_RDONLY)
+        directory_flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            directory_flags |= os.O_NOFOLLOW
+        directory_fd = os.open(parent, directory_flags)
         try:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
     finally:
-        try:
-            os.remove(tmp)
-        except FileNotFoundError:
-            pass
+        for temporary in (tmp, witness_tmp):
+            try:
+                os.remove(temporary)
+            except FileNotFoundError:
+                pass
     return record
 
 
@@ -9697,7 +9779,7 @@ def _install_attestation_artifacts():
         return [
             entry.path
             for entry in entries
-            if entry.name == basename or entry.name.startswith(f"{basename}.tmp.")
+            if entry.name == basename or entry.name.startswith(f"{basename}.")
         ]
 
 
@@ -9709,6 +9791,14 @@ def _remove_install_attestation_artifacts():
         except FileNotFoundError:
             pass
         except OSError:
+            clean = False
+    parent = os.path.dirname(INSTALL_ATTESTATION_PATH)
+    try:
+        os.rmdir(parent)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
             clean = False
     return clean
 

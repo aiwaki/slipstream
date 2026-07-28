@@ -1444,7 +1444,8 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
     installed = tmp_path / "slipstreamd"
     installed.write_bytes(b"qualified daemon")
     installed.chmod(0o700)
-    evidence = tmp_path / "attestation.json"
+    evidence_dir = tmp_path / "attestation"
+    evidence = evidence_dir / "install-attestation.json"
     source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
     monkeypatch.setattr(
         tproxy,
@@ -1474,6 +1475,10 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
     }
     assert stat.S_IMODE(evidence.stat().st_mode) == 0o644
     assert json.loads(evidence.read_text()) == record
+    witness = Path(record["witness"]["path"])
+    assert witness == Path(f"{evidence}.daemon")
+    assert witness.stat().st_ino == installed.stat().st_ino
+    assert witness.stat().st_nlink >= 2
 
     installed.write_bytes(b"tampered daemon")
     with pytest.raises(RuntimeError, match="does not match"):
@@ -1482,6 +1487,7 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
             source_sha256,
             0o700,
             1080,
+            witness_path=str(witness),
             expected_uid=os.getuid(),
         )
 
@@ -1493,6 +1499,8 @@ def test_install_attestation_retries_a_dormant_to_active_transition(
     installed.write_bytes(b"qualified daemon")
     installed.chmod(0o700)
     source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
+    witness = tmp_path / "attestation-witness"
+    os.link(installed, witness)
     snapshots = iter(
         (
             (False, "PF state does not match daemon state", None, True),
@@ -1516,12 +1524,50 @@ def test_install_attestation_retries_a_dormant_to_active_transition(
         source_sha256,
         0o700,
         1080,
+        witness_path=str(witness),
         expected_uid=os.getuid(),
     )
 
     assert record["state"] == "active"
     assert record["pf_active"] is True
     assert record["launchd"]["pid"] == 4242
+
+
+def test_install_attestation_path_persists_across_reboot() -> None:
+    assert not tproxy.INSTALL_ATTESTATION_DIR.startswith("/var/run/")
+    assert not tproxy.INSTALL_ATTESTATION_DIR.startswith("/private/var/run/")
+    assert tproxy.INSTALL_ATTESTATION_DIR.startswith(
+        "/Library/Application Support/"
+    )
+
+
+def test_install_attestation_rejects_symlink_parent(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    parent = tmp_path / "attestation"
+    parent.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="not a directory"):
+        tproxy._ensure_install_attestation_directory(
+            str(parent),
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_install_attestation_cleanup_removes_witness_and_empty_parent(
+    monkeypatch, tmp_path
+) -> None:
+    parent = tmp_path / "attestation"
+    evidence = parent / "install-attestation.json"
+    parent.mkdir()
+    evidence.write_text("{}")
+    Path(f"{evidence}.daemon").write_text("witness")
+    Path(f"{evidence}.tmp.42").write_text("temporary")
+    monkeypatch.setattr(tproxy, "INSTALL_ATTESTATION_PATH", str(evidence))
+
+    assert tproxy._remove_install_attestation_artifacts()
+    assert not parent.exists()
 
 
 def test_install_attestation_failure_rolls_back_daemon_free(monkeypatch, tmp_path):

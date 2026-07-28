@@ -3658,11 +3658,14 @@ mod tests {
         let installed = dir.join("installed-slipstreamd");
         let plist = dir.join("dev.slipstream.tproxy.plist");
         let attestation = dir.join("install-attestation.json");
+        let witness = std::path::PathBuf::from(format!("{}.daemon", attestation.display()));
         let daemon_v1 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 1];
         let daemon_v2 = [0xfe, 0xed, 0xfa, 0xcf, 0, 0, 0, 2];
         std::fs::write(&bundled, daemon_v1).unwrap();
         std::fs::set_permissions(&bundled, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(&installed, daemon_v1).unwrap();
+        std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::hard_link(&installed, &witness).unwrap();
         std::fs::write(
             &plist,
             format!(
@@ -3672,10 +3675,11 @@ mod tests {
         )
         .unwrap();
         let daemon_sha256 = crate::install_attestation::file_sha256(&bundled).unwrap();
+        let witness_metadata = std::fs::symlink_metadata(&witness).unwrap();
         std::fs::write(
             &attestation,
             serde_json::to_vec(&json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "source_sha256": daemon_sha256,
                 "daemon": {
                     "path": installed,
@@ -3683,6 +3687,14 @@ mod tests {
                     "uid": 0,
                     "gid": 0,
                     "mode": 0o700
+                },
+                "witness": {
+                    "path": witness,
+                    "dev": witness_metadata.dev(),
+                    "ino": witness_metadata.ino(),
+                    "size": witness_metadata.len(),
+                    "mtime": witness_metadata.mtime(),
+                    "mtime_nsec": witness_metadata.mtime_nsec()
                 },
                 "launchd": {
                     "label": "dev.slipstream.tproxy",
@@ -3729,7 +3741,21 @@ mod tests {
             &attestation,
             attestation_uid,
         );
-        assert_eq!(still_attested["installed_daemon_matches_bundle"], true);
+        assert_eq!(still_attested["installed_daemon_matches_bundle"], false);
+        assert_eq!(still_attested["install_attestation_valid"], false);
+
+        std::fs::remove_file(&installed).unwrap();
+        let missing_runtime = install_diagnostic_value_at(
+            Some(&bundled),
+            &installed,
+            &plist,
+            &attestation,
+            attestation_uid,
+        );
+        assert_eq!(missing_runtime["installed_daemon_exists"], false);
+        assert_eq!(missing_runtime["installed_daemon_matches_bundle"], false);
+        assert_eq!(missing_runtime["install_attestation_valid"], false);
+        std::fs::hard_link(&witness, &installed).unwrap();
 
         std::fs::write(&bundled, daemon_v2).unwrap();
         let stale = install_diagnostic_value_at(

@@ -51,7 +51,10 @@ INSTALLED_ROUTING_POLICY = INSTALL_DIR / "routing_policy.py"
 INSTALLED_ROUTING_RECOVERY = INSTALL_DIR / "routing_recovery.py"
 INSTALLED_XBOX_DNS = INSTALL_DIR / "xbox_dns.py"
 INSTALLED_FROZEN_DAEMON = INSTALL_DIR / "slipstreamd"
-INSTALL_ATTESTATION_PATH = Path("/var/run/slipstream-install-attestation.json")
+INSTALL_ATTESTATION_DIR = Path(
+    "/Library/Application Support/dev.slipstream.tray"
+)
+INSTALL_ATTESTATION_PATH = INSTALL_ATTESTATION_DIR / "install-attestation.json"
 LAUNCHD_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 LAUNCHD_LABEL = "system/dev.slipstream.tproxy"
 STATUS_PATH = Path("/var/run/slipstream.status")
@@ -1953,13 +1956,17 @@ def _assert_install_attestation(target: LifecycleTarget) -> None:
             f"uid={evidence_stat.st_uid}, mode={stat.S_IMODE(evidence_stat.st_mode):04o}"
         )
     daemon = evidence.get("daemon")
+    witness = evidence.get("witness")
     launchd = evidence.get("launchd")
     listener = evidence.get("listener")
-    if not all(isinstance(item, dict) for item in (daemon, launchd, listener)):
+    if not all(
+        isinstance(item, dict)
+        for item in (daemon, witness, launchd, listener)
+    ):
         raise LifecycleError("install attestation omitted required records")
     source_sha256 = _sha256_file(source)
     expected_path = str(installed.resolve(strict=True))
-    if evidence.get("schema_version") != 1:
+    if evidence.get("schema_version") != 2:
         raise LifecycleError("install attestation schema mismatch")
     if evidence.get("source_sha256") != source_sha256:
         raise LifecycleError("install attestation source SHA-256 mismatch")
@@ -1970,6 +1977,32 @@ def _assert_install_attestation(target: LifecycleTarget) -> None:
         or daemon.get("mode") != expected_mode
     ):
         raise LifecycleError(f"installed daemon attestation mismatch: {daemon!r}")
+    expected_witness = Path(f"{INSTALL_ATTESTATION_PATH}.daemon")
+    try:
+        installed_stat = installed.stat()
+        witness_stat = expected_witness.lstat()
+    except OSError as exc:
+        raise LifecycleError(
+            f"install attestation witness is unavailable: {exc}"
+        ) from exc
+    if (
+        witness.get("path") != str(expected_witness)
+        or witness.get("dev") != witness_stat.st_dev
+        or witness.get("ino") != witness_stat.st_ino
+        or witness.get("size") != witness_stat.st_size
+        or witness.get("mtime") != int(witness_stat.st_mtime)
+        or witness.get("mtime_nsec")
+        != witness_stat.st_mtime_ns % 1_000_000_000
+        or not stat.S_ISREG(witness_stat.st_mode)
+        or witness_stat.st_uid != 0
+        or stat.S_IMODE(witness_stat.st_mode) != expected_mode
+        or witness_stat.st_dev != installed_stat.st_dev
+        or witness_stat.st_ino != installed_stat.st_ino
+        or witness_stat.st_nlink < 2
+    ):
+        raise LifecycleError(
+            f"install attestation witness mismatch: {witness!r}"
+        )
     status = _daemon_status(_read_status()) or {}
     _assert_install_attestation_runtime(evidence, status)
 
@@ -1982,8 +2015,20 @@ def _install_attestation_artifacts() -> tuple[Path, ...]:
     return tuple(
         path
         for path in parent.iterdir()
-        if path.name == name or path.name.startswith(f"{name}.tmp.")
+        if path.name == name or path.name.startswith(f"{name}.")
     )
+
+
+def _remove_install_attestation_artifacts() -> None:
+    for path in _install_attestation_artifacts():
+        path.unlink(missing_ok=True)
+    try:
+        INSTALL_ATTESTATION_DIR.rmdir()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        if not INSTALL_ATTESTATION_DIR.exists():
+            raise
 
 
 def _assert_installed_payload(target: LifecycleTarget) -> None:
@@ -2036,6 +2081,11 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
         raise LifecycleError(
             f"installed lifecycle attestation residue remains: {artifacts!r}"
         )
+    if INSTALL_ATTESTATION_DIR.exists():
+        raise LifecycleError(
+            "installed lifecycle attestation directory remains: "
+            f"{INSTALL_ATTESTATION_DIR}"
+        )
 
 
 def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
@@ -2057,6 +2107,11 @@ def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
     artifacts = _install_attestation_artifacts()
     if artifacts:
         raise LifecycleError(f"refusing existing install attestation: {artifacts!r}")
+    if INSTALL_ATTESTATION_DIR.exists():
+        raise LifecycleError(
+            "refusing existing install attestation directory: "
+            f"{INSTALL_ATTESTATION_DIR}"
+        )
     pf._assert_empty_anchor(runner, pf.SLIPSTREAM_ANCHOR)
     pf._assert_empty_anchor(runner, pf.SENTINEL_ANCHOR)
     return pf._pf_snapshot(runner), uid, gid
@@ -2159,8 +2214,7 @@ def _fallback_uninstall(
             TGWS_LINK_PATH,
         ):
             path.unlink(missing_ok=True)
-        for path in _install_attestation_artifacts():
-            path.unlink(missing_ok=True)
+        _remove_install_attestation_artifacts()
         shutil.rmtree(INSTALL_DIR, ignore_errors=True)
     return errors
 
