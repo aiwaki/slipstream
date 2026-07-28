@@ -9442,35 +9442,50 @@ def _wait_for_listener_state(port, present, timeout=8.0):
     return _tcp_listener_present(port) == present
 
 
-def _installed_daemon_readiness(port):
+def _installed_daemon_readiness_snapshot(port):
     status = _daemon_status_record()
     if not status:
-        return False, "status missing"
+        return False, "status missing", None, False
     updated_at = status.get("updated_at", status.get("ts", 0))
     if not isinstance(updated_at, (int, float)) or time.time() - updated_at > 15:
-        return False, "status stale"
+        return False, "status stale", None, False
     if status.get("state") not in {"active", "dormant"}:
-        return False, f"unexpected state {status.get('state')!r}"
+        return False, f"unexpected state {status.get('state')!r}", None, False
     recovery = _daemon_recovery_record() or {}
     if recovery.get("reason") == BASELINE_GUARD_BLOCK_REASON:
-        return False, "daemon rolled back after baseline HTTPS qualification failed"
+        return (
+            False,
+            "daemon rolled back after baseline HTTPS qualification failed",
+            None,
+            False,
+        )
     if recovery.get("reason") == BASELINE_GUARD_ROLLBACK_REASON:
-        return False, "daemon is still restoring the system HTTPS path"
+        return False, "daemon is still restoring the system HTTPS path", None, False
     if recovery.get("reason") == PF_LOOPBACK_UNAVAILABLE_REASON:
-        return False, "daemon could not qualify the PF loopback path"
+        return False, "daemon could not qualify the PF loopback path", None, False
     pid = status.get("pid")
     if not _installed_daemon_command_owned(_process_command_for_pid(pid)):
-        return False, "status pid is not the installed daemon"
+        return False, "status pid is not the installed daemon", None, False
     listener_pids = _listener_pids(port)
     if listener_pids != [pid]:
-        return False, (
-            f"listener 127.0.0.1:{port} is not owned exclusively by "
-            "the status pid"
+        return (
+            False,
+            (
+                f"listener 127.0.0.1:{port} is not owned exclusively by "
+                "the status pid"
+            ),
+            None,
+            False,
         )
     rules_loaded = bool(pf_state_snapshot(port).get("rules_loaded"))
     if rules_loaded != (status.get("state") == "active"):
-        return False, "PF state does not match daemon state"
-    return True, "ready"
+        return False, "PF state does not match daemon state", None, rules_loaded
+    return True, "ready", status, rules_loaded
+
+
+def _installed_daemon_readiness(port):
+    ready, reason, _status, _rules_loaded = _installed_daemon_readiness_snapshot(port)
+    return ready, reason
 
 
 def _installed_daemon_ready(port):
@@ -9565,14 +9580,23 @@ def _install_attestation_record(
     installed_sha256 = _sha256_regular_file(installed_path)
     if installed_sha256 != source_sha256:
         raise RuntimeError("installed daemon SHA-256 does not match its source artifact")
-    ready, reason = _installed_daemon_readiness(port)
-    if not ready:
+    deadline = time.monotonic() + 5.0
+    ready = False
+    reason = "status missing"
+    status = None
+    pf_active = False
+    while time.monotonic() < deadline:
+        ready, reason, status, pf_active = _installed_daemon_readiness_snapshot(
+            port
+        )
+        if ready:
+            break
+        if "baseline HTTPS qualification failed" in reason:
+            break
+        time.sleep(0.05)
+    if not ready or status is None:
         raise RuntimeError(f"installed daemon lost readiness before attestation: {reason}")
-    status = _daemon_status_record() or {}
     state = status.get("state")
-    pf_active = bool(pf_state_snapshot(port).get("rules_loaded"))
-    if pf_active != (state == "active"):
-        raise RuntimeError("installed daemon PF state changed before attestation")
     return {
         "schema_version": INSTALL_ATTESTATION_SCHEMA_VERSION,
         "source_sha256": source_sha256,

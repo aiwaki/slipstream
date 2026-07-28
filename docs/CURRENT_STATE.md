@@ -60,10 +60,11 @@ verification into the privileged installer. It atomically publishes a bounded,
 root-owned evidence record only after the installed path, SHA-256, owner, mode,
 launchd PID, exclusive listener, fresh StatusV2 state, and private-PF state
 agree. The tray validates that record against its bundled daemon without
-opening the root-owned execute-only installed binary. Injected attestation failure enters the
-same exact uninstall path and must leave a daemon-free baseline. This change is
-not qualified until its pull-request packaged lifecycle and exact-main gates
-pass; it has not been installed on the primary workstation. PR #245 CI run
+opening the root-owned installed binary. Injected attestation failure enters
+the same exact uninstall path and must leave a daemon-free baseline. This
+change is not qualified until its pull-request packaged lifecycle and
+exact-main gates pass; it has not been installed on the primary workstation.
+PR #245 CI run
 `30349298867` rejected the first implementation because mode `0700` also
 prevented the intentionally console-user baseline child from traversing and
 executing the frozen daemon. Both lifecycle jobs kept PF dormant and the
@@ -73,7 +74,14 @@ starting. It also kept PF dormant and touched no workstation. The current
 follow-up restores root-only `0700/0600` installed identities and moves
 console-user DNS and HTTPS qualification to fixed macOS `dscacheutil` and
 `curl` children, so baseline health no longer depends on executing or reading
-the installed daemon.
+the installed daemon. Run `30352115171` proved those fixed children and the
+before/after-PF HTTPS baseline in both lifecycle jobs, but rejected the
+attestation harness after a legitimate `dormant` to `active` transition: the
+root evidence retained its coherent time-of-install `dormant` snapshot while
+the later lifecycle assertion incorrectly required it to equal the current
+`active` status. Both jobs completed exact cleanup and the workstation remained
+untouched. The current patch retries only an incoherent transition snapshot and
+checks later daemon/PF state independently from the immutable install evidence.
 
 ## Resume Protocol
 

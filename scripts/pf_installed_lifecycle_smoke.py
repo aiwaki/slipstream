@@ -1913,6 +1913,27 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _assert_install_attestation_runtime(evidence: dict, status: dict) -> None:
+    launchd = evidence.get("launchd")
+    listener = evidence.get("listener")
+    if not all(isinstance(item, dict) for item in (launchd, listener)):
+        raise LifecycleError("install attestation omitted required runtime records")
+    if (
+        launchd.get("label") != "dev.slipstream.tproxy"
+        or launchd.get("pid") != status.get("pid")
+        or not isinstance(launchd.get("pid"), int)
+        or launchd.get("pid") <= 0
+    ):
+        raise LifecycleError(f"launchd attestation mismatch: {launchd!r}")
+    if listener != {"host": "127.0.0.1", "port": 1080}:
+        raise LifecycleError(f"listener attestation mismatch: {listener!r}")
+    state = evidence.get("state")
+    if state not in {"active", "dormant"}:
+        raise LifecycleError(f"daemon state attestation mismatch: {state!r}")
+    if evidence.get("pf_active") != (state == "active"):
+        raise LifecycleError("install attestation PF state mismatch")
+
+
 def _assert_install_attestation(target: LifecycleTarget) -> None:
     installed = target.attested_installed_path
     source = target.attestation_source_path
@@ -1950,20 +1971,7 @@ def _assert_install_attestation(target: LifecycleTarget) -> None:
     ):
         raise LifecycleError(f"installed daemon attestation mismatch: {daemon!r}")
     status = _daemon_status(_read_status()) or {}
-    if (
-        launchd.get("label") != "dev.slipstream.tproxy"
-        or launchd.get("pid") != status.get("pid")
-        or not isinstance(launchd.get("pid"), int)
-        or launchd.get("pid") <= 0
-    ):
-        raise LifecycleError(f"launchd attestation mismatch: {launchd!r}")
-    if listener != {"host": "127.0.0.1", "port": 1080}:
-        raise LifecycleError(f"listener attestation mismatch: {listener!r}")
-    state = evidence.get("state")
-    if state not in {"active", "dormant"} or state != status.get("state"):
-        raise LifecycleError(f"daemon state attestation mismatch: {state!r}")
-    if evidence.get("pf_active") != (state == "active"):
-        raise LifecycleError("install attestation PF state mismatch")
+    _assert_install_attestation_runtime(evidence, status)
 
 
 def _install_attestation_artifacts() -> tuple[Path, ...]:

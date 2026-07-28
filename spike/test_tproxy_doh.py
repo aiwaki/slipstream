@@ -1448,18 +1448,13 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
     source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
     monkeypatch.setattr(
         tproxy,
-        "_installed_daemon_readiness",
-        lambda _port: (True, "ready"),
-    )
-    monkeypatch.setattr(
-        tproxy,
-        "_daemon_status_record",
-        lambda: {"state": "active", "pid": 4242},
-    )
-    monkeypatch.setattr(
-        tproxy,
-        "pf_state_snapshot",
-        lambda _port: {"rules_loaded": True},
+        "_installed_daemon_readiness_snapshot",
+        lambda _port: (
+            True,
+            "ready",
+            {"state": "active", "pid": 4242},
+            True,
+        ),
     )
 
     record = tproxy._write_install_attestation(
@@ -1489,6 +1484,44 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
             1080,
             expected_uid=os.getuid(),
         )
+
+
+def test_install_attestation_retries_a_dormant_to_active_transition(
+    monkeypatch, tmp_path
+):
+    installed = tmp_path / "slipstreamd"
+    installed.write_bytes(b"qualified daemon")
+    installed.chmod(0o700)
+    source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
+    snapshots = iter(
+        (
+            (False, "PF state does not match daemon state", None, True),
+            (
+                True,
+                "ready",
+                {"state": "active", "pid": 4242},
+                True,
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_installed_daemon_readiness_snapshot",
+        lambda _port: next(snapshots),
+    )
+    monkeypatch.setattr(tproxy.time, "sleep", lambda _seconds: None)
+
+    record = tproxy._install_attestation_record(
+        str(installed),
+        source_sha256,
+        0o700,
+        1080,
+        expected_uid=os.getuid(),
+    )
+
+    assert record["state"] == "active"
+    assert record["pf_active"] is True
+    assert record["launchd"]["pid"] == 4242
 
 
 def test_install_attestation_failure_rolls_back_daemon_free(monkeypatch, tmp_path):
