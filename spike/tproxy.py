@@ -9633,9 +9633,16 @@ def _write_install_attestation(
     return record
 
 
-def _harden_installed_identity(path, mode, *, owner_uid=0, owner_gid=0):
+def _harden_installed_identity(
+    path,
+    mode,
+    directory_mode,
+    *,
+    owner_uid=0,
+    owner_gid=0,
+):
     os.chown(INSTALL_DIR, owner_uid, owner_gid)
-    os.chmod(INSTALL_DIR, 0o700)
+    os.chmod(INSTALL_DIR, directory_mode)
     os.chown(path, owner_uid, owner_gid)
     os.chmod(path, mode)
 
@@ -9813,13 +9820,17 @@ def do_install(port):
             _script_runtime_payload(__file__)
             source_identity = os.path.abspath(__file__)
             installed_identity_name = "tproxy.py"
-            installed_identity_mode = 0o600
+            installed_identity_mode = 0o644
+            installed_directory_mode = 0o755
         elif not os.path.isfile(sys.executable) or not os.access(sys.executable, os.X_OK):
             raise RuntimeError("frozen daemon payload is not executable")
         else:
             source_identity = os.path.abspath(sys.executable)
             installed_identity_name = os.path.basename(sys.executable)
-            installed_identity_mode = 0o700
+            # The console-user baseline child must be able to execute the frozen
+            # daemon, but it must not be able to read or hash the installed bytes.
+            installed_identity_mode = 0o711
+            installed_directory_mode = 0o711
         source_sha256 = _sha256_regular_file(source_identity)
     except Exception as error:
         print(f"install preflight failed: {error}", file=sys.stderr)
@@ -9877,7 +9888,11 @@ def do_install(port):
             prog_args = [py, script, "--port", str(port)]
             uninstall_hint = f"sudo {py} {script} --uninstall"
         installed_identity = os.path.join(INSTALL_DIR, installed_identity_name)
-        _harden_installed_identity(installed_identity, installed_identity_mode)
+        _harden_installed_identity(
+            installed_identity,
+            installed_identity_mode,
+            installed_directory_mode,
+        )
         if tgws_secret_backup:
             with open(secret_path, "w") as handle:
                 handle.write(tgws_secret_backup.strip())

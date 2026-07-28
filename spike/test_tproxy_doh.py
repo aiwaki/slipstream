@@ -1443,7 +1443,7 @@ def test_install_reports_success_only_after_health_gate(monkeypatch, tmp_path):
 def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
     installed = tmp_path / "slipstreamd"
     installed.write_bytes(b"qualified daemon")
-    installed.chmod(0o700)
+    installed.chmod(0o711)
     evidence = tmp_path / "attestation.json"
     source_sha256 = hashlib.sha256(installed.read_bytes()).hexdigest()
     monkeypatch.setattr(
@@ -1465,7 +1465,7 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
     record = tproxy._write_install_attestation(
         str(installed),
         source_sha256,
-        0o700,
+        0o711,
         1080,
         evidence_path=str(evidence),
         expected_uid=os.getuid(),
@@ -1485,10 +1485,38 @@ def test_install_attestation_is_bounded_and_hash_bound(monkeypatch, tmp_path):
         tproxy._install_attestation_record(
             str(installed),
             source_sha256,
-            0o700,
+            0o711,
             1080,
             expected_uid=os.getuid(),
         )
+
+
+@pytest.mark.parametrize(
+    ("directory_mode", "identity_mode"),
+    ((0o711, 0o711), (0o755, 0o644)),
+)
+def test_harden_installed_identity_keeps_directory_and_file_modes_distinct(
+    monkeypatch,
+    tmp_path,
+    directory_mode,
+    identity_mode,
+):
+    install = tmp_path / "slipstream"
+    install.mkdir()
+    installed = install / "slipstreamd"
+    installed.write_bytes(b"qualified daemon")
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install))
+
+    tproxy._harden_installed_identity(
+        str(installed),
+        identity_mode,
+        directory_mode,
+        owner_uid=os.getuid(),
+        owner_gid=os.getgid(),
+    )
+
+    assert stat.S_IMODE(install.stat().st_mode) == directory_mode
+    assert stat.S_IMODE(installed.stat().st_mode) == identity_mode
 
 
 def test_install_attestation_failure_rolls_back_daemon_free(monkeypatch, tmp_path):
@@ -1517,7 +1545,7 @@ def test_install_attestation_failure_rolls_back_daemon_free(monkeypatch, tmp_pat
     monkeypatch.setattr(
         tproxy,
         "_harden_installed_identity",
-        lambda path, mode: os.chmod(path, mode),
+        lambda path, mode, _directory_mode: os.chmod(path, mode),
     )
     monkeypatch.setattr(tproxy, "remove_obsolete_newsyslog_config", lambda: None)
     monkeypatch.setattr(

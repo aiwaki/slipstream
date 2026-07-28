@@ -359,7 +359,7 @@ def script_target() -> LifecycleTarget:
         ),
         attested_installed_path=INSTALLED_DAEMON,
         attestation_source_path=SOURCE_DAEMON,
-        attested_mode=0o600,
+        attested_mode=0o644,
     )
 
 
@@ -389,7 +389,7 @@ def packaged_app_target(app_bundle: Path) -> LifecycleTarget:
         tray_executable=tray,
         attested_installed_path=INSTALLED_FROZEN_DAEMON,
         attestation_source_path=daemon,
-        attested_mode=0o700,
+        attested_mode=0o711,
     )
 
 

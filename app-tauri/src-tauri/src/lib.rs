@@ -3682,7 +3682,7 @@ mod tests {
                     "sha256": daemon_sha256,
                     "uid": 0,
                     "gid": 0,
-                    "mode": 0o700
+                    "mode": 0o711
                 },
                 "launchd": {
                     "label": "dev.slipstream.tproxy",

@@ -30,7 +30,7 @@ YouTube/googlevideo.
 | Area | Current state | Remaining work |
 |---|---|---|
 | Start at boot | LaunchDaemon `RunAtLoad` | none |
-| Startup qualification | publishes a probe-free `dormant` snapshot before network probes; system-DNS lookups run in killable console-user child processes under per-host and total preflight deadlines; the privileged installer verifies the root-only daemon's exact path, SHA-256, owner, mode, launchd PID, listener, StatusV2, and private-PF state before atomically publishing bounded evidence for the tray; the unprivileged tray never opens the installed binary | prove successful commit and injected attestation-failure rollback in packaged disposable CI, repeat exact-main and protected exact-artifact gates, then complete one user-present workstation smoke |
+| Startup qualification | publishes a probe-free `dormant` snapshot before network probes; system-DNS lookups run in killable console-user child processes under per-host and total preflight deadlines; the privileged installer verifies the root-owned execute-only daemon's exact path, SHA-256, owner, mode, launchd PID, listener, StatusV2, and private-PF state before atomically publishing bounded evidence for the tray; the unprivileged tray never opens the installed binary | prove successful commit and injected attestation-failure rollback in packaged disposable CI, repeat exact-main and protected exact-artifact gates, then complete one user-present workstation smoke |
 | Crash restart | launchd `KeepAlive` | none |
 | PF ownership | private `com.apple/slipstream` anchor below the system `com.apple/*` anchor point; earlier transparent HTTPS interceptors or an unavailable enabled geo-exit backend pause Slipstream without mutating external state | keep both privileged sentinel jobs required in CI and add cross-version rollback after the first safety-qualified release |
 | Clean exit | flushes only private filter/NAT rules and releases Slipstream's PF enable token; script and frozen packaged payloads share the same install/reinstall/restart/uninstall sentinel gate | stable release artifact qualification |
@@ -68,9 +68,11 @@ exact launchd label, plist, private PF state, enable token, status, socket,
 attestation record, and root runtime, and restore the exact global PF snapshot.
 The successful path then requires a root-owned mode-`0644` evidence record whose
 source and installed hashes match the packaged daemon, whose installed identity
-is root-only mode `0700`, and whose launchd PID, listener, StatusV2 state, and PF
-state agree. The tray validates only that bounded record against its bundled
-daemon; it does not open the installed root-only executable.
+is root-owned execute-only mode `0711`, and whose launchd PID, listener,
+StatusV2 state, and PF state agree. The mode permits the bounded console-user
+baseline child to execute the frozen daemon while preventing the tray from
+listing, reading, or hashing its installed bytes. The tray validates only that
+bounded record against its bundled daemon.
 Both modes prove a missing Geph backend leaves PF dormant, repeat installation,
 briefly activate the existing local-only mode, restart the daemon, and uninstall
 it. They then run two bounded lifecycle cycles: `SIGSTOP`/`SIGCONT` crosses a

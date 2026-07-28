@@ -40,7 +40,7 @@ its rollback snapshot. It removed the newly installed daemon and restored the
 old app, but could not reinstall the previous root daemon. The second attempt
 started from that safe daemon-free baseline and installed the exact qualified
 daemon, but the unprivileged coordinator tried to hash its deliberately
-root-only installed binary and received `Permission denied`.
+unreadable installed binary and received `Permission denied`.
 
 The second attempt immediately requested rollback. The privileged transaction
 uninstalled the new daemon, cleared only `com.apple/slipstream`, disabled the
@@ -52,7 +52,7 @@ were unchanged, and the restored tray executable matched the previous SHA-256.
 Post-rollback direct probes received HTTP from ChatGPT and CrystalIDEA; Discord
 timed out directly, as expected without Slipstream local bypass. The qualified
 app is not installed, no root daemon or private PF runtime remains, and no
-further workstation retry is permitted until root-only artifact attestation is
+further workstation retry is permitted until privileged artifact attestation is
 performed inside a disposable privileged transaction.
 
 The current root-attestation change moves installed-daemon hashing and identity
@@ -60,10 +60,16 @@ verification into the privileged installer. It atomically publishes a bounded,
 root-owned evidence record only after the installed path, SHA-256, owner, mode,
 launchd PID, exclusive listener, fresh StatusV2 state, and private-PF state
 agree. The tray validates that record against its bundled daemon without
-opening the root-only installed binary. Injected attestation failure enters the
+opening the root-owned execute-only installed binary. Injected attestation failure enters the
 same exact uninstall path and must leave a daemon-free baseline. This change is
 not qualified until its pull-request packaged lifecycle and exact-main gates
-pass; it has not been installed on the primary workstation.
+pass; it has not been installed on the primary workstation. PR #245 CI run
+`30349298867` rejected the first implementation because mode `0700` also
+prevented the intentionally console-user baseline child from traversing and
+executing the frozen daemon. Both lifecycle jobs kept PF dormant and the
+workstation was untouched. The follow-up contract uses root-owned execute-only
+mode `0711`: execution remains available to the bounded child while
+unprivileged read, listing, and hashing remain denied.
 
 ## Resume Protocol
 

@@ -96,11 +96,20 @@ user-owned listeners are never accepted or terminated.
 
 ### Install validator reports `Permission denied` for `slipstreamd`
 
-The installed frozen daemon and its directory are deliberately root-only. An
-unprivileged tray or temporary coordinator must never open
+The installed frozen daemon and its directory are root-owned execute-only
+(`0711`). This lets the bounded console-user baseline child traverse and
+execute the daemon, but does not let an unprivileged tray list, read, or hash
+the installed bytes. An unprivileged tray or temporary coordinator must never open
 `/usr/local/slipstream/slipstreamd` to compare its bytes. The 2026-07-28
 workstation transaction did that after an otherwise healthy install, received
 `Permission denied`, and correctly rolled back.
+
+PR #245 CI run `30349298867` also proved that mode `0700` is too restrictive:
+both installed lifecycle jobs kept the daemon safely dormant because the
+console-user baseline child could not traverse and execute the installed
+runtime. No workstation was mutated. The corrected frozen contract is exact
+mode `0711`; source-mode CI uses `0755/0644` because Python must read the
+installed script.
 
 The privileged installer now hashes the source before mutation, verifies the
 installed regular file after launch, and requires exact owner, mode, launchd

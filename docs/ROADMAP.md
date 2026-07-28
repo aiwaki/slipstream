@@ -57,12 +57,14 @@ release exists; stable distribution remains a separate M3 gate.
 
 The primary-Mac delivery failures exposed kernel `lo0 (skip)` state, an
 unbounded startup resolver call, and a temporary coordinator that tried to hash
-the deliberately root-only installed daemon. The first two boundaries are
+the deliberately unreadable installed daemon. The first two boundaries are
 closed by disposable lifecycle gates. Installed-artifact attestation now
 belongs to the same privileged transaction that copies and starts the daemon:
 it verifies the exact regular-file identity, SHA-256, owner, mode, launchd PID,
 exclusive listener, StatusV2 state, and private-PF state, then atomically emits
-only bounded evidence for the tray. The packaged disposable gate must prove both
+only bounded evidence for the tray. Frozen installs use root-owned execute-only
+mode `0711`, which preserves the console-user baseline child without granting
+the tray read access. The packaged disposable gate must prove both
 successful commit and injected post-verification rollback to a daemon-free
 baseline. After merge, exact-main CI/audit and the protected account-backed
 Geph/Chromium gate must pass on the new exact artifact before one short
