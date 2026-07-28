@@ -204,3 +204,24 @@ jobs:
           test ! -e "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.slipstream.semantic.json"
           ! security find-generic-password \
             -s dev.slipstream.geph -a account-secret >/dev/null 2>&1
+
+      - name: Package the exact qualified app
+        run: |
+          set -euo pipefail
+          app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
+          mkdir -p dist-qualified
+          ditto -c -k --keepParent \
+            "$app" \
+            dist-qualified/Slipstream-owned-geph-qualified.zip
+          cd dist-qualified
+          shasum -a 256 Slipstream-owned-geph-qualified.zip \
+            > Slipstream-owned-geph-qualified.zip.sha256
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Slipstream-owned-geph-qualified-${{ github.sha }}
+          path: |
+            dist-qualified/Slipstream-owned-geph-qualified.zip
+            dist-qualified/Slipstream-owned-geph-qualified.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
