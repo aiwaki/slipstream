@@ -8,7 +8,7 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-28, through product commit
+Last evidence audit: 2026-07-29, through product commit
 `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`. PR #251 moved Chromium and
 macOS Safari incomplete-response observation to read-only
 `webRequest.onErrorOccurred`. The sole protected account-backed run for its
@@ -28,11 +28,30 @@ reason and begins producer cleanup. Its PR gates passed, and exact-main CI
 `30399287525` plus audit `30399287465` passed for
 `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`.
 
-The next authorized action is exactly one protected main-only run after the
-upstream UTC-day authentication budget resets. Repeating it before reset would
-hot-loop the finite account budget and is prohibited. No workstation install
-is authorized until that full run proves owned-Geph payload, both Chromium
-semantic scenarios, exact cleanup, and publishes its exact qualified artifact.
+After the UTC-day reset, protected run `30411915972` was dispatched exactly once
+on docs checkpoint main `bebb6776b554a01a7885b889d6d98c2a405d570c`.
+Packaged-resource and daemon-free boundaries passed. Owned Geph returned the
+same complete Steam payload initially, without the tray, and after KeepAlive
+recovery: HTTP 200, TLS 1.3, and `68103` bytes in each phase. The frozen
+regional-denial browser scenario completed before the harness entered
+`incomplete_response`.
+
+The second scenario made one root request and no reload or subresource request.
+Chrome's documented `webRequest.onErrorOccurred` details omit `method` and
+`parentFrameId`, while the v2 builder required both fields directly on that
+final event. Synthetic unit tests had supplied an impossible event shape, so
+the real event was silently rejected before native messaging. The exact
+correction correlates a browser-owned top-level GET from `onBeforeRequest` to
+the final event by opaque request ID, tab, and normalized hostname, using only
+ephemeral `storage.session` state without path or query. The always-run cleanup
+passed, system network state was not mutated, no artifact was published, and no
+workstation install was attempted.
+
+The next authorized action is to merge that evidence-scoped browser correction
+after normal gates, then dispatch exactly one protected run for its exact main
+SHA. No workstation install is authorized until the full run proves owned-Geph
+payload, both Chromium semantic scenarios, exact cleanup, and publishes its
+exact qualified artifact.
 
 The full local suite passed with `840` Python tests and `32` subtests before
 PR #248 merged. Exact-main CI run `30378302132` and audit run `30378302209`

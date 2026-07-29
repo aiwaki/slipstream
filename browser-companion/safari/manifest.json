@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "Slipstream Browser Companion",
   "short_name": "Slipstream",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reports bounded regional-denial and incomplete-response evidence to Slipstream.",
   "permissions": [
     "nativeMessaging",
+    "storage",
     "webRequest"
   ],
   "host_permissions": [

@@ -8,9 +8,12 @@ without decrypting HTTPS or adding per-site rules.
 ## Chromium Preview
 
 The preview under `browser-companion/chromium/` is a Manifest V3 extension with
-two permissions: `nativeMessaging` and read-only `webRequest`. Its HTTPS host
-access is used only to observe final errors for top-level document requests;
-the extension does not block, redirect, or modify requests.
+three permissions: `nativeMessaging`, `storage`, and read-only `webRequest`.
+Its HTTPS host access is used only to observe top-level document requests and
+their final errors; the extension does not block, redirect, or modify requests.
+`storage.session` retains only an opaque request ID, tab ID, normalized
+hostname, and expiry. It never retains a path or query, and the record is
+removed on the request's final completion or error.
 
 1. A top-frame content script observes the first ten seconds of an HTTPS page.
    It checks the title, visible dialogs, and a bounded sparse-page snapshot
@@ -35,10 +38,15 @@ the extension does not block, redirect, or modify requests.
    no reload loop.
 
 The additive semantic-signal v2 path handles a different failure class without
-changing v1. Chrome's browser-owned `webRequest.onErrorOccurred` event is
-observed only for an HTTPS `main_frame` GET with frame ID `0` and no parent
-frame. It is accepted only for exact `net::ERR_CONTENT_LENGTH_MISMATCH` or
-`net::ERR_INCOMPLETE_CHUNKED_ENCODING` failures on a normalized HTTPS hostname.
+changing v1. Chrome's browser-owned `webRequest.onBeforeRequest` event records
+an HTTPS `main_frame` GET with frame ID `0` and no parent, keyed by the opaque
+request ID. The matching `onErrorOccurred` event is accepted only for exact
+`net::ERR_CONTENT_LENGTH_MISMATCH` or
+`net::ERR_INCOMPLETE_CHUNKED_ENCODING` failures on the same tab and normalized
+HTTPS hostname. This correlation is required because Chrome's documented final
+error event does not carry `method` or `parentFrameId`; requiring those fields
+on that event silently rejected real errors even though synthetic tests
+supplied them.
 `webRequest` is used because Chromium guarantees a final `onCompleted` or
 `onErrorOccurred` event for each observed request, while `webNavigation`
 reports only an aborted navigation and did not report the protected fixture's
@@ -200,6 +208,20 @@ runtime signal for a top-level response body truncated after navigation commit;
 the Chromium preview now uses the narrower read-only `webRequest` observer
 described above. The harness reports the scenario and bounded fixture counters
 on future timeouts.
+
+Protected run `30411915972` on exact main
+`bebb6776b554a01a7885b889d6d98c2a405d570c` passed packaged-resource and
+daemon-free boundaries, then proved the owned-Geph Steam payload initially,
+without the tray, and after KeepAlive recovery (`68103` bytes and HTTP 200 in
+all three phases). The frozen regional-denial browser scenario completed before
+the harness entered the additive incomplete-response scenario. That second
+scenario recorded one root request and no reload or subresources. Current
+Chrome's final error event omitted the two fields that the v2 builder required,
+so the signal was discarded before native messaging. The always-run cleanup
+passed, system network state was not mutated, no artifact was published, and no
+workstation install was attempted. The request-ID correlation above is the
+evidence-scoped correction; another protected run is required on its exact
+merged main SHA.
 
 The fixture uses an untrusted one-day certificate accepted only by the
 disposable Chrome process. It does not install a certificate, alter system DNS,

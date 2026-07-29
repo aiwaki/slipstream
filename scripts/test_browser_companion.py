@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 COMPANION = ROOT / "browser-companion" / "chromium"
 MANIFEST = COMPANION / "manifest.json"
+WORKER = COMPANION / "service-worker.js"
 SAFARI_COMPANION = ROOT / "browser-companion" / "safari"
 SAFARI_MANIFEST = SAFARI_COMPANION / "manifest.json"
 SAFARI_BUILD = ROOT / "scripts" / "build_safari_companion.sh"
@@ -36,13 +37,18 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertEqual(manifest["manifest_version"], 3)
         self.assertEqual(
             manifest["permissions"],
-            ["nativeMessaging", "webRequest"],
+            ["nativeMessaging", "storage", "webRequest"],
         )
         self.assertEqual(manifest["host_permissions"], ["https://*/*"])
         self.assertNotIn("externally_connectable", manifest)
         self.assertNotIn("web_accessible_resources", manifest)
         self.assertEqual(manifest["content_scripts"][0]["matches"], ["https://*/*"])
         self.assertFalse(manifest["content_scripts"][0]["all_frames"])
+        worker_source = WORKER.read_text()
+        self.assertIn("chrome.storage.session", worker_source)
+        self.assertIn("chrome.webRequest.onBeforeRequest.addListener", worker_source)
+        self.assertIn("chrome.webRequest.onCompleted.addListener", worker_source)
+        self.assertIn("chrome.webRequest.onErrorOccurred.addListener", worker_source)
 
     def test_native_host_and_extension_identity_are_exactly_bound(self):
         source = NATIVE_HOST.read_text()
@@ -60,7 +66,7 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertEqual(manifest["manifest_version"], 3)
         self.assertEqual(
             manifest["permissions"],
-            ["nativeMessaging", "webRequest"],
+            ["nativeMessaging", "storage", "webRequest"],
         )
         self.assertEqual(manifest["host_permissions"], ["https://*/*"])
         self.assertNotIn("key", manifest)
@@ -69,6 +75,8 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertEqual(manifest["content_scripts"][0]["matches"], ["https://*/*"])
         self.assertFalse(manifest["content_scripts"][0]["all_frames"])
         worker_source = SAFARI_WORKER.read_text()
+        self.assertIn("webRequest.onBeforeRequest.addListener", worker_source)
+        self.assertIn("webRequest.onCompleted.addListener", worker_source)
         self.assertIn("webRequest.onErrorOccurred.addListener", worker_source)
         self.assertNotIn("webNavigation", worker_source)
 
