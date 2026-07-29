@@ -166,6 +166,7 @@ use slipstream_userspace_stack_effect_evaluation::native_connector_v1::{
 use slipstream_userspace_stack_effect_evaluation::stack_connector_composition_v1::{
     NativeBackendReadErrorCode, NativeBackendReadQueue, NativeBackendReadQueueConfig,
     NativeBackendReadResult, NativeConnectorReader, SelectedStackBackendWriter,
+    DEFAULT_MAX_FRAME_BYTES,
 };
 use slipstream_userspace_stack_effect_evaluation::v1::MAX_EFFECT_PAYLOAD_BYTES;
 use slipstream_windows_adapter::data_plane::WindowsDataPlaneBackend;
@@ -662,7 +663,16 @@ impl NativeConnectorReader for UdpLoopbackReader {
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> Result<NativeBackendReadResult, Self::Error> {
-        let bytes_read = self.socket.recv(buffer)?;
+        let mut probe = vec![0; buffer.len().saturating_add(1)];
+        let (pending, _) = self.socket.peek_from(&mut probe)?;
+        if pending > buffer.len() {
+            self.socket.recv_from(&mut probe)?;
+            return Ok(NativeBackendReadResult {
+                bytes_read: 0,
+                datagram_complete: false,
+            });
+        }
+        let (bytes_read, _) = self.socket.recv_from(buffer)?;
         Ok(NativeBackendReadResult {
             bytes_read,
             datagram_complete: true,
@@ -772,22 +782,41 @@ fn backend_tcp_read_is_retained_across_failures_then_reaches_selected_stack_once
         expected_len: payload.len(),
         fail_next: true,
     };
-    let mut queue = NativeBackendReadQueue::new(NativeBackendReadQueueConfig::default(), 1_300)
-        .expect("backend-read queue");
+    let mut queue = NativeBackendReadQueue::new(
+        NativeBackendReadQueueConfig::default(),
+        &fixture.binding,
+        1_300,
+    )
+    .expect("backend-read queue");
 
     let error = queue
-        .capture_from(&fixture.binding, 7, &mut reader)
+        .capture_from(&fixture.binding, 1, &mut reader)
         .expect_err("injected native read failure");
     assert_eq!(error.code, NativeBackendReadErrorCode::NativeReadFailed);
     assert_eq!(queue.queued_frames(), 0);
     assert_eq!(queue.queued_bytes(), 0);
 
     let captured = queue
-        .capture_from(&fixture.binding, 7, &mut reader)
+        .capture_from(&fixture.binding, 1, &mut reader)
         .expect("retry captures exact native bytes");
     assert_eq!(captured, payload.len());
     assert_eq!(queue.front_key(), Some(fixture.key));
-    assert_eq!(queue.front_sequence(), Some(7));
+    assert_eq!(queue.front_sequence(), Some(1));
+
+    let mut sequence_reader = NeverReadReader {
+        key: fixture.key,
+        backend: WindowsDataPlaneBackend::Geph,
+        transport: WindowsPacketFlowTransport::Tcp,
+        calls: 0,
+    };
+    for sequence in [1, 3] {
+        let error = queue
+            .capture_from(&fixture.binding, sequence, &mut sequence_reader)
+            .expect_err("stale or skipped backend sequence");
+        assert_eq!(error.code, NativeBackendReadErrorCode::OutOfOrderSequence);
+    }
+    assert_eq!(sequence_reader.calls, 0);
+    assert_eq!(queue.front_sequence(), Some(1));
 
     let other_key = opened_fixture_for(
         "chatgpt.com",
@@ -797,7 +826,7 @@ fn backend_tcp_read_is_retained_across_failures_then_reaches_selected_stack_once
         false,
     )
     .key;
-    let mut writer = StackBackendWriter::new(&fixture.binding, WindowsDataPlaneBackend::Geph, 7);
+    let mut writer = StackBackendWriter::new(&fixture.binding, WindowsDataPlaneBackend::Geph, 1);
     writer.key = other_key;
     let error = queue
         .flush_front(&mut writer)
@@ -859,16 +888,20 @@ fn backend_reader_identity_is_rejected_before_native_bytes_are_consumed() {
         306,
         false,
     );
-    let other_key = opened_fixture_for(
+    let other_fixture = opened_fixture_for(
         "chatgpt.com",
         WindowsDataPlaneBackend::Geph,
         WindowsPacketCaptureTransport::TcpTls,
         406,
         false,
+    );
+    let other_key = other_fixture.key;
+    let mut queue = NativeBackendReadQueue::new(
+        NativeBackendReadQueueConfig::default(),
+        &fixture.binding,
+        1_300,
     )
-    .key;
-    let mut queue = NativeBackendReadQueue::new(NativeBackendReadQueueConfig::default(), 1_300)
-        .expect("backend-read queue");
+    .expect("backend-read queue");
     let mut reader = NeverReadReader {
         key: other_key,
         backend: WindowsDataPlaneBackend::Geph,
@@ -877,13 +910,17 @@ fn backend_reader_identity_is_rejected_before_native_bytes_are_consumed() {
     };
 
     let error = queue
-        .capture_from(&fixture.binding, 9, &mut reader)
+        .capture_from(&other_fixture.binding, 1, &mut reader)
+        .expect_err("queue cannot substitute another flow binding");
+    assert_eq!(error.code, NativeBackendReadErrorCode::BindingMismatch);
+    let error = queue
+        .capture_from(&fixture.binding, 1, &mut reader)
         .expect_err("wrong reader flow");
     assert_eq!(error.code, NativeBackendReadErrorCode::ReaderFlowMismatch);
     reader.key = fixture.key;
     reader.backend = WindowsDataPlaneBackend::LocalEngine;
     let error = queue
-        .capture_from(&fixture.binding, 9, &mut reader)
+        .capture_from(&fixture.binding, 1, &mut reader)
         .expect_err("wrong reader backend");
     assert_eq!(
         error.code,
@@ -892,7 +929,7 @@ fn backend_reader_identity_is_rejected_before_native_bytes_are_consumed() {
     reader.backend = WindowsDataPlaneBackend::Geph;
     reader.transport = WindowsPacketFlowTransport::Udp;
     let error = queue
-        .capture_from(&fixture.binding, 9, &mut reader)
+        .capture_from(&fixture.binding, 1, &mut reader)
         .expect_err("wrong reader transport");
     assert_eq!(
         error.code,
@@ -926,19 +963,83 @@ fn backend_udp_datagram_reaches_selected_stack_as_one_exact_frame() {
         key: fixture.key,
         backend: WindowsDataPlaneBackend::LocalEngine,
     };
-    let mut queue = NativeBackendReadQueue::new(NativeBackendReadQueueConfig::default(), 1_300)
-        .expect("backend-read queue");
+    let mut queue = NativeBackendReadQueue::new(
+        NativeBackendReadQueueConfig::default(),
+        &fixture.binding,
+        1_300,
+    )
+    .expect("backend-read queue");
     queue
-        .capture_from(&fixture.binding, 8, &mut reader)
+        .capture_from(&fixture.binding, 1, &mut reader)
         .expect("capture exact backend datagram");
     let mut writer =
-        StackBackendWriter::new(&fixture.binding, WindowsDataPlaneBackend::LocalEngine, 8);
+        StackBackendWriter::new(&fixture.binding, WindowsDataPlaneBackend::LocalEngine, 1);
     queue
         .flush_front(&mut writer)
         .expect("deliver exact backend datagram");
     writer
         .stack
         .receive_exact(WindowsPacketFlowDirection::BackendToClient, payload);
+    assert_eq!(queue.queued_frames(), 0);
+    assert_eq!(queue.queued_bytes(), 0);
+}
+
+#[test]
+fn oversized_backend_udp_datagram_is_discarded_without_advancing_sequence() {
+    let fixture = opened_fixture_for(
+        "discord.com",
+        WindowsDataPlaneBackend::LocalEngine,
+        WindowsPacketCaptureTransport::UdpQuic,
+        308,
+        false,
+    );
+    let receiver = UdpSocket::bind("127.0.0.1:0").expect("numeric UDP receiver");
+    receiver
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("UDP read timeout");
+    let sender = UdpSocket::bind("127.0.0.1:0").expect("numeric UDP sender");
+    let destination = receiver.local_addr().expect("receiver address");
+    let oversized = vec![0x5a; DEFAULT_MAX_FRAME_BYTES + 1];
+    sender
+        .send_to(&oversized, destination)
+        .expect("send oversized backend UDP datagram");
+    let mut reader = UdpLoopbackReader {
+        socket: receiver,
+        key: fixture.key,
+        backend: WindowsDataPlaneBackend::LocalEngine,
+    };
+    let mut queue = NativeBackendReadQueue::new(
+        NativeBackendReadQueueConfig::default(),
+        &fixture.binding,
+        1_300,
+    )
+    .expect("backend-read queue");
+
+    let error = queue
+        .capture_from(&fixture.binding, 1, &mut reader)
+        .expect_err("oversized UDP datagram must not be truncated into a frame");
+    assert_eq!(
+        error.code,
+        NativeBackendReadErrorCode::InvalidNativeProgress
+    );
+    assert_eq!(queue.queued_frames(), 0);
+    assert_eq!(queue.queued_bytes(), 0);
+
+    let valid = b"retry-same-sequence";
+    sender
+        .send_to(valid, destination)
+        .expect("send valid backend UDP datagram");
+    queue
+        .capture_from(&fixture.binding, 1, &mut reader)
+        .expect("rejected datagram must not advance sequence");
+    let mut writer =
+        StackBackendWriter::new(&fixture.binding, WindowsDataPlaneBackend::LocalEngine, 1);
+    queue
+        .flush_front(&mut writer)
+        .expect("deliver valid retry datagram");
+    writer
+        .stack
+        .receive_exact(WindowsPacketFlowDirection::BackendToClient, valid);
     assert_eq!(queue.queued_frames(), 0);
     assert_eq!(queue.queued_bytes(), 0);
 }

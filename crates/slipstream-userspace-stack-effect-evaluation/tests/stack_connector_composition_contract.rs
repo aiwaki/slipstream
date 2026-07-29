@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use slipstream_userspace_stack_effect_evaluation::stack_connector_composition_v1::{
     CONTRACT_VERSION, DEFAULT_MAX_FRAME_BYTES, DEFAULT_MAX_QUEUED_BYTES, DEFAULT_MAX_QUEUED_FRAMES,
+    INITIAL_BACKEND_SEQUENCE,
 };
 use slipstream_userspace_stack_effect_evaluation::v1::MAX_EFFECT_PAYLOAD_BYTES;
 
@@ -75,6 +76,10 @@ fn composition_contract_freezes_predecessors_and_bounds() {
         MAX_EFFECT_PAYLOAD_BYTES
     );
     assert_eq!(
+        fixture.bounds["initial_backend_sequence"],
+        INITIAL_BACKEND_SEQUENCE
+    );
+    assert_eq!(
         fixture.bounds["max_backend_read_frames"],
         DEFAULT_MAX_QUEUED_FRAMES
     );
@@ -98,6 +103,8 @@ fn composition_contract_is_bounded_and_non_production() {
         "connector_backpressure_rejects_before_stack_mutation",
         "backend_read_is_retained_before_stack_delivery",
         "backend_read_failure_before_progress_retains_no_frame",
+        "backend_read_sequence_is_reducer_issued_and_contiguous",
+        "oversized_udp_datagram_is_rejected_without_sequence_advance",
         "selected_stack_failure_retains_complete_backend_frame",
         "backend_read_retry_commits_once",
         "flow_identity_is_rechecked_in_both_directions",

@@ -605,10 +605,12 @@ therefore stays phased and closed to production traffic:
    write, and the route edge rejects Geph for Discord, YouTube, and UDP. An
    additive composition now proves selected-stack output reaches that exact
    connector queue and that bounded native backend reads are retained until the
-   selected stack accepts one complete frame. Reader and writer flow, backend,
-   transport, and sequence identity are revalidated before mutation; native
-   read or selected-stack failure retains the retryable boundary on its current
-   owner. The next subgate is packet-flow qualification on disposable
+   selected stack accepts one complete frame. Reader and writer flow and backend
+   identity are revalidated before mutation. The reverse queue starts at
+   packet-flow v1 sequence 1, rejects stale or skipped sequence before native
+   read, and discards oversized UDP datagrams without advancing sequence.
+   Native read or selected-stack failure retains the retryable boundary on its
+   current owner. The next subgate is packet-flow qualification on disposable
    AMD64/ARM64. Production-host composition remains a later independent gate.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.

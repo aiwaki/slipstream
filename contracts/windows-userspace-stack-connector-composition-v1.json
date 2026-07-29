@@ -19,6 +19,7 @@
   },
   "bounds": {
     "max_effect_payload_bytes": 512,
+    "initial_backend_sequence": 1,
     "max_backend_read_frames": 8,
     "max_backend_read_bytes": 4096,
     "max_backend_read_frame_bytes": 512
@@ -29,6 +30,8 @@
     "connector_backpressure_rejects_before_stack_mutation": true,
     "backend_read_is_retained_before_stack_delivery": true,
     "backend_read_failure_before_progress_retains_no_frame": true,
+    "backend_read_sequence_is_reducer_issued_and_contiguous": true,
+    "oversized_udp_datagram_is_rejected_without_sequence_advance": true,
     "selected_stack_failure_retains_complete_backend_frame": true,
     "backend_read_retry_commits_once": true,
     "flow_identity_is_rechecked_in_both_directions": true,

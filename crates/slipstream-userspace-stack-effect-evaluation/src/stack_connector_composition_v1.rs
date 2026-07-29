@@ -14,6 +14,7 @@ pub const CONTRACT_VERSION: u32 = 1;
 pub const DEFAULT_MAX_QUEUED_FRAMES: usize = 8;
 pub const DEFAULT_MAX_QUEUED_BYTES: usize = 4_096;
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 512;
+pub const INITIAL_BACKEND_SEQUENCE: u64 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeBackendReadQueueConfig {
@@ -60,6 +61,9 @@ pub enum NativeBackendReadErrorCode {
     ReaderTransportMismatch,
     UnsupportedRouteBackend,
     UnsupportedTransportBackend,
+    BindingMismatch,
+    OutOfOrderSequence,
+    SequenceOverflow,
     NativeReadFailed,
     InvalidNativeProgress,
     WriterFlowMismatch,
@@ -146,6 +150,10 @@ struct BackendReadFrame {
 pub struct NativeBackendReadQueue {
     config: NativeBackendReadQueueConfig,
     now_ms: u64,
+    key: WindowsPacketFlowKey,
+    backend: WindowsDataPlaneBackend,
+    transport: WindowsPacketFlowTransport,
+    next_sequence: u64,
     frames: VecDeque<BackendReadFrame>,
     queued_bytes: usize,
 }
@@ -153,11 +161,16 @@ pub struct NativeBackendReadQueue {
 impl NativeBackendReadQueue {
     pub fn new(
         config: NativeBackendReadQueueConfig,
+        binding: &WindowsUserspaceFlowBinding,
         now_ms: u64,
     ) -> Result<Self, NativeBackendReadError> {
         Ok(Self {
             config: config.validate()?,
             now_ms,
+            key: binding.key(),
+            backend: binding.admission().request().backend,
+            transport: binding.tuple().transport,
+            next_sequence: INITIAL_BACKEND_SEQUENCE,
             frames: VecDeque::new(),
             queued_bytes: 0,
         })
@@ -225,20 +238,41 @@ impl NativeBackendReadQueue {
                 "userspace flow binding expired before backend read",
             ));
         }
+        let request = binding.admission().request();
+        let transport = binding.tuple().transport;
+        if binding.key() != self.key
+            || request.backend != self.backend
+            || transport != self.transport
+        {
+            return Err(NativeBackendReadError::new(
+                NativeBackendReadErrorCode::BindingMismatch,
+                "backend-read queue is bound to a different flow, backend, or transport",
+            ));
+        }
+        if sequence != self.next_sequence {
+            return Err(NativeBackendReadError::new(
+                NativeBackendReadErrorCode::OutOfOrderSequence,
+                "backend-read sequence does not match reducer-issued next sequence",
+            ));
+        }
+        let next_sequence = sequence.checked_add(1).ok_or_else(|| {
+            NativeBackendReadError::new(
+                NativeBackendReadErrorCode::SequenceOverflow,
+                "backend-read sequence cannot advance without overflow",
+            )
+        })?;
         if reader.key() != binding.key() {
             return Err(NativeBackendReadError::new(
                 NativeBackendReadErrorCode::ReaderFlowMismatch,
                 "native reader does not own the bound flow",
             ));
         }
-        let request = binding.admission().request();
         if reader.backend() != request.backend {
             return Err(NativeBackendReadError::new(
                 NativeBackendReadErrorCode::ReaderBackendMismatch,
                 "native reader backend does not own the bound flow",
             ));
         }
-        let transport = binding.tuple().transport;
         if reader.transport() != transport {
             return Err(NativeBackendReadError::new(
                 NativeBackendReadErrorCode::ReaderTransportMismatch,
@@ -277,6 +311,7 @@ impl NativeBackendReadQueue {
         }
         bytes.truncate(progress.bytes_read);
         self.queued_bytes += progress.bytes_read;
+        self.next_sequence = next_sequence;
         self.frames.push_back(BackendReadFrame {
             key: binding.key(),
             backend: request.backend,

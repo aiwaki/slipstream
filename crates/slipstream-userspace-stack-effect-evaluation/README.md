@@ -19,7 +19,9 @@ revalidated as well. Discord and YouTube cannot select Geph, and Geph cannot
 accept UDP at this boundary. The composition contract retains backend-read
 frames across a pre-mutation selected-stack failure, rejects connector
 backpressure before selected-stack mutation, and revalidates the exact flow,
-backend, transport, and sequence before one retry.
+backend, transport, and reducer-issued contiguous sequence before one retry.
+Oversized UDP datagrams are discarded rather than accepted as truncated frames,
+without advancing that sequence.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
