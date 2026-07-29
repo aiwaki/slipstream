@@ -11,6 +11,8 @@ const STACK_SELECTION: &str =
 const BYTE_OWNER: &str = include_str!("../../../contracts/windows-userspace-byte-owner-v1.json");
 const MANIFEST: &str = include_str!("../Cargo.toml");
 const EFFECT_TEST: &str = include_str!("selected_stack_effect_v1.rs");
+const TRAY_MANIFEST: &str = include_str!("../../../app-tauri/src-tauri/Cargo.toml");
+const WINDOWS_ADAPTER_MANIFEST: &str = include_str!("../../slipstream-windows-adapter/Cargo.toml");
 
 #[derive(Debug, Deserialize)]
 struct ContractFixture {
@@ -43,10 +45,6 @@ struct ByteOwnerFixture {
 
 fn contract() -> ContractFixture {
     serde_json::from_str(CONTRACT).expect("selected-stack effect v1 must be valid JSON")
-}
-
-fn manifest_has_section(manifest: &str, section: &str) -> bool {
-    manifest.lines().any(|line| line.trim() == section)
 }
 
 #[test]
@@ -134,11 +132,9 @@ fn effect_contract_is_bounded_and_test_only() {
         assert_eq!(fixture.invariants[invariant], false, "{invariant}");
     }
 
-    assert!(!manifest_has_section(MANIFEST, "[dependencies]"));
-    assert!(manifest_has_section(MANIFEST, "[dev-dependencies]"));
-    let crlf_manifest = MANIFEST.replace('\n', "\r\n");
-    assert!(!manifest_has_section(&crlf_manifest, "[dependencies]"));
-    assert!(manifest_has_section(&crlf_manifest, "[dev-dependencies]"));
+    assert!(MANIFEST.contains("publish = false"));
+    assert!(!TRAY_MANIFEST.contains("slipstream-userspace-stack-effect-evaluation"));
+    assert!(!WINDOWS_ADAPTER_MANIFEST.contains("slipstream-userspace-stack-effect-evaluation"));
     for forbidden in [
         "TcpStream",
         "UdpSocket",

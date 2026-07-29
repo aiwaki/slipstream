@@ -188,7 +188,7 @@ jobs:
       - name: Rust userspace stack evaluation tests
         run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml
 
-      - name: Rust selected-stack effect evaluation tests
+      - name: Rust selected-stack and native connector effect tests
         run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
 
       - name: Rust tray lint
@@ -204,7 +204,7 @@ jobs:
       - name: Rust userspace stack evaluation lint
         run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml --all-targets -- -D warnings
 
-      - name: Rust selected-stack effect evaluation lint
+      - name: Rust selected-stack and native connector effect lint
         run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings
 
       - name: Installed daemon lifecycle sentinel smoke
@@ -229,7 +229,7 @@ jobs:
       - name: Test the effect-free userspace stack evaluation
         run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml
 
-      - name: Test the selected-stack byte-owner effect boundary
+      - name: Test selected-stack and native connector effect boundaries
         run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
 
       - name: Qualify exact Windows SCM registration and removal

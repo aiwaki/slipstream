@@ -19,6 +19,8 @@ const FRAGMENT_INPUT: &str =
     include_str!("../../../contracts/windows-userspace-stack-ipv6-fragment-input-v1.json");
 const MANIFEST: &str = include_str!("../Cargo.toml");
 const EFFECT_TEST: &str = include_str!("capture_fragment_effect_v1.rs");
+const TRAY_MANIFEST: &str = include_str!("../../../app-tauri/src-tauri/Cargo.toml");
+const WINDOWS_ADAPTER_MANIFEST: &str = include_str!("../../slipstream-windows-adapter/Cargo.toml");
 
 #[derive(Debug, Deserialize)]
 struct ContractFixture {
@@ -48,10 +50,6 @@ struct DependencyFixture {
 
 fn contract() -> ContractFixture {
     serde_json::from_str(CONTRACT).expect("capture-fragment effect v1 must be valid JSON")
-}
-
-fn manifest_has_section(manifest: &str, section: &str) -> bool {
-    manifest.lines().any(|line| line.trim() == section)
 }
 
 #[test]
@@ -182,8 +180,9 @@ fn composition_contract_is_bounded_and_effect_free() {
         assert_eq!(fixture.invariants[invariant], false, "{invariant}");
     }
 
-    assert!(!manifest_has_section(MANIFEST, "[dependencies]"));
-    assert!(manifest_has_section(MANIFEST, "[dev-dependencies]"));
+    assert!(MANIFEST.contains("publish = false"));
+    assert!(!TRAY_MANIFEST.contains("slipstream-userspace-stack-effect-evaluation"));
+    assert!(!WINDOWS_ADAPTER_MANIFEST.contains("slipstream-userspace-stack-effect-evaluation"));
     for forbidden in [
         "TcpStream",
         "UdpSocket",
