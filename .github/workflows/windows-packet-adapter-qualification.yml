@@ -5,11 +5,16 @@ on:
   pull_request:
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
+      - "contracts/windows-packet-capture-v4.json"
+      - "contracts/windows-userspace-byte-owner-v1.json"
       - "contracts/windows-userspace-flow-binding-v1.json"
       - "contracts/windows-userspace-native-connector-effect-v1.json"
       - "contracts/windows-userspace-stack-connector-composition-v1.json"
       - "contracts/windows-userspace-stack-effect-v1.json"
+      - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
+      - "contracts/windows-userspace-stack-selection-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -20,11 +25,16 @@ on:
     branches: ["main"]
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
+      - "contracts/windows-packet-capture-v4.json"
+      - "contracts/windows-userspace-byte-owner-v1.json"
       - "contracts/windows-userspace-flow-binding-v1.json"
       - "contracts/windows-userspace-native-connector-effect-v1.json"
       - "contracts/windows-userspace-stack-connector-composition-v1.json"
       - "contracts/windows-userspace-stack-effect-v1.json"
+      - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
+      - "contracts/windows-userspace-stack-selection-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"

@@ -164,19 +164,25 @@ fn composition_contract_is_bounded_and_non_production() {
 #[test]
 fn disposable_native_architecture_gate_tracks_every_composed_predecessor() {
     for required_path in [
+        "contracts/windows-capture-fragment-effect-v1.json",
         "contracts/windows-packet-flow-v1.json",
+        "contracts/windows-packet-capture-v4.json",
+        "contracts/windows-userspace-byte-owner-v1.json",
         "contracts/windows-userspace-flow-binding-v1.json",
         "contracts/windows-userspace-native-connector-effect-v1.json",
         "contracts/windows-userspace-stack-connector-composition-v1.json",
         "contracts/windows-userspace-stack-effect-v1.json",
+        "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json",
+        "contracts/windows-userspace-stack-selection-v1.json",
         "crates/slipstream-core/**",
         "crates/slipstream-userspace-stack-evaluation/**",
         "crates/slipstream-userspace-stack-effect-evaluation/**",
         "crates/slipstream-windows-adapter/**",
     ] {
-        assert!(
-            WINDOWS_PACKET_QUALIFICATION_WORKFLOW.contains(required_path),
-            "qualification workflow must track {required_path}"
+        assert_eq!(
+            WINDOWS_PACKET_QUALIFICATION_WORKFLOW.matches(required_path).count(),
+            2,
+            "qualification workflow must track {required_path} on pull requests and main pushes"
         );
     }
 
