@@ -19,11 +19,14 @@ macOS lifecycle. IPv4 and IPv6 UDP predecessors remain frozen, the evaluation
 dependency remains qualification-only, and production Windows service-host
 networking remains closed.
 
-The next M4 gate is bounded production service-host composition. It must reuse
-the frozen capture, flow-binding, byte-owner, selected-stack, connector, and
-Wintun ownership contracts rather than bypassing them, remain disabled by
-default, and prove exact compensation on AMD64 and ARM64 before any user-facing
-Windows preview is allowed.
+The next M4 gate is disposable Windows resilience qualification: crash, reboot,
+sleep/wake, route churn, update, uninstall, and external network-tool
+coexistence on AMD64 and ARM64. It must prove exact cleanup and preserve
+independently owned network state before production service-host composition
+can begin. That later composition must reuse the frozen capture, flow-binding,
+byte-owner, selected-stack, connector, and Wintun ownership contracts rather
+than bypassing them, remain disabled by default, and prove exact compensation
+before any user-facing Windows preview is allowed.
 
 Protected owned-Geph run `30429690683` was dispatched exactly once for previous
 main `3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. Packaged resources, the

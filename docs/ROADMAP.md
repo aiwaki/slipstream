@@ -616,8 +616,8 @@ therefore stays phased and closed to production traffic:
    stack/connector suite before its existing real Wintun lifecycle,
    capture/injection, coexistence, and cleanup proofs. Subsequent additive gates
    now prove IPv4 and IPv6 UDP plus IPv4 TCP from real OS sockets through
-   Wintun and the selected stack with exact cleanup. Production service-host
-   composition remains the next independent gate.
+   Wintun and the selected stack with exact cleanup. Disposable resilience
+   qualification in step 6 remains the next independent gate.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier
