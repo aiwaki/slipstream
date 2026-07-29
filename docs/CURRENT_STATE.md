@@ -8,34 +8,26 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-PR #271 is the current M4 resilience gate on head
-`dc2bd7960205030bcff724429caf48fe4a214095`. It freezes a disposable
-same-name Wintun capture-generation contract and requires generation 1 to
-remove its exact route, address, session, and adapter before generation 2 may
-reuse that owned name. The pre-existing system route must match before,
-between, and after both cycles. The gate does not reinstall the driver, mutate
-default routes, DNS, proxy/PAC/VPN, or external network owners, and does not
-compose production Windows networking. It remains proposed until the exact
-native AMD64 and ARM64 PR jobs pass.
+Last exact-main evidence audit: 2026-07-30, through product merge
+`3a26653a2b221d757834cdb8ceb53f95c4589906` (PR #271). Exact-main native
+AMD64/ARM64 run `30494843668`, CI `30494843656`, and audit `30494843671`
+passed on that SHA. The merge freezes a disposable same-name Wintun
+capture-generation contract: generation 1 must remove its exact route,
+address, session, and adapter before generation 2 may reuse that owned name,
+while the pre-existing system route remains identical before, between, and
+after both cycles. The native run proved this on both architectures together
+with the earlier route-churn, independent VPN-like owner, packet handoff, and
+exact-cleanup gates. CI repeated the complete Windows contract suite and the
+packaged macOS lifecycle. The gate did not reinstall the driver, mutate default
+routes, DNS, proxy/PAC/VPN, or external network owners, and did not compose
+production Windows networking.
 
-Last exact-main evidence audit: 2026-07-29, through product merge
-`66f0bb697aa60b4387d4e4544d6ea06d2fffbae5` (PR #269). Exact-main native
-AMD64/ARM64 run `30490498603`, CI `30490498586`, and audit `30490498662`
-passed on that SHA. The merge freezes an isolated read-only
-`NotifyRouteChange2` observer with bounded numeric-prefix history and a native
-exact-route churn qualification. The native run proved active-token
-invalidation, explicit deletion of both test-owned exact routes, baseline-route
-recovery, adjacent independent VPN-like route-owner coexistence, exact Wintun
-cleanup, and strict Windows clippy on both architectures. CI repeated the full
-contract suites and packaged macOS lifecycle. Production Windows service-host
-networking remains closed.
-
-The PR run on head `42dec297dda9c667a5be168fa856d6b49e143ad7` also passed:
-native `30489911315`, CI `30489911341`, and audit `30489911306`. An earlier
-AMD64 attempt on predecessor head `c50a54e5fc7b8b24b7943c9eda4f6b4c578d7d23`
-reported the existing child-termination test and exact adapter absence before
-the surrounding Cargo process exceeded its bound; the one evidence-authorized
-job rerun passed, and both the final PR head and exact-main head then passed
+The first PR attempt exposed a fixture defect before product evidence was
+accepted: `WindowsOwnedRouteTransitionIssuer::new` received the fixed route
+epoch where it expected the capture generation, so the generation-2 proof
+failed with `capture-generation issuer changed its generation`. PR #271
+corrected the argument order and added a static regression for the exact
+constructor call. The final PR head and exact-main AMD64/ARM64 jobs passed
 without reruns.
 
 The next M4 work is the remaining disposable Windows resilience
