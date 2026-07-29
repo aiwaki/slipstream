@@ -5,6 +5,14 @@ on:
   pull_request:
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-packet-flow-v1.json"
+      - "contracts/windows-userspace-flow-binding-v1.json"
+      - "contracts/windows-userspace-native-connector-effect-v1.json"
+      - "contracts/windows-userspace-stack-connector-composition-v1.json"
+      - "contracts/windows-userspace-stack-effect-v1.json"
+      - "crates/slipstream-core/**"
+      - "crates/slipstream-userspace-stack-evaluation/**"
+      - "crates/slipstream-userspace-stack-effect-evaluation/**"
       - "crates/slipstream-windows-adapter/**"
       - "scripts/run_bounded_windows_cargo_test.ps1"
       - "vendor/wintun/**"
@@ -12,6 +20,14 @@ on:
     branches: ["main"]
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-packet-flow-v1.json"
+      - "contracts/windows-userspace-flow-binding-v1.json"
+      - "contracts/windows-userspace-native-connector-effect-v1.json"
+      - "contracts/windows-userspace-stack-connector-composition-v1.json"
+      - "contracts/windows-userspace-stack-effect-v1.json"
+      - "crates/slipstream-core/**"
+      - "crates/slipstream-userspace-stack-evaluation/**"
+      - "crates/slipstream-userspace-stack-effect-evaluation/**"
       - "crates/slipstream-windows-adapter/**"
       - "scripts/run_bounded_windows_cargo_test.ps1"
       - "vendor/wintun/**"
@@ -56,6 +72,16 @@ jobs:
           if ($actual -ne $env:EXPECTED_OS_ARCHITECTURE) {
             throw "Expected $($env:EXPECTED_OS_ARCHITECTURE), got $actual"
           }
+
+      - name: Qualify frozen packet-flow ownership on the native architecture
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test packet_flow_contract -- --test-threads=1
+
+      - name: Qualify selected-stack and native-connector composition on the native architecture
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml -- --test-threads=1
 
       - name: Qualify read-only route and source observation
         shell: pwsh
@@ -345,3 +371,6 @@ jobs:
 
       - name: Lint the disposable packet fixture
         run: cargo clippy --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --all-targets --features disposable-windows-packet-fixture -- -D warnings
+
+      - name: Lint selected-stack and native-connector composition
+        run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings
