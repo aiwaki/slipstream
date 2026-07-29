@@ -24,8 +24,12 @@ function createWorker({
     native: [],
     reload: [],
     timeout: [],
-    webRequestListener: null
+    beforeRequestListener: null,
+    beforeRedirectListener: null,
+    completedListener: null,
+    errorListener: null
   };
+  const sessionValues = {};
   const chrome = {
     runtime: {
       onMessage: {
@@ -34,6 +38,25 @@ function createWorker({
       sendNativeMessage(host, signal) {
         calls.native.push({ host, signal });
         return Promise.resolve(nativeResponse);
+      }
+    },
+    storage: {
+      session: {
+        get(key) {
+          return Promise.resolve(
+            Object.hasOwn(sessionValues, key)
+              ? { [key]: sessionValues[key] }
+              : {}
+          );
+        },
+        remove(key) {
+          delete sessionValues[key];
+          return Promise.resolve();
+        },
+        set(entries) {
+          Object.assign(sessionValues, entries);
+          return Promise.resolve();
+        }
       }
     },
     tabs: {
@@ -46,10 +69,28 @@ function createWorker({
       }
     },
     webRequest: {
+      onBeforeRequest: {
+        addListener(listener, filter) {
+          calls.beforeRequestListener = listener;
+          calls.beforeRequestFilter = filter;
+        }
+      },
+      onBeforeRedirect: {
+        addListener(listener, filter) {
+          calls.beforeRedirectListener = listener;
+          calls.beforeRedirectFilter = filter;
+        }
+      },
+      onCompleted: {
+        addListener(listener, filter) {
+          calls.completedListener = listener;
+          calls.completedFilter = filter;
+        }
+      },
       onErrorOccurred: {
         addListener(listener, filter) {
-          calls.webRequestListener = listener;
-          calls.webRequestFilter = filter;
+          calls.errorListener = listener;
+          calls.errorFilter = filter;
         }
       }
     }
@@ -83,7 +124,13 @@ function createWorker({
   vm.runInContext(workerSource, context, {
     filename: "service-worker.js"
   });
-  return { calls, listener: calls.webRequestListener };
+  return {
+    before: calls.beforeRequestListener,
+    calls,
+    completed: calls.completedListener,
+    error: calls.errorListener,
+    redirect: calls.beforeRedirectListener
+  };
 }
 
 async function settleWorkerPromises() {
@@ -97,10 +144,10 @@ function plain(value) {
 }
 
 test("incomplete top-frame request confirms and reloads the same host once", async () => {
-  const { calls, listener } = createWorker();
+  const { before, calls, error } = createWorker();
 
-  listener({
-    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+  before({
+    requestId: "request-17",
     type: "main_frame",
     method: "GET",
     frameId: 0,
@@ -109,8 +156,25 @@ test("incomplete top-frame request confirms and reloads the same host once", asy
     url: "https://Partial.Example/download?secret=ignored"
   });
   await settleWorkerPromises();
+  error({
+    requestId: "request-17",
+    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    frameId: 0,
+    tabId: 17,
+    url: "https://Partial.Example/download?secret=ignored"
+  });
+  await settleWorkerPromises();
 
-  assert.deepEqual(plain(calls.webRequestFilter), {
+  assert.deepEqual(plain(calls.beforeRequestFilter), {
+    urls: ["https://*/*"],
+    types: ["main_frame"]
+  });
+  assert.deepEqual(plain(calls.errorFilter), {
+    urls: ["https://*/*"],
+    types: ["main_frame"]
+  });
+  assert.deepEqual(plain(calls.beforeRedirectFilter), {
     urls: ["https://*/*"],
     types: ["main_frame"]
   });
@@ -131,16 +195,25 @@ test("incomplete top-frame request confirms and reloads the same host once", asy
 });
 
 test("accepted confirmation does not reload after the tab changes host", async () => {
-  const { calls, listener } = createWorker({
+  const { before, calls, error } = createWorker({
     currentTabUrl: "https://other.example/"
   });
 
-  listener({
-    error: "net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+  before({
+    requestId: "request-18",
     type: "main_frame",
     method: "GET",
     frameId: 0,
     parentFrameId: -1,
+    tabId: 18,
+    url: "https://partial.example/"
+  });
+  await settleWorkerPromises();
+  error({
+    requestId: "request-18",
+    error: "net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    type: "main_frame",
+    frameId: 0,
     tabId: 18,
     url: "https://partial.example/"
   });
@@ -151,7 +224,7 @@ test("accepted confirmation does not reload after the tab changes host", async (
 });
 
 test("rejected confirmation never schedules a reload", async () => {
-  const { calls, listener } = createWorker({
+  const { before, calls, error } = createWorker({
     nativeResponse: {
       schema_version: 1,
       accepted: false,
@@ -159,12 +232,21 @@ test("rejected confirmation never schedules a reload", async () => {
     }
   });
 
-  listener({
-    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+  before({
+    requestId: "request-19",
     type: "main_frame",
     method: "GET",
     frameId: 0,
     parentFrameId: -1,
+    tabId: 19,
+    url: "https://partial.example/"
+  });
+  await settleWorkerPromises();
+  error({
+    requestId: "request-19",
+    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    frameId: 0,
     tabId: 19,
     url: "https://partial.example/"
   });
@@ -176,16 +258,97 @@ test("rejected confirmation never schedules a reload", async () => {
 });
 
 test("ambiguous request errors never cross native messaging", async () => {
-  const { calls, listener } = createWorker();
+  const { before, calls, error } = createWorker();
 
-  listener({
-    error: "net::ERR_CONNECTION_RESET",
+  before({
+    requestId: "request-20",
     type: "main_frame",
     method: "GET",
     frameId: 0,
     parentFrameId: -1,
     tabId: 20,
     url: "https://partial.example/"
+  });
+  await settleWorkerPromises();
+  error({
+    requestId: "request-20",
+    error: "net::ERR_CONNECTION_RESET",
+    type: "main_frame",
+    frameId: 0,
+    tabId: 20,
+    url: "https://partial.example/"
+  });
+  await settleWorkerPromises();
+
+  assert.deepEqual(calls.native, []);
+  assert.deepEqual(calls.reload, []);
+});
+
+test("a completed request cannot be reused as an incomplete candidate", async () => {
+  const { before, calls, completed, error } = createWorker();
+  const request = {
+    requestId: "request-21",
+    type: "main_frame",
+    method: "GET",
+    frameId: 0,
+    parentFrameId: -1,
+    tabId: 21,
+    url: "https://partial.example/"
+  };
+
+  before(request);
+  await settleWorkerPromises();
+  completed({
+    requestId: request.requestId,
+    type: "main_frame",
+    frameId: 0,
+    tabId: request.tabId,
+    url: request.url
+  });
+  await settleWorkerPromises();
+  error({
+    requestId: request.requestId,
+    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    frameId: 0,
+    tabId: request.tabId,
+    url: request.url
+  });
+  await settleWorkerPromises();
+
+  assert.deepEqual(calls.native, []);
+  assert.deepEqual(calls.reload, []);
+});
+
+test("a redirected request cannot leave a reusable incomplete candidate", async () => {
+  const { before, calls, error, redirect } = createWorker();
+  const request = {
+    requestId: "request-22",
+    type: "main_frame",
+    method: "GET",
+    frameId: 0,
+    parentFrameId: -1,
+    tabId: 22,
+    url: "https://partial.example/"
+  };
+
+  before(request);
+  redirect({
+    requestId: request.requestId,
+    type: "main_frame",
+    frameId: 0,
+    tabId: request.tabId,
+    url: request.url,
+    redirectUrl: "custom-scheme://finished"
+  });
+  await settleWorkerPromises();
+  error({
+    requestId: request.requestId,
+    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    frameId: 0,
+    tabId: request.tabId,
+    url: request.url
   });
   await settleWorkerPromises();
 

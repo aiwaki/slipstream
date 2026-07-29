@@ -10,6 +10,9 @@
   const MAX_CONFIDENCE_BPS = 10000;
   const CONFIRMATION_RELOAD_DELAY_MS = 7000;
   const COMPLETED_CONFIRMATION_RELOAD_DELAY_MS = 250;
+  const INCOMPLETE_RESPONSE_CANDIDATE_TTL_MS = 5 * 60 * 1000;
+  const INCOMPLETE_RESPONSE_STORAGE_PREFIX =
+    "slipstream.incomplete-response.";
 
   function exactMessage(message) {
     if (!message || typeof message !== "object" || Array.isArray(message)) {
@@ -93,29 +96,88 @@
     };
   }
 
-  function buildIncompleteResponseSignal(details, nowUnixMs, randomBytes) {
+  function incompleteResponseCandidate(details, nowUnixMs) {
     if (
       !details ||
       typeof details !== "object" ||
       Array.isArray(details) ||
+      typeof details.requestId !== "string" ||
+      !details.requestId ||
       details.type !== "main_frame" ||
       details.method !== "GET" ||
       details.frameId !== 0 ||
       details.parentFrameId !== -1 ||
       !Number.isInteger(details.tabId) ||
       details.tabId < 0 ||
-      !INCOMPLETE_RESPONSE_ERRORS.includes(details.error)
+      !Number.isSafeInteger(nowUnixMs) ||
+      nowUnixMs <= 0
+    ) {
+      return null;
+    }
+    const host = normalizedHttpsHostname(details.url);
+    if (!host) {
+      return null;
+    }
+    return {
+      request_id: details.requestId,
+      tab_id: details.tabId,
+      host,
+      expires_at_unix_ms:
+        nowUnixMs + INCOMPLETE_RESPONSE_CANDIDATE_TTL_MS
+    };
+  }
+
+  function incompleteResponseStorageKey(requestId) {
+    if (typeof requestId !== "string" || !requestId) {
+      return null;
+    }
+    return `${INCOMPLETE_RESPONSE_STORAGE_PREFIX}${requestId}`;
+  }
+
+  function validIncompleteResponseCandidate(candidate, details, nowUnixMs) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      Object.keys(candidate).sort().join(",") !==
+        "expires_at_unix_ms,host,request_id,tab_id" ||
+      candidate.request_id !== details.requestId ||
+      candidate.tab_id !== details.tabId ||
+      candidate.host !== normalizedHttpsHostname(details.url) ||
+      !Number.isSafeInteger(candidate.expires_at_unix_ms) ||
+      candidate.expires_at_unix_ms < nowUnixMs
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  function buildIncompleteResponseSignal(
+    details,
+    candidate,
+    nowUnixMs,
+    randomBytes
+  ) {
+    if (
+      !details ||
+      typeof details !== "object" ||
+      Array.isArray(details) ||
+      typeof details.requestId !== "string" ||
+      !details.requestId ||
+      details.type !== "main_frame" ||
+      details.frameId !== 0 ||
+      !Number.isInteger(details.tabId) ||
+      details.tabId < 0 ||
+      !INCOMPLETE_RESPONSE_ERRORS.includes(details.error) ||
+      !Number.isSafeInteger(nowUnixMs) ||
+      nowUnixMs <= 0 ||
+      !validIncompleteResponseCandidate(candidate, details, nowUnixMs)
     ) {
       return null;
     }
     const host = normalizedHttpsHostname(details.url);
     const id = signalId(randomBytes);
-    if (
-      !host ||
-      !id ||
-      !Number.isSafeInteger(nowUnixMs) ||
-      nowUnixMs <= 0
-    ) {
+    if (!host || !id) {
       return null;
     }
     return {
@@ -128,6 +190,76 @@
       observed_at_unix_ms: nowUnixMs,
       top_level: true
     };
+  }
+
+  function createIncompleteResponseTracker(storageSession) {
+    const memory = new Map();
+    let pending = Promise.resolve();
+    const durable =
+      storageSession &&
+      typeof storageSession.get === "function" &&
+      typeof storageSession.set === "function" &&
+      typeof storageSession.remove === "function"
+        ? storageSession
+        : null;
+
+    function enqueue(operation) {
+      const result = pending.then(operation, operation);
+      pending = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
+    }
+
+    function remember(details, nowUnixMs) {
+      return enqueue(async () => {
+        const candidate = incompleteResponseCandidate(details, nowUnixMs);
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!candidate || !key) {
+          return false;
+        }
+        memory.set(key, candidate);
+        if (durable) {
+          await durable.set({ [key]: candidate });
+        }
+        return true;
+      });
+    }
+
+    function take(details) {
+      return enqueue(async () => {
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!key) {
+          return null;
+        }
+        let candidate = memory.get(key) ?? null;
+        memory.delete(key);
+        if (!candidate && durable) {
+          const stored = await durable.get(key);
+          candidate = stored?.[key] ?? null;
+        }
+        if (durable) {
+          await durable.remove(key);
+        }
+        return candidate;
+      });
+    }
+
+    function discard(details) {
+      return enqueue(async () => {
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!key) {
+          return;
+        }
+        memory.delete(key);
+        if (durable) {
+          await durable.remove(key);
+        }
+      });
+    }
+
+    return Object.freeze({ discard, remember, take });
   }
 
   function reloadInstruction(nativeResponse, signal) {
@@ -165,7 +297,10 @@
     buildIncompleteResponseSignal,
     buildSemanticSignal,
     browserOwnedHostname,
+    createIncompleteResponseTracker,
     exactMessage,
+    incompleteResponseCandidate,
+    incompleteResponseStorageKey,
     normalizedHttpsHostname,
     reloadInstruction,
     signalId,

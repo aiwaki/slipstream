@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "Slipstream Browser Companion",
   "short_name": "Slipstream",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reports bounded regional-denial and incomplete-navigation evidence to Slipstream.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA/tOMxpo55u3EQkEL5U+25HUzLfl5y3Bm8lSEIw+Jij829NsCBqsSSMOS46pHi0dNsjK0zwZMEx4TWwNEr4Ug9KS5sL9X42Ql/QXP8fkSRIliOuS+nLRu9VHz9mSpqFjfvuLj7XcOQoGpjjnhyQHgqy2KkSu9Ky2wyXayXrW3mRfVRsHG/e7ZjeCkSJsOyTGvDI/ppcxOzSRBZq0I0fM0LCT54uYtKU1yaQAw5Mh5PW+7wGUnQJd3nH5VaCZq95XSIPOTjH6hm6wFve+f/l/tBbgzJ4YoUESJLVizFC2bIEjamQEjmP1FPnn55oreDg6vNEgXtbvqfttDiGc8TlmmmQIDAQAB",
   "minimum_chrome_version": "102",
   "permissions": [
     "nativeMessaging",
+    "storage",
     "webRequest"
   ],
   "host_permissions": [

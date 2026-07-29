@@ -8,7 +8,7 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-28, through product commit
+Last evidence audit: 2026-07-29, through product commit
 `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`. PR #251 moved Chromium and
 macOS Safari incomplete-response observation to read-only
 `webRequest.onErrorOccurred`. The sole protected account-backed run for its
@@ -28,11 +28,30 @@ reason and begins producer cleanup. Its PR gates passed, and exact-main CI
 `30399287525` plus audit `30399287465` passed for
 `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`.
 
-The next authorized action is exactly one protected main-only run after the
-upstream UTC-day authentication budget resets. Repeating it before reset would
-hot-loop the finite account budget and is prohibited. No workstation install
-is authorized until that full run proves owned-Geph payload, both Chromium
-semantic scenarios, exact cleanup, and publishes its exact qualified artifact.
+After the UTC-day reset, protected run `30411915972` was dispatched exactly once
+on docs checkpoint main `bebb6776b554a01a7885b889d6d98c2a405d570c`.
+Packaged-resource and daemon-free boundaries passed. Owned Geph returned the
+same complete Steam payload initially, without the tray, and after KeepAlive
+recovery: HTTP 200, TLS 1.3, and `68103` bytes in each phase. The frozen
+regional-denial browser scenario completed before the harness entered
+`incomplete_response`.
+
+The second scenario made one root request and no reload or subresource request.
+Chrome's documented `webRequest.onErrorOccurred` details omit `method` and
+`parentFrameId`, while the v2 builder required both fields directly on that
+final event. Synthetic unit tests had supplied an impossible event shape, so
+the real event was silently rejected before native messaging. The exact
+correction correlates a browser-owned top-level GET from `onBeforeRequest` to
+the final event by opaque request ID, tab, and normalized hostname, using only
+ephemeral `storage.session` state without path or query. The always-run cleanup
+passed, system network state was not mutated, no artifact was published, and no
+workstation install was attempted.
+
+PR #254 contains that evidence-scoped browser correction plus redirect-safe
+candidate cleanup. After its normal gates and merge, exactly one protected run
+is required for the resulting exact main SHA. No workstation install is
+authorized until the full run proves owned-Geph payload, both Chromium semantic
+scenarios, exact cleanup, and publishes its exact qualified artifact.
 
 The full local suite passed with `840` Python tests and `32` subtests before
 PR #248 merged. Exact-main CI run `30378302132` and audit run `30378302209`
@@ -240,7 +259,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Exact v1 gates pass; additive incomplete-response v2 is merged and awaits only protected account-backed qualification | PRs #219-#252 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Exact-main CI `30399287525` and audit `30399287465` pass on product commit `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`. The earlier qualified artifact and frozen v1 browser path remain valid historical evidence, while the workstation partial-response finding motivated v2 without adding a hostname rule. The sole v2 protected run was blocked by the upstream Geph daily authentication limit and published no artifact. Exactly one protected two-scenario browser run remains after the upstream budget resets; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
+| M1 - Autonomous Routing V1 | Exact v1 gates pass; additive incomplete-response v2 awaits corrected protected account-backed qualification | PRs #219-#252 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Exact-main CI `30399287525` and audit `30399287465` pass on product commit `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`. Protected run `30411915972` then passed packaged-resource, daemon-free, frozen regional-denial, all three owned-Geph payload phases, and always-run cleanup on checkpoint main `bebb6776b554a01a7885b889d6d98c2a405d570c`, but real Chrome exposed that the v2 final error event lacks the synthetic test's `method` and `parentFrameId`; no artifact or install followed. PR #254 correlates those immutable fields from `onBeforeRequest` and adds redirect-safe cleanup without a hostname rule. Exactly one protected two-scenario browser run remains for its eventual exact merged SHA; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Capture-bound selected-stack input qualified; native execution remains closed | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate now composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. Neither composition is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, native connectors and backends, disposable AMD64/ARM64 packet-flow qualification, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |

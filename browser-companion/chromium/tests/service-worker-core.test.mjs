@@ -130,16 +130,28 @@ test("maps only exact top-level incomplete-response request errors to v2", () =>
     "net::ERR_CONTENT_LENGTH_MISMATCH",
     "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
   ]) {
-    const signal = core.buildIncompleteResponseSignal(
+    const candidate = core.incompleteResponseCandidate(
       {
+        requestId: "request-7",
         tabId: 7,
         type: "main_frame",
         method: "GET",
         frameId: 0,
         parentFrameId: -1,
+        url: "https://Example.NET/private/path?token=secret"
+      },
+      900_000
+    );
+    const signal = core.buildIncompleteResponseSignal(
+      {
+        requestId: "request-7",
+        tabId: 7,
+        type: "main_frame",
+        frameId: 0,
         url: "https://Example.NET/private/path?token=secret",
         error
       },
+      candidate,
       1_000_000,
       new Uint8Array(16).fill(11)
     );
@@ -151,52 +163,95 @@ test("maps only exact top-level incomplete-response request errors to v2", () =>
     assert.equal(JSON.stringify(signal).includes("ERR_"), false);
     assert.equal(JSON.stringify(signal).includes("/private/path"), false);
     assert.equal(JSON.stringify(signal).includes("token=secret"), false);
+    assert.equal(JSON.stringify(candidate).includes("/private/path"), false);
+    assert.equal(JSON.stringify(candidate).includes("token=secret"), false);
   }
 });
 
 test("rejects ambiguous, subframe, non-HTTPS, and IP request errors", () => {
-  const base = {
+  const before = {
+    requestId: "request-7",
     tabId: 7,
     type: "main_frame",
     method: "GET",
     frameId: 0,
     parentFrameId: -1,
+    url: "https://example.net/"
+  };
+  const error = {
+    requestId: "request-7",
+    tabId: 7,
+    type: "main_frame",
+    frameId: 0,
     url: "https://example.net/",
     error: "net::ERR_CONTENT_LENGTH_MISMATCH"
   };
   for (const details of [
-    { ...base, frameId: 2 },
-    { ...base, parentFrameId: 2 },
-    { ...base, type: "xmlhttprequest" },
-    { ...base, method: "POST" },
-    { ...base, tabId: -1 },
-    { ...base, url: "http://example.net/" },
-    { ...base, url: "https://127.0.0.1/" },
-    { ...base, error: "net::ERR_CONNECTION_CLOSED" },
-    { ...base, error: "net::ERR_HTTP2_PROTOCOL_ERROR" }
+    { ...before, frameId: 2 },
+    { ...before, parentFrameId: 2 },
+    { ...before, type: "xmlhttprequest" },
+    { ...before, method: "POST" },
+    { ...before, tabId: -1 },
+    { ...before, url: "http://example.net/" },
+    { ...before, url: "https://127.0.0.1/" }
+  ]) {
+    assert.equal(core.incompleteResponseCandidate(details, 900_000), null);
+  }
+  const candidate = core.incompleteResponseCandidate(before, 900_000);
+  for (const details of [
+    { ...error, frameId: 2 },
+    { ...error, type: "xmlhttprequest" },
+    { ...error, tabId: -1 },
+    { ...error, requestId: "other-request" },
+    { ...error, url: "http://example.net/" },
+    { ...error, url: "https://other.example/" },
+    { ...error, error: "net::ERR_CONNECTION_CLOSED" },
+    { ...error, error: "net::ERR_HTTP2_PROTOCOL_ERROR" }
   ]) {
     assert.equal(
       core.buildIncompleteResponseSignal(
         details,
+        candidate,
         1_000_000,
         new Uint8Array(16)
       ),
       null
     );
   }
+  assert.equal(
+    core.buildIncompleteResponseSignal(
+      error,
+      { ...candidate, expires_at_unix_ms: 999_999 },
+      1_000_000,
+      new Uint8Array(16)
+    ),
+    null
+  );
 });
 
 test("v2 reload follows completed confirmation and remains same-host scoped", () => {
-  const signal = core.buildIncompleteResponseSignal(
+  const candidate = core.incompleteResponseCandidate(
     {
+      requestId: "request-7",
       tabId: 7,
       type: "main_frame",
       method: "GET",
       frameId: 0,
       parentFrameId: -1,
+      url: "https://example.net/"
+    },
+    900_000
+  );
+  const signal = core.buildIncompleteResponseSignal(
+    {
+      requestId: "request-7",
+      tabId: 7,
+      type: "main_frame",
+      frameId: 0,
       url: "https://example.net/",
       error: "net::ERR_CONTENT_LENGTH_MISMATCH"
     },
+    candidate,
     1_000_000,
     new Uint8Array(16).fill(12)
   );
@@ -221,5 +276,43 @@ test("v2 reload follows completed confirmation and remains same-host scoped", ()
   assert.equal(
     core.tabStillOnSignalHost({ url: "https://other.example/" }, signal),
     false
+  );
+});
+
+test("request correlation survives a service-worker restart", async () => {
+  const values = {};
+  const storageSession = {
+    async get(key) {
+      return Object.hasOwn(values, key) ? { [key]: values[key] } : {};
+    },
+    async remove(key) {
+      delete values[key];
+    },
+    async set(entries) {
+      Object.assign(values, entries);
+    }
+  };
+  const before = {
+    requestId: "request-across-worker-restart",
+    tabId: 17,
+    type: "main_frame",
+    method: "GET",
+    frameId: 0,
+    parentFrameId: -1,
+    url: "https://example.net/private?token=secret"
+  };
+  const firstWorker = core.createIncompleteResponseTracker(storageSession);
+  assert.equal(await firstWorker.remember(before, 900_000), true);
+
+  const restartedWorker = core.createIncompleteResponseTracker(storageSession);
+  const candidate = await restartedWorker.take({
+    requestId: before.requestId
+  });
+  assert.equal(candidate.host, "example.net");
+  assert.equal(JSON.stringify(candidate).includes("private"), false);
+  assert.equal(JSON.stringify(candidate).includes("secret"), false);
+  assert.equal(
+    await restartedWorker.take({ requestId: before.requestId }),
+    null
   );
 });
