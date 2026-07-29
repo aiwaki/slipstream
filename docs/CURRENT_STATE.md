@@ -33,14 +33,14 @@ passes PR and exact-main gates, the next authorized protected action is one run
 after the next UTC-day account reset. Installation remains prohibited until
 that run passes both Chromium scenarios and publishes its exact artifact.
 
-That protected run also exposed a coordination defect rather than a routing
-regression. The owned-Geph producer published `ready`, then a late broker abort
-made it clean user resources while the Chromium consumer still owned the root
-daemon and native-host manifest. This produced secondary boundary and
-missing-manifest errors. PR #252 now retains a late abort until the consumer
-publishes the exact private `release`, then reports the original fail-closed
-reason and begins producer cleanup. Its PR gates passed, and exact-main CI
-`30399287525` plus audit `30399287465` passed for
+Earlier protected run `30397332251` exposed a coordination defect rather than a
+routing regression. The owned-Geph producer published `ready`, then a late
+broker abort made it clean user resources while the Chromium consumer still
+owned the root daemon and native-host manifest. This produced secondary
+boundary and missing-manifest errors. PR #252 now retains a late abort until
+the consumer publishes the exact private `release`, then reports the original
+fail-closed reason and begins producer cleanup. Its PR gates passed, and
+exact-main CI `30399287525` plus audit `30399287465` passed for
 `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`.
 
 After the UTC-day reset, protected run `30411915972` was dispatched exactly once
