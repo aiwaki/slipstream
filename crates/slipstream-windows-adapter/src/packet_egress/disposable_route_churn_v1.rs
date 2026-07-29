@@ -569,8 +569,8 @@ fn lookup_route(
 }
 
 fn same_route_key(left: MIB_IPFORWARD_ROW2, right: MIB_IPFORWARD_ROW2) -> bool {
-    unsafe { left.InterfaceLuid.Value == right.InterfaceLuid.Value }
-    &&left.InterfaceIndex == right.InterfaceIndex
+    (unsafe { left.InterfaceLuid.Value == right.InterfaceLuid.Value })
+        && left.InterfaceIndex == right.InterfaceIndex
         && left.DestinationPrefix.PrefixLength == right.DestinationPrefix.PrefixLength
         && unsafe { left.DestinationPrefix.Prefix.si_family }
             == unsafe { right.DestinationPrefix.Prefix.si_family }
