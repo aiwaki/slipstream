@@ -88,6 +88,7 @@ fn native_fixture_reuses_one_owned_name_only_after_exact_absence() {
     assert!(generation_one < intermediate_absence && intermediate_absence < generation_two);
 
     for required in [
+        "WindowsOwnedRouteTransitionIssuer::new(capture_generation, capture_interface, 1)",
         "issuer.capture_generation() != capture_generation",
         "wait_for_adapter_absent_until",
         "wait_for_fixture_route_absent_until",

@@ -4188,7 +4188,7 @@ fn qualify_capture_generation_recovery(
         owned_rows = Some((route_row, address_row));
 
         let mut issuer =
-            WindowsOwnedRouteTransitionIssuer::new(23, capture_interface, capture_generation)
+            WindowsOwnedRouteTransitionIssuer::new(capture_generation, capture_interface, 1)
                 .map_err(|error| format!("construct capture-generation issuer: {error}"))?;
         if issuer.capture_generation() != capture_generation {
             return Err("capture-generation issuer changed its generation".to_owned());
