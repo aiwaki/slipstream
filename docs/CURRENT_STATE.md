@@ -8,14 +8,25 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-29, through product merge
-`9979889d82316f21701f1ef8304ffe3b8a11bb7d` (PR #265). Exact-main native
-AMD64/ARM64 run `30476588359`, CI `30476589552`, and audit `30476588735`
-passed on that SHA. The native run proved both IPv4 and IPv6 UDP
-Wintun-to-selected-stack handoffs with exact owned-route, address, session, and
-adapter cleanup. CI repeated the full contract suites and packaged macOS
-lifecycle. The evaluation dependency remains qualification-only and production
-Windows service-host networking remains closed.
+Last exact-main evidence audit: 2026-07-29, through documentation merge
+`d7647418f83975b7de1aa9395c0df98a83a69ecd` (PR #266). Product merge
+`9979889d82316f21701f1ef8304ffe3b8a11bb7d` (PR #265) passed exact-main native
+AMD64/ARM64 run `30476588359`, CI `30476589552`, and audit `30476588735`.
+The native run proved both IPv4 and IPv6 UDP Wintun-to-selected-stack handoffs
+with exact owned-route, address, session, and adapter cleanup. CI repeated the
+full contract suites and packaged macOS lifecycle. The evaluation dependency
+remains qualification-only and production Windows service-host networking
+remains closed.
+
+PR #267 adds the next isolated qualification boundary: bounded IPv4 TCP SYN,
+handshake ACK, request payload, and response payload across a real Windows
+socket, Wintun, and the selected `smoltcp` stack. Pull-request native run
+`30480798925` passed the exact TCP handoff and cleanup on AMD64 and ARM64; CI
+run `30480799178` passed the Windows adapter and userspace-stack contracts, and
+audit run `30480803419` passed. The implementation remains dev-only and the
+production service-host composition gate is still closed. These are PR-head
+results, not exact-main evidence; after merge, the resulting main SHA and its
+native, CI, and audit runs must be recorded before selecting the next gate.
 
 Protected owned-Geph run `30429690683` was dispatched exactly once for previous
 main `3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. Packaged resources, the
