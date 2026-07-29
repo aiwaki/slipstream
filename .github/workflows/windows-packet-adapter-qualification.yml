@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
       - "contracts/windows-capture-generation-recovery-v1.json"
+      - "contracts/windows-service-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
       - "contracts/windows-packet-capture-v4.json"
@@ -31,6 +32,7 @@ on:
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
       - "contracts/windows-capture-generation-recovery-v1.json"
+      - "contracts/windows-service-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
       - "contracts/windows-packet-capture-v4.json"
@@ -92,6 +94,20 @@ jobs:
           if ($actual -ne $env:EXPECTED_OS_ARCHITECTURE) {
             throw "Expected $($env:EXPECTED_OS_ARCHITECTURE), got $actual"
           }
+
+      - name: Build the disposable Windows service fixture
+        run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bin slipstream-disposable-service
+
+      - name: Qualify same-name Windows service-generation recovery
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_SERVICE_GENERATION_RECOVERY_CI: "1"
+        run: |
+          $fixture = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-disposable-service.exe"
+          $env:SLIPSTREAM_WINDOWS_SERVICE_FIXTURE = $fixture.Path
+          cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_native::windows::tests::native_service_generation_recovery_replaces_owned_payload_after_exact_absence -- --exact --test-threads=1
 
       - name: Qualify frozen packet-flow ownership on the native architecture
         env:

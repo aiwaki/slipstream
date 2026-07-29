@@ -438,12 +438,14 @@ mod tests {
     use crate::service_ownership::{parse_windows_owner_record_v1, WINDOWS_OWNER_RECORD_FILE_NAME};
     use sha2::{Digest, Sha256};
     use std::fs;
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::path::Path;
     use std::thread;
     use std::time::{Duration, Instant};
 
     const FULL_LIFECYCLE_ENV: &str = "SLIPSTREAM_WINDOWS_FULL_LIFECYCLE_CI";
+    const SERVICE_GENERATION_RECOVERY_ENV: &str =
+        "SLIPSTREAM_WINDOWS_SERVICE_GENERATION_RECOVERY_CI";
     const FIXTURE_PATH_ENV: &str = "SLIPSTREAM_WINDOWS_SERVICE_FIXTURE";
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
     const OBSERVATION_INTERVAL: Duration = Duration::from_millis(50);
@@ -474,6 +476,131 @@ mod tests {
             Ok(WindowsServiceObservation::absent()),
             "the disposable tests must leave the exact service absent"
         );
+    }
+
+    #[test]
+    fn native_service_generation_recovery_replaces_owned_payload_after_exact_absence() {
+        if std::env::var_os(SERVICE_GENERATION_RECOVERY_ENV).is_none() {
+            return;
+        }
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "the disposable runner must not already contain the Slipstream service"
+        );
+
+        let source = PathBuf::from(
+            std::env::var_os(FIXTURE_PATH_ENV)
+                .expect("the disposable service fixture path must be provided"),
+        );
+        let root = disposable_root("service-generation");
+        let destination = root.join("Slipstream");
+        let independent_owner = root.join("independent-owner.sentinel");
+        let independent_evidence = b"independent owner must survive both generations";
+        fs::write(&independent_owner, independent_evidence)
+            .expect("write independent-owner sentinel");
+
+        let second_source = root.join("slipstream-disposable-service-generation-2.exe");
+        fs::copy(&source, &second_source).expect("copy generation-2 service fixture");
+        let mut second_file = fs::OpenOptions::new()
+            .append(true)
+            .open(&second_source)
+            .expect("open generation-2 service fixture");
+        second_file
+            .write_all(b"\nslipstream-service-generation-2\n")
+            .expect("make generation-2 payload byte-distinct");
+        second_file
+            .sync_all()
+            .expect("flush generation-2 service fixture");
+        drop(second_file);
+
+        let first_identity = identity_for(&source, 1).expect("construct generation-1 identity");
+        let second_identity =
+            identity_for(&second_source, 2).expect("construct generation-2 identity");
+        assert_eq!(first_identity.service_name, second_identity.service_name);
+        assert_ne!(
+            first_identity.executable_sha256, second_identity.executable_sha256,
+            "service generations must use byte-distinct payloads"
+        );
+
+        let first_effects =
+            run_owned_generation(&source, &destination, &first_identity, "generation 1")
+                .expect("qualify service generation 1");
+        verify_terminal_absence(&first_effects, &first_identity)
+            .expect("generation 1 exact absence");
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "generation 1 SCM state must be absent before generation 2"
+        );
+        assert_eq!(
+            fs::read(&independent_owner).expect("read intermediate independent-owner sentinel"),
+            independent_evidence
+        );
+
+        let second_effects = run_owned_generation(
+            &second_source,
+            &destination,
+            &second_identity,
+            "generation 2",
+        )
+        .expect("qualify service generation 2");
+        verify_terminal_absence(&second_effects, &second_identity)
+            .expect("generation 2 exact absence");
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "generation 2 must leave the exact service absent"
+        );
+        assert_eq!(
+            fs::read(&independent_owner).expect("read final independent-owner sentinel"),
+            independent_evidence
+        );
+
+        fs::remove_dir_all(&root).expect("remove disposable service-generation root");
+    }
+
+    fn run_owned_generation(
+        source: &Path,
+        destination: &Path,
+        identity: &WindowsServiceIdentity,
+        label: &str,
+    ) -> Result<WindowsServiceNativeEffects, String> {
+        let mut effects = WindowsServiceNativeEffects::for_disposable_test(
+            source.to_path_buf(),
+            destination.to_path_buf(),
+        );
+        let mut lifecycle = WindowsServiceLifecycleV1::new(WindowsServiceState::absent())
+            .map_err(|error| error.to_string())?;
+        let installed = lifecycle
+            .execute(
+                &WindowsServiceCommand::Install {
+                    identity: identity.clone(),
+                },
+                &mut effects,
+            )
+            .map_err(|error| error.to_string())?;
+        require_decision(installed.decision, WindowsServiceDecision::Installed)?;
+        wait_for_state(WindowsScmState::Running)?;
+
+        let owner_record = parse_windows_owner_record_v1(
+            &fs::read(destination.join(WINDOWS_OWNER_RECORD_FILE_NAME))
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        if owner_record.identity() != *identity {
+            return Err(format!("{label} published a different owner identity"));
+        }
+        let installed_hash = sha256_file(Path::new(&owner_record.executable_path))?;
+        if installed_hash != identity.executable_sha256 {
+            return Err(format!("{label} installed a different payload hash"));
+        }
+
+        let uninstalled = lifecycle
+            .execute(&WindowsServiceCommand::Uninstall, &mut effects)
+            .map_err(|error| error.to_string())?;
+        require_decision(uninstalled.decision, WindowsServiceDecision::Uninstalled)?;
+        Ok(effects)
     }
 
     fn run_full_lifecycle(source: &Path, generation: u64) -> Result<(), String> {

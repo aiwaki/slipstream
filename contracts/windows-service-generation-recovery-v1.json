@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_service_generation_recovery",
+  "contract_version": 1,
+  "invariants": {
+    "same_owned_service_name": true,
+    "same_owned_runtime_root": true,
+    "service_generations": [1, 2],
+    "payload_hashes_differ": true,
+    "generation_one_absent_before_generation_two": true,
+    "scm_absent_between_generations": true,
+    "payload_absent_between_generations": true,
+    "durable_active_record_absent_between_generations": true,
+    "independent_owner_preserved": true,
+    "terminal_absence_required": true,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "external_process_or_service_mutation": false,
+    "driver_install_or_removal": false,
+    "production_service_host_composition": false
+  },
+  "disposable_native_qualification": {
+    "architectures": ["amd64", "arm64"],
+    "generation_one": 1,
+    "generation_two": 2,
+    "byte_distinct_payloads": true,
+    "intermediate_absence_required": true,
+    "final_absence_required": true
+  }
+}
