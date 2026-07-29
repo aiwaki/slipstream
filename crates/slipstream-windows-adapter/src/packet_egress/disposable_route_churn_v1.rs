@@ -383,16 +383,19 @@ pub fn qualify_disposable_windows_route_churn(
 }
 
 fn require_gate() -> Result<(), WindowsDisposableRouteChurnError> {
-    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
-        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
-        || std::env::var(ROUTE_CHURN_CI_ENV).as_deref() != Ok("1")
-    {
+    if !windows_disposable_route_churn_gate_is_open() {
         return Err(WindowsDisposableRouteChurnError::new(
             WindowsDisposableRouteChurnErrorCode::GateClosed,
             "disposable Windows route-churn gate is closed",
         ));
     }
     Ok(())
+}
+
+pub fn windows_disposable_route_churn_gate_is_open() -> bool {
+    std::env::var(DISPOSABLE_CI_ENV).as_deref() == Ok("1")
+        && std::env::var(EXACT_ROUTE_CI_ENV).as_deref() == Ok("1")
+        && std::env::var(ROUTE_CHURN_CI_ENV).as_deref() == Ok("1")
 }
 
 fn host_prefix_length(destination: IpAddr) -> u8 {
@@ -490,23 +493,23 @@ impl OwnedQualificationRoute {
             Ok(Some(observed)) if same_route_key(observed, row) => Ok(owned),
             Ok(Some(_)) => {
                 let cleanup = owned.remove_and_verify();
-                Err(WindowsDisposableRouteChurnError::new(
-                    Code::RouteLookupFailed,
-                    format!("created route identity changed; cleanup={cleanup:?}"),
+                Err(route_lookup_failure_after_cleanup(
+                    "created route identity changed",
+                    cleanup,
                 ))
             }
             Ok(None) => {
                 let cleanup = owned.remove_and_verify();
-                Err(WindowsDisposableRouteChurnError::new(
-                    Code::RouteLookupFailed,
-                    format!("created route was absent; cleanup={cleanup:?}"),
+                Err(route_lookup_failure_after_cleanup(
+                    "created route was absent",
+                    cleanup,
                 ))
             }
             Err(error) => {
                 let cleanup = owned.remove_and_verify();
-                Err(WindowsDisposableRouteChurnError::new(
-                    Code::RouteLookupFailed,
-                    format!("{error}; cleanup={cleanup:?}"),
+                Err(route_lookup_failure_after_cleanup(
+                    format!("created route lookup failed: {error}"),
+                    cleanup,
                 ))
             }
         }
@@ -549,6 +552,23 @@ impl Drop for OwnedQualificationRoute {
                 DeleteIpForwardEntry2(&self.row);
             }
         }
+    }
+}
+
+fn route_lookup_failure_after_cleanup(
+    detail: impl Into<String>,
+    cleanup: Result<(), WindowsDisposableRouteChurnError>,
+) -> WindowsDisposableRouteChurnError {
+    let detail = detail.into();
+    match cleanup {
+        Ok(()) => WindowsDisposableRouteChurnError::new(
+            WindowsDisposableRouteChurnErrorCode::RouteLookupFailed,
+            detail,
+        ),
+        Err(cleanup_error) => WindowsDisposableRouteChurnError::new(
+            WindowsDisposableRouteChurnErrorCode::CleanupFailed,
+            format!("{detail}; cleanup: {cleanup_error}"),
+        ),
     }
 }
 

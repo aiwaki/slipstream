@@ -10,9 +10,9 @@ use slipstream_windows_adapter::packet_adapter::{
 use slipstream_windows_adapter::packet_egress::{
     observe_windows_packet_route, qualify_disposable_exact_host_route,
     qualify_disposable_exact_host_route_with_active_probe, qualify_disposable_windows_route_churn,
-    WindowsDisposableExactRouteActiveProbe, WindowsDisposableExactRouteErrorCode,
-    WindowsOwnedRouteTransitionIssuer, WindowsPacketInterfaceIdentity,
-    WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
+    windows_disposable_route_churn_gate_is_open, WindowsDisposableExactRouteActiveProbe,
+    WindowsDisposableExactRouteErrorCode, WindowsOwnedRouteTransitionIssuer,
+    WindowsPacketInterfaceIdentity, WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
     WINDOWS_DISPOSABLE_ROUTE_CHURN_QUALIFICATION_VERSION,
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -65,7 +65,6 @@ const INDEPENDENT_ROUTE_CHILD_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT
 const INDEPENDENT_ROUTE_ADAPTER_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_ADAPTER";
 const INDEPENDENT_ROUTE_READY_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_READY";
 const INDEPENDENT_ROUTE_RELEASE_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_RELEASE";
-const ROUTE_CHURN_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_ROUTE_CHURN_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const WINTUN_MAX_IP_PACKET_SIZE: usize = 0xffff;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -249,10 +248,7 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
 
 #[test]
 fn native_wintun_route_churn_invalidates_activation_and_cleans_exactly() {
-    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
-        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
-        || std::env::var(ROUTE_CHURN_CI_ENV).as_deref() != Ok("1")
-    {
+    if !windows_disposable_route_churn_gate_is_open() {
         return;
     }
 

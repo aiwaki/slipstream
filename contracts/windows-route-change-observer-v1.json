@@ -8,6 +8,7 @@
     "monotonic_sequence": true,
     "numeric_route_prefix_only": true,
     "exact_interface_identity": true,
+    "cleanup_failure_is_structured": true,
     "cancellation_without_callback_lock": true,
     "invalid_handle_retains_callback_context": true,
     "cancellation_failure_retains_callback_context": true,

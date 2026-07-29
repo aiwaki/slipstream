@@ -19,6 +19,10 @@ fn route_change_observer_contract_is_frozen_and_bounded() {
     assert_eq!(contract["invariants"]["read_only_subscription"], true);
     assert_eq!(contract["invariants"]["bounded_event_history"], 64);
     assert_eq!(
+        contract["invariants"]["cleanup_failure_is_structured"],
+        true
+    );
+    assert_eq!(
         contract["invariants"]["production_service_host_composition"],
         false
     );
@@ -79,6 +83,7 @@ fn disposable_route_churn_gate_is_exact_and_feature_only() {
         "SLIPSTREAM_WINDOWS_DISPOSABLE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI",
         "SLIPSTREAM_WINDOWS_WINTUN_ROUTE_CHURN_CI",
+        "windows_disposable_route_churn_gate_is_open",
         "qualify_disposable_windows_route_churn",
         "attest_exact_host_route_created",
         "require_current_activation",
@@ -89,6 +94,8 @@ fn disposable_route_churn_gate_is_exact_and_feature_only() {
         "observe_windows_packet_route",
         "baseline route identity changed after cleanup",
         "active token survived a later native route change",
+        "route_lookup_failure_after_cleanup",
+        "CleanupFailed",
     ] {
         assert!(
             source.contains(required),
