@@ -159,6 +159,17 @@ Slipstream routing decisions and bounded recovery primitives.
   call either socket option, trust JSON as native evidence, query or mutate a
   route, classify an external VPN, or compose the production host; those remain
   separate disposable AMD64/ARM64 gates.
+- `windows-route-change-observer-v1.json` freezes the additive read-only
+  `NotifyRouteChange2` boundary. It retains at most 64 numeric prefix events
+  with monotonic sequence numbers, cancels without holding callback state, and
+  keeps the callback context alive if Windows rejects cancellation or reports
+  success without a cancellable handle. The disposable native gate creates and
+  removes only exact test-owned routes,
+  feeds each observed change into the sealed route-transition issuer, proves
+  that a later change invalidates the active token, restores the baseline
+  route, and repeats on AMD64 and ARM64. The observer cannot mutate routes,
+  open sockets or adapters, change DNS/proxy/PAC/VPN state, or compose the
+  production service host.
 - `windows-packet-flow-v1.json` freezes the pure forwarding seam after capture
   classification and outbound-route admission. Its opaque admission binds one
   capture generation, flow ID, unique data-plane request/session owner minted

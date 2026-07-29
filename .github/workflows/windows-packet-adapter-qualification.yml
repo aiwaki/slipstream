@@ -18,6 +18,7 @@ on:
       - "contracts/windows-wintun-stack-handoff-v1.json"
       - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
       - "contracts/windows-wintun-tcp-stack-handoff-v1.json"
+      - "contracts/windows-route-change-observer-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -41,6 +42,7 @@ on:
       - "contracts/windows-wintun-stack-handoff-v1.json"
       - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
       - "contracts/windows-wintun-tcp-stack-handoff-v1.json"
+      - "contracts/windows-route-change-observer-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -274,6 +276,23 @@ jobs:
             -Features disposable-windows-packet-fixture `
             -TestTarget wintun_exact_route_windows `
             -TestName native_wintun_independent_route_owner_is_preserved_during_capture `
+            -TimeoutSeconds 180 `
+            -NoCapture
+
+      - name: Qualify native route-churn invalidation and exact cleanup
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_ROUTE_CHURN_CI: "1"
+        run: |
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_exact_route_windows `
+            -TestName native_wintun_route_churn_invalidates_activation_and_cleans_exactly `
             -TimeoutSeconds 180 `
             -NoCapture
 

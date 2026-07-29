@@ -8,15 +8,27 @@ mod v1;
 #[allow(unsafe_code)]
 mod disposable_route_owner_v1;
 
+#[cfg(all(windows, feature = "disposable-windows-packet-fixture"))]
+#[allow(unsafe_code)]
+mod disposable_route_churn_v1;
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod route_change_observer_windows_v1;
+
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows;
 
+#[cfg(all(windows, feature = "disposable-windows-packet-fixture"))]
+pub use disposable_route_churn_v1::*;
 #[cfg(all(windows, feature = "disposable-windows-packet-fixture"))]
 pub use disposable_route_owner_v1::*;
 #[cfg(any(windows, test))]
 pub use transition_v1::*;
 pub use v1::*;
 
+#[cfg(windows)]
+pub use route_change_observer_windows_v1::*;
 #[cfg(windows)]
 pub use windows::*;

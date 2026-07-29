@@ -19,14 +19,31 @@ macOS lifecycle. IPv4 and IPv6 UDP predecessors remain frozen, the evaluation
 dependency remains qualification-only, and production Windows service-host
 networking remains closed.
 
-The next M4 gate is disposable Windows resilience qualification: crash, reboot,
-sleep/wake, route churn, update, uninstall, and external network-tool
-coexistence on AMD64 and ARM64. It must prove exact cleanup and preserve
-independently owned network state before production service-host composition
-can begin. That later composition must reuse the frozen capture, flow-binding,
-byte-owner, selected-stack, connector, and Wintun ownership contracts rather
-than bypassing them, remain disabled by default, and prove exact compensation
-before any user-facing Windows preview is allowed.
+Docs checkpoint PR #268 then merged as
+`84edf33793aabdfb0ea2732367224bb2c16a3f42`; exact-main CI `30484581706`
+and audit `30484582535` passed on that SHA.
+
+PR #269 adds the first focused disposable Windows resilience gate: an isolated
+read-only `NotifyRouteChange2` observer with bounded numeric-prefix history,
+plus native exact-route churn qualification. PR native run `30488550964`
+passed on AMD64 and ARM64, including active-token invalidation, explicit
+test-owned route deletion, baseline-route recovery, independent route-owner
+coexistence, and strict Windows clippy. Its first AMD64 attempt observed an
+existing child-termination test report success and exact adapter absence before
+the surrounding Cargo process exceeded its bound; one exact job rerun completed
+successfully. PR CI `30488550884` and audit `30488550950` also passed.
+Production Windows service-host networking remains closed.
+
+After PR #269 merges and exact-main evidence passes, the next M4 work is the
+remaining disposable Windows resilience qualification: reboot, sleep/wake,
+update, uninstall, and broader external network-tool coexistence, plus any
+crash scenarios not already covered by the current child-termination gates.
+Each gate must prove exact cleanup and preserve independently owned network
+state before production service-host composition can begin. That later
+composition must reuse the frozen capture, flow-binding, byte-owner,
+selected-stack, connector, and Wintun ownership contracts rather than bypassing
+them, remain disabled by default, and prove exact compensation before any
+user-facing Windows preview is allowed.
 
 Protected owned-Geph run `30429690683` was dispatched exactly once for previous
 main `3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. Packaged resources, the

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_route_change_observer",
+  "contract_version": 1,
+  "invariants": {
+    "read_only_subscription": true,
+    "bounded_event_history": 64,
+    "monotonic_sequence": true,
+    "numeric_route_prefix_only": true,
+    "exact_interface_identity": true,
+    "cleanup_failure_is_structured": true,
+    "cancellation_without_callback_lock": true,
+    "invalid_handle_retains_callback_context": true,
+    "cancellation_failure_retains_callback_context": true,
+    "route_mutation": false,
+    "socket_effect": false,
+    "adapter_effect": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "production_service_host_composition": false
+  },
+  "disposable_native_qualification": {
+    "architectures": ["amd64", "arm64"],
+    "route_family": "ipv4",
+    "exact_activation_required": true,
+    "later_test_owned_route_change_required": true,
+    "active_token_invalidated": true,
+    "owned_route_cleanup_exact": true,
+    "owned_address_session_adapter_cleanup_exact": true,
+    "baseline_route_restored": true,
+    "external_route_owner_coexistence_gate": "adjacent_required"
+  },
+  "notification_kinds": [
+    "parameter_changed",
+    "added",
+    "deleted",
+    "initial",
+    "unknown"
+  ]
+}
