@@ -84,6 +84,7 @@ fn native_connector_contract_is_bounded_and_non_production() {
         "tcp_partial_progress_retains_exact_suffix",
         "failed_write_before_progress_retains_complete_frame",
         "udp_datagram_progress_is_exact",
+        "flow_identity_is_rechecked_before_native_write",
         "backend_identity_is_rechecked_before_native_write",
         "transport_identity_is_rechecked_before_native_write",
         "local_bypass_rejects_geph",

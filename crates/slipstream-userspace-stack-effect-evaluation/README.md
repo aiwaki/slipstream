@@ -12,8 +12,9 @@ directions, exact tuple and flow-identity use, payload preservation, and retry
 after a pre-mutation injected failure. The native connector contract proves an
 atomic byte-owner handoff, exact retained TCP suffixes after partial writes,
 failure-before-progress retention, one exact UDP datagram, and backend identity
-revalidation before every native write. Discord and YouTube cannot select Geph,
-and Geph cannot accept UDP at this boundary.
+revalidation before every native write. The exact flow key and transport are
+revalidated as well. Discord and YouTube cannot select Geph, and Geph cannot
+accept UDP at this boundary.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml

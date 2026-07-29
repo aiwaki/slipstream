@@ -28,6 +28,7 @@
     "tcp_partial_progress_retains_exact_suffix": true,
     "failed_write_before_progress_retains_complete_frame": true,
     "udp_datagram_progress_is_exact": true,
+    "flow_identity_is_rechecked_before_native_write": true,
     "backend_identity_is_rechecked_before_native_write": true,
     "transport_identity_is_rechecked_before_native_write": true,
     "local_bypass_rejects_geph": true,

@@ -601,8 +601,8 @@ therefore stays phased and closed to production traffic:
    a bounded native connector queue. Numeric loopback TCP proves exact suffix
    retention after partial progress and complete retention after a
    failure-before-progress; numeric loopback UDP proves one complete datagram.
-   Backend and transport identity are revalidated before every write, and the
-   route edge rejects Geph for Discord, YouTube, and UDP. The next subgate is
+   Exact flow key, backend, and transport identity are revalidated before every
+   write, and the route edge rejects Geph for Discord, YouTube, and UDP. The next subgate is
    selected-stack-to-connector composition plus backend reads, followed by
    packet-flow qualification on disposable AMD64/ARM64. Production-host
    composition remains a later independent gate.

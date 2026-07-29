@@ -236,8 +236,8 @@ Slipstream routing decisions and bounded recovery primitives.
   exact client-to-backend frame from frozen byte-owner v1 into a bounded
   connector-owned queue. Numeric loopback TCP proves failure-before-progress
   retention and exact suffix ownership after partial writes; numeric loopback
-  UDP proves one complete datagram. The queued backend and transport are
-  revalidated before every write. Local bypass accepts only the local engine,
+  UDP proves one complete datagram. The queued flow key, backend, and transport
+  are revalidated before every write. Local bypass accepts only the local engine,
   geo exit accepts only Smart DNS or Geph, Discord and YouTube reject Geph,
   and UDP rejects Geph. The contract has no Wintun, adapter, route, DNS, proxy,
   PAC, VPN, process, service, external endpoint, or production-host effect.

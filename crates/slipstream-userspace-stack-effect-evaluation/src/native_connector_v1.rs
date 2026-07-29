@@ -64,6 +64,7 @@ pub enum NativeConnectorErrorCode {
     PayloadTooLarge,
     QueueFull,
     QueueBytesExceeded,
+    WriterFlowMismatch,
     WriterBackendMismatch,
     WriterTransportMismatch,
     NativeWriteFailed,
@@ -82,6 +83,7 @@ impl NativeConnectorErrorCode {
             Self::PayloadTooLarge => "payload_too_large",
             Self::QueueFull => "queue_full",
             Self::QueueBytesExceeded => "queue_bytes_exceeded",
+            Self::WriterFlowMismatch => "writer_flow_mismatch",
             Self::WriterBackendMismatch => "writer_backend_mismatch",
             Self::WriterTransportMismatch => "writer_transport_mismatch",
             Self::NativeWriteFailed => "native_write_failed",
@@ -123,6 +125,7 @@ pub struct NativeConnectorProgress {
 pub trait NativeConnectorWriter {
     type Error: fmt::Display;
 
+    fn key(&self) -> WindowsPacketFlowKey;
     fn backend(&self) -> WindowsDataPlaneBackend;
     fn transport(&self) -> WindowsPacketFlowTransport;
 
@@ -240,6 +243,12 @@ impl NativeConnectorQueue {
                     "native connector queue is empty",
                 )
             })?;
+            if writer.key() != frame.key {
+                return Err(NativeConnectorError::new(
+                    NativeConnectorErrorCode::WriterFlowMismatch,
+                    "native writer does not own the queued flow",
+                ));
+            }
             if writer.backend() != frame.backend {
                 return Err(NativeConnectorError::new(
                     NativeConnectorErrorCode::WriterBackendMismatch,

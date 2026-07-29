@@ -193,6 +193,7 @@ fn stage_forward(
 
 struct TcpLoopbackWriter {
     stream: TcpStream,
+    key: WindowsPacketFlowKey,
     backend: WindowsDataPlaneBackend,
     max_chunk: usize,
     fail_next: bool,
@@ -200,6 +201,10 @@ struct TcpLoopbackWriter {
 
 impl NativeConnectorWriter for TcpLoopbackWriter {
     type Error = io::Error;
+
+    fn key(&self) -> WindowsPacketFlowKey {
+        self.key
+    }
 
     fn backend(&self) -> WindowsDataPlaneBackend {
         self.backend
@@ -224,11 +229,16 @@ impl NativeConnectorWriter for TcpLoopbackWriter {
 
 struct UdpLoopbackWriter {
     socket: UdpSocket,
+    key: WindowsPacketFlowKey,
     backend: WindowsDataPlaneBackend,
 }
 
 impl NativeConnectorWriter for UdpLoopbackWriter {
     type Error = io::Error;
+
+    fn key(&self) -> WindowsPacketFlowKey {
+        self.key
+    }
 
     fn backend(&self) -> WindowsDataPlaneBackend {
         self.backend
@@ -269,6 +279,7 @@ fn tcp_failure_retains_the_frame_and_partial_writes_commit_the_exact_suffix() {
     let (client, mut server) = tcp_loopback();
     let mut writer = TcpLoopbackWriter {
         stream: client,
+        key: fixture.key,
         backend: WindowsDataPlaneBackend::LocalEngine,
         max_chunk: 3,
         fail_next: true,
@@ -321,6 +332,7 @@ fn udp_handoff_commits_one_exact_datagram() {
         .expect("connect numeric loopback datagram");
     let mut writer = UdpLoopbackWriter {
         socket: sender,
+        key: fixture.key,
         backend: WindowsDataPlaneBackend::LocalEngine,
     };
 
@@ -348,8 +360,29 @@ fn queued_backend_identity_is_revalidated_before_native_write() {
         NativeConnectorQueue::new(NativeConnectorQueueConfig::default(), 1_300).expect("queue");
     handoff(&mut fixture, &mut queue, 1, payload);
     let (client, mut server) = tcp_loopback();
+    let other_key = opened_fixture_for(
+        "chatgpt.com",
+        WindowsDataPlaneBackend::Geph,
+        WindowsPacketCaptureTransport::TcpTls,
+        143,
+    )
+    .key;
+    let mut wrong_flow_writer = TcpLoopbackWriter {
+        stream: client.try_clone().expect("clone loopback stream"),
+        key: other_key,
+        backend: WindowsDataPlaneBackend::Geph,
+        max_chunk: payload.len(),
+        fail_next: false,
+    };
+    let error = queue
+        .flush_front(&mut wrong_flow_writer)
+        .expect_err("wrong flow must not receive payload");
+    assert_eq!(error.code, NativeConnectorErrorCode::WriterFlowMismatch);
+    assert_eq!(queue.queued_bytes(), payload.len());
+
     let mut wrong_writer = TcpLoopbackWriter {
         stream: client.try_clone().expect("clone loopback stream"),
+        key: fixture.key,
         backend: WindowsDataPlaneBackend::LocalEngine,
         max_chunk: payload.len(),
         fail_next: false,
@@ -363,6 +396,7 @@ fn queued_backend_identity_is_revalidated_before_native_write() {
 
     let mut geph_writer = TcpLoopbackWriter {
         stream: client,
+        key: fixture.key,
         backend: WindowsDataPlaneBackend::Geph,
         max_chunk: payload.len(),
         fail_next: false,
