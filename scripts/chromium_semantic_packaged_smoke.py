@@ -394,6 +394,9 @@ class SemanticHttpsFixture:
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(body)
+                # BaseHTTPRequestHandler does not infer connection state from
+                # response headers on an HTTP/1.1 keep-alive request.
+                self.close_connection = True
 
             def log_message(self, _format: str, *_args: object) -> None:
                 return

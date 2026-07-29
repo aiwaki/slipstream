@@ -9,20 +9,38 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-29, through merge commit
-`45db4321bafe244c87986c4c08daf1c3afaf8bf2`. PR #254 corrected real-Chrome
-incomplete-response correlation and redirect cleanup. Exact-main CI
-`30414420932` and audit `30414420883` passed on that SHA. No protected
-owned-Geph qualification run exists for it, no qualified artifact was
-published, and no workstation installation was attempted.
+`3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. PR #257 qualified bounded native
+userspace connector writes and exact flow/backend/transport revalidation.
+Exact-main CI `30427162038` and audit `30427162047` passed on that SHA.
 
-That protected run also exposed a coordination defect rather than a routing
-regression. The owned-Geph producer published `ready`, then a late broker abort
-made it clean user resources while the Chromium consumer still owned the root
-daemon and native-host manifest. This produced secondary boundary and
-missing-manifest errors. PR #252 now retains a late abort until the consumer
-publishes the exact private `release`, then reports the original fail-closed
-reason and begins producer cleanup. Its PR gates passed, and exact-main CI
-`30399287525` plus audit `30399287465` passed for
+Protected owned-Geph run `30429690683` was dispatched exactly once for that
+live main. Packaged resources, the daemon-free boundary, owned-Geph initial,
+trayless, and KeepAlive-recovered payload, and final cleanup all passed. Every
+payload phase returned HTTP 200 over TLS 1.3 with `67973` bytes, and system
+network state was not mutated. The second Chromium scenario timed out after one
+root request with no reload or subresource request, so no qualified artifact
+was published and no workstation installation was attempted.
+
+The failure is in the disposable incomplete-response fixture, not Geph or
+product routing. Its HTTP/1.1 handler advertised `Connection: close` and a
+larger `Content-Length`, but `BaseHTTPRequestHandler` does not infer
+`close_connection` from response headers. A keep-alive client therefore waited
+on an open socket instead of receiving EOF and emitting the expected
+incomplete-response event. The narrow correction explicitly closes the handler
+connection and adds a real TLS/HTTP regression test that must receive
+`IncompleteRead` with the exact transmitted prefix. After the correction
+passes PR and exact-main gates, the next authorized protected action is one run
+after the next UTC-day account reset. Installation remains prohibited until
+that run passes both Chromium scenarios and publishes its exact artifact.
+
+Earlier protected run `30397332251` exposed a coordination defect rather than a
+routing regression. The owned-Geph producer published `ready`, then a late
+broker abort made it clean user resources while the Chromium consumer still
+owned the root daemon and native-host manifest. This produced secondary
+boundary and missing-manifest errors. PR #252 now retains a late abort until
+the consumer publishes the exact private `release`, then reports the original
+fail-closed reason and begins producer cleanup. Its PR gates passed, and
+exact-main CI `30399287525` plus audit `30399287465` passed for
 `c9d3117fe2ab37946522ddcd16cddb64efe4b55d`.
 
 After the UTC-day reset, protected run `30411915972` was dispatched exactly once
