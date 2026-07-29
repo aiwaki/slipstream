@@ -17,6 +17,7 @@ on:
       - "contracts/windows-userspace-stack-selection-v1.json"
       - "contracts/windows-wintun-stack-handoff-v1.json"
       - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
+      - "contracts/windows-wintun-tcp-stack-handoff-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -39,6 +40,7 @@ on:
       - "contracts/windows-userspace-stack-selection-v1.json"
       - "contracts/windows-wintun-stack-handoff-v1.json"
       - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
+      - "contracts/windows-wintun-tcp-stack-handoff-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -342,6 +344,24 @@ jobs:
             -Features disposable-windows-packet-fixture `
             -TestTarget wintun_exact_route_windows `
             -TestName native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack `
+            -TimeoutSeconds 120 `
+            -NoCapture
+
+      - name: Qualify Wintun-to-selected-stack IPv4 TCP handoff
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI: "1"
+        run: |
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_exact_route_windows `
+            -TestName native_wintun_ipv4_tcp_round_trip_crosses_the_selected_stack `
             -TimeoutSeconds 120 `
             -NoCapture
 
