@@ -9,35 +9,29 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last exact-main evidence audit: 2026-07-29, through product merge
-`0a787ee284c6e12fe9394a707ceaaff9e13deacf` (PR #267). Exact-main native
-AMD64/ARM64 run `30481891835`, CI `30481892061`, and audit `30481891839`
-passed on that SHA. The native run proved bounded IPv4 TCP SYN, handshake ACK,
-request payload, and response payload across a real Windows socket, Wintun,
-and the selected `smoltcp` stack, followed by exact owned-route, address,
-session, and adapter cleanup. CI repeated the full contract suites and packaged
-macOS lifecycle. IPv4 and IPv6 UDP predecessors remain frozen, the evaluation
-dependency remains qualification-only, and production Windows service-host
+`66f0bb697aa60b4387d4e4544d6ea06d2fffbae5` (PR #269). Exact-main native
+AMD64/ARM64 run `30490498603`, CI `30490498586`, and audit `30490498662`
+passed on that SHA. The merge freezes an isolated read-only
+`NotifyRouteChange2` observer with bounded numeric-prefix history and a native
+exact-route churn qualification. The native run proved active-token
+invalidation, explicit deletion of both test-owned exact routes, baseline-route
+recovery, adjacent independent VPN-like route-owner coexistence, exact Wintun
+cleanup, and strict Windows clippy on both architectures. CI repeated the full
+contract suites and packaged macOS lifecycle. Production Windows service-host
 networking remains closed.
 
-Docs checkpoint PR #268 then merged as
-`84edf33793aabdfb0ea2732367224bb2c16a3f42`; exact-main CI `30484581706`
-and audit `30484582535` passed on that SHA.
+The PR run on head `42dec297dda9c667a5be168fa856d6b49e143ad7` also passed:
+native `30489911315`, CI `30489911341`, and audit `30489911306`. An earlier
+AMD64 attempt on predecessor head `c50a54e5fc7b8b24b7943c9eda4f6b4c578d7d23`
+reported the existing child-termination test and exact adapter absence before
+the surrounding Cargo process exceeded its bound; the one evidence-authorized
+job rerun passed, and both the final PR head and exact-main head then passed
+without reruns.
 
-PR #269 adds the first focused disposable Windows resilience gate: an isolated
-read-only `NotifyRouteChange2` observer with bounded numeric-prefix history,
-plus native exact-route churn qualification. PR native run `30488550964`
-passed on AMD64 and ARM64, including active-token invalidation, explicit
-test-owned route deletion, baseline-route recovery, independent route-owner
-coexistence, and strict Windows clippy. Its first AMD64 attempt observed an
-existing child-termination test report success and exact adapter absence before
-the surrounding Cargo process exceeded its bound; one exact job rerun completed
-successfully. PR CI `30488550884` and audit `30488550950` also passed.
-Production Windows service-host networking remains closed.
-
-After PR #269 merges and exact-main evidence passes, the next M4 work is the
-remaining disposable Windows resilience qualification: reboot, sleep/wake,
-update, uninstall, and broader external network-tool coexistence, plus any
-crash scenarios not already covered by the current child-termination gates.
+The next M4 work is the remaining disposable Windows resilience
+qualification: reboot, sleep/wake, update, uninstall, and broader external
+network-tool coexistence, plus any crash scenarios not already covered by the
+current child-termination gates.
 Each gate must prove exact cleanup and preserve independently owned network
 state before production service-host composition can begin. That later
 composition must reuse the frozen capture, flow-binding, byte-owner,
