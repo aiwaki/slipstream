@@ -5,6 +5,7 @@
 //! numeric loopback sockets only.
 
 pub mod native_connector_v1;
+pub mod stack_connector_composition_v1;
 
 pub mod v1 {
     pub const CONTRACT_VERSION: u32 = 1;

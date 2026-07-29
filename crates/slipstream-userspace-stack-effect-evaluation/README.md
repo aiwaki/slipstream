@@ -1,11 +1,13 @@
 # Userspace Stack Effect Evaluation
 
-This crate qualifies two additive boundaries outside the production host:
+This crate qualifies three additive boundaries outside the production host:
 
 - Windows userspace byte-owner v1 to the pinned `smoltcp 0.13.1` candidate,
   using a deterministic in-memory Layer 3 pair;
 - byte-owner v1 to a bounded native connector queue, using numeric loopback
-  sockets only.
+  sockets only;
+- selected-stack output to that connector queue plus bounded native backend
+  reads back into the selected stack.
 
 Selected-stack version 1 proves IPv4 and IPv6 TCP/UDP delivery in both
 directions, exact tuple and flow-identity use, payload preservation, and retry
@@ -14,7 +16,12 @@ atomic byte-owner handoff, exact retained TCP suffixes after partial writes,
 failure-before-progress retention, one exact UDP datagram, and backend identity
 revalidation before every native write. The exact flow key and transport are
 revalidated as well. Discord and YouTube cannot select Geph, and Geph cannot
-accept UDP at this boundary.
+accept UDP at this boundary. The composition contract retains backend-read
+frames across a pre-mutation selected-stack failure, rejects connector
+backpressure before selected-stack mutation, and revalidates the exact flow,
+backend, transport, and reducer-issued contiguous sequence before one retry.
+Oversized UDP datagrams are discarded rather than accepted as truncated frames,
+without advancing that sequence.
 
 ```bash
 cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml
@@ -33,5 +40,7 @@ The additive
 [`contracts/windows-userspace-native-connector-effect-v1.json`](../../contracts/windows-userspace-native-connector-effect-v1.json)
 contract freezes the connector queue and numeric-loopback evidence. Passing
 these gates does not admit the selected stack or connector into the Windows
-production host. Selected-stack composition, backend reads, and disposable
-AMD64/ARM64 packet-flow qualification remain separate gates.
+production host. The additive
+[`contracts/windows-userspace-stack-connector-composition-v1.json`](../../contracts/windows-userspace-stack-connector-composition-v1.json)
+contract closes the test-only selected-stack/connector composition and backend
+read gates. Disposable AMD64/ARM64 packet-flow qualification remains separate.
