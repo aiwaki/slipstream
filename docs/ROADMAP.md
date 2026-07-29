@@ -125,7 +125,8 @@ uses read-only top-level `webRequest` correlation. PR #254 corrected the real
 Chrome final-event contract, added redirect-safe ephemeral cleanup, and merged
 as `45db4321bafe244c87986c4c08daf1c3afaf8bf2`; its local, PR, and exact-main
 CI/audit gates passed. Only one protected two-scenario account-backed run
-remains for that exact SHA after the next UTC-day budget reset. Workstation
+remains after the next UTC-day budget reset for the then-current live `main`
+that contains this product merge and has green exact-main gates. Workstation
 installation remains closed until that run publishes its exact qualified
 artifact. A physical default-route/lid-close transition on a disposable Mac
 remains a separate M1 gate.
