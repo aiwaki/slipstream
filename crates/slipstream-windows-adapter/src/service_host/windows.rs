@@ -413,6 +413,7 @@ mod tests {
     use crate::service_ownership::windows::{
         machine_owner_record_path, WindowsServiceOwnershipCollector,
     };
+    use crate::service_payload::windows_payload_path;
     use std::fs;
     use std::io::Write;
     use std::path::PathBuf;
@@ -424,8 +425,6 @@ mod tests {
         "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_GENERATION_RECOVERY_CI";
     const HOST_PATH_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST";
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
-    const PAYLOAD_DIRECTORY: &str = "payloads";
-    const PAYLOAD_FILE_PREFIX: &str = "slipstream-service-";
 
     #[test]
     fn production_host_is_self_managing_idempotent_and_stops_through_scm() {
@@ -642,13 +641,6 @@ mod tests {
         }
     }
 
-    fn installed_payload_path(root: &Path, identity: &WindowsServiceIdentity) -> PathBuf {
-        root.join(PAYLOAD_DIRECTORY).join(format!(
-            "{PAYLOAD_FILE_PREFIX}{}.exe",
-            identity.executable_sha256
-        ))
-    }
-
     fn verify_production_generation_active(root: &Path, identity: &WindowsServiceIdentity) {
         let snapshot = wait_for_state(WindowsScmState::Running);
         assert_eq!(snapshot.service_name, identity.service_name);
@@ -672,7 +664,7 @@ mod tests {
             evidence => panic!("production generation is not durably active: {evidence:?}"),
         }
 
-        let payload = installed_payload_path(root, identity);
+        let payload = windows_payload_path(root, identity);
         assert!(payload.is_file(), "installed production payload is missing");
         assert_eq!(
             hash_source(&payload).expect("hash installed production payload"),
@@ -703,7 +695,7 @@ mod tests {
             "production owner record remained after uninstall"
         );
         assert!(
-            !installed_payload_path(root, identity).exists(),
+            !windows_payload_path(root, identity).exists(),
             "production payload remained after uninstall"
         );
         assert!(

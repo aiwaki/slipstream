@@ -5,4 +5,6 @@
 mod windows;
 
 #[cfg(windows)]
+pub(crate) use windows::windows_payload_path;
+#[cfg(windows)]
 pub use windows::{WindowsServicePayloadEffects, WindowsServicePayloadError};
