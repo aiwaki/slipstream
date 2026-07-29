@@ -8,25 +8,25 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last exact-main evidence audit: 2026-07-29, through documentation merge
-`d7647418f83975b7de1aa9395c0df98a83a69ecd` (PR #266). Product merge
-`9979889d82316f21701f1ef8304ffe3b8a11bb7d` (PR #265) passed exact-main native
-AMD64/ARM64 run `30476588359`, CI `30476589552`, and audit `30476588735`.
-The native run proved both IPv4 and IPv6 UDP Wintun-to-selected-stack handoffs
-with exact owned-route, address, session, and adapter cleanup. CI repeated the
-full contract suites and packaged macOS lifecycle. The evaluation dependency
-remains qualification-only and production Windows service-host networking
-remains closed.
+Last exact-main evidence audit: 2026-07-29, through product merge
+`0a787ee284c6e12fe9394a707ceaaff9e13deacf` (PR #267). Exact-main native
+AMD64/ARM64 run `30481891835`, CI `30481892061`, and audit `30481891839`
+passed on that SHA. The native run proved bounded IPv4 TCP SYN, handshake ACK,
+request payload, and response payload across a real Windows socket, Wintun,
+and the selected `smoltcp` stack, followed by exact owned-route, address,
+session, and adapter cleanup. CI repeated the full contract suites and packaged
+macOS lifecycle. IPv4 and IPv6 UDP predecessors remain frozen, the evaluation
+dependency remains qualification-only, and production Windows service-host
+networking remains closed.
 
-PR #267 adds the next isolated qualification boundary: bounded IPv4 TCP SYN,
-handshake ACK, request payload, and response payload across a real Windows
-socket, Wintun, and the selected `smoltcp` stack. Pull-request native run
-`30480798925` passed the exact TCP handoff and cleanup on AMD64 and ARM64; CI
-run `30480799178` passed the Windows adapter and userspace-stack contracts, and
-audit run `30480803419` passed. The implementation remains dev-only and the
-production service-host composition gate is still closed. These are PR-head
-results, not exact-main evidence; after merge, the resulting main SHA and its
-native, CI, and audit runs must be recorded before selecting the next gate.
+The next M4 gate is disposable Windows resilience qualification: crash, reboot,
+sleep/wake, route churn, update, uninstall, and external network-tool
+coexistence on AMD64 and ARM64. It must prove exact cleanup and preserve
+independently owned network state before production service-host composition
+can begin. That later composition must reuse the frozen capture, flow-binding,
+byte-owner, selected-stack, connector, and Wintun ownership contracts rather
+than bypassing them, remain disabled by default, and prove exact compensation
+before any user-facing Windows preview is allowed.
 
 Protected owned-Geph run `30429690683` was dispatched exactly once for previous
 main `3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. Packaged resources, the
@@ -299,7 +299,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Ordinary v1/v2 gates pass; one account-backed protected qualification remains | PRs #219-#258 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Protected run `30429690683` passed packaged resources, the daemon-free boundary, all three owned-Geph payload phases, unchanged system network state, and final cleanup. Its second browser scenario did not receive EOF because the disposable HTTP/1.1 fixture kept the socket alive after a deliberately short body; no artifact or install followed. PR #258 fixed that fixture and added a real TLS keep-alive `IncompleteRead` regression, then merged as `90c07771babfd32e797fdb8250911ca922274b4d`; exact-main CI `30431655863` and audit `30431655851` pass. Exactly one protected two-scenario run remains after the next UTC-day account budget reset for the then-current live `main`; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Native AMD64/ARM64 packet-flow architecture gate merged and exact-main green | `slipstream-core` owns the pure policy, recovery, StatusV2, signed-policy, and activation contracts. The Windows adapter has exact-main evidence for service ownership and lifecycle, a no-network production host, admitted signed Wintun artifacts, disposable adapter/session cleanup, exact-route ownership and recovery, no-payload IPv4/IPv6 socket selection, closed IPv4/IPv6 capture/injection round trips, constrained baseline source/LUID revalidation, bounded IPv4 UDP and TCP pre-existing-flow activation, abrupt capture-owner termination cleanup, and coexistence with one independently owned VPN-like non-default route. Packet-flow v1 bounds TCP/UDP ownership, queues, backpressure, half-close/reset, delivery accounting, timeout, cancellation, generation retirement, and exact rejected-session cleanup while keeping native effects and production composition closed. A separate Rust 1.91 evaluation crate pins `smoltcp 0.13.1` behind a fake bounded Layer 3 device and qualifies dual-stack TCP, IPv4/IPv6 UDP below the relevant MTU, IPv4 fragmentation/reassembly, checksum rejection, and fixed queue/socket bounds. Capture v4 retains the original client source address/port only after frozen-v3 policy classification, userspace-flow-binding v1 joins that evidence to an exact frozen packet-flow-v1 admission, and byte-owner v1 retains exact payload bytes in bounded directional queues until one injected effect succeeds. Opening requires the complete reducer-issued backend command set and must exactly equal a fresh reduction from its supplied full predecessor; every later payload or active reconciliation transition must also equal a fresh reduction from its full predecessor and configuration while preserving the binding's complete admission capability. Payload staging additionally requires the owner's exact packet-flow predecessor, declared queue delta, and exact transition-issued forwarding authorization. Delayed client payload cannot execute before `BackendReady`; that transition must authorize the retained queue one-to-one before any effect may borrow it. Every delivery also preflights the exact `Forwarded` acknowledgement from the current full registry, so an unrelated flow's newer global watermark cannot leave delivered bytes unaccounted; if the final acknowledgement makes a gracefully closed flow terminal, its empty owner is released in the same commit. Effect failure retains only the uncommitted suffix; ordinary terminal cleanup is exact-flow scoped, while generation retirement is high-watermark bounded. Before either cleanup releases bytes, its transition must exactly equal a fresh frozen-v1 reduction from the supplied full registry. A second test-only crate composes that exact owner with pinned `smoltcp` and proves IPv4/IPv6 TCP/UDP enqueue and receipt in both directions, original tuple use, and failure-before-mutation retry without changing either frozen predecessor. The selected stack does not natively reassemble IPv6 Fragment Header input. An additive effect-free pre-stack contract proves exact bounded reconstruction and RFC 6946 atomic handling. A second additive contract classifies through capture v4 before fragment state, binds each assembly to one exact flow and tuple, rejects cross-flow identification collisions without eviction, and caps state by the five-second capture-evidence deadline. A third additive contract atomically transfers one exact client frame into a bounded native connector queue and proves TCP partial-progress suffix retention, failure-before-progress retention, exact UDP datagrams, and exact flow/backend/transport revalidation over numeric loopback. A fourth additive contract merged in PR #259 keeps all three predecessors frozen while proving selected-stack output reaches that queue and native backend reads are retained in a separate bounded queue until one exact selected-stack delivery succeeds. Reader and writer flow/backend/transport identity are revalidated before mutation; the reverse queue starts at packet-flow v1 sequence 1, rejects stale or skipped sequence before native read, and discards oversized UDP datagrams without advancing it. Failed native reads retain no frame, while failed selected-stack writes retain the complete frame for one retry. Exact-main CI `30438309120` and audit `30438309270` passed. PR #261 merged as `c154f2d880d1d4aad34c83c813a03f11006b5d4e`; exact-main native AMD64/ARM64 run `30465700678`, CI `30465701374`, and audit `30465700386` passed. Every contract consumed by the complete packet-flow and composition suites now triggers the disposable matrix on both pull requests and main pushes, and each native runner executes those suites before the existing Wintun lifecycle, capture/injection, coexistence, and cleanup proofs. This is adjacent architecture qualification, not an integrated Wintun-to-stack handoff. None of these compositions is instantiated in the adapter; oversized IPv6 output remains fail-closed. The earlier WFP path remains frozen research. Physical/full-tunnel/split/per-app vendor VPN qualification, Wintun-to-stack handoff, Android/Linux adapters, and the iOS feasibility gate remain separate. The production SCM host remains no-network. |
+| M4 - Cross-Platform Core | IPv4/IPv6 UDP and IPv4 TCP Wintun-to-selected-stack gates are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PR #267 merged as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`; exact-main native AMD64/ARM64 run `30481891835`, CI `30481892061`, and audit `30481891839` passed. The evaluation stack remains development-only and the production SCM host remains no-network. The next gate is bounded production service-host composition with exact compensation; Android/Linux adapters and the iOS feasibility gate remain later. |
 
 The exact-main
 [CI run 30230210126](https://github.com/aiwaki/slipstream/actions/runs/30230210126)
@@ -968,9 +968,7 @@ fail-closed. It merged as `105551ec27f8139e455783b7ae2bf89d63812166`;
 exact-main native run `30472082661` passed on both AMD64 and ARM64, CI
 `30472083693` passed including the packaged lifecycle, and audit `30472083055`
 passed. The implementation remains a development-only qualification dependency
-and does not compose networking into the production SCM host. The next
-independent M4 gate is TCP handoff, followed only then by production-host
-composition.
+and does not compose networking into the production SCM host.
 
 PR #265 completed the additive IPv6 UDP gate without changing frozen IPv4 v1.
 A separate `raw_packet_udp_ipv6_v1` boundary validates one raw IPv6 UDP request
@@ -981,9 +979,19 @@ its manual IPv6 response builder is removed. It merged as
 `9979889d82316f21701f1ef8304ffe3b8a11bb7d`; exact-main native run
 `30476588359` passed on AMD64 and ARM64, CI `30476589552` passed including the
 packaged lifecycle, and audit `30476588735` passed. The dependency remains
-qualification-only and the production SCM host remains closed. The next
-independent M4 gate is TCP Wintun-to-selected-stack handoff; production-host
-composition remains later.
+qualification-only and the production SCM host remains closed.
+
+PR #267 completed the additive IPv4 TCP Wintun-to-selected-stack gate. A real
+Windows TCP socket supplies the SYN, handshake ACK, and request payload; the
+selected stack emits the SYN-ACK and response packets injected through the same
+owned Wintun session. The proof contains no manual handshake or response packet
+builder and preserves the exact route, address, session, and adapter cleanup
+requirements. It merged as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`;
+exact-main native run `30481891835` passed on AMD64 and ARM64, CI
+`30481892061` passed including packaged lifecycle, and audit `30481891839`
+passed. The next independent M4 gate is bounded production service-host
+composition; the existing production host remains no-network until that gate
+passes.
 
 ## External Gates
 
