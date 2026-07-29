@@ -958,8 +958,8 @@ exact-main native run `30472082661` passed on both AMD64 and ARM64, CI
 `30472083693` passed including the packaged lifecycle, and audit `30472083055`
 passed. The implementation remains a development-only qualification dependency
 and does not compose networking into the production SCM host. The next
-independent M4 gates are IPv6 UDP handoff, TCP handoff, and only then
-production-host composition.
+independent M4 gate is TCP handoff, followed only then by production-host
+composition.
 
 PR #265 completed the additive IPv6 UDP gate without changing frozen IPv4 v1.
 A separate `raw_packet_udp_ipv6_v1` boundary validates one raw IPv6 UDP request
