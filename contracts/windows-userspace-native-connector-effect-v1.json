@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_userspace_native_connector_effect",
+  "contract_version": 1,
+  "scope": "test_only_numeric_loopback",
+  "predecessors": {
+    "packet_flow": {
+      "contract": "slipstream.windows_packet_flow",
+      "contract_version": 1
+    },
+    "flow_binding": {
+      "contract": "slipstream.windows_userspace_flow_binding",
+      "contract_version": 1
+    },
+    "byte_owner": {
+      "contract": "slipstream.windows_userspace_byte_owner",
+      "contract_version": 1
+    }
+  },
+  "bounds": {
+    "max_queued_frames": 8,
+    "max_queued_bytes": 4096,
+    "max_frame_bytes": 512
+  },
+  "qualified_properties": {
+    "byte_owner_handoff_is_atomic": true,
+    "connector_queue_owns_exact_bytes_after_handoff": true,
+    "tcp_partial_progress_retains_exact_suffix": true,
+    "failed_write_before_progress_retains_complete_frame": true,
+    "udp_datagram_progress_is_exact": true,
+    "backend_identity_is_rechecked_before_native_write": true,
+    "transport_identity_is_rechecked_before_native_write": true,
+    "local_bypass_rejects_geph": true,
+    "discord_and_youtube_reject_geph": true,
+    "udp_rejects_geph": true
+  },
+  "invariants": {
+    "test_dependency_only": true,
+    "numeric_loopback_only": true,
+    "frozen_packet_flow_modified": false,
+    "frozen_flow_binding_modified": false,
+    "frozen_byte_owner_modified": false,
+    "production_service_host_composition": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "default_route_mutation": false,
+    "external_endpoint": false
+  },
+  "remaining_gates": {
+    "selected_stack_to_connector_composition": "required",
+    "backend_read_to_selected_stack_composition": "required",
+    "disposable_amd64_packet_flow": "required",
+    "disposable_arm64_packet_flow": "required",
+    "production_service_host_composition": "required"
+  }
+}

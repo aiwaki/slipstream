@@ -232,6 +232,15 @@ Slipstream routing decisions and bounded recovery primitives.
   leaves both the byte owner and selected stack unchanged. The crate has no native packet,
   socket, Wintun, route, DNS, proxy, PAC, VPN, process, service, or
   production-host effect.
+- `windows-userspace-native-connector-effect-v1.json` additively transfers one
+  exact client-to-backend frame from frozen byte-owner v1 into a bounded
+  connector-owned queue. Numeric loopback TCP proves failure-before-progress
+  retention and exact suffix ownership after partial writes; numeric loopback
+  UDP proves one complete datagram. The queued backend and transport are
+  revalidated before every write. Local bypass accepts only the local engine,
+  geo exit accepts only Smart DNS or Geph, Discord and YouTube reject Geph,
+  and UDP rejects Geph. The contract has no Wintun, adapter, route, DNS, proxy,
+  PAC, VPN, process, service, external endpoint, or production-host effect.
 - `windows-capture-fragment-effect-v1.json` additively composes frozen packet
   capture v4 with bounded IPv6 fragment-input v1 in the same test-only crate.
   It binds every retained assembly to the exact capture generation, flow,

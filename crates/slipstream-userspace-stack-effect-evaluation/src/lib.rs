@@ -1,7 +1,10 @@
 //! Versioned, test-only qualification of the Windows byte-owner effect boundary.
 //!
-//! The selected stack and Windows adapter are dev-dependencies. Nothing in this
-//! crate is linked into a Slipstream runtime.
+//! Nothing in this crate is linked into a Slipstream runtime. Version 1 selected
+//! stack evaluation stays effect-free; the additive native connector gate uses
+//! numeric loopback sockets only.
+
+pub mod native_connector_v1;
 
 pub mod v1 {
     pub const CONTRACT_VERSION: u32 = 1;

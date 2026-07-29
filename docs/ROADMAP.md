@@ -596,10 +596,16 @@ therefore stays phased and closed to production traffic:
    pre-mutation injected failure without changing either frozen predecessor or
    linking the stack into the Windows adapter. A second additive effect-only
    harness now composes bounded IPv6 fragment input with versioned capture
-   evidence while keeping both frozen predecessors unchanged. The next subgate
-   is native connector effects, followed by packet-flow qualification on
-   disposable AMD64/ARM64. Production-host composition remains a later
-   independent gate.
+   evidence while keeping both frozen predecessors unchanged. A third additive
+   contract transfers one exact client frame atomically from byte-owner v1 into
+   a bounded native connector queue. Numeric loopback TCP proves exact suffix
+   retention after partial progress and complete retention after a
+   failure-before-progress; numeric loopback UDP proves one complete datagram.
+   Backend and transport identity are revalidated before every write, and the
+   route edge rejects Geph for Discord, YouTube, and UDP. The next subgate is
+   selected-stack-to-connector composition plus backend reads, followed by
+   packet-flow qualification on disposable AMD64/ARM64. Production-host
+   composition remains a later independent gate.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier
