@@ -561,7 +561,7 @@ mod tests {
     ) -> Result<(), String> {
         verify_terminal_absence(effects, identity)?;
         match WindowsScmObserver::new().observe() {
-            Ok(WindowsServiceObservation::Absent) => Ok(()),
+            Ok(observation) if observation == WindowsServiceObservation::absent() => Ok(()),
             Ok(observation) => Err(format!(
                 "service generation remained in SCM before name reuse: {observation:?}"
             )),
