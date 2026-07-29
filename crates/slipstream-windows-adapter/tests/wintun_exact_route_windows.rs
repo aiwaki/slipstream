@@ -9,9 +9,11 @@ use slipstream_windows_adapter::packet_adapter::{
 };
 use slipstream_windows_adapter::packet_egress::{
     observe_windows_packet_route, qualify_disposable_exact_host_route,
-    qualify_disposable_exact_host_route_with_active_probe, WindowsDisposableExactRouteActiveProbe,
-    WindowsDisposableExactRouteErrorCode, WindowsOwnedRouteTransitionIssuer,
-    WindowsPacketInterfaceIdentity, WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
+    qualify_disposable_exact_host_route_with_active_probe, qualify_disposable_windows_route_churn,
+    WindowsDisposableExactRouteActiveProbe, WindowsDisposableExactRouteErrorCode,
+    WindowsOwnedRouteTransitionIssuer, WindowsPacketInterfaceIdentity,
+    WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
+    WINDOWS_DISPOSABLE_ROUTE_CHURN_QUALIFICATION_VERSION,
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::ffi::c_void;
@@ -63,6 +65,7 @@ const INDEPENDENT_ROUTE_CHILD_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT
 const INDEPENDENT_ROUTE_ADAPTER_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_ADAPTER";
 const INDEPENDENT_ROUTE_READY_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_READY";
 const INDEPENDENT_ROUTE_RELEASE_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_RELEASE";
+const ROUTE_CHURN_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_ROUTE_CHURN_CI";
 const WINTUN_MIN_RING_CAPACITY: u32 = 0x2_0000;
 const WINTUN_MAX_IP_PACKET_SIZE: usize = 0xffff;
 const ADDRESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -240,6 +243,86 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
         admission
             .retained_dll_length()
             .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+#[test]
+fn native_wintun_route_churn_invalidates_activation_and_cleans_exactly() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(ROUTE_CHURN_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let adapter_name = wide(&unique_adapter_name("RouteChurn"));
+    let tunnel_type = wide("Slipstream CI Route Churn");
+    api.require_adapter_absent(&adapter_name, "before route-churn fixture")
+        .unwrap_or_else(|error| panic!("route-churn preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut adapter = OwnedWintunAdapter::create(&api, &adapter_name, &tunnel_type)?;
+        adapter.start_session()?;
+        let capture_interface = adapter.interface_identity()?;
+        let mut address = OwnedUnicastAddress::create(
+            capture_interface,
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            IPV4_HOST_PREFIX_LENGTH,
+        )?;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(17, capture_interface, 1)
+            .map_err(|error| format!("construct route-churn issuer: {error}"))?;
+        let destination = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
+        let route_result = qualify_disposable_windows_route_churn(&mut issuer, destination)
+            .map_err(|error| format!("qualify native route churn: {error}"));
+        let address_cleanup = address.remove_and_verify();
+        adapter.end_session();
+        adapter.close_adapter();
+        if let Err(cleanup_error) = address_cleanup {
+            return Err(format!(
+                "owned route-churn address cleanup failed: {cleanup_error}; route result: {route_result:?}"
+            ));
+        }
+        let qualification = route_result?;
+        if WINDOWS_DISPOSABLE_ROUTE_CHURN_QUALIFICATION_VERSION != 1
+            || qualification.destination() != destination
+            || qualification.capture_interface() != capture_interface
+            || qualification.exact_route_added_sequence() == 0
+            || qualification.churn_route_added_sequence()
+                <= qualification.exact_route_added_sequence()
+            || qualification.churn_route_deleted_sequence()
+                <= qualification.churn_route_added_sequence()
+            || qualification.exact_route_deleted_sequence()
+                <= qualification.churn_route_deleted_sequence()
+            || qualification.route_epoch_after_churn() != 3
+            || qualification.route_epoch_after_cleanup() != 5
+        {
+            return Err(
+                "native route-churn qualification returned inconsistent evidence".to_owned(),
+            );
+        }
+        Ok::<(), String>(())
+    })();
+
+    let cleanup_result = api.require_adapter_absent(&adapter_name, "after route-churn fixture");
+    if let Err(cleanup_error) = cleanup_result {
+        panic!(
+            "Wintun route-churn cleanup proof failed: {cleanup_error}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable route-churn qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL after route churn"),
         admission.evidence().dll_length
     );
 }
