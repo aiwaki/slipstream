@@ -17,6 +17,8 @@ const FLOW_BINDING: &str =
 const COMPOSITION_SOURCE: &str = include_str!("../src/stack_connector_composition_v1.rs");
 const TRAY_MANIFEST: &str = include_str!("../../../app-tauri/src-tauri/Cargo.toml");
 const WINDOWS_ADAPTER_MANIFEST: &str = include_str!("../../slipstream-windows-adapter/Cargo.toml");
+const WINDOWS_PACKET_QUALIFICATION_WORKFLOW: &str =
+    include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml");
 
 #[derive(Debug, Deserialize)]
 struct ContractFixture {
@@ -155,6 +157,57 @@ fn composition_contract_is_bounded_and_non_production() {
         assert!(
             !COMPOSITION_SOURCE.contains(forbidden),
             "unexpected system mutation token: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn disposable_native_architecture_gate_tracks_every_composed_predecessor() {
+    for required_path in [
+        "contracts/windows-capture-fragment-effect-v1.json",
+        "contracts/windows-packet-flow-v1.json",
+        "contracts/windows-packet-capture-v4.json",
+        "contracts/windows-userspace-byte-owner-v1.json",
+        "contracts/windows-userspace-flow-binding-v1.json",
+        "contracts/windows-userspace-native-connector-effect-v1.json",
+        "contracts/windows-userspace-stack-connector-composition-v1.json",
+        "contracts/windows-userspace-stack-effect-v1.json",
+        "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json",
+        "contracts/windows-userspace-stack-selection-v1.json",
+        "crates/slipstream-core/**",
+        "crates/slipstream-userspace-stack-evaluation/**",
+        "crates/slipstream-userspace-stack-effect-evaluation/**",
+        "crates/slipstream-windows-adapter/**",
+    ] {
+        assert_eq!(
+            WINDOWS_PACKET_QUALIFICATION_WORKFLOW.matches(required_path).count(),
+            2,
+            "qualification workflow must track {required_path} on pull requests and main pushes"
+        );
+    }
+
+    for required_architecture in [
+        "runner: windows-latest",
+        "architecture: amd64",
+        "os_architecture: X64",
+        "runner: windows-11-arm",
+        "architecture: arm64",
+        "os_architecture: Arm64",
+    ] {
+        assert!(
+            WINDOWS_PACKET_QUALIFICATION_WORKFLOW.contains(required_architecture),
+            "qualification workflow must retain {required_architecture}"
+        );
+    }
+
+    for required_command in [
+        "cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --test packet_flow_contract -- --test-threads=1",
+        "cargo test --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml -- --test-threads=1",
+        "cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings",
+    ] {
+        assert!(
+            WINDOWS_PACKET_QUALIFICATION_WORKFLOW.contains(required_command),
+            "qualification workflow must retain exact command: {required_command}"
         );
     }
 }

@@ -610,8 +610,13 @@ therefore stays phased and closed to production traffic:
    packet-flow v1 sequence 1, rejects stale or skipped sequence before native
    read, and discards oversized UDP datagrams without advancing sequence.
    Native read or selected-stack failure retains the retryable boundary on its
-   current owner. The next subgate is packet-flow qualification on disposable
-   AMD64/ARM64. Production-host composition remains a later independent gate.
+   current owner. The current subgate makes every packet-flow and composition
+   predecessor trigger the existing disposable Windows matrix. Each exact
+   native AMD64/ARM64 runner executes the full packet-flow contract and
+   stack/connector suite before its existing real Wintun lifecycle,
+   capture/injection, coexistence, and cleanup proofs. This closes architecture
+   and native-loopback compatibility only; Wintun-to-stack handoff and
+   production-host composition remain later independent gates.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier
