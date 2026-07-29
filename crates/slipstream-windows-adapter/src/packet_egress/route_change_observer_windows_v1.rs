@@ -15,8 +15,10 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    CancelMibChangeNotify2, MibAddInstance, MibDeleteInstance, MibInitialNotification,
-    MibParameterNotification, NotifyRouteChange2, MIB_IPFORWARD_ROW2, MIB_NOTIFICATION_TYPE,
+    CancelMibChangeNotify2, MibAddInstance as MIB_ADD_INSTANCE,
+    MibDeleteInstance as MIB_DELETE_INSTANCE, MibInitialNotification as MIB_INITIAL_NOTIFICATION,
+    MibParameterNotification as MIB_PARAMETER_NOTIFICATION, NotifyRouteChange2, MIB_IPFORWARD_ROW2,
+    MIB_NOTIFICATION_TYPE,
 };
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC};
 
@@ -35,10 +37,10 @@ pub enum WindowsRouteChangeKindV1 {
 impl WindowsRouteChangeKindV1 {
     const fn from_native(value: MIB_NOTIFICATION_TYPE) -> Self {
         match value {
-            MibParameterNotification => Self::ParameterChanged,
-            MibAddInstance => Self::Added,
-            MibDeleteInstance => Self::Deleted,
-            MibInitialNotification => Self::Initial,
+            MIB_PARAMETER_NOTIFICATION => Self::ParameterChanged,
+            MIB_ADD_INSTANCE => Self::Added,
+            MIB_DELETE_INSTANCE => Self::Deleted,
+            MIB_INITIAL_NOTIFICATION => Self::Initial,
             other => Self::Unknown(other),
         }
     }
