@@ -633,7 +633,13 @@ therefore stays phased and closed to production traffic:
    PR #271 and exact-main native run `30494843668` on
    `3a26653a2b221d757834cdb8ceb53f95c4589906`. Driver install/removal and
    production composition remain outside this subgate; the other resilience
-   scenarios above remain open.
+   scenarios above remain open. The next bounded subgate freezes
+   service-generation recovery as the update/uninstall prerequisite: generation
+   1 must leave its exact SCM registration, payload, and active-install record
+   absent before the same owned service name and runtime root may admit a
+   byte-distinct generation 2. Native AMD64/ARM64 qualification must preserve
+   an independent owner and end with exact absence; it does not yet add an
+   in-place updater or production-host networking.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
