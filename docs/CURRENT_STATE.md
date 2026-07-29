@@ -732,22 +732,29 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not retry the controlled transaction on the primary workstation yet. First
-qualify this root-attestation change in the pull-request packaged lifecycle:
-both a successful commit and an injected attestation failure must return from a
-daemon-free baseline while preserving the exact global PF snapshot. After
-merge, require exact-main CI and audit, then dispatch one protected
-account-backed owned-Geph and Chromium semantic qualification for that exact
-main SHA. Download only the artifact produced and qualified by those exact
-gates. A user-present workstation transaction may follow with its existing
-snapshot and immediate rollback boundary. Do not reuse artifact `8673106618`,
-substitute a release or local build, or repeat a failed workstation attempt in
-the same session.
+Do not retry the controlled transaction on the primary workstation yet. After
+the next UTC-day Geph authentication reset, verify the physical repository,
+the then-current live `main`, its worktree, merged PRs, and exact-main CI and
+audit. The live SHA must contain product merge
+`45db4321bafe244c87986c4c08daf1c3afaf8bf2`, and no protected
+owned-Geph qualification may already exist for it. Dispatch the protected
+workflow exactly once for that live SHA. Require complete account-backed Geph
+payload initially, without the tray, and after KeepAlive recovery; both frozen
+Chromium semantic scenarios; exact cleanup; artifact identity; and no system
+network mutation.
 
-The Chromium protected gate is complete. Safari may advance through
-deterministic source, Swift contract tests, and unsigned packaging, but the
-signed app-extension sandbox/socket path must be proven on a disposable build
-before it is bundled, enabled, or described as runtime-ready.
+If any gate is blocked or fails, do not install and continue only from the
+exact evidenced defect in a small PR. If the full gate passes, download only
+that run's exact qualified artifact. A user-present workstation transaction
+may then use the existing snapshot and immediate rollback boundary, preserving
+DNS `111.88.96.50/51` and all external proxy, PAC, VPN, and PF owners. Do not
+reuse an older artifact, substitute a release or local build, or repeat a
+failed workstation attempt in the same session.
+
+Safari may advance through deterministic source, Swift contract tests, and
+unsigned packaging, but the signed app-extension sandbox/socket path must be
+proven on a disposable build before it is bundled, enabled, or described as
+runtime-ready.
 
 Continue M4 on disposable systems. PRs #193 and #194 proved no-payload IPv4
 and IPv6 socket selection under competing exact Wintun routes on exact main,
