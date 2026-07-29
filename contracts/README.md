@@ -170,6 +170,13 @@ Slipstream routing decisions and bounded recovery primitives.
   route, and repeats on AMD64 and ARM64. The observer cannot mutate routes,
   open sockets or adapters, change DNS/proxy/PAC/VPN state, or compose the
   production service host.
+- `windows-capture-generation-recovery-v1.json` freezes the disposable
+  same-name Wintun recreation gate. Generation 1 must remove its exact route,
+  address, session, and adapter before generation 2 may reuse the owned name;
+  both cycles must restore the identical pre-existing system route and leave no
+  owned state. The gate runs on AMD64 and ARM64, never installs or removes the
+  driver, never mutates default routes, DNS, proxy/PAC/VPN, or external network
+  owners, and is not composed into the production service host.
 - `windows-packet-flow-v1.json` freezes the pure forwarding seam after capture
   classification and outbound-route admission. Its opaque admission binds one
   capture generation, flow ID, unique data-plane request/session owner minted

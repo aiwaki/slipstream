@@ -12,7 +12,8 @@ use slipstream_windows_adapter::packet_egress::{
     qualify_disposable_exact_host_route_with_active_probe, qualify_disposable_windows_route_churn,
     windows_disposable_route_churn_gate_is_open, WindowsDisposableExactRouteActiveProbe,
     WindowsDisposableExactRouteErrorCode, WindowsOwnedRouteTransitionIssuer,
-    WindowsPacketInterfaceIdentity, WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
+    WindowsPacketInterfaceIdentity, WindowsPacketRouteObservation,
+    WINDOWS_DISPOSABLE_EXACT_ROUTE_OWNER_VERSION,
     WINDOWS_DISPOSABLE_ROUTE_CHURN_QUALIFICATION_VERSION,
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -60,6 +61,8 @@ const CRASH_REMOVAL_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CI";
 const CRASH_REMOVAL_CHILD_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_CHILD";
 const CRASH_REMOVAL_ADAPTER_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_ADAPTER";
 const CRASH_REMOVAL_READY_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_CRASH_REMOVAL_READY";
+const CAPTURE_GENERATION_RECOVERY_CI_ENV: &str =
+    "SLIPSTREAM_WINDOWS_WINTUN_CAPTURE_GENERATION_RECOVERY_CI";
 const INDEPENDENT_ROUTE_CI_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CI";
 const INDEPENDENT_ROUTE_CHILD_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CHILD";
 const INDEPENDENT_ROUTE_ADAPTER_ENV: &str = "SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_ADAPTER";
@@ -140,6 +143,7 @@ const IPV4_CAPTURE_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 255, 254, 3);
 const IPV4_PREEXISTING_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 3);
 const IPV4_CRASH_REMOVAL_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 4);
 const IPV4_INDEPENDENT_ROUTE_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 5);
+const IPV4_CAPTURE_GENERATION_DESTINATION: Ipv4Addr = Ipv4Addr::new(1, 0, 0, 6);
 const IPV4_INDEPENDENT_ROUTE_SOURCE: Ipv4Addr = Ipv4Addr::new(198, 18, 0, 2);
 const IPV4_BASELINE_PREFIX_LENGTH: u8 = 24;
 const IPV4_HOST_PREFIX_LENGTH: u8 = 32;
@@ -242,6 +246,70 @@ fn native_wintun_exact_route_transition_is_owned_and_removed() {
         admission
             .retained_dll_length()
             .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+#[test]
+fn native_wintun_same_name_capture_generation_recovers_without_stale_state() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(CAPTURE_GENERATION_RECOVERY_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let adapter_name = wide(&unique_adapter_name("CaptureGeneration"));
+    let tunnel_type = wide("Slipstream CI Capture Generation");
+    let destination = IpAddr::V4(IPV4_CAPTURE_GENERATION_DESTINATION);
+    api.require_adapter_absent(&adapter_name, "before capture-generation fixture")
+        .unwrap_or_else(|error| panic!("capture-generation preflight: {error}"));
+    let baseline = observe_windows_packet_route(destination)
+        .unwrap_or_else(|error| panic!("observe capture-generation baseline: {error}"));
+
+    let first = qualify_capture_generation_recovery(
+        &api,
+        &adapter_name,
+        &tunnel_type,
+        1,
+        destination,
+        &baseline,
+    )
+    .unwrap_or_else(|error| panic!("qualify capture generation 1: {error}"));
+    api.require_adapter_absent(&adapter_name, "between capture generations")
+        .unwrap_or_else(|error| panic!("capture generation 1 remained installed: {error}"));
+    let between = observe_windows_packet_route(destination)
+        .unwrap_or_else(|error| panic!("observe route between capture generations: {error}"));
+    require_same_route_observation(&baseline, &between, "between capture generations")
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let second = qualify_capture_generation_recovery(
+        &api,
+        &adapter_name,
+        &tunnel_type,
+        2,
+        destination,
+        &baseline,
+    )
+    .unwrap_or_else(|error| panic!("qualify capture generation 2: {error}"));
+    api.require_adapter_absent(&adapter_name, "after capture-generation fixture")
+        .unwrap_or_else(|error| panic!("capture generation 2 remained installed: {error}"));
+    let recovered = observe_windows_packet_route(destination)
+        .unwrap_or_else(|error| panic!("observe final capture-generation recovery: {error}"));
+    require_same_route_observation(&baseline, &recovered, "after capture generation 2")
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    assert_eq!(first.capture_generation, 1);
+    assert_eq!(second.capture_generation, 2);
+    assert_ne!(first.capture_generation, second.capture_generation);
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate admitted Wintun DLL after capture-generation recovery"),
         admission.evidence().dll_length
     );
 }
@@ -4081,6 +4149,136 @@ fn require_independent_route_selected(
             selected.egress_interface(),
             selected.source_address(),
             selected.route_prefix()
+        ));
+    }
+    Ok(())
+}
+
+struct CaptureGenerationRecoveryEvidence {
+    capture_generation: u64,
+}
+
+fn qualify_capture_generation_recovery(
+    api: &LoadedWintun,
+    adapter_name: &[u16],
+    tunnel_type: &[u16],
+    capture_generation: u64,
+    destination: IpAddr,
+    baseline: &WindowsPacketRouteObservation,
+) -> Result<CaptureGenerationRecoveryEvidence, String> {
+    api.require_adapter_absent(adapter_name, "before capture generation")?;
+    let mut adapter = OwnedWintunAdapter::create(api, adapter_name, tunnel_type)?;
+    let mut address = None;
+    let mut owned_rows = None;
+    let qualification_result = (|| {
+        adapter.start_session()?;
+        let capture_interface = adapter.interface_identity()?;
+        address = Some(OwnedUnicastAddress::create(
+            capture_interface,
+            IpAddr::V4(IPV4_CAPTURE_SOURCE),
+            IPV4_HOST_PREFIX_LENGTH,
+        )?);
+        let route_row =
+            fixture_route_row(capture_interface, destination, IPV4_HOST_PREFIX_LENGTH, 0);
+        let address_row = fixture_unicast_address_row(
+            capture_interface,
+            IpAddr::V4(IPV4_CAPTURE_SOURCE),
+            IPV4_HOST_PREFIX_LENGTH,
+        );
+        owned_rows = Some((route_row, address_row));
+
+        let mut issuer =
+            WindowsOwnedRouteTransitionIssuer::new(23, capture_interface, capture_generation)
+                .map_err(|error| format!("construct capture-generation issuer: {error}"))?;
+        if issuer.capture_generation() != capture_generation {
+            return Err("capture-generation issuer changed its generation".to_owned());
+        }
+        let qualification = qualify_disposable_exact_host_route(&mut issuer, destination)
+            .map_err(|error| format!("qualify capture-generation exact-route owner: {error}"))?;
+        if qualification.destination() != destination
+            || qualification.capture_interface() != capture_interface
+            || qualification.baseline_egress_interface() != baseline.egress_interface()
+            || qualification.recovered_egress_interface() != baseline.egress_interface()
+            || qualification.route_epoch_after_removal() != 3
+        {
+            return Err(
+                "capture-generation qualification returned inconsistent evidence".to_owned(),
+            );
+        }
+        Ok::<(), String>(())
+    })();
+
+    let address_cleanup = match address.as_mut() {
+        Some(address) => address.remove_and_verify(),
+        None => Ok(()),
+    };
+    adapter.end_session();
+    adapter.close_adapter();
+    let deadline = Instant::now() + CRASH_CAPTURE_REMOVAL_TIMEOUT;
+    let adapter_cleanup = api.wait_for_adapter_absent_until(adapter_name, deadline);
+    let stale_state_cleanup = match owned_rows {
+        Some((route_row, address_row)) => {
+            let route_cleanup = wait_for_fixture_route_absent_until(route_row, deadline);
+            let address_cleanup = wait_for_unicast_address_absent_until(address_row, deadline);
+            match (route_cleanup, address_cleanup) {
+                (Ok(()), Ok(())) => Ok(()),
+                (route, address) => Err(format!(
+                    "stale capture-generation state remained: route={route:?}, address={address:?}"
+                )),
+            }
+        }
+        None => Ok(()),
+    };
+    let baseline_recovery = observe_windows_packet_route(destination)
+        .map_err(|error| format!("observe capture-generation recovery: {error}"))
+        .and_then(|recovered| {
+            require_same_route_observation(baseline, &recovered, "after capture-generation cleanup")
+        });
+
+    let mut errors = Vec::new();
+    if let Err(error) = qualification_result {
+        errors.push(format!("qualification: {error}"));
+    }
+    if let Err(error) = address_cleanup {
+        errors.push(format!("address cleanup: {error}"));
+    }
+    if let Err(error) = adapter_cleanup {
+        errors.push(format!("adapter cleanup: {error}"));
+    }
+    if let Err(error) = stale_state_cleanup {
+        errors.push(error);
+    }
+    if let Err(error) = baseline_recovery {
+        errors.push(error);
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("; "));
+    }
+
+    Ok(CaptureGenerationRecoveryEvidence { capture_generation })
+}
+
+fn require_same_route_observation(
+    expected: &WindowsPacketRouteObservation,
+    observed: &WindowsPacketRouteObservation,
+    phase: &str,
+) -> Result<(), String> {
+    if observed.destination() != expected.destination()
+        || observed.egress_interface() != expected.egress_interface()
+        || observed.source_address() != expected.source_address()
+        || observed.route_prefix() != expected.route_prefix()
+        || observed.route_is_loopback() != expected.route_is_loopback()
+    {
+        return Err(format!(
+            "system route changed {phase}: expected interface={:?}, source={}, prefix={}, loopback={}; observed interface={:?}, source={}, prefix={}, loopback={}",
+            expected.egress_interface(),
+            expected.source_address(),
+            expected.route_prefix(),
+            expected.route_is_loopback(),
+            observed.egress_interface(),
+            observed.source_address(),
+            observed.route_prefix(),
+            observed.route_is_loopback()
         ));
     }
     Ok(())

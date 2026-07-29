@@ -261,6 +261,23 @@ jobs:
             -TimeoutSeconds 180 `
             -NoCapture
 
+      - name: Qualify same-name Wintun capture-generation recovery
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_CAPTURE_GENERATION_RECOVERY_CI: "1"
+        run: |
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_exact_route_windows `
+            -TestName native_wintun_same_name_capture_generation_recovers_without_stale_state `
+            -TimeoutSeconds 180 `
+            -NoCapture
+
       - name: Qualify independent VPN-like route-owner coexistence
         timeout-minutes: 4
         shell: pwsh
