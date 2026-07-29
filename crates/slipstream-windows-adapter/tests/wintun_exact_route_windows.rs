@@ -1,5 +1,6 @@
 #![cfg(all(windows, feature = "disposable-windows-packet-fixture"))]
 
+use slipstream_userspace_stack_evaluation::raw_packet_tcp_v1::RawPacketTcpStackV1;
 use slipstream_userspace_stack_evaluation::raw_packet_udp_ipv6_v1::RawPacketUdpIpv6StackV1;
 use slipstream_userspace_stack_evaluation::raw_packet_udp_v1::RawPacketUdpStackV1;
 use slipstream_windows_adapter::packet_adapter::{
@@ -83,6 +84,8 @@ const PACKET_DELIVERY_PORT: u16 = 41_723;
 const TCP_PACKET_DELIVERY_PORT: u16 = 41_724;
 const PACKET_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-request-v1";
 const PACKET_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-response-v1";
+const TCP_STACK_REQUEST_PAYLOAD: &[u8] = b"slipstream-wintun-tcp-request-v1";
+const TCP_STACK_RESPONSE_PAYLOAD: &[u8] = b"slipstream-wintun-tcp-response-v1";
 const PREEXISTING_WARMUP_REQUEST: &[u8] = b"slipstream-preexisting-warmup-v1";
 const PREEXISTING_WARMUP_RESPONSE: &[u8] = b"slipstream-preexisting-warmup-response-v1";
 const PREEXISTING_ACTIVE_REQUEST: &[u8] = b"slipstream-preexisting-active-v1";
@@ -1137,6 +1140,88 @@ fn native_wintun_ipv4_udp_round_trip_crosses_the_selected_stack() {
     if let Err(qualification_error) = qualification_result {
         panic!(
             "disposable IPv4 packet-delivery qualification failed after adapter cleanup: {qualification_error}"
+        );
+    }
+
+    drop(api);
+    assert_eq!(
+        admission
+            .retained_dll_length()
+            .expect("revalidate retained admitted Wintun DLL"),
+        admission.evidence().dll_length
+    );
+}
+
+#[test]
+fn native_wintun_ipv4_tcp_round_trip_crosses_the_selected_stack() {
+    if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
+        || std::env::var(PACKET_DELIVERY_CI_ENV).as_deref() != Ok("1")
+    {
+        return;
+    }
+
+    let (admission, api) = load_admitted_wintun()
+        .unwrap_or_else(|error| panic!("prepare admitted Wintun DLL: {error}"));
+    let adapter_name = wide(&unique_adapter_name("TcpStack4"));
+    let tunnel_type = wide("Slipstream CI IPv4 TCP Stack Handoff");
+    api.require_adapter_absent(&adapter_name, "before IPv4 TCP stack-handoff fixture")
+        .unwrap_or_else(|error| panic!("Wintun IPv4 TCP stack-handoff preflight: {error}"));
+
+    let qualification_result = (|| {
+        let mut adapter = OwnedWintunAdapter::create(&api, &adapter_name, &tunnel_type)?;
+        adapter.start_session()?;
+        let capture_interface = adapter.interface_identity()?;
+        let capture_source = Ipv4Addr::new(192, 0, 2, 21);
+        let destination = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 6));
+        let mut address =
+            OwnedUnicastAddress::create(capture_interface, IpAddr::V4(capture_source), 32)?;
+        let mut issuer = WindowsOwnedRouteTransitionIssuer::new(9, capture_interface, 1)
+            .map_err(|error| format!("construct IPv4 TCP stack-handoff issuer: {error}"))?;
+
+        let route_result = qualify_disposable_exact_host_route_with_active_probe(
+            &mut issuer,
+            destination,
+            |active| prove_ipv4_tcp_stack_round_trip(active, &adapter, capture_source),
+        )
+        .map_err(|error| format!("qualify IPv4 TCP stack handoff: {error}"));
+
+        let address_cleanup = address.remove_and_verify();
+        if let Err(cleanup_error) = address_cleanup {
+            return Err(format!(
+                "owned IPv4 TCP stack-handoff address cleanup failed: {cleanup_error}; route result: {route_result:?}"
+            ));
+        }
+        let qualification = route_result?;
+        if qualification.destination() != destination
+            || qualification.exact_route_prefix() != "1.0.0.6/32"
+            || qualification.capture_interface() != capture_interface
+            || qualification.baseline_egress_interface() == capture_interface
+            || qualification.recovered_egress_interface()
+                != qualification.baseline_egress_interface()
+            || qualification.route_epoch_after_removal() != 3
+        {
+            return Err(
+                "IPv4 TCP stack-handoff qualification returned inconsistent evidence".to_owned(),
+            );
+        }
+
+        adapter.end_session();
+        adapter.close_adapter();
+        Ok::<(), String>(())
+    })();
+
+    let cleanup_result =
+        api.require_adapter_absent(&adapter_name, "after IPv4 TCP stack-handoff fixture");
+    if let Err(cleanup_error) = cleanup_result {
+        panic!(
+            "Wintun IPv4 TCP stack-handoff cleanup proof failed: {cleanup_error}; qualification result: {qualification_result:?}"
+        );
+    }
+    if let Err(qualification_error) = qualification_result {
+        panic!(
+            "disposable IPv4 TCP stack-handoff qualification failed after adapter cleanup: {qualification_error}"
         );
     }
 
@@ -2368,6 +2453,173 @@ fn prove_ipv4_packet_round_trip(
         return Err(format!(
             "injected IPv4 response payload mismatch: length={received_length}"
         ));
+    }
+    Ok(())
+}
+
+fn prove_ipv4_tcp_stack_round_trip(
+    active: &WindowsDisposableExactRouteActiveProbe<'_>,
+    adapter: &OwnedWintunAdapter<'_>,
+    expected_capture_source: Ipv4Addr,
+) -> Result<(), String> {
+    let destination = match active.destination() {
+        IpAddr::V4(destination) => destination,
+        IpAddr::V6(_) => {
+            return Err("IPv4 TCP stack-handoff probe received an IPv6 destination".to_owned())
+        }
+    };
+    if active.exact_route_prefix() != format!("{destination}/32")
+        || active.capture_interface() == active.baseline_egress_interface()
+        || active.capture_source_address() != IpAddr::V4(expected_capture_source)
+        || active.baseline_source_address() == IpAddr::V4(expected_capture_source)
+    {
+        return Err("active route facts do not prove the owned TCP capture path".to_owned());
+    }
+
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
+        .map_err(|error| format!("create IPv4 TCP stack-handoff socket: {error}"))?;
+    socket
+        .bind(&SockAddr::from(SocketAddrV4::new(
+            expected_capture_source,
+            0,
+        )))
+        .map_err(|error| format!("bind IPv4 TCP stack-handoff socket: {error}"))?;
+    let local = match socket
+        .local_addr()
+        .map_err(|error| format!("read IPv4 TCP stack-handoff local address: {error}"))?
+        .as_socket()
+    {
+        Some(SocketAddr::V4(local))
+            if *local.ip() == expected_capture_source && local.port() != 0 =>
+        {
+            local
+        }
+        other => {
+            return Err(format!(
+                "unexpected bound IPv4 TCP stack-handoff address: {other:?}"
+            ))
+        }
+    };
+    socket
+        .set_nonblocking(true)
+        .map_err(|error| format!("make IPv4 TCP stack-handoff connect nonblocking: {error}"))?;
+    let peer = SocketAddrV4::new(destination, TCP_PACKET_DELIVERY_PORT);
+    match socket.connect(&SockAddr::from(peer)) {
+        Ok(()) => {
+            return Err(
+                "IPv4 TCP stack-handoff socket connected without selected-stack SYN-ACK".to_owned(),
+            )
+        }
+        Err(error)
+            if error.kind() == ErrorKind::WouldBlock
+                || matches!(error.raw_os_error(), Some(10035..=10037)) => {}
+        Err(error) => return Err(format!("start IPv4 TCP stack-handoff connect: {error}")),
+    }
+
+    let deadline = Instant::now() + PACKET_DELIVERY_TIMEOUT;
+    let syn_packet = adapter.receive_matching_ipv4_tcp_packet(
+        expected_capture_source,
+        destination,
+        Some(local.port()),
+        TCP_PACKET_DELIVERY_PORT,
+        &[],
+        TCP_FLAG_SYN,
+        TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN,
+        deadline,
+    )?;
+    let mut selected_stack =
+        RawPacketTcpStackV1::new_ipv4(destination, 0, TCP_PACKET_DELIVERY_PORT, 0x534c_1001)
+            .map_err(|error| format!("construct selected-stack raw TCP endpoint: {error}"))?;
+    let syn_ack = selected_stack
+        .accept_syn_ipv4(&syn_packet)
+        .map_err(|error| format!("selected-stack TCP SYN handoff: {error}"))?;
+    adapter.inject_packet(&syn_ack)?;
+
+    let acknowledgment_packet = adapter.receive_matching_ipv4_tcp_packet(
+        expected_capture_source,
+        destination,
+        Some(local.port()),
+        TCP_PACKET_DELIVERY_PORT,
+        &[],
+        TCP_FLAG_ACK,
+        TCP_FLAG_SYN | TCP_FLAG_RST | TCP_FLAG_FIN,
+        deadline,
+    )?;
+    selected_stack
+        .accept_ack_ipv4(&acknowledgment_packet)
+        .map_err(|error| format!("selected-stack TCP ACK handoff: {error}"))?;
+
+    loop {
+        if let Some(error) = socket
+            .take_error()
+            .map_err(|error| format!("read IPv4 TCP stack-handoff connect error: {error}"))?
+        {
+            return Err(format!("IPv4 TCP stack-handoff connect failed: {error}"));
+        }
+        match socket.peer_addr() {
+            Ok(observed) if observed.as_socket() == Some(SocketAddr::V4(peer)) => break,
+            Ok(observed) => {
+                return Err(format!(
+                    "IPv4 TCP stack-handoff selected unexpected peer {observed:?}"
+                ))
+            }
+            Err(error)
+                if error.kind() == ErrorKind::NotConnected
+                    || matches!(error.raw_os_error(), Some(10035 | 10057)) => {}
+            Err(error) => return Err(format!("observe IPv4 TCP stack-handoff connect: {error}")),
+        }
+        if Instant::now() >= deadline {
+            return Err("IPv4 TCP stack handshake exceeded its bounded deadline".to_owned());
+        }
+        thread::sleep(PACKET_DELIVERY_PROBE_INTERVAL);
+    }
+    socket
+        .set_nonblocking(false)
+        .map_err(|error| format!("restore blocking IPv4 TCP stack-handoff socket: {error}"))?;
+    let mut stream: TcpStream = socket.into();
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| "IPv4 TCP stack handoff exceeded its bounded deadline".to_owned())?;
+    stream
+        .set_nodelay(true)
+        .map_err(|error| format!("disable Nagle for IPv4 TCP stack handoff: {error}"))?;
+    stream
+        .set_read_timeout(Some(remaining))
+        .map_err(|error| format!("bound IPv4 TCP stack-handoff read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(remaining))
+        .map_err(|error| format!("bound IPv4 TCP stack-handoff write timeout: {error}"))?;
+    stream
+        .write_all(TCP_STACK_REQUEST_PAYLOAD)
+        .map_err(|error| format!("write IPv4 TCP stack-handoff request: {error}"))?;
+
+    let request_packet = adapter.receive_matching_ipv4_tcp_packet(
+        expected_capture_source,
+        destination,
+        Some(local.port()),
+        TCP_PACKET_DELIVERY_PORT,
+        TCP_STACK_REQUEST_PAYLOAD,
+        TCP_FLAG_ACK,
+        TCP_FLAG_SYN | TCP_FLAG_RST | TCP_FLAG_FIN,
+        deadline,
+    )?;
+    let exchange = selected_stack
+        .exchange_payload_ipv4(&request_packet, TCP_STACK_RESPONSE_PAYLOAD)
+        .map_err(|error| format!("selected-stack raw TCP payload exchange: {error}"))?;
+    if exchange.request_payload != TCP_STACK_REQUEST_PAYLOAD {
+        return Err("selected stack changed the captured IPv4 TCP payload".to_owned());
+    }
+    for response_packet in &exchange.response_packets {
+        adapter.inject_packet(response_packet)?;
+    }
+
+    let mut received = vec![0u8; TCP_STACK_RESPONSE_PAYLOAD.len()];
+    stream
+        .read_exact(&mut received)
+        .map_err(|error| format!("read IPv4 TCP stack-handoff response: {error}"))?;
+    if Instant::now() > deadline || received != TCP_STACK_RESPONSE_PAYLOAD {
+        return Err("IPv4 TCP stack response exceeded its deadline or mismatched".to_owned());
     }
     Ok(())
 }
@@ -4005,6 +4257,37 @@ impl<'a> OwnedWintunAdapter<'a> {
                 forbidden_flags,
             )? {
                 return Ok(segment);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn receive_matching_ipv4_tcp_packet(
+        &self,
+        expected_source: Ipv4Addr,
+        expected_destination: Ipv4Addr,
+        expected_source_port: Option<u16>,
+        expected_destination_port: u16,
+        expected_payload: &[u8],
+        required_flags: u8,
+        forbidden_flags: u8,
+        deadline: Instant,
+    ) -> Result<Vec<u8>, String> {
+        loop {
+            let packet = self.receive_packet_until(deadline)?;
+            if parse_ipv4_tcp_segment(
+                &packet,
+                expected_source,
+                expected_destination,
+                expected_source_port,
+                expected_destination_port,
+                expected_payload,
+                required_flags,
+                forbidden_flags,
+            )?
+            .is_some()
+            {
+                return Ok(packet);
             }
         }
     }
