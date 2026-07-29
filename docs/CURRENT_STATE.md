@@ -8,15 +8,14 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Last evidence audit: 2026-07-29, through documentation checkpoint merge
-`4260da969c8f7f0d3d39262a7cd9575174376ebd` (PR #264). Exact-main CI
-`30474057318` and audit `30474057345` passed on that SHA. The checkpoint records
-PR #263's first disposable real Wintun-to-selected-stack IPv4 UDP handoff while
-keeping the production Windows service host closed. Its exact-main native
-AMD64/ARM64 run `30472082661`, CI `30472083693`, and audit `30472083055`
-passed on product SHA `105551ec27f8139e455783b7ae2bf89d63812166`, including
-exact owned-route/address/session/adapter cleanup and the packaged macOS
-lifecycle.
+Last evidence audit: 2026-07-29, through product merge
+`9979889d82316f21701f1ef8304ffe3b8a11bb7d` (PR #265). Exact-main native
+AMD64/ARM64 run `30476588359`, CI `30476589552`, and audit `30476588735`
+passed on that SHA. The native run proved both IPv4 and IPv6 UDP
+Wintun-to-selected-stack handoffs with exact owned-route, address, session, and
+adapter cleanup. CI repeated the full contract suites and packaged macOS
+lifecycle. The evaluation dependency remains qualification-only and production
+Windows service-host networking remains closed.
 
 Protected owned-Geph run `30429690683` was dispatched exactly once for previous
 main `3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. Packaged resources, the
@@ -959,19 +958,21 @@ exact-main native run `30472082661` passed on both AMD64 and ARM64, CI
 `30472083693` passed including the packaged lifecycle, and audit `30472083055`
 passed. The implementation remains a development-only qualification dependency
 and does not compose networking into the production SCM host. The next
-independent M4 gates are IPv6 UDP handoff, TCP handoff, and only then
-production-host composition.
+independent M4 gate is TCP handoff, followed only then by production-host
+composition.
 
-The current additive branch implements the IPv6 UDP gate without changing
-frozen IPv4 v1. A separate `raw_packet_udp_ipv6_v1` boundary validates one raw
-IPv6 UDP request through pinned `smoltcp`, emits one checksum-valid fixed-MTU
-response, and exposes bounded structured failures. The existing disposable
-Windows `/128` route proof now retains the exact captured packet and injects
-only that selected-stack response; its manual IPv6 response builder is removed.
-Local stack tests (`35`), Windows adapter tests (`211`), and clippy pass.
-Native AMD64/ARM64 handoff and cleanup evidence is still required before merge.
-The dependency remains qualification-only and the production SCM host remains
-closed.
+PR #265 completed the additive IPv6 UDP gate without changing frozen IPv4 v1.
+A separate `raw_packet_udp_ipv6_v1` boundary validates one raw IPv6 UDP request
+through pinned `smoltcp`, emits one checksum-valid fixed-MTU response, and
+exposes bounded structured failures. The disposable Windows `/128` route proof
+retains the exact captured packet and injects only that selected-stack response;
+its manual IPv6 response builder is removed. It merged as
+`9979889d82316f21701f1ef8304ffe3b8a11bb7d`; exact-main native run
+`30476588359` passed on AMD64 and ARM64, CI `30476589552` passed including the
+packaged lifecycle, and audit `30476588735` passed. The dependency remains
+qualification-only and the production SCM host remains closed. The next
+independent M4 gate is TCP Wintun-to-selected-stack handoff; production-host
+composition remains later.
 
 ## External Gates
 
