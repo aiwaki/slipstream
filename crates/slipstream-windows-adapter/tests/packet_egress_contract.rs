@@ -503,7 +503,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "qualify_disposable_exact_host_route_with_active_probe",
         "native_wintun_ipv4_socket_binding_avoids_the_competing_exact_route",
         "native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route",
-        "native_wintun_ipv4_packet_round_trip_is_captured_and_injected",
+        "native_wintun_ipv4_udp_round_trip_crosses_the_selected_stack",
+        "RawPacketUdpStackV1",
         "native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered",
         "native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered",
         "native_wintun_child_termination_removes_active_capture_route",
@@ -828,7 +829,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         ),
         (
             "fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route()",
-            "fn native_wintun_ipv4_packet_round_trip_is_captured_and_injected()",
+            "fn native_wintun_ipv4_udp_round_trip_crosses_the_selected_stack()",
         ),
         (
             "fn prove_ipv4_socket_binding(",
@@ -867,9 +868,10 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow.contains("Qualify no-payload IPv6 socket selection under exact route"));
     assert!(workflow
         .contains("-TestName native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route"));
-    assert!(workflow.contains("Qualify closed IPv4 packet capture and injection round trip"));
-    assert!(workflow
-        .contains("-TestName native_wintun_ipv4_packet_round_trip_is_captured_and_injected"));
+    assert!(workflow.contains("Qualify Wintun-to-selected-stack IPv4 UDP handoff"));
+    assert!(
+        workflow.contains("-TestName native_wintun_ipv4_udp_round_trip_crosses_the_selected_stack")
+    );
     assert!(workflow.contains("Qualify pre-existing IPv4 UDP flow activation safety"));
     assert!(workflow.contains(
         "-TestName native_wintun_ipv4_preexisting_flow_is_preserved_or_safely_recovered"

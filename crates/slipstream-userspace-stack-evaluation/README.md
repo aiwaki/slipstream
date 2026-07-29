@@ -4,6 +4,14 @@ This crate qualifies a pinned userspace IPv4/IPv6 TCP/UDP stack behind an
 in-memory Layer 3 device. It is deliberately separate from
 `slipstream-windows-adapter` and is not linked into the Windows service host.
 
+The additive `raw_packet_udp_v1` boundary accepts one bounded raw IPv4 packet
+and returns the selected stack's raw UDP response packet. The Windows adapter
+uses it only as a development dependency in the disposable native Wintun
+qualification. That gate proves a real OS UDP request crosses Wintun, reaches
+the selected stack, returns through Wintun, and leaves the owned route, address,
+session, and adapter absent. It does not compose the stack into the production
+service host.
+
 Version 1 selects `smoltcp 0.13.1` for bounded evaluation. The tests prove
 dual-stack TCP, UDP below the IPv6 MTU, IPv4 fragmentation and reassembly,
 dual-stack UDP checksum rejection, deterministic polling, and fixed queue and
@@ -25,6 +33,8 @@ The corresponding language-neutral contracts are
 [`windows-userspace-stack-selection-v1.json`](../../contracts/windows-userspace-stack-selection-v1.json)
 and
 [`windows-userspace-stack-ipv6-fragment-input-v1.json`](../../contracts/windows-userspace-stack-ipv6-fragment-input-v1.json).
+The native handoff is frozen separately in
+[`windows-wintun-stack-handoff-v1.json`](../../contracts/windows-wintun-stack-handoff-v1.json).
 
 ```sh
 cargo test --locked --manifest-path crates/slipstream-userspace-stack-evaluation/Cargo.toml

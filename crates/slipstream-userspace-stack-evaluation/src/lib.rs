@@ -1,10 +1,12 @@
-//! Versioned, effect-free userspace network-stack qualification constants.
+//! Versioned, effect-free userspace network-stack qualification boundaries.
 //!
 //! This crate is not linked into a Slipstream runtime. Its dependencies are
-//! test-only so selecting a candidate cannot silently compose production
-//! packet, route, socket, adapter, service, or process effects.
+//! consumed only by qualification crates, so selecting a candidate cannot
+//! silently compose production packet, route, socket, adapter, service, or
+//! process effects.
 
 pub mod ipv6_fragment_input_v1;
+pub mod raw_packet_udp_v1;
 
 pub mod v1 {
     pub const CONTRACT_VERSION: u32 = 1;

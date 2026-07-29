@@ -64,3 +64,4 @@ windows-sys = { version = "0.61.2", features = [
 
 [dev-dependencies]
 socket2 = "=0.6.4"
+slipstream-userspace-stack-evaluation = { path = "../slipstream-userspace-stack-evaluation" }
