@@ -25,6 +25,7 @@ function createWorker({
     reload: [],
     timeout: [],
     beforeRequestListener: null,
+    beforeRedirectListener: null,
     completedListener: null,
     errorListener: null
   };
@@ -74,6 +75,12 @@ function createWorker({
           calls.beforeRequestFilter = filter;
         }
       },
+      onBeforeRedirect: {
+        addListener(listener, filter) {
+          calls.beforeRedirectListener = listener;
+          calls.beforeRedirectFilter = filter;
+        }
+      },
       onCompleted: {
         addListener(listener, filter) {
           calls.completedListener = listener;
@@ -121,7 +128,8 @@ function createWorker({
     before: calls.beforeRequestListener,
     calls,
     completed: calls.completedListener,
-    error: calls.errorListener
+    error: calls.errorListener,
+    redirect: calls.beforeRedirectListener
   };
 }
 
@@ -163,6 +171,10 @@ test("incomplete top-frame request confirms and reloads the same host once", asy
     types: ["main_frame"]
   });
   assert.deepEqual(plain(calls.errorFilter), {
+    urls: ["https://*/*"],
+    types: ["main_frame"]
+  });
+  assert.deepEqual(plain(calls.beforeRedirectFilter), {
     urls: ["https://*/*"],
     types: ["main_frame"]
   });
@@ -292,6 +304,42 @@ test("a completed request cannot be reused as an incomplete candidate", async ()
     frameId: 0,
     tabId: request.tabId,
     url: request.url
+  });
+  await settleWorkerPromises();
+  error({
+    requestId: request.requestId,
+    error: "net::ERR_CONTENT_LENGTH_MISMATCH",
+    type: "main_frame",
+    frameId: 0,
+    tabId: request.tabId,
+    url: request.url
+  });
+  await settleWorkerPromises();
+
+  assert.deepEqual(calls.native, []);
+  assert.deepEqual(calls.reload, []);
+});
+
+test("a redirected request cannot leave a reusable incomplete candidate", async () => {
+  const { before, calls, error, redirect } = createWorker();
+  const request = {
+    requestId: "request-22",
+    type: "main_frame",
+    method: "GET",
+    frameId: 0,
+    parentFrameId: -1,
+    tabId: 22,
+    url: "https://partial.example/"
+  };
+
+  before(request);
+  redirect({
+    requestId: request.requestId,
+    type: "main_frame",
+    frameId: 0,
+    tabId: request.tabId,
+    url: request.url,
+    redirectUrl: "custom-scheme://finished"
   });
   await settleWorkerPromises();
   error({

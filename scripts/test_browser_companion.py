@@ -47,6 +47,7 @@ class BrowserCompanionContractTests(unittest.TestCase):
         worker_source = WORKER.read_text()
         self.assertIn("chrome.storage.session", worker_source)
         self.assertIn("chrome.webRequest.onBeforeRequest.addListener", worker_source)
+        self.assertIn("chrome.webRequest.onBeforeRedirect.addListener", worker_source)
         self.assertIn("chrome.webRequest.onCompleted.addListener", worker_source)
         self.assertIn("chrome.webRequest.onErrorOccurred.addListener", worker_source)
 
@@ -76,6 +77,7 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertFalse(manifest["content_scripts"][0]["all_frames"])
         worker_source = SAFARI_WORKER.read_text()
         self.assertIn("webRequest.onBeforeRequest.addListener", worker_source)
+        self.assertIn("webRequest.onBeforeRedirect.addListener", worker_source)
         self.assertIn("webRequest.onCompleted.addListener", worker_source)
         self.assertIn("webRequest.onErrorOccurred.addListener", worker_source)
         self.assertNotIn("webNavigation", worker_source)

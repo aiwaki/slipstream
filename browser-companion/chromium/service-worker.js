@@ -40,6 +40,16 @@ chrome.webRequest.onBeforeRequest.addListener(
   }
 );
 
+chrome.webRequest.onBeforeRedirect.addListener(
+  (details) => {
+    incompleteResponseTracker.discard(details).catch(() => {});
+  },
+  {
+    urls: ["https://*/*"],
+    types: ["main_frame"]
+  }
+);
+
 chrome.webRequest.onCompleted.addListener(
   (details) => {
     incompleteResponseTracker.discard(details).catch(() => {});

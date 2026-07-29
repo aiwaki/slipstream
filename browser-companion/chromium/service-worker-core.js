@@ -194,6 +194,7 @@
 
   function createIncompleteResponseTracker(storageSession) {
     const memory = new Map();
+    let pending = Promise.resolve();
     const durable =
       storageSession &&
       typeof storageSession.get === "function" &&
@@ -202,45 +203,60 @@
         ? storageSession
         : null;
 
-    async function remember(details, nowUnixMs) {
-      const candidate = incompleteResponseCandidate(details, nowUnixMs);
-      const key = incompleteResponseStorageKey(details?.requestId);
-      if (!candidate || !key) {
-        return false;
-      }
-      memory.set(key, candidate);
-      if (durable) {
-        await durable.set({ [key]: candidate });
-      }
-      return true;
+    function enqueue(operation) {
+      const result = pending.then(operation, operation);
+      pending = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
     }
 
-    async function take(details) {
-      const key = incompleteResponseStorageKey(details?.requestId);
-      if (!key) {
-        return null;
-      }
-      let candidate = memory.get(key) ?? null;
-      memory.delete(key);
-      if (!candidate && durable) {
-        const stored = await durable.get(key);
-        candidate = stored?.[key] ?? null;
-      }
-      if (durable) {
-        await durable.remove(key);
-      }
-      return candidate;
+    function remember(details, nowUnixMs) {
+      return enqueue(async () => {
+        const candidate = incompleteResponseCandidate(details, nowUnixMs);
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!candidate || !key) {
+          return false;
+        }
+        memory.set(key, candidate);
+        if (durable) {
+          await durable.set({ [key]: candidate });
+        }
+        return true;
+      });
     }
 
-    async function discard(details) {
-      const key = incompleteResponseStorageKey(details?.requestId);
-      if (!key) {
-        return;
-      }
-      memory.delete(key);
-      if (durable) {
-        await durable.remove(key);
-      }
+    function take(details) {
+      return enqueue(async () => {
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!key) {
+          return null;
+        }
+        let candidate = memory.get(key) ?? null;
+        memory.delete(key);
+        if (!candidate && durable) {
+          const stored = await durable.get(key);
+          candidate = stored?.[key] ?? null;
+        }
+        if (durable) {
+          await durable.remove(key);
+        }
+        return candidate;
+      });
+    }
+
+    function discard(details) {
+      return enqueue(async () => {
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!key) {
+          return;
+        }
+        memory.delete(key);
+        if (durable) {
+          await durable.remove(key);
+        }
+      });
     }
 
     return Object.freeze({ discard, remember, take });

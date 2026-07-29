@@ -37,6 +37,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 if (
   webRequest?.onBeforeRequest &&
+  webRequest?.onBeforeRedirect &&
   webRequest?.onCompleted &&
   webRequest?.onErrorOccurred &&
   tabs?.get &&
@@ -45,6 +46,15 @@ if (
   webRequest.onBeforeRequest.addListener(
     (details) => {
       incompleteResponseTracker.remember(details, Date.now()).catch(() => {});
+    },
+    {
+      urls: ["https://*/*"],
+      types: ["main_frame"]
+    }
+  );
+  webRequest.onBeforeRedirect.addListener(
+    (details) => {
+      incompleteResponseTracker.discard(details).catch(() => {});
     },
     {
       urls: ["https://*/*"],
