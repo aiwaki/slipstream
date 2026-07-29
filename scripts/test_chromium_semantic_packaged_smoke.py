@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import os
+import ssl
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -130,6 +132,48 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ),
             len(success),
         )
+
+    def test_incomplete_fixture_closes_keep_alive_connection_after_partial_body(
+        self,
+    ) -> None:
+        fixture = smoke.SemanticHttpsFixture(
+            smoke.INCOMPLETE_FIXTURE_HOST,
+            smoke.INCOMPLETE_RESPONSE_SCENARIO,
+        )
+        connection: http.client.HTTPSConnection | None = None
+        try:
+            fixture.start()
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            connection = http.client.HTTPSConnection(
+                "127.0.0.1",
+                fixture.port,
+                timeout=1.0,
+                context=context,
+            )
+            connection.request(
+                "GET",
+                "/",
+                headers={
+                    "Connection": "keep-alive",
+                    "Host": fixture.host,
+                },
+            )
+            response = connection.getresponse()
+            with self.assertRaises(http.client.IncompleteRead) as raised:
+                response.read()
+
+            _, _, expected = smoke._fixture_response(
+                "/",
+                root_visit=1,
+                scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+            )
+            self.assertEqual(raised.exception.partial, expected)
+        finally:
+            if connection is not None:
+                connection.close()
+            fixture.close()
 
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
         command = smoke._chrome_command(
