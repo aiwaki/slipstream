@@ -134,4 +134,11 @@ fn native_workflow_runs_the_exact_gate_on_both_architectures() {
             "native workflow is missing {required}"
         );
     }
+    assert_eq!(
+        workflow
+            .matches("contracts/windows-capture-generation-recovery-v1.json")
+            .count(),
+        2,
+        "capture-generation contract must trigger both pull_request and main push gates"
+    );
 }

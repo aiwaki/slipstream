@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-capture-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
       - "contracts/windows-packet-capture-v4.json"
@@ -29,6 +30,7 @@ on:
     branches: ["main"]
     paths:
       - ".github/workflows/windows-packet-adapter-qualification.yml"
+      - "contracts/windows-capture-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
       - "contracts/windows-packet-capture-v4.json"
