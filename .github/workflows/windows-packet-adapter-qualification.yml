@@ -16,6 +16,7 @@ on:
       - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
       - "contracts/windows-userspace-stack-selection-v1.json"
       - "contracts/windows-wintun-stack-handoff-v1.json"
+      - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -37,6 +38,7 @@ on:
       - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
       - "contracts/windows-userspace-stack-selection-v1.json"
       - "contracts/windows-wintun-stack-handoff-v1.json"
+      - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -325,6 +327,24 @@ jobs:
             -TimeoutSeconds 120 `
             -NoCapture
 
+      - name: Qualify Wintun-to-selected-stack IPv6 UDP handoff
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI: "1"
+          SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI: "1"
+        run: |
+          ./scripts/run_bounded_windows_cargo_test.ps1 `
+            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
+            -Features disposable-windows-packet-fixture `
+            -TestTarget wintun_exact_route_windows `
+            -TestName native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack `
+            -TimeoutSeconds 120 `
+            -NoCapture
+
       - name: Qualify pre-existing IPv4 UDP flow activation safety
         timeout-minutes: 3
         shell: pwsh
@@ -360,24 +380,6 @@ jobs:
             -Features disposable-windows-packet-fixture `
             -TestTarget wintun_exact_route_windows `
             -TestName native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered `
-            -TimeoutSeconds 120 `
-            -NoCapture
-
-      - name: Qualify closed IPv6 packet capture and injection round trip
-        timeout-minutes: 3
-        shell: pwsh
-        env:
-          CARGO_TERM_COLOR: never
-          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
-          SLIPSTREAM_WINDOWS_WINTUN_EXACT_ROUTE_CI: "1"
-          SLIPSTREAM_WINDOWS_WINTUN_SOCKET_BINDING_CI: "1"
-          SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI: "1"
-        run: |
-          ./scripts/run_bounded_windows_cargo_test.ps1 `
-            -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
-            -Features disposable-windows-packet-fixture `
-            -TestTarget wintun_exact_route_windows `
-            -TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected `
             -TimeoutSeconds 120 `
             -NoCapture
 

@@ -6,6 +6,7 @@
 //! process effects.
 
 pub mod ipv6_fragment_input_v1;
+pub mod raw_packet_udp_ipv6_v1;
 pub mod raw_packet_udp_v1;
 
 pub mod v1 {

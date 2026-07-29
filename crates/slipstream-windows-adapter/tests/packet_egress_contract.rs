@@ -511,7 +511,8 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "native_wintun_crash_child_holds_active_capture_route",
         "native_wintun_independent_route_owner_is_preserved_during_capture",
         "native_wintun_independent_route_child_holds_baseline",
-        "native_wintun_ipv6_packet_round_trip_is_captured_and_injected",
+        "native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack",
+        "RawPacketUdpIpv6StackV1",
         "injected active-probe failure must be returned after recovery proof",
         "IP_UNICAST_IF",
         "interface_index.to_be()",
@@ -544,7 +545,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
         "receive_matching_ipv6_udp_request",
         "build_ipv4_udp_packet",
         "build_ipv4_tcp_packet",
-        "build_ipv6_udp_packet",
+        "exchange_ipv6(&request.packet, PACKET_RESPONSE_PAYLOAD)",
         "parse_ipv4_tcp_segment",
         "connected_ipv4_tcp_stream",
         "handshake_ack.sequence_number",
@@ -629,7 +630,7 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
 
     let tcp_preexisting_start = preexisting_end;
     let tcp_preexisting_end = fixture[tcp_preexisting_start..]
-        .find("fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected()")
+        .find("fn native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack()")
         .map(|offset| tcp_preexisting_start + offset)
         .expect("TCP pre-existing-flow gate must end before the IPv6 packet gate");
     let tcp_preexisting = &fixture[tcp_preexisting_start..tcp_preexisting_end];
@@ -892,9 +893,10 @@ fn disposable_exact_route_owner_is_feature_gated_exact_and_not_composed() {
     assert!(workflow
         .contains("-TestName native_wintun_independent_route_owner_is_preserved_during_capture"));
     assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_INDEPENDENT_ROUTE_CI: \"1\""));
-    assert!(workflow.contains("Qualify closed IPv6 packet capture and injection round trip"));
-    assert!(workflow
-        .contains("-TestName native_wintun_ipv6_packet_round_trip_is_captured_and_injected"));
+    assert!(workflow.contains("Qualify Wintun-to-selected-stack IPv6 UDP handoff"));
+    assert!(
+        workflow.contains("-TestName native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack")
+    );
     assert!(workflow.contains("SLIPSTREAM_WINDOWS_WINTUN_PACKET_DELIVERY_CI: \"1\""));
 
     let production_host = include_str!("../src/service_host/windows.rs");
