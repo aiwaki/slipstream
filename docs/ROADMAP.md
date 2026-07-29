@@ -121,10 +121,14 @@ Geph, and permits one same-host reload without replaying the failed transparent
 request. PR #250 and its exact-main gates passed, but protected run
 `30393151116` showed that `webNavigation` did not expose the post-commit
 truncated-body fixture even though owned Geph and cleanup passed. Chromium now
-uses a read-only top-level `webRequest` error observer and remains closed until
-its new local, PR, exact-main, and protected two-scenario browser gates pass. A
-physical default-route/lid-close transition on a disposable Mac remains a
-separate M1 gate.
+uses read-only top-level `webRequest` correlation. PR #254 corrected the real
+Chrome final-event contract, added redirect-safe ephemeral cleanup, and merged
+as `45db4321bafe244c87986c4c08daf1c3afaf8bf2`; its local, PR, and exact-main
+CI/audit gates passed. Only one protected two-scenario account-backed run
+remains for that exact SHA after the next UTC-day budget reset. Workstation
+installation remains closed until that run publishes its exact qualified
+artifact. A physical default-route/lid-close transition on a disposable Mac
+remains a separate M1 gate.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
