@@ -9,11 +9,12 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last evidence audit: 2026-07-29, through merge commit
-`7abaf556dd98139b0fdcabce0f203f4e9a4a3005`. PR #259 added the isolated
-selected-stack/native-connector composition gate, then hardened reverse reads
-with exact binding, contiguous sequence, and oversized-UDP rejection before
-native mutation. Exact-main CI `30438309120` and audit `30438309270` passed on
-that SHA, including the Windows adapter contract and packaged macOS lifecycle.
+`105551ec27f8139e455783b7ae2bf89d63812166`. PR #263 added the first
+disposable real Wintun-to-selected-stack IPv4 UDP handoff while keeping the
+production Windows service host closed. Exact-main native AMD64/ARM64 run
+`30472082661`, CI `30472083693`, and audit `30472083055` passed on that SHA,
+including exact owned-route/address/session/adapter cleanup and the packaged
+macOS lifecycle.
 
 Protected owned-Geph run `30429690683` was dispatched exactly once for previous
 main `3b9075d8b63e12e9ce93b2a3ac973005f3d43c13`. Packaged resources, the
@@ -946,18 +947,18 @@ YouTube, and UDP remain excluded from Geph. An additive composition now proves
 selected-stack output reaches the connector queue and retains bounded native
 backend reads until the selected stack accepts one exact frame. Flow, backend,
 transport, and reverse sequence identity are revalidated before mutation, and
-pre-mutation failures preserve the current byte owner. PR #263 adds the first
+pre-mutation failures preserve the current byte owner. PR #263 added the first
 test-only Wintun-to-stack packet handoff: a real OS IPv4 UDP request crosses an
 exact owned route into Wintun, enters the pinned selected stack as the exact
 captured Layer 3 packet, and returns to the OS only from the stack-emitted
 response packet. The boundary is fixed-MTU, fixed-queue, bounded-poll, and
-fail-closed. First-head native run `30470855189` passed on both AMD64 and ARM64,
-CI `30470854996` passed including the packaged lifecycle, and audit
-`30470853477` passed. The implementation remains a development-only
-qualification dependency and does not compose networking into the production
-SCM host. Exact-current-head review gates and exact-main evidence remain
-pending. The next independent M4 gates are IPv6 UDP handoff, TCP handoff, and
-only then production-host composition.
+fail-closed. It merged as `105551ec27f8139e455783b7ae2bf89d63812166`;
+exact-main native run `30472082661` passed on both AMD64 and ARM64, CI
+`30472083693` passed including the packaged lifecycle, and audit `30472083055`
+passed. The implementation remains a development-only qualification dependency
+and does not compose networking into the production SCM host. The next
+independent M4 gates are IPv6 UDP handoff, TCP handoff, and only then
+production-host composition.
 
 ## External Gates
 
