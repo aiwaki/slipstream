@@ -7,9 +7,7 @@ rust-version = "1.91"
 license = "MIT"
 publish = false
 
-[dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+[dependencies]
 smoltcp = { version = "=0.13.1", default-features = false, features = [
   "std",
   "medium-ip",
@@ -23,3 +21,7 @@ smoltcp = { version = "=0.13.1", default-features = false, features = [
   "reassembly-buffer-size-4096",
   "reassembly-buffer-count-2",
 ] }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

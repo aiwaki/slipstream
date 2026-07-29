@@ -15,6 +15,7 @@ on:
       - "contracts/windows-userspace-stack-effect-v1.json"
       - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
       - "contracts/windows-userspace-stack-selection-v1.json"
+      - "contracts/windows-wintun-stack-handoff-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -35,6 +36,7 @@ on:
       - "contracts/windows-userspace-stack-effect-v1.json"
       - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
       - "contracts/windows-userspace-stack-selection-v1.json"
+      - "contracts/windows-wintun-stack-handoff-v1.json"
       - "crates/slipstream-core/**"
       - "crates/slipstream-userspace-stack-evaluation/**"
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
@@ -305,7 +307,7 @@ jobs:
             -TimeoutSeconds 120 `
             -NoCapture
 
-      - name: Qualify closed IPv4 packet capture and injection round trip
+      - name: Qualify Wintun-to-selected-stack IPv4 UDP handoff
         timeout-minutes: 3
         shell: pwsh
         env:
@@ -319,7 +321,7 @@ jobs:
             -ManifestPath crates/slipstream-windows-adapter/Cargo.toml `
             -Features disposable-windows-packet-fixture `
             -TestTarget wintun_exact_route_windows `
-            -TestName native_wintun_ipv4_packet_round_trip_is_captured_and_injected `
+            -TestName native_wintun_ipv4_udp_round_trip_crosses_the_selected_stack `
             -TimeoutSeconds 120 `
             -NoCapture
 

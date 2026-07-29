@@ -1,5 +1,6 @@
 #![cfg(all(windows, feature = "disposable-windows-packet-fixture"))]
 
+use slipstream_userspace_stack_evaluation::raw_packet_udp_v1::RawPacketUdpStackV1;
 use slipstream_windows_adapter::packet_adapter::{
     collect_windows_packet_adapter_artifact, WindowsCollectedPacketAdapterAdmission,
     WindowsPacketAdapterArchitecture,
@@ -1069,7 +1070,7 @@ fn native_wintun_ipv6_socket_binding_avoids_the_competing_exact_route() {
 }
 
 #[test]
-fn native_wintun_ipv4_packet_round_trip_is_captured_and_injected() {
+fn native_wintun_ipv4_udp_round_trip_crosses_the_selected_stack() {
     if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
         || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
         || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
@@ -1771,7 +1772,7 @@ fn prove_ipv4_udp_round_trip_on_adapter(
     inject_and_receive_ipv4_udp_response(
         socket,
         adapter,
-        request,
+        request.udp,
         destination,
         source,
         response_payload,
@@ -2335,14 +2336,21 @@ fn prove_ipv4_packet_round_trip(
         PACKET_REQUEST_PAYLOAD,
         deadline,
     )?;
-    let response = build_ipv4_udp_packet(
-        destination,
-        expected_capture_source,
-        request.destination_port,
-        request.source_port,
-        PACKET_RESPONSE_PAYLOAD,
-    )?;
-    adapter.inject_packet(&response)?;
+    if request.udp.source_port != local.port()
+        || request.udp.destination_port != PACKET_DELIVERY_PORT
+    {
+        return Err("captured IPv4 UDP ports changed before selected-stack handoff".to_owned());
+    }
+    let mut selected_stack =
+        RawPacketUdpStackV1::new_ipv4(destination, 0, PACKET_DELIVERY_PORT, 0x534c_0001)
+            .map_err(|error| format!("construct selected-stack raw packet endpoint: {error}"))?;
+    let exchange = selected_stack
+        .exchange_ipv4(&request.packet, PACKET_RESPONSE_PAYLOAD)
+        .map_err(|error| format!("selected-stack raw packet exchange: {error}"))?;
+    if exchange.request_payload != PACKET_REQUEST_PAYLOAD {
+        return Err("selected stack changed the captured IPv4 UDP payload".to_owned());
+    }
+    adapter.inject_packet(&exchange.response_packet)?;
 
     let remaining = deadline
         .checked_duration_since(Instant::now())
@@ -2463,6 +2471,11 @@ fn prove_ipv6_packet_round_trip(
 struct CapturedUdpRequest {
     source_port: u16,
     destination_port: u16,
+}
+
+struct CapturedIpv4UdpRequest {
+    udp: CapturedUdpRequest,
+    packet: Vec<u8>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -3997,7 +4010,7 @@ impl<'a> OwnedWintunAdapter<'a> {
         expected_destination_port: u16,
         expected_payload: &[u8],
         deadline: Instant,
-    ) -> Result<CapturedUdpRequest, String> {
+    ) -> Result<CapturedIpv4UdpRequest, String> {
         loop {
             let packet = self.receive_packet_until(deadline)?;
             if let Some(request) = parse_ipv4_udp_request(
@@ -4008,7 +4021,10 @@ impl<'a> OwnedWintunAdapter<'a> {
                 expected_destination_port,
                 expected_payload,
             )? {
-                return Ok(request);
+                return Ok(CapturedIpv4UdpRequest {
+                    udp: request,
+                    packet,
+                });
             }
         }
     }

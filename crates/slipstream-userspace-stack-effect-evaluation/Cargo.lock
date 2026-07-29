@@ -388,6 +388,9 @@ dependencies = [
 [[package]]
 name = "slipstream-userspace-stack-evaluation"
 version = "0.1.0"
+dependencies = [
+ "smoltcp",
+]
 
 [[package]]
 name = "slipstream-windows-adapter"
