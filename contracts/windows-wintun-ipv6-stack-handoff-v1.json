@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_wintun_ipv6_stack_handoff",
+  "contract_version": 1,
+  "scope": {
+    "transport": "ipv6_udp",
+    "capture_adapter": "wintun_0.14.1",
+    "selected_stack": "smoltcp_0.13.1",
+    "native_architectures": [
+      "amd64",
+      "arm64"
+    ],
+    "qualification_test": "native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack"
+  },
+  "bounds": {
+    "medium": "layer_3",
+    "mtu": 1280,
+    "max_poll_steps": 64,
+    "max_link_frames_per_direction": 8,
+    "max_burst_frames": 1,
+    "one_request_packet": true,
+    "one_response_packet": true,
+    "fixed_deadline_seconds": 3
+  },
+  "qualified_evidence": {
+    "real_os_udp_request": true,
+    "owned_exact_host_route": true,
+    "wintun_captured_request_packet": true,
+    "selected_stack_received_request_payload": true,
+    "selected_stack_emitted_response_packet": true,
+    "wintun_injected_stack_response": true,
+    "real_os_udp_response": true,
+    "owned_route_removed": true,
+    "owned_address_removed": true,
+    "owned_adapter_and_session_removed": true
+  },
+  "invariants": {
+    "qualification_dependency_only": true,
+    "production_service_host_composition": false,
+    "manual_response_packet_builder": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "external_proxy_pac_vpn_mutation": false,
+    "external_adapter_or_route_mutation": false,
+    "discord_or_youtube_geo_exit": false
+  },
+  "frozen_predecessor": {
+    "module": "raw_packet_udp_v1",
+    "transport": "ipv4_udp",
+    "changed": false
+  },
+  "remaining_gates": {
+    "tcp_wintun_stack_handoff": "required",
+    "production_service_host_composition": "required"
+  }
+}

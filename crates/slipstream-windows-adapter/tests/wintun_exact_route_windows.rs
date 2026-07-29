@@ -1,5 +1,6 @@
 #![cfg(all(windows, feature = "disposable-windows-packet-fixture"))]
 
+use slipstream_userspace_stack_evaluation::raw_packet_udp_ipv6_v1::RawPacketUdpIpv6StackV1;
 use slipstream_userspace_stack_evaluation::raw_packet_udp_v1::RawPacketUdpStackV1;
 use slipstream_windows_adapter::packet_adapter::{
     collect_windows_packet_adapter_artifact, WindowsCollectedPacketAdapterAdmission,
@@ -101,7 +102,6 @@ const IPV4_MIN_HEADER_LENGTH: usize = 20;
 const IPV6_HEADER_LENGTH: usize = 40;
 const IPV6_PAYLOAD_LENGTH_OFFSET: usize = 4;
 const IPV6_NEXT_HEADER_OFFSET: usize = 6;
-const IPV6_HOP_LIMIT_OFFSET: usize = 7;
 const IPV6_SOURCE_OFFSET: usize = 8;
 const IPV6_DESTINATION_OFFSET: usize = 24;
 const UDP_HEADER_LENGTH: usize = 8;
@@ -119,10 +119,8 @@ const TCP_FLAGS_OFFSET: usize = 13;
 const TCP_WINDOW_OFFSET: usize = 14;
 const TCP_CHECKSUM_OFFSET: usize = 16;
 const IPV4_VERSION_AND_MIN_HEADER_LENGTH: u8 = 0x45;
-const IPV6_VERSION: u8 = 0x60;
 const IPV4_PACKET_IDENTIFICATION: u16 = 0x534c;
 const IPV4_DEFAULT_TTL: u8 = 64;
-const IPV6_DEFAULT_HOP_LIMIT: u8 = 64;
 const UDP_PROTOCOL_NUMBER: u8 = 17;
 const TCP_PROTOCOL_NUMBER: u8 = 6;
 const TCP_FLAG_FIN: u8 = 0x01;
@@ -1559,7 +1557,7 @@ fn native_wintun_ipv4_tcp_preexisting_flow_is_preserved_or_safely_recovered() {
 }
 
 #[test]
-fn native_wintun_ipv6_packet_round_trip_is_captured_and_injected() {
+fn native_wintun_ipv6_udp_round_trip_crosses_the_selected_stack() {
     if std::env::var(DISPOSABLE_CI_ENV).as_deref() != Ok("1")
         || std::env::var(EXACT_ROUTE_CI_ENV).as_deref() != Ok("1")
         || std::env::var(SOCKET_BINDING_CI_ENV).as_deref() != Ok("1")
@@ -2436,14 +2434,19 @@ fn prove_ipv6_packet_round_trip(
         PACKET_REQUEST_PAYLOAD,
         deadline,
     )?;
-    let response = build_ipv6_udp_packet(
-        destination,
-        expected_capture_source,
-        request.destination_port,
-        request.source_port,
-        PACKET_RESPONSE_PAYLOAD,
-    )?;
-    adapter.inject_packet(&response)?;
+    let mut stack =
+        RawPacketUdpIpv6StackV1::new_ipv6(destination, 0, request.udp.destination_port, 11)
+            .map_err(|error| format!("construct selected IPv6 UDP stack: {error}"))?;
+    let exchange = stack
+        .exchange_ipv6(&request.packet, PACKET_RESPONSE_PAYLOAD)
+        .map_err(|error| format!("exchange selected-stack IPv6 UDP packet: {error}"))?;
+    if exchange.request_payload != PACKET_REQUEST_PAYLOAD {
+        return Err(format!(
+            "selected stack IPv6 request payload mismatch: length={}",
+            exchange.request_payload.len()
+        ));
+    }
+    adapter.inject_packet(&exchange.response_packet)?;
 
     let remaining = deadline
         .checked_duration_since(Instant::now())
@@ -2474,6 +2477,11 @@ struct CapturedUdpRequest {
 }
 
 struct CapturedIpv4UdpRequest {
+    udp: CapturedUdpRequest,
+    packet: Vec<u8>,
+}
+
+struct CapturedIpv6UdpRequest {
     udp: CapturedUdpRequest,
     packet: Vec<u8>,
 }
@@ -2972,63 +2980,6 @@ fn build_ipv4_udp_packet(
     pseudo_header.extend_from_slice(&packet[IPV4_MIN_HEADER_LENGTH..]);
     let udp_checksum = internet_checksum(&pseudo_header);
     packet[26..28].copy_from_slice(
-        &(if udp_checksum == 0 {
-            0xffff
-        } else {
-            udp_checksum
-        })
-        .to_be_bytes(),
-    );
-    Ok(packet)
-}
-
-fn build_ipv6_udp_packet(
-    source: Ipv6Addr,
-    destination: Ipv6Addr,
-    source_port: u16,
-    destination_port: u16,
-    payload: &[u8],
-) -> Result<Vec<u8>, String> {
-    let udp_length = UDP_HEADER_LENGTH
-        .checked_add(payload.len())
-        .ok_or_else(|| "IPv6 UDP payload length overflow".to_owned())?;
-    let udp_length_u16 = u16::try_from(udp_length)
-        .map_err(|_| "IPv6 UDP packet exceeds the 65535-byte limit".to_owned())?;
-    let total_length = IPV6_HEADER_LENGTH
-        .checked_add(udp_length)
-        .ok_or_else(|| "IPv6 packet length overflow".to_owned())?;
-    if total_length > WINTUN_MAX_IP_PACKET_SIZE {
-        return Err("IPv6 packet exceeds the Wintun packet-size limit".to_owned());
-    }
-
-    let mut packet = vec![0u8; total_length];
-    packet[0] = IPV6_VERSION;
-    packet[IPV6_PAYLOAD_LENGTH_OFFSET..IPV6_PAYLOAD_LENGTH_OFFSET + 2]
-        .copy_from_slice(&udp_length_u16.to_be_bytes());
-    packet[IPV6_NEXT_HEADER_OFFSET] = UDP_PROTOCOL_NUMBER;
-    packet[IPV6_HOP_LIMIT_OFFSET] = IPV6_DEFAULT_HOP_LIMIT;
-    packet[IPV6_SOURCE_OFFSET..IPV6_DESTINATION_OFFSET].copy_from_slice(&source.octets());
-    packet[IPV6_DESTINATION_OFFSET..IPV6_HEADER_LENGTH].copy_from_slice(&destination.octets());
-
-    packet[IPV6_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET
-        ..IPV6_HEADER_LENGTH + UDP_SOURCE_PORT_OFFSET + 2]
-        .copy_from_slice(&source_port.to_be_bytes());
-    packet[IPV6_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET
-        ..IPV6_HEADER_LENGTH + UDP_DESTINATION_PORT_OFFSET + 2]
-        .copy_from_slice(&destination_port.to_be_bytes());
-    packet[IPV6_HEADER_LENGTH + UDP_LENGTH_OFFSET..IPV6_HEADER_LENGTH + UDP_LENGTH_OFFSET + 2]
-        .copy_from_slice(&udp_length_u16.to_be_bytes());
-    packet[IPV6_HEADER_LENGTH + UDP_HEADER_LENGTH..].copy_from_slice(payload);
-
-    let mut pseudo_header = Vec::with_capacity(40 + udp_length);
-    pseudo_header.extend_from_slice(&source.octets());
-    pseudo_header.extend_from_slice(&destination.octets());
-    pseudo_header.extend_from_slice(&(udp_length as u32).to_be_bytes());
-    pseudo_header.extend_from_slice(&[0, 0, 0, UDP_PROTOCOL_NUMBER]);
-    pseudo_header.extend_from_slice(&packet[IPV6_HEADER_LENGTH..]);
-    let udp_checksum = internet_checksum(&pseudo_header);
-    let checksum_offset = IPV6_HEADER_LENGTH + UDP_CHECKSUM_OFFSET;
-    packet[checksum_offset..checksum_offset + 2].copy_from_slice(
         &(if udp_checksum == 0 {
             0xffff
         } else {
@@ -4066,7 +4017,7 @@ impl<'a> OwnedWintunAdapter<'a> {
         expected_destination_port: u16,
         expected_payload: &[u8],
         deadline: Instant,
-    ) -> Result<CapturedUdpRequest, String> {
+    ) -> Result<CapturedIpv6UdpRequest, String> {
         loop {
             let packet = self.receive_packet_until(deadline)?;
             if let Some(request) = parse_ipv6_udp_request(
@@ -4077,7 +4028,10 @@ impl<'a> OwnedWintunAdapter<'a> {
                 expected_destination_port,
                 expected_payload,
             )? {
-                return Ok(request);
+                return Ok(CapturedIpv6UdpRequest {
+                    udp: request,
+                    packet,
+                });
             }
         }
     }
