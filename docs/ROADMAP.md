@@ -621,6 +621,9 @@ therefore stays phased and closed to production traffic:
    exact-route churn on disposable AMD64 and ARM64. A later observed route
    change must invalidate the active transition token; cleanup must remove only
    the two test-owned exact routes and restore the original route identity.
+   Done in PR #269; exact-main native run `30490498603`, CI `30490498586`, and
+   audit `30490498662` passed on
+   `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`.
 7. Qualify the remaining reboot, sleep/wake, update, uninstall, broader crash,
    and external network-tool coexistence scenarios on disposable AMD64 and
    ARM64 Windows.
