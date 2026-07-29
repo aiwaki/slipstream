@@ -616,11 +616,15 @@ therefore stays phased and closed to production traffic:
    stack/connector suite before its existing real Wintun lifecycle,
    capture/injection, coexistence, and cleanup proofs. Subsequent additive gates
    now prove IPv4 and IPv6 UDP plus IPv4 TCP from real OS sockets through
-   Wintun and the selected stack with exact cleanup. Disposable resilience
-   qualification in step 6 remains the next independent gate.
-6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
-   external network-tool coexistence on disposable AMD64 and ARM64 Windows.
-7. Compose packet effects into the production SCM host only after every earlier
+   Wintun and the selected stack with exact cleanup.
+6. Freeze a read-only Windows route-change observer and qualify native
+   exact-route churn on disposable AMD64 and ARM64. A later observed route
+   change must invalidate the active transition token; cleanup must remove only
+   the two test-owned exact routes and restore the original route identity.
+7. Qualify the remaining reboot, sleep/wake, update, uninstall, broader crash,
+   and external network-tool coexistence scenarios on disposable AMD64 and
+   ARM64 Windows.
+8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
 
