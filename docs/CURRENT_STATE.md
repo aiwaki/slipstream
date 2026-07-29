@@ -8,18 +8,27 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Pending M4 gate: PR #273 freezes disposable same-name Windows
-service-generation recovery. Generation 1 and generation 2 use the same exact
-owned SCM name and runtime root but byte-distinct payloads.
-Generation 2 may start only after generation 1 proves SCM, installed payload,
-and durable lifecycle records are absent; an independent sentinel must survive
-both cycles. The native AMD64 and ARM64 workflow is the authority for this
-gate. This pending checkpoint is not exact-main evidence and must be replaced
-with the merge SHA and exact-main run/job IDs after the PR passes and merges.
-The gate does not compose production networking or mutate routes, DNS,
-proxy/PAC/VPN, drivers, or external services.
-
 Last exact-main evidence audit: 2026-07-30, through product merge
+`7f265549d727db93b8c0a7861808cc5f59784527` (PR #273). Exact-main native
+AMD64/ARM64 run `30497886810`, CI `30497886818`, and audit `30497886814`
+passed on that SHA. Native jobs `90730822239` and `90730822057` proved
+disposable same-name Windows service-generation recovery: generation 1 and
+generation 2 used the same exact owned SCM name and runtime root but
+byte-distinct payloads. Generation 2 started only after generation 1 proved
+SCM, installed payload, and durable lifecycle records absent; an independent
+sentinel survived both cycles. CI jobs `90730821810`, `90730821828`, and
+`90730821876` repeated the full Windows contract, packaged macOS lifecycle,
+and common checks.
+
+The first reviewed PR head was correctly rejected on both native architectures:
+the exact-absence helper matched the struct-like
+`WindowsServiceObservation::Absent` as a unit variant. PR #273 changed the
+helper to compare against the canonical `WindowsServiceObservation::absent()`
+value and then passed both native architectures without reruns. The gate did
+not compose production networking or mutate routes, DNS, proxy/PAC/VPN,
+drivers, or external services.
+
+Previous exact-main evidence audit: 2026-07-30, through product merge
 `3a26653a2b221d757834cdb8ceb53f95c4589906` (PR #271). Exact-main native
 AMD64/ARM64 run `30494843668`, CI `30494843656`, and audit `30494843671`
 passed on that SHA. The merge freezes a disposable same-name Wintun
@@ -323,7 +332,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Ordinary v1/v2 gates pass; one account-backed protected qualification remains | PRs #219-#258 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Protected run `30429690683` passed packaged resources, the daemon-free boundary, all three owned-Geph payload phases, unchanged system network state, and final cleanup. Its second browser scenario did not receive EOF because the disposable HTTP/1.1 fixture kept the socket alive after a deliberately short body; no artifact or install followed. PR #258 fixed that fixture and added a real TLS keep-alive `IncompleteRead` regression, then merged as `90c07771babfd32e797fdb8250911ca922274b4d`; exact-main CI `30431655863` and audit `30431655851` pass. Exactly one protected two-scenario run remains after the next UTC-day account budget reset for the then-current live `main`; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | IPv4/IPv6 UDP and IPv4 TCP Wintun-to-selected-stack gates are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PR #267 merged as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`; exact-main native AMD64/ARM64 run `30481891835`, CI `30481892061`, and audit `30481891839` passed. The evaluation stack remains development-only and the production SCM host remains no-network. The next gate is bounded production service-host composition with exact compensation; Android/Linux adapters and the iOS feasibility gate remain later. |
+| M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, and service-generation resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PR #267 merged packet handoff as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`; PR #269 added exact route-change invalidation as `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`; PR #271 added same-name Wintun capture-generation recovery as `3a26653a2b221d757834cdb8ceb53f95c4589906`; and PR #273 added same-name SCM service-generation recovery as `7f265549d727db93b8c0a7861808cc5f59784527`. The latest exact-main native AMD64/ARM64 run is `30497886810`, with CI `30497886818` and audit `30497886814`. The evaluation stack remains development-only and the production SCM host remains no-network. Reboot, sleep/wake, broader crash recovery, production-host generation replacement and uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
 
 The exact-main
 [CI run 30230210126](https://github.com/aiwaki/slipstream/actions/runs/30230210126)
