@@ -400,20 +400,32 @@ mod tests {
     use super::*;
     use crate::service_host::WindowsServiceManagementCommandKind;
     use crate::service_lifecycle::{
-        WindowsServiceDecision, WindowsServiceObservedState, WindowsServiceOwnership,
+        WindowsServiceDecision, WindowsServiceDesiredState, WindowsServiceIdentity,
+        WindowsServiceObservedState, WindowsServiceOwnership,
+    };
+    use crate::service_lifecycle_state::{
+        WindowsServiceLifecycleStateAssessment, WindowsServiceLifecycleStateEffects,
+        WINDOWS_SERVICE_ACTIVE_INSTALL_FILE_NAME,
     };
     use crate::service_observer::{
         WindowsScmObserver, WindowsScmState, WindowsServiceObservation, WindowsServiceObserver,
     };
-    use crate::service_ownership::windows::machine_owner_record_path;
+    use crate::service_ownership::windows::{
+        machine_owner_record_path, WindowsServiceOwnershipCollector,
+    };
     use std::fs;
+    use std::io::Write;
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Instant;
 
     const HOST_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI";
+    const HOST_GENERATION_CI_ENV: &str =
+        "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_GENERATION_RECOVERY_CI";
     const HOST_PATH_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST";
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
+    const PAYLOAD_DIRECTORY: &str = "payloads";
+    const PAYLOAD_FILE_PREFIX: &str = "slipstream-service-";
 
     #[test]
     fn production_host_is_self_managing_idempotent_and_stops_through_scm() {
@@ -517,6 +529,200 @@ mod tests {
         );
         assert!(repeated_uninstall.lifecycle.accepted);
         fs::remove_dir_all(root).expect("remove disposable terminal intent");
+    }
+
+    #[test]
+    fn production_host_generation_recovery_uses_exact_cli_uninstall() {
+        if std::env::var_os(HOST_GENERATION_CI_ENV).is_none() {
+            return;
+        }
+
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "the disposable runner must not already contain the Slipstream service"
+        );
+        let first_host = PathBuf::from(
+            std::env::var_os(HOST_PATH_ENV)
+                .expect("the production Windows service host path must be provided"),
+        );
+        let owner_record_path = machine_owner_record_path().expect("resolve machine owner record");
+        let root = owner_record_path
+            .parent()
+            .expect("owner record must have a parent")
+            .to_path_buf();
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale production-host state");
+        }
+
+        let scratch = std::env::temp_dir().join(format!(
+            "slipstream-production-host-generation-{}",
+            std::process::id()
+        ));
+        if scratch.exists() {
+            fs::remove_dir_all(&scratch).expect("remove stale generation scratch");
+        }
+        fs::create_dir(&scratch).expect("create generation scratch");
+        let independent_owner = scratch.join("independent-owner.sentinel");
+        let independent_evidence = b"independent owner must survive both production generations";
+        fs::write(&independent_owner, independent_evidence)
+            .expect("write independent-owner sentinel");
+
+        let second_host = scratch.join("slipstream-windows-service-generation-2.exe");
+        fs::copy(&first_host, &second_host).expect("copy generation-2 production host");
+        let mut second_file = fs::OpenOptions::new()
+            .append(true)
+            .open(&second_host)
+            .expect("open generation-2 production host");
+        second_file
+            .write_all(b"\nslipstream-production-host-generation-2\n")
+            .expect("make generation-2 production host byte-distinct");
+        second_file
+            .sync_all()
+            .expect("flush generation-2 production host");
+        drop(second_file);
+
+        let first_identity = production_identity(&first_host, 1);
+        let second_identity = production_identity(&second_host, 2);
+        assert_eq!(first_identity.service_name, second_identity.service_name);
+        assert_ne!(
+            first_identity.executable_sha256, second_identity.executable_sha256,
+            "production generations must use byte-distinct payloads"
+        );
+
+        let first_install = run_host(&first_host, &["manage", "install", "--generation", "1"]);
+        assert_eq!(
+            first_install.lifecycle.decision,
+            WindowsServiceDecision::Installed
+        );
+        assert!(first_install.lifecycle.accepted);
+        verify_production_generation_active(&root, &first_identity);
+
+        let first_uninstall = run_host(&first_host, &["manage", "uninstall"]);
+        assert_eq!(
+            first_uninstall.lifecycle.decision,
+            WindowsServiceDecision::Uninstalled
+        );
+        assert!(first_uninstall.lifecycle.accepted);
+        verify_production_generation_absent(&root, &first_identity);
+        assert_eq!(
+            fs::read(&independent_owner).expect("read intermediate independent-owner sentinel"),
+            independent_evidence
+        );
+
+        let second_install = run_host(&second_host, &["manage", "install", "--generation", "2"]);
+        assert_eq!(
+            second_install.lifecycle.decision,
+            WindowsServiceDecision::Installed
+        );
+        assert!(second_install.lifecycle.accepted);
+        verify_production_generation_active(&root, &second_identity);
+
+        let second_uninstall = run_host(&second_host, &["manage", "uninstall"]);
+        assert_eq!(
+            second_uninstall.lifecycle.decision,
+            WindowsServiceDecision::Uninstalled
+        );
+        assert!(second_uninstall.lifecycle.accepted);
+        verify_production_generation_absent(&root, &second_identity);
+        assert_eq!(
+            fs::read(&independent_owner).expect("read final independent-owner sentinel"),
+            independent_evidence
+        );
+
+        fs::remove_dir_all(&root).expect("remove production-host terminal intent");
+        fs::remove_dir_all(&scratch).expect("remove production-host generation scratch");
+    }
+
+    fn production_identity(host: &Path, generation: u64) -> WindowsServiceIdentity {
+        WindowsServiceIdentity {
+            service_name: WINDOWS_SERVICE_NAME.to_owned(),
+            executable_sha256: hash_source(host).expect("hash production service host"),
+            generation,
+        }
+    }
+
+    fn installed_payload_path(root: &Path, identity: &WindowsServiceIdentity) -> PathBuf {
+        root.join(PAYLOAD_DIRECTORY).join(format!(
+            "{PAYLOAD_FILE_PREFIX}{}.exe",
+            identity.executable_sha256
+        ))
+    }
+
+    fn verify_production_generation_active(root: &Path, identity: &WindowsServiceIdentity) {
+        let snapshot = wait_for_state(WindowsScmState::Running);
+        assert_eq!(snapshot.service_name, identity.service_name);
+
+        let ownership = WindowsServiceOwnershipCollector::new().assess();
+        assert_eq!(ownership.ownership, WindowsServiceOwnership::Owned);
+        assert_eq!(ownership.identity.as_ref(), Some(identity));
+
+        match WindowsServiceLifecycleStateEffects::new()
+            .collect()
+            .assess()
+        {
+            WindowsServiceLifecycleStateAssessment::Stable {
+                intent: Some(intent),
+                active_install: Some(active_install),
+            } => {
+                assert_eq!(intent.desired, WindowsServiceDesiredState::Running);
+                assert_eq!(intent.identity.as_ref(), Some(identity));
+                assert_eq!(&active_install.identity, identity);
+            }
+            evidence => panic!("production generation is not durably active: {evidence:?}"),
+        }
+
+        let payload = installed_payload_path(root, identity);
+        assert!(payload.is_file(), "installed production payload is missing");
+        assert_eq!(
+            hash_source(&payload).expect("hash installed production payload"),
+            identity.executable_sha256
+        );
+        assert!(machine_owner_record_path()
+            .expect("resolve active owner record")
+            .is_file());
+        assert!(root
+            .join(WINDOWS_SERVICE_ACTIVE_INSTALL_FILE_NAME)
+            .is_file());
+    }
+
+    fn verify_production_generation_absent(root: &Path, identity: &WindowsServiceIdentity) {
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "production generation remained in SCM"
+        );
+        assert_eq!(
+            WindowsServiceOwnershipCollector::new().assess().ownership,
+            WindowsServiceOwnership::Absent
+        );
+        assert!(
+            !machine_owner_record_path()
+                .expect("resolve absent owner record")
+                .exists(),
+            "production owner record remained after uninstall"
+        );
+        assert!(
+            !installed_payload_path(root, identity).exists(),
+            "production payload remained after uninstall"
+        );
+        assert!(
+            !root.join(WINDOWS_SERVICE_ACTIVE_INSTALL_FILE_NAME).exists(),
+            "active-install record remained after uninstall"
+        );
+        match WindowsServiceLifecycleStateEffects::new()
+            .collect()
+            .assess()
+        {
+            WindowsServiceLifecycleStateAssessment::Stable {
+                intent: Some(intent),
+                active_install: None,
+            } => {
+                assert_eq!(intent.desired, WindowsServiceDesiredState::Absent);
+                assert_eq!(intent.identity.as_ref(), Some(identity));
+            }
+            evidence => panic!("production generation is not durably absent: {evidence:?}"),
+        }
     }
 
     fn run_host(host: &Path, arguments: &[&str]) -> WindowsServiceManagementResultV1 {
