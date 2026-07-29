@@ -8,6 +8,17 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
+Pending M4 gate: PR #273 freezes disposable same-name Windows
+service-generation recovery. Generation 1 and generation 2 use the same exact
+owned SCM name and runtime root but byte-distinct payloads.
+Generation 2 may start only after generation 1 proves SCM, installed payload,
+and durable lifecycle records are absent; an independent sentinel must survive
+both cycles. The native AMD64 and ARM64 workflow is the authority for this
+gate. This pending checkpoint is not exact-main evidence and must be replaced
+with the merge SHA and exact-main run/job IDs after the PR passes and merges.
+The gate does not compose production networking or mutate routes, DNS,
+proxy/PAC/VPN, drivers, or external services.
+
 Last exact-main evidence audit: 2026-07-30, through product merge
 `3a26653a2b221d757834cdb8ceb53f95c4589906` (PR #271). Exact-main native
 AMD64/ARM64 run `30494843668`, CI `30494843656`, and audit `30494843671`

@@ -526,13 +526,8 @@ mod tests {
         let first_effects =
             run_owned_generation(&source, &destination, &first_identity, "generation 1")
                 .expect("qualify service generation 1");
-        verify_terminal_absence(&first_effects, &first_identity)
-            .expect("generation 1 exact absence");
-        assert_eq!(
-            WindowsScmObserver::new().observe(),
-            Ok(WindowsServiceObservation::absent()),
-            "generation 1 SCM state must be absent before generation 2"
-        );
+        verify_generation_absent_before_reuse(&first_effects, &first_identity)
+            .expect("generation 1 exact absence before reuse");
         assert_eq!(
             fs::read(&independent_owner).expect("read intermediate independent-owner sentinel"),
             independent_evidence
@@ -558,6 +553,22 @@ mod tests {
         );
 
         fs::remove_dir_all(&root).expect("remove disposable service-generation root");
+    }
+
+    fn verify_generation_absent_before_reuse(
+        effects: &WindowsServiceNativeEffects,
+        identity: &WindowsServiceIdentity,
+    ) -> Result<(), String> {
+        verify_terminal_absence(effects, identity)?;
+        match WindowsScmObserver::new().observe() {
+            Ok(WindowsServiceObservation::Absent) => Ok(()),
+            Ok(observation) => Err(format!(
+                "service generation remained in SCM before name reuse: {observation:?}"
+            )),
+            Err(error) => Err(format!(
+                "service generation SCM absence observation failed: {error}"
+            )),
+        }
     }
 
     fn run_owned_generation(
