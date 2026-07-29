@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_userspace_stack_connector_composition",
+  "contract_version": 1,
+  "scope": "test_only_in_memory_and_numeric_loopback",
+  "predecessors": {
+    "selected_stack_effect": {
+      "contract": "slipstream.windows_userspace_stack_effect",
+      "contract_version": 1
+    },
+    "native_connector_effect": {
+      "contract": "slipstream.windows_userspace_native_connector_effect",
+      "contract_version": 1
+    },
+    "flow_binding": {
+      "contract": "slipstream.windows_userspace_flow_binding",
+      "contract_version": 1
+    }
+  },
+  "bounds": {
+    "max_effect_payload_bytes": 512,
+    "max_backend_read_frames": 8,
+    "max_backend_read_bytes": 4096,
+    "max_backend_read_frame_bytes": 512
+  },
+  "qualified_properties": {
+    "selected_stack_output_reaches_connector_queue": true,
+    "connector_queue_receives_exact_payload_once": true,
+    "connector_backpressure_rejects_before_stack_mutation": true,
+    "backend_read_is_retained_before_stack_delivery": true,
+    "backend_read_failure_before_progress_retains_no_frame": true,
+    "selected_stack_failure_retains_complete_backend_frame": true,
+    "backend_read_retry_commits_once": true,
+    "flow_identity_is_rechecked_in_both_directions": true,
+    "backend_identity_is_rechecked_in_both_directions": true,
+    "transport_identity_is_rechecked_in_both_directions": true,
+    "tcp_and_udp_are_bounded": true,
+    "local_bypass_rejects_geph": true,
+    "discord_and_youtube_reject_geph": true,
+    "udp_rejects_geph": true
+  },
+  "invariants": {
+    "test_dependency_only": true,
+    "numeric_loopback_only": true,
+    "frozen_stack_effect_modified": false,
+    "frozen_native_connector_effect_modified": false,
+    "frozen_flow_binding_modified": false,
+    "production_service_host_composition": false,
+    "wintun_loading": false,
+    "adapter_or_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "process_or_service_effect": false,
+    "default_route_mutation": false,
+    "external_endpoint": false
+  },
+  "remaining_gates": {
+    "disposable_amd64_packet_flow": "required",
+    "disposable_arm64_packet_flow": "required",
+    "production_service_host_composition": "required"
+  }
+}

@@ -602,10 +602,14 @@ therefore stays phased and closed to production traffic:
    retention after partial progress and complete retention after a
    failure-before-progress; numeric loopback UDP proves one complete datagram.
    Exact flow key, backend, and transport identity are revalidated before every
-   write, and the route edge rejects Geph for Discord, YouTube, and UDP. The next subgate is
-   selected-stack-to-connector composition plus backend reads, followed by
-   packet-flow qualification on disposable AMD64/ARM64. Production-host
-   composition remains a later independent gate.
+   write, and the route edge rejects Geph for Discord, YouTube, and UDP. An
+   additive composition now proves selected-stack output reaches that exact
+   connector queue and that bounded native backend reads are retained until the
+   selected stack accepts one complete frame. Reader and writer flow, backend,
+   transport, and sequence identity are revalidated before mutation; native
+   read or selected-stack failure retains the retryable boundary on its current
+   owner. The next subgate is packet-flow qualification on disposable
+   AMD64/ARM64. Production-host composition remains a later independent gate.
 6. Qualify crash, reboot, sleep/wake, route churn, update, uninstall, and
    external network-tool coexistence on disposable AMD64 and ARM64 Windows.
 7. Compose packet effects into the production SCM host only after every earlier
