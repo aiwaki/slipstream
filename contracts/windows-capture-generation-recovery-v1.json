@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_capture_generation_recovery",
+  "contract_version": 1,
+  "invariants": {
+    "same_owned_adapter_name": true,
+    "capture_generations": [1, 2],
+    "generation_one_absent_before_generation_two": true,
+    "owned_exact_route_removed_between_generations": true,
+    "owned_address_removed_between_generations": true,
+    "owned_session_adapter_removed_between_generations": true,
+    "baseline_route_identity_preserved": true,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "external_adapter_or_route_mutation": false,
+    "process_or_service_effect": false,
+    "driver_install_or_removal": false,
+    "production_service_host_composition": false
+  },
+  "disposable_native_qualification": {
+    "architectures": ["amd64", "arm64"],
+    "route_family": "ipv4",
+    "route_scope": "single_exact_host",
+    "adapter_name_reused": true,
+    "intermediate_absence_required": true,
+    "final_absence_required": true
+  }
+}

@@ -8,6 +8,16 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
+PR #271 is the current M4 resilience gate on head
+`dc2bd7960205030bcff724429caf48fe4a214095`. It freezes a disposable
+same-name Wintun capture-generation contract and requires generation 1 to
+remove its exact route, address, session, and adapter before generation 2 may
+reuse that owned name. The pre-existing system route must match before,
+between, and after both cycles. The gate does not reinstall the driver, mutate
+default routes, DNS, proxy/PAC/VPN, or external network owners, and does not
+compose production Windows networking. It remains proposed until the exact
+native AMD64 and ARM64 PR jobs pass.
+
 Last exact-main evidence audit: 2026-07-29, through product merge
 `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5` (PR #269). Exact-main native
 AMD64/ARM64 run `30490498603`, CI `30490498586`, and audit `30490498662`

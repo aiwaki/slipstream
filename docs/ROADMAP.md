@@ -626,7 +626,11 @@ therefore stays phased and closed to production traffic:
    `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`.
 7. Qualify the remaining reboot, sleep/wake, update, uninstall, broader crash,
    and external network-tool coexistence scenarios on disposable AMD64 and
-   ARM64 Windows.
+   ARM64 Windows. The first bounded subgate reuses one exact owned Wintun name
+   across capture generations 1 and 2 only after proving the first generation's
+   route, address, session, and adapter absent, with identical system-route
+   evidence before, between, and after both cycles. Driver install/removal and
+   production composition remain outside this subgate.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
