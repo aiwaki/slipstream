@@ -946,12 +946,18 @@ YouTube, and UDP remain excluded from Geph. An additive composition now proves
 selected-stack output reaches the connector queue and retains bounded native
 backend reads until the selected stack accepts one exact frame. Flow, backend,
 transport, and reverse sequence identity are revalidated before mutation, and
-pre-mutation failures preserve the current byte owner. The next safe M4 gate is
-a test-only Wintun-to-stack packet handoff on both disposable native
-architectures. It may join captured packet bytes to the already-qualified
-selected stack and connector ownership boundaries, but it must not compose
-networking into the production SCM host. Production-host composition remains a
-later independent gate.
+pre-mutation failures preserve the current byte owner. PR #263 adds the first
+test-only Wintun-to-stack packet handoff: a real OS IPv4 UDP request crosses an
+exact owned route into Wintun, enters the pinned selected stack as the exact
+captured Layer 3 packet, and returns to the OS only from the stack-emitted
+response packet. The boundary is fixed-MTU, fixed-queue, bounded-poll, and
+fail-closed. First-head native run `30470855189` passed on both AMD64 and ARM64,
+CI `30470854996` passed including the packaged lifecycle, and audit
+`30470853477` passed. The implementation remains a development-only
+qualification dependency and does not compose networking into the production
+SCM host. Exact-current-head review gates and exact-main evidence remain
+pending. The next independent M4 gates are IPv6 UDP handoff, TCP handoff, and
+only then production-host composition.
 
 ## External Gates
 
