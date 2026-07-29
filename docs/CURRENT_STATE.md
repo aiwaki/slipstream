@@ -897,8 +897,10 @@ the still-opening accepted data-plane session rather than an unrelated raw ID,
 backend opening revalidates a fresh capability for that same current session,
 retained command batches resume from an exact failure cursor without replay,
 and a rejected reused request cancels only its exact new data-plane session.
-Required CI runs this pure contract; the native AMD64/ARM64 workflow currently
-requalifies the existing Wintun gates rather than packet-flow v1 itself.
+Required CI and the disposable native AMD64/ARM64 workflow run this complete
+packet-flow contract before the existing Wintun gates. Exact main
+`c154f2d880d1d4aad34c83c813a03f11006b5d4e` passed that matrix in
+[run 30465700678](https://github.com/aiwaki/slipstream/actions/runs/30465700678).
 Capture v4 and userspace-flow-binding v1 now retain and validate the original
 client source address/port without patching frozen capture v3 or packet-flow
 v1. The binding requires exact generation, flow ID, transport, destination
@@ -945,8 +947,11 @@ selected-stack output reaches the connector queue and retains bounded native
 backend reads until the selected stack accepts one exact frame. Flow, backend,
 transport, and reverse sequence identity are revalidated before mutation, and
 pre-mutation failures preserve the current byte owner. The next safe M4 gate is
-disposable AMD64/ARM64 packet-flow qualification. No implementation may enter
-the production host until those gates pass separately.
+a test-only Wintun-to-stack packet handoff on both disposable native
+architectures. It may join captured packet bytes to the already-qualified
+selected stack and connector ownership boundaries, but it must not compose
+networking into the production SCM host. Production-host composition remains a
+later independent gate.
 
 ## External Gates
 
