@@ -54,8 +54,8 @@ The next M4 work is the remaining disposable Windows resilience
 qualification: reboot, sleep/wake, update, uninstall, and broader external
 network-tool coexistence, plus any crash scenarios not already covered by the
 current child-termination gates.
-The current bounded candidate applies the already-qualified same-name service
-generation invariant to the real production Windows host. Two byte-distinct
+PR #275 is the current bounded candidate applying the already-qualified
+same-name service generation invariant to the real production Windows host. Two byte-distinct
 copies of `slipstream-windows-service.exe` must use their public
 `manage install/uninstall` CLI against the same exact SCM name and machine
 runtime root. Generation 2 is forbidden until generation 1 proves its SCM
