@@ -8,18 +8,28 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: make the exact Windows production host independent of
-the machine-installed MSVC runtime, prove the correction on native AMD64 and
-ARM64, then repeat the exact-main ARM64 physical reboot transaction on the
-disposable Parallels Windows 11 host. Exact-main run `30546036086` on
-`be460249494da8439ca0a4787cc1465263a06a91` passed both native jobs and
-published the commit-bound ARM64 bundle. Its manifest, sizes, and SHA-256
-values matched after download and again inside the guest. The first guest
-`prepare` then failed before installation with Windows status `0xC0000135`;
-the clean guest has no `vcruntime140.dll`. The harness left no SCM service,
-product root, owner record, active-install record, payload, transaction, or
-sentinel, and the read-only DNS/proxy state remained unchanged. Do not reboot
-or claim the physical gate from that artifact.
+Current M4 next action: correct the exact post-reboot payload-removal race,
+prove it on native AMD64 and ARM64, then repeat the exact-main ARM64 physical
+reboot transaction from the clean disposable-host snapshot. PR #286 merged the
+static MSVC CRT correction as `19f2a263d3ccb686128675d1ff387fde771a3846`.
+Exact-main CI `30548867352`, audit `30548869879`, and native run
+`30548867249` passed; jobs `90892002017` (AMD64) and `90892002053` (ARM64)
+both published commit-bound bundles. ARM64 artifact `8762073225` matched its
+manifest, sizes, and SHA-256 values on the host and inside the guest.
+
+The clean Parallels Windows 11 ARM64 guest then passed `prepare`: the exact
+service started automatically, retained generation `30548867249`, and wrote
+protected transaction `c13fb3cb-658b-480f-bcec-a2977716a51e`. A real restart
+changed the service PID from `2352` to `3344`, proving automatic post-boot
+execution. `resume` exposed a separate uninstall race: SCM had removed the
+service and owner record while the exiting service process still held the
+exact executable image, leaving the active-install record and payload behind.
+The controller correctly refused to reinterpret that half-state. After
+re-verifying the active record and payload SHA-256, rollback removed only
+those exact owned remnants and retained the durable absent intent plus the
+independent sentinel. Guest DNS remained `10.211.55.1`, WinHTTP remained
+direct, and host DNS remained `111.88.96.50` / `111.88.96.51`. Do not claim
+the physical reboot gate from this run.
 
 Every `main` push runs the unfiltered native workflow; PR jobs never publish a
 bundle. Before upload, the exact release production host is built without
