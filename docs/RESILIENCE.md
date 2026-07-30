@@ -110,6 +110,23 @@ the safe status at the incoming DNS query, requires a later target to activate,
 checks that no resolver helper survived, and restores the resolver configuration
 before continuing the browser and uninstall lifecycle.
 
+### Windows Production Host Evidence
+
+The production-host generation gate exercises the public
+`slipstream-windows-service.exe manage install/uninstall` path on native AMD64
+and ARM64 runners. It proves that a byte-distinct second generation cannot
+reuse the exact SCM name and machine runtime root until the first generation's
+SCM registration, payload, owner record, and active-install record are absent.
+An independently owned sentinel inside the secured runtime root must survive
+both uninstall cycles.
+
+The first coexistence-sentinel revision failed safely: the fixture pre-created
+the production runtime root, leaving an ACL that the lifecycle-state writer
+correctly rejected as untrusted on both architectures. The accepted gate lets
+the real installer create and secure the root before placing the independent
+sentinel. This preserves the ACL guard instead of weakening it to accommodate
+the test.
+
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`
 manual workflow, so account credentials are never available to pull-request
