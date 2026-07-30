@@ -1850,6 +1850,52 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             for directory in registration.created_directories:
                 self.assertFalse(directory.exists())
 
+    def test_chrome_for_testing_cleanup_preserves_nonempty_ancestor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir(mode=0o700)
+            expected_executable = root / "native-host"
+            expected_executable.write_bytes(b"host")
+            source = root / "native-host.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "name": smoke.NATIVE_HOST_NAME,
+                        "path": str(expected_executable),
+                        "type": "stdio",
+                        "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+            registration = smoke._install_chrome_for_testing_native_host(
+                home,
+                source,
+                os.getuid(),
+                os.getgid(),
+                expected_executable,
+            )
+            google_directory = (
+                home / "Library/Application Support/Google"
+            )
+            independent = google_directory / "independent"
+            independent.write_bytes(b"preserve")
+
+            smoke._remove_chrome_for_testing_native_host(
+                registration,
+                expected_executable,
+                os.getuid(),
+            )
+
+            self.assertFalse(registration.path.exists())
+            self.assertEqual(independent.read_bytes(), b"preserve")
+            self.assertTrue(google_directory.exists())
+            self.assertFalse(
+                google_directory.joinpath("ChromeForTesting").exists()
+            )
+
     def test_native_manifest_must_be_private_exact_origin_and_packaged_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

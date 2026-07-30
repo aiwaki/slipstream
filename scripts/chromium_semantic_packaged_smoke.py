@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 import hashlib
 import http.server
 import json
@@ -1726,7 +1727,12 @@ def _remove_chrome_for_testing_native_host(
                 f"refusing to remove an unowned Chrome for Testing directory: "
                 f"{directory}"
             )
-        directory.rmdir()
+        try:
+            directory.rmdir()
+        except OSError as exc:
+            if exc.errno == errno.ENOTEMPTY:
+                break
+            raise
 
 
 def _run_chrome(

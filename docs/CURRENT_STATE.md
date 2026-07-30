@@ -65,6 +65,12 @@ any pre-existing file or uncontrolled directory, and removes only its exact
 manifest and newly created empty directories after browser shutdown. Protected
 qualification still copies the packaged manifest and executable identity; the
 ordinary contract uses its bounded fixed-response stub.
+Run `30571120394` reached exact native-host cleanup, confirming that the
+browser-specific registration was discovered. Its cleanup then tried to remove
+the shared `Google` ancestor after Chrome had populated independent contents.
+Cleanup now removes the exact manifest and each empty directory it created,
+then stops at the first non-empty owner-controlled ancestor without deleting or
+rewriting independent browser data.
 It disables proxy use for HTTP control requests, validates the WebSocket
 upgrade and exact loopback target, bounds every file, frame, and JSON response,
 accepts no redirect, and retains the
