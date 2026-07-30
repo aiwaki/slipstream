@@ -13,11 +13,40 @@ on disposable Windows, still without production networking composition.
 Updater/uninstall orchestration remains the following bounded gate. The exact
 ARM64 physical reboot lifecycle gate is complete.
 
-Current user-facing priority: complete the generic unknown-host bounded-timeout
-fallback on branch `codex/unknown-stall-fallback`, merge only after required CI,
+Current user-facing priority: complete the generic unknown-host convergence fix
+on branch `codex/unknown-fallback-convergence`, merge only after required CI,
 then run exactly one protected owned-Geph qualification for that new exact
 `main` SHA. A primary-Mac install may use only the artifact from that successful
 run and must retain the same immediate rollback rule.
+
+PR #290 merged the bounded unknown-route timeout correction as exact main
+`a4628c7301eee187c2dbc300b62adac05ff29846`. CI `30581889243`, audit
+`30581889244`, and the sole protected account-backed qualification
+`30582540761` passed. Artifact `8775261865` matched its GitHub and inner ZIP
+SHA-256 values and was eligible for one controlled workstation transaction.
+Transaction `1FD68287-13D3-44EF-9E58-AF0B25617C80` installed the exact daemon
+SHA-256 `4ad1f755a81d690d1f065d568a97eaad9da49fd26f040b243f83134219c88b5a`,
+reached active StatusV2 with owned Geph up, and preserved DNS
+`111.88.96.50` / `111.88.96.51`, proxy/PAC, global PF, and external anchors
+through installation. The first mandatory Modrinth smoke then reached the
+original numeric destination but produced zero TLS bytes before the client's
+15-second connect bound. Immediate exact rollback removed the root daemon,
+listener, private anchor, token, status, socket, attestation, and witness,
+restored the previous app/runtime and owned Geph LaunchAgent, and proved DNS
+and proxy/PAC byte-identical to the pre-install snapshot.
+
+Code tracing found a second generic convergence defect. The complete safe
+promotion proof requires system, app-owned Xbox DNS, and two distinct local
+strategy zero-payload outcomes. Production `GENERAL_STRATS` contains six
+strategies, but `_handle_impl` kept running the remaining four after
+`note_zero_payload_route_failure()` had already completed the proof, delaying
+the owned-Geph attempt beyond the client bound. The prior regression replaced
+the production order with exactly two strategies and masked that delay. The
+current correction stops only the remaining unknown-host local probes when the
+complete proof is returned, then uses the existing ownership, network-wide,
+payload, and exact-host Geph gates. Protected/direct/static routes, partial
+race evidence, cancellation, Discord, and YouTube remain non-promoting. The old
+qualified artifact must not be reinstalled after this source change.
 
 Exact main `60811c1ddeccecb15687978f3bca62d15f4b882c` passed CI
 `30573765421`, audit `30573765030`, and protected account-backed qualification
@@ -31,7 +60,7 @@ and runtime and proved the exact root daemon, listener, private PF anchor,
 token, and status absent. The previous tray and its separately owned Geph
 LaunchAgent were restored; no root transparent interception remains.
 
-The concrete defect is in the generic unknown-host pre-payload ladder. A
+The preceding defect was in the generic unknown-host pre-payload ladder. A
 bounded direct or local read timeout published `pending`, the handler committed
 that silent stream, and the same request could not continue to the next route.
 The correction treats an owned bounded timeout as replay-safe only while zero

@@ -9178,10 +9178,16 @@ async def _handle_impl(reader, writer):
                         attempted,
                     )
                 ):
-                    note_zero_payload_route_failure(
+                    local_proof_complete = note_zero_payload_route_failure(
                         host,
                         f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{strat['name']}",
                     )
+                    if local_proof_complete:
+                        # Two distinct bounded local strategies, the system
+                        # route, and app-owned DNS already form the complete
+                        # replay-safe proof. Do not make the client wait for
+                        # every remaining strategy before trying owned Geph.
+                        break
             if result or attempts >= max_attempts:
                 break
         if result:
