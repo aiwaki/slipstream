@@ -8,28 +8,43 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: correct the exact post-reboot payload-removal race,
-prove it on native AMD64 and ARM64, then repeat the exact-main ARM64 physical
-reboot transaction from the clean disposable-host snapshot. PR #286 merged the
-static MSVC CRT correction as `19f2a263d3ccb686128675d1ff387fde771a3846`.
-Exact-main CI `30548867352`, audit `30548869879`, and native run
-`30548867249` passed; jobs `90892002017` (AMD64) and `90892002053` (ARM64)
-both published commit-bound bundles. ARM64 artifact `8762073225` matched its
-manifest, sizes, and SHA-256 values on the host and inside the guest.
+Current M4 next action: freeze and prove production-host sleep/wake recovery
+on disposable Windows, still without production networking composition.
+Updater/uninstall orchestration remains the following bounded gate. The exact
+ARM64 physical reboot lifecycle gate is complete.
 
-The clean Parallels Windows 11 ARM64 guest then passed `prepare`: the exact
-service started automatically, retained generation `30548867249`, and wrote
-protected transaction `c13fb3cb-658b-480f-bcec-a2977716a51e`. A real restart
-changed the service PID from `2352` to `3344`, proving automatic post-boot
-execution. `resume` exposed a separate uninstall race: SCM had removed the
-service and owner record while the exiting service process still held the
-exact executable image, leaving the active-install record and payload behind.
-The controller correctly refused to reinterpret that half-state. After
-re-verifying the active record and payload SHA-256, rollback removed only
-those exact owned remnants and retained the durable absent intent plus the
-independent sentinel. Guest DNS remained `10.211.55.1`, WinHTTP remained
-direct, and host DNS remained `111.88.96.50` / `111.88.96.51`. Do not claim
-the physical reboot gate from this run.
+Current user-facing priority: after this evidence checkpoint merges and the new
+live `main` has green exact-main CI and audit, verify that no protected
+owned-Geph qualification already exists for that SHA, then dispatch it exactly
+once. Install on the primary Mac only if the complete account-backed payload,
+both Chromium semantic scenarios, exact cleanup, unchanged system network
+state, and exact artifact publication all pass. Use only that run's artifact
+and roll back immediately on the first workstation smoke failure.
+
+PR #287 merged the bounded payload image-release correction as
+`8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI
+`30554495633`, audit `30554495985`, and native run `30554494634` passed.
+Native jobs `90911349617` (AMD64) and `90911349663` (ARM64) both ran the
+delayed exact-payload-release regression and the release-host
+`prepare -> cleanup` preflight. ARM64 artifact `8764371538`, selected by that
+run, commit, and architecture, matched its manifest, sizes, and SHA-256 values
+on the host and inside the guest.
+
+From clean snapshot `{2bb76695-9612-4180-ad43-9e19f0fcc11d}`, protected
+transaction `2ba05071-ac83-44a7-ad5f-259f35579962` installed generation
+`30554494634` with exact executable SHA-256
+`02a4e1b6b1c5cdebed5c794c05ade0f166eb2e78f9046b0b526b9fb60b828440`.
+A real restart changed boot identity and service PID from `5984` to `3348`;
+the new process was created inside the new boot. `resume` returned
+`outcome=passed` and `exact_uninstall_verified=true`. Independent checks found
+the SCM service, owner record, active-install record, and exact payload absent;
+the payload directory was empty and durable intent was `absent` for the same
+identity. The harness verified sentinel SHA-256
+`049a55607e7921e71a954200b3219272634a53b72d597e36d2b9cdde368bc044`
+before removing its temporary sentinel. Guest DNS remained `10.211.55.1`,
+WinHTTP remained direct, host DNS remained `111.88.96.50` /
+`111.88.96.51`, and host PAC remained disabled. This proves the production
+service lifecycle across a real reboot, not production Windows networking.
 
 Every `main` push runs the unfiltered native workflow; PR jobs never publish a
 bundle. Before upload, the exact release production host is built without
@@ -95,14 +110,16 @@ were skipped on both architectures, so no artifact was selected and no
 physical-host mutation was attempted.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
-`0d4bf269a3261c5f8263da051de805e32b8f030f` (PR #279). Exact-main
-native AMD64/ARM64 run `30511021761`, CI `30511021763`, and audit
-`30511021766` passed on that SHA. Native jobs `90770963824` and
-`90770963857` proved managed pre-commit start, unmarked stopped-intent boot
-refusal, explicit resume, demand-start drift refusal, independent-owner
-preservation, and exact terminal cleanup on both architectures. The gate did
-not reboot the runner, compose production networking, or mutate routes, DNS,
-proxy/PAC/VPN, drivers, or external processes and services.
+`8ef9fb3d3d4643f056793578511b693ef68b3fe5` (PR #287). Exact-main
+native AMD64/ARM64 run `30554494634`, CI `30554495633`, and audit
+`30554495985` passed on that SHA. Native jobs `90911349617` and
+`90911349663` proved the delayed exact-payload-release regression and
+release-host `prepare -> cleanup` preflight on both architectures. The exact
+ARM64 artifact then passed the physical Parallels Windows 11 reboot transaction
+and exact uninstall described at the top of this checkpoint. This is not a
+physical AMD64 reboot claim; architecture-dependent binary and lifecycle
+preflight passed natively on AMD64 and ARM64, while the OS-level physical
+power-state transaction ran on the available disposable ARM64 host.
 
 Previous exact-main evidence audit: 2026-07-30, through product merge
 `0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main
@@ -171,10 +188,10 @@ constructor call. The final PR head and exact-main AMD64/ARM64 jobs passed
 without reruns.
 
 The next M4 work is the remaining disposable Windows resilience
-qualification: reboot, sleep/wake, full updater/uninstall orchestration, and
-broader external network-tool coexistence. Explicit production-host process
-crash and public recovery are now covered independently of the earlier
-Wintun-child and generation-replacement gates.
+qualification: sleep/wake, full updater/uninstall orchestration, and broader
+external network-tool coexistence. Explicit production-host process crash,
+public recovery, and the bounded physical ARM64 reboot transaction are covered
+independently of the earlier Wintun-child and generation-replacement gates.
 Each gate must prove exact cleanup and preserve independently owned network
 state before production service-host composition can begin. That later
 composition must reuse the frozen capture, flow-binding, byte-owner,
@@ -453,7 +470,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Ordinary v1/v2 gates pass; one account-backed protected qualification remains | PRs #219-#258 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Protected run `30429690683` passed packaged resources, the daemon-free boundary, all three owned-Geph payload phases, unchanged system network state, and final cleanup. Its second browser scenario did not receive EOF because the disposable HTTP/1.1 fixture kept the socket alive after a deliberately short body; no artifact or install followed. PR #258 fixed that fixture and added a real TLS keep-alive `IncompleteRead` regression, then merged as `90c07771babfd32e797fdb8250911ca922274b4d`; exact-main CI `30431655863` and audit `30431655851` pass. Exactly one protected two-scenario run remains after the next UTC-day account budget reset for the then-current live `main`; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, generation, and production-host crash resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PR #267 merged packet handoff as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`; PR #269 added exact route-change invalidation as `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`; PR #271 added same-name Wintun capture-generation recovery as `3a26653a2b221d757834cdb8ceb53f95c4589906`; PR #273 added same-name SCM service-generation recovery as `7f265549d727db93b8c0a7861808cc5f59784527`; PR #275 applied that invariant to the real production service host as `ae4d47efdf8b3d15f5242eb767a809b5c775e75e`; and PR #277 proved exact real-host crash recovery as `0ed37e7b828bb642700d6191e10206061c27c525`. The latest exact-main native AMD64/ARM64 run is `30505427268`, with CI `30505427291` and audit `30505427304`. The evaluation stack remains development-only and the production SCM host remains no-network. Reboot, sleep/wake, full updater/uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
+| M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, generation, production-host crash, and physical ARM64 reboot resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PRs #267-#279 established packet handoff, route invalidation, capture/service generation, crash recovery, and boot admission. PR #287 merged the exact payload-release correction as `8ef9fb3d3d4643f056793578511b693ef68b3fe5`; exact-main native AMD64/ARM64 run `30554494634`, CI `30554495633`, and audit `30554495985` passed. Its exact ARM64 artifact passed the two-phase physical Parallels reboot and exact uninstall transaction. This is physical ARM64 evidence plus native AMD64/ARM64 binary and lifecycle preflight, not a physical AMD64 reboot claim. The evaluation stack remains development-only and the production SCM host remains no-network. Sleep/wake, full updater/uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
 
 The exact-main
 [CI run 30230210126](https://github.com/aiwaki/slipstream/actions/runs/30230210126)

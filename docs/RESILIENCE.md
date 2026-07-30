@@ -273,8 +273,34 @@ Payload removal now waits for bounded `ERROR_ACCESS_DENIED` or
 deleting the owner record. A native regression holds the staged executable
 without delete sharing, releases it after a delay, and requires complete
 payload plus owner-record absence. This does not enumerate or terminate
-processes and has no networking surface. A new exact-main bundle and complete
-physical reboot transaction are still required before the gate may pass.
+processes and has no networking surface.
+
+PR #287 merged that correction as
+`8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI
+`30554495633`, audit `30554495985`, and native run `30554494634` passed.
+Native jobs `90911349617` (AMD64) and `90911349663` (ARM64) both ran the
+delayed image-release regression and exact release-host cleanup preflight.
+Exact ARM64 artifact `8764371538` matched its commit-bound manifest, sizes,
+and SHA-256 values on the host and inside the disposable guest.
+
+The physical gate then passed from clean snapshot
+`{2bb76695-9612-4180-ad43-9e19f0fcc11d}`. Transaction
+`2ba05071-ac83-44a7-ad5f-259f35579962` installed generation `30554494634`
+with exact payload SHA-256
+`02a4e1b6b1c5cdebed5c794c05ade0f166eb2e78f9046b0b526b9fb60b828440`.
+A real restart changed boot identity and service PID from `5984` to `3348`;
+the replacement process was created after the new boot. `resume` returned
+`outcome=passed` with `exact_uninstall_verified=true`. The harness verified
+the unchanged network snapshot and independent sentinel SHA-256
+`049a55607e7921e71a954200b3219272634a53b72d597e36d2b9cdde368bc044`
+before deleting its temporary sentinel. Independent post-run checks found the
+SCM service, owner record, active-install record, and exact payload absent, an
+empty payload directory, and durable `Absent` intent bound to the same
+identity. Guest DNS remained `10.211.55.1`, WinHTTP remained direct, host DNS
+remained `111.88.96.50` / `111.88.96.51`, and host PAC remained disabled.
+This closes the physical reboot service-lifecycle gate only; sleep/wake,
+updater orchestration, production networking, and broader coexistence remain
+separate gates.
 
 The intended disposable-host sequence is:
 
