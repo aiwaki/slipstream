@@ -675,6 +675,14 @@ therefore stays phased and closed to production traffic:
    `30511021766` passed on `0d4bf269a3261c5f8263da051de805e32b8f030f`.
    The next bounded gate is a physical reboot with post-boot readiness and
    exact cleanup evidence, still without production networking composition.
+   Its versioned harness is now two-phase: `prepare` proves committed
+   automatic-start readiness and atomically records exact pre-boot evidence
+   without rebooting; after an explicit real restart, `resume` requires a
+   changed Windows boot identity, a matching process created during that boot,
+   unchanged independent sentinel and read-only DNS/proxy/PAC snapshot, then
+   exact uninstall and terminal product absence. Static native CI parses and
+   freezes the harness but cannot claim the physical result. The first runtime
+   qualification must execute on the disposable Parallels Windows 11 host.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
