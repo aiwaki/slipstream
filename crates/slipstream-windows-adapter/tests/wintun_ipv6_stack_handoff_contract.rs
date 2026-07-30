@@ -183,7 +183,7 @@ fn production_host_remains_closed_and_native_workflow_executes_ipv6_exactly() {
         WORKFLOW
             .matches("contracts/windows-wintun-ipv6-stack-handoff-v1.json")
             .count(),
-        2
+        1
     );
     assert_eq!(
         WORKFLOW

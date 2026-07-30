@@ -34,35 +34,6 @@ on:
       - "vendor/wintun/**"
   push:
     branches: ["main"]
-    paths:
-      - ".github/workflows/windows-packet-adapter-qualification.yml"
-      - "contracts/windows-capture-generation-recovery-v1.json"
-      - "contracts/windows-production-host-crash-recovery-v1.json"
-      - "contracts/windows-production-host-generation-recovery-v1.json"
-      - "contracts/windows-production-host-physical-reboot-v1.json"
-      - "contracts/windows-production-host-reboot-admission-v1.json"
-      - "contracts/windows-service-generation-recovery-v1.json"
-      - "contracts/windows-capture-fragment-effect-v1.json"
-      - "contracts/windows-packet-flow-v1.json"
-      - "contracts/windows-packet-capture-v4.json"
-      - "contracts/windows-userspace-byte-owner-v1.json"
-      - "contracts/windows-userspace-flow-binding-v1.json"
-      - "contracts/windows-userspace-native-connector-effect-v1.json"
-      - "contracts/windows-userspace-stack-connector-composition-v1.json"
-      - "contracts/windows-userspace-stack-effect-v1.json"
-      - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
-      - "contracts/windows-userspace-stack-selection-v1.json"
-      - "contracts/windows-wintun-stack-handoff-v1.json"
-      - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
-      - "contracts/windows-wintun-tcp-stack-handoff-v1.json"
-      - "contracts/windows-route-change-observer-v1.json"
-      - "crates/slipstream-core/**"
-      - "crates/slipstream-userspace-stack-evaluation/**"
-      - "crates/slipstream-userspace-stack-effect-evaluation/**"
-      - "crates/slipstream-windows-adapter/**"
-      - "scripts/run_bounded_windows_cargo_test.ps1"
-      - "scripts/qualify_windows_production_host_reboot.ps1"
-      - "vendor/wintun/**"
 
 permissions:
   contents: read
@@ -521,3 +492,87 @@ jobs:
 
       - name: Lint selected-stack and native-connector composition
         run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings
+
+      - name: Qualify the exact physical reboot production host before packaging
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          QUALIFICATION_GENERATION: ${{ github.run_id }}
+        run: |
+          cargo build --locked `
+            --manifest-path crates/slipstream-windows-adapter/Cargo.toml `
+            --release `
+            --bin slipstream-windows-service
+          if ($LASTEXITCODE -ne 0) {
+            throw "The release production host build failed."
+          }
+          $script = (Resolve-Path "scripts/qualify_windows_production_host_reboot.ps1").Path
+          $hostPath = (Resolve-Path "crates/slipstream-windows-adapter/target/release/slipstream-windows-service.exe").Path
+          $stateRoot = Join-Path $env:RUNNER_TEMP "slipstream-physical-reboot-preflight"
+          $prepared = $false
+          try {
+            & $script `
+              -Phase prepare `
+              -ServiceHost $hostPath `
+              -Generation ([long]$env:QUALIFICATION_GENERATION) `
+              -StateRoot $stateRoot
+            $prepared = $true
+            & $script -Phase cleanup -StateRoot $stateRoot
+            $prepared = $false
+            $result = Get-Content -LiteralPath (Join-Path $stateRoot "result-v1.json") -Raw |
+              ConvertFrom-Json
+            if ($result.outcome -ne "cleanup_only" -or -not $result.exact_uninstall_verified) {
+              throw "The exact release production host did not prove pre-reboot cleanup."
+            }
+          } finally {
+            if ($prepared) {
+              & $script -Phase cleanup -StateRoot $stateRoot
+            }
+          }
+
+      - name: Package the exact physical reboot qualification bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          BUNDLE_ARCHITECTURE: ${{ matrix.architecture }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "slipstream-windows-physical-reboot-$env:BUNDLE_ARCHITECTURE"
+          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+          $sources = [ordered]@{
+            "slipstream-windows-service.exe" = "crates/slipstream-windows-adapter/target/release/slipstream-windows-service.exe"
+            "qualify_windows_production_host_reboot.ps1" = "scripts/qualify_windows_production_host_reboot.ps1"
+            "windows-production-host-physical-reboot-v1.json" = "contracts/windows-production-host-physical-reboot-v1.json"
+          }
+          $files = [ordered]@{}
+          foreach ($entry in $sources.GetEnumerator()) {
+            $source = (Resolve-Path -LiteralPath $entry.Value).Path
+            $destination = Join-Path $bundle $entry.Key
+            Copy-Item -LiteralPath $source -Destination $destination
+            $files[$entry.Key] = [ordered]@{
+              sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+              size = (Get-Item -LiteralPath $destination).Length
+            }
+          }
+          $manifest = [ordered]@{
+            schema_version = 1
+            artifact = "slipstream.windows_physical_reboot_qualification"
+            source_commit = $env:SOURCE_COMMIT
+            architecture = $env:BUNDLE_ARCHITECTURE
+            workflow_run_id = [long]$env:WORKFLOW_RUN_ID
+            files = $files
+          }
+          $manifestPath = Join-Path $bundle "artifact-manifest-v1.json"
+          $json = $manifest | ConvertTo-Json -Depth 6 -Compress
+          [IO.File]::WriteAllText($manifestPath, $json, [Text.UTF8Encoding]::new($false))
+          Get-Content -LiteralPath $manifestPath -Raw
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: slipstream-windows-physical-reboot-${{ matrix.architecture }}-${{ github.sha }}
+          path: ${{ runner.temp }}/slipstream-windows-physical-reboot-${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

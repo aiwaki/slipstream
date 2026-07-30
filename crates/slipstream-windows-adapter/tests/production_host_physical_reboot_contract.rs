@@ -137,16 +137,46 @@ fn physical_reboot_harness_is_two_phase_exact_owned_and_non_rebooting() {
 #[test]
 fn native_workflow_parses_harness_on_both_windows_architectures() {
     let workflow =
-        include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml");
+        include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml")
+            .replace('\r', "");
+    let push_section = workflow
+        .split_once("\n  push:\n")
+        .and_then(|(_, rest)| rest.split_once("\n\npermissions:"))
+        .map(|(section, _)| section.trim())
+        .expect("native workflow must define a bounded main push trigger");
+    assert_eq!(
+        push_section, "branches: [\"main\"]",
+        "main push qualification must remain unfiltered"
+    );
     assert!(workflow.contains("Parse physical reboot qualification harness"));
     assert!(workflow.contains("qualify_windows_production_host_reboot.ps1"));
     assert!(workflow.contains(r#""contracts/windows-production-host-physical-reboot-v1.json""#));
     assert!(workflow.contains(r#""scripts/qualify_windows_production_host_reboot.ps1""#));
-    assert_eq!(
+    assert!(
         workflow
             .matches("scripts/qualify_windows_production_host_reboot.ps1")
-            .count(),
-        3,
-        "physical reboot harness must trigger PR/main gates and be parsed natively"
+            .count()
+            >= 4,
+        "physical reboot harness must trigger PR/main gates, be parsed, qualified, and packaged natively"
     );
+    for required in [
+        "Qualify the exact physical reboot production host before packaging",
+        "--release `",
+        "--bin slipstream-windows-service",
+        r#"$result.outcome -ne "cleanup_only""#,
+        "exact_uninstall_verified",
+        "Package the exact physical reboot qualification bundle",
+        "artifact-manifest-v1.json",
+        "slipstream.windows_physical_reboot_qualification",
+        "slipstream-windows-service.exe",
+        "SOURCE_COMMIT: ${{ github.sha }}",
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "slipstream-windows-physical-reboot-${{ matrix.architecture }}-${{ github.sha }}",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "native workflow is missing qualified artifact invariant {required}"
+        );
+    }
 }

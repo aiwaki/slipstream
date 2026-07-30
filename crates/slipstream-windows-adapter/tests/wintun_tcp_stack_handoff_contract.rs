@@ -201,7 +201,7 @@ fn production_host_remains_closed_and_native_workflow_executes_tcp_exactly() {
         WORKFLOW
             .matches("contracts/windows-wintun-tcp-stack-handoff-v1.json")
             .count(),
-        2
+        1
     );
     assert_eq!(
         WORKFLOW

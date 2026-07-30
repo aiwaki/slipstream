@@ -8,20 +8,26 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: run the versioned two-phase physical Windows reboot
-harness on the disposable Parallels Windows 11 host, then record its exact
-result. `prepare` requires a clean exact service name, installs the real
-production host through its public CLI, verifies committed active-install
+Current M4 next action: wait for the native Windows workflow on the intended
+current `main` SHA, download only its ARM64
+`slipstream-windows-physical-reboot-<architecture>-<commit>` bundle, verify
+`artifact-manifest-v1.json` plus every recorded size and SHA-256, then run the
+versioned two-phase physical Windows reboot harness from that bundle on the
+disposable Parallels Windows 11 host. Every `main` push runs the unfiltered
+native workflow; PR jobs never publish a bundle. Before upload, the exact
+release production host is built without fixture features and proves
+`prepare -> cleanup` with terminal absence on the native runner. The disposable
+host's `prepare` phase then requires a clean exact service name, installs that
+same artifact through its public CLI, verifies committed active-install
 evidence plus automatic-start readiness, and writes an owner-protected
 transaction without rebooting the machine. After an explicit real Windows
 restart, `resume` requires a changed boot identity, a service process created
 inside the new boot, matching SCM/path/SHA/generation evidence, an unchanged
 independent sentinel and read-only DNS/proxy/PAC snapshot, then performs exact
 uninstall and proves terminal product absence. Failure attempts the same exact
-owned rollback; identity mismatch refuses mutation. CI can parse and freeze
-this harness but cannot claim the physical runtime result. Sleep/wake, updater
-orchestration, production networking, and broader VPN coexistence remain
-separate unproven gates.
+owned rollback; identity mismatch refuses mutation. CI preflight cannot claim
+the physical runtime result. Sleep/wake, updater orchestration, production
+networking, and broader VPN coexistence remain separate unproven gates.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
 `0d4bf269a3261c5f8263da051de805e32b8f030f` (PR #279). Exact-main
