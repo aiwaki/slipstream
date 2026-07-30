@@ -21,6 +21,20 @@ both Chromium semantic scenarios, exact cleanup, unchanged system network
 state, and exact artifact publication all pass. Use only that run's artifact
 and roll back immediately on the first workstation smoke failure.
 
+Protected run `30561342773` for exact main
+`b282572ca057afa59826badeb5d22df3f079ca0d` did not publish an artifact and
+did not authorize a workstation install. Owned Geph passed initial, trayless,
+and recovered Steam payload with complete HTTP 200/TLS 1.3 responses; root
+daemon absence, unchanged system network state, and cleanup also passed. The
+regional-denial Chromium scenario completed, but the incomplete-response
+scenario made one root request and never reloaded. This is the first protected
+run after request-ID correlation and an explicit fixture EOF were both present.
+The remaining unproved assumption is the optional `parentFrameId` field on the
+real browser-owned `onBeforeRequest` event: `main_frame` plus `frameId=0`
+already establishes top-level scope, so omission must not discard an otherwise
+exact HTTPS GET candidate. No PF, DNS, installer, routing-policy, or Geph
+behavior changes in the follow-up.
+
 PR #287 merged the bounded payload image-release correction as
 `8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI
 `30554495633`, audit `30554495985`, and native run `30554494634` passed.

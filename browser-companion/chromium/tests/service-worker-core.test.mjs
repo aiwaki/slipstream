@@ -137,7 +137,6 @@ test("maps only exact top-level incomplete-response request errors to v2", () =>
         type: "main_frame",
         method: "GET",
         frameId: 0,
-        parentFrameId: -1,
         url: "https://Example.NET/private/path?token=secret"
       },
       900_000
@@ -166,6 +165,24 @@ test("maps only exact top-level incomplete-response request errors to v2", () =>
     assert.equal(JSON.stringify(candidate).includes("/private/path"), false);
     assert.equal(JSON.stringify(candidate).includes("token=secret"), false);
   }
+});
+
+test("accepts a top-level GET when parentFrameId is omitted", () => {
+  const candidate = core.incompleteResponseCandidate(
+    {
+      requestId: "request-without-parent",
+      tabId: 9,
+      type: "main_frame",
+      method: "GET",
+      frameId: 0,
+      url: "https://example.net/"
+    },
+    900_000
+  );
+
+  assert.equal(candidate.request_id, "request-without-parent");
+  assert.equal(candidate.tab_id, 9);
+  assert.equal(candidate.host, "example.net");
 });
 
 test("rejects ambiguous, subframe, non-HTTPS, and IP request errors", () => {
