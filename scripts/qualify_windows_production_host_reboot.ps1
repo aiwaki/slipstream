@@ -26,8 +26,11 @@ $ActiveInstallRecordPath = Join-Path $ProductRoot "service-active-v1.json"
 $TransactionPath = Join-Path $StateRoot "transaction-v1.json"
 $ResultPath = Join-Path $StateRoot "result-v1.json"
 $SentinelPath = Join-Path $StateRoot "independent-owner.sentinel"
+$StateRootMarkerPath = Join-Path $StateRoot ".slipstream-physical-reboot-v1"
 $Utf8NoBom = [Text.UTF8Encoding]::new($false)
 $MaximumRecordBytes = 32KB
+$MaximumManagementOutputBytes = 1MB
+$MaximumErrorOutputCharacters = 8192
 $ServiceReadyTimeoutSeconds = 30
 $TerminalTimeoutSeconds = 30
 
@@ -102,13 +105,27 @@ function Write-AtomicJson {
 }
 
 function Protect-StateRoot {
+    $created = $false
     if (-not (Test-Path -LiteralPath $StateRoot)) {
         New-Item -ItemType Directory -Path $StateRoot | Out-Null
+        $created = $true
     }
     $directory = Get-Item -LiteralPath $StateRoot
     if (-not $directory.PSIsContainer -or
         ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "The qualification state root must be a real directory, not a reparse point."
+    }
+    if (-not $created -and -not (Test-Path -LiteralPath $StateRootMarkerPath -PathType Leaf)) {
+        $existingEntries = @(Get-ChildItem -LiteralPath $StateRoot -Force)
+        if ($existingEntries.Count -gt 0) {
+            throw "The qualification state root must be newly created, empty, or already owned by this harness."
+        }
+    }
+    if (Test-Path -LiteralPath $StateRootMarkerPath -PathType Leaf) {
+        $marker = Get-Content -LiteralPath $StateRootMarkerPath -Raw
+        if ($marker -ne $ContractName) {
+            throw "The qualification state root ownership marker is invalid."
+        }
     }
 
     $administrators = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
@@ -127,6 +144,9 @@ function Protect-StateRoot {
         $system, $rights, $inheritance, $propagation, $allow
     ))
     Set-Acl -LiteralPath $StateRoot -AclObject $acl
+    if (-not (Test-Path -LiteralPath $StateRootMarkerPath -PathType Leaf)) {
+        [IO.File]::WriteAllText($StateRootMarkerPath, $ContractName, $Utf8NoBom)
+    }
 }
 
 function Get-BootIdentity {
@@ -161,6 +181,22 @@ function Get-RegistryValue {
     return $property.Value
 }
 
+function Get-RegistryBinaryValueBase64 {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $value = Get-RegistryValue -Path $Path -Name $Name
+    if ($null -eq $value) {
+        return $null
+    }
+    if ($value -isnot [byte[]]) {
+        throw "Expected a binary registry value at $Path\$Name."
+    }
+    return [Convert]::ToBase64String($value)
+}
+
 function Get-NetworkSettingsSnapshot {
     $dns = @(
         Get-DnsClientServerAddress |
@@ -176,6 +212,8 @@ function Get-NetworkSettingsSnapshot {
 
     $internetSettings = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
     $machineInternetSettings = "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    $userConnections = Join-Path $internetSettings "Connections"
+    $machineConnections = Join-Path $machineInternetSettings "Connections"
     $snapshot = [ordered]@{
         dns = $dns
         user_proxy = [ordered]@{
@@ -189,6 +227,13 @@ function Get-NetworkSettingsSnapshot {
             proxy_server = Get-RegistryValue -Path $machineInternetSettings -Name "ProxyServer"
             auto_config_url = Get-RegistryValue -Path $machineInternetSettings -Name "AutoConfigURL"
             auto_detect = Get-RegistryValue -Path $machineInternetSettings -Name "AutoDetect"
+        }
+        connection_proxy = [ordered]@{
+            user_default = Get-RegistryBinaryValueBase64 -Path $userConnections -Name "DefaultConnectionSettings"
+            user_legacy = Get-RegistryBinaryValueBase64 -Path $userConnections -Name "SavedLegacySettings"
+            machine_default = Get-RegistryBinaryValueBase64 -Path $machineConnections -Name "DefaultConnectionSettings"
+            machine_legacy = Get-RegistryBinaryValueBase64 -Path $machineConnections -Name "SavedLegacySettings"
+            winhttp = Get-RegistryBinaryValueBase64 -Path $machineConnections -Name "WinHttpSettings"
         }
     }
     $canonical = $snapshot | ConvertTo-Json -Depth 8 -Compress
@@ -218,11 +263,15 @@ function Invoke-Management {
     $output = @(& $HostPath @Arguments 2>&1)
     $exitCode = $LASTEXITCODE
     $text = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    if ($text.Length -gt 8192) {
-        $text = $text.Substring(0, 8192)
+    if ([Text.Encoding]::UTF8.GetByteCount($text) -gt $MaximumManagementOutputBytes) {
+        throw "The exact service host returned an oversized management response."
+    }
+    $shortText = $text
+    if ($shortText.Length -gt $MaximumErrorOutputCharacters) {
+        $shortText = $shortText.Substring(0, $MaximumErrorOutputCharacters)
     }
     if ($exitCode -ne 0) {
-        throw "The exact service host command failed with exit code $exitCode`: $text"
+        throw "The exact service host command failed with exit code $exitCode`: $shortText"
     }
     $result = $text | ConvertFrom-Json
     Assert-Equal -Actual $result.schema_version -Expected 1 -Label "management schema_version"
@@ -334,11 +383,33 @@ function Assert-TransactionIdentity {
     Assert-Equal -Actual $Owner.executable_sha256 -Expected $Transaction.identity.executable_sha256 -Label "current owner SHA-256"
     Assert-Equal -Actual $Owner.generation -Expected $Transaction.identity.generation -Label "current owner generation"
     Assert-PathEqual -Actual $Owner.executable_path -Expected $Transaction.installed_executable_path -Label "current owner executable"
+    Assert-Equal -Actual $Owner.scm_binary_path -Expected $Transaction.scm_binary_path -Label "current owner SCM binary command"
+}
+
+function Assert-TransactionTerminalAbsence {
+    param([Parameter(Mandatory = $true)]$Transaction)
+
+    Assert-ExactTerminalAbsence -InstalledPath $Transaction.installed_executable_path -LastProcessId 0
+    $intent = Read-BoundedJson -Path $IntentRecordPath
+    Assert-Equal -Actual $intent.schema_version -Expected 1 -Label "terminal intent schema_version"
+    Assert-Equal -Actual $intent.record_kind -Expected "slipstream.windows_service_intent" -Label "terminal intent record_kind"
+    Assert-Equal -Actual $intent.desired -Expected "absent" -Label "terminal intent desired"
+    Assert-Equal -Actual $intent.crash_restart_attempts -Expected 0 -Label "terminal intent crash budget"
+    if ($null -eq $intent.identity) {
+        throw "Terminal absence is not bound to the prepared service identity."
+    }
+    Assert-Equal -Actual $intent.identity.service_name -Expected $Transaction.identity.service_name -Label "terminal intent service_name"
+    Assert-Equal -Actual $intent.identity.executable_sha256 -Expected $Transaction.identity.executable_sha256 -Label "terminal intent SHA-256"
+    Assert-Equal -Actual $intent.identity.generation -Expected $Transaction.identity.generation -Label "terminal intent generation"
 }
 
 function Invoke-ExactRollback {
     param([Parameter(Mandatory = $true)]$Transaction)
 
+    if (-not (Test-Path -LiteralPath $OwnerRecordPath)) {
+        Assert-TransactionTerminalAbsence -Transaction $Transaction
+        return
+    }
     $owner = Read-InstalledIdentity
     Assert-TransactionIdentity -Transaction $Transaction -Owner $owner
     Assert-Equal -Actual (Get-Sha256 -Path $owner.executable_path) -Expected $Transaction.identity.executable_sha256 -Label "rollback host SHA-256"
@@ -468,7 +539,7 @@ function Invoke-Prepare {
                     "manage", "uninstall"
                 ) -ExpectedCommand "uninstall" | Out-Null
             } catch {
-                Write-Error "Prepare failed and exact rollback also failed: $($_.Exception.Message)"
+                Write-Warning "Prepare failed and exact rollback also failed: $($_.Exception.Message)"
             }
         }
         if (-not (Test-Path -LiteralPath $TransactionPath) -and (Test-Path -LiteralPath $SentinelPath)) {
@@ -502,7 +573,8 @@ function Invoke-Resume {
         $postBootProcessCreatedAt = $ready.process.CreationDate.ToUniversalTime().ToString("o")
         $bootTime = [DateTime]::Parse($currentBootIdentity).ToUniversalTime()
         $processTime = [DateTime]::Parse($postBootProcessCreatedAt).ToUniversalTime()
-        if ($processTime -lt $bootTime.AddSeconds(-5)) {
+        if ($processTime -lt $bootTime -or
+            $processTime -gt [DateTime]::UtcNow.AddSeconds(5)) {
             throw "The service process was not created in the current Windows boot."
         }
 

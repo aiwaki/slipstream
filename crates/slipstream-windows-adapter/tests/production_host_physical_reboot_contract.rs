@@ -88,10 +88,18 @@ fn physical_reboot_harness_is_two_phase_exact_owned_and_non_rebooting() {
         "service-intent-v1.json",
         "Wait-ExactServiceReady",
         "Assert-ExactTerminalAbsence",
+        "Assert-TransactionTerminalAbsence",
         "Invoke-ExactRollback",
         "independent-owner.sentinel",
+        ".slipstream-physical-reboot-v1",
+        "newly created, empty, or already owned by this harness",
         "Get-DnsClientServerAddress",
         "Get-ItemProperty",
+        "WinHttpSettings",
+        r#"$result = $text | ConvertFrom-Json"#,
+        r#"$shortText = $shortText.Substring"#,
+        r#"$Owner.scm_binary_path -Expected $Transaction.scm_binary_path"#,
+        r#"$processTime -lt $bootTime"#,
         "The Windows boot identity did not change",
     ] {
         assert!(
@@ -99,6 +107,10 @@ fn physical_reboot_harness_is_two_phase_exact_owned_and_non_rebooting() {
             "physical reboot harness is missing {required}"
         );
     }
+    assert!(
+        !source.contains(r#"$text = $text.Substring"#),
+        "management JSON must be parsed before any diagnostic truncation"
+    );
 
     for forbidden in [
         "Restart-Computer",
