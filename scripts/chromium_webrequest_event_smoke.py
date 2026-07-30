@@ -212,17 +212,28 @@ def _copy_diagnostic_extension(
     (destination / "qualification-warmup.js").write_text(
         (
             f"const target = {json.dumps(target_url)};\n"
-            "chrome.runtime.sendMessage({"
+            "const maxAttempts = 40;\n"
+            "let attempts = 0;\n"
+            "function warmWorker() {\n"
+            "  attempts += 1;\n"
+            "  chrome.runtime.sendMessage({"
             'type: "slipstream.qualification_warmup"'
-            "}).then((response) => {\n"
-            "  if (response?.ready === true) {\n"
-            "    location.replace(target);\n"
+            "  }).then((response) => {\n"
+            "    if (response?.ready === true) {\n"
+            "      location.replace(target);\n"
+            "      return;\n"
+            "    }\n"
+            "    retry();\n"
+            "  }).catch(retry);\n"
+            "}\n"
+            "function retry() {\n"
+            "  if (attempts >= maxAttempts) {\n"
+            '    document.body.textContent = "worker warmup failed";\n'
             "    return;\n"
             "  }\n"
-            '  document.body.textContent = "worker warmup rejected";\n'
-            "}).catch(() => {\n"
-            '  document.body.textContent = "worker warmup failed";\n'
-            "});\n"
+            "  setTimeout(warmWorker, 250);\n"
+            "}\n"
+            "warmWorker();\n"
         ),
         encoding="utf-8",
     )

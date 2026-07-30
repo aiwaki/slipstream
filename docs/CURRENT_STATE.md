@@ -36,7 +36,9 @@ the command-line fixture navigation before the Manifest V3 worker registered
 its listeners. A fixed-delay warm-up in run `30565374098` still produced no
 worker trace. The current harness therefore requires an explicit owner-only
 native acknowledgement from the disposable worker after listener registration
-before fixture navigation, while retaining the
+before fixture navigation. The extension page retries that readiness request
+for at most ten seconds so first-install registration cannot become another
+fixed-delay race, while retaining the
 `parentFrameId` omission correction (`main_frame` plus `frameId=0` already
 establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
 production-extension behavior changes in the follow-up.

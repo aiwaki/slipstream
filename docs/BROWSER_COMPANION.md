@@ -61,7 +61,9 @@ without Geph, PF, the daemon, or system network mutation. The protected
 account-backed gate remains authoritative for the complete product path. The
 fresh-profile harness first opens an owner-only extension page. The disposable
 worker acknowledges through the owner-only native stub after its listeners are
-registered, and only then does the page navigate to the fixture. This prevents
+registered. A bounded retry covers the short interval before a newly installed
+worker can receive its first message, and only then does the page navigate to
+the fixture. This prevents
 Chrome's command-line startup race from being mistaken for a missing
 `webRequest` event; the readiness acknowledgement and trace exist only in the
 CI copy, while the product observer itself is unchanged.

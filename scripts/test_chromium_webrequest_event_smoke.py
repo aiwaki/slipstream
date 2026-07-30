@@ -158,7 +158,8 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
             self.assertIn("chrome.runtime.sendMessage", warmup)
             self.assertIn("response?.ready === true", warmup)
             self.assertIn("location.replace(target)", warmup)
-            self.assertNotIn("setTimeout", warmup)
+            self.assertIn("const maxAttempts = 40", warmup)
+            self.assertIn("setTimeout(warmWorker, 250)", warmup)
             self.assertIn(target, warmup)
             self.assertEqual(
                 (destination / "qualification-warmup.js").stat().st_mode
