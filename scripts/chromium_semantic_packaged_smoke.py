@@ -11,6 +11,9 @@ hostname through real Geph before learning it.
 from __future__ import annotations
 
 import argparse
+import base64
+import errno
+import hashlib
 import http.server
 import json
 import os
@@ -18,13 +21,17 @@ import plistlib
 import pwd
 import shutil
 import signal
+import socket
 import ssl
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +46,9 @@ NATIVE_HOST_NAME = "dev.slipstream.semantic"
 NATIVE_HOST_ORIGIN = "chrome-extension://cecdingohhpfggapnlbghppcegbaciam/"
 NATIVE_HOST_RELATIVE_PATH = Path(
     "Library/Application Support/Google/Chrome/NativeMessagingHosts"
+) / f"{NATIVE_HOST_NAME}.json"
+CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH = Path(
+    "Library/Application Support/Google/ChromeForTesting/NativeMessagingHosts"
 ) / f"{NATIVE_HOST_NAME}.json"
 PROFILE_NATIVE_HOST_RELATIVE_PATH = (
     Path("NativeMessagingHosts") / f"{NATIVE_HOST_NAME}.json"
@@ -55,6 +65,31 @@ FIXTURE_SCENARIOS = frozenset(
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
 CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
+DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
+DEVTOOLS_TIMEOUT = 15.0
+MAX_DEVTOOLS_RESPONSE = 64 * 1024
+MAX_WEBSOCKET_HEADERS = 16 * 1024
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WORKER_READY_EXPRESSION = """
+(async () => {
+  if (globalThis.__slipstreamWorkerReadyV1 !== true) {
+    return false;
+  }
+  try {
+    const response = await chrome.runtime.sendNativeMessage(
+      "dev.slipstream.semantic",
+      {
+        schema_version: 0,
+        source: "qualification_worker_ready",
+        phase: "native_ready"
+      }
+    );
+    return response !== null && typeof response === "object";
+  } catch (_error) {
+    return false;
+  }
+})()
+""".strip()
 
 
 class QualificationError(RuntimeError):
@@ -87,6 +122,12 @@ class ChromeProcess:
 @dataclass
 class ChromeOwnership:
     process_groups: set[int]
+
+
+@dataclass(frozen=True)
+class NativeHostRegistration:
+    path: Path
+    created_directories: tuple[Path, ...]
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -569,8 +610,9 @@ def _chrome_command(
         f"--disable-extensions-except={extension}",
         f"--load-extension={extension}",
         f"--host-resolver-rules=MAP {fixture_host} 127.0.0.1, EXCLUDE localhost",
+        "--remote-debugging-port=0",
         f"--user-data-dir={profile}",
-        f"https://{fixture_host}:{fixture_port}/?slipstream-semantic=1",
+        "about:blank",
     )
 
 
@@ -757,6 +799,389 @@ def _read_owner_private_tail(path: Path, uid: int, limit: int = 4000) -> bytes:
         return os.pread(fd, length, max(0, metadata.st_size - length))
     finally:
         os.close(fd)
+
+
+def _read_owner_bounded_file(
+    path: Path,
+    uid: int,
+    limit: int = MAX_DEVTOOLS_RESPONSE,
+) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        mode = stat.S_IMODE(metadata.st_mode)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != uid
+            or mode & 0o022
+            or metadata.st_size <= 0
+            or metadata.st_size > limit
+        ):
+            raise QualificationError(f"{path} is not a bounded owner-controlled file")
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 16 * 1024))
+            if not chunk:
+                raise QualificationError(f"{path} changed while being read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise QualificationError(f"{path} changed while being read")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _parse_devtools_active_port(payload: bytes) -> int:
+    try:
+        lines = payload.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise QualificationError("DevToolsActivePort is not ASCII") from exc
+    if (
+        len(lines) != 2
+        or not lines[0].isdigit()
+        or not lines[1].startswith("/devtools/browser/")
+    ):
+        raise QualificationError("DevToolsActivePort has an invalid shape")
+    port = int(lines[0])
+    if port <= 0 or port > 65_535:
+        raise QualificationError("DevToolsActivePort exposes an invalid port")
+    return port
+
+
+def _wait_for_devtools_port(
+    profile: Path,
+    uid: int,
+    *,
+    timeout: float = DEVTOOLS_TIMEOUT,
+) -> int:
+    path = profile / DEVTOOLS_ACTIVE_PORT
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            return _parse_devtools_active_port(
+                _read_owner_bounded_file(path, uid)
+            )
+        except (FileNotFoundError, QualificationError, OSError) as exc:
+            last_error = exc
+        time.sleep(0.1)
+    raise QualificationError(
+        f"Chrome did not publish an owner-controlled DevTools endpoint: {last_error}"
+    )
+
+
+def _devtools_json(
+    port: int,
+    path: str,
+    *,
+    method: str = "GET",
+) -> object:
+    if port <= 0 or port > 65_535 or not path.startswith("/"):
+        raise QualificationError("refusing an invalid DevTools endpoint")
+    url = f"http://127.0.0.1:{port}{path}"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(url, method=method)
+    with opener.open(request, timeout=2.0) as response:
+        if response.geturl() != url:
+            raise QualificationError("DevTools redirected outside its exact endpoint")
+        payload = response.read(MAX_DEVTOOLS_RESPONSE + 1)
+    if len(payload) > MAX_DEVTOOLS_RESPONSE:
+        raise QualificationError("DevTools response exceeded its bounded limit")
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("DevTools returned invalid JSON") from exc
+
+
+def _worker_debugger_path(url: str, expected_port: int) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "ws"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.port != expected_port
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or not parsed.path.startswith("/devtools/")
+    ):
+        raise QualificationError("worker debugger URL escaped the exact loopback endpoint")
+    return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+
+
+def _receive_until(
+    connection: socket.socket,
+    delimiter: bytes,
+    limit: int,
+) -> tuple[bytes, bytes]:
+    payload = bytearray()
+    while delimiter not in payload:
+        chunk = connection.recv(min(4096, limit - len(payload) + 1))
+        if not chunk:
+            raise QualificationError("worker debugger closed during handshake")
+        payload.extend(chunk)
+        if len(payload) > limit:
+            raise QualificationError("worker debugger handshake exceeded its limit")
+    head, remainder = bytes(payload).split(delimiter, 1)
+    return head, remainder
+
+
+def _receive_exact(connection: socket.socket, size: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining:
+        chunk = connection.recv(remaining)
+        if not chunk:
+            raise QualificationError("worker debugger closed before a complete frame")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _connect_worker_debugger(url: str, expected_port: int) -> socket.socket:
+    path = _worker_debugger_path(url, expected_port)
+    connection = socket.create_connection(("127.0.0.1", expected_port), timeout=2.0)
+    try:
+        connection.settimeout(2.0)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{expected_port}\r\n"
+            "Connection: Upgrade\r\n"
+            "Upgrade: websocket\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "\r\n"
+        ).encode("ascii")
+        connection.sendall(request)
+        raw_headers, remainder = _receive_until(
+            connection,
+            b"\r\n\r\n",
+            MAX_WEBSOCKET_HEADERS,
+        )
+        if remainder:
+            raise QualificationError(
+                "worker debugger sent data before the protocol request"
+            )
+        lines = raw_headers.decode("iso-8859-1").split("\r\n")
+        status = lines[0].split(" ", 2) if lines else []
+        if len(status) < 2 or status[0] != "HTTP/1.1" or status[1] != "101":
+            raise QualificationError("worker debugger rejected the WebSocket upgrade")
+        headers: dict[str, str] = {}
+        for line in lines[1:]:
+            name, separator, value = line.partition(":")
+            if not separator:
+                raise QualificationError("worker debugger returned malformed headers")
+            normalized = name.strip().lower()
+            if normalized in headers:
+                raise QualificationError("worker debugger returned duplicate headers")
+            headers[normalized] = value.strip()
+        expected_accept = base64.b64encode(
+            hashlib.sha1(
+                f"{key}{WEBSOCKET_GUID}".encode("ascii"),
+                usedforsecurity=False,
+            ).digest()
+        ).decode("ascii")
+        if (
+            headers.get("upgrade", "").lower() != "websocket"
+            or "upgrade"
+            not in {
+                token.strip().lower()
+                for token in headers.get("connection", "").split(",")
+            }
+            or headers.get("sec-websocket-accept") != expected_accept
+        ):
+            raise QualificationError("worker debugger returned an invalid upgrade")
+        return connection
+    except BaseException:
+        connection.close()
+        raise
+
+
+def _send_websocket_json(connection: socket.socket, value: object) -> None:
+    payload = json.dumps(
+        value,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    if len(payload) > MAX_DEVTOOLS_RESPONSE:
+        raise QualificationError("worker debugger request exceeded its limit")
+    mask = os.urandom(4)
+    if len(payload) < 126:
+        header = bytes((0x81, 0x80 | len(payload)))
+    else:
+        header = bytes((0x81, 0xFE)) + struct.pack("!H", len(payload))
+    masked = bytes(
+        byte ^ mask[index % len(mask)]
+        for index, byte in enumerate(payload)
+    )
+    connection.sendall(header + mask + masked)
+
+
+def _receive_websocket_json(connection: socket.socket) -> object:
+    header = _receive_exact(connection, 2)
+    final = bool(header[0] & 0x80)
+    opcode = header[0] & 0x0F
+    masked = bool(header[1] & 0x80)
+    length = header[1] & 0x7F
+    if not final or masked or opcode != 0x1:
+        raise QualificationError("worker debugger returned an unsupported frame")
+    if length == 126:
+        length = struct.unpack("!H", _receive_exact(connection, 2))[0]
+    elif length == 127:
+        length = struct.unpack("!Q", _receive_exact(connection, 8))[0]
+    if length > MAX_DEVTOOLS_RESPONSE:
+        raise QualificationError("worker debugger frame exceeded its limit")
+    payload = _receive_exact(connection, length)
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("worker debugger returned invalid JSON") from exc
+
+
+def _devtools_command(
+    debugger_url: str,
+    port: int,
+    method: str,
+    params: dict[str, object],
+) -> dict[str, object]:
+    connection = _connect_worker_debugger(debugger_url, port)
+    try:
+        _send_websocket_json(
+            connection,
+            {
+                "id": 1,
+                "method": method,
+                "params": params,
+            },
+        )
+        for _ in range(20):
+            response = _receive_websocket_json(connection)
+            if not isinstance(response, dict) or response.get("id") != 1:
+                continue
+            error = response.get("error")
+            if error is not None:
+                raise QualificationError(
+                    f"DevTools command {method!r} failed: {error!r}"
+                )
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise QualificationError(
+                    f"DevTools command {method!r} returned no result"
+                )
+            return result
+        raise QualificationError(
+            f"DevTools omitted the response for command {method!r}"
+        )
+    finally:
+        connection.close()
+
+
+def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+    result = _devtools_command(
+        debugger_url,
+        port,
+        "Runtime.evaluate",
+        {
+            "expression": WORKER_READY_EXPRESSION,
+            "returnByValue": True,
+            "awaitPromise": True,
+        },
+    )
+    evaluation = result.get("result")
+    return (
+        isinstance(evaluation, dict)
+        and evaluation.get("type") == "boolean"
+        and evaluation.get("value") is True
+    )
+
+
+def _wait_for_extension_worker(
+    profile: Path,
+    uid: int,
+    *,
+    timeout: float = DEVTOOLS_TIMEOUT,
+) -> int:
+    port = _wait_for_devtools_port(profile, uid, timeout=timeout)
+    expected_url = f"{NATIVE_HOST_ORIGIN}service-worker.js"
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            targets = _devtools_json(port, "/json/list")
+            if not isinstance(targets, list):
+                raise QualificationError("DevTools target list is not an array")
+            matching = [
+                target
+                for target in targets
+                if (
+                    isinstance(target, dict)
+                    and target.get("type") == "service_worker"
+                    and target.get("url") == expected_url
+                )
+            ]
+            if len(matching) > 1:
+                raise QualificationError(
+                    "DevTools exposed duplicate Slipstream service workers"
+                )
+            if len(matching) == 1:
+                debugger_url = matching[0].get("webSocketDebuggerUrl")
+                if not isinstance(debugger_url, str):
+                    raise QualificationError(
+                        "Slipstream service worker has no debugger endpoint"
+                    )
+                if _worker_runtime_ready(debugger_url, port):
+                    return port
+            last_error = QualificationError(
+                "exact Slipstream service worker is not runtime-ready"
+            )
+        except (OSError, QualificationError) as exc:
+            last_error = exc
+        time.sleep(0.1)
+    raise QualificationError(
+        f"Chrome did not start the exact Slipstream service worker: {last_error}"
+    )
+
+
+def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> None:
+    target_url = (
+        f"https://{fixture.host}:{fixture.port}/"
+        "?slipstream-semantic=1"
+    )
+    targets = _devtools_json(port, "/json/list")
+    if not isinstance(targets, list):
+        raise QualificationError("DevTools target list is not an array")
+    pages = [
+        target
+        for target in targets
+        if (
+            isinstance(target, dict)
+            and target.get("type") == "page"
+            and target.get("url") == "about:blank"
+        )
+    ]
+    if len(pages) != 1:
+        raise QualificationError(
+            "DevTools did not expose exactly one owned about:blank page"
+        )
+    debugger_url = pages[0].get("webSocketDebuggerUrl")
+    if not isinstance(debugger_url, str):
+        raise QualificationError("owned about:blank page has no debugger endpoint")
+    result = _devtools_command(
+        debugger_url,
+        port,
+        "Page.navigate",
+        {"url": target_url},
+    )
+    if not isinstance(result.get("frameId"), str) or not result["frameId"]:
+        raise QualificationError("DevTools did not navigate the owned page")
+    error_text = result.get("errorText")
+    if error_text not in (None, ""):
+        raise QualificationError(
+            f"DevTools rejected the semantic fixture navigation: {error_text!r}"
+        )
 
 
 def _launch_agent_pid(target: str) -> int | None:
@@ -1173,16 +1598,13 @@ def _remove_owned_profile(profile: Path) -> None:
         raise QualificationError("fresh Chrome profile survived cleanup")
 
 
-def _install_profile_native_host(
-    profile: Path,
+def _copy_exact_native_host(
     source: Path,
+    destination: Path,
     uid: int,
     gid: int,
     expected_executable: Path,
 ) -> Path:
-    destination = profile / PROFILE_NATIVE_HOST_RELATIVE_PATH
-    destination.parent.mkdir(mode=0o700)
-    os.chown(destination.parent, uid, gid)
     payload = _read_private_bytes(source, uid)
     manifest = _decode_json_object(payload, source)
     if not _is_exact_native_host(manifest, expected_executable):
@@ -1197,7 +1619,7 @@ def _install_profile_native_host(
         while remaining:
             written = os.write(fd, remaining)
             if written <= 0:
-                raise QualificationError("profile native host write made no progress")
+                raise QualificationError("native host copy made no progress")
             remaining = remaining[written:]
         os.fsync(fd)
         os.fchown(fd, uid, gid)
@@ -1205,8 +1627,112 @@ def _install_profile_native_host(
     finally:
         os.close(fd)
     if destination.read_bytes() != payload:
-        raise QualificationError("profile native host differs from packaged manifest")
+        raise QualificationError("native host copy differs from source manifest")
     return destination
+
+
+def _install_profile_native_host(
+    profile: Path,
+    source: Path,
+    uid: int,
+    gid: int,
+    expected_executable: Path,
+) -> Path:
+    destination = profile / PROFILE_NATIVE_HOST_RELATIVE_PATH
+    destination.parent.mkdir(mode=0o700)
+    os.chown(destination.parent, uid, gid)
+    return _copy_exact_native_host(
+        source,
+        destination,
+        uid,
+        gid,
+        expected_executable,
+    )
+
+
+def _ensure_owner_directory_path(
+    home: Path,
+    relative: Path,
+    uid: int,
+    gid: int,
+) -> tuple[Path, tuple[Path, ...]]:
+    current = home
+    created: list[Path] = []
+    for component in relative.parts:
+        current = current / component
+        try:
+            metadata = os.lstat(current)
+        except FileNotFoundError:
+            current.mkdir(mode=0o700)
+            os.chown(current, uid, gid)
+            current.chmod(0o700)
+            created.append(current)
+            metadata = os.lstat(current)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != uid
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise QualificationError(
+                f"Chrome for Testing native host directory is not owner-controlled: "
+                f"{current}"
+            )
+    return current, tuple(created)
+
+
+def _install_chrome_for_testing_native_host(
+    home: Path,
+    source: Path,
+    uid: int,
+    gid: int,
+    expected_executable: Path,
+) -> NativeHostRegistration:
+    relative_parent = CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH.parent
+    directory, created = _ensure_owner_directory_path(
+        home,
+        relative_parent,
+        uid,
+        gid,
+    )
+    destination = directory / CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH.name
+    try:
+        _copy_exact_native_host(
+            source,
+            destination,
+            uid,
+            gid,
+            expected_executable,
+        )
+    except BaseException:
+        for created_directory in reversed(created):
+            created_directory.rmdir()
+        raise
+    return NativeHostRegistration(destination, created)
+
+
+def _remove_chrome_for_testing_native_host(
+    registration: NativeHostRegistration,
+    expected_executable: Path,
+    uid: int,
+) -> None:
+    _remove_exact_native_host(registration.path, expected_executable, uid)
+    for directory in reversed(registration.created_directories):
+        metadata = os.lstat(directory)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != uid
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise QualificationError(
+                f"refusing to remove an unowned Chrome for Testing directory: "
+                f"{directory}"
+            )
+        try:
+            directory.rmdir()
+        except OSError as exc:
+            if exc.errno == errno.ENOTEMPTY:
+                break
+            raise
 
 
 def _run_chrome(
@@ -1232,6 +1758,7 @@ def _run_chrome(
     browser: ChromeProcess | None = None
     ownership = ChromeOwnership(set())
     bootstrap_started = False
+    native_host_registration: NativeHostRegistration | None = None
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -1247,6 +1774,13 @@ def _run_chrome(
         executable = _launchservices_executable(
             executable,
             application_bundle,
+        )
+        native_host_registration = _install_chrome_for_testing_native_host(
+            home,
+            native_host_manifest,
+            uid,
+            gid,
+            native_host_executable,
         )
         _install_profile_native_host(
             profile,
@@ -1292,6 +1826,8 @@ def _run_chrome(
             profile,
             ownership,
         )
+        devtools_port = _wait_for_extension_worker(profile, uid)
+        _open_fixture_with_devtools(devtools_port, fixture)
 
         deadline = time.monotonic() + CHROME_TIMEOUT
         while time.monotonic() < deadline:
@@ -1362,6 +1898,17 @@ def _run_chrome(
                 profile_cleanup_safe = True
         except Exception as exc:
             cleanup_errors.append(f"Chrome LaunchAgent cleanup: {exc}")
+        if native_host_registration is not None:
+            try:
+                _remove_chrome_for_testing_native_host(
+                    native_host_registration,
+                    native_host_executable,
+                    uid,
+                )
+            except Exception as exc:
+                cleanup_errors.append(
+                    f"Chrome for Testing native host cleanup: {exc}"
+                )
         diagnostics: list[tuple[str, bytes]] = []
         for name, path in (
             ("LaunchServices", launcher_stderr_path),

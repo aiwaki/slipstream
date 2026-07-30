@@ -21,6 +21,16 @@ both Chromium semantic scenarios, exact cleanup, unchanged system network
 state, and exact artifact publication all pass. Use only that run's artifact
 and roll back immediately on the first workstation smoke failure.
 
+Protected run `30561342773` for exact main
+`b282572ca057afa59826badeb5d22df3f079ca0d` did not publish an artifact and
+did not authorize a workstation install. PR #289 head
+`f5fb0c7421c9b70f6d561f08df6a1fc742965915` now passes ordinary CI run
+`30572348605`, including the real-Chrome incomplete-response contract and
+packaged lifecycle, plus audit run `30572348663`. The detailed browser
+investigation remains in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md). Merge,
+exact-main CI and audit, then one protected qualification for the new main SHA
+remain mandatory before any workstation install.
+
 PR #287 merged the bounded payload image-release correction as
 `8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI
 `30554495633`, audit `30554495985`, and native run `30554494634` passed.

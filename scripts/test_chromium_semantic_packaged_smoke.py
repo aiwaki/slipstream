@@ -196,7 +196,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             f"--host-resolver-rules=MAP {smoke.FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
             command,
         )
-        self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
+        self.assertIn("--remote-debugging-port=0", command)
+        self.assertEqual(command[-1], "about:blank")
 
     def test_chrome_command_maps_the_selected_fixture_host(self) -> None:
         command = smoke._chrome_command(
@@ -211,10 +212,206 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             f"{smoke.INCOMPLETE_FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
             command,
         )
-        self.assertTrue(
-            command[-1].startswith(
-                f"https://{smoke.INCOMPLETE_FIXTURE_HOST}:18443/"
+        self.assertEqual(command[-1], "about:blank")
+
+    def test_devtools_active_port_requires_an_exact_local_endpoint(self) -> None:
+        self.assertEqual(
+            smoke._parse_devtools_active_port(
+                b"49152\n/devtools/browser/qualified-browser\n"
+            ),
+            49152,
+        )
+        for payload in (
+            b"0\n/devtools/browser/id\n",
+            b"65536\n/devtools/browser/id\n",
+            b"49152\n/devtools/page/id\n",
+            b"not-a-port\n/devtools/browser/id\n",
+            b"49152\n/devtools/browser/id\nextra\n",
+        ):
+            with self.subTest(payload=payload), self.assertRaises(
+                smoke.QualificationError
+            ):
+                smoke._parse_devtools_active_port(payload)
+
+    def test_owner_bounded_file_rejects_group_writable_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / smoke.DEVTOOLS_ACTIVE_PORT
+            path.write_bytes(b"49152\n/devtools/browser/id\n")
+            path.chmod(0o620)
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "owner-controlled",
+            ):
+                smoke._read_owner_bounded_file(path, os.getuid())
+
+    def test_extension_worker_gate_requires_the_exact_worker_target(self) -> None:
+        targets = [
+            [],
+            [
+                {
+                    "type": "service_worker",
+                    "url": f"{smoke.NATIVE_HOST_ORIGIN}service-worker.js",
+                    "webSocketDebuggerUrl": (
+                        "ws://127.0.0.1:49152/devtools/page/worker"
+                    ),
+                }
+            ],
+        ]
+        with mock.patch.object(
+            smoke,
+            "_wait_for_devtools_port",
+            return_value=49152,
+        ), mock.patch.object(
+            smoke,
+            "_devtools_json",
+            side_effect=targets,
+        ) as request, mock.patch.object(
+            smoke,
+            "_worker_runtime_ready",
+            return_value=True,
+        ) as runtime_ready, mock.patch.object(
+            smoke.time,
+            "sleep",
+        ):
+            self.assertEqual(
+                smoke._wait_for_extension_worker(
+                    Path("/tmp/profile"),
+                    501,
+                    timeout=1.0,
+                ),
+                49152,
             )
+        self.assertEqual(
+            request.call_args_list,
+            [
+                mock.call(49152, "/json/list"),
+                mock.call(49152, "/json/list"),
+            ],
+        )
+        runtime_ready.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/worker",
+            49152,
+        )
+
+    def test_worker_debugger_path_is_bound_to_the_exact_loopback_port(self) -> None:
+        self.assertEqual(
+            smoke._worker_debugger_path(
+                "ws://127.0.0.1:49152/devtools/page/worker",
+                49152,
+            ),
+            "/devtools/page/worker",
+        )
+        for url in (
+            "ws://localhost:49152/devtools/page/worker",
+            "ws://127.0.0.1:49153/devtools/page/worker",
+            "wss://127.0.0.1:49152/devtools/page/worker",
+            "ws://127.0.0.1:49152/other/worker",
+        ):
+            with self.subTest(url=url), self.assertRaises(
+                smoke.QualificationError
+            ):
+                smoke._worker_debugger_path(url, 49152)
+
+    def test_worker_runtime_gate_requires_the_terminal_boolean_marker(self) -> None:
+        with mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={
+                "result": {
+                    "type": "boolean",
+                    "value": True,
+                },
+            },
+        ) as command:
+            self.assertTrue(
+                smoke._worker_runtime_ready(
+                    "ws://127.0.0.1:49152/devtools/page/worker",
+                    49152,
+                )
+            )
+        command.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/worker",
+            49152,
+            "Runtime.evaluate",
+            {
+                "expression": smoke.WORKER_READY_EXPRESSION,
+                "returnByValue": True,
+                "awaitPromise": True,
+            },
+        )
+
+    def test_devtools_command_waits_for_its_bounded_response(self) -> None:
+        connection = mock.Mock()
+        with mock.patch.object(
+            smoke,
+            "_connect_worker_debugger",
+            return_value=connection,
+        ), mock.patch.object(
+            smoke,
+            "_send_websocket_json",
+        ) as send, mock.patch.object(
+            smoke,
+            "_receive_websocket_json",
+            side_effect=[
+                {"method": "Runtime.consoleAPICalled"},
+                {"id": 1, "result": {"frameId": "frame-1"}},
+            ],
+        ):
+            self.assertEqual(
+                smoke._devtools_command(
+                    "ws://127.0.0.1:49152/devtools/page/owned",
+                    49152,
+                    "Page.navigate",
+                    {"url": "https://example.net:18443/"},
+                ),
+                {"frameId": "frame-1"},
+            )
+        send.assert_called_once_with(
+            connection,
+            {
+                "id": 1,
+                "method": "Page.navigate",
+                "params": {"url": "https://example.net:18443/"},
+            },
+        )
+        connection.close.assert_called_once_with()
+
+    def test_worker_runtime_gate_proves_an_address_free_native_roundtrip(self) -> None:
+        self.assertIn("qualification_worker_ready", smoke.WORKER_READY_EXPRESSION)
+        self.assertIn("sendNativeMessage", smoke.WORKER_READY_EXPRESSION)
+        self.assertNotIn("http://", smoke.WORKER_READY_EXPRESSION)
+        self.assertNotIn("https://", smoke.WORKER_READY_EXPRESSION)
+
+    def test_fixture_navigation_uses_page_navigate_for_the_exact_url(self) -> None:
+        fixture = mock.Mock(host="example.net", port=18443)
+        target = (
+            "https://example.net:18443/"
+            "?slipstream-semantic=1"
+        )
+        with mock.patch.object(
+            smoke,
+            "_devtools_json",
+            return_value=[
+                {
+                    "type": "page",
+                    "url": "about:blank",
+                    "webSocketDebuggerUrl": (
+                        "ws://127.0.0.1:49152/devtools/page/owned"
+                    ),
+                }
+            ],
+        ) as request, mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={"frameId": "frame-1", "loaderId": "loader-1"},
+        ) as command:
+            smoke._open_fixture_with_devtools(49152, fixture)
+        request.assert_called_once_with(49152, "/json/list")
+        command.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/owned",
+            49152,
+            "Page.navigate",
+            {"url": target},
         )
 
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:
@@ -995,6 +1192,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ), mock.patch.object(
                 smoke.tempfile,
@@ -1015,6 +1222,13 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_wait_for_owned_chrome_process",
                 return_value=browser,
             ), mock.patch.object(
+                smoke,
+                "_wait_for_extension_worker",
+                return_value=49152,
+            ) as wait_for_worker, mock.patch.object(
+                smoke,
+                "_open_fixture_with_devtools",
+            ) as open_fixture, mock.patch.object(
                 smoke,
                 "_owned_chrome_process_alive",
                 return_value=True,
@@ -1042,6 +1256,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
             self.assertEqual(snapshot.ready_requests, 1)
             popen.assert_not_called()
+            wait_for_worker.assert_called_once_with(profile, 501)
+            open_fixture.assert_called_once_with(49152, fixture)
             stop.assert_called_once_with(
                 launch,
                 uid=501,
@@ -1089,6 +1305,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
             ), mock.patch.object(
                 smoke,
                 "_remove_owned_profile",
@@ -1179,6 +1405,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ) as remove_profile, mock.patch.object(
                 smoke.tempfile,
@@ -1198,6 +1434,13 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke,
                 "_wait_for_owned_chrome_process",
                 return_value=browser,
+            ), mock.patch.object(
+                smoke,
+                "_wait_for_extension_worker",
+                return_value=49152,
+            ), mock.patch.object(
+                smoke,
+                "_open_fixture_with_devtools",
             ), mock.patch.object(
                 smoke,
                 "_owned_chrome_process_alive",
@@ -1255,6 +1498,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
             ), mock.patch.object(
                 smoke,
                 "_remove_owned_profile",
@@ -1336,6 +1589,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ) as remove_profile, mock.patch.object(
                 smoke.tempfile,
@@ -1399,6 +1662,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
             ), mock.patch.object(
                 smoke,
                 "_remove_owned_profile",
@@ -1530,6 +1803,98 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     os.getgid(),
                     expected_executable,
                 )
+
+    def test_chrome_for_testing_native_host_uses_exact_current_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir(mode=0o700)
+            expected_executable = root / "native-host"
+            expected_executable.write_bytes(b"host")
+            source = root / "native-host.json"
+            payload = json.dumps(
+                {
+                    "name": smoke.NATIVE_HOST_NAME,
+                    "path": str(expected_executable),
+                    "type": "stdio",
+                    "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
+                },
+                separators=(",", ":"),
+            ).encode()
+            source.write_bytes(payload)
+            source.chmod(0o600)
+
+            registration = smoke._install_chrome_for_testing_native_host(
+                home,
+                source,
+                os.getuid(),
+                os.getgid(),
+                expected_executable,
+            )
+
+            self.assertEqual(
+                registration.path.relative_to(home),
+                smoke.CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH,
+            )
+            self.assertEqual(registration.path.read_bytes(), payload)
+            self.assertEqual(registration.path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(registration.created_directories)
+
+            smoke._remove_chrome_for_testing_native_host(
+                registration,
+                expected_executable,
+                os.getuid(),
+            )
+            self.assertFalse(registration.path.exists())
+            self.assertTrue(home.exists())
+            for directory in registration.created_directories:
+                self.assertFalse(directory.exists())
+
+    def test_chrome_for_testing_cleanup_preserves_nonempty_ancestor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir(mode=0o700)
+            expected_executable = root / "native-host"
+            expected_executable.write_bytes(b"host")
+            source = root / "native-host.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "name": smoke.NATIVE_HOST_NAME,
+                        "path": str(expected_executable),
+                        "type": "stdio",
+                        "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+            registration = smoke._install_chrome_for_testing_native_host(
+                home,
+                source,
+                os.getuid(),
+                os.getgid(),
+                expected_executable,
+            )
+            google_directory = (
+                home / "Library/Application Support/Google"
+            )
+            independent = google_directory / "independent"
+            independent.write_bytes(b"preserve")
+
+            smoke._remove_chrome_for_testing_native_host(
+                registration,
+                expected_executable,
+                os.getuid(),
+            )
+
+            self.assertFalse(registration.path.exists())
+            self.assertEqual(independent.read_bytes(), b"preserve")
+            self.assertTrue(google_directory.exists())
+            self.assertFalse(
+                google_directory.joinpath("ChromeForTesting").exists()
+            )
 
     def test_native_manifest_must_be_private_exact_origin_and_packaged_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

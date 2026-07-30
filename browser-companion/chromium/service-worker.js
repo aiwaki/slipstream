@@ -107,3 +107,5 @@ chrome.webRequest.onErrorOccurred.addListener(
     types: ["main_frame"]
   }
 );
+
+globalThis.__slipstreamWorkerReadyV1 = true;

@@ -53,6 +53,20 @@ reports only an aborted navigation and did not report the protected fixture's
 post-commit body truncation. Chromium documents error strings as
 version-sensitive, so the two-value allowlist is frozen and the protected
 current-Chrome gate is required to detect upstream drift.
+Ordinary CI also launches stable Chrome for Testing with a fresh private
+profile, a deterministic truncated HTTPS response, and an owner-only fixed
+native stub. That gate proves the real `webRequest` event, exact v2 signal, one
+reload, mandatory CSS/JavaScript/image resources, and browser-ready callback
+without Geph, PF, the daemon, or system network mutation. The protected
+account-backed gate remains authoritative for the complete product path. The
+fresh-profile harness first opens an owner-only extension page. The disposable
+worker acknowledges through the owner-only native stub after its listeners are
+registered. A bounded retry covers the short interval before a newly installed
+worker can receive its first message, and only then does the page navigate to
+the fixture. This prevents
+Chrome's command-line startup race from being mistaken for a missing
+`webRequest` event; the readiness acknowledgement and trace exist only in the
+CI copy, while the product observer itself is unchanged.
 The extension converts either error locally into the fixed
 `incomplete_response` category; the raw error and URL never cross native
 messaging. Static direct, direct-first, local-bypass, and reviewed geo-exit

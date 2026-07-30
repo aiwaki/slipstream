@@ -212,6 +212,33 @@ jobs:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py
 
+  chromium-webrequest-contract:
+    runs-on: macos-14
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install stable Chrome for Testing
+        id: chrome-for-testing
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        with:
+          chrome-version: stable
+          install-chromedriver: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+
+      - name: Qualify real Chromium incomplete-response observation
+        env:
+          CI: "true"
+          GITHUB_ACTIONS: "true"
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          sudo -E "$(command -v python3)" \
+            scripts/chromium_webrequest_event_smoke.py \
+            --chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"
+
   windows-adapter-contract:
     runs-on: windows-latest
     steps:

@@ -50,6 +50,11 @@ class BrowserCompanionContractTests(unittest.TestCase):
         self.assertIn("chrome.webRequest.onBeforeRedirect.addListener", worker_source)
         self.assertIn("chrome.webRequest.onCompleted.addListener", worker_source)
         self.assertIn("chrome.webRequest.onErrorOccurred.addListener", worker_source)
+        self.assertTrue(
+            worker_source.rstrip().endswith(
+                "globalThis.__slipstreamWorkerReadyV1 = true;"
+            )
+        )
 
     def test_native_host_and_extension_identity_are_exactly_bound(self):
         source = NATIVE_HOST.read_text()

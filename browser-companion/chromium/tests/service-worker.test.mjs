@@ -151,7 +151,6 @@ test("incomplete top-frame request confirms and reloads the same host once", asy
     type: "main_frame",
     method: "GET",
     frameId: 0,
-    parentFrameId: -1,
     tabId: 17,
     url: "https://Partial.Example/download?secret=ignored"
   });
