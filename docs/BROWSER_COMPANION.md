@@ -58,7 +58,11 @@ profile, a deterministic truncated HTTPS response, and an owner-only fixed
 native stub. That gate proves the real `webRequest` event, exact v2 signal, one
 reload, mandatory CSS/JavaScript/image resources, and browser-ready callback
 without Geph, PF, the daemon, or system network mutation. The protected
-account-backed gate remains authoritative for the complete product path.
+account-backed gate remains authoritative for the complete product path. The
+fresh-profile harness first opens an owner-only extension page that wakes the
+Manifest V3 worker, then navigates to the fixture. This prevents Chrome's
+command-line startup race from being mistaken for a missing `webRequest`
+event; the product observer itself is unchanged.
 The extension converts either error locally into the fixed
 `incomplete_response` category; the raw error and URL never cross native
 messaging. Static direct, direct-first, local-bypass, and reviewed geo-exit

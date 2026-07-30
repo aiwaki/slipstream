@@ -217,6 +217,28 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
         )
 
+    def test_chrome_command_can_warm_the_extension_before_fixture_navigation(
+        self,
+    ) -> None:
+        warmup = (
+            f"{smoke.NATIVE_HOST_ORIGIN}"
+            "qualification-warmup.html"
+        )
+        command = smoke._chrome_command(
+            Path("/Applications/Google Chrome"),
+            Path("/tmp/profile"),
+            Path("/repo/browser-companion/chromium"),
+            18443,
+            smoke.INCOMPLETE_FIXTURE_HOST,
+            warmup,
+        )
+        self.assertEqual(command[-1], warmup)
+        self.assertIn(
+            "--host-resolver-rules=MAP "
+            f"{smoke.INCOMPLETE_FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
+            command,
+        )
+
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             executable = _fake_chrome_for_testing(Path(tmp))

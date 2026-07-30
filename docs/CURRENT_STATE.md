@@ -29,11 +29,15 @@ daemon absence, unchanged system network state, and cleanup also passed. The
 regional-denial Chromium scenario completed, but the incomplete-response
 scenario made one root request and never reloaded. This is the first protected
 run after request-ID correlation and an explicit fixture EOF were both present.
-The remaining unproved assumption is the optional `parentFrameId` field on the
-real browser-owned `onBeforeRequest` event: `main_frame` plus `frameId=0`
-already establishes top-level scope, so omission must not discard an otherwise
-exact HTTPS GET candidate. No PF, DNS, installer, routing-policy, or Geph
-behavior changes in the follow-up.
+The first ordinary real-Chrome rerun reproduced the missing signal after the
+optional `parentFrameId` correction. A CI-only observer then produced an empty
+owner-private event trace, isolating a fresh-profile startup race: Chrome began
+the command-line fixture navigation before the Manifest V3 worker registered
+its listeners. The harness follow-up wakes the worker through an owner-only
+extension page before the fixture navigation, while retaining the
+`parentFrameId` omission correction (`main_frame` plus `frameId=0` already
+establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
+production-extension behavior changes in the follow-up.
 
 PR #287 merged the bounded payload image-release correction as
 `8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI

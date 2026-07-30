@@ -178,6 +178,7 @@ def _copy_diagnostic_extension(
     destination: Path,
     *,
     host: str,
+    target_url: str,
     uid: int,
     gid: int,
 ) -> Path:
@@ -185,6 +186,25 @@ def _copy_diagnostic_extension(
     worker_path = destination / "service-worker.js"
     with worker_path.open("ab") as worker:
         worker.write(_diagnostic_worker_source(host))
+    (destination / "qualification-warmup.html").write_text(
+        (
+            "<!doctype html><meta charset=\"utf-8\">"
+            "<title>Slipstream qualification</title>"
+            "<script src=\"qualification-warmup.js\"></script>"
+        ),
+        encoding="utf-8",
+    )
+    (destination / "qualification-warmup.js").write_text(
+        (
+            f"const target = {json.dumps(target_url)};\n"
+            "chrome.runtime.sendMessage({"
+            'type: "slipstream.qualification_warmup"'
+            "}).catch(() => null).finally(() => {\n"
+            "  setTimeout(() => location.replace(target), 250);\n"
+            "});\n"
+        ),
+        encoding="utf-8",
+    )
     for root, directories, files in os.walk(destination):
         root_path = Path(root)
         os.chown(root_path, uid, gid)
@@ -201,7 +221,28 @@ def _copy_diagnostic_extension(
 
 
 def _read_trace(path: Path, uid: int) -> list[dict[str, object]]:
-    payload = semantic._read_private_bytes(path, uid)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != uid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size > MAX_NATIVE_MESSAGE
+        ):
+            raise semantic.QualificationError(
+                f"{path} is not a bounded owner-private trace"
+            )
+        payload = os.read(descriptor, MAX_NATIVE_MESSAGE + 1)
+    finally:
+        os.close(descriptor)
+    if not payload:
+        return []
     traces: list[dict[str, object]] = []
     for line in payload.splitlines():
         if not line:
@@ -312,14 +353,19 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             uid=uid,
             gid=gid,
         )
+        fixture.start()
+        target_url = (
+            f"https://{fixture.host}:{fixture.port}/"
+            "?slipstream-webrequest=1"
+        )
         diagnostic_extension = _copy_diagnostic_extension(
             extension,
             diagnostic_extension,
             host=fixture.host,
+            target_url=target_url,
             uid=uid,
             gid=gid,
         )
-        fixture.start()
         snapshot = semantic._run_chrome(
             uid,
             gid,
@@ -328,6 +374,10 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             chrome_executable,
             manifest_path,
             stub_path,
+            initial_url=(
+                f"{semantic.NATIVE_HOST_ORIGIN}"
+                "qualification-warmup.html"
+            ),
         )
         semantic._assert_fixture_complete(snapshot)
         signal = _validate_signal(signal_path, uid)

@@ -127,6 +127,40 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
         self.assertNotIn("url:", worker)
         self.assertNotIn("host,", worker)
 
+    def test_diagnostic_extension_warms_worker_before_fixture_navigation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            (source / "service-worker.js").write_text(
+                'const NATIVE_HOST = "dev.slipstream.semantic";\n',
+                encoding="utf-8",
+            )
+            target = "https://example.net:443/?slipstream-webrequest=1"
+            smoke._copy_diagnostic_extension(
+                source,
+                destination,
+                host="example.net",
+                target_url=target,
+                uid=os.getuid(),
+                gid=os.getgid(),
+            )
+
+            warmup = (destination / "qualification-warmup.js").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("chrome.runtime.sendMessage", warmup)
+            self.assertIn("location.replace(target)", warmup)
+            self.assertIn(target, warmup)
+            self.assertEqual(
+                (destination / "qualification-warmup.js").stat().st_mode
+                & 0o777,
+                0o600,
+            )
+
     def test_validate_signal_accepts_only_the_privacy_bounded_v2_contract(
         self,
     ) -> None:

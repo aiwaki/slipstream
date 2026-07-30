@@ -550,6 +550,7 @@ def _chrome_command(
     extension: Path,
     fixture_port: int,
     fixture_host: str = FIXTURE_HOST,
+    initial_url: str | None = None,
 ) -> tuple[str, ...]:
     return (
         str(executable),
@@ -570,7 +571,8 @@ def _chrome_command(
         f"--load-extension={extension}",
         f"--host-resolver-rules=MAP {fixture_host} 127.0.0.1, EXCLUDE localhost",
         f"--user-data-dir={profile}",
-        f"https://{fixture_host}:{fixture_port}/?slipstream-semantic=1",
+        initial_url
+        or f"https://{fixture_host}:{fixture_port}/?slipstream-semantic=1",
     )
 
 
@@ -650,6 +652,7 @@ def _chrome_open_command(
     stderr_path: Path,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
+    initial_url: str | None = None,
 ) -> tuple[str, ...]:
     chrome = _chrome_command(
         executable,
@@ -657,6 +660,7 @@ def _chrome_open_command(
         extension,
         fixture_port,
         fixture_host,
+        initial_url,
     )
     return (
         "/usr/bin/open",
@@ -688,6 +692,7 @@ def _chrome_launch_agent_payload(
     fixture_port: int,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
+    initial_url: str | None = None,
 ) -> dict[str, object]:
     return {
         "Label": label,
@@ -701,6 +706,7 @@ def _chrome_launch_agent_payload(
                 chrome_stderr_path,
                 application_bundle,
                 fixture_host,
+                initial_url,
             )
         ),
         "RunAtLoad": True,
@@ -1217,6 +1223,7 @@ def _run_chrome(
     executable: Path,
     native_host_manifest: Path,
     native_host_executable: Path,
+    initial_url: str | None = None,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -1273,6 +1280,7 @@ def _run_chrome(
             fixture.port,
             application_bundle,
             fixture.host,
+            initial_url,
         )
         _write_owner_private_file(
             plist_path,
