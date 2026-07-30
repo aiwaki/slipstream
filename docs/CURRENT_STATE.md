@@ -21,15 +21,6 @@ record absent while retaining the matching durable absent intent. An
 independent sentinel inside the production-secured runtime root survived both
 uninstalls, and both architectures finished with exact terminal absence.
 
-The first coexistence-sentinel revision correctly failed before product
-evidence was accepted: pre-creating the production runtime root outside the
-service installer left it with an untrusted ACL, so the product refused to
-persist lifecycle state on both native architectures. The final gate lets the
-real installer create and secure the root before placing the independent
-sentinel. PR and exact-main runs then passed without weakening the ACL guard.
-No production networking was composed and no routes, DNS, proxy/PAC/VPN,
-drivers, or external processes/services were mutated.
-
 Previous exact-main evidence audit: 2026-07-30, through product merge
 `7f265549d727db93b8c0a7861808cc5f59784527` (PR #273). Exact-main native
 AMD64/ARM64 run `30497886810`, CI `30497886818`, and audit `30497886814`
