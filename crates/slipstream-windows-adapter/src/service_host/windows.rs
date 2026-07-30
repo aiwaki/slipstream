@@ -1,6 +1,7 @@
 //! Native Windows service dispatcher and self-managing controller entry point.
 
 use super::{
+    reduce_windows_service_boot_admission, WindowsServiceBootAdmission,
     WindowsServiceHostContractError, WindowsServiceHostFailureCode, WindowsServiceHostInvocation,
     WindowsServiceHostPhase, WindowsServiceHostStatus, WindowsServiceManagementCommand,
     WindowsServiceManagementResultV1,
@@ -10,6 +11,9 @@ use crate::service_controller::{WindowsServiceController, WindowsServiceControll
 use crate::service_lifecycle::{
     WindowsServiceCommand, WindowsServiceIdentity, WINDOWS_SERVICE_NAME,
 };
+use crate::service_lifecycle_state::WindowsServiceLifecycleStateEffects;
+use crate::service_observer::WindowsScmObserver;
+use crate::service_scm::require_reboot_admission_configuration;
 use crate::worker_host::{
     execute_windows_worker_host_transition, reduce_windows_worker_host, WindowsWorkerHostCommand,
     WindowsWorkerHostEffects, WindowsWorkerHostEvent, WindowsWorkerHostState,
@@ -151,12 +155,23 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
 
     let started = Instant::now();
     let mut state = WindowsWorkerHostState::new(0);
-    let config = production_worker_config();
-    let policy_tables = bundled_policy_v1();
     let mut effects = NoNetworkWindowsWorkerHostEffects::new(status_handle);
     if !report_status(status_handle, state.initial_service_status(), 0) {
         return;
     }
+    match observe_windows_service_boot_admission() {
+        WindowsServiceBootAdmission::Run => {}
+        WindowsServiceBootAdmission::RemainStopped => {
+            let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 0);
+            return;
+        }
+        WindowsServiceBootAdmission::Refuse => {
+            let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
+            return;
+        }
+    }
+    let config = production_worker_config();
+    let policy_tables = bundled_policy_v1();
     if apply_worker_host_event(
         &mut state,
         WindowsWorkerHostEvent::Worker {
@@ -197,6 +212,24 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
             return;
         }
     }
+}
+
+fn observe_windows_service_boot_admission() -> WindowsServiceBootAdmission {
+    let assessment = WindowsServiceLifecycleStateEffects::new()
+        .collect()
+        .assess();
+    let admission = reduce_windows_service_boot_admission(&assessment);
+    if admission != WindowsServiceBootAdmission::Run {
+        return admission;
+    }
+    let configuration = match WindowsScmObserver::new().observe_configuration() {
+        Ok(Some(configuration)) => configuration,
+        Ok(None) | Err(_) => return WindowsServiceBootAdmission::Refuse,
+    };
+    if require_reboot_admission_configuration(&configuration).is_err() {
+        return WindowsServiceBootAdmission::Refuse;
+    }
+    WindowsServiceBootAdmission::Run
 }
 
 unsafe extern "system" fn service_control_handler(control: u32) {
@@ -428,9 +461,10 @@ mod tests {
     };
     use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
     use windows_sys::Win32::System::Services::{
-        ChangeServiceConfigW, CloseServiceHandle, OpenSCManagerW, OpenServiceW, SC_HANDLE,
-        SC_MANAGER_CONNECT, SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG, SERVICE_DEMAND_START,
-        SERVICE_ERROR_NORMAL, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG, SERVICE_WIN32_OWN_PROCESS,
+        ChangeServiceConfigW, CloseServiceHandle, OpenSCManagerW, OpenServiceW, StartServiceW,
+        SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG,
+        SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG,
+        SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_WIN32_OWN_PROCESS,
     };
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
@@ -598,6 +632,30 @@ mod tests {
             WindowsServiceDecision::NoChange
         );
         assert!(repeated.lifecycle.accepted);
+        assert_reboot_admission_configuration();
+
+        let stopped_before_boot = run_host(&host, &["manage", "stop"]);
+        assert_eq!(
+            stopped_before_boot.lifecycle.decision,
+            WindowsServiceDecision::Stopped
+        );
+        assert!(stopped_before_boot.lifecycle.accepted);
+        wait_for_state(WindowsScmState::Stopped);
+        assert_durable_intent(WindowsServiceDesiredState::Stopped);
+
+        start_exact_service_through_scm();
+        thread::sleep(Duration::from_millis(250));
+        wait_for_state(WindowsScmState::Stopped);
+        assert_durable_intent(WindowsServiceDesiredState::Stopped);
+
+        let explicitly_started = run_host(&host, &["manage", "start"]);
+        assert_eq!(
+            explicitly_started.lifecycle.decision,
+            WindowsServiceDecision::Started
+        );
+        assert!(explicitly_started.lifecycle.accepted);
+        wait_for_state(WindowsScmState::Running);
+        assert_durable_intent(WindowsServiceDesiredState::Running);
         assert_reboot_admission_configuration();
 
         change_exact_service_start_type(SERVICE_DEMAND_START);
@@ -879,6 +937,41 @@ mod tests {
                 error_control: SERVICE_ERROR_NORMAL,
             }
         );
+    }
+
+    fn assert_durable_intent(expected: WindowsServiceDesiredState) {
+        match WindowsServiceLifecycleStateEffects::new()
+            .collect()
+            .assess()
+        {
+            WindowsServiceLifecycleStateAssessment::Stable {
+                intent: Some(intent),
+                active_install: Some(_),
+            } => assert_eq!(intent.desired, expected),
+            evidence => panic!("production host has invalid durable intent: {evidence:?}"),
+        }
+    }
+
+    fn start_exact_service_through_scm() {
+        let manager = OwnedTestScHandle::open(
+            unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT) },
+            "OpenSCManagerW",
+        );
+        let service_name = wide_null(WINDOWS_SERVICE_NAME);
+        let service = OwnedTestScHandle::open(
+            unsafe {
+                OpenServiceW(
+                    manager.raw(),
+                    service_name.as_ptr(),
+                    SERVICE_START | SERVICE_QUERY_STATUS,
+                )
+            },
+            "OpenServiceW",
+        );
+        let started = unsafe { StartServiceW(service.raw(), 0, null()) };
+        assert_ne!(started, 0, "StartServiceW failed with {}", unsafe {
+            GetLastError()
+        });
     }
 
     fn change_exact_service_start_type(start_type: u32) {

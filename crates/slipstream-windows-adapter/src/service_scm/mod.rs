@@ -9,4 +9,6 @@ pub use v1::*;
 mod windows;
 
 #[cfg(windows)]
+pub(crate) use windows::require_reboot_admission_configuration;
+#[cfg(windows)]
 pub use windows::{WindowsServiceScmEffects, WindowsServiceScmError};

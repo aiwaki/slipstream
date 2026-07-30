@@ -23,6 +23,9 @@ fn production_host_reboot_admission_contract_is_frozen_and_bounded() {
         "normal_error_control",
         "configuration_revalidated_before_install_start_recover",
         "configuration_drift_fails_closed",
+        "stopped_intent_remains_stopped_on_scm_start",
+        "unknown_or_inconsistent_intent_fails_closed",
+        "explicit_start_required_to_resume_stopped_intent",
         "stop_and_uninstall_remain_available_for_exact_cleanup",
         "independent_owner_preserved",
         "terminal_absence_required",
@@ -47,6 +50,10 @@ fn production_host_reboot_admission_contract_is_frozen_and_bounded() {
     assert_eq!(
         contract["disposable_native_qualification"]["generation"],
         41
+    );
+    assert_eq!(
+        contract["disposable_native_qualification"]["direct_scm_start_with_stopped_intent"],
+        true
     );
 }
 
@@ -108,6 +115,19 @@ fn production_registration_and_controller_enforce_exact_reboot_admission() {
         preflight < reduction,
         "configuration admission must run before a no-change reducer result can be accepted"
     );
+
+    let host = include_str!("../src/service_host/windows.rs").replace("\r\n", "\n");
+    for required in [
+        "observe_windows_service_boot_admission()",
+        "WindowsServiceBootAdmission::RemainStopped",
+        "WindowsServiceBootAdmission::Refuse",
+        "require_reboot_admission_configuration(&configuration)",
+    ] {
+        assert!(
+            host.contains(required),
+            "production service boot entry is missing {required}"
+        );
+    }
 }
 
 #[test]
@@ -129,6 +149,9 @@ fn native_gate_injects_drift_and_preserves_cleanup() {
     for required in [
         "run_host(&host,&[\"manage\",\"install\",\"--generation\",\"41\"])",
         "assert_reboot_admission_configuration()",
+        "assert_durable_intent(WindowsServiceDesiredState::Stopped)",
+        "start_exact_service_through_scm()",
+        "assert_durable_intent(WindowsServiceDesiredState::Running)",
         "change_exact_service_start_type(SERVICE_DEMAND_START)",
         "assert_host_rejects_configuration_drift(&host,&[\"manage\",\"recover\"])",
         "assert_host_rejects_configuration_drift(&host,&[\"manage\",\"start\"])",

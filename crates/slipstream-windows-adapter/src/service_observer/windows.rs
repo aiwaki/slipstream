@@ -29,7 +29,6 @@ impl WindowsScmObserver {
         Self
     }
 
-    #[cfg(test)]
     pub(crate) fn observe_configuration(
         &self,
     ) -> Result<Option<WindowsServiceConfiguration>, WindowsServiceObserverError> {

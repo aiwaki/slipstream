@@ -12,10 +12,14 @@ Current M4 candidate: PR #279 adds production-host reboot admission without
 claiming a physical reboot. The exact owned Windows service is registered as
 automatic-start and its service type, start type, and error control are
 re-read before install/start/recovery can be accepted, including no-change
-paths. Its native AMD64/ARM64 gate deliberately injects demand-start drift,
-requires running-state commands to fail closed, keeps exact stop/uninstall
-available, preserves an independent sentinel, and proves terminal absence.
-Local contract tests and lint pass; native PR qualification is pending.
+paths and boot worker activation. Boot entry additionally requires matching
+active-install evidence and durable running intent; stopped intent remains
+stopped, while unknown evidence fails closed. Its native AMD64/ARM64 gate
+starts the stopped service directly through SCM, proves only explicit
+management start resumes it, deliberately injects demand-start drift, requires
+running-state commands to fail closed, keeps exact stop/uninstall available,
+preserves an independent sentinel, and proves terminal absence. Local contract
+tests and lint pass; native PR qualification is pending.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
 `0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main

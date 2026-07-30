@@ -335,7 +335,7 @@ impl ExistingMutation {
     }
 }
 
-fn require_reboot_admission_configuration(
+pub(crate) fn require_reboot_admission_configuration(
     configuration: &WindowsServiceConfiguration,
 ) -> Result<(), WindowsServiceScmError> {
     for (field, expected, observed) in [

@@ -661,13 +661,14 @@ therefore stays phased and closed to production traffic:
    `0ed37e7b828bb642700d6191e10206061c27c525`. The next bounded subgate is
    reboot admission: registration must use automatic start, SCM configuration
    must be revalidated before install/start/recovery (including no-change
-   paths), and injected configuration drift must fail closed while exact
-   stop/uninstall cleanup remains available. Native AMD64/ARM64 qualification
-   is required. This is only a prerequisite; a physical reboot, post-boot
-   readiness, sleep/wake, full updater/uninstall orchestration, and broader
-   external network-tool coexistence remain open. Reboot admission is under
-   review in PR #279; its native matrix must pass before this prerequisite can
-   be marked complete.
+   paths) and boot worker activation. Durable stopped intent must remain
+   stopped when SCM starts the service, unknown evidence and injected
+   configuration drift must fail closed, and exact stop/uninstall cleanup must
+   remain available. Native AMD64/ARM64 qualification is required. This is
+   only a prerequisite; a physical reboot, post-boot readiness, sleep/wake,
+   full updater/uninstall orchestration, and broader external network-tool
+   coexistence remain open. Reboot admission is under review in PR #279; its
+   native matrix must pass before this prerequisite can be marked complete.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
