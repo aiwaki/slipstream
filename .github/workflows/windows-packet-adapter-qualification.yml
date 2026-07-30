@@ -494,7 +494,6 @@ jobs:
         run: cargo clippy --locked --manifest-path crates/slipstream-userspace-stack-effect-evaluation/Cargo.toml --all-targets -- -D warnings
 
       - name: Qualify the exact physical reboot production host before packaging
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           QUALIFICATION_GENERATION: ${{ github.run_id }}

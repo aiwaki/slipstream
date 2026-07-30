@@ -8,9 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: land the bounded PowerShell `REG_BINARY` preservation
-correction exposed by exact-main run `30539745019`, then wait for the native
-Windows workflow on the resulting current `main` SHA and download only its ARM64
+Current M4 next action: identify and correct the exact terminal-absence surface
+exposed by exact-main run `30541625059`, then wait for the native Windows
+workflow on the resulting current `main` SHA and download only its ARM64
 `slipstream-windows-physical-reboot-<architecture>-<commit>` bundle, verify
 `artifact-manifest-v1.json` plus every recorded size and SHA-256, then run the
 versioned two-phase physical Windows reboot harness from that bundle on the
@@ -29,6 +29,19 @@ uninstall and proves terminal product absence. Failure attempts the same exact
 owned rollback; identity mismatch refuses mutation. CI preflight cannot claim
 the physical runtime result. Sleep/wake, updater orchestration, production
 networking, and broader VPN coexistence remain separate unproven gates.
+
+PR #284 merged the bounded PowerShell `REG_BINARY` preservation correction as
+`1f9e9768cb554d08a4ac888a842ee44c06897444`. Exact-main run
+`30541625059` proved that correction on AMD64 and ARM64: all prior lifecycle,
+packet, coexistence, cleanup, and lint gates passed, the release host built, and
+physical-reboot `prepare` reached committed automatic-start readiness. The
+immediate protected `cleanup` then timed out waiting for independent terminal
+absence even though the public management command returned an accepted
+uninstall. Packaging and upload were skipped on both architectures, so there is
+still no qualified artifact and no physical Windows host transaction has been
+attempted. The next PR must expose the exact remaining SCM, durable-record,
+payload, or process surface and run this same release-host preflight on PR
+native jobs rather than discovering another cleanup defect only after merge.
 
 PR #283 merged the commit-bound physical reboot bundle workflow as
 `3fad7d49de41eac41d3babb835828ccaed7642f1`. Exact-main run

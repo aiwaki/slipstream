@@ -208,6 +208,18 @@ current owner record, generation, executable path, and SHA-256 still agree;
 otherwise it refuses mutation. `cleanup` is the explicit recovery phase for an
 interrupted operator session.
 
+Exact-main run `30541625059` on
+`1f9e9768cb554d08a4ac888a842ee44c06897444` proved the PowerShell
+`REG_BINARY` snapshot correction and reached release-host `prepare` on native
+AMD64 and ARM64. Both jobs then timed out in the independent terminal-absence
+observer after the exact public uninstall returned accepted. No bundle was
+packaged or uploaded. The harness now reports a bounded, non-secret observation
+of the exact SCM service, owner record, active-install record, payload, and
+last known service process, and the release-host `prepare -> cleanup` preflight
+runs on PR native jobs as well as main. This changes no product lifecycle or
+network state; it narrows the next correction to evidence from the real
+architectures before merge.
+
 The intended disposable-host sequence is:
 
 ```powershell

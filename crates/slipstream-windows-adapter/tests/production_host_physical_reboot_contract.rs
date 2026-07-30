@@ -87,7 +87,10 @@ fn physical_reboot_harness_is_two_phase_exact_owned_and_non_rebooting() {
         "service-owner-v1.json",
         "service-intent-v1.json",
         "Wait-ExactServiceReady",
+        "Get-ExactTerminalObservation",
         "Assert-ExactTerminalAbsence",
+        "last_process_matches_payload",
+        "The exact service did not reach terminal product absence:",
         "Assert-TransactionTerminalAbsence",
         "Invoke-ExactRollback",
         "independent-owner.sentinel",
@@ -181,4 +184,15 @@ fn native_workflow_parses_harness_on_both_windows_architectures() {
             "native workflow is missing qualified artifact invariant {required}"
         );
     }
+    let preflight = workflow
+        .split_once("      - name: Qualify the exact physical reboot production host before packaging")
+        .and_then(|(_, rest)| {
+            rest.split_once("      - name: Package the exact physical reboot qualification bundle")
+        })
+        .map(|(section, _)| section)
+        .expect("native workflow must contain the bounded release-host preflight");
+    assert!(
+        !preflight.contains("github.event_name == 'push'"),
+        "the exact release-host preflight must run on PR and main native jobs"
+    );
 }

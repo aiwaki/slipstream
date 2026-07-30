@@ -338,6 +338,45 @@ function Wait-ExactServiceReady {
     throw "The exact automatic-start service did not reach verified Running readiness."
 }
 
+function Get-ExactTerminalObservation {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstalledPath,
+        [Parameter(Mandatory = $true)][uint32]$LastProcessId
+    )
+
+    $service = Get-ExactService
+    $lastProcess = $null
+    if ($LastProcessId -gt 0) {
+        $lastProcess = Get-ExactProcess -ProcessId $LastProcessId
+    }
+    $lastProcessMatches = $false
+    if ($null -ne $lastProcess -and
+        -not [string]::IsNullOrWhiteSpace($lastProcess.ExecutablePath)) {
+        $lastProcessMatches = [StringComparer]::OrdinalIgnoreCase.Equals(
+            [IO.Path]::GetFullPath($lastProcess.ExecutablePath),
+            [IO.Path]::GetFullPath($InstalledPath)
+        )
+    }
+
+    return [ordered]@{
+        service = if ($null -eq $service) {
+            $null
+        } else {
+            [ordered]@{
+                state = [string]$service.State
+                start_mode = [string]$service.StartMode
+                process_id = [uint32]$service.ProcessId
+            }
+        }
+        owner_present = Test-Path -LiteralPath $OwnerRecordPath
+        active_install_present = Test-Path -LiteralPath $ActiveInstallRecordPath
+        payload_present = Test-Path -LiteralPath $InstalledPath
+        last_process_present = $null -ne $lastProcess
+        last_process_matches_payload = $lastProcessMatches
+        intent_present = Test-Path -LiteralPath $IntentRecordPath
+    }
+}
+
 function Assert-ExactTerminalAbsence {
     param(
         [Parameter(Mandatory = $true)][string]$InstalledPath,
@@ -345,31 +384,24 @@ function Assert-ExactTerminalAbsence {
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TerminalTimeoutSeconds)
+    $observation = $null
     do {
-        $service = Get-ExactService
-        $ownerAbsent = -not (Test-Path -LiteralPath $OwnerRecordPath)
-        $activeAbsent = -not (Test-Path -LiteralPath $ActiveInstallRecordPath)
-        $payloadAbsent = -not (Test-Path -LiteralPath $InstalledPath)
-        if ($null -eq $service -and $ownerAbsent -and $activeAbsent -and $payloadAbsent) {
-            if ($LastProcessId -gt 0) {
-                $process = Get-ExactProcess -ProcessId $LastProcessId
-                if ($null -ne $process -and -not [string]::IsNullOrWhiteSpace($process.ExecutablePath)) {
-                    if ([StringComparer]::OrdinalIgnoreCase.Equals(
-                        [IO.Path]::GetFullPath($process.ExecutablePath),
-                        [IO.Path]::GetFullPath($InstalledPath)
-                    )) {
-                        Start-Sleep -Milliseconds 250
-                        continue
-                    }
-                }
-            }
+        $observation = Get-ExactTerminalObservation `
+            -InstalledPath $InstalledPath `
+            -LastProcessId $LastProcessId
+        if ($null -eq $observation.service -and
+            -not $observation.owner_present -and
+            -not $observation.active_install_present -and
+            -not $observation.payload_present -and
+            -not $observation.last_process_matches_payload) {
             $intent = Read-BoundedJson -Path $IntentRecordPath
             Assert-Equal -Actual $intent.desired -Expected "absent" -Label "terminal intent"
             return
         }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "The exact service did not reach terminal product absence."
+    $diagnostic = $observation | ConvertTo-Json -Depth 4 -Compress
+    throw "The exact service did not reach terminal product absence: $diagnostic"
 }
 
 function Assert-TransactionIdentity {
