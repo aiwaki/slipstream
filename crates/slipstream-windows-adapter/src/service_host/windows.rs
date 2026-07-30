@@ -562,11 +562,8 @@ mod tests {
             fs::remove_dir_all(&scratch).expect("remove stale generation scratch");
         }
         fs::create_dir(&scratch).expect("create generation scratch");
-        fs::create_dir_all(&root).expect("create production-host runtime root");
         let independent_owner = root.join("independent-owner.sentinel");
         let independent_evidence = b"independent owner must survive both production generations";
-        fs::write(&independent_owner, independent_evidence)
-            .expect("write independent-owner sentinel");
 
         let second_host = scratch.join("slipstream-windows-service-generation-2.exe");
         fs::copy(&first_host, &second_host).expect("copy generation-2 production host");
@@ -597,6 +594,8 @@ mod tests {
         );
         assert!(first_install.lifecycle.accepted);
         verify_production_generation_active(&root, &first_identity);
+        fs::write(&independent_owner, independent_evidence)
+            .expect("write independent-owner sentinel into the secured runtime root");
 
         let first_uninstall = run_host(&first_host, &["manage", "uninstall"]);
         assert_eq!(
