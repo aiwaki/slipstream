@@ -47,6 +47,14 @@ before any listener observed it. The worker now sets a terminal in-process
 marker only after every production listener is registered. The harness reads
 that exact boolean through the target's loopback DevTools Protocol before
 opening the fixture; the CI-only observer is inserted before the same marker.
+Run `30569114212` reached that terminal marker but still produced one root
+request and an empty observer trace. Target publication and listener
+registration are therefore no longer the unresolved boundary. The harness now
+requires an address-free round trip through the packaged native-messaging host
+before navigation, then uses `Page.navigate` on the single owned
+`about:blank` page instead of creating a special `/json/new` target. This
+separates native-host availability from navigation semantics and exercises an
+ordinary page navigation.
 It disables proxy use for HTTP control requests, validates the WebSocket
 upgrade and exact loopback target, bounds every file, frame, and JSON response,
 accepts no redirect, and retains the

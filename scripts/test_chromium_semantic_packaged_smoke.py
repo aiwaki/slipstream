@@ -313,6 +313,34 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke._worker_debugger_path(url, 49152)
 
     def test_worker_runtime_gate_requires_the_terminal_boolean_marker(self) -> None:
+        with mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={
+                "result": {
+                    "type": "boolean",
+                    "value": True,
+                },
+            },
+        ) as command:
+            self.assertTrue(
+                smoke._worker_runtime_ready(
+                    "ws://127.0.0.1:49152/devtools/page/worker",
+                    49152,
+                )
+            )
+        command.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/worker",
+            49152,
+            "Runtime.evaluate",
+            {
+                "expression": smoke.WORKER_READY_EXPRESSION,
+                "returnByValue": True,
+                "awaitPromise": True,
+            },
+        )
+
+    def test_devtools_command_waits_for_its_bounded_response(self) -> None:
         connection = mock.Mock()
         with mock.patch.object(
             smoke,
@@ -324,36 +352,37 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         ) as send, mock.patch.object(
             smoke,
             "_receive_websocket_json",
-            return_value={
-                "id": 1,
-                "result": {
-                    "result": {
-                        "type": "boolean",
-                        "value": True,
-                    }
-                },
-            },
+            side_effect=[
+                {"method": "Runtime.consoleAPICalled"},
+                {"id": 1, "result": {"frameId": "frame-1"}},
+            ],
         ):
-            self.assertTrue(
-                smoke._worker_runtime_ready(
-                    "ws://127.0.0.1:49152/devtools/page/worker",
+            self.assertEqual(
+                smoke._devtools_command(
+                    "ws://127.0.0.1:49152/devtools/page/owned",
                     49152,
-                )
+                    "Page.navigate",
+                    {"url": "https://example.net:18443/"},
+                ),
+                {"frameId": "frame-1"},
             )
         send.assert_called_once_with(
             connection,
             {
                 "id": 1,
-                "method": "Runtime.evaluate",
-                "params": {
-                    "expression": smoke.WORKER_READY_EXPRESSION,
-                    "returnByValue": True,
-                },
+                "method": "Page.navigate",
+                "params": {"url": "https://example.net:18443/"},
             },
         )
         connection.close.assert_called_once_with()
 
-    def test_fixture_navigation_uses_put_for_the_exact_url(self) -> None:
+    def test_worker_runtime_gate_proves_an_address_free_native_roundtrip(self) -> None:
+        self.assertIn("qualification_worker_ready", smoke.WORKER_READY_EXPRESSION)
+        self.assertIn("sendNativeMessage", smoke.WORKER_READY_EXPRESSION)
+        self.assertNotIn("http://", smoke.WORKER_READY_EXPRESSION)
+        self.assertNotIn("https://", smoke.WORKER_READY_EXPRESSION)
+
+    def test_fixture_navigation_uses_page_navigate_for_the_exact_url(self) -> None:
         fixture = mock.Mock(host="example.net", port=18443)
         target = (
             "https://example.net:18443/"
@@ -362,15 +391,27 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         with mock.patch.object(
             smoke,
             "_devtools_json",
-            return_value={"url": target},
-        ) as request:
+            return_value=[
+                {
+                    "type": "page",
+                    "url": "about:blank",
+                    "webSocketDebuggerUrl": (
+                        "ws://127.0.0.1:49152/devtools/page/owned"
+                    ),
+                }
+            ],
+        ) as request, mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={"frameId": "frame-1", "loaderId": "loader-1"},
+        ) as command:
             smoke._open_fixture_with_devtools(49152, fixture)
-        request.assert_called_once_with(
+        request.assert_called_once_with(49152, "/json/list")
+        command.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/owned",
             49152,
-            "/json/new?"
-            "https%3A%2F%2Fexample.net%3A18443%2F"
-            "%3Fslipstream-semantic%3D1",
-            method="PUT",
+            "Page.navigate",
+            {"url": target},
         )
 
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:

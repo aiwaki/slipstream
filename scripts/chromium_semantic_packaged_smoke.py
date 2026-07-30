@@ -66,7 +66,26 @@ DEVTOOLS_TIMEOUT = 15.0
 MAX_DEVTOOLS_RESPONSE = 64 * 1024
 MAX_WEBSOCKET_HEADERS = 16 * 1024
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-WORKER_READY_EXPRESSION = "globalThis.__slipstreamWorkerReadyV1 === true"
+WORKER_READY_EXPRESSION = """
+(async () => {
+  if (globalThis.__slipstreamWorkerReadyV1 !== true) {
+    return false;
+  }
+  try {
+    const response = await chrome.runtime.sendNativeMessage(
+      "dev.slipstream.semantic",
+      {
+        schema_version: 0,
+        source: "qualification_worker_ready",
+        phase: "native_ready"
+      }
+    );
+    return response !== null && typeof response === "object";
+  } catch (_error) {
+    return false;
+  }
+})()
+""".strip()
 
 
 class QualificationError(RuntimeError):
@@ -1012,34 +1031,61 @@ def _receive_websocket_json(connection: socket.socket) -> object:
         raise QualificationError("worker debugger returned invalid JSON") from exc
 
 
-def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+def _devtools_command(
+    debugger_url: str,
+    port: int,
+    method: str,
+    params: dict[str, object],
+) -> dict[str, object]:
     connection = _connect_worker_debugger(debugger_url, port)
     try:
         _send_websocket_json(
             connection,
             {
                 "id": 1,
-                "method": "Runtime.evaluate",
-                "params": {
-                    "expression": WORKER_READY_EXPRESSION,
-                    "returnByValue": True,
-                },
+                "method": method,
+                "params": params,
             },
         )
         for _ in range(20):
             response = _receive_websocket_json(connection)
             if not isinstance(response, dict) or response.get("id") != 1:
                 continue
+            error = response.get("error")
+            if error is not None:
+                raise QualificationError(
+                    f"DevTools command {method!r} failed: {error!r}"
+                )
             result = response.get("result")
-            evaluation = result.get("result") if isinstance(result, dict) else None
-            return (
-                isinstance(evaluation, dict)
-                and evaluation.get("type") == "boolean"
-                and evaluation.get("value") is True
-            )
-        raise QualificationError("worker debugger omitted the evaluation response")
+            if not isinstance(result, dict):
+                raise QualificationError(
+                    f"DevTools command {method!r} returned no result"
+                )
+            return result
+        raise QualificationError(
+            f"DevTools omitted the response for command {method!r}"
+        )
     finally:
         connection.close()
+
+
+def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+    result = _devtools_command(
+        debugger_url,
+        port,
+        "Runtime.evaluate",
+        {
+            "expression": WORKER_READY_EXPRESSION,
+            "returnByValue": True,
+            "awaitPromise": True,
+        },
+    )
+    evaluation = result.get("result")
+    return (
+        isinstance(evaluation, dict)
+        and evaluation.get("type") == "boolean"
+        and evaluation.get("value") is True
+    )
 
 
 def _wait_for_extension_worker(
@@ -1094,10 +1140,38 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
         f"https://{fixture.host}:{fixture.port}/"
         "?slipstream-semantic=1"
     )
-    encoded_url = urllib.parse.quote(target_url, safe="")
-    target = _devtools_json(port, f"/json/new?{encoded_url}", method="PUT")
-    if not isinstance(target, dict) or target.get("url") != target_url:
-        raise QualificationError("DevTools did not open the exact semantic fixture")
+    targets = _devtools_json(port, "/json/list")
+    if not isinstance(targets, list):
+        raise QualificationError("DevTools target list is not an array")
+    pages = [
+        target
+        for target in targets
+        if (
+            isinstance(target, dict)
+            and target.get("type") == "page"
+            and target.get("url") == "about:blank"
+        )
+    ]
+    if len(pages) != 1:
+        raise QualificationError(
+            "DevTools did not expose exactly one owned about:blank page"
+        )
+    debugger_url = pages[0].get("webSocketDebuggerUrl")
+    if not isinstance(debugger_url, str):
+        raise QualificationError("owned about:blank page has no debugger endpoint")
+    result = _devtools_command(
+        debugger_url,
+        port,
+        "Page.navigate",
+        {"url": target_url},
+    )
+    if not isinstance(result.get("frameId"), str) or not result["frameId"]:
+        raise QualificationError("DevTools did not navigate the owned page")
+    error_text = result.get("errorText")
+    if error_text not in (None, ""):
+        raise QualificationError(
+            f"DevTools rejected the semantic fixture navigation: {error_text!r}"
+        )
 
 
 def _launch_agent_pid(target: str) -> int | None:
