@@ -54,7 +54,17 @@ requires an address-free round trip through the packaged native-messaging host
 before navigation, then uses `Page.navigate` on the single owned
 `about:blank` page instead of creating a special `/json/new` target. This
 separates native-host availability from navigation semantics and exercises an
-ordinary page navigation.
+ordinary page navigation. Run `30570286341` then stopped before navigation:
+the terminal worker marker passed, but its address-free native round trip did
+not. Chrome for Testing 151 uses its current browser-specific user-level
+`Google/ChromeForTesting/NativeMessagingHosts` location; the harness had only
+copied the exact manifest into the temporary user-data directory. The shared
+Chrome harness now registers an owner-private exact manifest in the current
+Chrome for Testing location for the duration of the disposable gate, refuses
+any pre-existing file or uncontrolled directory, and removes only its exact
+manifest and newly created empty directories after browser shutdown. Protected
+qualification still copies the packaged manifest and executable identity; the
+ordinary contract uses its bounded fixed-response stub.
 It disables proxy use for HTTP control requests, validates the WebSocket
 upgrade and exact loopback target, bounds every file, frame, and JSON response,
 accepts no redirect, and retains the

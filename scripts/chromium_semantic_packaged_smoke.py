@@ -46,6 +46,9 @@ NATIVE_HOST_ORIGIN = "chrome-extension://cecdingohhpfggapnlbghppcegbaciam/"
 NATIVE_HOST_RELATIVE_PATH = Path(
     "Library/Application Support/Google/Chrome/NativeMessagingHosts"
 ) / f"{NATIVE_HOST_NAME}.json"
+CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH = Path(
+    "Library/Application Support/Google/ChromeForTesting/NativeMessagingHosts"
+) / f"{NATIVE_HOST_NAME}.json"
 PROFILE_NATIVE_HOST_RELATIVE_PATH = (
     Path("NativeMessagingHosts") / f"{NATIVE_HOST_NAME}.json"
 )
@@ -118,6 +121,12 @@ class ChromeProcess:
 @dataclass
 class ChromeOwnership:
     process_groups: set[int]
+
+
+@dataclass(frozen=True)
+class NativeHostRegistration:
+    path: Path
+    created_directories: tuple[Path, ...]
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -1588,16 +1597,13 @@ def _remove_owned_profile(profile: Path) -> None:
         raise QualificationError("fresh Chrome profile survived cleanup")
 
 
-def _install_profile_native_host(
-    profile: Path,
+def _copy_exact_native_host(
     source: Path,
+    destination: Path,
     uid: int,
     gid: int,
     expected_executable: Path,
 ) -> Path:
-    destination = profile / PROFILE_NATIVE_HOST_RELATIVE_PATH
-    destination.parent.mkdir(mode=0o700)
-    os.chown(destination.parent, uid, gid)
     payload = _read_private_bytes(source, uid)
     manifest = _decode_json_object(payload, source)
     if not _is_exact_native_host(manifest, expected_executable):
@@ -1612,7 +1618,7 @@ def _install_profile_native_host(
         while remaining:
             written = os.write(fd, remaining)
             if written <= 0:
-                raise QualificationError("profile native host write made no progress")
+                raise QualificationError("native host copy made no progress")
             remaining = remaining[written:]
         os.fsync(fd)
         os.fchown(fd, uid, gid)
@@ -1620,8 +1626,107 @@ def _install_profile_native_host(
     finally:
         os.close(fd)
     if destination.read_bytes() != payload:
-        raise QualificationError("profile native host differs from packaged manifest")
+        raise QualificationError("native host copy differs from source manifest")
     return destination
+
+
+def _install_profile_native_host(
+    profile: Path,
+    source: Path,
+    uid: int,
+    gid: int,
+    expected_executable: Path,
+) -> Path:
+    destination = profile / PROFILE_NATIVE_HOST_RELATIVE_PATH
+    destination.parent.mkdir(mode=0o700)
+    os.chown(destination.parent, uid, gid)
+    return _copy_exact_native_host(
+        source,
+        destination,
+        uid,
+        gid,
+        expected_executable,
+    )
+
+
+def _ensure_owner_directory_path(
+    home: Path,
+    relative: Path,
+    uid: int,
+    gid: int,
+) -> tuple[Path, tuple[Path, ...]]:
+    current = home
+    created: list[Path] = []
+    for component in relative.parts:
+        current = current / component
+        try:
+            metadata = os.lstat(current)
+        except FileNotFoundError:
+            current.mkdir(mode=0o700)
+            os.chown(current, uid, gid)
+            current.chmod(0o700)
+            created.append(current)
+            metadata = os.lstat(current)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != uid
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise QualificationError(
+                f"Chrome for Testing native host directory is not owner-controlled: "
+                f"{current}"
+            )
+    return current, tuple(created)
+
+
+def _install_chrome_for_testing_native_host(
+    home: Path,
+    source: Path,
+    uid: int,
+    gid: int,
+    expected_executable: Path,
+) -> NativeHostRegistration:
+    relative_parent = CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH.parent
+    directory, created = _ensure_owner_directory_path(
+        home,
+        relative_parent,
+        uid,
+        gid,
+    )
+    destination = directory / CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH.name
+    try:
+        _copy_exact_native_host(
+            source,
+            destination,
+            uid,
+            gid,
+            expected_executable,
+        )
+    except BaseException:
+        for created_directory in reversed(created):
+            created_directory.rmdir()
+        raise
+    return NativeHostRegistration(destination, created)
+
+
+def _remove_chrome_for_testing_native_host(
+    registration: NativeHostRegistration,
+    expected_executable: Path,
+    uid: int,
+) -> None:
+    _remove_exact_native_host(registration.path, expected_executable, uid)
+    for directory in reversed(registration.created_directories):
+        metadata = os.lstat(directory)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != uid
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise QualificationError(
+                f"refusing to remove an unowned Chrome for Testing directory: "
+                f"{directory}"
+            )
+        directory.rmdir()
 
 
 def _run_chrome(
@@ -1647,6 +1752,7 @@ def _run_chrome(
     browser: ChromeProcess | None = None
     ownership = ChromeOwnership(set())
     bootstrap_started = False
+    native_host_registration: NativeHostRegistration | None = None
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -1662,6 +1768,13 @@ def _run_chrome(
         executable = _launchservices_executable(
             executable,
             application_bundle,
+        )
+        native_host_registration = _install_chrome_for_testing_native_host(
+            home,
+            native_host_manifest,
+            uid,
+            gid,
+            native_host_executable,
         )
         _install_profile_native_host(
             profile,
@@ -1779,6 +1892,17 @@ def _run_chrome(
                 profile_cleanup_safe = True
         except Exception as exc:
             cleanup_errors.append(f"Chrome LaunchAgent cleanup: {exc}")
+        if native_host_registration is not None:
+            try:
+                _remove_chrome_for_testing_native_host(
+                    native_host_registration,
+                    native_host_executable,
+                    uid,
+                )
+            except Exception as exc:
+                cleanup_errors.append(
+                    f"Chrome for Testing native host cleanup: {exc}"
+                )
         diagnostics: list[tuple[str, bytes]] = []
         for name, path in (
             ("LaunchServices", launcher_stderr_path),

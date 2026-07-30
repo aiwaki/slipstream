@@ -1192,6 +1192,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ), mock.patch.object(
                 smoke.tempfile,
@@ -1297,6 +1307,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ) as remove_profile, mock.patch.object(
                 smoke.tempfile,
@@ -1385,6 +1405,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ) as remove_profile, mock.patch.object(
                 smoke.tempfile,
@@ -1470,6 +1500,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ) as remove_profile, mock.patch.object(
                 smoke.tempfile,
@@ -1549,6 +1589,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "_install_profile_native_host",
             ), mock.patch.object(
                 smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
+            ), mock.patch.object(
+                smoke,
                 "_remove_owned_profile",
             ) as remove_profile, mock.patch.object(
                 smoke.tempfile,
@@ -1612,6 +1662,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 smoke,
                 "_install_profile_native_host",
+            ), mock.patch.object(
+                smoke,
+                "_install_chrome_for_testing_native_host",
+                return_value=smoke.NativeHostRegistration(
+                    Path("/tmp/chrome-for-testing-native-host.json"),
+                    (),
+                ),
+            ), mock.patch.object(
+                smoke,
+                "_remove_chrome_for_testing_native_host",
             ), mock.patch.object(
                 smoke,
                 "_remove_owned_profile",
@@ -1743,6 +1803,52 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     os.getgid(),
                     expected_executable,
                 )
+
+    def test_chrome_for_testing_native_host_uses_exact_current_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir(mode=0o700)
+            expected_executable = root / "native-host"
+            expected_executable.write_bytes(b"host")
+            source = root / "native-host.json"
+            payload = json.dumps(
+                {
+                    "name": smoke.NATIVE_HOST_NAME,
+                    "path": str(expected_executable),
+                    "type": "stdio",
+                    "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
+                },
+                separators=(",", ":"),
+            ).encode()
+            source.write_bytes(payload)
+            source.chmod(0o600)
+
+            registration = smoke._install_chrome_for_testing_native_host(
+                home,
+                source,
+                os.getuid(),
+                os.getgid(),
+                expected_executable,
+            )
+
+            self.assertEqual(
+                registration.path.relative_to(home),
+                smoke.CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH,
+            )
+            self.assertEqual(registration.path.read_bytes(), payload)
+            self.assertEqual(registration.path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(registration.created_directories)
+
+            smoke._remove_chrome_for_testing_native_host(
+                registration,
+                expected_executable,
+                os.getuid(),
+            )
+            self.assertFalse(registration.path.exists())
+            self.assertTrue(home.exists())
+            for directory in registration.created_directories:
+                self.assertFalse(directory.exists())
 
     def test_native_manifest_must_be_private_exact_origin_and_packaged_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
