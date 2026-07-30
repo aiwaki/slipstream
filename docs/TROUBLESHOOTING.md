@@ -463,10 +463,14 @@ routes it remains a byte-transparent passthrough. For an eligible unknown TLS
 request, a zero-server-byte close means the buffered first flight has not been
 exposed downstream and is still safe to retry. That same request may therefore
 continue through per-connection app-owned DNS and the local strategy ladder. It
-may reach verified owned Geph only after every local stage has closed before
-payload and the complete exact-host evidence gate passes. The first server byte
-commits the route and forbids replay. An orderly client EOF is still propagated
-as a bounded TCP half-close so a delayed server response is delivered.
+may reach verified owned Geph only after the system route, app-owned DNS, and
+two distinct local strategies have each closed or hit their owned bounded
+first-payload timeout with zero server bytes, and the complete exact-host
+evidence gate passes. Once that proof exists, waiting for additional local
+strategies only risks client cancellation and does not add authorization. The
+first server byte commits the route and forbids replay. An orderly client EOF
+is still propagated as a bounded TCP half-close so a delayed server response is
+delivered.
 
 A later doc-only CI rerun reproduced the broad outage before this repair was
 merged: packaged Safari reported `You Are Not Connected to the Internet` at

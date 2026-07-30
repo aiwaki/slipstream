@@ -936,7 +936,7 @@ def test_proven_unknown_stops_when_conflict_appears_during_recovery(monkeypatch)
     assert tproxy._geph_port_conflict
 
 
-def test_unknown_bounded_route_timeouts_use_owned_geph_same_request(monkeypatch):
+def test_unknown_bounded_route_timeouts_short_circuit_to_owned_geph(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "foreign-exit-by-timeout.example"
     local_ip = "198.51.100.62"
@@ -944,9 +944,10 @@ def test_unknown_bounded_route_timeouts_use_owned_geph_same_request(monkeypatch)
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     evidence_before_geph = []
-    strategies = (
-        tproxy.STRAT_BY_NAME["split64+fake"],
-        tproxy.STRAT_BY_NAME["split16+fake"],
+    local_attempts = []
+    strategies = tuple(
+        tproxy.STRAT_BY_NAME[name]
+        for name in tproxy.GENERAL_STRATS
     )
 
     async def failed_system(_ip, _port, _first_flight):
@@ -970,7 +971,8 @@ def test_unknown_bounded_route_timeouts_use_owned_geph_same_request(monkeypatch)
     async def local_dns(_actual_host, _fallback_ip):
         return [local_ip]
 
-    async def timed_out_local(*_args, **_kwargs):
+    async def timed_out_local(_ip, _port, _head, _body, _host, strategy):
+        local_attempts.append(strategy["name"])
         tproxy._publish_route_probe_outcome(tproxy.ROUTE_PROBE_TIMEOUT)
         return None
 
@@ -1003,6 +1005,10 @@ def test_unknown_bounded_route_timeouts_use_owned_geph_same_request(monkeypatch)
             "strategy:split64+fake",
             "strategy:split16+fake",
         }
+    ]
+    assert local_attempts == [
+        "split64+fake",
+        "split16+fake",
     ]
     assert host not in tproxy._local_zero_payload_failures
 
