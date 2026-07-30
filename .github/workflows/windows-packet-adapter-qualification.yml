@@ -8,6 +8,7 @@ on:
       - "contracts/windows-capture-generation-recovery-v1.json"
       - "contracts/windows-production-host-crash-recovery-v1.json"
       - "contracts/windows-production-host-generation-recovery-v1.json"
+      - "contracts/windows-production-host-physical-reboot-v1.json"
       - "contracts/windows-production-host-reboot-admission-v1.json"
       - "contracts/windows-service-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
@@ -29,6 +30,7 @@ on:
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
       - "crates/slipstream-windows-adapter/**"
       - "scripts/run_bounded_windows_cargo_test.ps1"
+      - "scripts/qualify_windows_production_host_reboot.ps1"
       - "vendor/wintun/**"
   push:
     branches: ["main"]
@@ -37,6 +39,7 @@ on:
       - "contracts/windows-capture-generation-recovery-v1.json"
       - "contracts/windows-production-host-crash-recovery-v1.json"
       - "contracts/windows-production-host-generation-recovery-v1.json"
+      - "contracts/windows-production-host-physical-reboot-v1.json"
       - "contracts/windows-production-host-reboot-admission-v1.json"
       - "contracts/windows-service-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
@@ -58,6 +61,7 @@ on:
       - "crates/slipstream-userspace-stack-effect-evaluation/**"
       - "crates/slipstream-windows-adapter/**"
       - "scripts/run_bounded_windows_cargo_test.ps1"
+      - "scripts/qualify_windows_production_host_reboot.ps1"
       - "vendor/wintun/**"
 
 permissions:
@@ -103,6 +107,22 @@ jobs:
 
       - name: Build the production host and disposable Windows service fixtures
         run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bins
+
+      - name: Parse physical reboot qualification harness
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $script = Resolve-Path "scripts/qualify_windows_production_host_reboot.ps1"
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $script.Path,
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Physical reboot qualification harness has parser errors"
+          }
 
       - name: Qualify same-name Windows service-generation recovery
         timeout-minutes: 4

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_production_host_physical_reboot",
+  "contract_version": 1,
+  "service_name": "dev.slipstream.service",
+  "harness": {
+    "script": "scripts/qualify_windows_production_host_reboot.ps1",
+    "phases": ["prepare", "resume", "cleanup"],
+    "state_file": "transaction-v1.json",
+    "result_file": "result-v1.json",
+    "independent_sentinel": "independent-owner.sentinel",
+    "automatic_reboot": false
+  },
+  "invariants": {
+    "administrator_required": true,
+    "exact_service_absence_required_before_prepare": true,
+    "real_management_cli": true,
+    "automatic_start_registration": true,
+    "committed_active_install_required_before_reboot": true,
+    "physical_boot_identity_must_change": true,
+    "post_boot_running_state_required": true,
+    "post_boot_process_created_in_current_boot": true,
+    "exact_executable_identity_required": true,
+    "dns_proxy_pac_snapshot_is_read_only": true,
+    "dns_proxy_pac_snapshot_must_match_after_reboot": true,
+    "independent_owner_preserved": true,
+    "exact_uninstall_required": true,
+    "terminal_product_absence_required": true,
+    "failed_resume_attempts_exact_owned_rollback": true,
+    "identity_mismatch_refuses_mutation": true,
+    "manual_reboot_required": true,
+    "production_networking_composition": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "external_process_or_service_mutation": false,
+    "driver_install_or_removal": false
+  },
+  "runtime_evidence": {
+    "physical_reboot_claimed_by_static_contract": false,
+    "successful_result_required_for_claim": true,
+    "required_result": "slipstream.windows_production_host_physical_reboot_result",
+    "required_outcome": "passed"
+  }
+}

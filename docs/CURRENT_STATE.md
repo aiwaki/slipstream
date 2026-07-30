@@ -8,16 +8,20 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: qualify a physical Windows reboot and post-boot
-readiness without composing production networking. The completed admission
-gate proves that the exact owned automatic-start service accepts boot worker
-activation only with matching durable `Running` intent and active-install
-evidence. Its sole pre-commit exception is the controller-owned initial start
-carrying the exact `--slipstream-managed-start-v1` SCM argument; an ordinary
-automatic boot has no marker and still requires the committed active-install
-record. Durable `Stopped` intent remains stopped, while unknown evidence and
-SCM configuration drift fail closed. Physical reboot, sleep/wake, updater
-orchestration, and production networking remain separate unproven gates.
+Current M4 next action: run the versioned two-phase physical Windows reboot
+harness on the disposable Parallels Windows 11 host, then record its exact
+result. `prepare` requires a clean exact service name, installs the real
+production host through its public CLI, verifies committed active-install
+evidence plus automatic-start readiness, and writes an owner-protected
+transaction without rebooting the machine. After an explicit real Windows
+restart, `resume` requires a changed boot identity, a service process created
+inside the new boot, matching SCM/path/SHA/generation evidence, an unchanged
+independent sentinel and read-only DNS/proxy/PAC snapshot, then performs exact
+uninstall and proves terminal product absence. Failure attempts the same exact
+owned rollback; identity mismatch refuses mutation. CI can parse and freeze
+this harness but cannot claim the physical runtime result. Sleep/wake, updater
+orchestration, production networking, and broader VPN coexistence remain
+separate unproven gates.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
 `0d4bf269a3261c5f8263da051de805e32b8f030f` (PR #279). Exact-main

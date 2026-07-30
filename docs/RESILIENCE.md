@@ -188,6 +188,46 @@ jobs completed the target reboot-admission test and every later packet,
 cleanup, and lint step. The next gate must perform an actual reboot and prove
 post-boot readiness; this evidence does not substitute for that test.
 
+The physical reboot gate is implemented as
+`scripts/qualify_windows_production_host_reboot.ps1` with a frozen
+`windows-production-host-physical-reboot-v1` contract. It deliberately has no
+reboot command. An elevated operator first runs `prepare` against the exact
+built production host. The phase refuses pre-existing SCM or active ownership,
+installs through the public management CLI, verifies the committed
+owner/intent/active-install records, automatic-start service, exact process
+path and SHA-256, then atomically writes an Administrator/SYSTEM-only
+transaction beside an independent sentinel. The operator performs a real
+Windows restart separately. `resume` then requires a changed
+`Win32_OperatingSystem.LastBootUpTime`, post-boot `Running` service evidence,
+a process creation time inside that boot, unchanged sentinel, and an identical
+read-only DNS/proxy/PAC snapshot. Success uninstalls through the same exact
+owned executable and proves the SCM service, owner record, active-install
+record, payload, and process absent while retaining the durable absent intent.
+Failure attempts that exact rollback only while the protected transaction,
+current owner record, generation, executable path, and SHA-256 still agree;
+otherwise it refuses mutation. `cleanup` is the explicit recovery phase for an
+interrupted operator session.
+
+The intended disposable-host sequence is:
+
+```powershell
+pwsh -File scripts/qualify_windows_production_host_reboot.ps1 `
+  -Phase prepare `
+  -ServiceHost crates/slipstream-windows-adapter/target/release/slipstream-windows-service.exe `
+  -Generation 1
+
+# Restart Windows explicitly, then return to the same checkout.
+
+pwsh -File scripts/qualify_windows_production_host_reboot.ps1 -Phase resume
+```
+
+GitHub-hosted Windows jobs parse the script on both native architectures and
+run its static contract tests, but they do not reboot and cannot publish the
+runtime result. The first successful physical result must come from a
+disposable Windows host. This gate does not compose Wintun or production
+networking, and it does not prove sleep/wake, updater orchestration, default
+route behavior, or broad VPN coexistence.
+
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`
 manual workflow, so account credentials are never available to pull-request
