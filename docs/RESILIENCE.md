@@ -223,10 +223,22 @@ pwsh -File scripts/qualify_windows_production_host_reboot.ps1 -Phase resume
 
 GitHub-hosted Windows jobs parse the script on both native architectures and
 run its static contract tests, but they do not reboot and cannot publish the
-runtime result. The first successful physical result must come from a
-disposable Windows host. This gate does not compose Wintun or production
-networking, and it does not prove sleep/wake, updater orchestration, default
-route behavior, or broad VPN coexistence.
+runtime result. After every successful `main` push, each native job emits a
+14-day `slipstream-windows-physical-reboot-<architecture>-<commit>` bundle.
+Before upload, the job separately builds the release production host without
+fixture features and runs that exact binary through the harness's real
+`prepare -> cleanup` lifecycle. Upload occurs only after exact uninstall and
+terminal absence are proven. The bundle contains that release executable, the
+harness, the frozen contract, and `artifact-manifest-v1.json` with the source
+commit, workflow run, architecture, size, and SHA-256 of every file. PR jobs
+never build or publish this bundle. A disposable host must verify the manifest
+and use only the bundle matching the intended `main` commit and guest
+architecture.
+
+The first successful physical result must come from a disposable Windows host.
+This gate does not compose Wintun or production networking, and it does not
+prove sleep/wake, updater orchestration, default route behavior, or broad VPN
+coexistence.
 
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`

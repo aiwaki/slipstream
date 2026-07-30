@@ -142,11 +142,31 @@ fn native_workflow_parses_harness_on_both_windows_architectures() {
     assert!(workflow.contains("qualify_windows_production_host_reboot.ps1"));
     assert!(workflow.contains(r#""contracts/windows-production-host-physical-reboot-v1.json""#));
     assert!(workflow.contains(r#""scripts/qualify_windows_production_host_reboot.ps1""#));
-    assert_eq!(
+    assert!(
         workflow
             .matches("scripts/qualify_windows_production_host_reboot.ps1")
-            .count(),
-        3,
-        "physical reboot harness must trigger PR/main gates and be parsed natively"
+            .count()
+            >= 4,
+        "physical reboot harness must trigger PR/main gates, be parsed, qualified, and packaged natively"
     );
+    for required in [
+        "Qualify the exact physical reboot production host before packaging",
+        "--release `",
+        "--bin slipstream-windows-service",
+        r#"$result.outcome -ne "cleanup_only""#,
+        "exact_uninstall_verified",
+        "Package the exact physical reboot qualification bundle",
+        "artifact-manifest-v1.json",
+        "slipstream.windows_physical_reboot_qualification",
+        "slipstream-windows-service.exe",
+        "SOURCE_COMMIT: ${{ github.sha }}",
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "slipstream-windows-physical-reboot-${{ matrix.architecture }}-${{ github.sha }}",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "native workflow is missing qualified artifact invariant {required}"
+        );
+    }
 }
