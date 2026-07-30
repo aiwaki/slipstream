@@ -34,35 +34,6 @@ on:
       - "vendor/wintun/**"
   push:
     branches: ["main"]
-    paths:
-      - ".github/workflows/windows-packet-adapter-qualification.yml"
-      - "contracts/windows-capture-generation-recovery-v1.json"
-      - "contracts/windows-production-host-crash-recovery-v1.json"
-      - "contracts/windows-production-host-generation-recovery-v1.json"
-      - "contracts/windows-production-host-physical-reboot-v1.json"
-      - "contracts/windows-production-host-reboot-admission-v1.json"
-      - "contracts/windows-service-generation-recovery-v1.json"
-      - "contracts/windows-capture-fragment-effect-v1.json"
-      - "contracts/windows-packet-flow-v1.json"
-      - "contracts/windows-packet-capture-v4.json"
-      - "contracts/windows-userspace-byte-owner-v1.json"
-      - "contracts/windows-userspace-flow-binding-v1.json"
-      - "contracts/windows-userspace-native-connector-effect-v1.json"
-      - "contracts/windows-userspace-stack-connector-composition-v1.json"
-      - "contracts/windows-userspace-stack-effect-v1.json"
-      - "contracts/windows-userspace-stack-ipv6-fragment-input-v1.json"
-      - "contracts/windows-userspace-stack-selection-v1.json"
-      - "contracts/windows-wintun-stack-handoff-v1.json"
-      - "contracts/windows-wintun-ipv6-stack-handoff-v1.json"
-      - "contracts/windows-wintun-tcp-stack-handoff-v1.json"
-      - "contracts/windows-route-change-observer-v1.json"
-      - "crates/slipstream-core/**"
-      - "crates/slipstream-userspace-stack-evaluation/**"
-      - "crates/slipstream-userspace-stack-effect-evaluation/**"
-      - "crates/slipstream-windows-adapter/**"
-      - "scripts/run_bounded_windows_cargo_test.ps1"
-      - "scripts/qualify_windows_production_host_reboot.ps1"
-      - "vendor/wintun/**"
 
 permissions:
   contents: read

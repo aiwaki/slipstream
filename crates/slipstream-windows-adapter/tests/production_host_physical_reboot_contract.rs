@@ -150,6 +150,7 @@ fn native_workflow_parses_harness_on_both_windows_architectures() {
         "physical reboot harness must trigger PR/main gates, be parsed, qualified, and packaged natively"
     );
     for required in [
+        "push:\n    branches: [\"main\"]\n\npermissions:",
         "Qualify the exact physical reboot production host before packaging",
         "--release `",
         "--bin slipstream-windows-service",
