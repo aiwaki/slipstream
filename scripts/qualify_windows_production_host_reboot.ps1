@@ -178,7 +178,11 @@ function Get-RegistryValue {
     if ($null -eq $property) {
         return $null
     }
-    return $property.Value
+    $value = $property.Value
+    if ($value -is [byte[]]) {
+        return ,$value
+    }
+    return $value
 }
 
 function Get-RegistryBinaryValueBase64 {

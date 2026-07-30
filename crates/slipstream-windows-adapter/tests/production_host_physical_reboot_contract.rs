@@ -95,6 +95,8 @@ fn physical_reboot_harness_is_two_phase_exact_owned_and_non_rebooting() {
         "newly created, empty, or already owned by this harness",
         "Get-DnsClientServerAddress",
         "Get-ItemProperty",
+        "if ($value -is [byte[]])",
+        "return ,$value",
         "WinHttpSettings",
         r#"$result = $text | ConvertFrom-Json"#,
         r#"$shortText = $shortText.Substring"#,
