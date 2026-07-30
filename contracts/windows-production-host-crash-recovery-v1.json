@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_production_host_crash_recovery",
+  "contract_version": 1,
+  "invariants": {
+    "real_management_cli": true,
+    "exact_scm_process_id": true,
+    "held_process_handle": true,
+    "process_image_matches_owned_payload": true,
+    "process_hash_matches_owned_identity": true,
+    "process_creation_time_observed": true,
+    "crash_uses_only_verified_handle": true,
+    "durable_running_intent_survives_crash": true,
+    "recover_uses_public_cli": true,
+    "recovered_process_instance_changes": true,
+    "crash_budget_resets_only_after_readiness": true,
+    "repeated_recover_is_idempotent": true,
+    "independent_owner_preserved": true,
+    "terminal_absence_required": true,
+    "broad_process_discovery_or_termination": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "external_process_or_service_mutation": false,
+    "driver_install_or_removal": false,
+    "production_networking_composition": false
+  },
+  "disposable_native_qualification": {
+    "architectures": ["amd64", "arm64"],
+    "generation": 31,
+    "exact_process_identity_required_before_crash": true,
+    "final_absence_required": true
+  }
+}

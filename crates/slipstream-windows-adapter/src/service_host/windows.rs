@@ -414,17 +414,31 @@ mod tests {
         machine_owner_record_path, WindowsServiceOwnershipCollector,
     };
     use crate::service_payload::windows_payload_path;
+    use std::ffi::OsString;
     use std::fs;
     use std::io::Write;
+    use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Instant;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0,
+    };
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+        WaitForSingleObject, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE,
+    };
 
     const HOST_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI";
+    const HOST_CRASH_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CRASH_RECOVERY_CI";
     const HOST_GENERATION_CI_ENV: &str =
         "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_GENERATION_RECOVERY_CI";
     const HOST_PATH_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST";
+    const MAX_PROCESS_IMAGE_U16: usize = 32_768;
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
+    const TEST_CRASH_EXIT_CODE: u32 = 0x5354_4C50;
 
     #[test]
     fn production_host_is_self_managing_idempotent_and_stops_through_scm() {
@@ -753,5 +767,288 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn production_host_crash_recovery_uses_exact_verified_process() {
+        if std::env::var_os(HOST_CRASH_CI_ENV).is_none() {
+            return;
+        }
+
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "the disposable runner must not already contain the Slipstream service"
+        );
+        let host = PathBuf::from(
+            std::env::var_os(HOST_PATH_ENV)
+                .expect("the production Windows service host path must be provided"),
+        );
+        let owner_record_path = machine_owner_record_path().expect("resolve machine owner record");
+        let root = owner_record_path
+            .parent()
+            .expect("owner record must have a parent")
+            .to_path_buf();
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale production-host state");
+        }
+
+        let identity = production_identity(&host, 31);
+        let installed = run_host(&host, &["manage", "install", "--generation", "31"]);
+        assert_eq!(
+            installed.lifecycle.decision,
+            WindowsServiceDecision::Installed
+        );
+        assert!(installed.lifecycle.accepted);
+        verify_production_generation_active(&root, &identity);
+
+        let independent_owner = root.join("independent-crash-owner.sentinel");
+        let independent_evidence = b"independent owner must survive production crash recovery";
+        fs::write(&independent_owner, independent_evidence)
+            .expect("write independent crash-owner sentinel");
+
+        let active = wait_for_state(WindowsScmState::Running);
+        let crashed_process = terminate_exact_production_host_process(&active, &identity, &root);
+        let stopped = wait_for_state(WindowsScmState::Stopped);
+        assert_eq!(
+            stopped.process_id, None,
+            "stopped production host must not retain a process ID"
+        );
+
+        match WindowsServiceLifecycleStateEffects::new()
+            .collect()
+            .assess()
+        {
+            WindowsServiceLifecycleStateAssessment::Stable {
+                intent: Some(intent),
+                active_install: Some(active_install),
+            } => {
+                assert_eq!(intent.desired, WindowsServiceDesiredState::Running);
+                assert_eq!(intent.identity.as_ref(), Some(&identity));
+                assert_eq!(intent.crash_restart_attempts, 0);
+                assert_eq!(active_install.identity, identity);
+            }
+            evidence => {
+                panic!("production crash did not retain stable running intent: {evidence:?}")
+            }
+        }
+
+        let recovered = run_host(&host, &["manage", "recover"]);
+        assert_eq!(
+            recovered.command,
+            WindowsServiceManagementCommandKind::Recover
+        );
+        assert_eq!(
+            recovered.lifecycle.decision,
+            WindowsServiceDecision::Restarted
+        );
+        assert!(recovered.lifecycle.accepted);
+        assert_eq!(recovered.lifecycle.state.crash_restart_attempts, 0);
+        let recovered_snapshot = wait_for_state(WindowsScmState::Running);
+        let recovered_process =
+            inspect_exact_production_host_process(&recovered_snapshot, &identity, &root);
+        assert_ne!(
+            recovered_process, crashed_process,
+            "recovery must create a new Windows process instance"
+        );
+        verify_production_generation_active(&root, &identity);
+        assert_eq!(
+            fs::read(&independent_owner).expect("read recovered independent-owner sentinel"),
+            independent_evidence
+        );
+
+        let repeated_recover = run_host(&host, &["manage", "recover"]);
+        assert_eq!(
+            repeated_recover.lifecycle.decision,
+            WindowsServiceDecision::NoChange
+        );
+        assert!(repeated_recover.lifecycle.accepted);
+        let repeated_snapshot = wait_for_state(WindowsScmState::Running);
+        assert_eq!(
+            inspect_exact_production_host_process(&repeated_snapshot, &identity, &root),
+            recovered_process,
+            "idempotent recovery must retain the healthy Windows process instance"
+        );
+
+        let uninstalled = run_host(&host, &["manage", "uninstall"]);
+        assert_eq!(
+            uninstalled.lifecycle.decision,
+            WindowsServiceDecision::Uninstalled
+        );
+        assert!(uninstalled.lifecycle.accepted);
+        verify_production_generation_absent(&root, &identity);
+        assert_eq!(
+            fs::read(&independent_owner).expect("read final independent-owner sentinel"),
+            independent_evidence
+        );
+
+        fs::remove_dir_all(&root).expect("remove production-host terminal intent");
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct TestProcessInstanceIdentity {
+        process_id: u32,
+        creation_time_ticks: u64,
+    }
+
+    struct OwnedTestProcessHandle(HANDLE);
+
+    impl OwnedTestProcessHandle {
+        fn open(process_id: u32, desired_access: u32) -> Self {
+            let raw_handle = unsafe { OpenProcess(desired_access, 0, process_id) };
+            assert!(
+                !raw_handle.is_null(),
+                "OpenProcess failed for the exact SCM PID with {}",
+                unsafe { GetLastError() }
+            );
+            Self(raw_handle)
+        }
+
+        fn image_path(&self) -> PathBuf {
+            let mut image = vec![0u16; MAX_PROCESS_IMAGE_U16];
+            let mut image_len = image.len() as u32;
+            let queried = unsafe {
+                QueryFullProcessImageNameW(
+                    self.0,
+                    PROCESS_NAME_WIN32,
+                    image.as_mut_ptr(),
+                    &mut image_len,
+                )
+            };
+            assert_ne!(
+                queried,
+                0,
+                "QueryFullProcessImageNameW failed with {}",
+                unsafe { GetLastError() }
+            );
+            image.truncate(image_len as usize);
+            PathBuf::from(OsString::from_wide(&image))
+        }
+
+        fn instance_identity(&self, process_id: u32) -> TestProcessInstanceIdentity {
+            let mut creation = zero_file_time();
+            let mut exit = zero_file_time();
+            let mut kernel = zero_file_time();
+            let mut user = zero_file_time();
+            let queried = unsafe {
+                GetProcessTimes(self.0, &mut creation, &mut exit, &mut kernel, &mut user)
+            };
+            assert_ne!(
+                queried,
+                0,
+                "GetProcessTimes failed for the exact SCM PID with {}",
+                unsafe { GetLastError() }
+            );
+            TestProcessInstanceIdentity {
+                process_id,
+                creation_time_ticks: file_time_ticks(creation),
+            }
+        }
+
+        fn terminate_and_wait(&self) {
+            let terminated = unsafe { TerminateProcess(self.0, TEST_CRASH_EXIT_CODE) };
+            assert_ne!(
+                terminated,
+                0,
+                "TerminateProcess failed for the verified handle with {}",
+                unsafe { GetLastError() }
+            );
+            let wait = unsafe {
+                WaitForSingleObject(
+                    self.0,
+                    OBSERVATION_TIMEOUT.as_millis().min(u128::from(u32::MAX)) as u32,
+                )
+            };
+            assert_ne!(
+                wait,
+                WAIT_FAILED,
+                "WaitForSingleObject failed for the verified handle with {}",
+                unsafe { GetLastError() }
+            );
+            assert_eq!(
+                wait, WAIT_OBJECT_0,
+                "verified production host process did not terminate before the deadline"
+            );
+        }
+    }
+
+    impl Drop for OwnedTestProcessHandle {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    const fn zero_file_time() -> FILETIME {
+        FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        }
+    }
+
+    const fn file_time_ticks(value: FILETIME) -> u64 {
+        (value.dwHighDateTime as u64) << 32 | value.dwLowDateTime as u64
+    }
+
+    fn open_verified_production_host_process(
+        snapshot: &crate::service_observer::WindowsServiceSnapshot,
+        identity: &WindowsServiceIdentity,
+        root: &Path,
+        desired_access: u32,
+    ) -> (OwnedTestProcessHandle, TestProcessInstanceIdentity) {
+        assert_eq!(snapshot.service_name, identity.service_name);
+        let process_id = snapshot
+            .process_id
+            .expect("running production host must expose an SCM process ID");
+        let handle = OwnedTestProcessHandle::open(process_id, desired_access);
+        let observed_path = handle.image_path();
+        let expected_path = windows_payload_path(root, identity);
+        let observed_canonical =
+            fs::canonicalize(&observed_path).expect("canonicalize observed production host");
+        let expected_canonical =
+            fs::canonicalize(&expected_path).expect("canonicalize expected production host");
+        assert!(
+            observed_canonical
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&expected_canonical.to_string_lossy()),
+            "SCM PID image does not match the exact owned payload"
+        );
+        assert_eq!(
+            hash_source(&observed_path).expect("hash observed production host process image"),
+            identity.executable_sha256,
+            "SCM PID image hash does not match the exact owned identity"
+        );
+        let instance = handle.instance_identity(process_id);
+        (handle, instance)
+    }
+
+    fn inspect_exact_production_host_process(
+        snapshot: &crate::service_observer::WindowsServiceSnapshot,
+        identity: &WindowsServiceIdentity,
+        root: &Path,
+    ) -> TestProcessInstanceIdentity {
+        let (_handle, instance) = open_verified_production_host_process(
+            snapshot,
+            identity,
+            root,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+        );
+        instance
+    }
+
+    fn terminate_exact_production_host_process(
+        snapshot: &crate::service_observer::WindowsServiceSnapshot,
+        identity: &WindowsServiceIdentity,
+        root: &Path,
+    ) -> TestProcessInstanceIdentity {
+        let (handle, instance) = open_verified_production_host_process(
+            snapshot,
+            identity,
+            root,
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
+        );
+        handle.terminate_and_wait();
+        instance
     }
 }
