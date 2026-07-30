@@ -8,8 +8,9 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: wait for the native Windows workflow on the intended
-current `main` SHA, download only its ARM64
+Current M4 next action: land the bounded PowerShell `REG_BINARY` preservation
+correction exposed by exact-main run `30539745019`, then wait for the native
+Windows workflow on the resulting current `main` SHA and download only its ARM64
 `slipstream-windows-physical-reboot-<architecture>-<commit>` bundle, verify
 `artifact-manifest-v1.json` plus every recorded size and SHA-256, then run the
 versioned two-phase physical Windows reboot harness from that bundle on the
@@ -28,6 +29,20 @@ uninstall and proves terminal product absence. Failure attempts the same exact
 owned rollback; identity mismatch refuses mutation. CI preflight cannot claim
 the physical runtime result. Sleep/wake, updater orchestration, production
 networking, and broader VPN coexistence remain separate unproven gates.
+
+PR #283 merged the commit-bound physical reboot bundle workflow as
+`3fad7d49de41eac41d3babb835828ccaed7642f1`. Exact-main run
+`30539745019` passed every preceding native Windows lifecycle, packet,
+coexistence, cleanup, and lint step on AMD64 and ARM64, then failed the
+non-mutating network snapshot before the release-host preflight could install
+the service. `Get-RegistryValue` returned a registry `REG_BINARY` through the
+PowerShell pipeline, which expanded the original `System.Byte[]` into
+`System.Object[]`; `Get-RegistryBinaryValueBase64` correctly rejected that
+changed type. The same behavior was reproduced read-only on the disposable
+Parallels Windows 11 ARM64 host: direct `System.Byte[]`, captured
+`System.Object[]`, and comma-preserved `System.Byte[]`. Packaging and upload
+were skipped on both architectures, so no artifact was selected and no
+physical-host mutation was attempted.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
 `0d4bf269a3261c5f8263da051de805e32b8f030f` (PR #279). Exact-main

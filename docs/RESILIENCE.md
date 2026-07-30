@@ -235,6 +235,20 @@ never build or publish this bundle. A disposable host must verify the manifest
 and use only the bundle matching the intended `main` commit and guest
 architecture.
 
+PR #283 merged this publication gate as
+`3fad7d49de41eac41d3babb835828ccaed7642f1`. Its first exact-main run
+`30539745019` passed every earlier native qualification on AMD64 and ARM64 but
+failed before release-host installation while taking the read-only network
+snapshot. PowerShell pipeline enumeration changed the registry
+`DefaultConnectionSettings` value from `System.Byte[]` to `System.Object[]`
+when the helper returned it. The harness rejected the changed type, skipped
+packaging and upload on both architectures, and therefore authorized neither
+artifact selection nor a physical-host transaction. A read-only reproduction
+on the disposable Parallels Windows 11 ARM64 host confirmed direct
+`System.Byte[]`, pipeline-captured `System.Object[]`, and comma-preserved
+`System.Byte[]`. The correction preserves only binary registry values as one
+pipeline object; scalar proxy/PAC values retain their existing behavior.
+
 The first successful physical result must come from a disposable Windows host.
 This gate does not compose Wintun or production networking, and it does not
 prove sleep/wake, updater orchestration, default route behavior, or broad VPN
