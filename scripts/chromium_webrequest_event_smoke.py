@@ -16,6 +16,7 @@ import chromium_semantic_packaged_smoke as semantic
 
 
 MAX_NATIVE_MESSAGE = 64 * 1024
+WORKER_READY_MARKER = b"\nglobalThis.__slipstreamWorkerReadyV1 = true;\n"
 
 
 def _write_owner_file(
@@ -183,8 +184,17 @@ def _copy_diagnostic_extension(
 ) -> Path:
     shutil.copytree(source, destination, symlinks=False)
     worker_path = destination / "service-worker.js"
-    with worker_path.open("ab") as worker:
-        worker.write(_diagnostic_worker_source(host))
+    worker_payload = worker_path.read_bytes()
+    if worker_payload.count(WORKER_READY_MARKER) != 1:
+        raise semantic.QualificationError(
+            "reviewed worker has no exact terminal readiness marker"
+        )
+    worker_path.write_bytes(
+        worker_payload.replace(
+            WORKER_READY_MARKER,
+            _diagnostic_worker_source(host) + WORKER_READY_MARKER,
+        )
+    )
     for root, directories, files in os.walk(destination):
         root_path = Path(root)
         os.chown(root_path, uid, gid)

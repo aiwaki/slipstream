@@ -137,7 +137,10 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
             destination = root / "destination"
             source.mkdir()
             (source / "service-worker.js").write_text(
-                'const NATIVE_HOST = "dev.slipstream.semantic";\n',
+                (
+                    'const NATIVE_HOST = "dev.slipstream.semantic";\n'
+                    "globalThis.__slipstreamWorkerReadyV1 = true;\n"
+                ),
                 encoding="utf-8",
             )
             smoke._copy_diagnostic_extension(
@@ -153,6 +156,10 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
             )
             self.assertIn('const NATIVE_HOST = "dev.slipstream.semantic"', worker)
             self.assertIn("slipstreamCiWebRequestTrace", worker)
+            self.assertLess(
+                worker.index("slipstreamCiWebRequestTrace"),
+                worker.index("globalThis.__slipstreamWorkerReadyV1 = true"),
+            )
             self.assertFalse(
                 (destination / "qualification-warmup.html").exists()
             )

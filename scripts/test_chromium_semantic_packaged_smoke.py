@@ -251,6 +251,9 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 {
                     "type": "service_worker",
                     "url": f"{smoke.NATIVE_HOST_ORIGIN}service-worker.js",
+                    "webSocketDebuggerUrl": (
+                        "ws://127.0.0.1:49152/devtools/page/worker"
+                    ),
                 }
             ],
         ]
@@ -263,6 +266,10 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             "_devtools_json",
             side_effect=targets,
         ) as request, mock.patch.object(
+            smoke,
+            "_worker_runtime_ready",
+            return_value=True,
+        ) as runtime_ready, mock.patch.object(
             smoke.time,
             "sleep",
         ):
@@ -281,6 +288,70 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 mock.call(49152, "/json/list"),
             ],
         )
+        runtime_ready.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/worker",
+            49152,
+        )
+
+    def test_worker_debugger_path_is_bound_to_the_exact_loopback_port(self) -> None:
+        self.assertEqual(
+            smoke._worker_debugger_path(
+                "ws://127.0.0.1:49152/devtools/page/worker",
+                49152,
+            ),
+            "/devtools/page/worker",
+        )
+        for url in (
+            "ws://localhost:49152/devtools/page/worker",
+            "ws://127.0.0.1:49153/devtools/page/worker",
+            "wss://127.0.0.1:49152/devtools/page/worker",
+            "ws://127.0.0.1:49152/other/worker",
+        ):
+            with self.subTest(url=url), self.assertRaises(
+                smoke.QualificationError
+            ):
+                smoke._worker_debugger_path(url, 49152)
+
+    def test_worker_runtime_gate_requires_the_terminal_boolean_marker(self) -> None:
+        connection = mock.Mock()
+        with mock.patch.object(
+            smoke,
+            "_connect_worker_debugger",
+            return_value=connection,
+        ), mock.patch.object(
+            smoke,
+            "_send_websocket_json",
+        ) as send, mock.patch.object(
+            smoke,
+            "_receive_websocket_json",
+            return_value={
+                "id": 1,
+                "result": {
+                    "result": {
+                        "type": "boolean",
+                        "value": True,
+                    }
+                },
+            },
+        ):
+            self.assertTrue(
+                smoke._worker_runtime_ready(
+                    "ws://127.0.0.1:49152/devtools/page/worker",
+                    49152,
+                )
+            )
+        send.assert_called_once_with(
+            connection,
+            {
+                "id": 1,
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": smoke.WORKER_READY_EXPRESSION,
+                    "returnByValue": True,
+                },
+            },
+        )
+        connection.close.assert_called_once_with()
 
     def test_fixture_navigation_uses_put_for_the_exact_url(self) -> None:
         fixture = mock.Mock(host="example.net", port=18443)

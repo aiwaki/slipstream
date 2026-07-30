@@ -11,6 +11,8 @@ hostname through real Geph before learning it.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import http.server
 import json
 import os
@@ -18,8 +20,10 @@ import plistlib
 import pwd
 import shutil
 import signal
+import socket
 import ssl
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -60,6 +64,9 @@ CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
 DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
 DEVTOOLS_TIMEOUT = 15.0
 MAX_DEVTOOLS_RESPONSE = 64 * 1024
+MAX_WEBSOCKET_HEADERS = 16 * 1024
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WORKER_READY_EXPRESSION = "globalThis.__slipstreamWorkerReadyV1 === true"
 
 
 class QualificationError(RuntimeError):
@@ -860,6 +867,181 @@ def _devtools_json(
         raise QualificationError("DevTools returned invalid JSON") from exc
 
 
+def _worker_debugger_path(url: str, expected_port: int) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "ws"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.port != expected_port
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or not parsed.path.startswith("/devtools/")
+    ):
+        raise QualificationError("worker debugger URL escaped the exact loopback endpoint")
+    return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+
+
+def _receive_until(
+    connection: socket.socket,
+    delimiter: bytes,
+    limit: int,
+) -> tuple[bytes, bytes]:
+    payload = bytearray()
+    while delimiter not in payload:
+        chunk = connection.recv(min(4096, limit - len(payload) + 1))
+        if not chunk:
+            raise QualificationError("worker debugger closed during handshake")
+        payload.extend(chunk)
+        if len(payload) > limit:
+            raise QualificationError("worker debugger handshake exceeded its limit")
+    head, remainder = bytes(payload).split(delimiter, 1)
+    return head, remainder
+
+
+def _receive_exact(connection: socket.socket, size: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining:
+        chunk = connection.recv(remaining)
+        if not chunk:
+            raise QualificationError("worker debugger closed before a complete frame")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _connect_worker_debugger(url: str, expected_port: int) -> socket.socket:
+    path = _worker_debugger_path(url, expected_port)
+    connection = socket.create_connection(("127.0.0.1", expected_port), timeout=2.0)
+    try:
+        connection.settimeout(2.0)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{expected_port}\r\n"
+            "Connection: Upgrade\r\n"
+            "Upgrade: websocket\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "\r\n"
+        ).encode("ascii")
+        connection.sendall(request)
+        raw_headers, remainder = _receive_until(
+            connection,
+            b"\r\n\r\n",
+            MAX_WEBSOCKET_HEADERS,
+        )
+        if remainder:
+            raise QualificationError(
+                "worker debugger sent data before the protocol request"
+            )
+        lines = raw_headers.decode("iso-8859-1").split("\r\n")
+        status = lines[0].split(" ", 2) if lines else []
+        if len(status) < 2 or status[0] != "HTTP/1.1" or status[1] != "101":
+            raise QualificationError("worker debugger rejected the WebSocket upgrade")
+        headers: dict[str, str] = {}
+        for line in lines[1:]:
+            name, separator, value = line.partition(":")
+            if not separator:
+                raise QualificationError("worker debugger returned malformed headers")
+            normalized = name.strip().lower()
+            if normalized in headers:
+                raise QualificationError("worker debugger returned duplicate headers")
+            headers[normalized] = value.strip()
+        expected_accept = base64.b64encode(
+            hashlib.sha1(
+                f"{key}{WEBSOCKET_GUID}".encode("ascii"),
+                usedforsecurity=False,
+            ).digest()
+        ).decode("ascii")
+        if (
+            headers.get("upgrade", "").lower() != "websocket"
+            or "upgrade"
+            not in {
+                token.strip().lower()
+                for token in headers.get("connection", "").split(",")
+            }
+            or headers.get("sec-websocket-accept") != expected_accept
+        ):
+            raise QualificationError("worker debugger returned an invalid upgrade")
+        return connection
+    except BaseException:
+        connection.close()
+        raise
+
+
+def _send_websocket_json(connection: socket.socket, value: object) -> None:
+    payload = json.dumps(
+        value,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    if len(payload) > MAX_DEVTOOLS_RESPONSE:
+        raise QualificationError("worker debugger request exceeded its limit")
+    mask = os.urandom(4)
+    if len(payload) < 126:
+        header = bytes((0x81, 0x80 | len(payload)))
+    else:
+        header = bytes((0x81, 0xFE)) + struct.pack("!H", len(payload))
+    masked = bytes(
+        byte ^ mask[index % len(mask)]
+        for index, byte in enumerate(payload)
+    )
+    connection.sendall(header + mask + masked)
+
+
+def _receive_websocket_json(connection: socket.socket) -> object:
+    header = _receive_exact(connection, 2)
+    final = bool(header[0] & 0x80)
+    opcode = header[0] & 0x0F
+    masked = bool(header[1] & 0x80)
+    length = header[1] & 0x7F
+    if not final or masked or opcode != 0x1:
+        raise QualificationError("worker debugger returned an unsupported frame")
+    if length == 126:
+        length = struct.unpack("!H", _receive_exact(connection, 2))[0]
+    elif length == 127:
+        length = struct.unpack("!Q", _receive_exact(connection, 8))[0]
+    if length > MAX_DEVTOOLS_RESPONSE:
+        raise QualificationError("worker debugger frame exceeded its limit")
+    payload = _receive_exact(connection, length)
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("worker debugger returned invalid JSON") from exc
+
+
+def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+    connection = _connect_worker_debugger(debugger_url, port)
+    try:
+        _send_websocket_json(
+            connection,
+            {
+                "id": 1,
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": WORKER_READY_EXPRESSION,
+                    "returnByValue": True,
+                },
+            },
+        )
+        for _ in range(20):
+            response = _receive_websocket_json(connection)
+            if not isinstance(response, dict) or response.get("id") != 1:
+                continue
+            result = response.get("result")
+            evaluation = result.get("result") if isinstance(result, dict) else None
+            return (
+                isinstance(evaluation, dict)
+                and evaluation.get("type") == "boolean"
+                and evaluation.get("value") is True
+            )
+        raise QualificationError("worker debugger omitted the evaluation response")
+    finally:
+        connection.close()
+
+
 def _wait_for_extension_worker(
     profile: Path,
     uid: int,
@@ -875,15 +1057,29 @@ def _wait_for_extension_worker(
             targets = _devtools_json(port, "/json/list")
             if not isinstance(targets, list):
                 raise QualificationError("DevTools target list is not an array")
-            if any(
-                isinstance(target, dict)
-                and target.get("type") == "service_worker"
-                and target.get("url") == expected_url
+            matching = [
+                target
                 for target in targets
-            ):
-                return port
+                if (
+                    isinstance(target, dict)
+                    and target.get("type") == "service_worker"
+                    and target.get("url") == expected_url
+                )
+            ]
+            if len(matching) > 1:
+                raise QualificationError(
+                    "DevTools exposed duplicate Slipstream service workers"
+                )
+            if len(matching) == 1:
+                debugger_url = matching[0].get("webSocketDebuggerUrl")
+                if not isinstance(debugger_url, str):
+                    raise QualificationError(
+                        "Slipstream service worker has no debugger endpoint"
+                    )
+                if _worker_runtime_ready(debugger_url, port):
+                    return port
             last_error = QualificationError(
-                "exact Slipstream service worker target is absent"
+                "exact Slipstream service worker is not runtime-ready"
             )
         except (OSError, QualificationError) as exc:
             last_error = exc

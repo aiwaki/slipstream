@@ -41,8 +41,15 @@ registration and is not a readiness boundary. The current harness starts the
 fresh browser on `about:blank`, reads Chrome's owner-controlled
 `DevToolsActivePort` from that exact private profile, waits for the exact
 Slipstream service-worker target, and only then opens the local fixture through
-the loopback DevTools endpoint. It disables proxy use for that control request,
-accepts no redirect, bounds every file and JSON response, and retains the
+the loopback DevTools endpoint. Run `30568262971` proved that target publication
+still precedes completion of the worker script: it opened one fixture document
+before any listener observed it. The worker now sets a terminal in-process
+marker only after every production listener is registered. The harness reads
+that exact boolean through the target's loopback DevTools Protocol before
+opening the fixture; the CI-only observer is inserted before the same marker.
+It disables proxy use for HTTP control requests, validates the WebSocket
+upgrade and exact loopback target, bounds every file, frame, and JSON response,
+accepts no redirect, and retains the
 `parentFrameId` omission correction (`main_frame` plus `frameId=0` already
 establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
 production-extension behavior changes in the follow-up.
