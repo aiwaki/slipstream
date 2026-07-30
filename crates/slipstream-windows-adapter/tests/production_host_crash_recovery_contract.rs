@@ -22,10 +22,11 @@ fn production_host_crash_recovery_contract_is_frozen_and_disposable() {
         "held_process_handle",
         "process_image_matches_owned_payload",
         "process_hash_matches_owned_identity",
+        "process_creation_time_observed",
         "crash_uses_only_verified_handle",
         "durable_running_intent_survives_crash",
         "recover_uses_public_cli",
-        "recovered_process_id_changes",
+        "recovered_process_instance_changes",
         "crash_budget_resets_only_after_readiness",
         "repeated_recover_is_idempotent",
         "independent_owner_preserved",
@@ -73,10 +74,10 @@ fn production_host_crash_gate_terminates_only_a_verified_process_handle() {
 
     for required in [
         "run_host(&host,&[\"manage\",\"install\",\"--generation\",\"31\"])",
-        "terminate_exact_production_host_process(&active,&identity,&root)",
+        "letcrashed_process=terminate_exact_production_host_process(&active,&identity,&root)",
         "run_host(&host,&[\"manage\",\"recover\"])",
         "WindowsServiceDecision::Restarted",
-        "assert_ne!(recovered_pid,crashed_pid",
+        "assert_ne!(recovered_process,crashed_process",
         "run_host(&host,&[\"manage\",\"uninstall\"])",
         "verify_production_generation_absent(&root,&identity)",
         "fs::read(&independent_owner)",
@@ -88,11 +89,12 @@ fn production_host_crash_gate_terminates_only_a_verified_process_handle() {
     }
 
     for required in [
-        "OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_TERMINATE|SYNCHRONIZE",
+        "PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_TERMINATE|SYNCHRONIZE",
         "QueryFullProcessImageNameW",
+        "GetProcessTimes",
         "hash_source(&observed_path)",
-        "TerminateProcess(handle.0",
-        "WaitForSingleObject(handle.0",
+        "TerminateProcess(self.0",
+        "WaitForSingleObject(self.0",
         "WAIT_FAILED",
     ] {
         assert!(

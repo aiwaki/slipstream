@@ -421,11 +421,14 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Instant;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0,
+    };
     use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
-        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+        GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+        WaitForSingleObject, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE,
     };
 
     const HOST_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI";
@@ -805,10 +808,7 @@ mod tests {
             .expect("write independent crash-owner sentinel");
 
         let active = wait_for_state(WindowsScmState::Running);
-        let crashed_pid = active
-            .process_id
-            .expect("active production host must expose its SCM process ID");
-        terminate_exact_production_host_process(&active, &identity, &root);
+        let crashed_process = terminate_exact_production_host_process(&active, &identity, &root);
         let stopped = wait_for_state(WindowsScmState::Stopped);
         assert_eq!(
             stopped.process_id, None,
@@ -844,12 +844,12 @@ mod tests {
         );
         assert!(recovered.lifecycle.accepted);
         assert_eq!(recovered.lifecycle.state.crash_restart_attempts, 0);
-        let recovered_pid = wait_for_state(WindowsScmState::Running)
-            .process_id
-            .expect("recovered production host must expose its SCM process ID");
+        let recovered_snapshot = wait_for_state(WindowsScmState::Running);
+        let recovered_process =
+            inspect_exact_production_host_process(&recovered_snapshot, &identity, &root);
         assert_ne!(
-            recovered_pid, crashed_pid,
-            "recovery must not reuse the crashed process identity"
+            recovered_process, crashed_process,
+            "recovery must create a new Windows process instance"
         );
         verify_production_generation_active(&root, &identity);
         assert_eq!(
@@ -863,10 +863,11 @@ mod tests {
             WindowsServiceDecision::NoChange
         );
         assert!(repeated_recover.lifecycle.accepted);
+        let repeated_snapshot = wait_for_state(WindowsScmState::Running);
         assert_eq!(
-            wait_for_state(WindowsScmState::Running).process_id,
-            Some(recovered_pid),
-            "idempotent recovery must not restart the healthy production host"
+            inspect_exact_production_host_process(&repeated_snapshot, &identity, &root),
+            recovered_process,
+            "idempotent recovery must retain the healthy Windows process instance"
         );
 
         let uninstalled = run_host(&host, &["manage", "uninstall"]);
@@ -884,7 +885,92 @@ mod tests {
         fs::remove_dir_all(&root).expect("remove production-host terminal intent");
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct TestProcessInstanceIdentity {
+        process_id: u32,
+        creation_time_ticks: u64,
+    }
+
     struct OwnedTestProcessHandle(HANDLE);
+
+    impl OwnedTestProcessHandle {
+        fn open(process_id: u32, desired_access: u32) -> Self {
+            let raw_handle = unsafe { OpenProcess(desired_access, 0, process_id) };
+            assert!(
+                !raw_handle.is_null(),
+                "OpenProcess failed for the exact SCM PID with {}",
+                unsafe { GetLastError() }
+            );
+            Self(raw_handle)
+        }
+
+        fn image_path(&self) -> PathBuf {
+            let mut image = vec![0u16; MAX_PROCESS_IMAGE_U16];
+            let mut image_len = image.len() as u32;
+            let queried = unsafe {
+                QueryFullProcessImageNameW(
+                    self.0,
+                    PROCESS_NAME_WIN32,
+                    image.as_mut_ptr(),
+                    &mut image_len,
+                )
+            };
+            assert_ne!(
+                queried,
+                0,
+                "QueryFullProcessImageNameW failed with {}",
+                unsafe { GetLastError() }
+            );
+            image.truncate(image_len as usize);
+            PathBuf::from(OsString::from_wide(&image))
+        }
+
+        fn instance_identity(&self, process_id: u32) -> TestProcessInstanceIdentity {
+            let mut creation = zero_file_time();
+            let mut exit = zero_file_time();
+            let mut kernel = zero_file_time();
+            let mut user = zero_file_time();
+            let queried = unsafe {
+                GetProcessTimes(self.0, &mut creation, &mut exit, &mut kernel, &mut user)
+            };
+            assert_ne!(
+                queried,
+                0,
+                "GetProcessTimes failed for the exact SCM PID with {}",
+                unsafe { GetLastError() }
+            );
+            TestProcessInstanceIdentity {
+                process_id,
+                creation_time_ticks: file_time_ticks(creation),
+            }
+        }
+
+        fn terminate_and_wait(&self) {
+            let terminated = unsafe { TerminateProcess(self.0, TEST_CRASH_EXIT_CODE) };
+            assert_ne!(
+                terminated,
+                0,
+                "TerminateProcess failed for the verified handle with {}",
+                unsafe { GetLastError() }
+            );
+            let wait = unsafe {
+                WaitForSingleObject(
+                    self.0,
+                    OBSERVATION_TIMEOUT.as_millis().min(u128::from(u32::MAX)) as u32,
+                )
+            };
+            assert_ne!(
+                wait,
+                WAIT_FAILED,
+                "WaitForSingleObject failed for the verified handle with {}",
+                unsafe { GetLastError() }
+            );
+            assert_eq!(
+                wait, WAIT_OBJECT_0,
+                "verified production host process did not terminate before the deadline"
+            );
+        }
+    }
 
     impl Drop for OwnedTestProcessHandle {
         fn drop(&mut self) {
@@ -894,47 +980,29 @@ mod tests {
         }
     }
 
-    fn terminate_exact_production_host_process(
+    const fn zero_file_time() -> FILETIME {
+        FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        }
+    }
+
+    const fn file_time_ticks(value: FILETIME) -> u64 {
+        (value.dwHighDateTime as u64) << 32 | value.dwLowDateTime as u64
+    }
+
+    fn open_verified_production_host_process(
         snapshot: &crate::service_observer::WindowsServiceSnapshot,
         identity: &WindowsServiceIdentity,
         root: &Path,
-    ) {
+        desired_access: u32,
+    ) -> (OwnedTestProcessHandle, TestProcessInstanceIdentity) {
         assert_eq!(snapshot.service_name, identity.service_name);
         let process_id = snapshot
             .process_id
             .expect("running production host must expose an SCM process ID");
-        let raw_handle = unsafe {
-            OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
-                0,
-                process_id,
-            )
-        };
-        assert!(
-            !raw_handle.is_null(),
-            "OpenProcess failed for the exact SCM PID with {}",
-            unsafe { GetLastError() }
-        );
-        let handle = OwnedTestProcessHandle(raw_handle);
-
-        let mut image = vec![0u16; MAX_PROCESS_IMAGE_U16];
-        let mut image_len = image.len() as u32;
-        let queried = unsafe {
-            QueryFullProcessImageNameW(
-                handle.0,
-                PROCESS_NAME_WIN32,
-                image.as_mut_ptr(),
-                &mut image_len,
-            )
-        };
-        assert_ne!(
-            queried,
-            0,
-            "QueryFullProcessImageNameW failed with {}",
-            unsafe { GetLastError() }
-        );
-        image.truncate(image_len as usize);
-        let observed_path = PathBuf::from(OsString::from_wide(&image));
+        let handle = OwnedTestProcessHandle::open(process_id, desired_access);
+        let observed_path = handle.image_path();
         let expected_path = windows_payload_path(root, identity);
         let observed_canonical =
             fs::canonicalize(&observed_path).expect("canonicalize observed production host");
@@ -951,29 +1019,36 @@ mod tests {
             identity.executable_sha256,
             "SCM PID image hash does not match the exact owned identity"
         );
+        let instance = handle.instance_identity(process_id);
+        (handle, instance)
+    }
 
-        let terminated = unsafe { TerminateProcess(handle.0, TEST_CRASH_EXIT_CODE) };
-        assert_ne!(
-            terminated,
-            0,
-            "TerminateProcess failed for the verified handle with {}",
-            unsafe { GetLastError() }
+    fn inspect_exact_production_host_process(
+        snapshot: &crate::service_observer::WindowsServiceSnapshot,
+        identity: &WindowsServiceIdentity,
+        root: &Path,
+    ) -> TestProcessInstanceIdentity {
+        let (_handle, instance) = open_verified_production_host_process(
+            snapshot,
+            identity,
+            root,
+            PROCESS_QUERY_LIMITED_INFORMATION,
         );
-        let wait = unsafe {
-            WaitForSingleObject(
-                handle.0,
-                OBSERVATION_TIMEOUT.as_millis().min(u128::from(u32::MAX)) as u32,
-            )
-        };
-        assert_ne!(
-            wait,
-            WAIT_FAILED,
-            "WaitForSingleObject failed for the verified handle with {}",
-            unsafe { GetLastError() }
+        instance
+    }
+
+    fn terminate_exact_production_host_process(
+        snapshot: &crate::service_observer::WindowsServiceSnapshot,
+        identity: &WindowsServiceIdentity,
+        root: &Path,
+    ) -> TestProcessInstanceIdentity {
+        let (handle, instance) = open_verified_production_host_process(
+            snapshot,
+            identity,
+            root,
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
         );
-        assert_eq!(
-            wait, WAIT_OBJECT_0,
-            "verified production host process did not terminate before the deadline"
-        );
+        handle.terminate_and_wait();
+        instance
     }
 }
