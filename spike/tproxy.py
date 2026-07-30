@@ -2043,9 +2043,11 @@ AUTO_GEPH_STAGE_XBOX_DNS = "xbox_dns"
 AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
 SYSTEM_PROBE_PAYLOAD = "payload"
 SYSTEM_PROBE_CLOSED = "closed"
+SYSTEM_PROBE_TIMEOUT = "timeout"
 SYSTEM_PROBE_PENDING = "pending"
 ROUTE_PROBE_PAYLOAD = "payload"
 ROUTE_PROBE_CLOSED = "closed"
+ROUTE_PROBE_TIMEOUT = "timeout"
 ROUTE_PROBE_PENDING = "pending"
 ROUTE_PROBE_FAILED = "failed"
 _ROUTE_PROBE_OUTCOME_SINK = contextvars.ContextVar(
@@ -8355,7 +8357,7 @@ async def dial_and_probe(real_ip, port, first_blob, probe_timeout=2.5):
         _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
         raise
     except asyncio.TimeoutError:
-        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+        _publish_route_probe_outcome(ROUTE_PROBE_TIMEOUT)
     except ConnectionResetError:
         _publish_route_probe_outcome(
             ROUTE_PROBE_CLOSED if flight_sent else ROUTE_PROBE_FAILED
@@ -8402,7 +8404,7 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
         _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
         raise
     except asyncio.TimeoutError:
-        _publish_route_probe_outcome(ROUTE_PROBE_PENDING)
+        _publish_route_probe_outcome(ROUTE_PROBE_TIMEOUT)
     except ConnectionResetError:
         _publish_route_probe_outcome(
             ROUTE_PROBE_CLOSED if flight_sent else ROUTE_PROBE_FAILED
@@ -8428,11 +8430,12 @@ def _publish_route_probe_outcome(outcome):
         sink(outcome)
 
 
-def _probe_attempts_confirm_close(outcomes, attempted):
+def _probe_attempts_confirm_zero_payload(outcomes, attempted):
+    replay_safe = {ROUTE_PROBE_CLOSED, ROUTE_PROBE_TIMEOUT}
     return (
         attempted > 0
         and len(outcomes) == attempted
-        and all(outcome == ROUTE_PROBE_CLOSED for outcome in outcomes.values())
+        and all(outcome in replay_safe for outcome in outcomes.values())
     )
 
 
@@ -8531,11 +8534,11 @@ async def _try_exact_system_probe(
     first_flight,
     probe_timeout=3.0,
 ):
-    """Probe the PF-selected destination without treating silence as failure.
+    """Probe the PF-selected destination before committing a client stream.
 
-    An explicit connect failure or EOF before payload is replay-safe. A read
-    timeout is ambiguous, so retain and commit the exact system stream instead
-    of opening a second route for the same TLS first flight.
+    Until the client receives a server byte, the TLS first flight is
+    replay-safe. Close a bounded silent attempt so the same request can continue
+    through app-owned DNS, local strategies, and finally proven owned Geph.
     """
     direct = await dial_plain(dst_ip, port, first_flight)
     if direct is None:
@@ -8550,7 +8553,8 @@ async def _try_exact_system_probe(
         await _close_stream_writer(up_w)
         raise
     except asyncio.TimeoutError:
-        return SYSTEM_PROBE_PENDING, (up_r, up_w, b"")
+        await _close_stream_writer(up_w)
+        return SYSTEM_PROBE_TIMEOUT, None
     except (ConnectionError, OSError):
         await _close_stream_writer(up_w)
         return SYSTEM_PROBE_CLOSED, None
@@ -9037,7 +9041,7 @@ async def _handle_impl(reader, writer):
             chosen_name = "plain"
             via_system_exact = True
         else:
-            assert system_probe == SYSTEM_PROBE_CLOSED
+            assert system_probe in (SYSTEM_PROBE_CLOSED, SYSTEM_PROBE_TIMEOUT)
             note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_SYSTEM)
             _mark_xbox_dns_candidate(host)
             unknown_stage = UNKNOWN_RECOVERY_XBOX_DNS
@@ -9066,7 +9070,7 @@ async def _handle_impl(reader, writer):
             via_xbox_dns = True
             _record_strategy_result(host, chosen_name, True)
         else:
-            if _probe_attempts_confirm_close(
+            if _probe_attempts_confirm_zero_payload(
                 xbox_summary.get("outcomes") or {},
                 int(xbox_summary.get("attempted") or 0),
             ):
@@ -9169,7 +9173,7 @@ async def _handle_impl(reader, writer):
                 _record_strategy_result(host, strat["name"], False)
                 if (
                     route_class == ROUTE_UNKNOWN
-                    and _probe_attempts_confirm_close(
+                    and _probe_attempts_confirm_zero_payload(
                         strategy_outcomes,
                         attempted,
                     )

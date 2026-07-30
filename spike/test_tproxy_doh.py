@@ -8067,7 +8067,7 @@ def test_route_probe_distinguishes_confirmed_eof_from_timeout(monkeypatch):
         return outcomes
 
     assert asyncio.run(probe(False)) == [tproxy.ROUTE_PROBE_CLOSED]
-    assert asyncio.run(probe(True)) == [tproxy.ROUTE_PROBE_PENDING]
+    assert asyncio.run(probe(True)) == [tproxy.ROUTE_PROBE_TIMEOUT]
     assert all((writer.closed, writer.waited) == (1, 1) for writer in writers)
 
 
