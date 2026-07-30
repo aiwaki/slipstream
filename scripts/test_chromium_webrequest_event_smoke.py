@@ -160,6 +160,9 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
             self.assertIn("location.replace(target)", warmup)
             self.assertIn("const maxAttempts = 40", warmup)
             self.assertIn("setTimeout(warmWorker, 250)", warmup)
+            self.assertIn('source: "ci_warmup_page"', warmup)
+            self.assertIn('report("page_ready")', warmup)
+            self.assertIn('report("worker_unavailable")', warmup)
             self.assertIn(target, warmup)
             self.assertEqual(
                 (destination / "qualification-warmup.js").stat().st_mode

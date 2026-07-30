@@ -38,7 +38,9 @@ worker trace. The current harness therefore requires an explicit owner-only
 native acknowledgement from the disposable worker after listener registration
 before fixture navigation. The extension page retries that readiness request
 for at most ten seconds so first-install registration cannot become another
-fixed-delay race, while retaining the
+fixed-delay race. A bounded page/native readiness trace distinguishes extension
+load, native-host registration, and worker startup without recording a URL,
+while retaining the
 `parentFrameId` omission correction (`main_frame` plus `frameId=0` already
 establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
 production-extension behavior changes in the follow-up.

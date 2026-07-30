@@ -212,8 +212,16 @@ def _copy_diagnostic_extension(
     (destination / "qualification-warmup.js").write_text(
         (
             f"const target = {json.dumps(target_url)};\n"
+            f"const nativeHost = {json.dumps(semantic.NATIVE_HOST_NAME)};\n"
             "const maxAttempts = 40;\n"
             "let attempts = 0;\n"
+            "function report(phase) {\n"
+            "  return chrome.runtime.sendNativeMessage(nativeHost, {\n"
+            "    schema_version: 0,\n"
+            '    source: "ci_warmup_page",\n'
+            "    phase\n"
+            "  });\n"
+            "}\n"
             "function warmWorker() {\n"
             "  attempts += 1;\n"
             "  chrome.runtime.sendMessage({"
@@ -228,12 +236,16 @@ def _copy_diagnostic_extension(
             "}\n"
             "function retry() {\n"
             "  if (attempts >= maxAttempts) {\n"
-            '    document.body.textContent = "worker warmup failed";\n'
+            '    report("worker_unavailable").finally(() => {\n'
+            '      document.body.textContent = "worker warmup failed";\n'
+            "    });\n"
             "    return;\n"
             "  }\n"
             "  setTimeout(warmWorker, 250);\n"
             "}\n"
-            "warmWorker();\n"
+            'report("page_ready").then(warmWorker).catch(() => {\n'
+            '  document.body.textContent = "native warmup failed";\n'
+            "});\n"
         ),
         encoding="utf-8",
     )
