@@ -121,7 +121,6 @@ def _diagnostic_worker_source(host: str) -> bytes:
 
 // CI-only observer appended to an owner-only copy of the reviewed extension.
 const SLIPSTREAM_CI_FIXTURE_HOST = {host!r};
-const SLIPSTREAM_CI_WARMUP_TYPE = "slipstream.qualification_warmup";
 function slipstreamCiWebRequestTrace(phase, details) {{
   let host = null;
   try {{
@@ -155,20 +154,6 @@ function slipstreamCiWebRequestTrace(phase, details) {{
   chrome.runtime.sendNativeMessage(NATIVE_HOST, trace).catch(() => {{}});
 }}
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {{
-  if (message?.type !== SLIPSTREAM_CI_WARMUP_TYPE) {{
-    return;
-  }}
-  chrome.runtime.sendNativeMessage(NATIVE_HOST, {{
-    schema_version: 0,
-    source: "ci_worker_ready",
-    phase: "worker_ready"
-  }})
-    .then(() => sendResponse({{ ready: true }}))
-    .catch(() => sendResponse({{ ready: false }}));
-  return true;
-}});
-
 for (const [phase, event] of [
   ["before_request", chrome.webRequest.onBeforeRequest],
   ["headers_received", chrome.webRequest.onHeadersReceived],
@@ -193,7 +178,6 @@ def _copy_diagnostic_extension(
     destination: Path,
     *,
     host: str,
-    target_url: str,
     uid: int,
     gid: int,
 ) -> Path:
@@ -201,54 +185,6 @@ def _copy_diagnostic_extension(
     worker_path = destination / "service-worker.js"
     with worker_path.open("ab") as worker:
         worker.write(_diagnostic_worker_source(host))
-    (destination / "qualification-warmup.html").write_text(
-        (
-            "<!doctype html><meta charset=\"utf-8\">"
-            "<title>Slipstream qualification</title>"
-            "<script src=\"qualification-warmup.js\"></script>"
-        ),
-        encoding="utf-8",
-    )
-    (destination / "qualification-warmup.js").write_text(
-        (
-            f"const target = {json.dumps(target_url)};\n"
-            f"const nativeHost = {json.dumps(semantic.NATIVE_HOST_NAME)};\n"
-            "const maxAttempts = 40;\n"
-            "let attempts = 0;\n"
-            "function report(phase) {\n"
-            "  return chrome.runtime.sendNativeMessage(nativeHost, {\n"
-            "    schema_version: 0,\n"
-            '    source: "ci_warmup_page",\n'
-            "    phase\n"
-            "  });\n"
-            "}\n"
-            "function warmWorker() {\n"
-            "  attempts += 1;\n"
-            "  chrome.runtime.sendMessage({"
-            'type: "slipstream.qualification_warmup"'
-            "  }).then((response) => {\n"
-            "    if (response?.ready === true) {\n"
-            "      location.replace(target);\n"
-            "      return;\n"
-            "    }\n"
-            "    retry();\n"
-            "  }).catch(retry);\n"
-            "}\n"
-            "function retry() {\n"
-            "  if (attempts >= maxAttempts) {\n"
-            '    report("worker_unavailable").finally(() => {\n'
-            '      document.body.textContent = "worker warmup failed";\n'
-            "    });\n"
-            "    return;\n"
-            "  }\n"
-            "  setTimeout(warmWorker, 250);\n"
-            "}\n"
-            'report("page_ready").then(warmWorker).catch(() => {\n'
-            '  document.body.textContent = "native warmup failed";\n'
-            "});\n"
-        ),
-        encoding="utf-8",
-    )
     for root, directories, files in os.walk(destination):
         root_path = Path(root)
         os.chown(root_path, uid, gid)
@@ -398,15 +334,10 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             gid=gid,
         )
         fixture.start()
-        target_url = (
-            f"https://{fixture.host}:{fixture.port}/"
-            "?slipstream-webrequest=1"
-        )
         diagnostic_extension = _copy_diagnostic_extension(
             extension,
             diagnostic_extension,
             host=fixture.host,
-            target_url=target_url,
             uid=uid,
             gid=gid,
         )
@@ -418,10 +349,6 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             chrome_executable,
             manifest_path,
             stub_path,
-            initial_url=(
-                f"{semantic.NATIVE_HOST_ORIGIN}"
-                "qualification-warmup.html"
-            ),
         )
         semantic._assert_fixture_complete(snapshot)
         signal = _validate_signal(signal_path, uid)

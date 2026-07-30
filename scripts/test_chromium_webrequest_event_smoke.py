@@ -124,13 +124,11 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
         self.assertIn('"headers_received"', worker)
         self.assertIn('"completed"', worker)
         self.assertIn('"error"', worker)
-        self.assertIn('"slipstream.qualification_warmup"', worker)
-        self.assertIn('"ci_worker_ready"', worker)
-        self.assertIn('"worker_ready"', worker)
+        self.assertNotIn("qualification_warmup", worker)
         self.assertNotIn("url:", worker)
         self.assertNotIn("host,", worker)
 
-    def test_diagnostic_extension_warms_worker_before_fixture_navigation(
+    def test_diagnostic_extension_only_appends_the_fixture_observer(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -142,30 +140,27 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
                 'const NATIVE_HOST = "dev.slipstream.semantic";\n',
                 encoding="utf-8",
             )
-            target = "https://example.net:443/?slipstream-webrequest=1"
             smoke._copy_diagnostic_extension(
                 source,
                 destination,
                 host="example.net",
-                target_url=target,
                 uid=os.getuid(),
                 gid=os.getgid(),
             )
 
-            warmup = (destination / "qualification-warmup.js").read_text(
+            worker = (destination / "service-worker.js").read_text(
                 encoding="utf-8"
             )
-            self.assertIn("chrome.runtime.sendMessage", warmup)
-            self.assertIn("response?.ready === true", warmup)
-            self.assertIn("location.replace(target)", warmup)
-            self.assertIn("const maxAttempts = 40", warmup)
-            self.assertIn("setTimeout(warmWorker, 250)", warmup)
-            self.assertIn('source: "ci_warmup_page"', warmup)
-            self.assertIn('report("page_ready")', warmup)
-            self.assertIn('report("worker_unavailable")', warmup)
-            self.assertIn(target, warmup)
+            self.assertIn('const NATIVE_HOST = "dev.slipstream.semantic"', worker)
+            self.assertIn("slipstreamCiWebRequestTrace", worker)
+            self.assertFalse(
+                (destination / "qualification-warmup.html").exists()
+            )
+            self.assertFalse(
+                (destination / "qualification-warmup.js").exists()
+            )
             self.assertEqual(
-                (destination / "qualification-warmup.js").stat().st_mode
+                (destination / "service-worker.js").stat().st_mode
                 & 0o777,
                 0o600,
             )

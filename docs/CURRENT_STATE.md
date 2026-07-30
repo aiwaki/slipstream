@@ -34,13 +34,15 @@ optional `parentFrameId` correction. A CI-only observer then produced an empty
 owner-private event trace, isolating a fresh-profile startup race: Chrome began
 the command-line fixture navigation before the Manifest V3 worker registered
 its listeners. A fixed-delay warm-up in run `30565374098` still produced no
-worker trace. The current harness therefore requires an explicit owner-only
-native acknowledgement from the disposable worker after listener registration
-before fixture navigation. The extension page retries that readiness request
-for at most ten seconds so first-install registration cannot become another
-fixed-delay race. A bounded page/native readiness trace distinguishes extension
-load, native-host registration, and worker startup without recording a URL,
-while retaining the
+worker trace. Extension-page acknowledgement run `30566477975` made zero
+fixture requests, and the expanded boundary trace in run `30566813738` was
+also empty. The extension page itself can therefore race unpacked-extension
+registration and is not a readiness boundary. The current harness starts the
+fresh browser on `about:blank`, reads Chrome's owner-controlled
+`DevToolsActivePort` from that exact private profile, waits for the exact
+Slipstream service-worker target, and only then opens the local fixture through
+the loopback DevTools endpoint. It disables proxy use for that control request,
+accepts no redirect, bounds every file and JSON response, and retains the
 `parentFrameId` omission correction (`main_frame` plus `frameId=0` already
 establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
 production-extension behavior changes in the follow-up.

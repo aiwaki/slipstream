@@ -25,6 +25,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +57,9 @@ FIXTURE_SCENARIOS = frozenset(
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
 CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
+DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
+DEVTOOLS_TIMEOUT = 15.0
+MAX_DEVTOOLS_RESPONSE = 64 * 1024
 
 
 class QualificationError(RuntimeError):
@@ -550,7 +555,6 @@ def _chrome_command(
     extension: Path,
     fixture_port: int,
     fixture_host: str = FIXTURE_HOST,
-    initial_url: str | None = None,
 ) -> tuple[str, ...]:
     return (
         str(executable),
@@ -570,9 +574,9 @@ def _chrome_command(
         f"--disable-extensions-except={extension}",
         f"--load-extension={extension}",
         f"--host-resolver-rules=MAP {fixture_host} 127.0.0.1, EXCLUDE localhost",
+        "--remote-debugging-port=0",
         f"--user-data-dir={profile}",
-        initial_url
-        or f"https://{fixture_host}:{fixture_port}/?slipstream-semantic=1",
+        "about:blank",
     )
 
 
@@ -652,7 +656,6 @@ def _chrome_open_command(
     stderr_path: Path,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
-    initial_url: str | None = None,
 ) -> tuple[str, ...]:
     chrome = _chrome_command(
         executable,
@@ -660,7 +663,6 @@ def _chrome_open_command(
         extension,
         fixture_port,
         fixture_host,
-        initial_url,
     )
     return (
         "/usr/bin/open",
@@ -692,7 +694,6 @@ def _chrome_launch_agent_payload(
     fixture_port: int,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
-    initial_url: str | None = None,
 ) -> dict[str, object]:
     return {
         "Label": label,
@@ -706,7 +707,6 @@ def _chrome_launch_agent_payload(
                 chrome_stderr_path,
                 application_bundle,
                 fixture_host,
-                initial_url,
             )
         ),
         "RunAtLoad": True,
@@ -763,6 +763,145 @@ def _read_owner_private_tail(path: Path, uid: int, limit: int = 4000) -> bytes:
         return os.pread(fd, length, max(0, metadata.st_size - length))
     finally:
         os.close(fd)
+
+
+def _read_owner_bounded_file(
+    path: Path,
+    uid: int,
+    limit: int = MAX_DEVTOOLS_RESPONSE,
+) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        mode = stat.S_IMODE(metadata.st_mode)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != uid
+            or mode & 0o022
+            or metadata.st_size <= 0
+            or metadata.st_size > limit
+        ):
+            raise QualificationError(f"{path} is not a bounded owner-controlled file")
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 16 * 1024))
+            if not chunk:
+                raise QualificationError(f"{path} changed while being read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise QualificationError(f"{path} changed while being read")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _parse_devtools_active_port(payload: bytes) -> int:
+    try:
+        lines = payload.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise QualificationError("DevToolsActivePort is not ASCII") from exc
+    if (
+        len(lines) != 2
+        or not lines[0].isdigit()
+        or not lines[1].startswith("/devtools/browser/")
+    ):
+        raise QualificationError("DevToolsActivePort has an invalid shape")
+    port = int(lines[0])
+    if port <= 0 or port > 65_535:
+        raise QualificationError("DevToolsActivePort exposes an invalid port")
+    return port
+
+
+def _wait_for_devtools_port(
+    profile: Path,
+    uid: int,
+    *,
+    timeout: float = DEVTOOLS_TIMEOUT,
+) -> int:
+    path = profile / DEVTOOLS_ACTIVE_PORT
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            return _parse_devtools_active_port(
+                _read_owner_bounded_file(path, uid)
+            )
+        except (FileNotFoundError, QualificationError, OSError) as exc:
+            last_error = exc
+        time.sleep(0.1)
+    raise QualificationError(
+        f"Chrome did not publish an owner-controlled DevTools endpoint: {last_error}"
+    )
+
+
+def _devtools_json(
+    port: int,
+    path: str,
+    *,
+    method: str = "GET",
+) -> object:
+    if port <= 0 or port > 65_535 or not path.startswith("/"):
+        raise QualificationError("refusing an invalid DevTools endpoint")
+    url = f"http://127.0.0.1:{port}{path}"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(url, method=method)
+    with opener.open(request, timeout=2.0) as response:
+        if response.geturl() != url:
+            raise QualificationError("DevTools redirected outside its exact endpoint")
+        payload = response.read(MAX_DEVTOOLS_RESPONSE + 1)
+    if len(payload) > MAX_DEVTOOLS_RESPONSE:
+        raise QualificationError("DevTools response exceeded its bounded limit")
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("DevTools returned invalid JSON") from exc
+
+
+def _wait_for_extension_worker(
+    profile: Path,
+    uid: int,
+    *,
+    timeout: float = DEVTOOLS_TIMEOUT,
+) -> int:
+    port = _wait_for_devtools_port(profile, uid, timeout=timeout)
+    expected_url = f"{NATIVE_HOST_ORIGIN}service-worker.js"
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            targets = _devtools_json(port, "/json/list")
+            if not isinstance(targets, list):
+                raise QualificationError("DevTools target list is not an array")
+            if any(
+                isinstance(target, dict)
+                and target.get("type") == "service_worker"
+                and target.get("url") == expected_url
+                for target in targets
+            ):
+                return port
+            last_error = QualificationError(
+                "exact Slipstream service worker target is absent"
+            )
+        except (OSError, QualificationError) as exc:
+            last_error = exc
+        time.sleep(0.1)
+    raise QualificationError(
+        f"Chrome did not start the exact Slipstream service worker: {last_error}"
+    )
+
+
+def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> None:
+    target_url = (
+        f"https://{fixture.host}:{fixture.port}/"
+        "?slipstream-semantic=1"
+    )
+    encoded_url = urllib.parse.quote(target_url, safe="")
+    target = _devtools_json(port, f"/json/new?{encoded_url}", method="PUT")
+    if not isinstance(target, dict) or target.get("url") != target_url:
+        raise QualificationError("DevTools did not open the exact semantic fixture")
 
 
 def _launch_agent_pid(target: str) -> int | None:
@@ -1223,7 +1362,6 @@ def _run_chrome(
     executable: Path,
     native_host_manifest: Path,
     native_host_executable: Path,
-    initial_url: str | None = None,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -1280,7 +1418,6 @@ def _run_chrome(
             fixture.port,
             application_bundle,
             fixture.host,
-            initial_url,
         )
         _write_owner_private_file(
             plist_path,
@@ -1300,6 +1437,8 @@ def _run_chrome(
             profile,
             ownership,
         )
+        devtools_port = _wait_for_extension_worker(profile, uid)
+        _open_fixture_with_devtools(devtools_port, fixture)
 
         deadline = time.monotonic() + CHROME_TIMEOUT
         while time.monotonic() < deadline:

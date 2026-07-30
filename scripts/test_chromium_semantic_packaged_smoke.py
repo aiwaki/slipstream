@@ -196,7 +196,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             f"--host-resolver-rules=MAP {smoke.FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
             command,
         )
-        self.assertTrue(command[-1].startswith(f"https://{smoke.FIXTURE_HOST}:18443/"))
+        self.assertIn("--remote-debugging-port=0", command)
+        self.assertEqual(command[-1], "about:blank")
 
     def test_chrome_command_maps_the_selected_fixture_host(self) -> None:
         command = smoke._chrome_command(
@@ -211,32 +212,94 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             f"{smoke.INCOMPLETE_FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
             command,
         )
-        self.assertTrue(
-            command[-1].startswith(
-                f"https://{smoke.INCOMPLETE_FIXTURE_HOST}:18443/"
+        self.assertEqual(command[-1], "about:blank")
+
+    def test_devtools_active_port_requires_an_exact_local_endpoint(self) -> None:
+        self.assertEqual(
+            smoke._parse_devtools_active_port(
+                b"49152\n/devtools/browser/qualified-browser\n"
+            ),
+            49152,
+        )
+        for payload in (
+            b"0\n/devtools/browser/id\n",
+            b"65536\n/devtools/browser/id\n",
+            b"49152\n/devtools/page/id\n",
+            b"not-a-port\n/devtools/browser/id\n",
+            b"49152\n/devtools/browser/id\nextra\n",
+        ):
+            with self.subTest(payload=payload), self.assertRaises(
+                smoke.QualificationError
+            ):
+                smoke._parse_devtools_active_port(payload)
+
+    def test_owner_bounded_file_rejects_group_writable_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / smoke.DEVTOOLS_ACTIVE_PORT
+            path.write_bytes(b"49152\n/devtools/browser/id\n")
+            path.chmod(0o620)
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "owner-controlled",
+            ):
+                smoke._read_owner_bounded_file(path, os.getuid())
+
+    def test_extension_worker_gate_requires_the_exact_worker_target(self) -> None:
+        targets = [
+            [],
+            [
+                {
+                    "type": "service_worker",
+                    "url": f"{smoke.NATIVE_HOST_ORIGIN}service-worker.js",
+                }
+            ],
+        ]
+        with mock.patch.object(
+            smoke,
+            "_wait_for_devtools_port",
+            return_value=49152,
+        ), mock.patch.object(
+            smoke,
+            "_devtools_json",
+            side_effect=targets,
+        ) as request, mock.patch.object(
+            smoke.time,
+            "sleep",
+        ):
+            self.assertEqual(
+                smoke._wait_for_extension_worker(
+                    Path("/tmp/profile"),
+                    501,
+                    timeout=1.0,
+                ),
+                49152,
             )
+        self.assertEqual(
+            request.call_args_list,
+            [
+                mock.call(49152, "/json/list"),
+                mock.call(49152, "/json/list"),
+            ],
         )
 
-    def test_chrome_command_can_warm_the_extension_before_fixture_navigation(
-        self,
-    ) -> None:
-        warmup = (
-            f"{smoke.NATIVE_HOST_ORIGIN}"
-            "qualification-warmup.html"
+    def test_fixture_navigation_uses_put_for_the_exact_url(self) -> None:
+        fixture = mock.Mock(host="example.net", port=18443)
+        target = (
+            "https://example.net:18443/"
+            "?slipstream-semantic=1"
         )
-        command = smoke._chrome_command(
-            Path("/Applications/Google Chrome"),
-            Path("/tmp/profile"),
-            Path("/repo/browser-companion/chromium"),
-            18443,
-            smoke.INCOMPLETE_FIXTURE_HOST,
-            warmup,
-        )
-        self.assertEqual(command[-1], warmup)
-        self.assertIn(
-            "--host-resolver-rules=MAP "
-            f"{smoke.INCOMPLETE_FIXTURE_HOST} 127.0.0.1, EXCLUDE localhost",
-            command,
+        with mock.patch.object(
+            smoke,
+            "_devtools_json",
+            return_value={"url": target},
+        ) as request:
+            smoke._open_fixture_with_devtools(49152, fixture)
+        request.assert_called_once_with(
+            49152,
+            "/json/new?"
+            "https%3A%2F%2Fexample.net%3A18443%2F"
+            "%3Fslipstream-semantic%3D1",
+            method="PUT",
         )
 
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:
@@ -1038,6 +1101,13 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 return_value=browser,
             ), mock.patch.object(
                 smoke,
+                "_wait_for_extension_worker",
+                return_value=49152,
+            ) as wait_for_worker, mock.patch.object(
+                smoke,
+                "_open_fixture_with_devtools",
+            ) as open_fixture, mock.patch.object(
+                smoke,
                 "_owned_chrome_process_alive",
                 return_value=True,
             ), mock.patch.object(
@@ -1064,6 +1134,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
             self.assertEqual(snapshot.ready_requests, 1)
             popen.assert_not_called()
+            wait_for_worker.assert_called_once_with(profile, 501)
+            open_fixture.assert_called_once_with(49152, fixture)
             stop.assert_called_once_with(
                 launch,
                 uid=501,
@@ -1220,6 +1292,13 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 smoke,
                 "_wait_for_owned_chrome_process",
                 return_value=browser,
+            ), mock.patch.object(
+                smoke,
+                "_wait_for_extension_worker",
+                return_value=49152,
+            ), mock.patch.object(
+                smoke,
+                "_open_fixture_with_devtools",
             ), mock.patch.object(
                 smoke,
                 "_owned_chrome_process_alive",
