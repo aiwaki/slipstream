@@ -31,8 +31,13 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             signal_path = root / "signal.json"
+            trace_path = root / "trace.jsonl"
+            trace_path.write_bytes(b"")
+            trace_path.chmod(0o600)
             stub_path = root / "native-stub.py"
-            stub_path.write_bytes(smoke._native_stub_source(signal_path))
+            stub_path.write_bytes(
+                smoke._native_stub_source(signal_path, trace_path)
+            )
             payload = json.dumps(
                 _signal_payload(),
                 separators=(",", ":"),
@@ -60,6 +65,67 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
                 json.loads(signal_path.read_text(encoding="utf-8")),
                 _signal_payload(),
             )
+            self.assertEqual(trace_path.read_bytes(), b"")
+
+    def test_native_stub_records_ci_trace_without_accepting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            signal_path = root / "signal.json"
+            trace_path = root / "trace.jsonl"
+            trace_path.write_bytes(b"")
+            trace_path.chmod(0o600)
+            stub_path = root / "native-stub.py"
+            stub_path.write_bytes(
+                smoke._native_stub_source(signal_path, trace_path)
+            )
+            payload = json.dumps(
+                {
+                    "schema_version": 0,
+                    "source": "ci_webrequest_trace",
+                    "phase": "before_request",
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(stub_path)],
+                input=struct.pack("<I", len(payload)) + payload,
+                check=True,
+                capture_output=True,
+            )
+
+            response = json.loads(completed.stdout[4:].decode("utf-8"))
+            self.assertEqual(
+                response,
+                {
+                    "accepted": False,
+                    "action": "none",
+                    "schema_version": 1,
+                },
+            )
+            self.assertFalse(signal_path.exists())
+            self.assertEqual(
+                smoke._read_trace(trace_path, os.getuid()),
+                [
+                    {
+                        "schema_version": 0,
+                        "source": "ci_webrequest_trace",
+                        "phase": "before_request",
+                    }
+                ],
+            )
+
+    def test_diagnostic_worker_is_fixture_scoped_and_sanitized(self) -> None:
+        worker = smoke._diagnostic_worker_source(
+            semantic.INCOMPLETE_FIXTURE_HOST
+        ).decode("utf-8")
+        self.assertIn(semantic.INCOMPLETE_FIXTURE_HOST, worker)
+        self.assertIn('"before_request"', worker)
+        self.assertIn('"headers_received"', worker)
+        self.assertIn('"completed"', worker)
+        self.assertIn('"error"', worker)
+        self.assertNotIn("url:", worker)
+        self.assertNotIn("host,", worker)
 
     def test_validate_signal_accepts_only_the_privacy_bounded_v2_contract(
         self,

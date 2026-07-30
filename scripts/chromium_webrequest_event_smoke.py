@@ -47,8 +47,8 @@ def _write_owner_file(
         os.close(fd)
 
 
-def _native_stub_source(signal_path: Path) -> bytes:
-    response = json.dumps(
+def _native_stub_source(signal_path: Path, trace_path: Path) -> bytes:
+    accepted_response = json.dumps(
         {
             "schema_version": 1,
             "accepted": True,
@@ -57,14 +57,26 @@ def _native_stub_source(signal_path: Path) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+    rejected_response = json.dumps(
+        {
+            "schema_version": 1,
+            "accepted": False,
+            "action": "none",
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
     source = f"""#!{sys.executable}
 import json
+import os
 import struct
 import sys
 
 MAX_NATIVE_MESSAGE = {MAX_NATIVE_MESSAGE}
 SIGNAL_PATH = {str(signal_path)!r}
-RESPONSE = {response!r}
+TRACE_PATH = {str(trace_path)!r}
+ACCEPTED_RESPONSE = {accepted_response!r}
+REJECTED_RESPONSE = {rejected_response!r}
 
 
 def read_exact(size):
@@ -86,13 +98,117 @@ if length <= 0 or length > MAX_NATIVE_MESSAGE:
 payload = read_exact(length)
 signal = json.loads(payload.decode("utf-8"))
 encoded = json.dumps(signal, separators=(",", ":"), sort_keys=True).encode("utf-8")
-with open(SIGNAL_PATH, "wb") as output:
-    output.write(encoded)
-sys.stdout.buffer.write(struct.pack("<I", len(RESPONSE)))
-sys.stdout.buffer.write(RESPONSE)
+if signal.get("schema_version") == 2:
+    with open(SIGNAL_PATH, "wb") as output:
+        output.write(encoded)
+    response = ACCEPTED_RESPONSE
+else:
+    descriptor = os.open(TRACE_PATH, os.O_WRONLY | os.O_APPEND)
+    try:
+        os.write(descriptor, encoded + b"\\n")
+    finally:
+        os.close(descriptor)
+    response = REJECTED_RESPONSE
+sys.stdout.buffer.write(struct.pack("<I", len(response)))
+sys.stdout.buffer.write(response)
 sys.stdout.buffer.flush()
 """
     return source.encode("utf-8")
+
+
+def _diagnostic_worker_source(host: str) -> bytes:
+    source = f"""
+
+// CI-only observer appended to an owner-only copy of the reviewed extension.
+const SLIPSTREAM_CI_FIXTURE_HOST = {host!r};
+function slipstreamCiWebRequestTrace(phase, details) {{
+  let host = null;
+  try {{
+    host = new URL(details.url).hostname.toLowerCase();
+  }} catch (_error) {{
+    return;
+  }}
+  if (host !== SLIPSTREAM_CI_FIXTURE_HOST) {{
+    return;
+  }}
+  const trace = {{
+    schema_version: 0,
+    source: "ci_webrequest_trace",
+    phase,
+    keys: Object.keys(details).sort(),
+    type: typeof details.type === "string" ? details.type : null,
+    method: typeof details.method === "string" ? details.method : null,
+    frame_id: Number.isInteger(details.frameId) ? details.frameId : null,
+    parent_frame_id_present: Object.prototype.hasOwnProperty.call(
+      details,
+      "parentFrameId"
+    ),
+    parent_frame_id: Number.isInteger(details.parentFrameId)
+      ? details.parentFrameId
+      : null,
+    status_code: Number.isInteger(details.statusCode)
+      ? details.statusCode
+      : null,
+    error: typeof details.error === "string" ? details.error : null
+  }};
+  chrome.runtime.sendNativeMessage(NATIVE_HOST, trace).catch(() => {{}});
+}}
+
+for (const [phase, event] of [
+  ["before_request", chrome.webRequest.onBeforeRequest],
+  ["headers_received", chrome.webRequest.onHeadersReceived],
+  ["before_redirect", chrome.webRequest.onBeforeRedirect],
+  ["completed", chrome.webRequest.onCompleted],
+  ["error", chrome.webRequest.onErrorOccurred]
+]) {{
+  event.addListener(
+    (details) => slipstreamCiWebRequestTrace(phase, details),
+    {{
+      urls: ["https://*/*"],
+      types: ["main_frame"]
+    }}
+  );
+}}
+"""
+    return source.encode("utf-8")
+
+
+def _copy_diagnostic_extension(
+    source: Path,
+    destination: Path,
+    *,
+    host: str,
+    uid: int,
+    gid: int,
+) -> Path:
+    shutil.copytree(source, destination, symlinks=False)
+    worker_path = destination / "service-worker.js"
+    with worker_path.open("ab") as worker:
+        worker.write(_diagnostic_worker_source(host))
+    for root, directories, files in os.walk(destination):
+        root_path = Path(root)
+        os.chown(root_path, uid, gid)
+        root_path.chmod(0o700)
+        for directory in directories:
+            path = root_path / directory
+            os.chown(path, uid, gid)
+            path.chmod(0o700)
+        for filename in files:
+            path = root_path / filename
+            os.chown(path, uid, gid)
+            path.chmod(0o600)
+    return destination
+
+
+def _read_trace(path: Path, uid: int) -> list[dict[str, object]]:
+    payload = semantic._read_private_bytes(path, uid)
+    traces: list[dict[str, object]] = []
+    for line in payload.splitlines():
+        if not line:
+            continue
+        trace = semantic._decode_json_object(line, path)
+        traces.append(trace)
+    return traces
 
 
 def _validate_signal(path: Path, uid: int) -> dict[str, object]:
@@ -141,16 +257,19 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
     chrome_executable = semantic._validate_chrome_for_testing(chrome_executable)
     extension = semantic._validate_extension(extension)
     root = Path(tempfile.mkdtemp(prefix="slipstream-webrequest-smoke-"))
+    diagnostic_extension = root / "extension"
     fixture = semantic.SemanticHttpsFixture(
         semantic.INCOMPLETE_FIXTURE_HOST,
         semantic.INCOMPLETE_RESPONSE_SCENARIO,
     )
     signal_path = root / "signal.json"
+    trace_path = root / "trace.jsonl"
     stub_path = root / "native-stub"
     manifest_path = root / "native-host.json"
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
     result: dict[str, object] = {}
+    trace: list[dict[str, object]] = []
     try:
         os.chown(root, uid, gid)
         root.chmod(0o700)
@@ -162,8 +281,15 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             gid=gid,
         )
         _write_owner_file(
+            trace_path,
+            b"",
+            mode=stat.S_IRUSR | stat.S_IWUSR,
+            uid=uid,
+            gid=gid,
+        )
+        _write_owner_file(
             stub_path,
-            _native_stub_source(signal_path),
+            _native_stub_source(signal_path, trace_path),
             mode=stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR,
             uid=uid,
             gid=gid,
@@ -186,11 +312,18 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             uid=uid,
             gid=gid,
         )
+        diagnostic_extension = _copy_diagnostic_extension(
+            extension,
+            diagnostic_extension,
+            host=fixture.host,
+            uid=uid,
+            gid=gid,
+        )
         fixture.start()
         snapshot = semantic._run_chrome(
             uid,
             gid,
-            extension,
+            diagnostic_extension,
             fixture,
             chrome_executable,
             manifest_path,
@@ -218,6 +351,12 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
         failure = exc
     finally:
         try:
+            trace = _read_trace(trace_path, uid)
+        except FileNotFoundError:
+            trace = []
+        except Exception as exc:
+            cleanup_errors.append(f"sanitized trace read: {exc}")
+        try:
             fixture.close()
         except Exception as exc:
             cleanup_errors.append(f"fixture cleanup: {exc}")
@@ -229,7 +368,10 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
     if cleanup_errors:
         raise semantic.QualificationError("; ".join(cleanup_errors)) from failure
     if failure is not None:
-        raise failure
+        raise semantic.QualificationError(
+            f"{failure}; sanitized webRequest trace: "
+            f"{json.dumps(trace, separators=(',', ':'), sort_keys=True)}"
+        ) from failure
     return result
 
 
