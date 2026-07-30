@@ -33,8 +33,10 @@ The first ordinary real-Chrome rerun reproduced the missing signal after the
 optional `parentFrameId` correction. A CI-only observer then produced an empty
 owner-private event trace, isolating a fresh-profile startup race: Chrome began
 the command-line fixture navigation before the Manifest V3 worker registered
-its listeners. The harness follow-up wakes the worker through an owner-only
-extension page before the fixture navigation, while retaining the
+its listeners. A fixed-delay warm-up in run `30565374098` still produced no
+worker trace. The current harness therefore requires an explicit owner-only
+native acknowledgement from the disposable worker after listener registration
+before fixture navigation, while retaining the
 `parentFrameId` omission correction (`main_frame` plus `frameId=0` already
 establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
 production-extension behavior changes in the follow-up.

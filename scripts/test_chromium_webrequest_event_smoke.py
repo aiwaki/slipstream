@@ -124,6 +124,9 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
         self.assertIn('"headers_received"', worker)
         self.assertIn('"completed"', worker)
         self.assertIn('"error"', worker)
+        self.assertIn('"slipstream.qualification_warmup"', worker)
+        self.assertIn('"ci_worker_ready"', worker)
+        self.assertIn('"worker_ready"', worker)
         self.assertNotIn("url:", worker)
         self.assertNotIn("host,", worker)
 
@@ -153,7 +156,9 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("chrome.runtime.sendMessage", warmup)
+            self.assertIn("response?.ready === true", warmup)
             self.assertIn("location.replace(target)", warmup)
+            self.assertNotIn("setTimeout", warmup)
             self.assertIn(target, warmup)
             self.assertEqual(
                 (destination / "qualification-warmup.js").stat().st_mode

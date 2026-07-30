@@ -121,6 +121,7 @@ def _diagnostic_worker_source(host: str) -> bytes:
 
 // CI-only observer appended to an owner-only copy of the reviewed extension.
 const SLIPSTREAM_CI_FIXTURE_HOST = {host!r};
+const SLIPSTREAM_CI_WARMUP_TYPE = "slipstream.qualification_warmup";
 function slipstreamCiWebRequestTrace(phase, details) {{
   let host = null;
   try {{
@@ -153,6 +154,20 @@ function slipstreamCiWebRequestTrace(phase, details) {{
   }};
   chrome.runtime.sendNativeMessage(NATIVE_HOST, trace).catch(() => {{}});
 }}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {{
+  if (message?.type !== SLIPSTREAM_CI_WARMUP_TYPE) {{
+    return;
+  }}
+  chrome.runtime.sendNativeMessage(NATIVE_HOST, {{
+    schema_version: 0,
+    source: "ci_worker_ready",
+    phase: "worker_ready"
+  }})
+    .then(() => sendResponse({{ ready: true }}))
+    .catch(() => sendResponse({{ ready: false }}));
+  return true;
+}});
 
 for (const [phase, event] of [
   ["before_request", chrome.webRequest.onBeforeRequest],
@@ -199,8 +214,14 @@ def _copy_diagnostic_extension(
             f"const target = {json.dumps(target_url)};\n"
             "chrome.runtime.sendMessage({"
             'type: "slipstream.qualification_warmup"'
-            "}).catch(() => null).finally(() => {\n"
-            "  setTimeout(() => location.replace(target), 250);\n"
+            "}).then((response) => {\n"
+            "  if (response?.ready === true) {\n"
+            "    location.replace(target);\n"
+            "    return;\n"
+            "  }\n"
+            '  document.body.textContent = "worker warmup rejected";\n'
+            "}).catch(() => {\n"
+            '  document.body.textContent = "worker warmup failed";\n'
             "});\n"
         ),
         encoding="utf-8",
