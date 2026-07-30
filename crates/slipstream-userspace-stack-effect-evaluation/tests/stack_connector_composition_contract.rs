@@ -181,8 +181,8 @@ fn disposable_native_architecture_gate_tracks_every_composed_predecessor() {
     ] {
         assert_eq!(
             WINDOWS_PACKET_QUALIFICATION_WORKFLOW.matches(required_path).count(),
-            2,
-            "qualification workflow must track {required_path} on pull requests and main pushes"
+            1,
+            "qualification workflow must track {required_path} in the pull-request filter; main pushes are intentionally unfiltered"
         );
     }
 
