@@ -8,6 +8,15 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
+Current M4 candidate: PR #279 adds production-host reboot admission without
+claiming a physical reboot. The exact owned Windows service is registered as
+automatic-start and its service type, start type, and error control are
+re-read before install/start/recovery can be accepted, including no-change
+paths. Its native AMD64/ARM64 gate deliberately injects demand-start drift,
+requires running-state commands to fail closed, keeps exact stop/uninstall
+available, preserves an independent sentinel, and proves terminal absence.
+Local contract tests and lint pass; native PR qualification is pending.
+
 Last exact-main evidence audit: 2026-07-30, through product merge
 `0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main
 native AMD64/ARM64 run `30505427268`, CI `30505427291`, and audit

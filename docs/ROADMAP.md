@@ -665,7 +665,9 @@ therefore stays phased and closed to production traffic:
    stop/uninstall cleanup remains available. Native AMD64/ARM64 qualification
    is required. This is only a prerequisite; a physical reboot, post-boot
    readiness, sleep/wake, full updater/uninstall orchestration, and broader
-   external network-tool coexistence remain open.
+   external network-tool coexistence remain open. Reboot admission is under
+   review in PR #279; its native matrix must pass before this prerequisite can
+   be marked complete.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
