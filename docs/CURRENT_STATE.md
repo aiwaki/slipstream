@@ -8,23 +8,28 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 candidate: PR #279 adds production-host reboot admission without
-claiming a physical reboot. The exact owned Windows service is registered as
-automatic-start and its service type, start type, and error control are
-re-read before install/start/recovery can be accepted, including no-change
-paths and boot worker activation. Boot entry additionally requires matching
-active-install evidence and durable running intent. The sole pre-commit
-exception is the controller-owned initial start carrying the exact
-`--slipstream-managed-start-v1` SCM argument; an ordinary automatic boot has
-no such marker and still requires the committed active-install record. Stopped
-intent remains stopped, while unknown evidence fails closed. Its native AMD64/ARM64 gate
-starts the stopped service directly through SCM, proves only explicit
-management start resumes it, deliberately injects demand-start drift, requires
-running-state commands to fail closed, keeps exact stop/uninstall available,
-preserves an independent sentinel, and proves terminal absence. Local contract
-tests and lint pass; native PR qualification is pending.
+Current M4 next action: qualify a physical Windows reboot and post-boot
+readiness without composing production networking. The completed admission
+gate proves that the exact owned automatic-start service accepts boot worker
+activation only with matching durable `Running` intent and active-install
+evidence. Its sole pre-commit exception is the controller-owned initial start
+carrying the exact `--slipstream-managed-start-v1` SCM argument; an ordinary
+automatic boot has no marker and still requires the committed active-install
+record. Durable `Stopped` intent remains stopped, while unknown evidence and
+SCM configuration drift fail closed. Physical reboot, sleep/wake, updater
+orchestration, and production networking remain separate unproven gates.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
+`0d4bf269a3261c5f8263da051de805e32b8f030f` (PR #279). Exact-main
+native AMD64/ARM64 run `30511021761`, CI `30511021763`, and audit
+`30511021766` passed on that SHA. Native jobs `90770963824` and
+`90770963857` proved managed pre-commit start, unmarked stopped-intent boot
+refusal, explicit resume, demand-start drift refusal, independent-owner
+preservation, and exact terminal cleanup on both architectures. The gate did
+not reboot the runner, compose production networking, or mutate routes, DNS,
+proxy/PAC/VPN, drivers, or external processes and services.
+
+Previous exact-main evidence audit: 2026-07-30, through product merge
 `0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main
 native AMD64/ARM64 run `30505427268`, CI `30505427291`, and audit
 `30505427304` passed on that SHA. Native jobs `90754032083` and

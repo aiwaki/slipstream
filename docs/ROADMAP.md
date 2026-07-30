@@ -670,8 +670,11 @@ therefore stays phased and closed to production traffic:
    qualification is required. This is
    only a prerequisite; a physical reboot, post-boot readiness, sleep/wake,
    full updater/uninstall orchestration, and broader external network-tool
-   coexistence remain open. Reboot admission is under review in PR #279; its
-   native matrix must pass before this prerequisite can be marked complete.
+   coexistence remain open. Reboot admission is complete in PR #279:
+   exact-main native run `30511021761`, CI `30511021763`, and audit
+   `30511021766` passed on `0d4bf269a3261c5f8263da051de805e32b8f030f`.
+   The next bounded gate is a physical reboot with post-boot readiness and
+   exact cleanup evidence, still without production networking composition.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.

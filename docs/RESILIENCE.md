@@ -180,6 +180,14 @@ independent sentinel are mandatory. This gate does not reboot a runner and
 therefore does not claim physical boot-time execution, post-boot readiness, or
 production networking.
 
+PR #279 merged the admission gate as
+`0d4bf269a3261c5f8263da051de805e32b8f030f`. Exact-main native run
+`30511021761` passed jobs `90770963824` (AMD64) and `90770963857` (ARM64);
+CI `30511021763` and audit `30511021766` passed on the same SHA. Both native
+jobs completed the target reboot-admission test and every later packet,
+cleanup, and lint step. The next gate must perform an actual reboot and prove
+post-boot readiness; this evidence does not substitute for that test.
+
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`
 manual workflow, so account credentials are never available to pull-request
