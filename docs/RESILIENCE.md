@@ -232,6 +232,22 @@ distinct path, and uses that exact external controller for cleanup and resume.
 This makes accepted uninstall mean observable terminal absence without a broad
 process kill, reboot-delayed deletion, or mutation of unrelated files.
 
+PR #285 merged as `be460249494da8439ca0a4787cc1465263a06a91`.
+Exact-main run `30546036086` passed both native architectures, including the
+external-controller release preflight, and published the exact ARM64 bundle.
+After the bundle manifest, sizes, and SHA-256 values matched on the host and
+inside the disposable Parallels Windows 11 ARM64 guest, the guest's first
+`prepare` failed before installation with status `0xC0000135`. The clean guest
+does not contain `vcruntime140.dll`; GitHub's native runners do, so their green
+preflight did not prove fresh-machine portability. The harness left only its
+state-root ownership marker: the SCM service, product root, owner and
+active-install records, installed payload, transaction, and sentinel were
+absent, while DNS and proxy observations remained unchanged. Windows MSVC
+production binaries therefore use the statically linked CRT, and the
+production service entry point refuses to compile on Windows MSVC without
+`target_feature = "crt-static"`. A new exact-main artifact and a full physical
+reboot transaction are still required before this gate can pass.
+
 The intended disposable-host sequence is:
 
 ```powershell

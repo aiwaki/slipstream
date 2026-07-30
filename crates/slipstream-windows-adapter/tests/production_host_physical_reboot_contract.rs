@@ -8,6 +8,19 @@ fn contract() -> Value {
 }
 
 #[test]
+fn production_windows_host_requires_the_static_msvc_crt() {
+    let cargo_config = include_str!("../../../.cargo/config.toml");
+    let production_host = include_str!("../src/bin/slipstream_windows_service.rs");
+
+    assert!(cargo_config.contains(r#"[target.'cfg(all(windows, target_env = "msvc"))']"#));
+    assert!(cargo_config.contains(r#"rustflags = ["-C", "target-feature=+crt-static"]"#));
+    assert!(production_host
+        .contains(r#"all(windows, target_env = "msvc", not(target_feature = "crt-static"))"#));
+    assert!(production_host
+        .contains("slipstream-windows-service requires the statically linked MSVC CRT"));
+}
+
+#[test]
 fn physical_reboot_contract_is_frozen_and_does_not_claim_runtime_evidence() {
     let contract = contract();
     assert_eq!(contract["schema_version"], 1);
