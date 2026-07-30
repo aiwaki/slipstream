@@ -54,6 +54,16 @@ The next M4 work is the remaining disposable Windows resilience
 qualification: reboot, sleep/wake, update, uninstall, and broader external
 network-tool coexistence, plus any crash scenarios not already covered by the
 current child-termination gates.
+PR #275 is the current bounded candidate applying the already-qualified
+same-name service generation invariant to the real production Windows host. Two byte-distinct
+copies of `slipstream-windows-service.exe` must use their public
+`manage install/uninstall` CLI against the same exact SCM name and machine
+runtime root. Generation 2 is forbidden until generation 1 proves its SCM
+registration, content-addressed payload, owner record, and active-install
+record absent while retaining a matching durable absent intent. The gate must
+preserve an independent sentinel, finish absent on native AMD64 and ARM64, and
+must not compose networking or mutate routes, DNS, proxy/PAC/VPN, drivers, or
+external processes/services.
 Each gate must prove exact cleanup and preserve independently owned network
 state before production service-host composition can begin. That later
 composition must reuse the frozen capture, flow-binding, byte-owner,

@@ -52,6 +52,22 @@ const WINDOWS_OWNER_RECORD_PENDING_FILE_NAME: &str = ".service-owner-v1.json.pen
 const MAX_WINDOWS_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 const OWNER_ONLY_SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
+fn windows_payload_file_name(identity: &WindowsServiceIdentity) -> String {
+    format!(
+        "{WINDOWS_PAYLOAD_FILE_PREFIX}{}.exe",
+        identity.executable_sha256
+    )
+}
+
+pub(crate) fn windows_payload_path(
+    destination_directory: &Path,
+    identity: &WindowsServiceIdentity,
+) -> PathBuf {
+    destination_directory
+        .join(WINDOWS_PAYLOAD_DIRECTORY)
+        .join(windows_payload_file_name(identity))
+}
+
 pub struct WindowsServicePayloadEffects {
     source_path: PathBuf,
     #[cfg(test)]
@@ -363,11 +379,8 @@ impl WindowsServicePayloadEffects {
             WindowsServicePayloadError::Verification("owner record has no parent directory"),
         )?;
         let payload_directory = destination_directory.join(WINDOWS_PAYLOAD_DIRECTORY);
-        let executable_name = format!(
-            "{WINDOWS_PAYLOAD_FILE_PREFIX}{}.exe",
-            identity.executable_sha256
-        );
-        let executable = payload_directory.join(&executable_name);
+        let executable = windows_payload_path(&destination_directory, identity);
+        let executable_name = windows_payload_file_name(identity);
         let executable_pending = payload_directory.join(format!(
             ".{executable_name}{WINDOWS_PAYLOAD_PENDING_SUFFIX}"
         ));

@@ -642,9 +642,15 @@ therefore stays phased and closed to production traffic:
    in-place updater or production-host networking. Done in PR #273;
    exact-main native run `30497886810`, CI `30497886818`, and audit
    `30497886814` passed on
-   `7f265549d727db93b8c0a7861808cc5f59784527`. Reboot, sleep/wake, broader
-   crash recovery, full uninstall orchestration, and external network-tool
-   coexistence remain open.
+   `7f265549d727db93b8c0a7861808cc5f59784527`. The next bounded subgate applies
+   that invariant to two byte-distinct copies of the real production service
+   host through its public `manage install/uninstall` CLI. It must prove the
+   executable-derived identity, active owner and durable records, exact
+   intermediate absence, generation-2 reuse, independent-owner preservation,
+   and exact terminal absence on native AMD64 and ARM64 without composing
+   production networking. Reboot, sleep/wake, broader crash recovery, full
+   updater/uninstall orchestration, and external network-tool coexistence
+   remain open.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
