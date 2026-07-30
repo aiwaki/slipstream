@@ -78,6 +78,25 @@ function Assert-PathEqual {
     }
 }
 
+function Assert-ExternalManagementHost {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostPath,
+        [Parameter(Mandatory = $true)][string]$InstalledPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha256
+    )
+
+    if (-not (Test-Path -LiteralPath $HostPath -PathType Leaf)) {
+        throw "The exact external management host is unavailable."
+    }
+    $resolvedHost = (Resolve-Path -LiteralPath $HostPath).Path
+    $resolvedInstalled = [IO.Path]::GetFullPath($InstalledPath)
+    if ([StringComparer]::OrdinalIgnoreCase.Equals($resolvedHost, $resolvedInstalled)) {
+        throw "Uninstall requires an exact external management host, not the installed payload."
+    }
+    Assert-Equal -Actual (Get-Sha256 -Path $resolvedHost) -Expected $ExpectedSha256 -Label "external management host SHA-256"
+    return $resolvedHost
+}
+
 function Read-BoundedJson {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -449,6 +468,10 @@ function Invoke-ExactRollback {
     $owner = Read-InstalledIdentity
     Assert-TransactionIdentity -Transaction $Transaction -Owner $owner
     Assert-Equal -Actual (Get-Sha256 -Path $owner.executable_path) -Expected $Transaction.identity.executable_sha256 -Label "rollback host SHA-256"
+    $managementHost = Assert-ExternalManagementHost `
+        -HostPath $Transaction.source.path `
+        -InstalledPath $owner.executable_path `
+        -ExpectedSha256 $Transaction.source.sha256
     $service = Get-ExactService
     $lastProcessId = [uint32]0
     if ($null -ne $service) {
@@ -456,7 +479,7 @@ function Invoke-ExactRollback {
         Assert-Equal -Actual $service.PathName -Expected $owner.scm_binary_path -Label "rollback SCM binary command"
         $lastProcessId = [uint32]$service.ProcessId
     }
-    Invoke-Management -HostPath $owner.executable_path -Arguments @("manage", "uninstall") -ExpectedCommand "uninstall" | Out-Null
+    Invoke-Management -HostPath $managementHost -Arguments @("manage", "uninstall") -ExpectedCommand "uninstall" | Out-Null
     Assert-ExactTerminalAbsence -InstalledPath $owner.executable_path -LastProcessId $lastProcessId
 }
 
@@ -528,6 +551,10 @@ function Invoke-Prepare {
         $owner = Read-InstalledIdentity
         Assert-Equal -Actual $owner.executable_sha256 -Expected $sourceSha256 -Label "source/staged SHA-256"
         Assert-Equal -Actual $owner.generation -Expected $Generation -Label "installed generation"
+        Assert-ExternalManagementHost `
+            -HostPath $resolvedHost `
+            -InstalledPath $owner.executable_path `
+            -ExpectedSha256 $sourceSha256 | Out-Null
         $ready = Wait-ExactServiceReady -Owner $owner
         $processCreatedAt = $ready.process.CreationDate.ToUniversalTime().ToString("o")
         $transaction = [ordered]@{
@@ -571,7 +598,11 @@ function Invoke-Prepare {
         if ($installed -and -not (Test-Path -LiteralPath $TransactionPath)) {
             try {
                 $owner = Read-InstalledIdentity
-                Invoke-Management -HostPath $owner.executable_path -Arguments @(
+                $managementHost = Assert-ExternalManagementHost `
+                    -HostPath $resolvedHost `
+                    -InstalledPath $owner.executable_path `
+                    -ExpectedSha256 $sourceSha256
+                Invoke-Management -HostPath $managementHost -Arguments @(
                     "manage", "uninstall"
                 ) -ExpectedCommand "uninstall" | Out-Null
             } catch {
@@ -614,10 +645,7 @@ function Invoke-Resume {
             throw "The service process was not created in the current Windows boot."
         }
 
-        Invoke-Management -HostPath $owner.executable_path -Arguments @(
-            "manage", "uninstall"
-        ) -ExpectedCommand "uninstall" | Out-Null
-        Assert-ExactTerminalAbsence -InstalledPath $owner.executable_path -LastProcessId $postBootProcessId
+        Invoke-ExactRollback -Transaction $transaction
         Assert-Equal -Actual (Get-Sha256 -Path $transaction.independent_sentinel.path) -Expected $transaction.independent_sentinel.sha256 -Label "post-uninstall sentinel SHA-256"
         Write-Result -Transaction $transaction -Outcome "passed" -CurrentBootIdentity $currentBootIdentity -PostBootProcessId $postBootProcessId -PostBootProcessCreatedAt $postBootProcessCreatedAt
         Remove-Item -LiteralPath $TransactionPath -Force

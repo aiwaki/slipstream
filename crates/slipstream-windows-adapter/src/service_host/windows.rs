@@ -813,6 +813,20 @@ mod tests {
         fs::write(&independent_owner, independent_evidence)
             .expect("write independent-owner sentinel into the secured runtime root");
 
+        let installed_first_host = windows_payload_path(&root, &first_identity);
+        let self_uninstall = run_host_failure(&installed_first_host, &["manage", "uninstall"]);
+        assert_eq!(
+            self_uninstall.code,
+            WindowsServiceHostFailureCode::ControllerFailed
+        );
+        assert!(
+            self_uninstall
+                .message
+                .contains("external controller executable"),
+            "self-uninstall refusal must explain the exact external-controller requirement"
+        );
+        verify_production_generation_active(&root, &first_identity);
+
         let first_uninstall = run_host(&first_host, &["manage", "uninstall"]);
         assert_eq!(
             first_uninstall.lifecycle.decision,
@@ -947,6 +961,18 @@ mod tests {
             serde_json::from_slice(&output.stdout).expect("host output must be result JSON");
         result.validate().expect("host result must satisfy v1");
         result
+    }
+
+    fn run_host_failure(host: &Path, arguments: &[&str]) -> WindowsServiceHostFailureV1 {
+        let output = Command::new(host)
+            .args(arguments)
+            .output()
+            .expect("start rejected production Windows service host manager");
+        assert!(
+            !output.status.success(),
+            "production host command {arguments:?} unexpectedly succeeded"
+        );
+        serde_json::from_slice(&output.stderr).expect("host failure must be v1 JSON")
     }
 
     fn assert_host_rejects_configuration_drift(host: &Path, arguments: &[&str]) {

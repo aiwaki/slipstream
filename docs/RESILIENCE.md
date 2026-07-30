@@ -220,6 +220,18 @@ runs on PR native jobs as well as main. This changes no product lifecycle or
 network state; it narrows the next correction to evidence from the real
 architectures before merge.
 
+PR #285 run `30543502731` narrowed the result identically on AMD64 and ARM64:
+the SCM service, owner record, and last service process were absent, while the
+active-install record and installed executable remained visible for the full
+bounded deadline. The management command had been launched from that installed
+executable, so its internal delete-pending state was not terminal external
+absence. Product management now refuses uninstall when its controller source
+is the installed payload. The physical-reboot harness retains the original
+source artifact in its protected transaction, re-verifies its SHA-256 and
+distinct path, and uses that exact external controller for cleanup and resume.
+This makes accepted uninstall mean observable terminal absence without a broad
+process kill, reboot-delayed deletion, or mutation of unrelated files.
+
 The intended disposable-host sequence is:
 
 ```powershell

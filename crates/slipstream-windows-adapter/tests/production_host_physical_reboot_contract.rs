@@ -83,6 +83,9 @@ fn physical_reboot_harness_is_two_phase_exact_owned_and_non_rebooting() {
         "Get-CimInstance -ClassName Win32_Service",
         r#""manage", "install", "--generation""#,
         r#""manage", "uninstall""#,
+        "Assert-ExternalManagementHost",
+        "Uninstall requires an exact external management host",
+        r#"-HostPath $Transaction.source.path"#,
         "service-active-v1.json",
         "service-owner-v1.json",
         "service-intent-v1.json",
@@ -185,7 +188,9 @@ fn native_workflow_parses_harness_on_both_windows_architectures() {
         );
     }
     let preflight = workflow
-        .split_once("      - name: Qualify the exact physical reboot production host before packaging")
+        .split_once(
+            "      - name: Qualify the exact physical reboot production host before packaging",
+        )
         .and_then(|(_, rest)| {
             rest.split_once("      - name: Package the exact physical reboot qualification bundle")
         })

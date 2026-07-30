@@ -215,13 +215,17 @@ fn native_controller_holds_one_lock_across_reconstruction_and_execution() {
     let lifecycle = execute
         .find("WindowsServiceLifecycleStateEffects::new()")
         .unwrap();
-    let ownership = execute
-        .find("WindowsServiceOwnershipCollector::new().assess()")
+    let ownership_input = execute
+        .find("WindowsServiceOwnershipCollector::new().collect_input()")
         .unwrap();
+    let self_uninstall = execute.find("refuse_self_uninstall").unwrap();
+    let ownership = execute.find("assess_windows_service_ownership").unwrap();
     let reconstruction = execute.find("reconstruct_windows_service_state").unwrap();
     let command = execute.find(".execute(command, &mut effects)").unwrap();
     assert!(lock < lifecycle);
-    assert!(lifecycle < ownership);
+    assert!(lifecycle < ownership_input);
+    assert!(ownership_input < self_uninstall);
+    assert!(self_uninstall < ownership);
     assert!(ownership < reconstruction);
     assert!(reconstruction < command);
     assert!(production.contains("self.inner.apply_locked(action)"));

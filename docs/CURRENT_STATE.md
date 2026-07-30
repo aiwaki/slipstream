@@ -8,8 +8,8 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: identify and correct the exact terminal-absence surface
-exposed by exact-main run `30541625059`, then wait for the native Windows
+Current M4 next action: land and prove the exact external-controller uninstall
+correction exposed by PR run `30543502731`, then wait for the native Windows
 workflow on the resulting current `main` SHA and download only its ARM64
 `slipstream-windows-physical-reboot-<architecture>-<commit>` bundle, verify
 `artifact-manifest-v1.json` plus every recorded size and SHA-256, then run the
@@ -39,9 +39,19 @@ immediate protected `cleanup` then timed out waiting for independent terminal
 absence even though the public management command returned an accepted
 uninstall. Packaging and upload were skipped on both architectures, so there is
 still no qualified artifact and no physical Windows host transaction has been
-attempted. The next PR must expose the exact remaining SCM, durable-record,
-payload, or process surface and run this same release-host preflight on PR
-native jobs rather than discovering another cleanup defect only after merge.
+attempted.
+
+PR #285 moved the same release-host `prepare -> cleanup` preflight onto PR
+native jobs and added bounded terminal diagnostics. Run `30543502731` reproduced
+the failure identically on AMD64 and ARM64: SCM service absent, owner record
+absent, service process absent, but active-install record and installed
+executable still present after 30 seconds. The installed executable had invoked
+its own `manage uninstall`; native delete-pending evidence was accepted before
+the external filesystem reached terminal absence. The correction refuses
+self-uninstall in the product controller and makes the protected harness invoke
+the exact hash-verified source artifact outside the installed payload. PR and
+main native jobs now prove that external-controller boundary before packaging;
+artifact upload remains main-only.
 
 PR #283 merged the commit-bound physical reboot bundle workflow as
 `3fad7d49de41eac41d3babb835828ccaed7642f1`. Exact-main run
