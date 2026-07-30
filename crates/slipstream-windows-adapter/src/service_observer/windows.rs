@@ -28,6 +28,28 @@ impl WindowsScmObserver {
     pub const fn new() -> Self {
         Self
     }
+
+    pub(crate) fn observe_configuration(
+        &self,
+    ) -> Result<Option<WindowsServiceConfiguration>, WindowsServiceObserverError> {
+        let manager_handle = unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT) };
+        let manager = OwnedScHandle::open(manager_handle, "OpenSCManagerW")?;
+        let service_name = wide_null(WINDOWS_SERVICE_NAME);
+        let service_handle =
+            unsafe { OpenServiceW(manager.raw(), service_name.as_ptr(), SERVICE_QUERY_CONFIG) };
+        if service_handle.is_null() {
+            let code = unsafe { GetLastError() };
+            if code == ERROR_SERVICE_DOES_NOT_EXIST {
+                return Ok(None);
+            }
+            return Err(WindowsServiceObserverError::Win32 {
+                operation: "OpenServiceW",
+                code,
+            });
+        }
+        let service = OwnedScHandle(service_handle);
+        query_open_service_configuration(service.raw()).map(Some)
+    }
 }
 
 impl WindowsServiceObserver for WindowsScmObserver {
@@ -68,10 +90,22 @@ pub(crate) fn observe_open_service_handle(
         });
     }
     let (scm_state, process_id) = query_status(service)?;
-    let binary_path = query_binary_path(service)?;
+    let configuration = query_open_service_configuration(service)?;
     Ok(WindowsServiceObservation::Present {
-        snapshot: WindowsServiceSnapshot::from_scm(binary_path, scm_state, process_id),
+        snapshot: WindowsServiceSnapshot::from_scm(
+            configuration.binary_path,
+            scm_state,
+            process_id,
+        ),
     })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WindowsServiceConfiguration {
+    pub(crate) binary_path: String,
+    pub(crate) service_type: u32,
+    pub(crate) start_type: u32,
+    pub(crate) error_control: u32,
 }
 
 struct OwnedScHandle(SC_HANDLE);
@@ -128,7 +162,15 @@ fn query_status(service: SC_HANDLE) -> Result<(WindowsScmState, u32), WindowsSer
     Ok((map_scm_state(status.dwCurrentState), status.dwProcessId))
 }
 
-fn query_binary_path(service: SC_HANDLE) -> Result<String, WindowsServiceObserverError> {
+pub(crate) fn query_open_service_configuration(
+    service: SC_HANDLE,
+) -> Result<WindowsServiceConfiguration, WindowsServiceObserverError> {
+    if service.is_null() {
+        return Err(WindowsServiceObserverError::InvalidData {
+            field: "service_handle",
+            detail: "handle is null",
+        });
+    }
     let mut bytes_needed = 0;
     let first = unsafe { QueryServiceConfigW(service, null_mut(), 0, &mut bytes_needed) };
     if first != 0 {
@@ -164,7 +206,14 @@ fn query_binary_path(service: SC_HANDLE) -> Result<String, WindowsServiceObserve
     }
 
     let binary_path = unsafe { (*config).lpBinaryPathName };
-    unsafe { bounded_wide_string(binary_path, buffer.as_ptr().cast::<u8>(), buffer_bytes) }
+    let binary_path =
+        unsafe { bounded_wide_string(binary_path, buffer.as_ptr().cast::<u8>(), buffer_bytes) }?;
+    Ok(WindowsServiceConfiguration {
+        binary_path,
+        service_type: unsafe { (*config).dwServiceType },
+        start_type: unsafe { (*config).dwStartType },
+        error_control: unsafe { (*config).dwErrorControl },
+    })
 }
 
 unsafe fn bounded_wide_string(

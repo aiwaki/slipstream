@@ -658,9 +658,14 @@ therefore stays phased and closed to production traffic:
    [RESILIENCE.md](RESILIENCE.md#windows-production-host-evidence).
    Done in PR #277; exact-main native run
    `30505427268`, CI `30505427291`, and audit `30505427304` passed on
-   `0ed37e7b828bb642700d6191e10206061c27c525`. Reboot, sleep/wake, full
-   updater/uninstall orchestration, and broader external network-tool
-   coexistence remain open.
+   `0ed37e7b828bb642700d6191e10206061c27c525`. The next bounded subgate is
+   reboot admission: registration must use automatic start, SCM configuration
+   must be revalidated before install/start/recovery (including no-change
+   paths), and injected configuration drift must fail closed while exact
+   stop/uninstall cleanup remains available. Native AMD64/ARM64 qualification
+   is required. This is only a prerequisite; a physical reboot, post-boot
+   readiness, sleep/wake, full updater/uninstall orchestration, and broader
+   external network-tool coexistence remain open.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.

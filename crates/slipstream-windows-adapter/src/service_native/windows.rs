@@ -106,6 +106,14 @@ impl WindowsServiceNativeEffects {
         Ok(())
     }
 
+    pub(crate) fn require_reboot_admission_if_present_locked(
+        &self,
+    ) -> Result<(), WindowsServiceNativeError> {
+        self.scm
+            .require_reboot_admission_if_present_locked()
+            .map_err(Into::into)
+    }
+
     fn persist_intent_locked(
         &mut self,
         action: &WindowsServiceAction,

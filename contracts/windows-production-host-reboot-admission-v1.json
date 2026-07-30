@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_production_host_reboot_admission",
+  "contract_version": 1,
+  "invariants": {
+    "real_management_cli": true,
+    "automatic_start_registration": true,
+    "own_process_service_type": true,
+    "normal_error_control": true,
+    "configuration_revalidated_before_install_start_recover": true,
+    "configuration_drift_fails_closed": true,
+    "stop_and_uninstall_remain_available_for_exact_cleanup": true,
+    "independent_owner_preserved": true,
+    "terminal_absence_required": true,
+    "physical_reboot_claimed": false,
+    "production_networking_composition": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "external_process_or_service_mutation": false,
+    "driver_install_or_removal": false
+  },
+  "disposable_native_qualification": {
+    "architectures": ["amd64", "arm64"],
+    "generation": 41,
+    "configuration_drift_injected": true,
+    "final_absence_required": true
+  }
+}

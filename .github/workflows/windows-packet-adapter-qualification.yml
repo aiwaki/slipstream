@@ -8,6 +8,7 @@ on:
       - "contracts/windows-capture-generation-recovery-v1.json"
       - "contracts/windows-production-host-crash-recovery-v1.json"
       - "contracts/windows-production-host-generation-recovery-v1.json"
+      - "contracts/windows-production-host-reboot-admission-v1.json"
       - "contracts/windows-service-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
@@ -36,6 +37,7 @@ on:
       - "contracts/windows-capture-generation-recovery-v1.json"
       - "contracts/windows-production-host-crash-recovery-v1.json"
       - "contracts/windows-production-host-generation-recovery-v1.json"
+      - "contracts/windows-production-host-reboot-admission-v1.json"
       - "contracts/windows-service-generation-recovery-v1.json"
       - "contracts/windows-capture-fragment-effect-v1.json"
       - "contracts/windows-packet-flow-v1.json"
@@ -134,6 +136,17 @@ jobs:
           $serviceHost = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-windows-service.exe"
           $env:SLIPSTREAM_WINDOWS_PRODUCTION_HOST = $serviceHost.Path
           cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_host::windows::tests::production_host_crash_recovery_uses_exact_verified_process -- --exact --test-threads=1
+
+      - name: Qualify production-host reboot admission
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          SLIPSTREAM_WINDOWS_PRODUCTION_HOST_REBOOT_ADMISSION_CI: "1"
+        run: |
+          $serviceHost = Resolve-Path "crates/slipstream-windows-adapter/target/debug/slipstream-windows-service.exe"
+          $env:SLIPSTREAM_WINDOWS_PRODUCTION_HOST = $serviceHost.Path
+          cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture service_host::windows::tests::production_host_reboot_admission_requires_exact_automatic_start_configuration -- --exact --test-threads=1
 
       - name: Qualify frozen packet-flow ownership on the native architecture
         env:

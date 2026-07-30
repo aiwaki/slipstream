@@ -156,6 +156,19 @@ audit in PR #277. This gate terminates only the exact verified process and
 does not compose production networking or mutate routes, DNS, proxy/PAC/VPN,
 drivers, or external processes and services.
 
+The production-host reboot-admission gate is the prerequisite for a later
+physical reboot test. It registers the exact owned service as
+`SERVICE_AUTO_START` with `SERVICE_WIN32_OWN_PROCESS` and
+`SERVICE_ERROR_NORMAL`, then re-reads all three values from SCM before
+`install`, `start`, or crash recovery may be accepted, including reducer
+no-change paths. The disposable native test deliberately changes only the
+owned service back to demand-start and requires those running-state commands
+to fail closed. Exact `stop` and `uninstall` remain available despite that
+drift so a broken configuration cannot make the service unremovable; final
+absence and preservation of an independent sentinel are mandatory. This gate
+does not reboot a runner and therefore does not claim boot-time execution,
+post-boot readiness, or production networking.
+
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`
 manual workflow, so account credentials are never available to pull-request
