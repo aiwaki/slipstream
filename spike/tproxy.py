@@ -3520,6 +3520,69 @@ def _incomplete_response_geph_payload_probe(
             pass
 
 
+def _retry_semantic_geph_probe_after_owned_restart(host, probe):
+    """Retry one exact semantic probe after replacing only the owned Geph process."""
+    global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
+    h = normalize_host(host)
+    now = time.time()
+    last_requested = _geph_restart_hint.get("last_requested_at", 0.0)
+    if last_requested and now - last_requested < GEPH_RESTART_COOLDOWN:
+        return 0
+
+    old_pid = _geph_listener_pid(GEPH_OWNED_PORT)
+    if not old_pid or not geph_listener_owned(GEPH_OWNED_PORT):
+        return 0
+    if not request_owned_geph_restart(
+        h,
+        "payload probe failed",
+        now=now,
+        recommendation_reason="owned geo-exit semantic response unusable",
+    ):
+        return 0
+    if execute_owned_geph_restart(now=now) != "restarted":
+        return 0
+
+    recovered = False
+    deadline = time.monotonic() + AUTO_GEPH_RECOVERY_GRACE
+    try:
+        while not _shutdown_started.is_set():
+            new_pid = _geph_listener_pid(GEPH_OWNED_PORT)
+            recovery_state = _probe_owned_geph_recovery_state()
+            if recovery_state == "conflict":
+                _geph_port_conflict = True
+                _geph_port = None
+                _geph_owned = False
+                _geph_up = False
+                return 0
+            if (
+                recovery_state == "ready"
+                and new_pid
+                and new_pid != old_pid
+            ):
+                _geph_port_conflict = False
+                _geph_port = GEPH_OWNED_PORT
+                _geph_owned = True
+                _geph_up = True
+                recovered = True
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(AUTO_GEPH_RECOVERY_POLL, remaining))
+    finally:
+        _finish_geph_restart_drain()
+
+    if not recovered:
+        return 0
+    bytes_read = probe(h)
+    if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
+        print(
+            f">> owned Geph replacement restored a complete response for {h}",
+            file=sys.stderr,
+        )
+    return bytes_read
+
+
 def _confirm_semantic_geo_exit(host):
     h = normalize_host(host)
     if (
@@ -3529,6 +3592,11 @@ def _confirm_semantic_geo_exit(host):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
     bytes_read = _semantic_geph_payload_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        bytes_read = _retry_semantic_geph_probe_after_owned_restart(
+            h,
+            _semantic_geph_payload_probe,
+        )
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
         _set_auto_geph_status(
             "rejected",
@@ -3573,6 +3641,11 @@ def _confirm_incomplete_response_geo_exit(host):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
     bytes_read = _incomplete_response_geph_payload_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        bytes_read = _retry_semantic_geph_probe_after_owned_restart(
+            h,
+            _incomplete_response_geph_payload_probe,
+        )
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
         _set_auto_geph_status(
             "rejected",
