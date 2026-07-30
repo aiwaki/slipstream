@@ -138,7 +138,7 @@ fn native_workflow_runs_the_exact_gate_on_both_architectures() {
         workflow
             .matches("contracts/windows-capture-generation-recovery-v1.json")
             .count(),
-        2,
-        "capture-generation contract must trigger both pull_request and main push gates"
+        1,
+        "capture-generation contract must be in the pull-request filter; main pushes are intentionally unfiltered"
     );
 }

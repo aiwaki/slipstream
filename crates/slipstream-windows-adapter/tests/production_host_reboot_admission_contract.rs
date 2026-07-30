@@ -212,7 +212,7 @@ fn native_workflow_runs_reboot_admission_on_both_architectures() {
         workflow
             .matches("contracts/windows-production-host-reboot-admission-v1.json")
             .count(),
-        2,
-        "reboot-admission contract must trigger pull-request and main gates"
+        1,
+        "reboot-admission contract must be in the pull-request filter; main pushes are intentionally unfiltered"
     );
 }

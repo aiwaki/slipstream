@@ -142,7 +142,7 @@ fn native_workflow_runs_the_crash_gate_on_both_architectures() {
         workflow
             .matches("contracts/windows-production-host-crash-recovery-v1.json")
             .count(),
-        2,
-        "production-host crash contract must trigger pull-request and main gates"
+        1,
+        "production-host crash contract must be in the pull-request filter; main pushes are intentionally unfiltered"
     );
 }

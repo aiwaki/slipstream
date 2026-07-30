@@ -122,7 +122,7 @@ fn native_workflow_runs_the_production_gate_on_both_architectures() {
         workflow
             .matches("contracts/windows-production-host-generation-recovery-v1.json")
             .count(),
-        2,
-        "production-host generation contract must trigger pull-request and main gates"
+        1,
+        "production-host generation contract must be in the pull-request filter; main pushes are intentionally unfiltered"
     );
 }
