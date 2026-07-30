@@ -414,17 +414,27 @@ mod tests {
         machine_owner_record_path, WindowsServiceOwnershipCollector,
     };
     use crate::service_payload::windows_payload_path;
+    use std::ffi::OsString;
     use std::fs;
     use std::io::Write;
+    use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Instant;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
+        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+    };
 
     const HOST_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI";
+    const HOST_CRASH_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CRASH_RECOVERY_CI";
     const HOST_GENERATION_CI_ENV: &str =
         "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_GENERATION_RECOVERY_CI";
     const HOST_PATH_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST";
+    const MAX_PROCESS_IMAGE_U16: usize = 32_768;
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
+    const TEST_CRASH_EXIT_CODE: u32 = 0x5354_4C50;
 
     #[test]
     fn production_host_is_self_managing_idempotent_and_stops_through_scm() {
@@ -753,5 +763,210 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn production_host_crash_recovery_uses_exact_verified_process() {
+        if std::env::var_os(HOST_CRASH_CI_ENV).is_none() {
+            return;
+        }
+
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "the disposable runner must not already contain the Slipstream service"
+        );
+        let host = PathBuf::from(
+            std::env::var_os(HOST_PATH_ENV)
+                .expect("the production Windows service host path must be provided"),
+        );
+        let owner_record_path = machine_owner_record_path().expect("resolve machine owner record");
+        let root = owner_record_path
+            .parent()
+            .expect("owner record must have a parent")
+            .to_path_buf();
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale production-host state");
+        }
+
+        let identity = production_identity(&host, 31);
+        let installed = run_host(&host, &["manage", "install", "--generation", "31"]);
+        assert_eq!(
+            installed.lifecycle.decision,
+            WindowsServiceDecision::Installed
+        );
+        assert!(installed.lifecycle.accepted);
+        verify_production_generation_active(&root, &identity);
+
+        let independent_owner = root.join("independent-crash-owner.sentinel");
+        let independent_evidence = b"independent owner must survive production crash recovery";
+        fs::write(&independent_owner, independent_evidence)
+            .expect("write independent crash-owner sentinel");
+
+        let active = wait_for_state(WindowsScmState::Running);
+        let crashed_pid = active
+            .process_id
+            .expect("active production host must expose its SCM process ID");
+        terminate_exact_production_host_process(&active, &identity, &root);
+        let stopped = wait_for_state(WindowsScmState::Stopped);
+        assert_eq!(
+            stopped.process_id, None,
+            "stopped production host must not retain a process ID"
+        );
+
+        match WindowsServiceLifecycleStateEffects::new()
+            .collect()
+            .assess()
+        {
+            WindowsServiceLifecycleStateAssessment::Stable {
+                intent: Some(intent),
+                active_install: Some(active_install),
+            } => {
+                assert_eq!(intent.desired, WindowsServiceDesiredState::Running);
+                assert_eq!(intent.identity.as_ref(), Some(&identity));
+                assert_eq!(intent.crash_restart_attempts, 0);
+                assert_eq!(active_install.identity, identity);
+            }
+            evidence => {
+                panic!("production crash did not retain stable running intent: {evidence:?}")
+            }
+        }
+
+        let recovered = run_host(&host, &["manage", "recover"]);
+        assert_eq!(
+            recovered.command,
+            WindowsServiceManagementCommandKind::Recover
+        );
+        assert_eq!(
+            recovered.lifecycle.decision,
+            WindowsServiceDecision::Restarted
+        );
+        assert!(recovered.lifecycle.accepted);
+        assert_eq!(recovered.lifecycle.state.crash_restart_attempts, 0);
+        let recovered_pid = wait_for_state(WindowsScmState::Running)
+            .process_id
+            .expect("recovered production host must expose its SCM process ID");
+        assert_ne!(
+            recovered_pid, crashed_pid,
+            "recovery must not reuse the crashed process identity"
+        );
+        verify_production_generation_active(&root, &identity);
+        assert_eq!(
+            fs::read(&independent_owner).expect("read recovered independent-owner sentinel"),
+            independent_evidence
+        );
+
+        let repeated_recover = run_host(&host, &["manage", "recover"]);
+        assert_eq!(
+            repeated_recover.lifecycle.decision,
+            WindowsServiceDecision::NoChange
+        );
+        assert!(repeated_recover.lifecycle.accepted);
+        assert_eq!(
+            wait_for_state(WindowsScmState::Running).process_id,
+            Some(recovered_pid),
+            "idempotent recovery must not restart the healthy production host"
+        );
+
+        let uninstalled = run_host(&host, &["manage", "uninstall"]);
+        assert_eq!(
+            uninstalled.lifecycle.decision,
+            WindowsServiceDecision::Uninstalled
+        );
+        assert!(uninstalled.lifecycle.accepted);
+        verify_production_generation_absent(&root, &identity);
+        assert_eq!(
+            fs::read(&independent_owner).expect("read final independent-owner sentinel"),
+            independent_evidence
+        );
+
+        fs::remove_dir_all(&root).expect("remove production-host terminal intent");
+    }
+
+    struct OwnedTestProcessHandle(HANDLE);
+
+    impl Drop for OwnedTestProcessHandle {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    fn terminate_exact_production_host_process(
+        snapshot: &crate::service_observer::WindowsServiceSnapshot,
+        identity: &WindowsServiceIdentity,
+        root: &Path,
+    ) {
+        assert_eq!(snapshot.service_name, identity.service_name);
+        let process_id = snapshot
+            .process_id
+            .expect("running production host must expose an SCM process ID");
+        let raw_handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                0,
+                process_id,
+            )
+        };
+        assert!(
+            !raw_handle.is_null(),
+            "OpenProcess failed for the exact SCM PID with {}",
+            unsafe { GetLastError() }
+        );
+        let handle = OwnedTestProcessHandle(raw_handle);
+
+        let mut image = vec![0u16; MAX_PROCESS_IMAGE_U16];
+        let mut image_len = image.len() as u32;
+        let queried = unsafe {
+            QueryFullProcessImageNameW(
+                handle.0,
+                PROCESS_NAME_WIN32,
+                image.as_mut_ptr(),
+                &mut image_len,
+            )
+        };
+        assert_ne!(
+            queried,
+            0,
+            "QueryFullProcessImageNameW failed with {}",
+            unsafe { GetLastError() }
+        );
+        image.truncate(image_len as usize);
+        let observed_path = PathBuf::from(OsString::from_wide(&image));
+        let expected_path = windows_payload_path(root, identity);
+        let observed_canonical =
+            fs::canonicalize(&observed_path).expect("canonicalize observed production host");
+        let expected_canonical =
+            fs::canonicalize(&expected_path).expect("canonicalize expected production host");
+        assert!(
+            observed_canonical
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&expected_canonical.to_string_lossy()),
+            "SCM PID image does not match the exact owned payload"
+        );
+        assert_eq!(
+            hash_source(&observed_path).expect("hash observed production host process image"),
+            identity.executable_sha256,
+            "SCM PID image hash does not match the exact owned identity"
+        );
+
+        let terminated = unsafe { TerminateProcess(handle.0, TEST_CRASH_EXIT_CODE) };
+        assert_ne!(
+            terminated,
+            0,
+            "TerminateProcess failed for the verified handle with {}",
+            unsafe { GetLastError() }
+        );
+        assert_eq!(
+            unsafe {
+                WaitForSingleObject(
+                    handle.0,
+                    OBSERVATION_TIMEOUT.as_millis().min(u128::from(u32::MAX)) as u32,
+                )
+            },
+            WAIT_OBJECT_0,
+            "verified production host process did not terminate before the deadline"
+        );
     }
 }

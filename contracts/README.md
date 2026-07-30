@@ -68,6 +68,12 @@ Slipstream routing decisions and bounded recovery primitives.
   binary runs only as exact `--service` or explicit `manage` commands, installs
   from its currently opened executable identity, and has no networking or
   process-discovery surface.
+- `windows-production-host-crash-recovery-v1.json` freezes the disposable
+  native proof for the real production executable after an abrupt stop. The
+  gate may terminate only a held process handle whose SCM PID, image path, and
+  SHA-256 match the exact owned payload, then must recover through public
+  `manage recover`, reset the bounded crash budget only after readiness, remain
+  idempotent, and finish with exact absence on AMD64 and ARM64.
 - `windows-data-plane-v1.json` freezes the first Windows worker and session
   boundary as pure commands and events. It reclassifies each normalized host
   through the active validated policy tables instead of trusting caller route
