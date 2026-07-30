@@ -112,6 +112,15 @@ before continuing the browser and uninstall lifecycle.
 
 ### Windows Production Host Evidence
 
+Terms used below:
+
+- **active-install record**: the durable record binding the currently admitted
+  service identity to its installed payload;
+- **crash budget**: the durable bounded counter that limits automatic
+  crash-recovery attempts;
+- **independent sentinel**: a test-owned file inside the secured runtime root
+  that Slipstream does not own and therefore must preserve.
+
 The production-host generation gate exercises the public
 `slipstream-windows-service.exe manage install/uninstall` path on native AMD64
 and ARM64 runners. It proves that a byte-distinct second generation cannot
@@ -126,6 +135,26 @@ correctly rejected as untrusted on both architectures. The accepted gate lets
 the real installer create and secure the root before placing the independent
 sentinel. This preserves the ACL guard instead of weakening it to accommodate
 the test.
+
+The production-host crash gate uses the same public `manage install`,
+`manage recover`, and `manage uninstall` surface. Before termination it
+revalidates the SCM PID, canonical image path, executable SHA-256, owner
+record, and active-install record, then retains one exact process handle with
+termination and synchronization rights. Recovery must replace that process
+instance and reset the crash budget while preserving an independent sentinel.
+Instance replacement is identified by PID plus Windows process creation time;
+PID inequality alone is not evidence because Windows may reuse a numeric PID.
+A second recovery must leave the exact recovered instance unchanged, and final
+uninstall must prove the service, payload, and durable active records absent.
+
+The first native revision failed on both architectures because the process
+handle omitted `SYNCHRONIZE`, making `WaitForSingleObject` return
+`WAIT_FAILED`. The corrected PR head passed native execution, but review
+rejected its PID-inequality assertion before merge. The final RAII handle and
+creation-time identity passed native AMD64 and ARM64 plus exact-main CI and
+audit in PR #277. This gate terminates only the exact verified process and
+does not compose production networking or mutate routes, DNS, proxy/PAC/VPN,
+drivers, or external processes and services.
 
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`

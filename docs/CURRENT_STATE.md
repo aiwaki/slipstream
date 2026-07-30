@@ -9,6 +9,17 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
+`0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main
+native AMD64/ARM64 run `30505427268`, CI `30505427291`, and audit
+`30505427304` passed on that SHA. Native jobs `90754032083` and
+`90754032064` proved exact production-host termination, public recovery,
+process-instance replacement resilient to PID reuse, repeated-recovery
+idempotence, independent-owner preservation, crash-budget reset, and exact
+uninstall on both architectures. The rejected revisions and complete evidence
+boundary are recorded in
+[RESILIENCE.md](RESILIENCE.md#windows-production-host-evidence).
+
+Previous exact-main evidence audit: 2026-07-30, through product merge
 `ae4d47efdf8b3d15f5242eb767a809b5c775e75e` (PR #275). Exact-main
 native AMD64/ARM64 run `30501851242`, CI `30501851261`, and audit
 `30501851254` passed on that SHA. Native jobs `90743016854` and
@@ -64,9 +75,10 @@ constructor call. The final PR head and exact-main AMD64/ARM64 jobs passed
 without reruns.
 
 The next M4 work is the remaining disposable Windows resilience
-qualification: reboot, sleep/wake, full updater/uninstall orchestration,
-broader external network-tool coexistence, and any crash scenarios not already
-covered by the current child-termination and production-host generation gates.
+qualification: reboot, sleep/wake, full updater/uninstall orchestration, and
+broader external network-tool coexistence. Explicit production-host process
+crash and public recovery are now covered independently of the earlier
+Wintun-child and generation-replacement gates.
 Each gate must prove exact cleanup and preserve independently owned network
 state before production service-host composition can begin. That later
 composition must reuse the frozen capture, flow-binding, byte-owner,
@@ -345,7 +357,7 @@ Before continuing existing work, including after context compaction or a bare
 | M1 - Autonomous Routing V1 | Ordinary v1/v2 gates pass; one account-backed protected qualification remains | PRs #219-#258 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Protected run `30429690683` passed packaged resources, the daemon-free boundary, all three owned-Geph payload phases, unchanged system network state, and final cleanup. Its second browser scenario did not receive EOF because the disposable HTTP/1.1 fixture kept the socket alive after a deliberately short body; no artifact or install followed. PR #258 fixed that fixture and added a real TLS keep-alive `IncompleteRead` regression, then merged as `90c07771babfd32e797fdb8250911ca922274b4d`; exact-main CI `30431655863` and audit `30431655851` pass. Exactly one protected two-scenario run remains after the next UTC-day account budget reset for the then-current live `main`; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
-| M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, and service-generation resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PR #267 merged packet handoff as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`; PR #269 added exact route-change invalidation as `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`; PR #271 added same-name Wintun capture-generation recovery as `3a26653a2b221d757834cdb8ceb53f95c4589906`; PR #273 added same-name SCM service-generation recovery as `7f265549d727db93b8c0a7861808cc5f59784527`; and PR #275 applied that invariant to two byte-distinct generations of the real production service host as `ae4d47efdf8b3d15f5242eb767a809b5c775e75e`. The latest exact-main native AMD64/ARM64 run is `30501851242`, with CI `30501851261` and audit `30501851254`. The evaluation stack remains development-only and the production SCM host remains no-network. Reboot, sleep/wake, broader crash recovery, full updater/uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
+| M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, generation, and production-host crash resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PR #267 merged packet handoff as `0a787ee284c6e12fe9394a707ceaaff9e13deacf`; PR #269 added exact route-change invalidation as `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`; PR #271 added same-name Wintun capture-generation recovery as `3a26653a2b221d757834cdb8ceb53f95c4589906`; PR #273 added same-name SCM service-generation recovery as `7f265549d727db93b8c0a7861808cc5f59784527`; PR #275 applied that invariant to the real production service host as `ae4d47efdf8b3d15f5242eb767a809b5c775e75e`; and PR #277 proved exact real-host crash recovery as `0ed37e7b828bb642700d6191e10206061c27c525`. The latest exact-main native AMD64/ARM64 run is `30505427268`, with CI `30505427291` and audit `30505427304`. The evaluation stack remains development-only and the production SCM host remains no-network. Reboot, sleep/wake, full updater/uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
 
 The exact-main
 [CI run 30230210126](https://github.com/aiwaki/slipstream/actions/runs/30230210126)
