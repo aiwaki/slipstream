@@ -112,6 +112,15 @@ before continuing the browser and uninstall lifecycle.
 
 ### Windows Production Host Evidence
 
+Terms used below:
+
+- **active-install record**: the durable record binding the currently admitted
+  service identity to its installed payload;
+- **crash budget**: the durable bounded counter that limits automatic
+  crash-recovery attempts;
+- **independent sentinel**: a test-owned file inside the secured runtime root
+  that Slipstream does not own and therefore must preserve.
+
 The production-host generation gate exercises the public
 `slipstream-windows-service.exe manage install/uninstall` path on native AMD64
 and ARM64 runners. It proves that a byte-distinct second generation cannot
