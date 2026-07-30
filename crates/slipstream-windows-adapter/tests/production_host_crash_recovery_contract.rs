@@ -88,11 +88,12 @@ fn production_host_crash_gate_terminates_only_a_verified_process_handle() {
     }
 
     for required in [
-        "OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_TERMINATE",
+        "OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_TERMINATE|SYNCHRONIZE",
         "QueryFullProcessImageNameW",
         "hash_source(&observed_path)",
         "TerminateProcess(handle.0",
         "WaitForSingleObject(handle.0",
+        "WAIT_FAILED",
     ] {
         assert!(
             compact_helper.contains(required),

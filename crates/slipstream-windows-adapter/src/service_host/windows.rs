@@ -421,7 +421,8 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Instant;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
         PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
@@ -904,7 +905,7 @@ mod tests {
             .expect("running production host must expose an SCM process ID");
         let raw_handle = unsafe {
             OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
                 0,
                 process_id,
             )
@@ -958,14 +959,20 @@ mod tests {
             "TerminateProcess failed for the verified handle with {}",
             unsafe { GetLastError() }
         );
+        let wait = unsafe {
+            WaitForSingleObject(
+                handle.0,
+                OBSERVATION_TIMEOUT.as_millis().min(u128::from(u32::MAX)) as u32,
+            )
+        };
+        assert_ne!(
+            wait,
+            WAIT_FAILED,
+            "WaitForSingleObject failed for the verified handle with {}",
+            unsafe { GetLastError() }
+        );
         assert_eq!(
-            unsafe {
-                WaitForSingleObject(
-                    handle.0,
-                    OBSERVATION_TIMEOUT.as_millis().min(u128::from(u32::MAX)) as u32,
-                )
-            },
-            WAIT_OBJECT_0,
+            wait, WAIT_OBJECT_0,
             "verified production host process did not terminate before the deadline"
         );
     }
