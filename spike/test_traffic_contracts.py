@@ -227,8 +227,10 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_local_zero_payload_failures", {})
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "_geph_up", False)
     monkeypatch.setattr(tproxy, "_geph_owned", False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
     monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
     monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
     monkeypatch.setattr(tproxy, "_record_strategy_result", lambda *_args, **_kwargs: None)
@@ -515,7 +517,7 @@ def test_unknown_direct_connect_failure_continues_local_recovery_same_request(
     assert bytes(writer.payload) == response
 
 
-def test_exact_system_probe_timeout_commits_the_original_stream(monkeypatch):
+def test_exact_system_probe_timeout_is_replay_safe(monkeypatch):
     upstream_reader = ScriptedReader(block_when_empty=True)
     upstream_writer = CaptureWriter()
 
@@ -533,9 +535,9 @@ def test_exact_system_probe_timeout_commits_the_original_stream(monkeypatch):
         )
     )
 
-    assert state == tproxy.SYSTEM_PROBE_PENDING
-    assert result == (upstream_reader, upstream_writer, b"")
-    assert upstream_writer.closed is False
+    assert state == tproxy.SYSTEM_PROBE_TIMEOUT
+    assert result is None
+    assert upstream_writer.closed is True
 
 
 def test_exact_system_probe_eof_is_replay_safe(monkeypatch):
@@ -587,6 +589,24 @@ def test_exact_system_probe_cancellation_closes_the_owned_stream(monkeypatch):
     asyncio.run(scenario())
 
     assert upstream_writer.closed is True
+
+
+def test_probe_evidence_distinguishes_timeout_from_cancellation():
+    assert tproxy._probe_attempts_confirm_zero_payload(
+        {
+            "198.51.100.10": tproxy.ROUTE_PROBE_CLOSED,
+            "198.51.100.11": tproxy.ROUTE_PROBE_TIMEOUT,
+        },
+        2,
+    )
+    assert not tproxy._probe_attempts_confirm_zero_payload(
+        {"198.51.100.10": tproxy.ROUTE_PROBE_PENDING},
+        1,
+    )
+    assert not tproxy._probe_attempts_confirm_zero_payload(
+        {"198.51.100.10": tproxy.ROUTE_PROBE_FAILED},
+        1,
+    )
 
 
 def test_unknown_xbox_failure_advances_to_local_ladder_without_geph(monkeypatch):
@@ -916,21 +936,23 @@ def test_proven_unknown_stops_when_conflict_appears_during_recovery(monkeypatch)
     assert tproxy._geph_port_conflict
 
 
-def test_unknown_local_timeouts_do_not_become_owned_geph_proof(monkeypatch):
+def test_unknown_bounded_route_timeouts_use_owned_geph_same_request(monkeypatch):
     isolate_runtime_state(monkeypatch)
-    host = "slow-but-not-closed.example"
+    host = "foreign-exit-by-timeout.example"
     local_ip = "198.51.100.62"
-    client, _expected_first_flight = tls_client(host, block_after_hello=False)
+    response = b"\x16\x03\x03\x00\x60" + (b"T" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
+    evidence_before_geph = []
     strategies = (
         tproxy.STRAT_BY_NAME["split64+fake"],
         tproxy.STRAT_BY_NAME["split16+fake"],
     )
 
     async def failed_system(_ip, _port, _first_flight):
-        return tproxy.SYSTEM_PROBE_CLOSED, None
+        return tproxy.SYSTEM_PROBE_TIMEOUT, None
 
-    async def closed_xbox(
+    async def timed_out_xbox(
         _actual_host,
         _port,
         _head,
@@ -941,7 +963,7 @@ def test_unknown_local_timeouts_do_not_become_owned_geph_proof(monkeypatch):
         if attempt_summary is not None:
             attempt_summary["attempted"] = 1
             attempt_summary["outcomes"] = {
-                "198.51.100.60": tproxy.ROUTE_PROBE_CLOSED,
+                "198.51.100.60": tproxy.ROUTE_PROBE_TIMEOUT,
             }
         return None
 
@@ -949,33 +971,40 @@ def test_unknown_local_timeouts_do_not_become_owned_geph_proof(monkeypatch):
         return [local_ip]
 
     async def timed_out_local(*_args, **_kwargs):
-        tproxy._publish_route_probe_outcome(tproxy.ROUTE_PROBE_PENDING)
+        tproxy._publish_route_probe_outcome(tproxy.ROUTE_PROBE_TIMEOUT)
         return None
 
-    async def no_geph(*args, **kwargs):
-        await forbidden_backend("Geph", *args, **kwargs)
+    async def healthy_owned_geph(_host, _port, _first_flight):
+        evidence_before_geph.append(
+            set(tproxy._local_zero_payload_failures.get(host) or {})
+        )
+        return streaming_upstream_response(response)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.62", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_system)
-    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", closed_xbox)
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", timed_out_xbox)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
     monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
     monkeypatch.setattr(tproxy, "dial_strategy", timed_out_local)
-    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
     asyncio.run(run_handler(client, writer))
 
-    assert bytes(writer.payload) == b""
-    assert writer.closed is True
-    assert host not in tproxy._auto_geph
-    evidence = tproxy._local_zero_payload_failures.get(host) or {}
-    assert set(evidence) == {
-        tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
-    }
+    assert bytes(writer.payload) == response
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert evidence_before_geph == [
+        {
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+            "strategy:split64+fake",
+            "strategy:split16+fake",
+        }
+    ]
+    assert host not in tproxy._local_zero_payload_failures
 
 
 def test_unknown_first_server_payload_forbids_route_replay(monkeypatch):

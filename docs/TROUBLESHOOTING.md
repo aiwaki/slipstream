@@ -571,6 +571,9 @@ hostname; it is not a per-site list:
 4. Only after the exact host exhausts system, app DNS, and at least two distinct
    local strategies without receiving a server byte, confirm a real payload
    through the currently verified owned Geph and remember a temporary route.
+   Explicit EOF and a bounded first-payload timeout can prove one completed
+   attempt; cancellation, connect failure, generic probe error, or incomplete
+   address-race evidence cannot.
 5. Recheck the original system route after the bounded recovery/overlay window.
 
 One failed route, a successful Geph probe by itself, or a network-wide outage

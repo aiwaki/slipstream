@@ -13,23 +13,33 @@ on disposable Windows, still without production networking composition.
 Updater/uninstall orchestration remains the following bounded gate. The exact
 ARM64 physical reboot lifecycle gate is complete.
 
-Current user-facing priority: after this evidence checkpoint merges and the new
-live `main` has green exact-main CI and audit, verify that no protected
-owned-Geph qualification already exists for that SHA, then dispatch it exactly
-once. Install on the primary Mac only if the complete account-backed payload,
-both Chromium semantic scenarios, exact cleanup, unchanged system network
-state, and exact artifact publication all pass. Use only that run's artifact
-and roll back immediately on the first workstation smoke failure.
+Current user-facing priority: complete the generic unknown-host bounded-timeout
+fallback on branch `codex/unknown-stall-fallback`, merge only after required CI,
+then run exactly one protected owned-Geph qualification for that new exact
+`main` SHA. A primary-Mac install may use only the artifact from that successful
+run and must retain the same immediate rollback rule.
 
-Protected run `30561342773` for exact main
-`b282572ca057afa59826badeb5d22df3f079ca0d` did not publish an artifact and
-did not authorize a workstation install. PR #289 head
-`f5fb0c7421c9b70f6d561f08df6a1fc742965915` now passes ordinary CI run
-`30572348605`, including the real-Chrome incomplete-response contract and
-packaged lifecycle, plus audit run `30572348663`. The detailed browser
-investigation remains in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md). Merge,
-exact-main CI and audit, then one protected qualification for the new main SHA
-remain mandatory before any workstation install.
+Exact main `60811c1ddeccecb15687978f3bca62d15f4b882c` passed CI
+`30573765421`, audit `30573765030`, and protected account-backed qualification
+`30574330659`. Artifact `8772158225` was therefore eligible for one controlled
+workstation transaction. The install reached a fresh active StatusV2 while
+preserving DNS `111.88.96.50` / `111.88.96.51`, proxy/PAC, global PF, and
+external anchors. Discord gateway, YouTube control, and CrystalIDEA returned
+payload, but the first generic Modrinth smoke timed out during TLS. Transaction
+`1111DA3F-CFD4-4601-A2A5-A26372E4449D` immediately restored the previous app
+and runtime and proved the exact root daemon, listener, private PF anchor,
+token, and status absent. The previous tray and its separately owned Geph
+LaunchAgent were restored; no root transparent interception remains.
+
+The concrete defect is in the generic unknown-host pre-payload ladder. A
+bounded direct or local read timeout published `pending`, the handler committed
+that silent stream, and the same request could not continue to the next route.
+The correction treats an owned bounded timeout as replay-safe only while zero
+server bytes have reached the client, closes that attempt, and continues through
+the existing system, app-owned Xbox DNS, distinct local strategies, and finally
+verified owned Geph sequence. Cancellation, incomplete race evidence, protected
+policy, direct policy, Discord, and YouTube remain non-promoting. The old
+qualified artifact must not be reinstalled after this source change.
 
 PR #287 merged the bounded payload image-release correction as
 `8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI
