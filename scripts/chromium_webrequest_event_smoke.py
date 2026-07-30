@@ -117,6 +117,16 @@ sys.stdout.buffer.flush()
     return source.encode("utf-8")
 
 
+def _native_stub_manifest(stub_path: Path) -> dict[str, object]:
+    return {
+        "allowed_origins": [semantic.NATIVE_HOST_ORIGIN],
+        "description": "Slipstream Browser Companion Qualification",
+        "name": semantic.NATIVE_HOST_NAME,
+        "path": str(stub_path),
+        "type": "stdio",
+    }
+
+
 def _diagnostic_worker_source(host: str) -> bytes:
     source = f"""
 
@@ -325,12 +335,7 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             uid=uid,
             gid=gid,
         )
-        manifest = {
-            "allowed_origins": [semantic.NATIVE_HOST_ORIGIN],
-            "name": semantic.NATIVE_HOST_NAME,
-            "path": str(stub_path),
-            "type": "stdio",
-        }
+        manifest = _native_stub_manifest(stub_path)
         _write_owner_file(
             manifest_path,
             json.dumps(

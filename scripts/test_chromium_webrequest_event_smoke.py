@@ -27,6 +27,19 @@ def _signal_payload() -> dict[str, object]:
 
 
 class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
+    def test_native_stub_manifest_is_complete_and_exact(self) -> None:
+        stub_path = Path("/tmp/native-stub")
+        self.assertEqual(
+            smoke._native_stub_manifest(stub_path),
+            {
+                "allowed_origins": [semantic.NATIVE_HOST_ORIGIN],
+                "description": "Slipstream Browser Companion Qualification",
+                "name": semantic.NATIVE_HOST_NAME,
+                "path": str(stub_path),
+                "type": "stdio",
+            },
+        )
+
     def test_native_stub_uses_chromium_framing_and_records_exact_signal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

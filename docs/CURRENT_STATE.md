@@ -71,6 +71,13 @@ the shared `Google` ancestor after Chrome had populated independent contents.
 Cleanup now removes the exact manifest and each empty directory it created,
 then stops at the first non-empty owner-controlled ancestor without deleting or
 rewriting independent browser data.
+Run `30571398388` exposed the real remaining readiness failure after that
+cleanup correction: the worker reached its terminal marker, but the diagnostic
+native round trip was still rejected before navigation. The temporary
+diagnostic manifest omitted Chrome's required `description` field, while the
+packaged production manifest already includes it. The diagnostic gate now
+builds one complete manifest through a tested helper; this does not change the
+packaged companion or any routing behavior.
 It disables proxy use for HTTP control requests, validates the WebSocket
 upgrade and exact loopback target, bounds every file, frame, and JSON response,
 accepts no redirect, and retains the
