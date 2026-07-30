@@ -7344,6 +7344,10 @@ def test_semantic_geph_response_requires_usable_non_denial_http():
         b"HTTP/1.1 451 Unavailable For Legal Reasons\r\n\r\n"
     )
     assert not tproxy._semantic_geph_response_usable(
+        b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\n\r\n"
+        b"local_rate_limited"
+    )
+    assert not tproxy._semantic_geph_response_usable(
         b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
         b"\x1f\x8bopaque"
     )
@@ -7425,6 +7429,7 @@ def test_incomplete_response_confirmation_rejects_unproven_payload(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: None)
     monkeypatch.setattr(
         tproxy,
         "_incomplete_response_geph_payload_probe",
@@ -7437,6 +7442,155 @@ def test_incomplete_response_confirmation_rejects_unproven_payload(monkeypatch):
         tproxy._auto_geph_last_status["reason"]
         == "owned Geph response was not proven complete"
     )
+
+
+def test_incomplete_response_confirmation_restarts_owned_geph_once(
+    monkeypatch,
+    tmp_path,
+):
+    host = "rate-limited-exit.example"
+    probes = iter([0, 4096])
+    listener_pids = iter([100, 101])
+    events = []
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(
+        tproxy,
+        "_AUTO_GEPH_PATH",
+        str(tmp_path / "autogeph.json"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_incomplete_response_geph_payload_probe",
+        lambda candidate: next(probes) if candidate == host else 0,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+    monkeypatch.setattr(
+        tproxy,
+        "request_owned_geph_restart",
+        lambda candidate, reason, **_kwargs: (
+            events.append(("request", candidate, reason)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **_kwargs: events.append(("restart",)) or "restarted",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda: "ready",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_finish_geph_restart_drain",
+        lambda: events.append(("finish",)),
+    )
+
+    assert tproxy._confirm_incomplete_response_geo_exit(host)
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert events == [
+        ("request", host, "payload probe failed"),
+        ("restart",),
+        ("finish",),
+    ]
+
+
+def test_semantic_confirmation_does_not_restart_unverified_listener(monkeypatch):
+    host = "unverified-listener.example"
+    calls = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_semantic_geph_payload_probe", lambda _host: 0)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: False)
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **_kwargs: calls.append("restart") or "restarted",
+    )
+
+    assert not tproxy._confirm_semantic_geo_exit(host)
+    assert calls == []
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_semantic_confirmation_restart_is_globally_rate_limited(monkeypatch):
+    host = "cooldown.example"
+    calls = []
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 99.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy.time, "time", lambda: 100.0)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_semantic_geph_payload_probe", lambda _host: 0)
+    monkeypatch.setattr(
+        tproxy,
+        "request_owned_geph_restart",
+        lambda *_args, **_kwargs: calls.append("request") or True,
+    )
+
+    assert not tproxy._confirm_semantic_geo_exit(host)
+    assert calls == []
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_semantic_confirmation_retries_probe_only_once_after_restart(monkeypatch):
+    host = "still-unusable.example"
+    probes = iter([0, 0])
+    listener_pids = iter([100, 101])
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_semantic_geph_payload_probe",
+        lambda candidate: next(probes) if candidate == host else 0,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+    monkeypatch.setattr(
+        tproxy,
+        "request_owned_geph_restart",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **_kwargs: "restarted",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda: "ready",
+    )
+    monkeypatch.setattr(tproxy, "_finish_geph_restart_drain", lambda: None)
+
+    assert not tproxy._confirm_semantic_geo_exit(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    with pytest.raises(StopIteration):
+        next(probes)
 
 
 @pytest.mark.parametrize(

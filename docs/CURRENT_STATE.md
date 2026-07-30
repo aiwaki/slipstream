@@ -13,11 +13,41 @@ on disposable Windows, still without production networking composition.
 Updater/uninstall orchestration remains the following bounded gate. The exact
 ARM64 physical reboot lifecycle gate is complete.
 
-Current user-facing priority: complete the generic unknown-host convergence fix
-on branch `codex/unknown-fallback-convergence`, merge only after required CI,
-then run exactly one protected owned-Geph qualification for that new exact
+Current user-facing priority: complete the bounded semantic owned-Geph recovery
+on branch `codex/semantic-geph-rate-limit-recovery`, merge only after required
+CI, then run exactly one protected owned-Geph qualification for that new exact
 `main` SHA. A primary-Mac install may use only the artifact from that successful
 run and must retain the same immediate rollback rule.
+
+PR #291 merged the complete-proof convergence correction as exact main
+`b29be61e554f5ad3ec71d2864e487fabbdb014cf`. CI `30586625792`, audit
+`30586625648`, native Windows packet run `30586625811`, and the sole protected
+account-backed qualification `30587085951` passed. Protected artifact
+`8776982805` matched its GitHub SHA-256
+`83522d4cc9b7064f96d8a942858f869f8550034a676e49be43d176f41a409669`,
+inner ZIP SHA-256
+`c9e5aa78169cc47c767e09b0148458d2141ea7da7c08326007dfec39d48c1439`,
+and exact bundled executable identities. Transaction
+`5B152F0D-7CC2-4160-80B6-10719A14FEB2` installed that exact app, reached fresh
+active StatusV2, and preserved DNS `111.88.96.50` / `111.88.96.51`,
+proxy/PAC, global PF, and external anchors. Modrinth returned a complete
+1,941,091-byte response. The next required `xpersonatoy.com` smoke received a
+partial response and triggered immediate exact rollback. The prior app/runtime
+and owned-Geph LaunchAgent were restored; the root daemon, listener, private
+anchor, token, status, socket, attestation, and witness are absent.
+
+Post-rollback A/B evidence isolated a generic backend-session defect. Direct
+`xpersonatoy.com` returned 20,169 bytes and then stalled. The exact owned
+`:9954` Geph listener returned HTTP `429`, body `local_rate_limited`, and
+`Retry-After: 60`. An ownership-verified `launchctl kickstart -k` changed only
+the `dev.slipstream.geph` PID; the same SOCKS request then returned HTTP `200`
+and a complete 1,060,480-byte response. The correction permits one such
+restart only after an exact browser semantic failure and unusable complete
+owned-Geph probe, requires the owned listener and a changed replacement PID,
+waits for a live exact listener, and retries the exact probe once. A ten-minute
+global restart cooldown, active-session drain, shutdown guard, static policy,
+and exact ownership remain mandatory. External Geph, external network state,
+Discord, YouTube, and Googlevideo remain untouched. No hostname rule is added.
 
 PR #290 merged the bounded unknown-route timeout correction as exact main
 `a4628c7301eee187c2dbc300b62adac05ff29846`. CI `30581889243`, audit

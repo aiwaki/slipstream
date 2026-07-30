@@ -58,6 +58,26 @@ The watchdog runs only when launchd reports the Slipstream label explicitly
 enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
 is the explicit action that may reinstall or re-enable it.
 
+### A site partially loads or owned Geph returns `local_rate_limited`
+
+A live owned Geph process and listener do not guarantee a usable exit session.
+The 2026-07-30 workstation A/B received a partial direct response, then HTTP
+`429` with body `local_rate_limited` through the verified owned `:9954`
+listener. Replacing only the exact `dev.slipstream.geph` LaunchAgent PID made the
+same request return a complete HTTP `200` response.
+
+Current semantic recovery may perform that replacement autonomously only after
+the browser has proven a top-level regional-denial or incomplete-response
+failure and the daemon's own complete exact-host HTTP probe also fails. It
+drains active owned sessions, verifies the listener and LaunchAgent ownership,
+requires a changed PID and live replacement, then retries the same probe once.
+The exact host is learned only if that retry is complete and usable. The
+restart is globally rate-limited for ten minutes.
+
+Do not work around this symptom by adding the hostname to static policy,
+restarting an external Geph process, or changing system DNS, proxy, PAC, VPN, or
+PF state. Discord, YouTube, and Googlevideo remain excluded from Geph.
+
 ### Steam activity is followed by broad failures and an administrator prompt
 
 The 2026-07-26 workstation incident began with a working root daemon carrying
