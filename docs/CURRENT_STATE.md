@@ -23,67 +23,13 @@ and roll back immediately on the first workstation smoke failure.
 
 Protected run `30561342773` for exact main
 `b282572ca057afa59826badeb5d22df3f079ca0d` did not publish an artifact and
-did not authorize a workstation install. Owned Geph passed initial, trayless,
-and recovered Steam payload with complete HTTP 200/TLS 1.3 responses; root
-daemon absence, unchanged system network state, and cleanup also passed. The
-regional-denial Chromium scenario completed, but the incomplete-response
-scenario made one root request and never reloaded. This is the first protected
-run after request-ID correlation and an explicit fixture EOF were both present.
-The first ordinary real-Chrome rerun reproduced the missing signal after the
-optional `parentFrameId` correction. A CI-only observer then produced an empty
-owner-private event trace, isolating a fresh-profile startup race: Chrome began
-the command-line fixture navigation before the Manifest V3 worker registered
-its listeners. A fixed-delay warm-up in run `30565374098` still produced no
-worker trace. Extension-page acknowledgement run `30566477975` made zero
-fixture requests, and the expanded boundary trace in run `30566813738` was
-also empty. The extension page itself can therefore race unpacked-extension
-registration and is not a readiness boundary. The current harness starts the
-fresh browser on `about:blank`, reads Chrome's owner-controlled
-`DevToolsActivePort` from that exact private profile, waits for the exact
-Slipstream service-worker target, and only then opens the local fixture through
-the loopback DevTools endpoint. Run `30568262971` proved that target publication
-still precedes completion of the worker script: it opened one fixture document
-before any listener observed it. The worker now sets a terminal in-process
-marker only after every production listener is registered. The harness reads
-that exact boolean through the target's loopback DevTools Protocol before
-opening the fixture; the CI-only observer is inserted before the same marker.
-Run `30569114212` reached that terminal marker but still produced one root
-request and an empty observer trace. Target publication and listener
-registration are therefore no longer the unresolved boundary. The harness now
-requires an address-free round trip through the packaged native-messaging host
-before navigation, then uses `Page.navigate` on the single owned
-`about:blank` page instead of creating a special `/json/new` target. This
-separates native-host availability from navigation semantics and exercises an
-ordinary page navigation. Run `30570286341` then stopped before navigation:
-the terminal worker marker passed, but its address-free native round trip did
-not. Chrome for Testing 151 uses its current browser-specific user-level
-`Google/ChromeForTesting/NativeMessagingHosts` location; the harness had only
-copied the exact manifest into the temporary user-data directory. The shared
-Chrome harness now registers an owner-private exact manifest in the current
-Chrome for Testing location for the duration of the disposable gate, refuses
-any pre-existing file or uncontrolled directory, and removes only its exact
-manifest and newly created empty directories after browser shutdown. Protected
-qualification still copies the packaged manifest and executable identity; the
-ordinary contract uses its bounded fixed-response stub.
-Run `30571120394` reached exact native-host cleanup, confirming that the
-browser-specific registration was discovered. Its cleanup then tried to remove
-the shared `Google` ancestor after Chrome had populated independent contents.
-Cleanup now removes the exact manifest and each empty directory it created,
-then stops at the first non-empty owner-controlled ancestor without deleting or
-rewriting independent browser data.
-Run `30571398388` exposed the real remaining readiness failure after that
-cleanup correction: the worker reached its terminal marker, but the diagnostic
-native round trip was still rejected before navigation. The temporary
-diagnostic manifest omitted Chrome's required `description` field, while the
-packaged production manifest already includes it. The diagnostic gate now
-builds one complete manifest through a tested helper; this does not change the
-packaged companion or any routing behavior.
-It disables proxy use for HTTP control requests, validates the WebSocket
-upgrade and exact loopback target, bounds every file, frame, and JSON response,
-accepts no redirect, and retains the
-`parentFrameId` omission correction (`main_frame` plus `frameId=0` already
-establishes top-level scope). No PF, DNS, installer, routing-policy, Geph, or
-production-extension behavior changes in the follow-up.
+did not authorize a workstation install. PR #289 head
+`f5fb0c7421c9b70f6d561f08df6a1fc742965915` now passes ordinary CI run
+`30572348605`, including the real-Chrome incomplete-response contract and
+packaged lifecycle, plus audit run `30572348663`. The detailed browser
+investigation remains in [ROUTING_RESEARCH.md](ROUTING_RESEARCH.md). Merge,
+exact-main CI and audit, then one protected qualification for the new main SHA
+remain mandatory before any workstation install.
 
 PR #287 merged the bounded payload image-release correction as
 `8ef9fb3d3d4643f056793578511b693ef68b3fe5`. Exact-main CI
