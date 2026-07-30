@@ -8,27 +8,34 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: land and prove the exact external-controller uninstall
-correction exposed by PR run `30543502731`, then wait for the native Windows
-workflow on the resulting current `main` SHA and download only its ARM64
-`slipstream-windows-physical-reboot-<architecture>-<commit>` bundle, verify
-`artifact-manifest-v1.json` plus every recorded size and SHA-256, then run the
-versioned two-phase physical Windows reboot harness from that bundle on the
-disposable Parallels Windows 11 host. Every `main` push runs the unfiltered
-native workflow; PR jobs never publish a bundle. Before upload, the exact
-release production host is built without fixture features and proves
-`prepare -> cleanup` with terminal absence on the native runner. The disposable
-host's `prepare` phase then requires a clean exact service name, installs that
-same artifact through its public CLI, verifies committed active-install
-evidence plus automatic-start readiness, and writes an owner-protected
-transaction without rebooting the machine. After an explicit real Windows
-restart, `resume` requires a changed boot identity, a service process created
-inside the new boot, matching SCM/path/SHA/generation evidence, an unchanged
-independent sentinel and read-only DNS/proxy/PAC snapshot, then performs exact
-uninstall and proves terminal product absence. Failure attempts the same exact
-owned rollback; identity mismatch refuses mutation. CI preflight cannot claim
-the physical runtime result. Sleep/wake, updater orchestration, production
-networking, and broader VPN coexistence remain separate unproven gates.
+Current M4 next action: make the exact Windows production host independent of
+the machine-installed MSVC runtime, prove the correction on native AMD64 and
+ARM64, then repeat the exact-main ARM64 physical reboot transaction on the
+disposable Parallels Windows 11 host. Exact-main run `30546036086` on
+`be460249494da8439ca0a4787cc1465263a06a91` passed both native jobs and
+published the commit-bound ARM64 bundle. Its manifest, sizes, and SHA-256
+values matched after download and again inside the guest. The first guest
+`prepare` then failed before installation with Windows status `0xC0000135`;
+the clean guest has no `vcruntime140.dll`. The harness left no SCM service,
+product root, owner record, active-install record, payload, transaction, or
+sentinel, and the read-only DNS/proxy state remained unchanged. Do not reboot
+or claim the physical gate from that artifact.
+
+Every `main` push runs the unfiltered native workflow; PR jobs never publish a
+bundle. Before upload, the exact release production host is built without
+fixture features and proves `prepare -> cleanup` with terminal absence on the
+native runner. The disposable host's `prepare` phase then requires a clean
+exact service name, installs that same artifact through its public CLI,
+verifies committed active-install evidence plus automatic-start readiness, and
+writes an owner-protected transaction without rebooting the machine. After an
+explicit real Windows restart, `resume` requires a changed boot identity, a
+service process created inside the new boot, matching SCM/path/SHA/generation
+evidence, an unchanged independent sentinel and read-only DNS/proxy/PAC
+snapshot, then performs exact uninstall and proves terminal product absence.
+Failure attempts the same exact owned rollback; identity mismatch refuses
+mutation. CI preflight cannot claim the physical runtime result. Sleep/wake,
+updater orchestration, production networking, and broader VPN coexistence
+remain separate unproven gates.
 
 PR #284 merged the bounded PowerShell `REG_BINARY` preservation correction as
 `1f9e9768cb554d08a4ac888a842ee44c06897444`. Exact-main run
@@ -52,6 +59,16 @@ self-uninstall in the product controller and makes the protected harness invoke
 the exact hash-verified source artifact outside the installed payload. PR and
 main native jobs now prove that external-controller boundary before packaging;
 artifact upload remains main-only.
+
+PR #285 merged as `be460249494da8439ca0a4787cc1465263a06a91`.
+Exact-main CI `30546039967`, audit `30546036589`, and native Windows run
+`30546036086` passed. Native jobs `90882304030` (AMD64) and `90882304237`
+(ARM64) both proved external-controller cleanup and uploaded commit-bound
+qualification bundles. The ARM64 bundle was selected by exact run, commit, and
+architecture; all three payload hashes and sizes matched its manifest before
+and after transfer to the disposable guest. The guest then exposed the
+separate dynamic-CRT portability defect described above, before any service or
+product state was committed.
 
 PR #283 merged the commit-bound physical reboot bundle workflow as
 `3fad7d49de41eac41d3babb835828ccaed7642f1`. Exact-main run

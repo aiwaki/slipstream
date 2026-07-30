@@ -1,3 +1,6 @@
+#[cfg(all(windows, target_env = "msvc", not(target_feature = "crt-static")))]
+compile_error!("slipstream-windows-service requires the statically linked MSVC CRT");
+
 use slipstream_windows_adapter::service_host::{
     parse_windows_service_host_arguments, WindowsServiceHostFailureCode,
     WindowsServiceHostFailureV1,
