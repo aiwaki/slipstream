@@ -1,15 +1,19 @@
 use serde_json::Value;
 use slipstream_windows_adapter::service_host::{
-    parse_windows_service_host_arguments, WindowsServiceHostArgumentErrorCode,
-    WindowsServiceHostEvent, WindowsServiceHostFailureCode, WindowsServiceHostFailureV1,
-    WindowsServiceHostInvocation, WindowsServiceHostRuntimeV1, WindowsServiceHostStatus,
-    WindowsServiceHostTransition, WindowsServiceManagementCommandKind,
-    WindowsServiceManagementResultV1, WINDOWS_SERVICE_HOST_CONTRACT_VERSION,
-    WINDOWS_SERVICE_HOST_RESULT_SCHEMA_VERSION,
+    parse_windows_service_host_arguments, reduce_windows_service_boot_admission,
+    WindowsServiceBootAdmission, WindowsServiceHostArgumentErrorCode, WindowsServiceHostEvent,
+    WindowsServiceHostFailureCode, WindowsServiceHostFailureV1, WindowsServiceHostInvocation,
+    WindowsServiceHostRuntimeV1, WindowsServiceHostStatus, WindowsServiceHostTransition,
+    WindowsServiceManagementCommandKind, WindowsServiceManagementResultV1,
+    WINDOWS_SERVICE_HOST_CONTRACT_VERSION, WINDOWS_SERVICE_HOST_RESULT_SCHEMA_VERSION,
 };
 use slipstream_windows_adapter::service_lifecycle::{
-    WindowsServiceDecision, WindowsServiceLifecycleResult, WindowsServiceState,
-    WINDOWS_SERVICE_NAME,
+    WindowsServiceDecision, WindowsServiceDesiredState, WindowsServiceIdentity,
+    WindowsServiceLifecycleResult, WindowsServiceState, WINDOWS_SERVICE_NAME,
+};
+use slipstream_windows_adapter::service_lifecycle_state::{
+    WindowsServiceActiveInstallRecordV1, WindowsServiceIntentRecordV1,
+    WindowsServiceLifecycleStateAssessment,
 };
 use slipstream_windows_adapter::service_ownership::WINDOWS_SERVICE_ARGUMENT;
 
@@ -17,6 +21,42 @@ const HOST_V1: &str = include_str!("../../../contracts/windows-service-host-v1.j
 
 fn fixture() -> Value {
     serde_json::from_str(HOST_V1).expect("Windows service host fixture must be JSON")
+}
+
+fn boot_assessment(desired: WindowsServiceDesiredState) -> WindowsServiceLifecycleStateAssessment {
+    let identity = WindowsServiceIdentity {
+        service_name: WINDOWS_SERVICE_NAME.to_owned(),
+        executable_sha256: "a".repeat(64),
+        generation: 1,
+    };
+    WindowsServiceLifecycleStateAssessment::Stable {
+        intent: Some(
+            WindowsServiceIntentRecordV1::new(desired, Some(identity.clone()), 0)
+                .expect("valid boot intent"),
+        ),
+        active_install: Some(
+            WindowsServiceActiveInstallRecordV1::new(identity).expect("valid active install"),
+        ),
+    }
+}
+
+fn precommit_boot_assessment() -> WindowsServiceLifecycleStateAssessment {
+    let identity = WindowsServiceIdentity {
+        service_name: WINDOWS_SERVICE_NAME.to_owned(),
+        executable_sha256: "a".repeat(64),
+        generation: 1,
+    };
+    WindowsServiceLifecycleStateAssessment::Stable {
+        intent: Some(
+            WindowsServiceIntentRecordV1::new(
+                WindowsServiceDesiredState::Running,
+                Some(identity),
+                0,
+            )
+            .expect("valid precommit boot intent"),
+        ),
+        active_install: None,
+    }
 }
 
 #[test]
@@ -91,6 +131,57 @@ fn windows_service_host_executes_every_v1_shutdown_scenario() {
                 serde_json::from_value(step["expected"].clone()).unwrap();
             assert_eq!(runtime.transition(event), Ok(expected), "{name}");
         }
+    }
+}
+
+#[test]
+fn windows_service_boot_admission_preserves_durable_intent() {
+    assert_eq!(
+        reduce_windows_service_boot_admission(
+            &boot_assessment(WindowsServiceDesiredState::Running),
+            false
+        ),
+        WindowsServiceBootAdmission::Run
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(
+            &boot_assessment(WindowsServiceDesiredState::Stopped),
+            false
+        ),
+        WindowsServiceBootAdmission::RemainStopped
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(
+            &boot_assessment(WindowsServiceDesiredState::Stopped),
+            true
+        ),
+        WindowsServiceBootAdmission::RemainStopped
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(&precommit_boot_assessment(), false),
+        WindowsServiceBootAdmission::Refuse
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(&precommit_boot_assessment(), true),
+        WindowsServiceBootAdmission::Run
+    );
+    for assessment in [
+        WindowsServiceLifecycleStateAssessment::Stable {
+            intent: None,
+            active_install: None,
+        },
+        WindowsServiceLifecycleStateAssessment::InterruptedWrite,
+        WindowsServiceLifecycleStateAssessment::Unknown,
+        WindowsServiceLifecycleStateAssessment::Inconsistent,
+    ] {
+        assert_eq!(
+            reduce_windows_service_boot_admission(&assessment, false),
+            WindowsServiceBootAdmission::Refuse
+        );
+        assert_eq!(
+            reduce_windows_service_boot_admission(&assessment, true),
+            WindowsServiceBootAdmission::Refuse
+        );
     }
 }
 

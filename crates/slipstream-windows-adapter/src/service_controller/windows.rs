@@ -54,12 +54,24 @@ impl WindowsServiceController {
         let ownership_evidence = WindowsServiceOwnershipCollector::new().assess();
         let state = reconstruct_windows_service_state(&lifecycle_evidence, &ownership_evidence)?;
 
+        let mut native = WindowsServiceNativeEffects::new(self.source_path.clone());
+        if command_requires_reboot_admission(command) {
+            native.require_reboot_admission_if_present_locked()?;
+        }
         let mut lifecycle =
             WindowsServiceLifecycleV1::with_restart_limit(state, self.max_crash_restarts)?;
-        let mut native = WindowsServiceNativeEffects::new(self.source_path.clone());
         let mut effects = LockedNativeEffects { inner: &mut native };
         lifecycle.execute(command, &mut effects).map_err(Into::into)
     }
+}
+
+const fn command_requires_reboot_admission(command: &WindowsServiceCommand) -> bool {
+    matches!(
+        command,
+        WindowsServiceCommand::Install { .. }
+            | WindowsServiceCommand::Start
+            | WindowsServiceCommand::CrashObserved
+    )
 }
 
 struct LockedNativeEffects<'a> {
@@ -79,6 +91,7 @@ pub enum WindowsServiceControllerError {
     InvalidRestartLimit,
     OperationLock(String),
     Reconciliation(WindowsServiceReconciliationError),
+    Native(WindowsServiceNativeError),
     Lifecycle(WindowsServiceLifecycleError),
 }
 
@@ -90,6 +103,7 @@ impl fmt::Display for WindowsServiceControllerError {
             }
             Self::OperationLock(error) => write!(formatter, "{error}"),
             Self::Reconciliation(error) => write!(formatter, "{error}"),
+            Self::Native(error) => write!(formatter, "{error}"),
             Self::Lifecycle(error) => write!(formatter, "{error}"),
         }
     }
@@ -106,6 +120,12 @@ impl From<WindowsServiceOperationLockError> for WindowsServiceControllerError {
 impl From<WindowsServiceReconciliationError> for WindowsServiceControllerError {
     fn from(value: WindowsServiceReconciliationError) -> Self {
         Self::Reconciliation(value)
+    }
+}
+
+impl From<WindowsServiceNativeError> for WindowsServiceControllerError {
+    fn from(value: WindowsServiceNativeError) -> Self {
+        Self::Native(value)
     }
 }
 
@@ -138,6 +158,30 @@ mod tests {
     const CONTROLLER_FIXTURE_ENV: &str = "SLIPSTREAM_WINDOWS_CONTROLLER_FIXTURE";
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
     const OBSERVATION_INTERVAL: Duration = Duration::from_millis(50);
+
+    #[test]
+    fn reboot_admission_is_strict_only_for_commands_that_can_leave_service_running() {
+        let identity = crate::service_lifecycle::WindowsServiceIdentity {
+            service_name: crate::service_lifecycle::WINDOWS_SERVICE_NAME.to_owned(),
+            executable_sha256: "ab".repeat(32),
+            generation: 1,
+        };
+        assert!(command_requires_reboot_admission(
+            &WindowsServiceCommand::Install { identity }
+        ));
+        assert!(command_requires_reboot_admission(
+            &WindowsServiceCommand::Start
+        ));
+        assert!(command_requires_reboot_admission(
+            &WindowsServiceCommand::CrashObserved
+        ));
+        assert!(!command_requires_reboot_admission(
+            &WindowsServiceCommand::Stop
+        ));
+        assert!(!command_requires_reboot_admission(
+            &WindowsServiceCommand::Uninstall
+        ));
+    }
 
     #[test]
     fn controller_process_restarts_preserve_idempotence_and_recovery_budget() {

@@ -156,6 +156,30 @@ audit in PR #277. This gate terminates only the exact verified process and
 does not compose production networking or mutate routes, DNS, proxy/PAC/VPN,
 drivers, or external processes and services.
 
+The production-host reboot-admission gate is the prerequisite for a later
+physical reboot test. It registers the exact owned service as
+`SERVICE_AUTO_START` with `SERVICE_WIN32_OWN_PROCESS` and
+`SERVICE_ERROR_NORMAL`, then re-reads all three values from SCM before
+`install`, `start`, or crash recovery may be accepted, including reducer
+no-change paths. Service boot entry separately requires matching durable
+`Running` intent and active-install evidence plus the same exact SCM
+configuration. The controller-owned initial start is the sole exception:
+SCM passes the exact `--slipstream-managed-start-v1` argument so the worker can
+reach readiness before the lifecycle commits active-install evidence. An
+ordinary automatic boot has no marker and cannot use that pre-commit path.
+Durable `Stopped` intent exits cleanly without starting the worker, while
+missing, interrupted, unknown, or inconsistent evidence fails closed; only the
+public management start may deliberately resume it. The
+disposable native test stops the service, invokes the SCM start path directly,
+requires the stopped intent to remain authoritative, then proves an explicit
+management start can resume it. It also changes only the owned service back to
+demand-start and requires running-state commands to fail closed. Exact `stop`
+and `uninstall` remain available despite that drift so a broken configuration
+cannot make the service unremovable; final absence and preservation of an
+independent sentinel are mandatory. This gate does not reboot a runner and
+therefore does not claim physical boot-time execution, post-boot readiness, or
+production networking.
+
 `scripts/geph_owned_lifecycle_smoke.py` is a separate user-level qualification.
 It is invoked only by the protected, main-only `owned-geph-qualification`
 manual workflow, so account credentials are never available to pull-request

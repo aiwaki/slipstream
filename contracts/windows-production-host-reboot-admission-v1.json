@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.windows_production_host_reboot_admission",
+  "contract_version": 1,
+  "invariants": {
+    "real_management_cli": true,
+    "automatic_start_registration": true,
+    "own_process_service_type": true,
+    "normal_error_control": true,
+    "configuration_revalidated_before_install_start_recover": true,
+    "configuration_drift_fails_closed": true,
+    "initial_managed_start_requires_exact_marker": true,
+    "initial_managed_start_may_precede_active_install_commit": true,
+    "automatic_boot_requires_committed_active_install": true,
+    "stopped_intent_remains_stopped_on_scm_start": true,
+    "unknown_or_inconsistent_intent_fails_closed": true,
+    "explicit_start_required_to_resume_stopped_intent": true,
+    "stop_and_uninstall_remain_available_for_exact_cleanup": true,
+    "independent_owner_preserved": true,
+    "terminal_absence_required": true,
+    "physical_reboot_claimed": false,
+    "production_networking_composition": false,
+    "default_route_mutation": false,
+    "system_dns_mutation": false,
+    "proxy_pac_vpn_mutation": false,
+    "external_process_or_service_mutation": false,
+    "driver_install_or_removal": false
+  },
+  "disposable_native_qualification": {
+    "architectures": ["amd64", "arm64"],
+    "generation": 41,
+    "managed_install_start_marker": "--slipstream-managed-start-v1",
+    "direct_scm_start_with_stopped_intent": true,
+    "configuration_drift_injected": true,
+    "final_absence_required": true
+  }
+}

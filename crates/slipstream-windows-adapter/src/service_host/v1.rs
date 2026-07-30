@@ -1,11 +1,47 @@
 //! Pure version 1 command, result, and shutdown contracts for the Windows host.
 
-use crate::service_lifecycle::{WindowsServiceLifecycleResult, WINDOWS_SERVICE_NAME};
+use crate::service_lifecycle::{
+    WindowsServiceDesiredState, WindowsServiceLifecycleResult, WINDOWS_SERVICE_NAME,
+};
+use crate::service_lifecycle_state::WindowsServiceLifecycleStateAssessment;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub const WINDOWS_SERVICE_HOST_CONTRACT_VERSION: u32 = 1;
 pub const WINDOWS_SERVICE_HOST_RESULT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WindowsServiceBootAdmission {
+    Run,
+    RemainStopped,
+    Refuse,
+}
+
+pub fn reduce_windows_service_boot_admission(
+    assessment: &WindowsServiceLifecycleStateAssessment,
+    managed_start: bool,
+) -> WindowsServiceBootAdmission {
+    let WindowsServiceLifecycleStateAssessment::Stable {
+        intent: Some(intent),
+        active_install,
+    } = assessment
+    else {
+        return WindowsServiceBootAdmission::Refuse;
+    };
+    match intent.desired {
+        WindowsServiceDesiredState::Running => match active_install {
+            Some(active_install) if intent.identity.as_ref() == Some(&active_install.identity) => {
+                WindowsServiceBootAdmission::Run
+            }
+            None if managed_start && intent.identity.is_some() => WindowsServiceBootAdmission::Run,
+            Some(_) | None => WindowsServiceBootAdmission::Refuse,
+        },
+        WindowsServiceDesiredState::Stopped => WindowsServiceBootAdmission::RemainStopped,
+        WindowsServiceDesiredState::Absent | WindowsServiceDesiredState::Unknown => {
+            WindowsServiceBootAdmission::Refuse
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

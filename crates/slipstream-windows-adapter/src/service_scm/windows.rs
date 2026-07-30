@@ -5,10 +5,13 @@ use super::{
     WindowsServiceScmGateOutcome, WindowsServiceScmGateReason,
 };
 use crate::service_lifecycle::{
-    WindowsServiceAction, WindowsServiceEffects, WindowsServiceIdentity, WINDOWS_SERVICE_NAME,
+    WindowsServiceAction, WindowsServiceEffects, WindowsServiceIdentity,
+    WINDOWS_SERVICE_MANAGED_START_ARGUMENT, WINDOWS_SERVICE_NAME,
 };
 use crate::service_lifecycle_state::WindowsServiceLifecycleStateEffects;
-use crate::service_observer::windows::observe_open_service_handle;
+use crate::service_observer::windows::{
+    observe_open_service_handle, query_open_service_configuration, WindowsServiceConfiguration,
+};
 use crate::service_observer::{
     WindowsScmState, WindowsServiceObservation, WindowsServiceObserverError, WindowsServiceSnapshot,
 };
@@ -36,7 +39,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::System::Services::{
     CloseServiceHandle, ControlService, CreateServiceW, DeleteService, OpenSCManagerW,
     OpenServiceW, StartServiceW, SC_HANDLE, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
-    SERVICE_CONTROL_STOP, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL, SERVICE_QUERY_CONFIG,
+    SERVICE_AUTO_START, SERVICE_CONTROL_STOP, SERVICE_ERROR_NORMAL, SERVICE_QUERY_CONFIG,
     SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_STATUS, SERVICE_STOP, SERVICE_WIN32_OWN_PROCESS,
 };
 
@@ -75,12 +78,15 @@ impl WindowsServiceScmEffects {
             open_exact_service(manager.raw(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS)?
         {
             let observation = observe_open_service_handle(service.raw())?;
-            return require_no_mutation(assess_windows_service_scm_action(
+            require_no_mutation(assess_windows_service_scm_action(
                 action,
                 lifecycle,
                 &observation,
                 payload,
-            ));
+            ))?;
+            return require_reboot_admission_configuration(&query_open_service_configuration(
+                service.raw(),
+            )?);
         }
 
         let decision = assess_windows_service_scm_action(
@@ -109,7 +115,7 @@ impl WindowsServiceScmEffects {
                 display_name.as_ptr(),
                 SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS,
                 SERVICE_WIN32_OWN_PROCESS,
-                SERVICE_DEMAND_START,
+                SERVICE_AUTO_START,
                 SERVICE_ERROR_NORMAL,
                 binary_path.as_ptr(),
                 null(),
@@ -120,6 +126,7 @@ impl WindowsServiceScmEffects {
             )
         };
         let service = OwnedScHandle::open(service_handle, "CreateServiceW")?;
+        require_reboot_admission_configuration(&query_open_service_configuration(service.raw())?)?;
         let snapshot = present_snapshot(observe_open_service_handle(service.raw())?)?;
         if snapshot.scm_state != WindowsScmState::Stopped
             || !snapshot_is_exact_owned(snapshot, identity, payload)
@@ -158,13 +165,25 @@ impl WindowsServiceScmEffects {
         let observation = observe_open_service_handle(service.raw())?;
         let decision = assess_windows_service_scm_action(action, lifecycle, &observation, payload);
         match decision.outcome {
-            WindowsServiceScmGateOutcome::NoChange => return Ok(()),
+            WindowsServiceScmGateOutcome::NoChange => {
+                if mutation.requires_reboot_admission() {
+                    require_reboot_admission_configuration(&query_open_service_configuration(
+                        service.raw(),
+                    )?)?;
+                }
+                return Ok(());
+            }
             WindowsServiceScmGateOutcome::Refuse => {
                 return Err(WindowsServiceScmError::Gate(decision.reason))
             }
             WindowsServiceScmGateOutcome::Mutate => {}
         }
 
+        if mutation.requires_reboot_admission() {
+            require_reboot_admission_configuration(&query_open_service_configuration(
+                service.raw(),
+            )?)?;
+        }
         match mutation {
             ExistingMutation::Start => start_exact_service(&service, identity, payload),
             ExistingMutation::Stop => stop_exact_service(&service, identity, payload),
@@ -212,7 +231,22 @@ impl WindowsServiceScmEffects {
                     "owned service is absent during state verification",
                 ),
             )?;
+        if expected == WindowsScmState::Running {
+            require_reboot_admission_configuration(&query_open_service_configuration(
+                service.raw(),
+            )?)?;
+        }
         wait_for_owned_state(&service, identity, &payload, expected)
+    }
+
+    pub(crate) fn require_reboot_admission_if_present_locked(
+        &self,
+    ) -> Result<(), WindowsServiceScmError> {
+        let manager = open_manager(SC_MANAGER_CONNECT)?;
+        let Some(service) = open_exact_service(manager.raw(), SERVICE_QUERY_CONFIG)? else {
+            return Ok(());
+        };
+        require_reboot_admission_configuration(&query_open_service_configuration(service.raw())?)
     }
 
     pub(crate) fn wait_for_absent_locked(&self) -> Result<(), WindowsServiceScmError> {
@@ -296,12 +330,47 @@ enum ExistingMutation {
     Unregister,
 }
 
+impl ExistingMutation {
+    const fn requires_reboot_admission(self) -> bool {
+        matches!(self, Self::Start)
+    }
+}
+
+pub(crate) fn require_reboot_admission_configuration(
+    configuration: &WindowsServiceConfiguration,
+) -> Result<(), WindowsServiceScmError> {
+    for (field, expected, observed) in [
+        (
+            "service_type",
+            SERVICE_WIN32_OWN_PROCESS,
+            configuration.service_type,
+        ),
+        ("start_type", SERVICE_AUTO_START, configuration.start_type),
+        (
+            "error_control",
+            SERVICE_ERROR_NORMAL,
+            configuration.error_control,
+        ),
+    ] {
+        if observed != expected {
+            return Err(WindowsServiceScmError::ConfigurationMismatch {
+                field,
+                expected,
+                observed,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn start_exact_service(
     service: &OwnedScHandle,
     identity: &WindowsServiceIdentity,
     payload: &WindowsStagedPayloadEvidence,
 ) -> Result<(), WindowsServiceScmError> {
-    let ok = unsafe { StartServiceW(service.raw(), 0, null()) };
+    let managed_start = wide_null(WINDOWS_SERVICE_MANAGED_START_ARGUMENT);
+    let arguments = [managed_start.as_ptr()];
+    let ok = unsafe { StartServiceW(service.raw(), arguments.len() as u32, arguments.as_ptr()) };
     if ok == 0 {
         let code = unsafe { GetLastError() };
         if code == ERROR_SERVICE_ALREADY_RUNNING
@@ -580,7 +649,15 @@ pub enum WindowsServiceScmError {
     UnsupportedAction,
     Gate(WindowsServiceScmGateReason),
     Observer(WindowsServiceObserverError),
-    Win32 { operation: &'static str, code: u32 },
+    Win32 {
+        operation: &'static str,
+        code: u32,
+    },
+    ConfigurationMismatch {
+        field: &'static str,
+        expected: u32,
+        observed: u32,
+    },
     Verification(&'static str),
     OperationLock(String),
 }
@@ -594,6 +671,14 @@ impl fmt::Display for WindowsServiceScmError {
             Self::Win32 { operation, code } => {
                 write!(formatter, "{operation} failed with Win32 error {code}")
             }
+            Self::ConfigurationMismatch {
+                field,
+                expected,
+                observed,
+            } => write!(
+                formatter,
+                "SCM configuration mismatch for {field}: expected {expected}, observed {observed}"
+            ),
             Self::Verification(detail) => write!(formatter, "SCM verification failed: {detail}"),
             Self::OperationLock(error) => write!(formatter, "{error}"),
         }
@@ -624,6 +709,50 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::io::Read;
+    use windows_sys::Win32::System::Services::SERVICE_DEMAND_START;
+
+    #[test]
+    fn reboot_admission_rejects_each_scm_configuration_drift() {
+        let expected = WindowsServiceConfiguration {
+            binary_path: r#""C:\ProgramData\Slipstream\slipstream-windows-service.exe""#.to_owned(),
+            service_type: SERVICE_WIN32_OWN_PROCESS,
+            start_type: SERVICE_AUTO_START,
+            error_control: SERVICE_ERROR_NORMAL,
+        };
+        assert_eq!(require_reboot_admission_configuration(&expected), Ok(()));
+
+        for (field, configuration) in [
+            (
+                "service_type",
+                WindowsServiceConfiguration {
+                    service_type: 0,
+                    ..expected.clone()
+                },
+            ),
+            (
+                "start_type",
+                WindowsServiceConfiguration {
+                    start_type: SERVICE_DEMAND_START,
+                    ..expected.clone()
+                },
+            ),
+            (
+                "error_control",
+                WindowsServiceConfiguration {
+                    error_control: 0,
+                    ..expected.clone()
+                },
+            ),
+        ] {
+            assert!(matches!(
+                require_reboot_admission_configuration(&configuration),
+                Err(WindowsServiceScmError::ConfigurationMismatch {
+                    field: observed,
+                    ..
+                }) if observed == field
+            ));
+        }
+    }
 
     #[test]
     fn native_register_and_unregister_are_exact_and_disposable() {

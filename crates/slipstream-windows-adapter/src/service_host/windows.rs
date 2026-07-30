@@ -1,6 +1,7 @@
 //! Native Windows service dispatcher and self-managing controller entry point.
 
 use super::{
+    reduce_windows_service_boot_admission, WindowsServiceBootAdmission,
     WindowsServiceHostContractError, WindowsServiceHostFailureCode, WindowsServiceHostInvocation,
     WindowsServiceHostPhase, WindowsServiceHostStatus, WindowsServiceManagementCommand,
     WindowsServiceManagementResultV1,
@@ -8,8 +9,12 @@ use super::{
 use crate::data_plane::{WindowsDataPlaneCommand, WindowsDataPlaneConfig, WindowsDataPlaneEvent};
 use crate::service_controller::{WindowsServiceController, WindowsServiceControllerError};
 use crate::service_lifecycle::{
-    WindowsServiceCommand, WindowsServiceIdentity, WINDOWS_SERVICE_NAME,
+    WindowsServiceCommand, WindowsServiceIdentity, WINDOWS_SERVICE_MANAGED_START_ARGUMENT,
+    WINDOWS_SERVICE_NAME,
 };
+use crate::service_lifecycle_state::WindowsServiceLifecycleStateEffects;
+use crate::service_observer::WindowsScmObserver;
+use crate::service_scm::require_reboot_admission_configuration;
 use crate::worker_host::{
     execute_windows_worker_host_transition, reduce_windows_worker_host, WindowsWorkerHostCommand,
     WindowsWorkerHostEffects, WindowsWorkerHostEvent, WindowsWorkerHostState,
@@ -139,7 +144,7 @@ fn run_service_dispatcher() -> Result<(), WindowsServiceHostNativeError> {
     Ok(())
 }
 
-unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
+unsafe extern "system" fn service_main(argc: u32, argv: *mut *mut u16) {
     REQUESTED_CONTROL.store(CONTROL_NONE, Ordering::Release);
     let service_name = wide_null(WINDOWS_SERVICE_NAME);
     let status_handle = unsafe {
@@ -151,12 +156,25 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
 
     let started = Instant::now();
     let mut state = WindowsWorkerHostState::new(0);
-    let config = production_worker_config();
-    let policy_tables = bundled_policy_v1();
     let mut effects = NoNetworkWindowsWorkerHostEffects::new(status_handle);
     if !report_status(status_handle, state.initial_service_status(), 0) {
         return;
     }
+    match observe_windows_service_boot_admission(service_main_has_managed_start_argument(
+        argc, argv,
+    )) {
+        WindowsServiceBootAdmission::Run => {}
+        WindowsServiceBootAdmission::RemainStopped => {
+            let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 0);
+            return;
+        }
+        WindowsServiceBootAdmission::Refuse => {
+            let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 1);
+            return;
+        }
+    }
+    let config = production_worker_config();
+    let policy_tables = bundled_policy_v1();
     if apply_worker_host_event(
         &mut state,
         WindowsWorkerHostEvent::Worker {
@@ -197,6 +215,43 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
             return;
         }
     }
+}
+
+fn observe_windows_service_boot_admission(managed_start: bool) -> WindowsServiceBootAdmission {
+    let assessment = WindowsServiceLifecycleStateEffects::new()
+        .collect()
+        .assess();
+    let admission = reduce_windows_service_boot_admission(&assessment, managed_start);
+    if admission != WindowsServiceBootAdmission::Run {
+        return admission;
+    }
+    let configuration = match WindowsScmObserver::new().observe_configuration() {
+        Ok(Some(configuration)) => configuration,
+        Ok(None) | Err(_) => return WindowsServiceBootAdmission::Refuse,
+    };
+    if require_reboot_admission_configuration(&configuration).is_err() {
+        return WindowsServiceBootAdmission::Refuse;
+    }
+    WindowsServiceBootAdmission::Run
+}
+
+fn service_main_has_managed_start_argument(argc: u32, argv: *mut *mut u16) -> bool {
+    if argc != 2 || argv.is_null() {
+        return false;
+    }
+    let argument = unsafe { *argv.add(1) };
+    if argument.is_null() {
+        return false;
+    }
+    let expected = WINDOWS_SERVICE_MANAGED_START_ARGUMENT
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    for (index, expected_unit) in expected.iter().enumerate() {
+        if unsafe { *argument.add(index) } != *expected_unit {
+            return false;
+        }
+    }
+    unsafe { *argument.add(expected.len()) == 0 }
 }
 
 unsafe extern "system" fn service_control_handler(control: u32) {
@@ -398,7 +453,7 @@ impl From<WindowsServiceHostContractError> for WindowsServiceHostNativeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service_host::WindowsServiceManagementCommandKind;
+    use crate::service_host::{WindowsServiceHostFailureV1, WindowsServiceManagementCommandKind};
     use crate::service_lifecycle::{
         WindowsServiceDecision, WindowsServiceDesiredState, WindowsServiceIdentity,
         WindowsServiceObservedState, WindowsServiceOwnership,
@@ -407,6 +462,7 @@ mod tests {
         WindowsServiceLifecycleStateAssessment, WindowsServiceLifecycleStateEffects,
         WINDOWS_SERVICE_ACTIVE_INSTALL_FILE_NAME,
     };
+    use crate::service_observer::windows::WindowsServiceConfiguration;
     use crate::service_observer::{
         WindowsScmObserver, WindowsScmState, WindowsServiceObservation, WindowsServiceObserver,
     };
@@ -420,11 +476,18 @@ mod tests {
     use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::ptr::{null, null_mut};
     use std::time::Instant;
     use windows_sys::Win32::Foundation::{
-        CloseHandle, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0,
+        CloseHandle, GetLastError, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0,
     };
     use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    use windows_sys::Win32::System::Services::{
+        ChangeServiceConfigW, CloseServiceHandle, OpenSCManagerW, OpenServiceW, StartServiceW,
+        SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG,
+        SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG,
+        SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_WIN32_OWN_PROCESS,
+    };
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
         WaitForSingleObject, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -433,12 +496,38 @@ mod tests {
 
     const HOST_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CI";
     const HOST_CRASH_CI_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_CRASH_RECOVERY_CI";
+    const HOST_REBOOT_ADMISSION_CI_ENV: &str =
+        "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_REBOOT_ADMISSION_CI";
     const HOST_GENERATION_CI_ENV: &str =
         "SLIPSTREAM_WINDOWS_PRODUCTION_HOST_GENERATION_RECOVERY_CI";
     const HOST_PATH_ENV: &str = "SLIPSTREAM_WINDOWS_PRODUCTION_HOST";
     const MAX_PROCESS_IMAGE_U16: usize = 32_768;
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
     const TEST_CRASH_EXIT_CODE: u32 = 0x5354_4C50;
+
+    #[test]
+    fn managed_start_argument_is_exact_and_bounded() {
+        assert!(!service_main_has_managed_start_argument(0, null_mut()));
+
+        let mut service_name = wide_null(WINDOWS_SERVICE_NAME);
+        let mut marker = wide_null(WINDOWS_SERVICE_MANAGED_START_ARGUMENT);
+        let mut exact_arguments = [service_name.as_mut_ptr(), marker.as_mut_ptr()];
+        assert!(service_main_has_managed_start_argument(
+            exact_arguments.len() as u32,
+            exact_arguments.as_mut_ptr()
+        ));
+        assert!(!service_main_has_managed_start_argument(
+            1,
+            exact_arguments.as_mut_ptr()
+        ));
+
+        let mut wrong = wide_null("--slipstream-managed-start-v2");
+        let mut wrong_arguments = [service_name.as_mut_ptr(), wrong.as_mut_ptr()];
+        assert!(!service_main_has_managed_start_argument(
+            wrong_arguments.len() as u32,
+            wrong_arguments.as_mut_ptr()
+        ));
+    }
 
     #[test]
     fn production_host_is_self_managing_idempotent_and_stops_through_scm() {
@@ -542,6 +631,119 @@ mod tests {
         );
         assert!(repeated_uninstall.lifecycle.accepted);
         fs::remove_dir_all(root).expect("remove disposable terminal intent");
+    }
+
+    #[test]
+    fn production_host_reboot_admission_requires_exact_automatic_start_configuration() {
+        if std::env::var_os(HOST_REBOOT_ADMISSION_CI_ENV).is_none() {
+            return;
+        }
+
+        assert_eq!(
+            WindowsScmObserver::new().observe(),
+            Ok(WindowsServiceObservation::absent()),
+            "the disposable runner must not already contain the Slipstream service"
+        );
+        let host = PathBuf::from(
+            std::env::var_os(HOST_PATH_ENV)
+                .expect("the production Windows service host path must be provided"),
+        );
+        let owner_record_path = machine_owner_record_path().expect("resolve machine owner record");
+        let root = owner_record_path
+            .parent()
+            .expect("owner record must have a parent")
+            .to_path_buf();
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale reboot-admission state");
+        }
+
+        let identity = production_identity(&host, 41);
+        let installed = run_host(&host, &["manage", "install", "--generation", "41"]);
+        assert_eq!(
+            installed.lifecycle.decision,
+            WindowsServiceDecision::Installed
+        );
+        assert!(installed.lifecycle.accepted);
+        verify_production_generation_active(&root, &identity);
+        assert_reboot_admission_configuration();
+
+        let independent_owner = root.join("independent-reboot-admission-owner.sentinel");
+        let independent_evidence = b"independent owner must survive configuration drift cleanup";
+        fs::write(&independent_owner, independent_evidence)
+            .expect("write independent reboot-admission sentinel");
+
+        let repeated = run_host(&host, &["manage", "install", "--generation", "41"]);
+        assert_eq!(
+            repeated.lifecycle.decision,
+            WindowsServiceDecision::NoChange
+        );
+        assert!(repeated.lifecycle.accepted);
+        assert_reboot_admission_configuration();
+
+        let stopped_before_boot = run_host(&host, &["manage", "stop"]);
+        assert_eq!(
+            stopped_before_boot.lifecycle.decision,
+            WindowsServiceDecision::Stopped
+        );
+        assert!(stopped_before_boot.lifecycle.accepted);
+        wait_for_state(WindowsScmState::Stopped);
+        assert_durable_intent(WindowsServiceDesiredState::Stopped);
+
+        start_exact_service_through_scm();
+        thread::sleep(Duration::from_millis(250));
+        wait_for_state(WindowsScmState::Stopped);
+        assert_durable_intent(WindowsServiceDesiredState::Stopped);
+
+        let explicitly_started = run_host(&host, &["manage", "start"]);
+        assert_eq!(
+            explicitly_started.lifecycle.decision,
+            WindowsServiceDecision::Started
+        );
+        assert!(explicitly_started.lifecycle.accepted);
+        wait_for_state(WindowsScmState::Running);
+        assert_durable_intent(WindowsServiceDesiredState::Running);
+        assert_reboot_admission_configuration();
+
+        change_exact_service_start_type(SERVICE_DEMAND_START);
+        assert_eq!(
+            WindowsScmObserver::new()
+                .observe_configuration()
+                .expect("observe drifted production-host configuration")
+                .expect("drifted production host must remain registered")
+                .start_type,
+            SERVICE_DEMAND_START
+        );
+        assert_host_rejects_configuration_drift(&host, &["manage", "recover"]);
+        assert_host_rejects_configuration_drift(
+            &host,
+            &["manage", "install", "--generation", "41"],
+        );
+
+        let stopped = run_host(&host, &["manage", "stop"]);
+        assert_eq!(stopped.lifecycle.decision, WindowsServiceDecision::Stopped);
+        assert!(stopped.lifecycle.accepted);
+        wait_for_state(WindowsScmState::Stopped);
+        assert_host_rejects_configuration_drift(&host, &["manage", "start"]);
+
+        let uninstalled = run_host(&host, &["manage", "uninstall"]);
+        assert_eq!(
+            uninstalled.lifecycle.decision,
+            WindowsServiceDecision::Uninstalled
+        );
+        assert!(uninstalled.lifecycle.accepted);
+        verify_production_generation_absent(&root, &identity);
+        assert_eq!(
+            WindowsScmObserver::new()
+                .observe_configuration()
+                .expect("observe terminal reboot-admission configuration"),
+            None
+        );
+        assert_eq!(
+            fs::read(&independent_owner).expect("read independent reboot-admission sentinel"),
+            independent_evidence
+        );
+
+        fs::remove_dir_all(&root).expect("remove reboot-admission terminal intent");
     }
 
     #[test]
@@ -745,6 +947,143 @@ mod tests {
             serde_json::from_slice(&output.stdout).expect("host output must be result JSON");
         result.validate().expect("host result must satisfy v1");
         result
+    }
+
+    fn assert_host_rejects_configuration_drift(host: &Path, arguments: &[&str]) {
+        let output = Command::new(host)
+            .args(arguments)
+            .output()
+            .expect("start production Windows service host manager");
+        assert!(
+            !output.status.success(),
+            "production host command {arguments:?} accepted drifted startup configuration"
+        );
+        let failure: WindowsServiceHostFailureV1 =
+            serde_json::from_slice(&output.stderr).expect("host failure must be result JSON");
+        assert!(
+            failure
+                .message
+                .contains("configuration mismatch for start_type"),
+            "unexpected production-host drift failure: {}",
+            failure.message
+        );
+    }
+
+    fn assert_reboot_admission_configuration() {
+        let configuration = WindowsScmObserver::new()
+            .observe_configuration()
+            .expect("observe production-host configuration")
+            .expect("production host must remain registered");
+        assert_eq!(
+            configuration,
+            WindowsServiceConfiguration {
+                binary_path: configuration.binary_path.clone(),
+                service_type: SERVICE_WIN32_OWN_PROCESS,
+                start_type: SERVICE_AUTO_START,
+                error_control: SERVICE_ERROR_NORMAL,
+            }
+        );
+    }
+
+    fn assert_durable_intent(expected: WindowsServiceDesiredState) {
+        match WindowsServiceLifecycleStateEffects::new()
+            .collect()
+            .assess()
+        {
+            WindowsServiceLifecycleStateAssessment::Stable {
+                intent: Some(intent),
+                active_install: Some(_),
+            } => assert_eq!(intent.desired, expected),
+            evidence => panic!("production host has invalid durable intent: {evidence:?}"),
+        }
+    }
+
+    fn start_exact_service_through_scm() {
+        let manager = OwnedTestScHandle::open(
+            unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT) },
+            "OpenSCManagerW",
+        );
+        let service_name = wide_null(WINDOWS_SERVICE_NAME);
+        let service = OwnedTestScHandle::open(
+            unsafe {
+                OpenServiceW(
+                    manager.raw(),
+                    service_name.as_ptr(),
+                    SERVICE_START | SERVICE_QUERY_STATUS,
+                )
+            },
+            "OpenServiceW",
+        );
+        let started = unsafe { StartServiceW(service.raw(), 0, null()) };
+        assert_ne!(started, 0, "StartServiceW failed with {}", unsafe {
+            GetLastError()
+        });
+    }
+
+    fn change_exact_service_start_type(start_type: u32) {
+        let manager = OwnedTestScHandle::open(
+            unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT) },
+            "OpenSCManagerW",
+        );
+        let service_name = wide_null(WINDOWS_SERVICE_NAME);
+        let service = OwnedTestScHandle::open(
+            unsafe {
+                OpenServiceW(
+                    manager.raw(),
+                    service_name.as_ptr(),
+                    SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG,
+                )
+            },
+            "OpenServiceW",
+        );
+        let changed = unsafe {
+            ChangeServiceConfigW(
+                service.raw(),
+                SERVICE_NO_CHANGE,
+                start_type,
+                SERVICE_NO_CHANGE,
+                null(),
+                null(),
+                null_mut(),
+                null(),
+                null(),
+                null(),
+                null(),
+            )
+        };
+        assert_ne!(
+            changed,
+            0,
+            "ChangeServiceConfigW failed with Win32 error {}",
+            unsafe { GetLastError() }
+        );
+    }
+
+    struct OwnedTestScHandle(SC_HANDLE);
+
+    impl OwnedTestScHandle {
+        fn open(handle: SC_HANDLE, operation: &str) -> Self {
+            assert!(
+                !handle.is_null(),
+                "{operation} failed with Win32 error {}",
+                unsafe { GetLastError() }
+            );
+            Self(handle)
+        }
+
+        const fn raw(&self) -> SC_HANDLE {
+            self.0
+        }
+    }
+
+    impl Drop for OwnedTestScHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    CloseServiceHandle(self.0);
+                }
+            }
+        }
     }
 
     fn wait_for_state(
