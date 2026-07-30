@@ -23,6 +23,9 @@ fn production_host_reboot_admission_contract_is_frozen_and_bounded() {
         "normal_error_control",
         "configuration_revalidated_before_install_start_recover",
         "configuration_drift_fails_closed",
+        "initial_managed_start_requires_exact_marker",
+        "initial_managed_start_may_precede_active_install_commit",
+        "automatic_boot_requires_committed_active_install",
         "stopped_intent_remains_stopped_on_scm_start",
         "unknown_or_inconsistent_intent_fails_closed",
         "explicit_start_required_to_resume_stopped_intent",
@@ -50,6 +53,10 @@ fn production_host_reboot_admission_contract_is_frozen_and_bounded() {
     assert_eq!(
         contract["disposable_native_qualification"]["generation"],
         41
+    );
+    assert_eq!(
+        contract["disposable_native_qualification"]["managed_install_start_marker"],
+        "--slipstream-managed-start-v1"
     );
     assert_eq!(
         contract["disposable_native_qualification"]["direct_scm_start_with_stopped_intent"],
@@ -81,6 +88,8 @@ fn production_registration_and_controller_enforce_exact_reboot_admission() {
     }
     for required in [
         "SERVICE_AUTO_START",
+        "WINDOWS_SERVICE_MANAGED_START_ARGUMENT",
+        "StartServiceW(service.raw(), arguments.len() as u32, arguments.as_ptr())",
         "require_reboot_admission_if_present_locked",
         "WindowsServiceScmError::ConfigurationMismatch",
     ] {
@@ -118,7 +127,8 @@ fn production_registration_and_controller_enforce_exact_reboot_admission() {
 
     let host = include_str!("../src/service_host/windows.rs").replace("\r\n", "\n");
     for required in [
-        "observe_windows_service_boot_admission()",
+        "service_main_has_managed_start_argument",
+        "observe_windows_service_boot_admission(service_main_has_managed_start_argument(",
         "WindowsServiceBootAdmission::RemainStopped",
         "WindowsServiceBootAdmission::Refuse",
         "require_reboot_admission_configuration(&configuration)",

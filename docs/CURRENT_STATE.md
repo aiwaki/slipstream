@@ -13,8 +13,11 @@ claiming a physical reboot. The exact owned Windows service is registered as
 automatic-start and its service type, start type, and error control are
 re-read before install/start/recovery can be accepted, including no-change
 paths and boot worker activation. Boot entry additionally requires matching
-active-install evidence and durable running intent; stopped intent remains
-stopped, while unknown evidence fails closed. Its native AMD64/ARM64 gate
+active-install evidence and durable running intent. The sole pre-commit
+exception is the controller-owned initial start carrying the exact
+`--slipstream-managed-start-v1` SCM argument; an ordinary automatic boot has
+no such marker and still requires the committed active-install record. Stopped
+intent remains stopped, while unknown evidence fails closed. Its native AMD64/ARM64 gate
 starts the stopped service directly through SCM, proves only explicit
 management start resumes it, deliberately injects demand-start drift, requires
 running-state commands to fail closed, keeps exact stop/uninstall available,

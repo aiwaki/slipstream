@@ -40,6 +40,25 @@ fn boot_assessment(desired: WindowsServiceDesiredState) -> WindowsServiceLifecyc
     }
 }
 
+fn precommit_boot_assessment() -> WindowsServiceLifecycleStateAssessment {
+    let identity = WindowsServiceIdentity {
+        service_name: WINDOWS_SERVICE_NAME.to_owned(),
+        executable_sha256: "a".repeat(64),
+        generation: 1,
+    };
+    WindowsServiceLifecycleStateAssessment::Stable {
+        intent: Some(
+            WindowsServiceIntentRecordV1::new(
+                WindowsServiceDesiredState::Running,
+                Some(identity),
+                0,
+            )
+            .expect("valid precommit boot intent"),
+        ),
+        active_install: None,
+    }
+}
+
 #[test]
 fn windows_service_host_executes_every_v1_invocation_vector() {
     let contract = fixture();
@@ -118,16 +137,33 @@ fn windows_service_host_executes_every_v1_shutdown_scenario() {
 #[test]
 fn windows_service_boot_admission_preserves_durable_intent() {
     assert_eq!(
-        reduce_windows_service_boot_admission(&boot_assessment(
-            WindowsServiceDesiredState::Running
-        )),
+        reduce_windows_service_boot_admission(
+            &boot_assessment(WindowsServiceDesiredState::Running),
+            false
+        ),
         WindowsServiceBootAdmission::Run
     );
     assert_eq!(
-        reduce_windows_service_boot_admission(&boot_assessment(
-            WindowsServiceDesiredState::Stopped
-        )),
+        reduce_windows_service_boot_admission(
+            &boot_assessment(WindowsServiceDesiredState::Stopped),
+            false
+        ),
         WindowsServiceBootAdmission::RemainStopped
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(
+            &boot_assessment(WindowsServiceDesiredState::Stopped),
+            true
+        ),
+        WindowsServiceBootAdmission::RemainStopped
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(&precommit_boot_assessment(), false),
+        WindowsServiceBootAdmission::Refuse
+    );
+    assert_eq!(
+        reduce_windows_service_boot_admission(&precommit_boot_assessment(), true),
+        WindowsServiceBootAdmission::Run
     );
     for assessment in [
         WindowsServiceLifecycleStateAssessment::Stable {
@@ -139,7 +175,11 @@ fn windows_service_boot_admission_preserves_durable_intent() {
         WindowsServiceLifecycleStateAssessment::Inconsistent,
     ] {
         assert_eq!(
-            reduce_windows_service_boot_admission(&assessment),
+            reduce_windows_service_boot_admission(&assessment, false),
+            WindowsServiceBootAdmission::Refuse
+        );
+        assert_eq!(
+            reduce_windows_service_boot_admission(&assessment, true),
             WindowsServiceBootAdmission::Refuse
         );
     }

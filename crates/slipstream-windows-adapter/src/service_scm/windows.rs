@@ -5,7 +5,8 @@ use super::{
     WindowsServiceScmGateOutcome, WindowsServiceScmGateReason,
 };
 use crate::service_lifecycle::{
-    WindowsServiceAction, WindowsServiceEffects, WindowsServiceIdentity, WINDOWS_SERVICE_NAME,
+    WindowsServiceAction, WindowsServiceEffects, WindowsServiceIdentity,
+    WINDOWS_SERVICE_MANAGED_START_ARGUMENT, WINDOWS_SERVICE_NAME,
 };
 use crate::service_lifecycle_state::WindowsServiceLifecycleStateEffects;
 use crate::service_observer::windows::{
@@ -367,7 +368,9 @@ fn start_exact_service(
     identity: &WindowsServiceIdentity,
     payload: &WindowsStagedPayloadEvidence,
 ) -> Result<(), WindowsServiceScmError> {
-    let ok = unsafe { StartServiceW(service.raw(), 0, null()) };
+    let managed_start = wide_null(WINDOWS_SERVICE_MANAGED_START_ARGUMENT);
+    let arguments = [managed_start.as_ptr()];
+    let ok = unsafe { StartServiceW(service.raw(), arguments.len() as u32, arguments.as_ptr()) };
     if ok == 0 {
         let code = unsafe { GetLastError() };
         if code == ERROR_SERVICE_ALREADY_RUNNING

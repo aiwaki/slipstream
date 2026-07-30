@@ -163,9 +163,13 @@ physical reboot test. It registers the exact owned service as
 `install`, `start`, or crash recovery may be accepted, including reducer
 no-change paths. Service boot entry separately requires matching durable
 `Running` intent and active-install evidence plus the same exact SCM
-configuration. Durable `Stopped` intent exits cleanly without starting the
-worker, while missing, interrupted, unknown, or inconsistent evidence fails
-closed; only the public management start may deliberately resume it. The
+configuration. The controller-owned initial start is the sole exception:
+SCM passes the exact `--slipstream-managed-start-v1` argument so the worker can
+reach readiness before the lifecycle commits active-install evidence. An
+ordinary automatic boot has no marker and cannot use that pre-commit path.
+Durable `Stopped` intent exits cleanly without starting the worker, while
+missing, interrupted, unknown, or inconsistent evidence fails closed; only the
+public management start may deliberately resume it. The
 disposable native test stops the service, invokes the SCM start path directly,
 requires the stopped intent to remain authoritative, then proves an explicit
 management start can resume it. It also changes only the owned service back to

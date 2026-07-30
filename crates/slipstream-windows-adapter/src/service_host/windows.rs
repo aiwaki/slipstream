@@ -9,7 +9,8 @@ use super::{
 use crate::data_plane::{WindowsDataPlaneCommand, WindowsDataPlaneConfig, WindowsDataPlaneEvent};
 use crate::service_controller::{WindowsServiceController, WindowsServiceControllerError};
 use crate::service_lifecycle::{
-    WindowsServiceCommand, WindowsServiceIdentity, WINDOWS_SERVICE_NAME,
+    WindowsServiceCommand, WindowsServiceIdentity, WINDOWS_SERVICE_MANAGED_START_ARGUMENT,
+    WINDOWS_SERVICE_NAME,
 };
 use crate::service_lifecycle_state::WindowsServiceLifecycleStateEffects;
 use crate::service_observer::WindowsScmObserver;
@@ -143,7 +144,7 @@ fn run_service_dispatcher() -> Result<(), WindowsServiceHostNativeError> {
     Ok(())
 }
 
-unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
+unsafe extern "system" fn service_main(argc: u32, argv: *mut *mut u16) {
     REQUESTED_CONTROL.store(CONTROL_NONE, Ordering::Release);
     let service_name = wide_null(WINDOWS_SERVICE_NAME);
     let status_handle = unsafe {
@@ -159,7 +160,9 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
     if !report_status(status_handle, state.initial_service_status(), 0) {
         return;
     }
-    match observe_windows_service_boot_admission() {
+    match observe_windows_service_boot_admission(service_main_has_managed_start_argument(
+        argc, argv,
+    )) {
         WindowsServiceBootAdmission::Run => {}
         WindowsServiceBootAdmission::RemainStopped => {
             let _ = report_status(status_handle, WindowsServiceHostStatus::Stopped, 0);
@@ -214,11 +217,11 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
     }
 }
 
-fn observe_windows_service_boot_admission() -> WindowsServiceBootAdmission {
+fn observe_windows_service_boot_admission(managed_start: bool) -> WindowsServiceBootAdmission {
     let assessment = WindowsServiceLifecycleStateEffects::new()
         .collect()
         .assess();
-    let admission = reduce_windows_service_boot_admission(&assessment);
+    let admission = reduce_windows_service_boot_admission(&assessment, managed_start);
     if admission != WindowsServiceBootAdmission::Run {
         return admission;
     }
@@ -230,6 +233,25 @@ fn observe_windows_service_boot_admission() -> WindowsServiceBootAdmission {
         return WindowsServiceBootAdmission::Refuse;
     }
     WindowsServiceBootAdmission::Run
+}
+
+fn service_main_has_managed_start_argument(argc: u32, argv: *mut *mut u16) -> bool {
+    if argc != 2 || argv.is_null() {
+        return false;
+    }
+    let argument = unsafe { *argv.add(1) };
+    if argument.is_null() {
+        return false;
+    }
+    let expected = WINDOWS_SERVICE_MANAGED_START_ARGUMENT
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    for (index, expected_unit) in expected.iter().enumerate() {
+        if unsafe { *argument.add(index) } != *expected_unit {
+            return false;
+        }
+    }
+    unsafe { *argument.add(expected.len()) == 0 }
 }
 
 unsafe extern "system" fn service_control_handler(control: u32) {
@@ -482,6 +504,30 @@ mod tests {
     const MAX_PROCESS_IMAGE_U16: usize = 32_768;
     const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(20);
     const TEST_CRASH_EXIT_CODE: u32 = 0x5354_4C50;
+
+    #[test]
+    fn managed_start_argument_is_exact_and_bounded() {
+        assert!(!service_main_has_managed_start_argument(0, null_mut()));
+
+        let mut service_name = wide_null(WINDOWS_SERVICE_NAME);
+        let mut marker = wide_null(WINDOWS_SERVICE_MANAGED_START_ARGUMENT);
+        let mut exact_arguments = [service_name.as_mut_ptr(), marker.as_mut_ptr()];
+        assert!(service_main_has_managed_start_argument(
+            exact_arguments.len() as u32,
+            exact_arguments.as_mut_ptr()
+        ));
+        assert!(!service_main_has_managed_start_argument(
+            1,
+            exact_arguments.as_mut_ptr()
+        ));
+
+        let mut wrong = wide_null("--slipstream-managed-start-v2");
+        let mut wrong_arguments = [service_name.as_mut_ptr(), wrong.as_mut_ptr()];
+        assert!(!service_main_has_managed_start_argument(
+            wrong_arguments.len() as u32,
+            wrong_arguments.as_mut_ptr()
+        ));
+    }
 
     #[test]
     fn production_host_is_self_managing_idempotent_and_stops_through_scm() {

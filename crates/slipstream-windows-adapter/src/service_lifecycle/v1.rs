@@ -6,6 +6,7 @@ use std::fmt;
 
 pub const WINDOWS_SERVICE_LIFECYCLE_CONTRACT_VERSION: u32 = 1;
 pub const WINDOWS_SERVICE_NAME: &str = "dev.slipstream.service";
+pub const WINDOWS_SERVICE_MANAGED_START_ARGUMENT: &str = "--slipstream-managed-start-v1";
 pub const DEFAULT_MAX_CRASH_RESTARTS: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

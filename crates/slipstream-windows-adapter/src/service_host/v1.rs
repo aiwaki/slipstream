@@ -19,19 +19,23 @@ pub enum WindowsServiceBootAdmission {
 
 pub fn reduce_windows_service_boot_admission(
     assessment: &WindowsServiceLifecycleStateAssessment,
+    managed_start: bool,
 ) -> WindowsServiceBootAdmission {
     let WindowsServiceLifecycleStateAssessment::Stable {
         intent: Some(intent),
-        active_install: Some(active_install),
+        active_install,
     } = assessment
     else {
         return WindowsServiceBootAdmission::Refuse;
     };
-    if intent.identity.as_ref() != Some(&active_install.identity) {
-        return WindowsServiceBootAdmission::Refuse;
-    }
     match intent.desired {
-        WindowsServiceDesiredState::Running => WindowsServiceBootAdmission::Run,
+        WindowsServiceDesiredState::Running => match active_install {
+            Some(active_install) if intent.identity.as_ref() == Some(&active_install.identity) => {
+                WindowsServiceBootAdmission::Run
+            }
+            None if managed_start && intent.identity.is_some() => WindowsServiceBootAdmission::Run,
+            Some(_) | None => WindowsServiceBootAdmission::Refuse,
+        },
         WindowsServiceDesiredState::Stopped => WindowsServiceBootAdmission::RemainStopped,
         WindowsServiceDesiredState::Absent | WindowsServiceDesiredState::Unknown => {
             WindowsServiceBootAdmission::Refuse

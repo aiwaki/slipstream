@@ -9,6 +9,9 @@
     "normal_error_control": true,
     "configuration_revalidated_before_install_start_recover": true,
     "configuration_drift_fails_closed": true,
+    "initial_managed_start_requires_exact_marker": true,
+    "initial_managed_start_may_precede_active_install_commit": true,
+    "automatic_boot_requires_committed_active_install": true,
     "stopped_intent_remains_stopped_on_scm_start": true,
     "unknown_or_inconsistent_intent_fails_closed": true,
     "explicit_start_required_to_resume_stopped_intent": true,
@@ -26,6 +29,7 @@
   "disposable_native_qualification": {
     "architectures": ["amd64", "arm64"],
     "generation": 41,
+    "managed_install_start_marker": "--slipstream-managed-start-v1",
     "direct_scm_start_with_stopped_intent": true,
     "configuration_drift_injected": true,
     "final_absence_required": true
