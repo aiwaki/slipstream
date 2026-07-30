@@ -624,9 +624,13 @@ therefore stays phased and closed to production traffic:
    Done in PR #269; exact-main native run `30490498603`, CI `30490498586`, and
    audit `30490498662` passed on
    `66f0bb697aa60b4387d4e4544d6ea06d2fffbae5`.
-7. Qualify the remaining reboot, sleep/wake, update, uninstall, broader crash,
-   and external network-tool coexistence scenarios on disposable AMD64 and
-   ARM64 Windows. The first bounded subgate now reuses one exact owned Wintun
+7. Qualify architecture-dependent binaries, service configuration, packet
+   contracts, and cleanup on native disposable AMD64 and ARM64 Windows.
+   Qualify each physical power-state transaction on at least one disposable
+   native Windows host matching the selected artifact architecture; require a
+   second physical architecture only when the behavior depends on its hardware,
+   driver, or ABI rather than the shared Windows SCM and lifecycle contract.
+   The first bounded subgate now reuses one exact owned Wintun
    name across capture generations 1 and 2 only after proving the first
    generation's route, address, session, and adapter absent, with identical
    system-route evidence before, between, and after both cycles. It passed in
@@ -683,6 +687,16 @@ therefore stays phased and closed to production traffic:
    exact uninstall and terminal product absence. Static native CI parses and
    freezes the harness but cannot claim the physical result. The first runtime
    qualification must execute on the disposable Parallels Windows 11 host.
+   Complete in PR #287 after native AMD64/ARM64 run `30554494634`: exact-main
+   ARM64 artifact `8764371538` passed the two-phase transaction from a clean
+   Parallels snapshot. A real restart changed boot identity and service PID,
+   the replacement service belonged to the new boot, the read-only
+   DNS/proxy/PAC snapshot and independent sentinel remained unchanged, and
+   exact uninstall reached terminal absence. This proves the physical ARM64
+   transaction together with native AMD64/ARM64 release-host preflight; it does
+   not claim a physical AMD64 reboot. The next bounded gates are
+   production-host sleep/wake recovery and full updater/uninstall
+   orchestration, still without production networking composition.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.
