@@ -11,9 +11,12 @@ use crate::service_native::{WindowsServiceNativeEffects, WindowsServiceNativeErr
 use crate::service_operation_lock::{
     acquire_service_operation_lock, WindowsServiceOperationLockError,
 };
-use crate::service_ownership::WindowsServiceOwnershipCollector;
+use crate::service_ownership::{
+    assess_windows_service_ownership, WindowsOwnerRecordEvidence, WindowsServiceOwnershipCollector,
+};
 use std::fmt;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct WindowsServiceController {
@@ -51,7 +54,9 @@ impl WindowsServiceController {
         let lifecycle_evidence = WindowsServiceLifecycleStateEffects::new()
             .collect()
             .assess();
-        let ownership_evidence = WindowsServiceOwnershipCollector::new().assess();
+        let ownership_input = WindowsServiceOwnershipCollector::new().collect_input();
+        refuse_self_uninstall(command, &self.source_path, &ownership_input.record)?;
+        let ownership_evidence = assess_windows_service_ownership(&ownership_input);
         let state = reconstruct_windows_service_state(&lifecycle_evidence, &ownership_evidence)?;
 
         let mut native = WindowsServiceNativeEffects::new(self.source_path.clone());
@@ -63,6 +68,30 @@ impl WindowsServiceController {
         let mut effects = LockedNativeEffects { inner: &mut native };
         lifecycle.execute(command, &mut effects).map_err(Into::into)
     }
+}
+
+fn refuse_self_uninstall(
+    command: &WindowsServiceCommand,
+    source_path: &Path,
+    owner_record: &WindowsOwnerRecordEvidence,
+) -> Result<(), WindowsServiceControllerError> {
+    if !matches!(command, WindowsServiceCommand::Uninstall) {
+        return Ok(());
+    }
+    let WindowsOwnerRecordEvidence::OwnerOnly { record } = owner_record else {
+        return Ok(());
+    };
+    let source = fs::canonicalize(source_path)
+        .map_err(|_| WindowsServiceControllerError::SelfUninstallRequiresExternalController)?;
+    let installed = fs::canonicalize(&record.executable_path)
+        .map_err(|_| WindowsServiceControllerError::SelfUninstallRequiresExternalController)?;
+    if source
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&installed.to_string_lossy())
+    {
+        return Err(WindowsServiceControllerError::SelfUninstallRequiresExternalController);
+    }
+    Ok(())
 }
 
 const fn command_requires_reboot_admission(command: &WindowsServiceCommand) -> bool {
@@ -89,6 +118,7 @@ impl WindowsServiceEffects for LockedNativeEffects<'_> {
 #[derive(Debug)]
 pub enum WindowsServiceControllerError {
     InvalidRestartLimit,
+    SelfUninstallRequiresExternalController,
     OperationLock(String),
     Reconciliation(WindowsServiceReconciliationError),
     Native(WindowsServiceNativeError),
@@ -101,6 +131,9 @@ impl fmt::Display for WindowsServiceControllerError {
             Self::InvalidRestartLimit => {
                 formatter.write_str("Windows service crash restart limit must be positive")
             }
+            Self::SelfUninstallRequiresExternalController => formatter.write_str(
+                "Windows service uninstall requires an exact external controller executable",
+            ),
             Self::OperationLock(error) => write!(formatter, "{error}"),
             Self::Reconciliation(error) => write!(formatter, "{error}"),
             Self::Native(error) => write!(formatter, "{error}"),
