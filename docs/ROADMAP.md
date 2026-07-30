@@ -650,9 +650,18 @@ therefore stays phased and closed to production traffic:
    and exact terminal absence on native AMD64 and ARM64 without composing
    production networking. Done in PR #275; exact-main native run
    `30501851242`, CI `30501851261`, and audit `30501851254` passed on
-   `ae4d47efdf8b3d15f5242eb767a809b5c775e75e`. Reboot, sleep/wake, broader
-   crash recovery, full updater/uninstall orchestration, and external
-   network-tool coexistence remain open.
+   `ae4d47efdf8b3d15f5242eb767a809b5c775e75e`. The following bounded
+   subgate installed that same real host, revalidated its exact SCM PID,
+   canonical image path, SHA-256, owner and active records, terminated only
+   the retained verified process handle, and required public `manage recover`
+   to replace the process instance and reset its crash budget. Replacement is
+   proven by PID plus Windows creation time so PID reuse cannot create a false
+   pass; repeated recovery is idempotent, an independent sentinel survives,
+   and uninstall proves exact absence. Done in PR #277; exact-main native run
+   `30505427268`, CI `30505427291`, and audit `30505427304` passed on
+   `0ed37e7b828bb642700d6191e10206061c27c525`. Reboot, sleep/wake, full
+   updater/uninstall orchestration, and broader external network-tool
+   coexistence remain open.
 8. Compose packet effects into the production SCM host only after every earlier
    gate is green and teardown proves no adapter, route, process, or durable
    ownership residue.

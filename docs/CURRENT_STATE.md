@@ -9,6 +9,29 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Last exact-main evidence audit: 2026-07-30, through product merge
+`0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main
+native AMD64/ARM64 run `30505427268`, CI `30505427291`, and audit
+`30505427304` passed on that SHA. Native jobs `90754032083` and
+`90754032064` installed the real `slipstream-windows-service.exe` through its
+public CLI, verified the exact SCM PID, canonical image path, SHA-256, owner
+record, and active-install record, then opened that exact process with
+termination and synchronization rights. After abrupt termination, public
+`manage recover` admitted a new process instance and reset the crash budget.
+The replacement is proven by PID plus process creation time rather than PID
+inequality alone, so Windows PID reuse cannot satisfy the gate. A repeated
+recovery kept the same verified instance, an independent sentinel survived,
+and uninstall proved exact terminal absence on both architectures.
+
+The first native attempt was rejected because the test opened the process
+without `SYNCHRONIZE`, so `WaitForSingleObject` returned `WAIT_FAILED`.
+The first corrected review head then exposed a second fixture risk: numeric
+PIDs can be reused. Neither result was accepted as product evidence. The
+merged gate uses one RAII-owned verified handle and process creation time,
+passed both native architectures without reruns, and did not compose
+production networking or mutate routes, DNS, proxy/PAC/VPN, drivers, or
+external processes/services.
+
+Previous exact-main evidence audit: 2026-07-30, through product merge
 `ae4d47efdf8b3d15f5242eb767a809b5c775e75e` (PR #275). Exact-main
 native AMD64/ARM64 run `30501851242`, CI `30501851261`, and audit
 `30501851254` passed on that SHA. Native jobs `90743016854` and
@@ -64,9 +87,10 @@ constructor call. The final PR head and exact-main AMD64/ARM64 jobs passed
 without reruns.
 
 The next M4 work is the remaining disposable Windows resilience
-qualification: reboot, sleep/wake, full updater/uninstall orchestration,
-broader external network-tool coexistence, and any crash scenarios not already
-covered by the current child-termination and production-host generation gates.
+qualification: reboot, sleep/wake, full updater/uninstall orchestration, and
+broader external network-tool coexistence. Explicit production-host process
+crash and public recovery are now covered independently of the earlier
+Wintun-child and generation-replacement gates.
 Each gate must prove exact cleanup and preserve independently owned network
 state before production service-host composition can begin. That later
 composition must reuse the frozen capture, flow-binding, byte-owner,
