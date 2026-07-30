@@ -562,7 +562,8 @@ mod tests {
             fs::remove_dir_all(&scratch).expect("remove stale generation scratch");
         }
         fs::create_dir(&scratch).expect("create generation scratch");
-        let independent_owner = scratch.join("independent-owner.sentinel");
+        fs::create_dir_all(&root).expect("create production-host runtime root");
+        let independent_owner = root.join("independent-owner.sentinel");
         let independent_evidence = b"independent owner must survive both production generations";
         fs::write(&independent_owner, independent_evidence)
             .expect("write independent-owner sentinel");
