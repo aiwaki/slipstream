@@ -79,6 +79,12 @@ jobs:
       - name: Build the production host and disposable Windows service fixtures
         run: cargo build --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --features disposable-windows-service-fixture --bins
 
+      - name: Qualify delayed exact payload image release
+        timeout-minutes: 2
+        env:
+          SLIPSTREAM_WINDOWS_DISPOSABLE_CI: "1"
+        run: cargo test --locked --manifest-path crates/slipstream-windows-adapter/Cargo.toml --lib service_payload::windows::tests::removal_waits_for_the_exact_executable_to_leave_use -- --exact --test-threads=1
+
       - name: Parse physical reboot qualification harness
         shell: pwsh
         run: |

@@ -248,6 +248,34 @@ production service entry point refuses to compile on Windows MSVC without
 `target_feature = "crt-static"`. A new exact-main artifact and a full physical
 reboot transaction are still required before this gate can pass.
 
+PR #286 merged the static CRT correction as
+`19f2a263d3ccb686128675d1ff387fde771a3846`. Exact-main CI
+`30548867352`, audit `30548869879`, and native run `30548867249` passed on
+that SHA; native jobs `90892002017` (AMD64) and `90892002053` (ARM64)
+published the commit-bound bundles. The exact ARM64 artifact `8762073225`
+matched its manifest, sizes, and SHA-256 values before and after transfer to
+the clean Parallels Windows 11 ARM64 guest.
+
+The guest passed `prepare`, then a real Windows restart changed the exact
+service process from PID `2352` to PID `3344`. `resume` proved the new process
+belonged to the new boot but exposed a payload-removal race during uninstall.
+SCM can report `Stopped` and remove the exact service before the service
+process releases its executable image. The previous removal order deleted the
+owner record first, then failed to mark the still-used executable for deletion,
+leaving an active-install record and exact payload with durable `Absent`
+intent. The controller refused that incomplete cross-evidence. Exact rollback
+re-verified the active record and payload hash, removed only those two owned
+remnants, retained the independent sentinel and absent intent, and left guest
+DNS/proxy plus host DNS unchanged.
+
+Payload removal now waits for bounded `ERROR_ACCESS_DENIED` or
+`ERROR_SHARING_VIOLATION` release of the exact hash-verified executable before
+deleting the owner record. A native regression holds the staged executable
+without delete sharing, releases it after a delay, and requires complete
+payload plus owner-record absence. This does not enumerate or terminate
+processes and has no networking surface. A new exact-main bundle and complete
+physical reboot transaction are still required before the gate may pass.
+
 The intended disposable-host sequence is:
 
 ```powershell

@@ -25,9 +25,12 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::FromRawHandle;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
+use std::thread;
+use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{
-    GetLastError, LocalFree, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
-    GENERIC_READ, GENERIC_WRITE, HLOCAL, INVALID_HANDLE_VALUE,
+    GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND,
+    ERROR_PATH_NOT_FOUND, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE, HLOCAL,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -51,6 +54,8 @@ const WINDOWS_PAYLOAD_PENDING_SUFFIX: &str = ".pending-v1";
 const WINDOWS_OWNER_RECORD_PENDING_FILE_NAME: &str = ".service-owner-v1.json.pending-v1";
 const MAX_WINDOWS_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 const OWNER_ONLY_SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)";
+const PAYLOAD_REMOVE_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const PAYLOAD_REMOVE_WAIT_INTERVAL: Duration = Duration::from_millis(50);
 
 fn windows_payload_file_name(identity: &WindowsServiceIdentity) -> String {
     format!(
@@ -162,24 +167,9 @@ impl WindowsServicePayloadEffects {
             ));
         }
 
-        let mut executable_file = open_existing_file(
-            &paths.executable,
-            GENERIC_READ | READ_CONTROL | DELETE,
-            FILE_SHARE_READ | FILE_SHARE_DELETE,
-        )?
-        .ok_or(WindowsServicePayloadError::ExistingState(
-            "owned executable disappeared before removal",
-        ))?;
-        verify_executable_handle(
-            &mut executable_file,
-            &paths.executable,
-            &identity.executable_sha256,
-        )?;
-
+        mark_owned_executable_for_delete(&paths.executable, &identity.executable_sha256)?;
         mark_delete_on_close(&record_file, "delete owner record")?;
         drop(record_file);
-        mark_delete_on_close(&executable_file, "delete owned executable")?;
-        drop(executable_file);
         Ok(())
     }
 
@@ -421,6 +411,54 @@ impl WindowsServicePayloadEffects {
             _ => Err(WindowsServicePayloadError::UnsupportedAction(action.kind())),
         }
     }
+}
+
+fn mark_owned_executable_for_delete(
+    executable_path: &Path,
+    expected_sha256: &str,
+) -> Result<(), WindowsServicePayloadError> {
+    let deadline = Instant::now() + PAYLOAD_REMOVE_WAIT_TIMEOUT;
+    loop {
+        match open_existing_file(
+            executable_path,
+            GENERIC_READ | READ_CONTROL | DELETE,
+            FILE_SHARE_READ | FILE_SHARE_DELETE,
+        ) {
+            Ok(Some(mut executable_file)) => {
+                verify_executable_handle(&mut executable_file, executable_path, expected_sha256)?;
+                match mark_delete_on_close(&executable_file, "delete owned executable") {
+                    Ok(()) => {
+                        drop(executable_file);
+                        return Ok(());
+                    }
+                    Err(error)
+                        if payload_delete_is_transient(&error) && Instant::now() < deadline =>
+                    {
+                        drop(executable_file);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(None) => {
+                return Err(WindowsServicePayloadError::ExistingState(
+                    "owned executable disappeared before removal",
+                ))
+            }
+            Err(error) if payload_delete_is_transient(&error) && Instant::now() < deadline => {}
+            Err(error) => return Err(error),
+        }
+        thread::sleep(PAYLOAD_REMOVE_WAIT_INTERVAL);
+    }
+}
+
+fn payload_delete_is_transient(error: &WindowsServicePayloadError) -> bool {
+    matches!(
+        error,
+        WindowsServicePayloadError::Win32 {
+            code: ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION,
+            ..
+        }
+    )
 }
 
 impl WindowsServiceEffects for WindowsServicePayloadEffects {
@@ -1020,6 +1058,7 @@ impl Drop for OwnedLocalSecurityDescriptor {
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::windows::fs::OpenOptionsExt;
 
     const PAYLOAD: &[u8] = b"slipstream-windows-evidence";
     const PAYLOAD_SHA256: &str = "96c45d5cb404c8500d3a2f49e8aecc6b5ff98a147f0d0e6f69e325daa60850ab";
@@ -1075,6 +1114,43 @@ mod tests {
             .apply(&WindowsServiceAction::RemoveOwnedPayload { identity })
             .expect("remove exact owned payload");
 
+        assert!(!root
+            .join("Slipstream")
+            .join(WINDOWS_OWNER_RECORD_FILE_NAME)
+            .exists());
+        fs::remove_dir_all(root).expect("remove disposable payload root");
+        fs::remove_file(source).expect("remove disposable payload source");
+    }
+
+    #[test]
+    fn removal_waits_for_the_exact_executable_to_leave_use() {
+        if std::env::var_os("SLIPSTREAM_WINDOWS_DISPOSABLE_CI").is_none() {
+            return;
+        }
+        let (mut effects, root, source) = disposable_effects("delayed-image-release");
+        let identity = identity(1);
+        effects
+            .apply(&WindowsServiceAction::StagePayload {
+                identity: identity.clone(),
+            })
+            .expect("stage exact payload");
+        let payload_path = windows_payload_path(&root.join("Slipstream"), &identity);
+        let locked_payload = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&payload_path)
+            .expect("open payload without delete sharing");
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            drop(locked_payload);
+        });
+
+        effects
+            .apply(&WindowsServiceAction::RemoveOwnedPayload { identity })
+            .expect("wait for and remove the exact owned payload");
+        release.join().expect("release payload lock");
+
+        assert!(!payload_path.exists());
         assert!(!root
             .join("Slipstream")
             .join(WINDOWS_OWNER_RECORD_FILE_NAME)

@@ -71,6 +71,51 @@ fn payload_commit_marker_is_written_after_the_executable() {
 }
 
 #[test]
+fn payload_removal_waits_for_image_release_before_deleting_the_owner_record() {
+    let source = include_str!("../src/service_payload/windows.rs").replace("\r\n", "\n");
+    let executable_delete = source
+        .find("mark_owned_executable_for_delete(&paths.executable")
+        .expect("bounded exact executable deletion");
+    let record_delete = source
+        .find("mark_delete_on_close(&record_file, \"delete owner record\")")
+        .expect("owner record deletion");
+
+    assert!(executable_delete < record_delete);
+    for required in [
+        "PAYLOAD_REMOVE_WAIT_TIMEOUT",
+        "PAYLOAD_REMOVE_WAIT_INTERVAL",
+        "ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION",
+        "verify_executable_handle",
+    ] {
+        assert!(
+            source.contains(required),
+            "payload removal must use {required}"
+        );
+    }
+}
+
+#[test]
+fn native_workflow_runs_delayed_payload_release_on_each_architecture() {
+    let workflow =
+        include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml")
+            .replace("\r\n", "\n");
+
+    for required in [
+        "- runner: windows-latest",
+        "- runner: windows-11-arm",
+        "name: Qualify delayed exact payload image release",
+        "SLIPSTREAM_WINDOWS_DISPOSABLE_CI: \"1\"",
+        "service_payload::windows::tests::removal_waits_for_the_exact_executable_to_leave_use",
+        "--exact --test-threads=1",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "native delayed payload-release gate must include {required}"
+        );
+    }
+}
+
+#[test]
 fn pending_handles_are_registered_before_fallible_io() {
     let source = include_str!("../src/service_payload/windows.rs").replace("\r\n", "\n");
     let executable_registration = source
