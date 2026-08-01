@@ -13,11 +13,53 @@ on disposable Windows, still without production networking composition.
 Updater/uninstall orchestration remains the following bounded gate. The exact
 ARM64 physical reboot lifecycle gate is complete.
 
-Current user-facing priority: complete the bounded two-replacement semantic
-owned-Geph recovery on branch `codex/bounded-geph-exit-replacement`, merge only
-after required CI, then run exactly one protected owned-Geph qualification for
-that new exact `main` SHA. A primary-Mac install may use only the artifact from
-that successful run and must retain the same immediate rollback rule.
+Current user-facing priority: close the gap between the protected browser
+qualification and the browser path a normal workstation actually receives.
+The Chromium companion is not published or installed for the user's ordinary
+browser, while the Safari companion remains an unsigned, runtime-unqualified
+preview. Until a browser-independent recovery trigger or a production-delivered
+companion exists, another primary-Mac install would repeat a gate that cannot
+exercise the qualified semantic path. Do not add a hostname rule and do not
+reinstall before this generic gap is fixed and requalified.
+
+PR #293 merged the bounded two-replacement owned-Geph correction as exact main
+`62aabd64d3f9dd0fd5f08401b198fc2ee35ae37d`. Exact-main CI `30693565371`,
+audit `30693565390`, and Windows native qualification `30693565372` passed.
+The sole protected run `30711121048` passed account-backed owned-Geph initial,
+trayless, and KeepAlive-recovered payload, both Chromium semantic scenarios,
+every cleanup assertion, and system-network non-mutation. Artifact
+`8821938264`,
+`Slipstream-owned-geph-qualified-62aabd64d3f9dd0fd5f08401b198fc2ee35ae37d`,
+matched inner ZIP SHA-256
+`e50bd77ca4fa94ea8077c5c105bc58ac34463945c50f3d0d29160f5b0f3a64d9`.
+
+The controlled primary-Mac transaction installed only that exact artifact.
+Its tray, daemon, and Geph hashes matched the qualified bundle; StatusV2 became
+active; the private PF anchor contained only the expected loopback TCP/443
+rules; `/etc/pf.conf`, global PF, DNS `111.88.96.50` / `111.88.96.51`,
+proxy/PAC, default route, owned Geph PID/hash, and Telegram proxy remained
+unchanged. Discord updater returned HTTP 200, Discord gateway completed
+TLS/HTTP, YouTube returned a complete page, `yt-dlp` downloaded a real
+Googlevideo fragment, and ChatGPT, CrystalIDEA, Modrinth, and Weather completed
+TLS/HTTP payloads.
+
+The next required generic smoke, `xpersonatoy.com`, returned HTTP 200 but ended
+with curl error 18 after 16,401 bytes. Immediate rollback removed and disabled
+the exact root daemon, listener, private anchor, token, status, socket,
+attestation, witness, and root runtime; restored the prior app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`;
+and left owned Geph PID `55818` running. PF is disabled, the private anchor is
+empty, proxy/PAC is off, and DNS/default route match preflight.
+
+Post-rollback A/B confirms that the origin path is genuinely degraded rather
+than made healthy by removal: direct traffic timed out after 50 seconds with
+13,672 bytes. The unchanged owned `:9954` Geph session returned HTTP 429 with
+an 18-byte response. Unlike the prior fixture-backed semantic scenario, the
+curl gate cannot emit Chromium's exact incomplete-response signal, and the
+user's ordinary Chrome/Safari installation has no production-delivered
+companion that could do so. The current two-replacement recovery therefore had
+no authorized trigger. This is a product delivery/recovery boundary, not
+evidence for a per-site policy entry.
 
 PR #292 merged the first semantic owned-Geph recovery as exact main
 `3126f8404419403aee0eac0585a112c20b66cb78`. The sole protected run
@@ -574,7 +616,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Ordinary v1/v2 gates pass; one account-backed protected qualification remains | PRs #219-#258 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Protected run `30429690683` passed packaged resources, the daemon-free boundary, all three owned-Geph payload phases, unchanged system network state, and final cleanup. Its second browser scenario did not receive EOF because the disposable HTTP/1.1 fixture kept the socket alive after a deliberately short body; no artifact or install followed. PR #258 fixed that fixture and added a real TLS keep-alive `IncompleteRead` regression, then merged as `90c07771babfd32e797fdb8250911ca922274b4d`; exact-main CI `30431655863` and audit `30431655851` pass. Exactly one protected two-scenario run remains after the next UTC-day account budget reset for the then-current live `main`; Discord/YouTube and external DNS/proxy/PAC/VPN/PF owners remain untouched, and installation remains prohibited before that run publishes its exact artifact. |
+| M1 - Autonomous Routing V1 | Core routing and protected semantic recovery qualify; ordinary-browser delivery remains open | PRs #219-#293 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload and replacement, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. Protected run `30711121048` passed packaged resources, the daemon-free boundary, all three account-backed owned-Geph payload phases, both Chromium semantic scenarios, unchanged system network state, and final cleanup. The exact artifact then passed the controlled workstation install and all preceding smokes, but `xpersonatoy.com` ended with a partial HTTP response before any production-delivered semantic signal could reach the daemon. Immediate rollback completed without mutating external DNS/proxy/PAC/VPN/PF owners. M1 therefore still needs a generic production-reachable trigger or a production-delivered companion before another install; Discord/YouTube remain local-only. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, generation, production-host crash, and physical ARM64 reboot resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PRs #267-#279 established packet handoff, route invalidation, capture/service generation, crash recovery, and boot admission. PR #287 merged the exact payload-release correction as `8ef9fb3d3d4643f056793578511b693ef68b3fe5`; exact-main native AMD64/ARM64 run `30554494634`, CI `30554495633`, and audit `30554495985` passed. Its exact ARM64 artifact passed the two-phase physical Parallels reboot and exact uninstall transaction. This is physical ARM64 evidence plus native AMD64/ARM64 binary and lifecycle preflight, not a physical AMD64 reboot claim. The evaluation stack remains development-only and the production SCM host remains no-network. Sleep/wake, full updater/uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
@@ -1043,24 +1085,25 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not retry the controlled transaction on the primary workstation yet. After
-the next UTC-day Geph authentication reset, verify the physical repository,
-the then-current live `main`, its worktree, merged PRs, and exact-main CI and
-audit. The live SHA must contain product merge
-`45db4321bafe244c87986c4c08daf1c3afaf8bf2`, and no protected
-owned-Geph qualification may already exist for it. Dispatch the protected
-workflow exactly once for that live SHA. Require complete account-backed Geph
-payload initially, without the tray, and after KeepAlive recovery; both frozen
-Chromium semantic scenarios; exact cleanup; artifact identity; and no system
-network mutation.
+Do not retry the controlled transaction on the primary workstation yet. The
+next product change must make partial-response evidence from an ordinary
+browser reach the existing bounded exact-host owned-Geph confirmation path.
+Prefer a browser-independent transport trigger when it can distinguish strong
+or repeated server-first failure evidence; otherwise production-deliver and
+qualify the companion. The change must remain exact-host bounded, preserve
+static-policy precedence, and add no per-site rule. Discord, YouTube, and
+Googlevideo remain local-only, and external DNS/proxy/PAC/VPN/PF owners remain
+read-only.
 
-If any gate is blocked or fails, do not install and continue only from the
-exact evidenced defect in a small PR. If the full gate passes, download only
-that run's exact qualified artifact. A user-present workstation transaction
-may then use the existing snapshot and immediate rollback boundary, preserving
-DNS `111.88.96.50/51` and all external proxy, PAC, VPN, and PF owners. Do not
-reuse an older artifact, substitute a release or local build, or repeat a
-failed workstation attempt in the same session.
+After that generic delivery/recovery gap is fixed and merged, verify the live
+`main` and matching CI/audit, then run exactly one protected qualification for
+that SHA. Require complete account-backed owned-Geph payload initially,
+without the tray, and after KeepAlive recovery; semantic and transport
+regressions; exact cleanup; artifact identity; and no system-network mutation.
+Only a passing run may publish the artifact used by another controlled
+workstation transaction with the existing snapshot and immediate rollback
+boundary. Do not reuse an older artifact, substitute a release or local build,
+or repeat a failed workstation attempt in the same session.
 
 Safari may advance through deterministic source, Swift contract tests, and
 unsigned packaging, but the signed app-extension sandbox/socket path must be
