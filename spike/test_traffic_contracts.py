@@ -225,6 +225,11 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
     monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
     monkeypatch.setattr(tproxy, "_local_zero_payload_failures", {})
+    monkeypatch.setattr(
+        tproxy,
+        "_transport_incomplete_server_first_evidence",
+        {},
+    )
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "_geph_up", False)
@@ -1074,6 +1079,10 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
             activity.server_ended_first,
             activity.downstream_bytes,
             kwargs["duration"],
+            kwargs["probe_ip"],
+            kwargs["strategy_name"],
+            kwargs["repeat_claimed"],
+            kwargs["repeat_probe_ip"],
         ))
         return False
 
@@ -1081,6 +1090,11 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
         await forbidden_backend(name, *args, **kwargs)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.64", 443))
+    monkeypatch.setattr(
+        tproxy,
+        "_claim_server_first_repeat_stage",
+        lambda _host: (tproxy.AUTO_GEPH_STAGE_SYSTEM, "1.1.1.1"),
+    )
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
     monkeypatch.setattr(tproxy, "note_server_first_route_close", record_close)
     monkeypatch.setattr(
@@ -1103,14 +1117,26 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
 
     assert bytes(writer.payload) == response
     assert len(observations) == 1
-    actual_host, stage, server_ended_first, downstream_bytes, duration = (
-        observations[0]
-    )
+    (
+        actual_host,
+        stage,
+        server_ended_first,
+        downstream_bytes,
+        duration,
+        probe_ip,
+        strategy_name,
+        repeat_claimed,
+        repeat_probe_ip,
+    ) = observations[0]
     assert actual_host == host
     assert stage == tproxy.AUTO_GEPH_STAGE_SYSTEM
     assert server_ended_first
     assert downstream_bytes == len(response)
     assert duration >= 0
+    assert probe_ip == "203.0.113.64"
+    assert strategy_name == "plain"
+    assert repeat_claimed
+    assert repeat_probe_ip == "1.1.1.1"
 
 
 def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):

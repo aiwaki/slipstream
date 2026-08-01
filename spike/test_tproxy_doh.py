@@ -60,6 +60,18 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     server_first_closes = {
         key: deque(values) for key, values in tproxy._server_first_closes.items()
     }
+    server_first_repeat_stages = dict(tproxy._server_first_repeat_stages)
+    transport_confirming = dict(tproxy._transport_incomplete_confirming)
+    transport_last_probe = dict(tproxy._transport_incomplete_last_probe)
+    transport_plain_candidates = dict(
+        tproxy._transport_incomplete_plain_candidates
+    )
+    transport_server_first_evidence = {
+        host: dict(values)
+        for host, values in (
+            tproxy._transport_incomplete_server_first_evidence.items()
+        )
+    }
     auto_last_status = dict(tproxy._auto_geph_last_status)
     local_resweep_active = dict(tproxy._local_bypass_resweep_active)
     local_resweep_last = dict(tproxy._local_bypass_resweep_last)
@@ -141,6 +153,11 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
         tproxy._server_first_closes.clear()
+        tproxy._server_first_repeat_stages.clear()
+        tproxy._transport_incomplete_confirming.clear()
+        tproxy._transport_incomplete_last_probe.clear()
+        tproxy._transport_incomplete_plain_candidates.clear()
+        tproxy._transport_incomplete_server_first_evidence.clear()
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
@@ -226,6 +243,20 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._clean_eof_stalls.update(clean_eof_stalls)
         tproxy._server_first_closes.clear()
         tproxy._server_first_closes.update(server_first_closes)
+        tproxy._server_first_repeat_stages.clear()
+        tproxy._server_first_repeat_stages.update(server_first_repeat_stages)
+        tproxy._transport_incomplete_confirming.clear()
+        tproxy._transport_incomplete_confirming.update(transport_confirming)
+        tproxy._transport_incomplete_last_probe.clear()
+        tproxy._transport_incomplete_last_probe.update(transport_last_probe)
+        tproxy._transport_incomplete_plain_candidates.clear()
+        tproxy._transport_incomplete_plain_candidates.update(
+            transport_plain_candidates
+        )
+        tproxy._transport_incomplete_server_first_evidence.clear()
+        tproxy._transport_incomplete_server_first_evidence.update(
+            transport_server_first_evidence
+        )
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_active.update(local_resweep_active)
         tproxy._local_bypass_resweep_last.clear()
@@ -7729,6 +7760,20 @@ def test_semantic_confirmation_stops_after_two_owned_geph_replacements(monkeypat
             ],
             False,
         ),
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n"
+                b"X-Fill: " + b"x" * 100 + b"\r\n\r\n",
+            ],
+            False,
+        ),
+        (
+            [
+                b"HTTP/1.1 204 No Content\r\n"
+                b"X-Fill: " + b"x" * 100 + b"\r\n\r\n",
+            ],
+            False,
+        ),
     ],
 )
 def test_incomplete_response_probe_requires_complete_http_response(
@@ -7782,6 +7827,185 @@ def test_incomplete_response_probe_requires_complete_http_response(
     assert b"Range: bytes=0-262143\r\n" in tls_socket.request
     assert b"Accept-Encoding: identity\r\n" in tls_socket.request
     assert tls_socket.closed
+
+
+@pytest.mark.parametrize(
+    ("response_chunks", "expected_incomplete"),
+    [
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Length: 200\r\n\r\n<html>",
+                b"x" * 80 + b"</html>",
+                b"",
+            ],
+            True,
+        ),
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Length: 93\r\n\r\n<html>",
+                b"x" * 80 + b"</html>",
+            ],
+            False,
+        ),
+        (
+            [
+                b"HTTP/1.1 429 Too Many Requests\r\n"
+                b"Content-Length: 18\r\n\r\nlocal",
+                b"",
+            ],
+            False,
+        ),
+    ],
+)
+def test_plain_transport_probe_requires_a_proven_body_shortfall(
+    monkeypatch,
+    response_chunks,
+    expected_incomplete,
+):
+    class FakeTlsSocket:
+        def __init__(self, chunks):
+            self.chunks = deque(chunks)
+            self.closed = False
+            self.request = b""
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, request):
+            self.request = request
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self, tls_socket):
+            self.tls_socket = tls_socket
+
+        def wrap_socket(self, _sock, server_hostname):
+            assert server_hostname == "partial-response.example"
+            return self.tls_socket
+
+    tls_socket = FakeTlsSocket(response_chunks)
+    addresses = []
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda address, timeout: (
+            addresses.append((address, timeout)) or tls_socket
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: FakeContext(tls_socket),
+    )
+
+    result = tproxy._incomplete_response_plain_payload_probe(
+        "1.1.1.1",
+        "partial-response.example",
+    )
+
+    assert result is expected_incomplete
+    assert addresses and addresses[0][0] == ("1.1.1.1", 443)
+    assert b"Range:" not in tls_socket.request
+    assert b"Accept-Encoding: identity\r\n" in tls_socket.request
+    assert tls_socket.closed
+
+
+def test_plain_transport_probe_accepts_a_framed_body_stall(monkeypatch):
+    response = (
+        b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\n"
+        + b"x" * 80
+    )
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.responses = deque([response, tproxy.socket.timeout()])
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _request):
+            return None
+
+        def recv(self, _size):
+            result = self.responses.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def close(self):
+            return None
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda _address, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda _sock, server_hostname: tls_socket
+        ),
+    )
+
+    assert tproxy._incomplete_response_plain_payload_probe(
+        "1.1.1.1",
+        "partial-response.example",
+    )
+
+
+def test_plain_transport_probe_rejects_nonclosure_read_errors(monkeypatch):
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\nshort"
+
+    class FakeTlsSocket:
+        def __init__(self, error):
+            self.responses = deque([response, error])
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _request):
+            return None
+
+        def recv(self, _size):
+            result = self.responses.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def close(self):
+            return None
+
+    for error in (
+        ssl.SSLError("bad TLS record"),
+        OSError("local socket failure"),
+    ):
+        tls_socket = FakeTlsSocket(error)
+        monkeypatch.setattr(
+            tproxy.socket,
+            "create_connection",
+            lambda _address, timeout: tls_socket,
+        )
+        monkeypatch.setattr(
+            tproxy,
+            "_local_payload_ssl_context",
+            lambda: SimpleNamespace(
+                wrap_socket=lambda _sock, server_hostname: tls_socket
+            ),
+        )
+
+        assert not tproxy._incomplete_response_plain_payload_probe(
+            "1.1.1.1",
+            "partial-response.example",
+        )
 
 
 def test_socks5_connect_uses_one_total_deadline(monkeypatch):
@@ -8720,8 +8944,9 @@ def test_repeated_short_server_first_closes_advance_exact_unknown_host():
     assert tproxy._xbox_dns_candidate_active(host, now=100.3)
     assert (
         tproxy.AUTO_GEPH_STAGE_SYSTEM
-        in tproxy._local_partial_stalls[host]
+        in tproxy._transport_incomplete_server_first_evidence[host]
     )
+    assert host not in tproxy._local_partial_stalls
     assert not tproxy.is_geo_exit_route(host)
 
     for protected in (
@@ -8739,6 +8964,219 @@ def test_repeated_short_server_first_closes_advance_exact_unknown_host():
         assert not tproxy._xbox_dns_candidate_active(protected, now=100.4)
 
 
+def test_repeated_plain_server_close_schedules_exact_transport_confirmation(
+    monkeypatch,
+):
+    host = "partial-body.example"
+    activity = _short_server_first_activity()
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    def observe(stage, strategy_name, times):
+        for now in times:
+            tproxy.note_server_first_route_close(
+                host,
+                stage,
+                activity,
+                duration=0.2,
+                now=now,
+                probe_ip="1.1.1.1",
+                strategy_name=strategy_name,
+                transport_confirmation_runner=lambda candidate, ip: (
+                    confirmations.append((candidate, ip)) or True
+                ),
+            )
+
+    observe(tproxy.AUTO_GEPH_STAGE_SYSTEM, "plain", (100.2, 100.3))
+    assert confirmations == []
+    observe(tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "plain", (101.2, 101.3))
+    assert confirmations == []
+    observe(
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        "split64+fake",
+        (102.2, 102.3),
+    )
+    assert confirmations == []
+    observe(
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+        "split16+fake",
+        (103.2, 103.3),
+    )
+
+    assert confirmations == [(host, "1.1.1.1")]
+    assert set(tproxy._transport_incomplete_server_first_evidence[host]) == {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+    }
+    assert tproxy._transport_incomplete_plain_candidates[host] == (
+        "1.1.1.1",
+        100.3,
+    )
+    assert host not in tproxy._transport_incomplete_confirming
+    assert tproxy._transport_incomplete_last_probe[host] == 103.3
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_system_server_close_never_bypasses_the_local_ladder(monkeypatch):
+    host = "system-only-partial.example"
+    activity = _short_server_first_activity()
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for now in (100.2, 100.3):
+        tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=0.2,
+            now=now,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == []
+    assert host not in tproxy._transport_incomplete_last_probe
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_server_first_evidence_does_not_mix_with_partial_record_stalls(
+    monkeypatch,
+):
+    host = "mixed-evidence.example"
+    activity = _short_server_first_activity()
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for stage in (
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+    ):
+        assert not tproxy._record_partial_tls_stall_evidence(host, stage, 100.0)
+
+    for now in (100.2, 100.3):
+        tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=0.2,
+            now=now,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == []
+    assert set(tproxy._transport_incomplete_server_first_evidence[host]) == {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    }
+    assert set(tproxy._local_partial_stalls[host]) == {
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+    }
+    assert host not in tproxy._transport_incomplete_last_probe
+
+
+def test_transport_confirmation_rejects_non_plain_and_protected_routes(monkeypatch):
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert not tproxy._schedule_transport_incomplete_response_confirmation(
+        "unknown.example",
+        "1.1.1.1",
+        "split64",
+        now=100.0,
+        runner=lambda host, ip: confirmations.append((host, ip)),
+    )
+    for protected in (
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "www.google.com",
+    ):
+        assert not tproxy._schedule_transport_incomplete_response_confirmation(
+            protected,
+            "1.1.1.1",
+            "plain",
+            now=100.0,
+            runner=lambda host, ip: confirmations.append((host, ip)),
+        )
+
+    assert confirmations == []
+
+
+def test_transport_confirmation_requires_local_proof_before_geph(monkeypatch):
+    host = "partial-body.example"
+    requested = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_request_incomplete_response_geo_exit_confirmation",
+        lambda candidate: requested.append(candidate) or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_incomplete_response_plain_payload_probe",
+        lambda ip, candidate: False,
+    )
+
+    assert not tproxy._confirm_transport_incomplete_response(host, "1.1.1.1")
+    assert requested == []
+
+    monkeypatch.setattr(
+        tproxy,
+        "_incomplete_response_plain_payload_probe",
+        lambda ip, candidate: ip == "1.1.1.1" and candidate == host,
+    )
+    assert tproxy._confirm_transport_incomplete_response(host, "1.1.1.1")
+    assert requested == [host]
+
+
+def test_transport_confirmation_is_rate_limited_per_exact_host(monkeypatch):
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for now in (100.0, 101.0):
+        tproxy._schedule_transport_incomplete_response_confirmation(
+            "partial-body.example",
+            "1.1.1.1",
+            "plain",
+            now=now,
+            runner=lambda host, ip: confirmations.append((host, ip)),
+        )
+    tproxy._schedule_transport_incomplete_response_confirmation(
+        "other-partial.example",
+        "8.8.8.8",
+        "plain",
+        now=101.0,
+        runner=lambda host, ip: confirmations.append((host, ip)),
+    )
+
+    assert confirmations == [
+        ("partial-body.example", "1.1.1.1"),
+        ("other-partial.example", "8.8.8.8"),
+    ]
+
+
 def test_server_reset_advances_unknown_host_without_waiting_for_repeat():
     host = "reset-after-record.example"
     activity = _short_server_first_activity(read_failed=True)
@@ -8751,6 +9189,196 @@ def test_server_reset_advances_unknown_host_without_waiting_for_repeat():
         now=100.2,
     )
     assert tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert host not in tproxy._transport_incomplete_server_first_evidence
+    assert (
+        tproxy.unknown_recovery_stage(host, now=100.3)
+        == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+    )
+    repeat_stage = tproxy._claim_server_first_repeat_stage(host, now=100.3)
+    assert repeat_stage == (tproxy.AUTO_GEPH_STAGE_SYSTEM, None)
+    assert (
+        tproxy._unknown_recovery_stage_for_attempt(
+            host,
+            repeat_stage[0],
+            now=100.3,
+        )
+        == tproxy.UNKNOWN_RECOVERY_SYSTEM
+    )
+    assert tproxy._claim_server_first_repeat_stage(host, now=100.3) is None
+
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.4,
+        repeat_claimed=True,
+    )
+    assert set(tproxy._transport_incomplete_server_first_evidence[host]) == {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    }
+
+
+def test_nonmatching_server_first_retry_discards_the_provisional_close():
+    host = "nonmatching-reset-repeat.example"
+    stage = tproxy.AUTO_GEPH_STAGE_SYSTEM
+    activity = _short_server_first_activity(read_failed=True)
+
+    assert tproxy.note_server_first_route_close(
+        host,
+        stage,
+        activity,
+        duration=0.2,
+        now=100.0,
+    )
+    assert tproxy._claim_server_first_repeat_stage(host, now=100.1) == (
+        stage,
+        None,
+    )
+    assert (host, stage) not in tproxy._server_first_closes
+
+    # The claimed attempt produced a different outcome. A later close is a new
+    # first observation, not the missing matching retry.
+    assert tproxy.note_server_first_route_close(
+        host,
+        stage,
+        activity,
+        duration=0.2,
+        now=100.2,
+    )
+    assert host not in tproxy._transport_incomplete_server_first_evidence
+    assert tproxy._claim_server_first_repeat_stage(host, now=100.3) == (
+        stage,
+        None,
+    )
+
+
+def test_server_first_repeat_stage_expires_inside_the_evidence_window():
+    host = "expired-reset-repeat.example"
+    activity = _short_server_first_activity(read_failed=True)
+
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        activity,
+        duration=0.2,
+        now=100.0,
+    )
+    assert (
+        tproxy._claim_server_first_repeat_stage(
+            host,
+            now=100.0 + tproxy.SERVER_FIRST_CLOSE_WINDOW,
+        )
+        is None
+    )
+
+
+def test_server_first_repeat_restores_xbox_and_exact_strategy_once():
+    activity = _short_server_first_activity(read_failed=True)
+    xbox_host = "repeat-xbox.example"
+    tproxy._mark_xbox_dns_candidate(xbox_host, now=100.0)
+
+    assert tproxy.note_server_first_route_close(
+        xbox_host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        activity,
+        duration=0.2,
+        now=100.1,
+    )
+    assert (
+        tproxy.unknown_recovery_stage(xbox_host, now=100.2)
+        == tproxy.UNKNOWN_RECOVERY_LOCAL_LADDER
+    )
+    xbox_repeat = tproxy._claim_server_first_repeat_stage(xbox_host, now=100.2)
+    assert xbox_repeat == (tproxy.AUTO_GEPH_STAGE_XBOX_DNS, None)
+    assert (
+        tproxy._unknown_recovery_stage_for_attempt(
+            xbox_host,
+            xbox_repeat[0],
+            now=100.2,
+        )
+        == tproxy.UNKNOWN_RECOVERY_XBOX_DNS
+    )
+
+    strategy_host = "repeat-strategy.example"
+    tproxy._mark_xbox_dns_exhausted(strategy_host, now=100.0)
+    repeat_name = "plain"
+    repeat_stage = f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}{repeat_name}"
+    assert tproxy.note_server_first_route_close(
+        strategy_host,
+        repeat_stage,
+        activity,
+        duration=0.2,
+        now=100.1,
+        strategy_name=repeat_name,
+    )
+    claimed = tproxy._claim_server_first_repeat_stage(
+        strategy_host,
+        now=100.2,
+    )
+    assert claimed == (repeat_stage, None)
+    assert (
+        tproxy._strategy_order_for_attempt(strategy_host, claimed[0])[0]["name"]
+        == repeat_name
+    )
+
+
+def test_system_repeat_preserves_the_first_selected_ip():
+    activity = _short_server_first_activity(read_failed=True)
+    host = "system-ip-changed.example"
+
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.0,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+    )
+    claim = tproxy._claim_server_first_repeat_stage(host, now=100.1)
+    assert claim == (tproxy.AUTO_GEPH_STAGE_SYSTEM, "1.1.1.1")
+
+    assert tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.2,
+        probe_ip="8.8.8.8",
+        strategy_name="plain",
+        repeat_claimed=True,
+        repeat_probe_ip=claim[1],
+    )
+    assert tproxy._transport_incomplete_plain_candidates[host] == (
+        "1.1.1.1",
+        100.2,
+    )
+
+    natural_host = "system-ip-changed-without-claim.example"
+    orderly = _short_server_first_activity()
+    assert not tproxy.note_server_first_route_close(
+        natural_host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        orderly,
+        duration=0.2,
+        now=101.0,
+        probe_ip="1.0.0.1",
+        strategy_name="plain",
+    )
+    assert tproxy.note_server_first_route_close(
+        natural_host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        orderly,
+        duration=0.2,
+        now=101.1,
+        probe_ip="8.8.4.4",
+        strategy_name="plain",
+    )
+    assert tproxy._transport_incomplete_plain_candidates[natural_host] == (
+        "1.0.0.1",
+        101.1,
+    )
 
 
 def test_downstream_write_failure_is_not_server_close_evidence():
@@ -8838,8 +9466,9 @@ def test_repeated_xbox_server_closes_advance_to_local_ladder():
     )
     assert (
         tproxy.AUTO_GEPH_STAGE_XBOX_DNS
-        in tproxy._local_partial_stalls[host]
+        in tproxy._transport_incomplete_server_first_evidence[host]
     )
+    assert host not in tproxy._local_partial_stalls
     assert not tproxy.is_geo_exit_route(host)
 
 
