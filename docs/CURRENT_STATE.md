@@ -13,11 +13,39 @@ on disposable Windows, still without production networking composition.
 Updater/uninstall orchestration remains the following bounded gate. The exact
 ARM64 physical reboot lifecycle gate is complete.
 
-Current user-facing priority: complete the bounded semantic owned-Geph recovery
-on branch `codex/semantic-geph-rate-limit-recovery`, merge only after required
-CI, then run exactly one protected owned-Geph qualification for that new exact
-`main` SHA. A primary-Mac install may use only the artifact from that successful
-run and must retain the same immediate rollback rule.
+Current user-facing priority: complete the bounded two-replacement semantic
+owned-Geph recovery on branch `codex/bounded-geph-exit-replacement`, merge only
+after required CI, then run exactly one protected owned-Geph qualification for
+that new exact `main` SHA. A primary-Mac install may use only the artifact from
+that successful run and must retain the same immediate rollback rule.
+
+PR #292 merged the first semantic owned-Geph recovery as exact main
+`3126f8404419403aee0eac0585a112c20b66cb78`. The sole protected run
+`30591636334` passed owned-Geph initial, trayless, and KeepAlive-recovered
+payload, both Chromium semantic scenarios, cleanup, and system-state
+non-mutation. Artifact `8778619390` matched archive SHA-256
+`3ca16e9303530a0ee288e1803196cd51bcb24146b399beea42a9cd5e674eb879`
+and inner ZIP SHA-256
+`f705c9063108e4d08e070093a4a97f4e0a9d9c235f404b2a24f4a49ac914efaa`.
+Controlled transaction `C84FCEB4-DBB1-43C9-AA44-B0AF4243B6F7` reached fresh
+active StatusV2 and preserved DNS `111.88.96.50` / `111.88.96.51`, proxy/PAC,
+global PF, and external owners. Modrinth returned 1,959,739 bytes. The next
+`xpersonatoy.com` smoke ended with curl error 18 after 19,139 bytes, so the
+transaction immediately restored the previous app and exact user-owned Geph
+runtime and removed the root daemon, listener, private PF anchor, token, status,
+socket, attestation, and witness. Post-rollback DNS, proxy/PAC, and global PF
+matched the pre-install snapshot.
+
+Post-rollback A/B proved that one owned-Geph replacement is not always enough.
+Direct `xpersonatoy.com` remained partial. The exact owned `:9954` listener
+returned HTTP `429 local_rate_limited`; one ownership-verified LaunchAgent PID
+replacement remained `429`, while a second replacement returned HTTP `200` and
+a complete 1,058,817-byte response. The current correction permits at most two
+sequential replacements inside one session drain and one ten-minute incident
+cooldown, revalidates exact listener ownership and changed PID before each
+probe, stops on first complete response, and otherwise fails closed. It adds no
+hostname rule and changes no PF, DNS, proxy/PAC/VPN, external Geph, static
+policy, Discord, YouTube, or Googlevideo behavior.
 
 PR #291 merged the complete-proof convergence correction as exact main
 `b29be61e554f5ad3ec71d2864e487fabbdb014cf`. CI `30586625792`, audit
@@ -188,17 +216,17 @@ Parallels Windows 11 ARM64 host: direct `System.Byte[]`, captured
 were skipped on both architectures, so no artifact was selected and no
 physical-host mutation was attempted.
 
-Last exact-main evidence audit: 2026-07-30, through product merge
-`8ef9fb3d3d4643f056793578511b693ef68b3fe5` (PR #287). Exact-main
-native AMD64/ARM64 run `30554494634`, CI `30554495633`, and audit
-`30554495985` passed on that SHA. Native jobs `90911349617` and
-`90911349663` proved the delayed exact-payload-release regression and
-release-host `prepare -> cleanup` preflight on both architectures. The exact
-ARM64 artifact then passed the physical Parallels Windows 11 reboot transaction
-and exact uninstall described at the top of this checkpoint. This is not a
-physical AMD64 reboot claim; architecture-dependent binary and lifecycle
-preflight passed natively on AMD64 and ARM64, while the OS-level physical
-power-state transaction ran on the available disposable ARM64 host.
+Last exact-main evidence audit: 2026-08-01, through product merge
+`3126f8404419403aee0eac0585a112c20b66cb78` (PR #292). Exact-main CI
+`30591198059`, audit `30591198060`, and native AMD64/ARM64 run `30591198068`
+passed on that SHA. The sole protected account-backed qualification
+`30591636334` also passed and produced artifact `8778619390`; its controlled
+workstation transaction and exact rollback are recorded at the top of this
+checkpoint. The latest physical Windows reboot proof remains the PR #287 ARM64
+transaction. This is not a physical AMD64 reboot claim; architecture-dependent
+binary and lifecycle preflight passed natively on AMD64 and ARM64, while the
+OS-level physical power-state transaction ran on the available disposable
+ARM64 host.
 
 Previous exact-main evidence audit: 2026-07-30, through product merge
 `0ed37e7b828bb642700d6191e10206061c27c525` (PR #277). Exact-main

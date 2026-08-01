@@ -61,18 +61,21 @@ is the explicit action that may reinstall or re-enable it.
 ### A site partially loads or owned Geph returns `local_rate_limited`
 
 A live owned Geph process and listener do not guarantee a usable exit session.
-The 2026-07-30 workstation A/B received a partial direct response, then HTTP
-`429` with body `local_rate_limited` through the verified owned `:9954`
-listener. Replacing only the exact `dev.slipstream.geph` LaunchAgent PID made the
-same request return a complete HTTP `200` response.
+Workstation A/B evidence on 2026-07-30 and 2026-08-01 received partial direct
+responses, then HTTP `429` with body `local_rate_limited` through the verified
+owned `:9954` listener. One incident recovered after the first exact
+`dev.slipstream.geph` PID replacement; the later incident required a second
+replacement before the same request returned a complete HTTP `200` response.
 
 Current semantic recovery may perform that replacement autonomously only after
 the browser has proven a top-level regional-denial or incomplete-response
 failure and the daemon's own complete exact-host HTTP probe also fails. It
-drains active owned sessions, verifies the listener and LaunchAgent ownership,
-requires a changed PID and live replacement, then retries the same probe once.
-The exact host is learned only if that retry is complete and usable. The
-restart is globally rate-limited for ten minutes.
+drains active owned sessions once, verifies the listener and LaunchAgent
+ownership before every replacement, and requires a changed live PID. It may
+perform at most two replacements, retrying the same probe after each and
+stopping immediately on success. The exact host is learned only if one of those
+probes is complete and usable. A new semantic-recovery incident is globally
+rate-limited for ten minutes.
 
 Do not work around this symptom by adding the hostname to static policy,
 restarting an external Geph process, or changing system DNS, proxy, PAC, VPN, or
