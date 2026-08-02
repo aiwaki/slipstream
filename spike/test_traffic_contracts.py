@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -222,6 +223,9 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
     monkeypatch.setattr(tproxy, "_server_first_closes", {})
     monkeypatch.setattr(tproxy, "_auto_geph", {})
+    monkeypatch.setattr(tproxy, "_auto_geph_confirming", {})
+    monkeypatch.setattr(tproxy, "_auto_geph_confirmation_tokens", {})
+    monkeypatch.setattr(tproxy, "_auto_geph_last_probe", {})
     monkeypatch.setattr(tproxy, "_auto_geph_retry_after_drain", set())
     monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
     monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
@@ -947,16 +951,27 @@ def test_failed_early_confirmation_retries_once_after_relay_drain(monkeypatch):
     response = b"\x16\x03\x03\x00\x60" + (b"D" * 96)
     writer = CaptureWriter()
     confirmation_attempts = []
+    post_drain_completed = threading.Event()
 
     async def healthy_owned_geph(_host, _port, _payload):
         return streaming_upstream_response(response)
 
     def failed_confirmation(actual_host, **_kwargs):
         confirmation_attempts.append(
-            (actual_host, tproxy.geph_active_session_count())
+            (actual_host, tproxy.geph_active_session_count(), "early")
         )
         tproxy._auto_geph_confirmation_completed(actual_host, False)
         return True
+
+    def post_drain_confirmation(actual_host, *, drain_reserved=False):
+        confirmation_attempts.append(
+            (actual_host, tproxy.geph_active_session_count(), "post-drain")
+        )
+        assert drain_reserved
+        assert tproxy._geph_restart_draining
+        assert not tproxy._geph_session_started()
+        post_drain_completed.set()
+        return False
 
     monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
     monkeypatch.setattr(
@@ -964,6 +979,7 @@ def test_failed_early_confirmation_retries_once_after_relay_drain(monkeypatch):
         "_schedule_auto_geph_confirmation",
         failed_confirmation,
     )
+    monkeypatch.setattr(tproxy, "_confirm_auto_geph", post_drain_confirmation)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
@@ -978,10 +994,15 @@ def test_failed_early_confirmation_retries_once_after_relay_drain(monkeypatch):
             writer,
         )
     )
-    assert confirmation_attempts == [(host, 1), (host, 0)]
+    assert post_drain_completed.wait(1.0)
+    assert confirmation_attempts == [
+        (host, 1, "early"),
+        (host, 0, "post-drain"),
+    ]
     assert host not in tproxy._auto_geph_retry_after_drain
     assert bytes(writer.payload) == response
     assert tproxy.geph_active_session_count() == 0
+    assert not tproxy._geph_restart_draining
 
 
 def test_unproven_unknown_never_waits_for_owned_geph_recovery(monkeypatch):

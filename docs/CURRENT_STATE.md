@@ -66,7 +66,11 @@ soon as the first owned-Geph payload arrives, before the relay can outlive the
 candidate window; session-draining replacement remains blocked until that
 active relay has finished. If the early worker cannot complete confirmation
 while the relay is active, one pending retry is consumed after the active
-session count reaches zero; it cannot loop into another post-drain retry.
+session count reaches zero; it cannot loop into another post-drain retry. A
+live confirmation owns a unique worker token and cannot be evicted by elapsed
+time while its bounded replacement sequence is still running. The post-drain
+retry reserves the idle Geph session drain before consuming its marker, so a
+new route cannot enter between the zero-session observation and confirmation.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

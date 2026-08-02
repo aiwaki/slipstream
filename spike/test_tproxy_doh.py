@@ -39,6 +39,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     auto_fail = {host: list(values) for host, values in tproxy._auto_fail.items()}
     auto_geph = dict(tproxy._auto_geph)
     auto_confirming = dict(tproxy._auto_geph_confirming)
+    auto_confirmation_tokens = dict(tproxy._auto_geph_confirmation_tokens)
     auto_last_probe = dict(tproxy._auto_geph_last_probe)
     auto_retry_after_drain = set(tproxy._auto_geph_retry_after_drain)
     auto_runtime_failures = {
@@ -145,6 +146,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_fail.clear()
         tproxy._auto_geph.clear()
         tproxy._auto_geph_confirming.clear()
+        tproxy._auto_geph_confirmation_tokens.clear()
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_retry_after_drain.clear()
         tproxy._auto_geph_runtime_failures.clear()
@@ -227,6 +229,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_geph.update(auto_geph)
         tproxy._auto_geph_confirming.clear()
         tproxy._auto_geph_confirming.update(auto_confirming)
+        tproxy._auto_geph_confirmation_tokens.clear()
+        tproxy._auto_geph_confirmation_tokens.update(auto_confirmation_tokens)
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_last_probe.update(auto_last_probe)
         tproxy._auto_geph_retry_after_drain.clear()
@@ -8425,6 +8429,7 @@ def test_auto_geph_confirmation_cooldown_state_is_bounded(monkeypatch):
     monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
     tproxy._auto_geph_last_probe.clear()
     tproxy._auto_geph_confirming.clear()
+    tproxy._auto_geph_confirmation_tokens.clear()
 
     try:
         for host, now in (
@@ -8456,6 +8461,139 @@ def test_auto_geph_confirmation_cooldown_state_is_bounded(monkeypatch):
     finally:
         tproxy._auto_geph_last_probe.clear()
         tproxy._auto_geph_confirming.clear()
+        tproxy._auto_geph_confirmation_tokens.clear()
+
+
+def test_live_auto_geph_confirmation_is_not_time_pruned(monkeypatch):
+    host = "long-confirmation.example"
+    entered = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+
+    def long_confirmation(actual_host):
+        assert actual_host == host
+        entered.set()
+        assert release.wait(1.0)
+        return False
+
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda _host, _now=None: True,
+    )
+    monkeypatch.setattr(tproxy, "_confirm_auto_geph", long_confirmation)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_confirmation_completed",
+        lambda _host, _succeeded: completed.set(),
+    )
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+
+    assert tproxy._schedule_auto_geph_confirmation(host, now=100.0)
+    assert entered.wait(1.0)
+    token = tproxy._auto_geph_confirmation_tokens[host]
+
+    tproxy._prune_auto_geph_confirmation_state(10_000.0)
+
+    assert tproxy._auto_geph_confirming[host] == 100.0
+    assert tproxy._auto_geph_confirmation_tokens[host] is token
+    assert not tproxy._schedule_auto_geph_confirmation(
+        host,
+        now=10_001.0,
+        runner=lambda _host: True,
+    )
+
+    release.set()
+    assert completed.wait(1.0)
+    assert host not in tproxy._auto_geph_confirming
+    assert host not in tproxy._auto_geph_confirmation_tokens
+
+
+def test_auto_geph_confirmation_token_prevents_stale_worker_cleanup():
+    host = "token-owner.example"
+    stale_token = object()
+    live_token = object()
+    tproxy._auto_geph_confirming[host] = 200.0
+    tproxy._auto_geph_confirmation_tokens[host] = live_token
+
+    assert not tproxy._finish_auto_geph_confirmation(host, stale_token)
+    assert tproxy._auto_geph_confirming[host] == 200.0
+    assert tproxy._auto_geph_confirmation_tokens[host] is live_token
+
+    assert tproxy._finish_auto_geph_confirmation(host, live_token)
+    assert host not in tproxy._auto_geph_confirming
+    assert host not in tproxy._auto_geph_confirmation_tokens
+
+
+def test_post_drain_retry_reserves_backend_before_consuming_marker(monkeypatch):
+    host = "atomic-post-drain.example"
+    observations = []
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda actual_host, _now=None: actual_host == host,
+    )
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
+    tproxy._auto_geph_retry_after_drain.add(host)
+
+    def confirmation(actual_host):
+        observations.append({
+            "host": actual_host,
+            "draining": tproxy._geph_restart_draining,
+            "pending": actual_host in tproxy._auto_geph_retry_after_drain,
+            "new_session_allowed": tproxy._geph_session_started(),
+        })
+        return False
+
+    assert tproxy._retry_auto_geph_confirmation_after_drain(
+        host,
+        runner=confirmation,
+    )
+    assert observations == [{
+        "host": host,
+        "draining": True,
+        "pending": False,
+        "new_session_allowed": False,
+    }]
+    assert host not in tproxy._auto_geph_retry_after_drain
+    assert not tproxy._geph_restart_draining
+    assert tproxy._geph_session_started()
+    tproxy._geph_session_finished()
+
+
+def test_reserved_auto_geph_confirmation_reuses_held_drain(monkeypatch):
+    host = "reserved-confirmation.example"
+    recovery = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda actual_host, _now=None: actual_host == host,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_stable_owned_geph_payload_probe",
+        lambda _host, _probe: 0,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_retry_semantic_geph_probe_after_owned_restart",
+        lambda actual_host, _probe, *, drain_reserved=False: (
+            recovery.append((actual_host, drain_reserved)) or 0
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_remember_auto_geph_host",
+        lambda _host, _bytes, _reason: False,
+    )
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
+
+    assert not tproxy._confirm_auto_geph(host, drain_reserved=True)
+    assert recovery == [(host, True)]
 
 
 def test_owned_geph_recovery_retries_pending_exact_host_confirmation(monkeypatch):
@@ -8464,7 +8602,8 @@ def test_owned_geph_recovery_retries_pending_exact_host_confirmation(monkeypatch
     confirmations = []
     original_candidates = dict(tproxy._auto_geph_candidates)
     original_last_probe = dict(tproxy._auto_geph_last_probe)
-    original_confirming = set(tproxy._auto_geph_confirming)
+    original_confirming = dict(tproxy._auto_geph_confirming)
+    original_tokens = dict(tproxy._auto_geph_confirmation_tokens)
     monkeypatch.setattr(tproxy, "_geph_up", False)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
@@ -8479,6 +8618,7 @@ def test_owned_geph_recovery_retries_pending_exact_host_confirmation(monkeypatch
         protected: 99.0,
     })
     tproxy._auto_geph_confirming.clear()
+    tproxy._auto_geph_confirmation_tokens.clear()
 
     try:
         assert not tproxy.retry_pending_auto_geph_confirmations(
@@ -8501,6 +8641,8 @@ def test_owned_geph_recovery_retries_pending_exact_host_confirmation(monkeypatch
         tproxy._auto_geph_last_probe.update(original_last_probe)
         tproxy._auto_geph_confirming.clear()
         tproxy._auto_geph_confirming.update(original_confirming)
+        tproxy._auto_geph_confirmation_tokens.clear()
+        tproxy._auto_geph_confirmation_tokens.update(original_tokens)
 
 
 def test_local_stream_stall_requires_abnormal_client_abort_after_downstream_idle():

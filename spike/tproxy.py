@@ -2093,6 +2093,7 @@ AUTO_GEPH_RUNTIME_MISS_STORM = 2
 _auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _auto_geph_confirming = {}    # host -> monotonic start time
+_auto_geph_confirmation_tokens = {}  # host -> unique live worker ownership token
 _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
 _auto_geph_retry_after_drain = set()  # one post-relay retry per current incident
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
@@ -2871,8 +2872,12 @@ def _geph_session_started():
 
 def _geph_session_finished():
     global _geph_active_sessions
+    became_idle = False
     with _geph_session_lock:
         _geph_active_sessions = max(0, _geph_active_sessions - 1)
+        became_idle = _geph_active_sessions == 0 and not _geph_restart_draining
+    if became_idle:
+        _retry_pending_auto_geph_confirmations_after_drain()
 
 
 def _begin_geph_restart_drain():
@@ -2884,10 +2889,14 @@ def _begin_geph_restart_drain():
         return True
 
 
-def _finish_geph_restart_drain():
+def _finish_geph_restart_drain(*, retry_pending=True):
     global _geph_restart_draining
+    became_idle = False
     with _geph_session_lock:
         _geph_restart_draining = False
+        became_idle = _geph_active_sessions == 0
+    if retry_pending and became_idle:
+        _retry_pending_auto_geph_confirmations_after_drain()
 
 
 def request_owned_geph_restart(
@@ -3655,7 +3664,12 @@ def _incomplete_response_geph_payload_probe(
             pass
 
 
-def _retry_semantic_geph_probe_after_owned_restart(host, probe):
+def _retry_semantic_geph_probe_after_owned_restart(
+    host,
+    probe,
+    *,
+    drain_reserved=False,
+):
     """Retry an exact semantic probe after bounded owned-Geph replacement."""
     global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
     h = normalize_host(host)
@@ -3667,7 +3681,7 @@ def _retry_semantic_geph_probe_after_owned_restart(host, probe):
     old_pid = _geph_listener_pid(GEPH_OWNED_PORT)
     if not old_pid or not geph_listener_owned(GEPH_OWNED_PORT):
         return 0
-    if not _begin_geph_restart_drain():
+    if not drain_reserved and not _begin_geph_restart_drain():
         return 0
     try:
         bytes_read = 0
@@ -3734,7 +3748,8 @@ def _retry_semantic_geph_probe_after_owned_restart(host, probe):
                 return bytes_read
         return bytes_read
     finally:
-        _finish_geph_restart_drain()
+        if not drain_reserved:
+            _finish_geph_restart_drain()
 
 
 def _stable_owned_geph_payload_probe(host, probe):
@@ -3887,7 +3902,7 @@ def _remember_auto_geph_host(host, bytes_read, reason):
     return True
 
 
-def _confirm_auto_geph(host):
+def _confirm_auto_geph(host, *, drain_reserved=False):
     h = normalize_host(host)
     if not AUTO_GEPH_ENABLED or not _geph_up or not _auto_geph_candidate_allowed(h):
         _set_auto_geph_status("skipped", h, "not eligible")
@@ -3901,6 +3916,7 @@ def _confirm_auto_geph(host):
         bytes_read = _retry_semantic_geph_probe_after_owned_restart(
             h,
             stable_probe,
+            drain_reserved=drain_reserved,
         )
     return _remember_auto_geph_host(
         h,
@@ -4151,10 +4167,12 @@ def note_local_ladder_partial_stall(
 
 
 def _prune_auto_geph_confirmation_state(now):
-    stale_confirmation = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
-    for host, started in list(_auto_geph_confirming.items()):
-        if started < stale_confirmation:
-            _auto_geph_confirming.pop(host, None)
+    # A legitimate confirmation may span two ownership-verified Geph
+    # replacements, so elapsed time cannot prove that its worker is dead. The
+    # worker's unique token is cleared only by that worker's finally block.
+    for host in list(_auto_geph_confirmation_tokens):
+        if host not in _auto_geph_confirming:
+            _auto_geph_confirmation_tokens.pop(host, None)
 
     expired_probe = now - AUTO_GEPH_CONFIRM_COOLDOWN
     for host, attempted_at in list(_auto_geph_last_probe.items()):
@@ -4174,6 +4192,56 @@ def _prune_auto_geph_confirmation_state(now):
         _auto_geph_last_probe.pop(oldest, None)
 
 
+def _reserve_auto_geph_confirmation_locked(
+    host,
+    now,
+    *,
+    ignore_cooldown=False,
+):
+    """Reserve one exact-host confirmation while ``_auto_geph_lock`` is held."""
+    h = normalize_host(host)
+    _prune_auto_geph_confirmation_state(now)
+    if h in _auto_geph_confirming:
+        return None
+    last = _auto_geph_last_probe.get(h, 0.0)
+    if (
+        not ignore_cooldown
+        and last
+        and now - last < AUTO_GEPH_CONFIRM_COOLDOWN
+    ):
+        return None
+    if h not in _auto_geph_last_probe:
+        while len(_auto_geph_last_probe) >= AUTO_GEPH_STATE_MAX:
+            evictable = (
+                (attempted_at, candidate)
+                for candidate, attempted_at in _auto_geph_last_probe.items()
+                if candidate not in _auto_geph_confirming
+            )
+            try:
+                _, oldest = min(evictable)
+            except ValueError:
+                return None
+            _auto_geph_last_probe.pop(oldest, None)
+    if len(_auto_geph_confirming) >= AUTO_GEPH_STATE_MAX:
+        return None
+    token = object()
+    _auto_geph_last_probe[h] = now
+    _auto_geph_confirming[h] = now
+    _auto_geph_confirmation_tokens[h] = token
+    return token
+
+
+def _finish_auto_geph_confirmation(host, token):
+    """Release confirmation state only for the worker that reserved it."""
+    h = normalize_host(host)
+    with _auto_geph_lock:
+        if _auto_geph_confirmation_tokens.get(h) is not token:
+            return False
+        _auto_geph_confirmation_tokens.pop(h, None)
+        _auto_geph_confirming.pop(h, None)
+        return True
+
+
 def _schedule_bounded_geph_confirmation(
     host,
     *,
@@ -4188,32 +4256,9 @@ def _schedule_bounded_geph_confirmation(
     if not eligible(h, now):
         return False
     with _auto_geph_lock:
-        _prune_auto_geph_confirmation_state(now)
-        last = _auto_geph_last_probe.get(h, 0.0)
-        if last and now - last < AUTO_GEPH_CONFIRM_COOLDOWN:
+        token = _reserve_auto_geph_confirmation_locked(h, now)
+        if token is None:
             return False
-        started = _auto_geph_confirming.get(h)
-        if started is not None and now - started < AUTO_GEPH_CONFIRM_TIMEOUT * 2:
-            return False
-        if h not in _auto_geph_last_probe:
-            while len(_auto_geph_last_probe) >= AUTO_GEPH_STATE_MAX:
-                evictable = (
-                    (attempted_at, host)
-                    for host, attempted_at in _auto_geph_last_probe.items()
-                    if host not in _auto_geph_confirming
-                )
-                try:
-                    _, oldest = min(evictable)
-                except ValueError:
-                    return False
-                _auto_geph_last_probe.pop(oldest, None)
-        if (
-            h not in _auto_geph_confirming
-            and len(_auto_geph_confirming) >= AUTO_GEPH_STATE_MAX
-        ):
-            return False
-        _auto_geph_last_probe[h] = now
-        _auto_geph_confirming[h] = now
         _set_auto_geph_status("checking", h, evidence_reason)
 
     def run():
@@ -4221,9 +4266,8 @@ def _schedule_bounded_geph_confirmation(
         try:
             succeeded = bool((runner or confirmation)(h))
         finally:
-            with _auto_geph_lock:
-                _auto_geph_confirming.pop(h, None)
-            if on_complete is not None:
+            owns_confirmation = _finish_auto_geph_confirmation(h, token)
+            if owns_confirmation and on_complete is not None:
                 on_complete(h, succeeded)
 
     if runner is not None:
@@ -4233,37 +4277,83 @@ def _schedule_bounded_geph_confirmation(
     return True
 
 
-def _retry_auto_geph_confirmation_after_drain(host):
-    """Consume one pending retry once the one-shot relay is no longer active."""
+def _retry_auto_geph_confirmation_after_drain(host, runner=None):
+    """Atomically reserve an idle backend before consuming one pending retry."""
     h = normalize_host(host)
-    if not h or geph_active_session_count() > 0:
+    if not h or _shutdown_started.is_set() or not _begin_geph_restart_drain():
         return False
+    token = None
     with _auto_geph_lock:
         if h not in _auto_geph_retry_after_drain:
-            return False
-        if _auto_geph_learned_exact_host(h):
+            pass
+        elif _auto_geph_learned_exact_host(h):
             _auto_geph_retry_after_drain.discard(h)
-            return False
-        if h in _auto_geph_confirming:
-            return False
-        if not _auto_geph_candidate_allowed(h):
+        elif h in _auto_geph_confirming:
+            pass
+        elif not _auto_geph_candidate_allowed(h):
             _auto_geph_retry_after_drain.discard(h)
-            return False
-        _auto_geph_retry_after_drain.discard(h)
-        _auto_geph_last_probe.pop(h, None)
-    return _schedule_auto_geph_confirmation(
-        h,
-        evidence_reason="retrying stable confirmation after one-shot relay",
-    )
+        else:
+            now = time.monotonic()
+            token = _reserve_auto_geph_confirmation_locked(
+                h,
+                now,
+                ignore_cooldown=True,
+            )
+            if token is not None:
+                _auto_geph_retry_after_drain.discard(h)
+                _set_auto_geph_status(
+                    "checking",
+                    h,
+                    "retrying stable confirmation after one-shot relay",
+                )
+    if token is None:
+        _finish_geph_restart_drain(retry_pending=False)
+        return False
+
+    def run():
+        succeeded = False
+        try:
+            if runner is not None:
+                succeeded = bool(runner(h))
+            else:
+                succeeded = bool(_confirm_auto_geph(h, drain_reserved=True))
+        finally:
+            owns_confirmation = _finish_auto_geph_confirmation(h, token)
+            _finish_geph_restart_drain()
+            if owns_confirmation:
+                _auto_geph_confirmation_completed(h, succeeded)
+
+    if runner is not None:
+        run()
+        return True
+    try:
+        threading.Thread(target=run, daemon=True).start()
+    except Exception:
+        _finish_auto_geph_confirmation(h, token)
+        _finish_geph_restart_drain()
+        raise
+    return True
+
+
+def _retry_pending_auto_geph_confirmations_after_drain():
+    """Start at most one retained exact-host proof for an idle owned backend."""
+    with _auto_geph_lock:
+        pending = sorted(_auto_geph_retry_after_drain)
+    for host in pending:
+        if _retry_auto_geph_confirmation_after_drain(host):
+            return True
+    return False
 
 
 def _auto_geph_confirmation_completed(host, succeeded):
     h = normalize_host(host)
-    if succeeded or _auto_geph_learned_exact_host(h):
-        with _auto_geph_lock:
+    with _auto_geph_lock:
+        if succeeded or _auto_geph_learned_exact_host(h):
             _auto_geph_retry_after_drain.discard(h)
-        return
-    _retry_auto_geph_confirmation_after_drain(h)
+            return
+        retry_pending = h in _auto_geph_retry_after_drain
+    if retry_pending:
+        _retry_auto_geph_confirmation_after_drain(h)
 
 
 def _schedule_auto_geph_confirmation(
@@ -9252,8 +9342,6 @@ async def _try_unknown_owned_geph_route(
         if up_w is not None:
             await _close_stream_writer(up_w)
         _geph_session_finished()
-        if confirm_after_session:
-            _retry_auto_geph_confirmation_after_drain(h)
 
 
 async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writer):
