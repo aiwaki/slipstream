@@ -893,6 +893,52 @@ def test_proven_unknown_learns_only_from_independent_confirmation(monkeypatch):
     assert tproxy.geph_active_session_count() == 0
 
 
+def test_proven_unknown_schedules_confirmation_before_long_lived_relay(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "long-lived-foreign-exit.example"
+    first_flight = static_tls_fixture_record(host)
+    response = b"\x16\x03\x03\x00\x60" + (b"L" * 96)
+    writer = CaptureWriter()
+    confirmations = []
+    relay_observations = []
+
+    async def healthy_owned_geph(_host, _port, _payload):
+        return streaming_upstream_response(response)
+
+    async def long_lived_relay(*_args, **_kwargs):
+        relay_observations.append(tuple(confirmations))
+        tproxy._auto_geph_candidates.pop(host, None)
+        return None
+
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(tproxy, "relay_local_stream", long_lived_relay)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_auto_geph_confirmation",
+        lambda actual_host, **_kwargs: confirmations.append(actual_host) or True,
+    )
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    tproxy._auto_geph_candidates[host] = time.monotonic() + 10.0
+
+    assert asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            first_flight,
+            ScriptedReader(),
+            writer,
+        )
+    )
+    assert confirmations == [host]
+    assert relay_observations == [(host,)]
+    assert bytes(writer.payload) == response
+    assert tproxy.geph_active_session_count() == 0
+
+
 def test_unproven_unknown_never_waits_for_owned_geph_recovery(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "unproven-foreign-exit.example"

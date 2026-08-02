@@ -61,6 +61,10 @@ at-most-two-replacement recovery. The route remains unlearned and backend hold
 remains intact until that independent proof succeeds. No hostname rule or PF,
 DNS, proxy/PAC/VPN,
 external-Geph, Discord, YouTube, or Googlevideo behavior changes.
+For a long-lived one-shot connection, independent confirmation is scheduled as
+soon as the first owned-Geph payload arrives, before the relay can outlive the
+candidate window; session-draining replacement remains blocked until that
+active relay has finished.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

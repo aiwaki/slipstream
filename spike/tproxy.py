@@ -9165,6 +9165,7 @@ async def _try_unknown_owned_geph_route(
         return False
     up_w = None
     confirm_after_session = False
+    confirmation_scheduled = False
     try:
         geph = await dial_via_geph(h, port, first_flight)
         if geph is None:
@@ -9187,6 +9188,11 @@ async def _try_unknown_owned_geph_route(
             )
             return False
         confirm_after_session = not _auto_geph_learned_exact_host(h)
+        if confirm_after_session:
+            confirmation_scheduled = _schedule_auto_geph_confirmation(
+                h,
+                evidence_reason="one-shot Geph route needs stable confirmation",
+            )
         try:
             writer.write(server_first)
             await writer.drain()
@@ -9198,7 +9204,11 @@ async def _try_unknown_owned_geph_route(
         if up_w is not None:
             await _close_stream_writer(up_w)
         _geph_session_finished()
-        if confirm_after_session and not _auto_geph_learned_exact_host(h):
+        if (
+            confirm_after_session
+            and not confirmation_scheduled
+            and not _auto_geph_learned_exact_host(h)
+        ):
             _schedule_auto_geph_confirmation(
                 h,
                 evidence_reason="one-shot Geph route needs stable confirmation",
