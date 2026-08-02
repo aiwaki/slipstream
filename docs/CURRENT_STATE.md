@@ -84,10 +84,11 @@ the post-drain worker cannot start, and retried by the monitor only after the
 backend is ready. Retained authorization is insertion-ordered and capped by
 the shared routing-state bound; learned or policy-invalid hosts are pruned and
 the oldest authorization is evicted if the bound is exceeded. The two stable
-HTTP probes share
-one lifecycle reservation, so another host cannot replace Geph between them;
-the learned route is committed before that reservation is released, and a
-recovery worker reuses its already-held drain through proof and commit.
+HTTP probes share one lifecycle reservation and pin the exact owned listener
+PID. Ownership and PID equality are checked before and after each response and
+again at route commit; KeepAlive or external PID drift rejects the proof. The
+learned route is committed before that reservation is released, and a recovery
+worker reuses its already-held drain through proof and commit.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production
