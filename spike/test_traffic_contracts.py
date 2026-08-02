@@ -956,6 +956,10 @@ def test_failed_early_confirmation_retries_once_after_relay_drain(monkeypatch):
     async def healthy_owned_geph(_host, _port, _payload):
         return streaming_upstream_response(response)
 
+    async def relay_past_candidate_ttl(*_args, **_kwargs):
+        tproxy._auto_geph_candidates.pop(host, None)
+        return None
+
     def failed_confirmation(actual_host, **_kwargs):
         confirmation_attempts.append(
             (actual_host, tproxy.geph_active_session_count(), "early")
@@ -963,17 +967,24 @@ def test_failed_early_confirmation_retries_once_after_relay_drain(monkeypatch):
         tproxy._auto_geph_confirmation_completed(actual_host, False)
         return True
 
-    def post_drain_confirmation(actual_host, *, drain_reserved=False):
+    def post_drain_confirmation(
+        actual_host,
+        *,
+        drain_reserved=False,
+        candidate_authorized=False,
+    ):
         confirmation_attempts.append(
             (actual_host, tproxy.geph_active_session_count(), "post-drain")
         )
         assert drain_reserved
+        assert candidate_authorized
         assert tproxy._geph_restart_draining
         assert not tproxy._geph_session_started()
         post_drain_completed.set()
         return False
 
     monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(tproxy, "relay_local_stream", relay_past_candidate_ttl)
     monkeypatch.setattr(
         tproxy,
         "_schedule_auto_geph_confirmation",

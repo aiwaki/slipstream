@@ -3138,6 +3138,19 @@ def _auto_geph_candidate_allowed(host, now=None):
     )
 
 
+def _auto_geph_deferred_candidate_allowed(host):
+    """Keep one proven incident eligible after its active relay outlives TTL."""
+    h = normalize_host(host)
+    return bool(
+        AUTO_GEPH_ENABLED
+        and GEPH_ENABLED
+        and _auto_geph_base_host_allowed(h)
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
+    )
+
+
 def _probe_owned_geph_recovery_state():
     """Observe the exact owned listener without waiting for monitor cadence."""
     if not GEPH_ENABLED:
@@ -3876,13 +3889,25 @@ def _confirm_transport_incomplete_response(host, ip):
     return _request_incomplete_response_geo_exit_confirmation(h)
 
 
-def _remember_auto_geph_host(host, bytes_read, reason):
+def _remember_auto_geph_host(
+    host,
+    bytes_read,
+    reason,
+    *,
+    candidate_authorized=False,
+):
     h = normalize_host(host)
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
         _set_auto_geph_status("rejected", h, reason, bytes_read)
         return False
     with _auto_geph_lock:
-        if not _auto_geph_candidate_allowed(h):
+        if not (
+            _auto_geph_candidate_allowed(h)
+            or (
+                candidate_authorized
+                and _auto_geph_deferred_candidate_allowed(h)
+            )
+        ):
             _set_auto_geph_status("skipped", h, "route changed")
             return False
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
@@ -3902,9 +3927,21 @@ def _remember_auto_geph_host(host, bytes_read, reason):
     return True
 
 
-def _confirm_auto_geph(host, *, drain_reserved=False):
+def _confirm_auto_geph(
+    host,
+    *,
+    drain_reserved=False,
+    candidate_authorized=False,
+):
     h = normalize_host(host)
-    if not AUTO_GEPH_ENABLED or not _geph_up or not _auto_geph_candidate_allowed(h):
+    candidate_authorized = bool(candidate_authorized and drain_reserved)
+    if not (
+        _auto_geph_candidate_allowed(h)
+        or (
+            candidate_authorized
+            and _auto_geph_deferred_candidate_allowed(h)
+        )
+    ):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
     stable_probe = lambda candidate: _stable_owned_geph_payload_probe(
@@ -3922,6 +3959,7 @@ def _confirm_auto_geph(host, *, drain_reserved=False):
         h,
         bytes_read,
         "stable Geph payload confirmed",
+        candidate_authorized=candidate_authorized,
     )
 
 
@@ -4290,7 +4328,7 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
             _auto_geph_retry_after_drain.discard(h)
         elif h in _auto_geph_confirming:
             pass
-        elif not _auto_geph_candidate_allowed(h):
+        elif not _auto_geph_base_host_allowed(h):
             _auto_geph_retry_after_drain.discard(h)
         else:
             now = time.monotonic()
@@ -4316,7 +4354,13 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
             if runner is not None:
                 succeeded = bool(runner(h))
             else:
-                succeeded = bool(_confirm_auto_geph(h, drain_reserved=True))
+                succeeded = bool(
+                    _confirm_auto_geph(
+                        h,
+                        drain_reserved=True,
+                        candidate_authorized=True,
+                    )
+                )
         finally:
             owns_confirmation = _finish_auto_geph_confirmation(h, token)
             _finish_geph_restart_drain()
@@ -4377,12 +4421,20 @@ def _schedule_auto_geph_confirmation(
 def _schedule_auto_geph_confirmation_before_relay(host):
     """Probe early, retaining one retry if the active relay blocks recovery."""
     h = normalize_host(host)
-    if not h or _auto_geph_learned_exact_host(h):
+    now = time.monotonic()
+    if (
+        not h
+        or _auto_geph_learned_exact_host(h)
+        or not _auto_geph_candidate_allowed(h, now)
+    ):
         return False
     with _auto_geph_lock:
+        # This marker captures authorization while the original candidate is
+        # still live. Its single post-drain retry may outlive candidate TTL.
         _auto_geph_retry_after_drain.add(h)
     return _schedule_auto_geph_confirmation(
         h,
+        now=now,
         evidence_reason="one-shot Geph route needs stable confirmation",
     )
 

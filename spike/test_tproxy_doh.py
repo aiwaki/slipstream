@@ -8564,6 +8564,56 @@ def test_post_drain_retry_reserves_backend_before_consuming_marker(monkeypatch):
     tproxy._geph_session_finished()
 
 
+def test_post_drain_retry_preserves_authorization_after_candidate_expires(
+    monkeypatch,
+):
+    host = "expired-post-drain.example"
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
+    tproxy._auto_geph_retry_after_drain.add(host)
+
+    assert tproxy._retry_auto_geph_confirmation_after_drain(
+        host,
+        runner=lambda actual_host: confirmations.append(actual_host) or False,
+    )
+    assert confirmations == [host]
+    assert host not in tproxy._auto_geph_retry_after_drain
+    assert not tproxy._geph_restart_draining
+
+
+def test_authorized_post_drain_confirmation_can_learn_after_candidate_expires(
+    monkeypatch,
+):
+    host = "expired-authorized-confirmation.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_stable_owned_geph_payload_probe",
+        lambda _host, _probe: tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES,
+    )
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_clear_owned_geph_backend_hold_after_payload",
+        lambda: None,
+    )
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
+
+    assert not tproxy._confirm_auto_geph(host, drain_reserved=True)
+    assert tproxy._confirm_auto_geph(
+        host,
+        drain_reserved=True,
+        candidate_authorized=True,
+    )
+    assert tproxy._auto_geph_learned_exact_host(host)
+
+
 def test_reserved_auto_geph_confirmation_reuses_held_drain(monkeypatch):
     host = "reserved-confirmation.example"
     recovery = []
@@ -8588,7 +8638,7 @@ def test_reserved_auto_geph_confirmation_reuses_held_drain(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_remember_auto_geph_host",
-        lambda _host, _bytes, _reason: False,
+        lambda _host, _bytes, _reason, **_kwargs: False,
     )
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
 

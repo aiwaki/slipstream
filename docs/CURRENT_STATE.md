@@ -71,6 +71,9 @@ live confirmation owns a unique worker token and cannot be evicted by elapsed
 time while its bounded replacement sequence is still running. The post-drain
 retry reserves the idle Geph session drain before consuming its marker, so a
 new route cannot enter between the zero-session observation and confirmation.
+That marker captures authorization while the original candidate is live and
+survives candidate expiry until its one reserved retry is consumed, so a relay
+lasting beyond the candidate TTL cannot cancel the recovery it deferred.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production
