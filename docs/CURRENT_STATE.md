@@ -55,10 +55,11 @@ HTTP status from one `HEAD` response. Neither contract could reject a live SOCKS
 listener whose next session returned `429 local_rate_limited`. The current
 correction retains the one-shot Geph attempt after the complete local proof but
 does not learn from encrypted bytes. Generic route learning now requires two
-consecutive usable HTTP responses on independent owned SOCKS sessions; a failed
-second response enters the existing ownership-verified, at-most-two-replacement
-recovery. The route remains unlearned and backend hold remains intact until that
-independent proof succeeds. No hostname rule or PF, DNS, proxy/PAC/VPN,
+consecutive complete, usable HTTP responses on independent owned SOCKS
+sessions; a failed second response enters the existing ownership-verified,
+at-most-two-replacement recovery. The route remains unlearned and backend hold
+remains intact until that independent proof succeeds. No hostname rule or PF,
+DNS, proxy/PAC/VPN,
 external-Geph, Discord, YouTube, or Googlevideo behavior changes.
 
 After the Mac correction is qualified, the M4 next action remains

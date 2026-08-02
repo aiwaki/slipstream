@@ -72,9 +72,9 @@ a generic unknown host completed the local evidence ladder, the one-shot Geph
 stream delivered encrypted payload, and Slipstream learned the route before an
 independent HTTP check. The next request then received persistent HTTP `429`
 with `local_rate_limited`. Encrypted TLS payload therefore no longer authorizes
-a learned route. Generic learning requires two consecutive usable HTTP
-responses on independent owned SOCKS sessions; unsuccessful responses cannot
-clear backend hold or create the route.
+a learned route. Generic learning requires two consecutive complete, usable
+HTTP responses on independent owned SOCKS sessions; unsuccessful, incomplete,
+or over-deadline responses cannot clear backend hold or create the route.
 
 Current recovery drains active owned sessions once, verifies the listener and
 LaunchAgent ownership before every replacement, and requires a changed live

@@ -3441,6 +3441,8 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
         tls_sock.sendall(request)
         chunks = []
         size = 0
+        stream_closed = False
+        complete = False
         while size < SEMANTIC_GEPH_PROBE_MAX_BYTES:
             try:
                 _set_socket_deadline_timeout(tls_sock, deadline)
@@ -3450,12 +3452,32 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
             except socket.timeout:
                 break
             if not chunk:
+                stream_closed = True
                 break
             chunks.append(chunk)
             size += len(chunk)
+            data = b"".join(chunks)
+            if http_response_complete(
+                data,
+                stream_closed=False,
+                truncated=False,
+            ):
+                complete = True
+                break
         data = b"".join(chunks)
-        if _semantic_geph_response_usable(data):
-            return len(data)
+        truncated = size >= SEMANTIC_GEPH_PROBE_MAX_BYTES and not complete
+        response_complete = complete or http_response_complete(
+            data,
+            stream_closed=stream_closed,
+            truncated=truncated,
+        )
+        if response_complete and _semantic_geph_response_usable(data):
+            body_length = http_response_body_length(
+                data,
+                stream_closed=stream_closed,
+                truncated=truncated,
+            )
+            return body_length or 0
         return 0
     except Exception:
         return 0

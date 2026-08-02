@@ -8189,6 +8189,136 @@ def test_semantic_geph_probe_shares_deadline_across_socks_tls_and_http(
     assert tls_socket.closed
 
 
+@pytest.mark.parametrize(
+    ("response_chunks", "expected_positive"),
+    [
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Length: 128\r\n\r\n",
+                b"x" * 128,
+            ],
+            True,
+        ),
+        (
+            [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                b"Content-Length: 256\r\n\r\n",
+                b"x" * 128,
+            ],
+            False,
+        ),
+    ],
+)
+def test_semantic_geph_probe_requires_complete_http_response(
+    monkeypatch,
+    response_chunks,
+    expected_positive,
+):
+    class FakeTlsSocket:
+        def __init__(self, chunks):
+            self.chunks = deque(chunks + [b""])
+            self.closed = False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    tls_socket = FakeTlsSocket(response_chunks)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda _sock, server_hostname: tls_socket
+        ),
+    )
+
+    result = tproxy._semantic_geph_payload_probe("complete-response.example")
+
+    assert (result > 0) is expected_positive
+    assert tls_socket.closed
+
+
+def test_semantic_recovery_performs_two_successful_in_incident_replacements(
+    monkeypatch,
+):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    listener_pids = iter([100, 101, 101, 102])
+    probe_results = iter([0, 512])
+    launchctl_calls = []
+
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(tproxy, "geph_ownership_path", lambda: "/tmp/owned.json")
+    monkeypatch.setattr(
+        tproxy,
+        "_read_geph_ownership",
+        lambda _path: {
+            "uid": 502,
+            "launchd_label": tproxy.GEPH_LAUNCHD_LABEL,
+        },
+    )
+    monkeypatch.setattr(tproxy, "_ownership_file_uid", lambda _path: 502)
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *args: (
+            launchctl_calls.append(args)
+            or SimpleNamespace(returncode=0, stdout="", stderr="")
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_geo_exit_backend",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(tproxy, "note_runtime_rearm", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", lambda: "ready")
+
+    result = tproxy._retry_semantic_geph_probe_after_owned_restart(
+        "two-replacements.example",
+        lambda _host: next(probe_results),
+    )
+
+    assert result == 512
+    assert len(launchctl_calls) == 2
+    assert not tproxy._geph_restart_draining
+    with pytest.raises(StopIteration):
+        next(listener_pids)
+    with pytest.raises(StopIteration):
+        next(probe_results)
+
+
 def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
     confirmations = []
     route_class = {"value": tproxy.ROUTE_UNKNOWN}
