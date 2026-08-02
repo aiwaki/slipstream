@@ -8,30 +8,28 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: correct and re-run the protected qualification
-for the browser-independent recovery trigger before another workstation
-installation. PR #295 merged as exact main
-`db5df67c11f72ce36e5e98513ab682a2fbb53174`. Exact-main CI
-`30727142757`, dependency audit `30727142778`, and native Windows qualification
-`30727142747` passed.
+Current user-facing priority: when the user is present, perform one controlled
+workstation transaction using only the artifact qualified for exact main
+`1be02bc8a4a410989b59ec601821e2bd6a9f1b19`. PR #296 corrected the protected
+outer lifecycle and merged as that SHA. Exact-main CI `30729020756`, dependency
+audit `30729020741`, and native Windows qualification `30729020745` passed.
 
-The sole protected run for that SHA, `30727352290`, built and verified the
-packaged app and passed both Chromium semantic scenarios (`incomplete_response`
-and `regional_denial`) with one reload and complete CSS, JavaScript, image, and
-ready-callback evidence. It then failed the outer account-backed lifecycle with
-`Geph ownership changed before a protected action`. Cleanup and the daemon-free
-system/network boundary passed; artifact packaging and upload were skipped, so
-no artifact was eligible and no workstation mutation occurred.
+The sole protected run for that SHA, `30729228620`, passed its only job
+`91446387268`. It proved account-backed owned-Geph payload before tray exit,
+after tray exit, and after a KeepAlive replacement; both Chromium semantic
+scenarios (`incomplete_response` and `regional_denial`) completed one reload
+with CSS, JavaScript, image, and ready-callback evidence. The daemon-free
+boundary, every cleanup assertion, and system/network non-mutation also passed.
 
-The failure is in the protected harness rather than the browser or routing
-result: coordinated semantic work may legitimately replace the exact
-user-owned Geph process. The correction may adopt that successor only after
-revalidating the private ownership record, UID, executable/config paths,
-LaunchAgent label/PID, and sole `:9954` listener, and after proving that the
-previous exact owned process no longer survives. Trayless payload and the next
-KeepAlive recovery must continue from that verified successor. Do not install
-until this correction is reviewed and merged, exact-main CI/audit passes, and
-one protected run for the new exact main publishes its qualified artifact.
+Artifact `8827417897`,
+`Slipstream-owned-geph-qualified-1be02bc8a4a410989b59ec601821e2bd6a9f1b19`,
+has GitHub digest
+`sha256:4672cdc4e60137220230b917f96aefad04dc9ff09a8087551383ecd52ce545da`;
+the downloaded exact ZIP has SHA-256
+`a215f1f05037e01c3786a85cc388f5839a0a141d2c768e5a413bc162ff1b8391`.
+No workstation install or network mutation was attempted during the adjacent
+repository research pass because the user was away; this is a deferral, not a
+failed product gate.
 
 Current M4 next action remains production-host sleep/wake recovery on disposable
 Windows, without production networking composition. Updater/uninstall
