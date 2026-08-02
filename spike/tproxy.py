@@ -3415,14 +3415,20 @@ def _semantic_geph_response_usable(data):
 
 
 def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
-    sock = _socks5_connect_blocking(host, 443, timeout)
+    deadline = time.monotonic() + max(float(timeout), 0.001)
+    sock = _socks5_connect_blocking(
+        host,
+        443,
+        max(deadline - time.monotonic(), 0.001),
+    )
     if sock is None:
         return 0
     tls_sock = None
     try:
         ctx = _local_payload_ssl_context()
+        _set_socket_deadline_timeout(sock, deadline)
         tls_sock = ctx.wrap_socket(sock, server_hostname=host)
-        tls_sock.settimeout(timeout)
+        _set_socket_deadline_timeout(tls_sock, deadline)
         request = (
             "GET / HTTP/1.1\r\n"
             f"Host: {host}\r\n"
@@ -3437,6 +3443,7 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
         size = 0
         while size < SEMANTIC_GEPH_PROBE_MAX_BYTES:
             try:
+                _set_socket_deadline_timeout(tls_sock, deadline)
                 chunk = tls_sock.recv(
                     min(4096, SEMANTIC_GEPH_PROBE_MAX_BYTES - size)
                 )

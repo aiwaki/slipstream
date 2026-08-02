@@ -8132,6 +8132,63 @@ def test_incomplete_response_probe_shares_deadline_across_socks_tls_and_http(
     assert tls_socket.closed
 
 
+def test_semantic_geph_probe_shares_deadline_across_socks_tls_and_http(
+    monkeypatch,
+):
+    class FakeSocket:
+        def __init__(self):
+            self.closed = False
+            self.recv_called = False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            self.recv_called = True
+            return (
+                b"HTTP/1.1 200 OK\r\nContent-Length: 128\r\n\r\n"
+                + b"x" * 128
+            )
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self, tls_socket):
+            self.tls_socket = tls_socket
+
+        def wrap_socket(self, _sock, server_hostname):
+            assert server_hostname == "slow-response.example"
+            return self.tls_socket
+
+    tls_socket = FakeSocket()
+    clock = iter([0.0, 0.0, 1.0, 2.0, 7.0])
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: FakeContext(tls_socket),
+    )
+
+    assert (
+        tproxy._semantic_geph_payload_probe(
+            "slow-response.example",
+            timeout=6.0,
+        )
+        == 0
+    )
+    assert not tls_socket.recv_called
+    assert tls_socket.closed
+
+
 def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
     confirmations = []
     route_class = {"value": tproxy.ROUTE_UNKNOWN}
