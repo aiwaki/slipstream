@@ -2094,6 +2094,7 @@ _auto_fail = {}               # host -> list[monotonic] recent stuck closes
 _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _auto_geph_confirming = {}    # host -> monotonic start time
 _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
+_auto_geph_retry_after_drain = set()  # one post-relay retry per current incident
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
@@ -4181,6 +4182,7 @@ def _schedule_bounded_geph_confirmation(
     confirmation,
     eligible,
     evidence_reason,
+    on_complete=None,
 ):
     h = normalize_host(host)
     if not eligible(h, now):
@@ -4215,17 +4217,53 @@ def _schedule_bounded_geph_confirmation(
         _set_auto_geph_status("checking", h, evidence_reason)
 
     def run():
+        succeeded = False
         try:
-            (runner or confirmation)(h)
+            succeeded = bool((runner or confirmation)(h))
         finally:
             with _auto_geph_lock:
                 _auto_geph_confirming.pop(h, None)
+            if on_complete is not None:
+                on_complete(h, succeeded)
 
     if runner is not None:
         run()
         return True
     threading.Thread(target=run, daemon=True).start()
     return True
+
+
+def _retry_auto_geph_confirmation_after_drain(host):
+    """Consume one pending retry once the one-shot relay is no longer active."""
+    h = normalize_host(host)
+    if not h or geph_active_session_count() > 0:
+        return False
+    with _auto_geph_lock:
+        if h not in _auto_geph_retry_after_drain:
+            return False
+        if _auto_geph_learned_exact_host(h):
+            _auto_geph_retry_after_drain.discard(h)
+            return False
+        if h in _auto_geph_confirming:
+            return False
+        if not _auto_geph_candidate_allowed(h):
+            _auto_geph_retry_after_drain.discard(h)
+            return False
+        _auto_geph_retry_after_drain.discard(h)
+        _auto_geph_last_probe.pop(h, None)
+    return _schedule_auto_geph_confirmation(
+        h,
+        evidence_reason="retrying stable confirmation after one-shot relay",
+    )
+
+
+def _auto_geph_confirmation_completed(host, succeeded):
+    h = normalize_host(host)
+    if succeeded or _auto_geph_learned_exact_host(h):
+        with _auto_geph_lock:
+            _auto_geph_retry_after_drain.discard(h)
+        return
+    _retry_auto_geph_confirmation_after_drain(h)
 
 
 def _schedule_auto_geph_confirmation(
@@ -4242,6 +4280,20 @@ def _schedule_auto_geph_confirmation(
         confirmation=_confirm_auto_geph,
         eligible=_auto_geph_candidate_allowed,
         evidence_reason=evidence_reason,
+        on_complete=_auto_geph_confirmation_completed,
+    )
+
+
+def _schedule_auto_geph_confirmation_before_relay(host):
+    """Probe early, retaining one retry if the active relay blocks recovery."""
+    h = normalize_host(host)
+    if not h or _auto_geph_learned_exact_host(h):
+        return False
+    with _auto_geph_lock:
+        _auto_geph_retry_after_drain.add(h)
+    return _schedule_auto_geph_confirmation(
+        h,
+        evidence_reason="one-shot Geph route needs stable confirmation",
     )
 
 
@@ -9165,7 +9217,6 @@ async def _try_unknown_owned_geph_route(
         return False
     up_w = None
     confirm_after_session = False
-    confirmation_scheduled = False
     try:
         geph = await dial_via_geph(h, port, first_flight)
         if geph is None:
@@ -9189,10 +9240,7 @@ async def _try_unknown_owned_geph_route(
             return False
         confirm_after_session = not _auto_geph_learned_exact_host(h)
         if confirm_after_session:
-            confirmation_scheduled = _schedule_auto_geph_confirmation(
-                h,
-                evidence_reason="one-shot Geph route needs stable confirmation",
-            )
+            _schedule_auto_geph_confirmation_before_relay(h)
         try:
             writer.write(server_first)
             await writer.drain()
@@ -9204,15 +9252,8 @@ async def _try_unknown_owned_geph_route(
         if up_w is not None:
             await _close_stream_writer(up_w)
         _geph_session_finished()
-        if (
-            confirm_after_session
-            and not confirmation_scheduled
-            and not _auto_geph_learned_exact_host(h)
-        ):
-            _schedule_auto_geph_confirmation(
-                h,
-                evidence_reason="one-shot Geph route needs stable confirmation",
-            )
+        if confirm_after_session:
+            _retry_auto_geph_confirmation_after_drain(h)
 
 
 async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writer):

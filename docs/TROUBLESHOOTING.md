@@ -83,6 +83,12 @@ proof after each and stopping immediately on stable success. The exact host is
 learned only after that proof. A new recovery incident is globally rate-limited
 for ten minutes.
 
+For a long-lived one-shot relay, the independent proof starts after its first
+payload rather than after connection close. If that worker fails while the
+relay prevents session drain, Slipstream retains one post-drain retry and
+consumes it after the active session finishes; no unbounded retry chain is
+created.
+
 Do not work around this symptom by adding the hostname to static policy,
 restarting an external Geph process, or changing system DNS, proxy, PAC, VPN, or
 PF state. Discord, YouTube, and Googlevideo remain excluded from Geph.
