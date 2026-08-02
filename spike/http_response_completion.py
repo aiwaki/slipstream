@@ -1,28 +1,49 @@
 """Pure bounded HTTP/1 response-completion checks for route qualification."""
 
 
-_NO_BODY_STATUSES = frozenset((204, 304))
+_NO_BODY_STATUSES = frozenset((204, 205, 304))
+_TOKEN_BYTES = frozenset(
+    b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+def _header_value_valid(value):
+    return not any(byte < 0x20 and byte != 0x09 or byte == 0x7F for byte in value)
+
+
+def _parse_header_line(line):
+    if not line or line.startswith((b" ", b"\t")):
+        return None
+    name, separator, value = line.partition(b":")
+    if (
+        not separator
+        or not name
+        or any(byte not in _TOKEN_BYTES for byte in name)
+        or not _header_value_valid(value)
+    ):
+        return None
+    return name.lower(), value.strip()
 
 
 def _parse_headers(block):
     lines = block.split(b"\r\n")
-    parts = lines[0].split()
-    if len(parts) < 2 or not parts[0].startswith(b"HTTP/"):
+    parts = lines[0].split(b" ", 2)
+    if (
+        len(parts) != 3
+        or parts[0] not in (b"HTTP/1.0", b"HTTP/1.1")
+        or len(parts[1]) != 3
+        or not parts[1].isdigit()
+        or not _header_value_valid(parts[2])
+    ):
         return None
-    try:
-        status = int(parts[1])
-    except ValueError:
-        return None
+    version = parts[0]
+    status = int(parts[1])
     headers = {}
     for line in lines[1:]:
-        name, separator, value = line.partition(b":")
-        if not separator:
+        parsed = _parse_header_line(line)
+        if parsed is None:
             return None
-        key = name.strip().lower()
-        if not key:
-            return None
-        headers.setdefault(key, []).append(value.strip())
-    return status, headers
+        name, value = parsed
+        headers.setdefault(name, []).append(value)
+    return version, status, headers
 
 
 def _content_length(headers):
@@ -32,34 +53,86 @@ def _content_length(headers):
     normalized = {value for value in values}
     if len(normalized) != 1:
         return False
+    value = next(iter(normalized))
+    if not value or any(byte not in b"0123456789" for byte in value):
+        return False
     try:
-        length = int(next(iter(normalized)))
+        length = int(value)
     except ValueError:
         return False
-    return length if length >= 0 else False
+    return length
 
 
-def _chunked_body_complete(body):
+def _chunked_trailer_state(trailer):
+    if trailer == b"\r\n":
+        return "complete"
+    if trailer in (b"", b"\r"):
+        return "incomplete"
+    return "invalid"
+
+
+def _chunked_body_state(body):
     cursor = 0
     while True:
         line_end = body.find(b"\r\n", cursor)
         if line_end < 0:
-            return False
-        size_token = body[cursor:line_end].split(b";", 1)[0].strip()
-        if not size_token:
-            return False
+            pending = body[cursor:]
+            if not pending:
+                return "incomplete"
+            if b";" in pending:
+                return "invalid"
+            if all(
+                byte in b"0123456789abcdefABCDEF" for byte in pending
+            ):
+                return "incomplete"
+            return "invalid"
+        size_line = body[cursor:line_end]
+        if b";" in size_line:
+            return "invalid"
+        if not size_line or any(
+            byte not in b"0123456789abcdefABCDEF" for byte in size_line
+        ):
+            return "invalid"
         try:
-            size = int(size_token, 16)
+            size = int(size_line, 16)
         except ValueError:
-            return False
+            return "invalid"
         cursor = line_end + 2
         if size == 0:
-            trailer_end = body.find(b"\r\n\r\n", cursor)
-            return trailer_end >= 0 or body[cursor:] == b"\r\n"
+            return _chunked_trailer_state(body[cursor:])
         chunk_end = cursor + size
-        if chunk_end + 2 > len(body) or body[chunk_end : chunk_end + 2] != b"\r\n":
-            return False
+        if chunk_end > len(body):
+            return "incomplete"
+        terminator = body[chunk_end : chunk_end + 2]
+        if len(terminator) < 2:
+            return "incomplete" if b"\r\n".startswith(terminator) else "invalid"
+        if terminator != b"\r\n":
+            return "invalid"
         cursor = chunk_end + 2
+
+
+def _chunked_body_complete(body):
+    return _chunked_body_state(body) == "complete"
+
+
+def _chunked_body_length(body):
+    if not _chunked_body_complete(body):
+        return None
+    cursor = 0
+    total = 0
+    while True:
+        line_end = body.find(b"\r\n", cursor)
+        if line_end < 0:
+            return None
+        try:
+            size = int(body[cursor:line_end], 16)
+        except ValueError:
+            return None
+        cursor = line_end + 2
+        if size == 0:
+            return total
+        total += size
+        cursor += size + 2
 
 
 def http_response_complete(data, *, stream_closed, truncated):
@@ -73,7 +146,7 @@ def http_response_complete(data, *, stream_closed, truncated):
     parsed = _parse_headers(data[:boundary])
     if parsed is None:
         return False
-    status, headers = parsed
+    version, status, headers = parsed
     if status < 200 or status >= 400:
         return False
     body = data[boundary + 4 :]
@@ -82,12 +155,14 @@ def http_response_complete(data, *, stream_closed, truncated):
 
     transfer_encodings = headers.get(b"transfer-encoding", ())
     if transfer_encodings:
+        if version != b"HTTP/1.1":
+            return False
         tokens = [
             token.strip().lower()
             for value in transfer_encodings
             for token in value.split(b",")
         ]
-        if not tokens or tokens[-1] != b"chunked":
+        if tokens != [b"chunked"] or b"content-length" in headers:
             return False
         return _chunked_body_complete(body)
 
@@ -97,3 +172,78 @@ def http_response_complete(data, *, stream_closed, truncated):
     if length is not None:
         return len(body) == length
     return bool(stream_closed)
+
+
+def http_response_body_length(data, *, stream_closed, truncated):
+    """Return representation-body bytes for one proven-complete response."""
+
+    if not http_response_complete(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+    ):
+        return None
+    boundary = data.find(b"\r\n\r\n")
+    parsed = _parse_headers(data[:boundary])
+    if parsed is None:
+        return None
+    _version, status, headers = parsed
+    if status in _NO_BODY_STATUSES:
+        return 0
+    body = data[boundary + 4 :]
+    if headers.get(b"transfer-encoding", ()):
+        return _chunked_body_length(body)
+    length = _content_length(headers)
+    if length is False:
+        return None
+    return len(body) if length is None else length
+
+
+def http_response_incomplete(data, *, stream_closed, idle_timed_out, truncated):
+    """Return whether a bounded HTTP/1 body is proven unfinished.
+
+    A timeout or EOF is evidence only after a complete successful response
+    header declares framing that has not arrived. Connection-delimited,
+    malformed, unsuccessful, or locally truncated responses remain unknown.
+    """
+
+    if not (stream_closed or idle_timed_out):
+        return False
+    if not isinstance(data, bytes) or not data.startswith(b"HTTP/") or truncated:
+        return False
+    boundary = data.find(b"\r\n\r\n")
+    if boundary < 0:
+        return False
+    parsed = _parse_headers(data[:boundary])
+    if parsed is None:
+        return False
+    version, status, headers = parsed
+    if status < 200 or status >= 400 or status in _NO_BODY_STATUSES:
+        return False
+    body = data[boundary + 4 :]
+
+    content_encodings = [
+        token.strip().lower()
+        for value in headers.get(b"content-encoding", ())
+        for token in value.split(b",")
+    ]
+    if content_encodings and any(token != b"identity" for token in content_encodings):
+        return False
+
+    transfer_encodings = headers.get(b"transfer-encoding", ())
+    if transfer_encodings:
+        if version != b"HTTP/1.1":
+            return False
+        tokens = [
+            token.strip().lower()
+            for value in transfer_encodings
+            for token in value.split(b",")
+        ]
+        if tokens != [b"chunked"] or b"content-length" in headers:
+            return False
+        return _chunked_body_state(body) == "incomplete"
+
+    length = _content_length(headers)
+    if length is False or length is None:
+        return False
+    return len(body) < length

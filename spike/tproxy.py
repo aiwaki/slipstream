@@ -54,7 +54,11 @@ import urllib.request
 
 import connection_probe
 import geph_backend
-from http_response_completion import http_response_complete
+from http_response_completion import (
+    http_response_body_length,
+    http_response_complete,
+    http_response_incomplete,
+)
 import install_guard
 import pf_adapter
 import route_circuit
@@ -2031,6 +2035,8 @@ SERVER_FIRST_CLOSE_STORM = 2
 SERVER_FIRST_CLOSE_MAX_BYTES = 32 * 1024
 SERVER_FIRST_CLOSE_MAX_DURATION = 10.0
 SERVER_FIRST_CLOSE_STATE_MAX = 4096
+TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
+TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
 AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
@@ -2113,7 +2119,12 @@ UNKNOWN_RECOVERY_XBOX_DNS = "xbox_dns"
 UNKNOWN_RECOVERY_LOCAL_LADDER = "local_ladder"
 XBOX_DNS_STATE_MAX = 4096
 _clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
-_server_first_closes = {}     # (host, stage) -> deque[monotonic] early closes
+_server_first_closes = {}     # (host, stage) -> deque[(monotonic, probe_ip)]
+_server_first_repeat_stages = {}  # (host, stage) -> (expiry, original_probe_ip)
+_transport_incomplete_confirming = {}  # host -> monotonic probe start
+_transport_incomplete_last_probe = {}  # host -> monotonic last probe start
+_transport_incomplete_plain_candidates = {}  # host -> (ip, monotonic observed)
+_transport_incomplete_server_first_evidence = {}  # host -> {stage: monotonic}
 
 # Runtime local-bypass failures start a private exact-host re-sweep. The state is
 # deliberately process-local and aggregate-free: status must not become browsing
@@ -3229,6 +3240,32 @@ def _request_semantic_geo_exit_confirmation(
     )
 
 
+def _request_incomplete_response_geo_exit_confirmation(
+    host,
+    *,
+    now=None,
+    confirmation_runner=None,
+):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+    ):
+        return False
+    return _schedule_bounded_geph_confirmation(
+        h,
+        now=now,
+        runner=confirmation_runner,
+        confirmation=_confirm_incomplete_response_geo_exit,
+        eligible=lambda candidate, _now: (
+            _auto_geph_base_host_allowed(candidate)
+            and _owned_geph_ready_for_semantic_confirmation()
+        ),
+        evidence_reason="incomplete response confirmed locally",
+    )
+
+
 def _get_semantic_route_signal_runtime():
     global _semantic_route_signal_runtime
     with _semantic_route_signal_runtime_lock:
@@ -3441,6 +3478,97 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
             pass
 
 
+def _incomplete_response_probe_request(host, *, bounded_range):
+    range_header = "Range: bytes=0-262143\r\n" if bounded_range else ""
+    return (
+        "GET / HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        "User-Agent: SlipstreamIncompleteResponse/1\r\n"
+        "Accept: text/html,application/xhtml+xml\r\n"
+        "Accept-Encoding: identity\r\n"
+        f"{range_header}"
+        "Cache-Control: no-cache\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii", "ignore")
+
+
+def _incomplete_response_plain_payload_probe(
+    ip,
+    host,
+    timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
+):
+    """Prove one incomplete plain-TLS response on the exact observed IP."""
+    h = normalize_host(host)
+    if not h or not ip:
+        return False
+    deadline = time.monotonic() + max(float(timeout), 0.001)
+    sock = None
+    tls_sock = None
+    chunks = []
+    size = 0
+    stream_closed = False
+    idle_timed_out = False
+    try:
+        sock = socket.create_connection(
+            (ip, 443),
+            timeout=max(deadline - time.monotonic(), 0.001),
+        )
+        _set_socket_deadline_timeout(sock, deadline)
+        tls_sock = _local_payload_ssl_context().wrap_socket(
+            sock,
+            server_hostname=h,
+        )
+        _set_socket_deadline_timeout(tls_sock, deadline)
+        tls_sock.sendall(
+            _incomplete_response_probe_request(h, bounded_range=False)
+        )
+        while size < TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES:
+            try:
+                _set_socket_deadline_timeout(tls_sock, deadline)
+                chunk = tls_sock.recv(
+                    min(16384, TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES - size)
+                )
+            except socket.timeout:
+                idle_timed_out = True
+                break
+            except (
+                ConnectionResetError,
+                ssl.SSLEOFError,
+                ssl.SSLZeroReturnError,
+            ):
+                stream_closed = True
+                break
+            except (ssl.SSLError, OSError):
+                return False
+            if not chunk:
+                stream_closed = True
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            data = b"".join(chunks)
+            if http_response_complete(
+                data,
+                stream_closed=False,
+                truncated=False,
+            ):
+                return False
+        data = b"".join(chunks)
+        truncated = size >= TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES
+        return http_response_incomplete(
+            data,
+            stream_closed=stream_closed,
+            idle_timed_out=idle_timed_out,
+            truncated=truncated,
+        )
+    except Exception:
+        return False
+    finally:
+        try:
+            (tls_sock or sock).close()
+        except Exception:
+            pass
+
+
 def _incomplete_response_geph_payload_probe(
     host,
     timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
@@ -3459,17 +3587,9 @@ def _incomplete_response_geph_payload_probe(
         _set_socket_deadline_timeout(sock, deadline)
         tls_sock = ctx.wrap_socket(sock, server_hostname=host)
         _set_socket_deadline_timeout(tls_sock, deadline)
-        request = (
-            "GET / HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            "User-Agent: SlipstreamIncompleteResponse/1\r\n"
-            "Accept: text/html,application/xhtml+xml\r\n"
-            "Accept-Encoding: identity\r\n"
-            "Range: bytes=0-262143\r\n"
-            "Cache-Control: no-cache\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("ascii", "ignore")
-        tls_sock.sendall(request)
+        tls_sock.sendall(
+            _incomplete_response_probe_request(host, bounded_range=True)
+        )
         chunks = []
         size = 0
         stream_closed = False
@@ -3502,15 +3622,18 @@ def _incomplete_response_geph_payload_probe(
         truncated = (
             size >= INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES and not complete
         )
-        if (
-            (complete or http_response_complete(
+        response_complete = complete or http_response_complete(
+            data,
+            stream_closed=stream_closed,
+            truncated=truncated,
+        )
+        if response_complete and _semantic_geph_response_usable(data):
+            body_length = http_response_body_length(
                 data,
                 stream_closed=stream_closed,
                 truncated=truncated,
-            ))
-            and _semantic_geph_response_usable(data)
-        ):
-            return len(data)
+            )
+            return body_length or 0
         return 0
     except Exception:
         return 0
@@ -3636,6 +3759,7 @@ def _confirm_semantic_geo_exit(host):
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
@@ -3685,6 +3809,7 @@ def _confirm_incomplete_response_geo_exit(host):
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
@@ -3698,6 +3823,18 @@ def _confirm_incomplete_response_geo_exit(host):
         f"browser response (remembered {AUTO_GEPH_TTL // 3600}h)"
     )
     return True
+
+
+def _confirm_transport_incomplete_response(host, ip):
+    """Require an exact local partial body before testing owned Geph."""
+    h = normalize_host(host)
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+        or not _incomplete_response_plain_payload_probe(ip, h)
+    ):
+        return False
+    return _request_incomplete_response_geo_exit_confirmation(h)
 
 
 def _remember_auto_geph_host(host, bytes_read, reason):
@@ -3714,6 +3851,7 @@ def _remember_auto_geph_host(host, bytes_read, reason):
         _auto_geph_candidates.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status("learned", h, reason, bytes_read)
@@ -3786,6 +3924,7 @@ def _forget_auto_geph_host(host, reason):
         _auto_geph_candidates.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _transport_incomplete_server_first_evidence.pop(h, None)
         _auto_geph_runtime_failures.pop(h, None)
         save_auto_geph()
         _set_auto_geph_status("reset", h, reason)
@@ -3872,6 +4011,13 @@ def _network_wide_unknown_failure_visible():
         for host, observations in _local_zero_payload_failures.items()
         if observations
     )
+    noisy_hosts.update(
+        host
+        for host, observations in (
+            _transport_incomplete_server_first_evidence.items()
+        )
+        if observations
+    )
     return len(noisy_hosts) >= AUTO_GEPH_NET_BAD
 
 
@@ -3912,16 +4058,8 @@ def note_zero_payload_route_failure(host, stage, now=None):
     return True
 
 
-def note_partial_tls_stall(
-    host,
-    stage,
-    *,
-    now=None,
-    confirmation_runner=None,
-):
-    """Record one framed TLS truncation without treating attempts as proof."""
+def _record_partial_tls_stall_evidence(host, stage, now):
     h = normalize_host(host)
-    now = time.monotonic() if now is None else now
     if (
         not _auto_geph_base_host_allowed(h)
         or not _valid_auto_geph_stage(stage)
@@ -3937,6 +4075,21 @@ def note_partial_tls_stall(
     ):
         return False
     if _network_wide_unknown_failure_visible():
+        return False
+    return True
+
+
+def note_partial_tls_stall(
+    host,
+    stage,
+    *,
+    now=None,
+    confirmation_runner=None,
+):
+    """Record one framed TLS truncation without treating attempts as proof."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if not _record_partial_tls_stall_evidence(h, stage, now):
         return False
     _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
     return _schedule_auto_geph_confirmation(
@@ -7769,22 +7922,201 @@ def note_clean_eof_stream_stall(
 def _prune_server_first_closes(now):
     cutoff = now - SERVER_FIRST_CLOSE_WINDOW
     for key, events in list(_server_first_closes.items()):
-        while events and events[0] <= cutoff:
+        while events and events[0][0] <= cutoff:
             events.popleft()
         if not events:
             _server_first_closes.pop(key, None)
     while len(_server_first_closes) > SERVER_FIRST_CLOSE_STATE_MAX:
         _server_first_closes.pop(next(iter(_server_first_closes)))
 
+    for key, (expiry, _probe_ip) in list(_server_first_repeat_stages.items()):
+        if expiry <= now or not _auto_geph_base_host_allowed(key[0]):
+            _server_first_repeat_stages.pop(key, None)
+    while len(_server_first_repeat_stages) > SERVER_FIRST_CLOSE_STATE_MAX:
+        _server_first_repeat_stages.pop(next(iter(_server_first_repeat_stages)))
+
+
+def _schedule_server_first_repeat_stage(host, stage, now, probe_ip=None):
+    h = normalize_host(host)
+    if not h or not _valid_auto_geph_stage(stage):
+        return False
+    _server_first_repeat_stages[(h, stage)] = (
+        now + SERVER_FIRST_CLOSE_WINDOW,
+        probe_ip,
+    )
+    _prune_server_first_closes(now)
+    return True
+
+
+def _claim_server_first_repeat_stage(host, now=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    _prune_server_first_closes(now)
+    candidates = [
+        (key, repeat)
+        for key, repeat in _server_first_repeat_stages.items()
+        if key[0] == h
+    ]
+    if not candidates:
+        return None
+    key, (_expiry, probe_ip) = min(
+        candidates,
+        key=lambda item: (item[1][0], item[0][1]),
+    )
+    _server_first_repeat_stages.pop(key, None)
+    # The first close is provisional, not independently reusable evidence.
+    # A matching connection carries the claim explicitly into the reducer.
+    _server_first_closes.pop(key, None)
+    return key[1], probe_ip
+
 
 def _clear_server_first_closes(host, stage=None):
     h = normalize_host(host)
     if stage is not None:
         _server_first_closes.pop((h, stage), None)
+        _server_first_repeat_stages.pop((h, stage), None)
         return
     for key in tuple(_server_first_closes):
         if key[0] == h:
             _server_first_closes.pop(key, None)
+    for key in tuple(_server_first_repeat_stages):
+        if key[0] == h:
+            _server_first_repeat_stages.pop(key, None)
+
+
+def _prune_transport_incomplete_probes(now):
+    stale = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
+    for host, started in list(_transport_incomplete_confirming.items()):
+        if started < stale:
+            _transport_incomplete_confirming.pop(host, None)
+    cutoff = now - TRANSPORT_INCOMPLETE_PROBE_COOLDOWN
+    for host, attempted_at in list(_transport_incomplete_last_probe.items()):
+        if attempted_at < cutoff and host not in _transport_incomplete_confirming:
+            _transport_incomplete_last_probe.pop(host, None)
+    while len(_transport_incomplete_last_probe) > AUTO_GEPH_STATE_MAX:
+        oldest = min(
+            _transport_incomplete_last_probe,
+            key=_transport_incomplete_last_probe.get,
+        )
+        _transport_incomplete_last_probe.pop(oldest, None)
+    cutoff = now - SERVER_FIRST_CLOSE_WINDOW
+    for host, (_ip, observed_at) in list(
+        _transport_incomplete_plain_candidates.items()
+    ):
+        if observed_at <= cutoff or not _auto_geph_base_host_allowed(host):
+            _transport_incomplete_plain_candidates.pop(host, None)
+    while len(_transport_incomplete_plain_candidates) > AUTO_GEPH_STATE_MAX:
+        oldest = min(
+            _transport_incomplete_plain_candidates,
+            key=lambda host: _transport_incomplete_plain_candidates[host][1],
+        )
+        _transport_incomplete_plain_candidates.pop(oldest, None)
+    for host, observations in list(
+        _transport_incomplete_server_first_evidence.items()
+    ):
+        fresh = {
+            stage: observed_at
+            for stage, observed_at in observations.items()
+            if observed_at > cutoff
+        }
+        if fresh and _auto_geph_base_host_allowed(host):
+            _transport_incomplete_server_first_evidence[host] = fresh
+        else:
+            _transport_incomplete_server_first_evidence.pop(host, None)
+    while (
+        len(_transport_incomplete_server_first_evidence)
+        > AUTO_GEPH_STATE_MAX
+    ):
+        oldest = min(
+            _transport_incomplete_server_first_evidence,
+            key=lambda host: max(
+                _transport_incomplete_server_first_evidence[host].values()
+            ),
+        )
+        _transport_incomplete_server_first_evidence.pop(oldest, None)
+
+
+def _record_transport_incomplete_server_first_evidence(host, stage, now):
+    h = normalize_host(host)
+    if (
+        not _auto_geph_base_host_allowed(h)
+        or not _valid_auto_geph_stage(stage)
+    ):
+        return False
+    _prune_transport_incomplete_probes(now)
+    _prune_local_partial_stalls(now)
+    _prune_local_zero_payload_failures(now)
+    observations = _transport_incomplete_server_first_evidence.setdefault(h, {})
+    observations[stage] = now
+    if not _local_route_evidence_complete(
+        observations,
+        AUTO_GEPH_PARTIAL_STRATEGIES,
+    ):
+        return False
+    if _network_wide_unknown_failure_visible():
+        return False
+    return True
+
+
+def _remember_transport_incomplete_plain_candidate(host, ip, now):
+    h = normalize_host(host)
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if not address.is_global or not _auto_geph_base_host_allowed(h):
+        return False
+    _transport_incomplete_plain_candidates[h] = (str(address), now)
+    _prune_transport_incomplete_probes(now)
+    return True
+
+
+def _schedule_transport_incomplete_response_confirmation(
+    host,
+    ip,
+    strategy_name,
+    *,
+    now=None,
+    runner=None,
+):
+    """Verify one repeated plain-path close without browser integration."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if (
+        strategy_name != "plain"
+        or not address.is_global
+        or not _auto_geph_base_host_allowed(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+    ):
+        return False
+    with _auto_geph_lock:
+        _prune_transport_incomplete_probes(now)
+        last = _transport_incomplete_last_probe.get(h, 0.0)
+        if last and now - last < TRANSPORT_INCOMPLETE_PROBE_COOLDOWN:
+            return False
+        if h in _transport_incomplete_confirming:
+            return False
+        if len(_transport_incomplete_confirming) >= AUTO_GEPH_STATE_MAX:
+            return False
+        _transport_incomplete_last_probe[h] = now
+        _transport_incomplete_confirming[h] = now
+
+    def run():
+        try:
+            (runner or _confirm_transport_incomplete_response)(h, str(address))
+        finally:
+            with _auto_geph_lock:
+                _transport_incomplete_confirming.pop(h, None)
+
+    if runner is not None:
+        run()
+        return True
+    threading.Thread(target=run, daemon=True).start()
+    return True
 
 
 def _suspicious_server_first_close(activity, duration):
@@ -7815,6 +8147,11 @@ def note_server_first_route_close(
     duration,
     now=None,
     confirmation_runner=None,
+    probe_ip=None,
+    strategy_name=None,
+    transport_confirmation_runner=None,
+    repeat_claimed=False,
+    repeat_probe_ip=None,
 ):
     """Advance one unknown host after repeated early server-side TLS closes.
 
@@ -7839,21 +8176,58 @@ def note_server_first_route_close(
     _prune_server_first_closes(now)
     key = (h, stage)
     events = _server_first_closes.setdefault(key, deque())
-    events.append(now)
+    events.append((now, probe_ip))
     _prune_server_first_closes(now)
+    original_probe_ip = next(
+        (event_ip for _observed_at, event_ip in events if event_ip),
+        None,
+    )
     strong_transport_failure = bool(
         activity.server_read_failed or _incomplete_tls_record_visible(activity)
     )
-    if not strong_transport_failure and len(events) < SERVER_FIRST_CLOSE_STORM:
-        return False
-    _server_first_closes.pop(key, None)
-
-    note_partial_tls_stall(
-        h,
-        stage,
-        now=now,
-        confirmation_runner=confirmation_runner,
+    repeated_server_first_failure = bool(repeat_claimed) or (
+        len(events) >= SERVER_FIRST_CLOSE_STORM
     )
+    if not strong_transport_failure and not repeated_server_first_failure:
+        return False
+    if repeated_server_first_failure:
+        _server_first_closes.pop(key, None)
+        _server_first_repeat_stages.pop(key, None)
+    elif strong_transport_failure:
+        _schedule_server_first_repeat_stage(
+            h,
+            stage,
+            now,
+            probe_ip=original_probe_ip,
+        )
+
+    local_evidence_complete = False
+    if repeated_server_first_failure:
+        if stage == AUTO_GEPH_STAGE_SYSTEM and strategy_name == "plain":
+            candidate_ip = (
+                repeat_probe_ip if repeat_claimed else original_probe_ip
+            )
+            _remember_transport_incomplete_plain_candidate(h, candidate_ip, now)
+        local_evidence_complete = (
+            _record_transport_incomplete_server_first_evidence(h, stage, now)
+        )
+    if local_evidence_complete:
+        _prune_transport_incomplete_probes(now)
+        candidate = _transport_incomplete_plain_candidates.get(h)
+        if candidate is not None:
+            candidate_ip, _observed_at = candidate
+            transport_runner = transport_confirmation_runner
+            if transport_runner is None and confirmation_runner is not None:
+                transport_runner = lambda candidate_host, _ip: (
+                    confirmation_runner(candidate_host)
+                )
+            _schedule_transport_incomplete_response_confirmation(
+                h,
+                candidate_ip,
+                "plain",
+                now=now,
+                runner=transport_runner,
+            )
     if stage == AUTO_GEPH_STAGE_SYSTEM:
         _mark_xbox_dns_candidate(h, now)
         return True
@@ -7930,6 +8304,29 @@ def unknown_recovery_stage(host, now=None):
     if _xbox_dns_candidate_active(h, now):
         return UNKNOWN_RECOVERY_XBOX_DNS
     return UNKNOWN_RECOVERY_SYSTEM
+
+
+def _unknown_recovery_stage_for_attempt(host, repeat_stage=None, now=None):
+    if repeat_stage == AUTO_GEPH_STAGE_SYSTEM:
+        return UNKNOWN_RECOVERY_SYSTEM
+    if repeat_stage == AUTO_GEPH_STAGE_XBOX_DNS:
+        return UNKNOWN_RECOVERY_XBOX_DNS
+    if repeat_stage is not None:
+        return UNKNOWN_RECOVERY_LOCAL_LADDER
+    return unknown_recovery_stage(host, now=now)
+
+
+def _strategy_order_for_attempt(host, repeat_stage=None):
+    ordered = strategy_order(host)
+    if not repeat_stage or not repeat_stage.startswith(
+        AUTO_GEPH_STAGE_STRATEGY_PREFIX
+    ):
+        return ordered
+    repeat_name = repeat_stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
+    return [
+        *[strategy for strategy in ordered if strategy["name"] == repeat_name],
+        *[strategy for strategy in ordered if strategy["name"] != repeat_name],
+    ]
 
 
 def _mark_xbox_dns_exhausted(host, now=None):
@@ -9089,8 +9486,23 @@ async def _handle_impl(reader, writer):
 
     policy = runtime_policy
     route_class = policy["route_class"]
+    server_first_repeat_claim = (
+        _claim_server_first_repeat_stage(host)
+        if is_tls and host and route_class == ROUTE_UNKNOWN
+        else None
+    )
+    server_first_repeat_stage = (
+        server_first_repeat_claim[0]
+        if server_first_repeat_claim is not None
+        else None
+    )
+    server_first_repeat_probe_ip = (
+        server_first_repeat_claim[1]
+        if server_first_repeat_claim is not None
+        else None
+    )
     unknown_stage = (
-        unknown_recovery_stage(host)
+        _unknown_recovery_stage_for_attempt(host, server_first_repeat_stage)
         if is_tls and host and route_class == ROUTE_UNKNOWN
         else UNKNOWN_RECOVERY_SYSTEM
     )
@@ -9234,7 +9646,10 @@ async def _handle_impl(reader, writer):
             2 if direct_first_cooldown else 1 if dead_cooldown else 7
         )
         attempts = 0
-        for strat in strategy_order(host):
+        for strat in _strategy_order_for_attempt(
+            host,
+            server_first_repeat_stage,
+        ):
             strat_ok = False
             strategy_outcomes = {}
             remaining = max_attempts - attempts
@@ -9422,6 +9837,16 @@ async def _handle_impl(reader, writer):
                     activity,
                     duration=duration,
                     now=t0 + duration,
+                    probe_ip=chosen,
+                    strategy_name=chosen_name,
+                    repeat_claimed=(
+                        observed_stage == server_first_repeat_stage
+                    ),
+                    repeat_probe_ip=(
+                        server_first_repeat_probe_ip
+                        if observed_stage == server_first_repeat_stage
+                        else None
+                    ),
                 )
         elif observed_stage is not None:
             _clear_server_first_closes(host, observed_stage)
