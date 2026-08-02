@@ -75,7 +75,11 @@ That marker captures authorization while the original candidate is live and
 survives candidate expiry until its one reserved retry is consumed, so a relay
 lasting beyond the candidate TTL cannot cancel the recovery it deferred. If a
 confirmation thread cannot start, its exact token and probe cooldown are
-released immediately; the host cannot remain permanently wedged as active.
+released immediately; the host cannot remain permanently wedged as active. The
+fallback marker is taken before the early worker attempts recovery and restored
+only when an active session blocks its drain. It is retained while owned Geph
+is unavailable, restored if the post-drain worker cannot start, and retried by
+the monitor only after the backend is ready.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

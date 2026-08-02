@@ -3682,6 +3682,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
     probe,
     *,
     drain_reserved=False,
+    on_drain_blocked=None,
+    on_backend_unavailable=None,
 ):
     """Retry an exact semantic probe after bounded owned-Geph replacement."""
     global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
@@ -3692,9 +3694,15 @@ def _retry_semantic_geph_probe_after_owned_restart(
         return 0
 
     old_pid = _geph_listener_pid(GEPH_OWNED_PORT)
-    if not old_pid or not geph_listener_owned(GEPH_OWNED_PORT):
+    if not old_pid:
+        if on_backend_unavailable is not None:
+            on_backend_unavailable()
+        return 0
+    if not geph_listener_owned(GEPH_OWNED_PORT):
         return 0
     if not drain_reserved and not _begin_geph_restart_drain():
+        if on_drain_blocked is not None:
+            on_drain_blocked()
         return 0
     try:
         bytes_read = 0
@@ -3950,11 +3958,29 @@ def _confirm_auto_geph(
     )
     bytes_read = stable_probe(h)
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
-        bytes_read = _retry_semantic_geph_probe_after_owned_restart(
-            h,
-            stable_probe,
-            drain_reserved=drain_reserved,
-        )
+        backend_ready = _auto_geph_deferred_candidate_allowed(h)
+        if backend_ready:
+            retry_authorized = bool(
+                not drain_reserved and _take_auto_geph_retry_after_drain(h)
+            )
+            restore_retry = bool(retry_authorized or candidate_authorized)
+            bytes_read = _retry_semantic_geph_probe_after_owned_restart(
+                h,
+                stable_probe,
+                drain_reserved=drain_reserved,
+                on_drain_blocked=(
+                    (lambda: _restore_auto_geph_retry_after_drain(h))
+                    if retry_authorized
+                    else None
+                ),
+                on_backend_unavailable=(
+                    (lambda: _restore_auto_geph_retry_after_drain(h))
+                    if restore_retry
+                    else None
+                ),
+            )
+        elif candidate_authorized:
+            _restore_auto_geph_retry_after_drain(h)
     return _remember_auto_geph_host(
         h,
         bytes_read,
@@ -4346,6 +4372,10 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
             pass
         elif not _auto_geph_base_host_allowed(h):
             _auto_geph_retry_after_drain.discard(h)
+        elif not _auto_geph_deferred_candidate_allowed(h):
+            # The marker already carries the bounded incident authorization.
+            # Keep it until the verified owned backend returns.
+            pass
         else:
             now = time.monotonic()
             token = _reserve_auto_geph_confirmation_locked(
@@ -4388,10 +4418,25 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
         return True
     try:
         threading.Thread(target=run, daemon=True).start()
-    except Exception:
-        _finish_auto_geph_confirmation(h, token)
-        _finish_geph_restart_drain()
-        raise
+    except (OSError, RuntimeError):
+        owns_confirmation = _finish_auto_geph_confirmation(h, token)
+        if owns_confirmation:
+            with _auto_geph_lock:
+                if _auto_geph_last_probe.get(h) == now:
+                    _auto_geph_last_probe.pop(h, None)
+                if (
+                    not _shutdown_started.is_set()
+                    and _auto_geph_base_host_allowed(h)
+                    and not _auto_geph_learned_exact_host(h)
+                ):
+                    _auto_geph_retry_after_drain.add(h)
+            _set_auto_geph_status(
+                "deferred",
+                h,
+                "post-drain confirmation worker unavailable",
+            )
+        _finish_geph_restart_drain(retry_pending=False)
+        return False
     return True
 
 
@@ -4403,6 +4448,29 @@ def _retry_pending_auto_geph_confirmations_after_drain():
         if _retry_auto_geph_confirmation_after_drain(host):
             return True
     return False
+
+
+def _take_auto_geph_retry_after_drain(host):
+    """Take the fallback before recovery; restore it only if the drain blocks."""
+    h = normalize_host(host)
+    with _auto_geph_lock:
+        if h not in _auto_geph_retry_after_drain:
+            return False
+        _auto_geph_retry_after_drain.discard(h)
+        return True
+
+
+def _restore_auto_geph_retry_after_drain(host):
+    """Restore one authorized fallback after an active relay blocks recovery."""
+    h = normalize_host(host)
+    with _auto_geph_lock:
+        if (
+            h
+            and not _shutdown_started.is_set()
+            and _auto_geph_base_host_allowed(h)
+            and not _auto_geph_learned_exact_host(h)
+        ):
+            _auto_geph_retry_after_drain.add(h)
 
 
 def _auto_geph_confirmation_completed(host, succeeded):
@@ -7652,6 +7720,10 @@ def network_monitor(port, voice=True):
                 start_canaries_if_due("geph_up" if _geph_up else "geph_down", force=True)
             if _geph_up:
                 retry_pending_auto_geph_confirmations()
+        if _geph_up:
+            # Deferred one-shot incidents are independent of candidate TTL and
+            # must also recover after backend downtime or thread pressure.
+            _retry_pending_auto_geph_confirmations_after_drain()
         # Coexist with the user's own VPN: when a full-tunnel VPN owns the default
         # route (utun*) it already bypasses DPI, so drop our pf rules to avoid any
         # conflict; re-arm automatically when the VPN drops.
