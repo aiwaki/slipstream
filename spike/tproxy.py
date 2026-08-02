@@ -3728,10 +3728,16 @@ def _retry_semantic_geph_probe_after_owned_restart(
                 recommendation_reason="owned geo-exit semantic response unusable",
             ):
                 return 0
-            if (
-                execute_owned_geph_restart(now=attempt_now, active_sessions=0)
-                != "restarted"
-            ):
+            restart_result = execute_owned_geph_restart(
+                now=attempt_now,
+                active_sessions=0,
+            )
+            if restart_result != "restarted":
+                if (
+                    restart_result == "unavailable"
+                    and on_backend_unavailable is not None
+                ):
+                    on_backend_unavailable()
                 return 0
 
             recovered = False
@@ -3764,6 +3770,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
                 time.sleep(min(AUTO_GEPH_RECOVERY_POLL, remaining))
 
             if not recovered:
+                if on_backend_unavailable is not None:
+                    on_backend_unavailable()
                 return 0
             bytes_read = probe(h)
             if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:

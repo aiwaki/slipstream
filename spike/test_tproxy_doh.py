@@ -8584,6 +8584,74 @@ def test_semantic_recovery_reports_unowned_backend(monkeypatch):
     assert unavailable == [True]
 
 
+def test_semantic_recovery_reports_unavailable_restart(monkeypatch):
+    unavailable = []
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "request_owned_geph_restart",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **_kwargs: "unavailable",
+    )
+
+    assert not tproxy._retry_semantic_geph_probe_after_owned_restart(
+        "unavailable-restart.example",
+        lambda _host: pytest.fail("unavailable restart must prevent probing"),
+        drain_reserved=True,
+        on_backend_unavailable=lambda: unavailable.append(True),
+    )
+    assert unavailable == [True]
+
+
+def test_semantic_recovery_reports_replacement_timeout(monkeypatch):
+    unavailable = []
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_RECOVERY_GRACE", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "request_owned_geph_restart",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **_kwargs: "restarted",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda: "missing",
+    )
+
+    assert not tproxy._retry_semantic_geph_probe_after_owned_restart(
+        "replacement-timeout.example",
+        lambda _host: pytest.fail("timed-out replacement must prevent probing"),
+        drain_reserved=True,
+        on_backend_unavailable=lambda: unavailable.append(True),
+    )
+    assert unavailable == [True]
+
+
 def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
     confirmations = []
     route_class = {"value": tproxy.ROUTE_UNKNOWN}
