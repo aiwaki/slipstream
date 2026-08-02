@@ -3684,6 +3684,7 @@ def _retry_semantic_geph_probe_after_owned_restart(
     drain_reserved=False,
     on_drain_blocked=None,
     on_backend_unavailable=None,
+    on_success=None,
 ):
     """Retry an exact semantic probe after bounded owned-Geph replacement."""
     global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
@@ -3760,6 +3761,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
                 return 0
             bytes_read = probe(h)
             if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
+                if on_success is not None:
+                    on_success(bytes_read)
                 print(
                     ">> owned Geph replacement "
                     f"{replacement}/{AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX} "
@@ -3773,17 +3776,26 @@ def _retry_semantic_geph_probe_after_owned_restart(
             _finish_geph_restart_drain()
 
 
-def _stable_owned_geph_payload_probe(host, probe):
-    """Require consecutive usable responses on independent SOCKS sessions."""
-    bytes_read = 0
-    for _attempt in range(AUTO_GEPH_CONFIRM_STABLE_PROBES):
-        if not _owned_geph_ready_for_semantic_confirmation():
+def _stable_owned_geph_payload_probe(host, probe, *, drain_reserved=False):
+    """Prove consecutive responses without allowing backend replacement."""
+    session_reserved = False
+    if not drain_reserved:
+        if not _geph_session_started():
             return 0
-        current = probe(host)
-        if current < AUTO_GEPH_CONFIRM_MIN_BYTES:
-            return 0
-        bytes_read = current if not bytes_read else min(bytes_read, current)
-    return bytes_read
+        session_reserved = True
+    try:
+        bytes_read = 0
+        for _attempt in range(AUTO_GEPH_CONFIRM_STABLE_PROBES):
+            if not _owned_geph_ready_for_semantic_confirmation():
+                return 0
+            current = probe(host)
+            if current < AUTO_GEPH_CONFIRM_MIN_BYTES:
+                return 0
+            bytes_read = current if not bytes_read else min(bytes_read, current)
+        return bytes_read
+    finally:
+        if session_reserved:
+            _geph_session_finished()
 
 
 def _confirm_semantic_geo_exit(host):
@@ -3943,6 +3955,7 @@ def _confirm_auto_geph(
 ):
     h = normalize_host(host)
     candidate_authorized = bool(candidate_authorized and drain_reserved)
+    retry_authorized = False
     if not (
         _auto_geph_candidate_allowed(h)
         or (
@@ -3952,41 +3965,81 @@ def _confirm_auto_geph(
     ):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
-    stable_probe = lambda candidate: _stable_owned_geph_payload_probe(
+    def remember(bytes_read):
+        return _remember_auto_geph_host(
+            h,
+            bytes_read,
+            "stable Geph payload confirmed",
+            candidate_authorized=candidate_authorized,
+        )
+
+    if drain_reserved:
+        bytes_read = _stable_owned_geph_payload_probe(
+            h,
+            _auto_geph_payload_probe,
+            drain_reserved=True,
+        )
+        if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
+            return remember(bytes_read)
+    else:
+        if not _geph_session_started():
+            _set_auto_geph_status(
+                "deferred",
+                h,
+                "stable confirmation backend busy",
+            )
+            return False
+        try:
+            bytes_read = _stable_owned_geph_payload_probe(
+                h,
+                _auto_geph_payload_probe,
+                drain_reserved=True,
+            )
+            if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
+                return remember(bytes_read)
+            # Take this incident's retained retry before the active lifecycle
+            # session is released. Otherwise the idle hook can launch a
+            # post-drain worker for the same host while this worker is still
+            # converging on recovery.
+            retry_authorized = _take_auto_geph_retry_after_drain(h)
+        finally:
+            _geph_session_finished()
+
+    recovery_probe = lambda candidate: _stable_owned_geph_payload_probe(
         candidate,
         _auto_geph_payload_probe,
+        drain_reserved=True,
     )
-    bytes_read = stable_probe(h)
-    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
-        backend_ready = _auto_geph_deferred_candidate_allowed(h)
-        if backend_ready:
-            retry_authorized = bool(
-                not drain_reserved and _take_auto_geph_retry_after_drain(h)
-            )
-            restore_retry = bool(retry_authorized or candidate_authorized)
-            bytes_read = _retry_semantic_geph_probe_after_owned_restart(
-                h,
-                stable_probe,
-                drain_reserved=drain_reserved,
-                on_drain_blocked=(
-                    (lambda: _restore_auto_geph_retry_after_drain(h))
-                    if retry_authorized
-                    else None
-                ),
-                on_backend_unavailable=(
-                    (lambda: _restore_auto_geph_retry_after_drain(h))
-                    if restore_retry
-                    else None
-                ),
-            )
-        elif candidate_authorized:
-            _restore_auto_geph_retry_after_drain(h)
-    return _remember_auto_geph_host(
-        h,
-        bytes_read,
-        "stable Geph payload confirmed",
-        candidate_authorized=candidate_authorized,
-    )
+    backend_ready = _auto_geph_deferred_candidate_allowed(h)
+    if backend_ready:
+        restore_retry = bool(retry_authorized or candidate_authorized)
+        learned_during_recovery = False
+
+        def learn_before_releasing_drain(recovered_bytes):
+            nonlocal learned_during_recovery
+            learned_during_recovery = remember(recovered_bytes)
+
+        bytes_read = _retry_semantic_geph_probe_after_owned_restart(
+            h,
+            recovery_probe,
+            drain_reserved=drain_reserved,
+            on_drain_blocked=(
+                (lambda: _restore_auto_geph_retry_after_drain(h))
+                if retry_authorized
+                else None
+            ),
+            on_backend_unavailable=(
+                (lambda: _restore_auto_geph_retry_after_drain(h))
+                if restore_retry
+                else None
+            ),
+            on_success=learn_before_releasing_drain,
+        )
+        if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
+            return learned_during_recovery
+    elif retry_authorized or candidate_authorized:
+        _restore_auto_geph_retry_after_drain(h)
+    return remember(0)
 
 
 def _is_auto_geph_runtime_miss(reason):

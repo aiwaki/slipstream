@@ -76,10 +76,15 @@ survives candidate expiry until its one reserved retry is consumed, so a relay
 lasting beyond the candidate TTL cannot cancel the recovery it deferred. If a
 confirmation thread cannot start, its exact token and probe cooldown are
 released immediately; the host cannot remain permanently wedged as active. The
-fallback marker is taken before the early worker attempts recovery and restored
-only when an active session blocks its drain. It is retained while owned Geph
+fallback marker is taken before the early worker releases its lifecycle session
+or attempts recovery, preventing the idle hook from launching a concurrent
+post-drain worker for the same host, and restored only when an active session
+blocks its drain. It is retained while owned Geph
 is unavailable, restored if the post-drain worker cannot start, and retried by
-the monitor only after the backend is ready.
+the monitor only after the backend is ready. The two stable HTTP probes share
+one lifecycle reservation, so another host cannot replace Geph between them;
+the learned route is committed before that reservation is released, and a
+recovery worker reuses its already-held drain through proof and commit.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

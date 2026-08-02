@@ -8284,6 +8284,7 @@ def test_semantic_recovery_performs_two_successful_in_incident_replacements(
     probe_results = iter([0, 512])
     launchctl_calls = []
     blocked_callbacks = []
+    success_observations = []
 
     monkeypatch.setattr(
         tproxy,
@@ -8325,16 +8326,114 @@ def test_semantic_recovery_performs_two_successful_in_incident_replacements(
         "two-replacements.example",
         lambda _host: next(probe_results),
         on_drain_blocked=lambda: blocked_callbacks.append(True),
+        on_success=lambda bytes_read: success_observations.append(
+            (bytes_read, tproxy._geph_restart_draining)
+        ),
     )
 
     assert result == 512
     assert len(launchctl_calls) == 2
     assert blocked_callbacks == []
+    assert success_observations == [(512, True)]
     assert not tproxy._geph_restart_draining
     with pytest.raises(StopIteration):
         next(listener_pids)
     with pytest.raises(StopIteration):
         next(probe_results)
+
+
+def test_stable_owned_geph_probe_blocks_replacement_between_responses(
+    monkeypatch,
+):
+    observations = []
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_geph_ready_for_semantic_confirmation",
+        lambda: True,
+    )
+
+    def probe(_host):
+        observations.append(
+            (tproxy.geph_active_session_count(), tproxy._geph_restart_draining)
+        )
+        assert not tproxy._begin_geph_restart_drain()
+        return tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES + len(observations)
+
+    assert tproxy._stable_owned_geph_payload_probe(
+        "serialized-stable-proof.example",
+        probe,
+    ) == tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES + 1
+    assert observations == [(1, False), (1, False)]
+    assert tproxy.geph_active_session_count() == 0
+    assert not tproxy._geph_restart_draining
+
+
+def test_stable_owned_geph_probe_reuses_reserved_drain(monkeypatch):
+    observations = []
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", True)
+    monkeypatch.setattr(
+        tproxy,
+        "_owned_geph_ready_for_semantic_confirmation",
+        lambda: True,
+    )
+
+    def probe(_host):
+        observations.append(
+            (tproxy.geph_active_session_count(), tproxy._geph_restart_draining)
+        )
+        return tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+
+    assert tproxy._stable_owned_geph_payload_probe(
+        "reserved-stable-proof.example",
+        probe,
+        drain_reserved=True,
+    ) == tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES
+    assert observations == [(0, True), (0, True)]
+    assert tproxy.geph_active_session_count() == 0
+    assert tproxy._geph_restart_draining
+
+
+def test_auto_geph_learns_before_releasing_stable_session(monkeypatch):
+    host = "learn-under-stable-session.example"
+    observations = []
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda actual_host, _now=None: actual_host == host,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_stable_owned_geph_payload_probe",
+        lambda _host, _probe, **_kwargs: tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES,
+    )
+
+    def remember(actual_host, bytes_read, _reason, **_kwargs):
+        observations.append(
+            (
+                actual_host,
+                bytes_read,
+                tproxy.geph_active_session_count(),
+                tproxy._begin_geph_restart_drain(),
+            )
+        )
+        return True
+
+    monkeypatch.setattr(tproxy, "_remember_auto_geph_host", remember)
+
+    assert tproxy._confirm_auto_geph(host)
+    assert observations == [
+        (host, tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES, 1, False)
+    ]
+    assert tproxy.geph_active_session_count() == 0
+    assert not tproxy._geph_restart_draining
 
 
 def test_semantic_recovery_reports_only_a_blocked_session_drain(monkeypatch):
@@ -8747,7 +8846,7 @@ def test_authorized_post_drain_confirmation_can_learn_after_candidate_expires(
     monkeypatch.setattr(
         tproxy,
         "_stable_owned_geph_payload_probe",
-        lambda _host, _probe: tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES,
+        lambda _host, _probe, **_kwargs: tproxy.AUTO_GEPH_CONFIRM_MIN_BYTES,
     )
     monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
     monkeypatch.setattr(
@@ -8775,7 +8874,7 @@ def test_authorized_post_drain_confirmation_restores_retry_if_backend_drops(
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
-    def drop_backend(_host, _probe):
+    def drop_backend(_host, _probe, **_kwargs):
         tproxy._geph_up = False
         return 0
 
@@ -8806,6 +8905,44 @@ def test_authorized_post_drain_confirmation_restores_retry_if_backend_drops(
     assert host in tproxy._auto_geph_retry_after_drain
 
 
+def test_early_confirmation_restores_taken_retry_if_backend_drops(monkeypatch):
+    host = "early-backend-drop.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda actual_host, _now=None: actual_host == host,
+    )
+
+    def drop_backend(_host, _probe, **_kwargs):
+        tproxy._geph_up = False
+        return 0
+
+    monkeypatch.setattr(
+        tproxy,
+        "_stable_owned_geph_payload_probe",
+        drop_backend,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_retry_semantic_geph_probe_after_owned_restart",
+        lambda *_args, **_kwargs: pytest.fail(
+            "unavailable backend must defer before recovery"
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_remember_auto_geph_host",
+        lambda _host, _bytes, _reason, **_kwargs: False,
+    )
+    tproxy._auto_geph_retry_after_drain.add(host)
+
+    assert not tproxy._confirm_auto_geph(host)
+    assert host in tproxy._auto_geph_retry_after_drain
+
+
 def test_early_confirmation_consumes_retry_after_acquiring_drain(monkeypatch):
     host = "early-worker-owned-drain.example"
     recovery_attempts = []
@@ -8820,7 +8957,7 @@ def test_early_confirmation_consumes_retry_after_acquiring_drain(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_stable_owned_geph_payload_probe",
-        lambda _host, _probe: 0,
+        lambda _host, _probe, **_kwargs: 0,
     )
 
     def failed_recovery(
@@ -8830,11 +8967,13 @@ def test_early_confirmation_consumes_retry_after_acquiring_drain(monkeypatch):
         drain_reserved=False,
         on_drain_blocked=None,
         on_backend_unavailable=None,
+        on_success=None,
     ):
         assert actual_host == host
         assert not drain_reserved
         assert on_drain_blocked is not None
         assert on_backend_unavailable is not None
+        assert on_success is not None
         assert actual_host not in tproxy._auto_geph_retry_after_drain
         recovery_attempts.append(actual_host)
         return 0
@@ -8871,7 +9010,7 @@ def test_early_confirmation_restores_retry_only_when_drain_is_blocked(
     monkeypatch.setattr(
         tproxy,
         "_stable_owned_geph_payload_probe",
-        lambda _host, _probe: 0,
+        lambda _host, _probe, **_kwargs: 0,
     )
 
     def blocked_recovery(
@@ -8881,11 +9020,13 @@ def test_early_confirmation_restores_retry_only_when_drain_is_blocked(
         drain_reserved=False,
         on_drain_blocked=None,
         on_backend_unavailable=None,
+        on_success=None,
     ):
         assert actual_host == host
         assert not drain_reserved
         assert on_drain_blocked is not None
         assert on_backend_unavailable is not None
+        assert on_success is not None
         assert actual_host not in tproxy._auto_geph_retry_after_drain
         on_drain_blocked()
         return 0
@@ -8920,7 +9061,7 @@ def test_reserved_auto_geph_confirmation_reuses_held_drain(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_stable_owned_geph_payload_probe",
-        lambda _host, _probe: 0,
+        lambda _host, _probe, **_kwargs: 0,
     )
     monkeypatch.setattr(
         tproxy,
