@@ -67,15 +67,27 @@ owned `:9954` listener. One incident recovered after the first exact
 `dev.slipstream.geph` PID replacement; the later incident required a second
 replacement before the same request returned a complete HTTP `200` response.
 
-Current semantic recovery may perform that replacement autonomously only after
-the browser has proven a top-level regional-denial or incomplete-response
-failure and the daemon's own complete exact-host HTTP probe also fails. It
-drains active owned sessions once, verifies the listener and LaunchAgent
-ownership before every replacement, and requires a changed live PID. It may
-perform at most two replacements, retrying the same probe after each and
-stopping immediately on success. The exact host is learned only if one of those
-probes is complete and usable. A new semantic-recovery incident is globally
-rate-limited for ten minutes.
+The 2026-08-02 controlled transaction found a second form of the same problem:
+a generic unknown host completed the local evidence ladder, the one-shot Geph
+stream delivered encrypted payload, and Slipstream learned the route before an
+independent HTTP check. The next request then received persistent HTTP `429`
+with `local_rate_limited`. Encrypted TLS payload therefore no longer authorizes
+a learned route. Generic learning requires two consecutive complete, usable
+HTTP responses on independent owned SOCKS sessions; unsuccessful, incomplete,
+or over-deadline responses cannot clear backend hold or create the route.
+
+Current recovery drains active owned sessions once, verifies the listener and
+LaunchAgent ownership before every replacement, and requires a changed live
+PID. It may perform at most two replacements, repeating the same two-response
+proof after each and stopping immediately on stable success. The exact host is
+learned only after that proof. A new recovery incident is globally rate-limited
+for ten minutes.
+
+For a long-lived one-shot relay, the independent proof starts after its first
+payload rather than after connection close. If that worker fails while the
+relay prevents session drain, Slipstream retains one post-drain retry and
+consumes it after the active session finishes; no unbounded retry chain is
+created.
 
 Do not work around this symptom by adding the hostname to static policy,
 restarting an external Geph process, or changing system DNS, proxy, PAC, VPN, or

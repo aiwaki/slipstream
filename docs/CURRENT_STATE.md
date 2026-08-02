@@ -8,11 +8,13 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: when the user is present, perform one controlled
-workstation transaction using only the artifact qualified for exact main
-`1be02bc8a4a410989b59ec601821e2bd6a9f1b19`. PR #296 corrected the protected
-outer lifecycle and merged as that SHA. Exact-main CI `30729020756`, dependency
-audit `30729020741`, and native Windows qualification `30729020745` passed.
+Current user-facing priority: do not reinstall the artifact qualified for exact
+main `1be02bc8a4a410989b59ec601821e2bd6a9f1b19`. Controlled workstation
+transaction `5CCAE939-C2D8-4843-AF24-0E2D32C7C3D6` exposed a generic
+post-confirmation owned-Geph defect and completed its exact rollback. A new
+artifact may be considered only after the correction on
+`codex/geph-confirmation-convergence` passes full local checks, PR CI/audit,
+exact-main CI/audit, and a fresh protected account-backed qualification.
 
 The sole protected run for that SHA, `30729228620`, passed its only job
 `91446387268`. It proved account-backed owned-Geph payload before tray exit,
@@ -27,14 +29,78 @@ has GitHub digest
 `sha256:4672cdc4e60137220230b917f96aefad04dc9ff09a8087551383ecd52ce545da`;
 the downloaded exact ZIP has SHA-256
 `a215f1f05037e01c3786a85cc388f5839a0a141d2c768e5a413bc162ff1b8391`.
-No workstation install or network mutation was attempted during the adjacent
-repository research pass because the user was away; this is a deferral, not a
-failed product gate.
+The exact app installed successfully and reached active StatusV2. Google,
+Spotify, Discord updater/gateway, YouTube plus a real Googlevideo fragment,
+ChatGPT, CrystalIDEA, and Modrinth returned payload. Modrinth recovered from one
+partial first response on retry. The first three `xpersonatoy.com` attempts
+ended with curl error 18 after about 21.5 KiB. The daemon then retained an
+exact-host Geph route for one hour, but the next transparent request returned
+HTTP `429`, body `local_rate_limited`, and `Retry-After: 60`; the same result
+remained after the advertised wait.
 
-Current M4 next action remains production-host sleep/wake recovery on disposable
-Windows, without production networking composition. Updater/uninstall
-orchestration remains the following bounded gate. The exact ARM64 physical
-reboot lifecycle gate is complete.
+Immediate rollback restored the previous app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`
+and preserved the pre-existing owned Geph PID `10139`, Telegram proxy PID
+`49694`, DNS `111.88.96.50` / `111.88.96.51`, proxy/PAC state, default route,
+global PF, and every external anchor. The root launchd label is absent and
+disabled; TCP/1080, the private anchor, PF token, status, socket, attestation,
+witness, and hidden application swap paths are absent. Direct post-rollback
+CrystalIDEA returned HTTP 200 and ChatGPT returned a complete Cloudflare HTTP
+response, confirming that transparent interception is no longer active.
+
+Code tracing found that `_try_unknown_owned_geph_route()` treated the first
+opaque TLS record as both permission to serve the current request and proof for
+a one-hour learned route. `_auto_geph_payload_probe()` separately accepted any
+HTTP status from one `HEAD` response. Neither contract could reject a live SOCKS
+listener whose next session returned `429 local_rate_limited`. The current
+correction retains the one-shot Geph attempt after the complete local proof but
+does not learn from encrypted bytes. Generic route learning now requires two
+consecutive complete, usable HTTP responses on independent owned SOCKS
+sessions; a failed second response enters the existing ownership-verified,
+at-most-two-replacement recovery. The route remains unlearned and backend hold
+remains intact until that independent proof succeeds. No hostname rule or PF,
+DNS, proxy/PAC/VPN,
+external-Geph, Discord, YouTube, or Googlevideo behavior changes.
+For a long-lived one-shot connection, independent confirmation is scheduled as
+soon as the first owned-Geph payload arrives, before the relay can outlive the
+candidate window; session-draining replacement remains blocked until that
+active relay has finished. If the early worker cannot complete confirmation
+while the relay is active, one pending retry is consumed after the active
+session count reaches zero; it cannot loop into another post-drain retry. A
+live confirmation owns a unique worker token and cannot be evicted by elapsed
+time while its bounded replacement sequence is still running. The post-drain
+retry reserves the idle Geph session drain before consuming its marker, so a
+new route cannot enter between the zero-session observation and confirmation.
+That marker captures authorization while the original candidate is live and
+survives candidate expiry until its one reserved retry is consumed, so a relay
+lasting beyond the candidate TTL cannot cancel the recovery it deferred. If a
+confirmation thread cannot start, its exact token and probe cooldown are
+released immediately; the host cannot remain permanently wedged as active. The
+fallback marker is taken before the early worker releases its lifecycle session
+or attempts recovery, preventing the idle hook from launching a concurrent
+post-drain worker for the same host, and restored only when an active session
+blocks its drain. It is retained while owned Geph is unavailable, restored if
+the post-drain worker cannot start, and retried by the monitor only after the
+backend is ready. Retained authorization is insertion-ordered and capped by
+the shared routing-state bound; learned or policy-invalid hosts are pruned and
+the oldest authorization is evicted if the bound is exceeded. The two stable
+HTTP probes share one lifecycle reservation and pin the exact owned listener
+PID. Ownership and PID equality are checked before and after each response and
+again at route commit; KeepAlive or external PID drift rejects the proof. The
+learned route is committed before that reservation is released, and a recovery
+worker reuses its already-held drain through proof and commit. Loss of verified
+listener ownership, an unavailable restart, or a replacement that misses its
+bounded recovery window is treated as backend unavailability, so an
+already-consumed deferred authorization is restored and waits for a verified
+monitor recovery instead of being immediately consumed again. Confirmation
+requests ask for a bounded byte range and retain a two-MiB hard cap plus the
+single end-to-end deadline, allowing a complete large response when an origin
+ignores the range without accepting an unbounded stream.
+
+After the Mac correction is qualified, the M4 next action remains
+production-host sleep/wake recovery on disposable Windows, without production
+networking composition. Updater/uninstall orchestration remains the following
+bounded gate. The exact ARM64 physical reboot lifecycle gate is complete.
 
 PR #293 merged the bounded two-replacement owned-Geph correction as exact main
 `62aabd64d3f9dd0fd5f08401b198fc2ee35ae37d`. Exact-main CI `30693565371`,
