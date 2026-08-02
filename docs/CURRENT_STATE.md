@@ -8,48 +8,35 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current M4 next action: freeze and prove production-host sleep/wake recovery
-on disposable Windows, still without production networking composition.
-Updater/uninstall orchestration remains the following bounded gate. The exact
-ARM64 physical reboot lifecycle gate is complete.
+Current user-facing priority: correct and re-run the protected qualification
+for the browser-independent recovery trigger before another workstation
+installation. PR #295 merged as exact main
+`db5df67c11f72ce36e5e98513ab682a2fbb53174`. Exact-main CI
+`30727142757`, dependency audit `30727142778`, and native Windows qualification
+`30727142747` passed.
 
-Current user-facing priority: qualify the browser-independent recovery trigger
-for incomplete ordinary HTTPS responses. Repeated bounded server-first closes
-must independently cover the system route, app-owned Xbox DNS, and multiple
-distinct local strategies; partial-record and zero-payload observations cannot
-complete this evidence class. A single reset may retain the older local
-recovery behavior and one bounded same-stage retry, but it cannot count toward
-this Geph-authorizing ladder until that retry repeats the same failure. Claiming
-the retry consumes the first provisional close; only a matching server-first
-outcome on that exact attempt may complete the pair.
-Only after that complete local ladder may the candidate
-recheck the exact unknown hostname against the public IP retained from the
-first system-close observation, even if a retry resolves another address. It
-may request owned Geph confirmation only when that local HTTP/1 response
-is provably unfinished; the host is learned only after the existing bounded
-owned-Geph probe returns a complete usable response. Malformed, including a
-status line missing its required separators, non-decimal `Content-Length`,
-HTTP/1.0 transfer coding, or whitespace-padded chunk size, unframed,
-compressed, oversized, unsuccessful, bodyless including `205`,
-non-public-IP, protected-policy, or non-plain evidence remains non-authorizing.
-For chunked responses, a syntactically valid trailer section cut off before its
-terminal empty line is incomplete evidence. Any trailer field or bytes after
-the empty trailer terminator remain non-authorizing. Generic TLS/socket read
-errors are not closure evidence; only an explicit EOF/reset class or the bounded
-idle timeout can prove the framed shortfall. Owned-Geph confirmation counts only
-representation-body bytes; headers and complete bodyless responses cannot
-satisfy its payload threshold.
-The current request is never
-replayed. Do not add a hostname rule and do not reinstall before this candidate
-is merged, passes exact-main CI/audit and one protected qualification, and
-publishes the exact artifact.
+The sole protected run for that SHA, `30727352290`, built and verified the
+packaged app and passed both Chromium semantic scenarios (`incomplete_response`
+and `regional_denial`) with one reload and complete CSS, JavaScript, image, and
+ready-callback evidence. It then failed the outer account-backed lifecycle with
+`Geph ownership changed before a protected action`. Cleanup and the daemon-free
+system/network boundary passed; artifact packaging and upload were skipped, so
+no artifact was eligible and no workstation mutation occurred.
 
-PR #294 recorded the passed protected qualification and exact workstation
-rollback as current main `446ea39d1f99a04b96693aa869196cdc01d4fe1d`.
-The generic transport candidate currently passes 418 focused tests, the full
-Python suite (`911 passed`, `41 subtests passed`), the Tauri Rust suite
-(`83 passed`), and the shared-core Rust suite (`32 passed`). It is under review
-in PR #295; no workstation mutation is authorized by the PR alone.
+The failure is in the protected harness rather than the browser or routing
+result: coordinated semantic work may legitimately replace the exact
+user-owned Geph process. The correction may adopt that successor only after
+revalidating the private ownership record, UID, executable/config paths,
+LaunchAgent label/PID, and sole `:9954` listener, and after proving that the
+previous exact owned process no longer survives. Trayless payload and the next
+KeepAlive recovery must continue from that verified successor. Do not install
+until this correction is reviewed and merged, exact-main CI/audit passes, and
+one protected run for the new exact main publishes its qualified artifact.
+
+Current M4 next action remains production-host sleep/wake recovery on disposable
+Windows, without production networking composition. Updater/uninstall
+orchestration remains the following bounded gate. The exact ARM64 physical
+reboot lifecycle gate is complete.
 
 PR #293 merged the bounded two-replacement owned-Geph correction as exact main
 `62aabd64d3f9dd0fd5f08401b198fc2ee35ae37d`. Exact-main CI `30693565371`,

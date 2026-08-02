@@ -159,9 +159,9 @@ def _publish_ready_and_wait(
     *,
     timeout: float = COORDINATION_TIMEOUT,
     abort_reason: Callable[[], str | None] | None = None,
-) -> None:
+) -> OwnedGephState:
     if coordination is None:
-        return
+        return state
     if abort_reason is not None and (reason := abort_reason()):
         raise QualificationError(reason)
     coordination.ready.parent.mkdir(parents=True, exist_ok=True)
@@ -200,8 +200,7 @@ def _publish_ready_and_wait(
                 raise QualificationError(deferred_abort_reason)
             if abort_reason is not None and (reason := abort_reason()):
                 raise QualificationError(reason)
-            _assert_owned_geph(paths, uid, state)
-            return
+            return _owned_geph_after_coordination(paths, uid, state)
         time.sleep(0.25)
     if deferred_abort_reason is not None:
         raise QualificationError(deferred_abort_reason)
@@ -289,14 +288,29 @@ def _process_identity(pid: int) -> tuple[int, str] | None:
         ("/bin/ps", "-o", "uid=", "-o", "command=", "-p", str(pid)),
         check=False,
     )
-    line = result.stdout.strip() if result.returncode == 0 else ""
+    if result.returncode != 0:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except OSError as exc:
+            raise QualificationError("cannot prove process absence") from exc
+        raise QualificationError("cannot inspect live process identity")
+
+    line = result.stdout.strip()
     parts = line.split(None, 1)
     if len(parts) != 2:
-        return None
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except OSError as exc:
+            raise QualificationError("cannot prove process absence") from exc
+        raise QualificationError("invalid live process identity")
     try:
         return int(parts[0]), parts[1]
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise QualificationError("invalid live process identity") from exc
 
 
 def _write_private_json(path: Path, value: dict[str, str]) -> None:
@@ -499,6 +513,41 @@ def _wait_for_owned_geph(
             last_error = str(exc)
         time.sleep(0.5)
     raise QualificationError(f"owned Geph did not become ready: {last_error}")
+
+
+def _owned_geph_after_coordination(
+    paths: GephPaths,
+    uid: int,
+    state: OwnedGephState,
+) -> OwnedGephState:
+    try:
+        _assert_owned_geph(paths, uid, state)
+        return state
+    except QualificationError as original_error:
+        try:
+            replacement = _wait_for_owned_geph(
+                paths,
+                uid,
+                previous_pid=state.pid,
+            )
+        except QualificationError as replacement_error:
+            raise QualificationError(
+                "owned Geph did not remain valid across semantic qualification: "
+                f"{original_error}; replacement: {replacement_error}"
+            ) from replacement_error
+
+    expected_identity = (
+        uid,
+        f"{paths.executable} --config {paths.config}",
+    )
+    deadline = time.monotonic() + PROCESS_STOP_TIMEOUT
+    while time.monotonic() < deadline:
+        if _process_identity(state.pid) != expected_identity:
+            return replacement
+        time.sleep(0.2)
+    raise QualificationError(
+        "previous owned Geph process survived its verified replacement"
+    )
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -892,7 +941,7 @@ def run_qualification(
         abort_reason = lambda: _owned_geph_abort_reason(paths, redaction_secret)
         initial_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
-        _publish_ready_and_wait(
+        active = _publish_ready_and_wait(
             coordination,
             paths,
             uid,
@@ -901,12 +950,12 @@ def run_qualification(
         )
 
         tray.crash()
-        _assert_owned_geph(paths, uid, initial)
+        _assert_owned_geph(paths, uid, active)
         trayless_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
 
-        _kill_owned_geph(paths, uid, initial)
-        recovered = _wait_for_owned_geph(paths, uid, previous_pid=initial.pid)
+        _kill_owned_geph(paths, uid, active)
+        recovered = _wait_for_owned_geph(paths, uid, previous_pid=active.pid)
         recovered_payload = _wait_for_payload(abort_reason=abort_reason)
         sentinel.check()
 

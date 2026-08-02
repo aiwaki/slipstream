@@ -4,10 +4,11 @@ import io
 import json
 import os
 import stat
+import subprocess
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -112,7 +113,7 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             worker = threading.Thread(target=release)
             worker.start()
             with mock.patch.object(smoke, "_assert_owned_geph") as validate:
-                smoke._publish_ready_and_wait(
+                active = smoke._publish_ready_and_wait(
                     coordination,
                     paths,
                     os.getuid(),
@@ -122,7 +123,159 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             worker.join(timeout=2)
             self.assertFalse(worker.is_alive())
             self.assertEqual(stat.S_IMODE(coordination.ready.stat().st_mode), 0o600)
+            self.assertEqual(active, state)
             validate.assert_called_once_with(paths, os.getuid(), state)
+
+    def test_coordination_accepts_only_a_verified_owned_geph_replacement(
+        self,
+    ) -> None:
+        paths = smoke.geph_paths(Path("/Users/runner"))
+        initial = smoke.OwnedGephState(
+            pid=4242,
+            uid=501,
+            executable=paths.executable,
+            config=paths.config,
+            launchd_label=smoke.GEPH_LABEL,
+        )
+        replacement = smoke.OwnedGephState(
+            pid=4343,
+            uid=501,
+            executable=paths.executable,
+            config=paths.config,
+            launchd_label=smoke.GEPH_LABEL,
+        )
+
+        with (
+            mock.patch.object(
+                smoke,
+                "_assert_owned_geph",
+                side_effect=smoke.QualificationError("ownership changed"),
+            ),
+            mock.patch.object(
+                smoke,
+                "_wait_for_owned_geph",
+                return_value=replacement,
+            ) as wait_for_replacement,
+            mock.patch.object(smoke, "_process_identity", return_value=None),
+        ):
+            active = smoke._owned_geph_after_coordination(paths, 501, initial)
+
+        self.assertEqual(active, replacement)
+        wait_for_replacement.assert_called_once_with(
+            paths,
+            501,
+            previous_pid=initial.pid,
+        )
+
+    def test_process_identity_returns_absent_only_after_kernel_confirmation(
+        self,
+    ) -> None:
+        result = subprocess.CompletedProcess(
+            args=("/bin/ps",),
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        with (
+            mock.patch.object(smoke, "_run", return_value=result),
+            mock.patch.object(
+                smoke.os,
+                "kill",
+                side_effect=ProcessLookupError,
+            ) as probe,
+        ):
+            self.assertIsNone(smoke._process_identity(4242))
+        probe.assert_called_once_with(4242, 0)
+
+    def test_process_identity_rejects_failed_inspection_of_live_process(
+        self,
+    ) -> None:
+        result = subprocess.CompletedProcess(
+            args=("/bin/ps",),
+            returncode=1,
+            stdout="",
+            stderr="temporary failure",
+        )
+        with (
+            mock.patch.object(smoke, "_run", return_value=result),
+            mock.patch.object(smoke.os, "kill") as probe,
+        ):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "cannot inspect live process identity",
+            ):
+                smoke._process_identity(4242)
+        probe.assert_called_once_with(4242, 0)
+
+    def test_process_identity_rejects_malformed_live_process_output(self) -> None:
+        result = subprocess.CompletedProcess(
+            args=("/bin/ps",),
+            returncode=0,
+            stdout="malformed\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(smoke, "_run", return_value=result),
+            mock.patch.object(smoke.os, "kill") as probe,
+        ):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "invalid live process identity",
+            ):
+                smoke._process_identity(4242)
+        probe.assert_called_once_with(4242, 0)
+
+    def test_coordination_rejects_replacement_while_old_owned_process_survives(
+        self,
+    ) -> None:
+        paths = smoke.geph_paths(Path("/Users/runner"))
+        initial = smoke.OwnedGephState(
+            pid=4242,
+            uid=501,
+            executable=paths.executable,
+            config=paths.config,
+            launchd_label=smoke.GEPH_LABEL,
+        )
+        replacement = smoke.OwnedGephState(
+            pid=4343,
+            uid=501,
+            executable=paths.executable,
+            config=paths.config,
+            launchd_label=smoke.GEPH_LABEL,
+        )
+        expected_identity = (
+            501,
+            f"{paths.executable} --config {paths.config}",
+        )
+
+        with (
+            mock.patch.object(
+                smoke,
+                "_assert_owned_geph",
+                side_effect=smoke.QualificationError("ownership changed"),
+            ),
+            mock.patch.object(
+                smoke,
+                "_wait_for_owned_geph",
+                return_value=replacement,
+            ),
+            mock.patch.object(
+                smoke,
+                "_process_identity",
+                return_value=expected_identity,
+            ),
+            mock.patch.object(
+                smoke.time,
+                "monotonic",
+                side_effect=(0.0, 0.0, smoke.PROCESS_STOP_TIMEOUT + 1.0),
+            ),
+            mock.patch.object(smoke.time, "sleep"),
+        ):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "previous owned Geph process survived",
+            ):
+                smoke._owned_geph_after_coordination(paths, 501, initial)
 
     def test_coordination_defers_late_broker_abort_until_private_release(
         self,
@@ -554,6 +707,148 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             ),
             check=False,
         )
+
+    def test_qualification_continues_from_the_coordinated_owned_replacement(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = (Path(tmp) / "runner").resolve()
+            app_bundle = Path(tmp) / "Slipstream.app"
+            app_bundle.mkdir()
+            paths = smoke.geph_paths(home)
+            initial = smoke.OwnedGephState(
+                pid=4242,
+                uid=501,
+                executable=paths.executable,
+                config=paths.config,
+                launchd_label=smoke.GEPH_LABEL,
+            )
+            coordinated = smoke.OwnedGephState(
+                pid=4343,
+                uid=501,
+                executable=paths.executable,
+                config=paths.config,
+                launchd_label=smoke.GEPH_LABEL,
+            )
+            recovered = smoke.OwnedGephState(
+                pid=4444,
+                uid=501,
+                executable=paths.executable,
+                config=paths.config,
+                launchd_label=smoke.GEPH_LABEL,
+            )
+            sentinel = mock.Mock()
+            tray = mock.Mock()
+
+            with ExitStack() as stack:
+                stack.enter_context(
+                    mock.patch.object(smoke, "_require_disposable_ci")
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke, "_take_secret", return_value="secret")
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.Path, "home", return_value=home)
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke.os, "getuid", return_value=501)
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "_preflight",
+                        return_value=Path(tmp) / "slipstream",
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "ExternalListenerSentinel",
+                        return_value=sentinel,
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke, "PackagedTray", return_value=tray)
+                )
+                for name in (
+                    "_write_private_json",
+                    "_keychain_add",
+                    "_remove_exact_native_host",
+                    "_bootout_owned_geph",
+                    "_wait_for_listener_gone",
+                    "_keychain_delete",
+                ):
+                    stack.enter_context(mock.patch.object(smoke, name))
+                wait_for_owned = stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "_wait_for_owned_geph",
+                        side_effect=(initial, recovered),
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "_wait_for_payload",
+                        side_effect=(
+                            {"target": "initial"},
+                            {"target": "trayless"},
+                            {"target": "recovered"},
+                        ),
+                    )
+                )
+                publish = stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "_publish_ready_and_wait",
+                        return_value=coordinated,
+                    )
+                )
+                validate = stack.enter_context(
+                    mock.patch.object(smoke, "_assert_owned_geph")
+                )
+                kill_owned = stack.enter_context(
+                    mock.patch.object(smoke, "_kill_owned_geph")
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke, "_keychain_exists", return_value=False)
+                )
+                stack.enter_context(
+                    mock.patch.object(smoke, "_listener_pids", return_value=())
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "_daemon_is_disabled",
+                        return_value=True,
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        smoke,
+                        "DAEMON_PLIST",
+                        Path(tmp) / "daemon.plist",
+                    )
+                )
+                result = smoke.run_qualification(app_bundle)
+
+            self.assertEqual(result["result"], "pass")
+            publish.assert_called_once_with(
+                None,
+                paths,
+                501,
+                initial,
+                abort_reason=mock.ANY,
+            )
+            validate.assert_called_once_with(paths, 501, coordinated)
+            kill_owned.assert_called_once_with(paths, 501, coordinated)
+            self.assertEqual(
+                wait_for_owned.call_args_list,
+                [
+                    mock.call(paths, 501),
+                    mock.call(paths, 501, previous_pid=coordinated.pid),
+                ],
+            )
 
     def test_cleanup_continues_after_keychain_delete_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
