@@ -4,6 +4,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -165,6 +166,64 @@ class GephOwnedLifecycleSmokeTests(unittest.TestCase):
             501,
             previous_pid=initial.pid,
         )
+
+    def test_process_identity_returns_absent_only_after_kernel_confirmation(
+        self,
+    ) -> None:
+        result = subprocess.CompletedProcess(
+            args=("/bin/ps",),
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        with (
+            mock.patch.object(smoke, "_run", return_value=result),
+            mock.patch.object(
+                smoke.os,
+                "kill",
+                side_effect=ProcessLookupError,
+            ) as probe,
+        ):
+            self.assertIsNone(smoke._process_identity(4242))
+        probe.assert_called_once_with(4242, 0)
+
+    def test_process_identity_rejects_failed_inspection_of_live_process(
+        self,
+    ) -> None:
+        result = subprocess.CompletedProcess(
+            args=("/bin/ps",),
+            returncode=1,
+            stdout="",
+            stderr="temporary failure",
+        )
+        with (
+            mock.patch.object(smoke, "_run", return_value=result),
+            mock.patch.object(smoke.os, "kill") as probe,
+        ):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "cannot inspect live process identity",
+            ):
+                smoke._process_identity(4242)
+        probe.assert_called_once_with(4242, 0)
+
+    def test_process_identity_rejects_malformed_live_process_output(self) -> None:
+        result = subprocess.CompletedProcess(
+            args=("/bin/ps",),
+            returncode=0,
+            stdout="malformed\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(smoke, "_run", return_value=result),
+            mock.patch.object(smoke.os, "kill") as probe,
+        ):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "invalid live process identity",
+            ):
+                smoke._process_identity(4242)
+        probe.assert_called_once_with(4242, 0)
 
     def test_coordination_rejects_replacement_while_old_owned_process_survives(
         self,

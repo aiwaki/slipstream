@@ -288,14 +288,29 @@ def _process_identity(pid: int) -> tuple[int, str] | None:
         ("/bin/ps", "-o", "uid=", "-o", "command=", "-p", str(pid)),
         check=False,
     )
-    line = result.stdout.strip() if result.returncode == 0 else ""
+    if result.returncode != 0:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except OSError as exc:
+            raise QualificationError("cannot prove process absence") from exc
+        raise QualificationError("cannot inspect live process identity")
+
+    line = result.stdout.strip()
     parts = line.split(None, 1)
     if len(parts) != 2:
-        return None
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except OSError as exc:
+            raise QualificationError("cannot prove process absence") from exc
+        raise QualificationError("invalid live process identity")
     try:
         return int(parts[0]), parts[1]
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise QualificationError("invalid live process identity") from exc
 
 
 def _write_private_json(path: Path, value: dict[str, str]) -> None:
