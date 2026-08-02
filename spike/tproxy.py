@@ -2064,6 +2064,7 @@ AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
 AUTO_GEPH_CONFIRM_MIN_BYTES = 64
+AUTO_GEPH_CONFIRM_STABLE_PROBES = 2
 AUTO_GEPH_RECOVERY_GRACE = 5.0
 AUTO_GEPH_RECOVERY_POLL = 0.1
 AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
@@ -2071,6 +2072,7 @@ AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX = 2
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 65536
 INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 524288
 SEMANTIC_GEO_DENIAL_MARKERS = (
+    b"local_rate_limited",
     b"no longer available in your area",
     b"no longer available in your region",
     b"no longer available in your country",
@@ -3375,34 +3377,13 @@ def _socks5_connect_blocking(host, port, timeout=3.0):
 
 
 def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
-    sock = _socks5_connect_blocking(host, 443, timeout)
-    if sock is None:
-        return 0
-    tls_sock = None
-    try:
-        ctx = _local_payload_ssl_context()
-        tls_sock = ctx.wrap_socket(sock, server_hostname=host)
-        tls_sock.settimeout(timeout)
-        req = (
-            "HEAD / HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            "User-Agent: SlipstreamAutoGeo/1\r\n"
-            "Accept: */*\r\n"
-            "Cache-Control: no-cache\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("ascii", "ignore")
-        tls_sock.sendall(req)
-        data = tls_sock.recv(4096)
-        if data.startswith(b"HTTP/"):
-            return len(data)
-        return 0
-    except Exception:
-        return 0
-    finally:
-        try:
-            (tls_sock or sock).close()
-        except Exception:
-            pass
+    """Return bytes only for a usable HTTP response through owned Geph.
+
+    A TLS record or arbitrary HTTP status is not route-health evidence.  In
+    particular, Geph may return a complete ``429 local_rate_limited`` response
+    while its listener and tunnel still look healthy.
+    """
+    return _semantic_geph_payload_probe(host, timeout)
 
 
 def _semantic_geph_response_usable(data):
@@ -3726,6 +3707,19 @@ def _retry_semantic_geph_probe_after_owned_restart(host, probe):
         _finish_geph_restart_drain()
 
 
+def _stable_owned_geph_payload_probe(host, probe):
+    """Require consecutive usable responses on independent SOCKS sessions."""
+    bytes_read = 0
+    for _attempt in range(AUTO_GEPH_CONFIRM_STABLE_PROBES):
+        if not _owned_geph_ready_for_semantic_confirmation():
+            return 0
+        current = probe(host)
+        if current < AUTO_GEPH_CONFIRM_MIN_BYTES:
+            return 0
+        bytes_read = current if not bytes_read else min(bytes_read, current)
+    return bytes_read
+
+
 def _confirm_semantic_geo_exit(host):
     h = normalize_host(host)
     if (
@@ -3868,11 +3862,20 @@ def _confirm_auto_geph(host):
     if not AUTO_GEPH_ENABLED or not _geph_up or not _auto_geph_candidate_allowed(h):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
-    bytes_read = _auto_geph_payload_probe(h)
+    stable_probe = lambda candidate: _stable_owned_geph_payload_probe(
+        candidate,
+        _auto_geph_payload_probe,
+    )
+    bytes_read = stable_probe(h)
+    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        bytes_read = _retry_semantic_geph_probe_after_owned_restart(
+            h,
+            stable_probe,
+        )
     return _remember_auto_geph_host(
         h,
         bytes_read,
-        "geph payload confirmed",
+        "stable Geph payload confirmed",
     )
 
 
@@ -9132,6 +9135,7 @@ async def _try_unknown_owned_geph_route(
     if not _geph_session_started():
         return False
     up_w = None
+    confirm_after_session = False
     try:
         geph = await dial_via_geph(h, port, first_flight)
         if geph is None:
@@ -9153,15 +9157,7 @@ async def _try_unknown_owned_geph_route(
                 len(server_first),
             )
             return False
-        if (
-            not _auto_geph_learned_exact_host(h)
-            and not _remember_auto_geph_host(
-                h,
-                len(server_first),
-                "owned Geph payload confirmed after local route exhaustion",
-            )
-        ):
-            return False
+        confirm_after_session = not _auto_geph_learned_exact_host(h)
         try:
             writer.write(server_first)
             await writer.drain()
@@ -9173,6 +9169,11 @@ async def _try_unknown_owned_geph_route(
         if up_w is not None:
             await _close_stream_writer(up_w)
         _geph_session_finished()
+        if confirm_after_session and not _auto_geph_learned_exact_host(h):
+            _schedule_auto_geph_confirmation(
+                h,
+                evidence_reason="one-shot Geph route needs stable confirmation",
+            )
 
 
 async def _try_system_geo_connect(host, dst_ip, port, first_flight, reader, writer):

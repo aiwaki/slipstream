@@ -7379,6 +7379,10 @@ def test_semantic_geph_response_requires_usable_non_denial_http():
         b"local_rate_limited"
     )
     assert not tproxy._semantic_geph_response_usable(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+        b"local_rate_limited"
+    )
+    assert not tproxy._semantic_geph_response_usable(
         b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
         b"\x1f\x8bopaque"
     )
@@ -9860,13 +9864,14 @@ def test_auto_geph_confirmation_learns_only_proven_exact_unknown_host(
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
 
     assert tproxy._confirm_auto_geph(host)
-    assert probes == [host]
+    assert probes == [host, host]
     assert tproxy._auto_geph_learned_exact_host(host)
     assert tproxy.runtime_route_policy(host)["route_class"] == tproxy.ROUTE_GEO_EXIT
     assert tproxy.route_policy(host)["route_class"] == tproxy.ROUTE_UNKNOWN
     snap = tproxy.auto_geo_exit_status_snapshot()
     assert snap["enabled"] is True
     assert snap["last_state"] == "learned"
+    assert tproxy._auto_geph_last_status["reason"] == "stable Geph payload confirmed"
     assert snap["learned"] == 1
     assert tproxy._geph_backend_hold_until == 0.0
     assert tproxy._geph_backend_hold_reason == ""
@@ -9886,12 +9891,83 @@ def test_auto_geph_failed_payload_keeps_backend_hold(monkeypatch, tmp_path):
         str(tmp_path / "autogeph.json"),
     )
     monkeypatch.setattr(tproxy, "_auto_geph_payload_probe", lambda _host: 0)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: None)
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
 
     assert not tproxy._confirm_auto_geph(host)
     assert not tproxy._auto_geph_learned_exact_host(host)
     assert tproxy._geph_backend_hold_until == hold_until
     assert tproxy._geph_backend_hold_reason == "payload miss"
+
+
+def test_auto_geph_confirmation_replaces_owned_exit_when_second_probe_is_limited(
+    monkeypatch,
+    tmp_path,
+):
+    host = "unstable-exit.example.com"
+    probes = iter([512, 0, 1024, 1024])
+    listener_pids = iter([100, 101])
+    events = []
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(
+        tproxy,
+        "_AUTO_GEPH_PATH",
+        str(tmp_path / "autogeph.json"),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_payload_probe",
+        lambda candidate: next(probes) if candidate == host else 0,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda _port: True)
+    monkeypatch.setattr(
+        tproxy,
+        "_begin_geph_restart_drain",
+        lambda: events.append(("begin",)) or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "request_owned_geph_restart",
+        lambda candidate, reason, **_kwargs: (
+            events.append(("request", candidate, reason)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "execute_owned_geph_restart",
+        lambda **kwargs: (
+            events.append(("restart", kwargs.get("active_sessions"))) or "restarted"
+        ),
+    )
+    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", lambda: "ready")
+    monkeypatch.setattr(
+        tproxy,
+        "_finish_geph_restart_drain",
+        lambda: events.append(("finish",)),
+    )
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
+
+    assert tproxy._confirm_auto_geph(host)
+    assert tproxy._auto_geph_learned_exact_host(host)
+    assert events == [
+        ("begin",),
+        ("request", host, "payload probe failed"),
+        ("restart", 0),
+        ("finish",),
+    ]
+    with pytest.raises(StopIteration):
+        next(probes)
 
 
 def test_load_auto_geph_keeps_only_fresh_unknown_exact_hosts(tmp_path, monkeypatch):
