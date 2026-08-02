@@ -73,7 +73,9 @@ retry reserves the idle Geph session drain before consuming its marker, so a
 new route cannot enter between the zero-session observation and confirmation.
 That marker captures authorization while the original candidate is live and
 survives candidate expiry until its one reserved retry is consumed, so a relay
-lasting beyond the candidate TTL cannot cancel the recovery it deferred.
+lasting beyond the candidate TTL cannot cancel the recovery it deferred. If a
+confirmation thread cannot start, its exact token and probe cooldown are
+released immediately; the host cannot remain permanently wedged as active.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

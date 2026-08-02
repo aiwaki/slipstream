@@ -4311,7 +4311,23 @@ def _schedule_bounded_geph_confirmation(
     if runner is not None:
         run()
         return True
-    threading.Thread(target=run, daemon=True).start()
+    worker = threading.Thread(target=run, daemon=True)
+    try:
+        worker.start()
+    except (OSError, RuntimeError):
+        owns_confirmation = _finish_auto_geph_confirmation(h, token)
+        if owns_confirmation:
+            with _auto_geph_lock:
+                if _auto_geph_last_probe.get(h) == now:
+                    _auto_geph_last_probe.pop(h, None)
+            _set_auto_geph_status(
+                "deferred",
+                h,
+                "confirmation worker unavailable",
+            )
+            if on_complete is not None:
+                on_complete(h, False)
+        return False
     return True
 
 

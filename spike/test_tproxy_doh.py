@@ -8525,6 +8525,45 @@ def test_auto_geph_confirmation_token_prevents_stale_worker_cleanup():
     assert host not in tproxy._auto_geph_confirmation_tokens
 
 
+def test_auto_geph_confirmation_thread_start_failure_releases_token(
+    monkeypatch,
+):
+    host = "thread-start-failure.example"
+    statuses = []
+
+    class BrokenThread:
+        def __init__(self, *, target, daemon):
+            assert callable(target)
+            assert daemon
+
+        def start(self):
+            raise RuntimeError("thread capacity unavailable")
+
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_candidate_allowed",
+        lambda actual_host, _now=None: actual_host == host,
+    )
+    monkeypatch.setattr(tproxy.threading, "Thread", BrokenThread)
+    monkeypatch.setattr(
+        tproxy,
+        "_set_auto_geph_status",
+        lambda state, actual_host, reason, *_args: statuses.append(
+            (state, actual_host, reason)
+        ),
+    )
+
+    assert not tproxy._schedule_auto_geph_confirmation(host, now=100.0)
+    assert host not in tproxy._auto_geph_confirming
+    assert host not in tproxy._auto_geph_confirmation_tokens
+    assert host not in tproxy._auto_geph_last_probe
+    assert statuses[-1] == (
+        "deferred",
+        host,
+        "confirmation worker unavailable",
+    )
+
+
 def test_post_drain_retry_reserves_backend_before_consuming_marker(monkeypatch):
     host = "atomic-post-drain.example"
     observations = []
