@@ -91,7 +91,11 @@ learned route is committed before that reservation is released, and a recovery
 worker reuses its already-held drain through proof and commit. Loss of verified
 listener ownership, an unavailable restart, or a replacement that misses its
 bounded recovery window is treated as backend unavailability, so an
-already-consumed deferred authorization is restored instead of discarded.
+already-consumed deferred authorization is restored and waits for a verified
+monitor recovery instead of being immediately consumed again. Confirmation
+requests ask for a bounded byte range and retain a two-MiB hard cap plus the
+single end-to-end deadline, allowing a complete large response when an origin
+ignores the range without accepting an unbounded stream.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

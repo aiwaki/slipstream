@@ -2069,7 +2069,8 @@ AUTO_GEPH_RECOVERY_GRACE = 5.0
 AUTO_GEPH_RECOVERY_POLL = 0.1
 AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX = 2
-SEMANTIC_GEPH_PROBE_MAX_BYTES = 65536
+SEMANTIC_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
+SEMANTIC_GEPH_PROBE_RANGE_END = 262143
 INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 524288
 SEMANTIC_GEO_DENIAL_MARKERS = (
     b"local_rate_limited",
@@ -3409,6 +3410,19 @@ def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     return _semantic_geph_payload_probe(host, timeout)
 
 
+def _semantic_geph_probe_request(host):
+    return (
+        "GET / HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        "User-Agent: SlipstreamSemanticGeo/1\r\n"
+        "Accept: text/html,application/xhtml+xml\r\n"
+        "Accept-Encoding: identity\r\n"
+        f"Range: bytes=0-{SEMANTIC_GEPH_PROBE_RANGE_END}\r\n"
+        "Cache-Control: no-cache\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii", "ignore")
+
+
 def _semantic_geph_response_usable(data):
     if not isinstance(data, bytes) or not data.startswith(b"HTTP/"):
         return False
@@ -3452,16 +3466,7 @@ def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
         _set_socket_deadline_timeout(sock, deadline)
         tls_sock = ctx.wrap_socket(sock, server_hostname=host)
         _set_socket_deadline_timeout(tls_sock, deadline)
-        request = (
-            "GET / HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            "User-Agent: SlipstreamSemanticGeo/1\r\n"
-            "Accept: text/html,application/xhtml+xml\r\n"
-            "Accept-Encoding: identity\r\n"
-            "Cache-Control: no-cache\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("ascii", "ignore")
-        tls_sock.sendall(request)
+        tls_sock.sendall(_semantic_geph_probe_request(host))
         chunks = []
         size = 0
         stream_closed = False
@@ -4046,6 +4051,10 @@ def _confirm_auto_geph(
 
     learned = False
 
+    def defer_until_backend_recovers():
+        suspend_geo_exit_backend("owned Geph confirmation backend unavailable")
+        _restore_auto_geph_retry_after_drain(h)
+
     def learn_pinned(bytes_read, pinned_pid):
         nonlocal learned
         learned = remember(bytes_read, pinned_pid)
@@ -4106,7 +4115,7 @@ def _confirm_auto_geph(
                 else None
             ),
             on_backend_unavailable=(
-                (lambda: _restore_auto_geph_retry_after_drain(h))
+                defer_until_backend_recovers
                 if restore_retry
                 else None
             ),
@@ -4543,7 +4552,12 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
                 )
         finally:
             owns_confirmation = _finish_auto_geph_confirmation(h, token)
-            _finish_geph_restart_drain()
+            with _auto_geph_lock:
+                wait_for_backend = (
+                    h in _auto_geph_retry_after_drain
+                    and not _auto_geph_deferred_candidate_allowed(h)
+                )
+            _finish_geph_restart_drain(retry_pending=not wait_for_backend)
             if owns_confirmation:
                 _auto_geph_confirmation_completed(h, succeeded)
 
@@ -4645,7 +4659,10 @@ def _auto_geph_confirmation_completed(host, succeeded):
         if succeeded or _auto_geph_learned_exact_host(h):
             _auto_geph_retry_after_drain.pop(h, None)
             return
-        retry_pending = h in _auto_geph_retry_after_drain
+        retry_pending = (
+            h in _auto_geph_retry_after_drain
+            and _auto_geph_deferred_candidate_allowed(h)
+        )
     if retry_pending:
         _retry_auto_geph_confirmation_after_drain(h)
 

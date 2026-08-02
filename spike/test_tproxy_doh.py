@@ -8234,12 +8234,13 @@ def test_semantic_geph_probe_requires_complete_http_response(
         def __init__(self, chunks):
             self.chunks = deque(chunks + [b""])
             self.closed = False
+            self.request = b""
 
         def settimeout(self, _timeout):
             return None
 
-        def sendall(self, _payload):
-            return None
+        def sendall(self, payload):
+            self.request += payload
 
         def recv(self, _size):
             return self.chunks.popleft()
@@ -8265,6 +8266,55 @@ def test_semantic_geph_probe_requires_complete_http_response(
     result = tproxy._semantic_geph_payload_probe("complete-response.example")
 
     assert (result > 0) is expected_positive
+    assert b"Range: bytes=0-262143\r\n" in tls_socket.request
+    assert tls_socket.closed
+
+
+def test_semantic_geph_probe_accepts_complete_large_response(monkeypatch):
+    body = b"x" * 1_100_000
+    response_chunks = [
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode(),
+        body,
+    ]
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.chunks = deque(response_chunks + [b""])
+            self.closed = False
+            self.request = b""
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, payload):
+            self.request += payload
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda _sock, server_hostname: tls_socket
+        ),
+    )
+
+    result = tproxy._semantic_geph_payload_probe("large-response.example")
+
+    assert result == len(body)
+    assert b"Range: bytes=0-262143\r\n" in tls_socket.request
     assert tls_socket.closed
 
 
@@ -9033,6 +9083,47 @@ def test_post_drain_retry_waits_for_owned_backend_recovery(monkeypatch):
     assert host not in tproxy._auto_geph_retry_after_drain
 
 
+def test_post_drain_unavailable_backend_does_not_immediately_reconsume_marker(
+    monkeypatch,
+):
+    host = "unavailable-post-drain.example"
+    confirmations = []
+    drain_attempts = []
+    original_begin = tproxy._begin_geph_restart_drain
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
+
+    def begin():
+        drain_attempts.append(True)
+        return original_begin()
+
+    def confirmation(actual_host):
+        confirmations.append(actual_host)
+        tproxy.suspend_geo_exit_backend("fixture backend unavailable")
+        tproxy._restore_auto_geph_retry_after_drain(actual_host)
+        return False
+
+    monkeypatch.setattr(tproxy, "_begin_geph_restart_drain", begin)
+
+    assert tproxy._retry_auto_geph_confirmation_after_drain(
+        host,
+        runner=confirmation,
+    )
+    assert confirmations == [host]
+    assert drain_attempts == [True]
+    assert host in tproxy._auto_geph_retry_after_drain
+    assert not tproxy._geph_up
+    assert not tproxy._geph_restart_draining
+
+
 def test_post_drain_thread_start_failure_restores_authorized_retry(monkeypatch):
     host = "post-drain-thread-failure.example"
 
@@ -9148,6 +9239,8 @@ def test_authorized_post_drain_confirmation_restores_retry_if_ownership_is_lost(
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_until", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_backend_hold_reason", "")
     monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
     monkeypatch.setattr(
         tproxy,
