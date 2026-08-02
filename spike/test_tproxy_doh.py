@@ -41,7 +41,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     auto_confirming = dict(tproxy._auto_geph_confirming)
     auto_confirmation_tokens = dict(tproxy._auto_geph_confirmation_tokens)
     auto_last_probe = dict(tproxy._auto_geph_last_probe)
-    auto_retry_after_drain = set(tproxy._auto_geph_retry_after_drain)
+    auto_retry_after_drain = dict(tproxy._auto_geph_retry_after_drain)
     auto_runtime_failures = {
         host: list(values)
         for host, values in tproxy._auto_geph_runtime_failures.items()
@@ -8714,6 +8714,57 @@ def test_auto_geph_confirmation_thread_start_failure_releases_token(
     )
 
 
+def test_post_drain_authorization_evicts_oldest_at_state_bound(monkeypatch):
+    monkeypatch.setattr(tproxy, "AUTO_GEPH_STATE_MAX", 2)
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_base_host_allowed",
+        lambda _host: True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_learned_exact_host",
+        lambda _host: False,
+    )
+
+    assert tproxy._retain_auto_geph_retry_after_drain_locked("old.example", 1.0)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked("mid.example", 2.0)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked("new.example", 3.0)
+
+    assert list(tproxy._auto_geph_retry_after_drain) == [
+        "mid.example",
+        "new.example",
+    ]
+
+
+def test_post_drain_authorization_prunes_learned_and_invalid_hosts(monkeypatch):
+    tproxy._auto_geph_retry_after_drain.update({
+        "learned.example": 1.0,
+        "invalid.example": 2.0,
+        "valid.example": 3.0,
+    })
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_learned_exact_host",
+        lambda host: host == "learned.example",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_auto_geph_base_host_allowed",
+        lambda host: host != "invalid.example",
+    )
+
+    tproxy._prune_auto_geph_retry_after_drain_locked()
+
+    assert tproxy._auto_geph_retry_after_drain == {"valid.example": 3.0}
+    assert not tproxy._retain_auto_geph_retry_after_drain_locked(
+        "learned.example"
+    )
+    assert not tproxy._retain_auto_geph_retry_after_drain_locked(
+        "invalid.example"
+    )
+
+
 def test_post_drain_retry_reserves_backend_before_consuming_marker(monkeypatch):
     host = "atomic-post-drain.example"
     observations = []
@@ -8729,7 +8780,7 @@ def test_post_drain_retry_reserves_backend_before_consuming_marker(monkeypatch):
     )
     monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() + 60.0
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     def confirmation(actual_host):
         observations.append({
@@ -8768,7 +8819,7 @@ def test_post_drain_retry_preserves_authorization_after_candidate_expires(
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     assert tproxy._retry_auto_geph_confirmation_after_drain(
         host,
@@ -8789,7 +8840,7 @@ def test_post_drain_retry_waits_for_owned_backend_recovery(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     assert not tproxy._retry_auto_geph_confirmation_after_drain(
         host,
@@ -8826,7 +8877,7 @@ def test_post_drain_thread_start_failure_restores_authorized_retry(monkeypatch):
     monkeypatch.setattr(tproxy.threading, "Thread", BrokenThread)
     monkeypatch.setattr(tproxy, "_set_auto_geph_status", lambda *_args: None)
     tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     assert not tproxy._retry_auto_geph_confirmation_after_drain(host)
     assert host in tproxy._auto_geph_retry_after_drain
@@ -8937,7 +8988,7 @@ def test_early_confirmation_restores_taken_retry_if_backend_drops(monkeypatch):
         "_remember_auto_geph_host",
         lambda _host, _bytes, _reason, **_kwargs: False,
     )
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     assert not tproxy._confirm_auto_geph(host)
     assert host in tproxy._auto_geph_retry_after_drain
@@ -8988,7 +9039,7 @@ def test_early_confirmation_consumes_retry_after_acquiring_drain(monkeypatch):
         "_remember_auto_geph_host",
         lambda _host, _bytes, _reason, **_kwargs: False,
     )
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     assert not tproxy._confirm_auto_geph(host)
     assert recovery_attempts == [host]
@@ -9041,7 +9092,7 @@ def test_early_confirmation_restores_retry_only_when_drain_is_blocked(
         "_remember_auto_geph_host",
         lambda _host, _bytes, _reason, **_kwargs: False,
     )
-    tproxy._auto_geph_retry_after_drain.add(host)
+    assert tproxy._retain_auto_geph_retry_after_drain_locked(host)
 
     assert not tproxy._confirm_auto_geph(host)
     assert host in tproxy._auto_geph_retry_after_drain

@@ -2095,7 +2095,7 @@ _auto_geph = {}               # host -> wall-clock expiry (learned geph hosts)
 _auto_geph_confirming = {}    # host -> monotonic start time
 _auto_geph_confirmation_tokens = {}  # host -> unique live worker ownership token
 _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
-_auto_geph_retry_after_drain = set()  # one post-relay retry per current incident
+_auto_geph_retry_after_drain = {}  # host -> monotonic retained authorization
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
@@ -4420,11 +4420,11 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
         if h not in _auto_geph_retry_after_drain:
             pass
         elif _auto_geph_learned_exact_host(h):
-            _auto_geph_retry_after_drain.discard(h)
+            _auto_geph_retry_after_drain.pop(h, None)
         elif h in _auto_geph_confirming:
             pass
         elif not _auto_geph_base_host_allowed(h):
-            _auto_geph_retry_after_drain.discard(h)
+            _auto_geph_retry_after_drain.pop(h, None)
         elif not _auto_geph_deferred_candidate_allowed(h):
             # The marker already carries the bounded incident authorization.
             # Keep it until the verified owned backend returns.
@@ -4437,7 +4437,7 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
                 ignore_cooldown=True,
             )
             if token is not None:
-                _auto_geph_retry_after_drain.discard(h)
+                _auto_geph_retry_after_drain.pop(h, None)
                 _set_auto_geph_status(
                     "checking",
                     h,
@@ -4482,7 +4482,7 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
                     and _auto_geph_base_host_allowed(h)
                     and not _auto_geph_learned_exact_host(h)
                 ):
-                    _auto_geph_retry_after_drain.add(h)
+                    _retain_auto_geph_retry_after_drain_locked(h)
             _set_auto_geph_status(
                 "deferred",
                 h,
@@ -4496,11 +4496,43 @@ def _retry_auto_geph_confirmation_after_drain(host, runner=None):
 def _retry_pending_auto_geph_confirmations_after_drain():
     """Start at most one retained exact-host proof for an idle owned backend."""
     with _auto_geph_lock:
+        _prune_auto_geph_retry_after_drain_locked()
         pending = sorted(_auto_geph_retry_after_drain)
     for host in pending:
         if _retry_auto_geph_confirmation_after_drain(host):
             return True
     return False
+
+
+def _prune_auto_geph_retry_after_drain_locked():
+    """Keep deferred incident authorization valid but globally bounded."""
+    for host in list(_auto_geph_retry_after_drain):
+        if (
+            _auto_geph_learned_exact_host(host)
+            or not _auto_geph_base_host_allowed(host)
+        ):
+            _auto_geph_retry_after_drain.pop(host, None)
+    while len(_auto_geph_retry_after_drain) > AUTO_GEPH_STATE_MAX:
+        oldest = next(iter(_auto_geph_retry_after_drain))
+        _auto_geph_retry_after_drain.pop(oldest, None)
+
+
+def _retain_auto_geph_retry_after_drain_locked(host, now=None):
+    """Retain one authorization and evict the oldest excess incident."""
+    h = normalize_host(host)
+    if (
+        not h
+        or _auto_geph_learned_exact_host(h)
+        or not _auto_geph_base_host_allowed(h)
+    ):
+        return False
+    _prune_auto_geph_retry_after_drain_locked()
+    _auto_geph_retry_after_drain.pop(h, None)
+    _auto_geph_retry_after_drain[h] = (
+        time.monotonic() if now is None else now
+    )
+    _prune_auto_geph_retry_after_drain_locked()
+    return h in _auto_geph_retry_after_drain
 
 
 def _take_auto_geph_retry_after_drain(host):
@@ -4509,7 +4541,7 @@ def _take_auto_geph_retry_after_drain(host):
     with _auto_geph_lock:
         if h not in _auto_geph_retry_after_drain:
             return False
-        _auto_geph_retry_after_drain.discard(h)
+        _auto_geph_retry_after_drain.pop(h, None)
         return True
 
 
@@ -4523,14 +4555,14 @@ def _restore_auto_geph_retry_after_drain(host):
             and _auto_geph_base_host_allowed(h)
             and not _auto_geph_learned_exact_host(h)
         ):
-            _auto_geph_retry_after_drain.add(h)
+            _retain_auto_geph_retry_after_drain_locked(h)
 
 
 def _auto_geph_confirmation_completed(host, succeeded):
     h = normalize_host(host)
     with _auto_geph_lock:
         if succeeded or _auto_geph_learned_exact_host(h):
-            _auto_geph_retry_after_drain.discard(h)
+            _auto_geph_retry_after_drain.pop(h, None)
             return
         retry_pending = h in _auto_geph_retry_after_drain
     if retry_pending:
@@ -4568,7 +4600,7 @@ def _schedule_auto_geph_confirmation_before_relay(host):
     with _auto_geph_lock:
         # This marker captures authorization while the original candidate is
         # still live. Its single post-drain retry may outlive candidate TTL.
-        _auto_geph_retry_after_drain.add(h)
+        _retain_auto_geph_retry_after_drain_locked(h, now=now)
     return _schedule_auto_geph_confirmation(
         h,
         now=now,

@@ -226,7 +226,7 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_auto_geph_confirming", {})
     monkeypatch.setattr(tproxy, "_auto_geph_confirmation_tokens", {})
     monkeypatch.setattr(tproxy, "_auto_geph_last_probe", {})
-    monkeypatch.setattr(tproxy, "_auto_geph_retry_after_drain", set())
+    monkeypatch.setattr(tproxy, "_auto_geph_retry_after_drain", {})
     monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
     monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
     monkeypatch.setattr(tproxy, "_local_zero_payload_failures", {})
