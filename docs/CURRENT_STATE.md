@@ -88,7 +88,9 @@ HTTP probes share one lifecycle reservation and pin the exact owned listener
 PID. Ownership and PID equality are checked before and after each response and
 again at route commit; KeepAlive or external PID drift rejects the proof. The
 learned route is committed before that reservation is released, and a recovery
-worker reuses its already-held drain through proof and commit.
+worker reuses its already-held drain through proof and commit. Loss of verified
+listener ownership during bounded recovery is treated as backend unavailability,
+so an already-consumed deferred authorization is restored instead of discarded.
 
 After the Mac correction is qualified, the M4 next action remains
 production-host sleep/wake recovery on disposable Windows, without production

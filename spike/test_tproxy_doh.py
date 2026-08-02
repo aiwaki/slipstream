@@ -8559,6 +8559,31 @@ def test_semantic_recovery_reports_missing_owned_backend(monkeypatch):
     assert unavailable == [True]
 
 
+def test_semantic_recovery_reports_unowned_backend(monkeypatch):
+    unavailable = []
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_begin_geph_restart_drain",
+        lambda: pytest.fail("unowned backend must not reserve drain"),
+    )
+
+    assert not tproxy._retry_semantic_geph_probe_after_owned_restart(
+        "unowned-recovery-backend.example",
+        lambda _host: pytest.fail("unowned backend must prevent probing"),
+        on_backend_unavailable=lambda: unavailable.append(True),
+    )
+    assert unavailable == [True]
+
+
 def test_semantic_runtime_reclassifies_against_current_policy(monkeypatch):
     confirmations = []
     route_class = {"value": tproxy.ROUTE_UNKNOWN}
@@ -9029,6 +9054,37 @@ def test_authorized_post_drain_confirmation_restores_retry_if_backend_drops(
         lambda *_args, **_kwargs: pytest.fail(
             "unavailable backend must defer before recovery"
         ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_remember_auto_geph_host",
+        lambda _host, _bytes, _reason, **_kwargs: False,
+    )
+    tproxy._auto_geph_candidates[host] = tproxy.time.monotonic() - 1.0
+
+    assert not tproxy._confirm_auto_geph(
+        host,
+        drain_reserved=True,
+        candidate_authorized=True,
+    )
+    assert host in tproxy._auto_geph_retry_after_drain
+
+
+def test_authorized_post_drain_confirmation_restores_retry_if_ownership_is_lost(
+    monkeypatch,
+):
+    host = "post-drain-ownership-loss.example"
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: False,
     )
     monkeypatch.setattr(
         tproxy,
@@ -10801,6 +10857,12 @@ def test_auto_geph_confirmation_learns_only_proven_exact_unknown_host(
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 4242)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
     monkeypatch.setattr(
         tproxy,
         "_AUTO_GEPH_PATH",

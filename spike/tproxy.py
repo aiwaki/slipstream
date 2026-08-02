@@ -3700,6 +3700,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
             on_backend_unavailable()
         return 0
     if not geph_listener_owned(GEPH_OWNED_PORT):
+        if on_backend_unavailable is not None:
+            on_backend_unavailable()
         return 0
     if not drain_reserved and not _begin_geph_restart_drain():
         if on_drain_blocked is not None:
@@ -3714,6 +3716,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
             if replacement > 1:
                 old_pid = _geph_listener_pid(GEPH_OWNED_PORT)
                 if not old_pid or not geph_listener_owned(GEPH_OWNED_PORT):
+                    if on_backend_unavailable is not None:
+                        on_backend_unavailable()
                     return 0
 
             attempt_now = time.time()
@@ -3740,6 +3744,8 @@ def _retry_semantic_geph_probe_after_owned_restart(
                     _geph_port = None
                     _geph_owned = False
                     _geph_up = False
+                    if on_backend_unavailable is not None:
+                        on_backend_unavailable()
                     return 0
                 if (
                     recovery_state == "ready"
