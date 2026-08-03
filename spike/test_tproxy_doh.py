@@ -13,6 +13,7 @@ import shutil
 import signal
 import ssl
 import stat
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -2874,6 +2875,7 @@ def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
 ):
     calls = []
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 123)
     monkeypatch.setattr(
         tproxy,
         "_tcp_listener_present",
@@ -2884,7 +2886,9 @@ def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
     monkeypatch.setattr(
         tproxy,
         "geph_listener_owned",
-        lambda port: calls.append(("owned", port)) or listener_owned,
+        lambda port, *, listener_pid: (
+            calls.append(("owned", port, listener_pid)) or listener_owned
+        ),
     )
     monkeypatch.setattr(
         tproxy,
@@ -2900,12 +2904,33 @@ def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
         tproxy.GEPH_OWNED_PORT,
         tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     )
-    assert ("owned", tproxy.GEPH_OWNED_PORT) in calls or not listener_present
+    assert ("owned", tproxy.GEPH_OWNED_PORT, 123) in calls or not listener_present
     assert (
         "live",
         tproxy.GEPH_OWNED_PORT,
         tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     ) in calls or not (listener_present and listener_owned)
+
+
+def test_owned_geph_successor_rejects_pid_changed_during_readiness(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "_geph_live", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda _port, *, listener_pid: listener_pid == 101,
+    )
+    listener_pids = iter((101, 100))
+
+    assert (
+        tproxy._wait_for_owned_geph_successor(
+            100,
+            timeout=0.0,
+            listener_pid=lambda _port: next(listener_pids),
+        )
+        == "timeout"
+    )
 
 
 def test_geph_probe_hysteresis_never_invents_cold_start_readiness():
@@ -7121,6 +7146,22 @@ def test_owned_geph_restart_cools_backend_and_kickstarts_exact_launchagent(monke
     monkeypatch.setattr(tproxy, "_geph_restart_failures", deque([(99.0, "chatgpt.com", "stale")]))
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    listener_pids = iter((100, 101))
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "ready",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
     events = []
 
     def run(*args):
@@ -7158,6 +7199,213 @@ def test_owned_geph_restart_cools_backend_and_kickstarts_exact_launchagent(monke
     assert tproxy._geph_restart_draining is False
 
 
+def test_owned_geph_restart_adopts_delayed_successor_after_command_timeout(
+    monkeypatch,
+    capsys,
+):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    listener_pids = iter((100, 101))
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+
+    def recovery_probe(successor_pid, **_kwargs):
+        assert tproxy._geph_restart_draining is True
+        assert successor_pid == 101
+        return "ready"
+
+    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", recovery_probe)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
+    calls = []
+
+    def timed_out(*args):
+        calls.append(args)
+        return SimpleNamespace(
+            returncode=124,
+            stdout="",
+            stderr="timed out after 5s",
+        )
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=timed_out,
+        backend_suspender=lambda: None,
+    )
+
+    assert result == "restarted"
+    assert len(calls) == 1
+    assert hint["recommended"] is False
+    assert tproxy._geph_restart_draining is True
+    stderr = capsys.readouterr().err
+    assert "completion was indeterminate" in stderr
+    assert "recovery unavailable" not in stderr
+    tproxy._finish_geph_restart_drain()
+
+
+def test_owned_geph_restart_preserves_timeout_diagnostics(monkeypatch, capsys):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "GEPH_RESTART_SUCCESSOR_GRACE", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "down",
+    )
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda *args, **kwargs: True)
+
+    def timed_out(*_args):
+        raise subprocess.TimeoutExpired(
+            cmd="launchctl kickstart",
+            timeout=5,
+            output=b"launch still active",
+            stderr=b"delayed successor",
+        )
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=timed_out,
+        backend_suspender=lambda: None,
+    )
+
+    assert result == "unavailable"
+    assert "delayed successor" in capsys.readouterr().err
+
+
+def test_owned_geph_restart_shutdown_while_waiting_is_quiet(monkeypatch, capsys):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(tproxy, "geph_listener_owned", lambda *args, **kwargs: True)
+    monkeypatch.setattr(tproxy, "_wait_for_owned_geph_successor", lambda _pid: "shutdown")
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=lambda *_args: SimpleNamespace(returncode=0, stdout="", stderr=""),
+        backend_suspender=lambda: None,
+    )
+
+    assert result == "shutdown"
+    assert tproxy._geph_restart_draining is False
+    assert "recovery unavailable" not in capsys.readouterr().err
+
+
+def test_owned_geph_restart_timeout_without_successor_fails_closed(monkeypatch, capsys):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    monkeypatch.setattr(tproxy, "GEPH_RESTART_SUCCESSOR_GRACE", 0.0)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "down",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
+    calls = []
+
+    def timed_out(*args):
+        calls.append(args)
+        return SimpleNamespace(returncode=124, stdout="", stderr="timed out after 5s")
+
+    kwargs = {
+        "ownership_path": "/tmp/geph-owned.json",
+        "ownership_state": {"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        "owner_uid": 502,
+        "listener_owned": True,
+        "runner": timed_out,
+        "backend_suspender": lambda: None,
+    }
+    assert tproxy.execute_owned_geph_restart(now=100.0, **kwargs) == "unavailable"
+    assert tproxy.execute_owned_geph_restart(now=101.0, **kwargs) == "cooldown"
+    assert len(calls) == 1
+    assert hint["recommended"] is True
+    assert tproxy._geph_restart_draining is False
+    assert "no verified owned successor appeared (timeout)" in capsys.readouterr().err
+
+
+def test_owned_geph_restart_rejects_unowned_successor_after_timeout(monkeypatch):
+    hint = dict(tproxy._geph_restart_hint)
+    hint.update({"recommended": True, "last_attempt_at": 0.0})
+    monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
+    monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
+    listener_pids = iter((100, 999))
+    monkeypatch.setattr(
+        tproxy,
+        "_geph_listener_pid",
+        lambda _port: next(listener_pids),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "conflict",
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
+    calls = []
+
+    def timed_out(*args):
+        calls.append(args)
+        return SimpleNamespace(returncode=124, stdout="", stderr="timed out after 5s")
+
+    result = tproxy.execute_owned_geph_restart(
+        now=100.0,
+        ownership_path="/tmp/geph-owned.json",
+        ownership_state={"uid": 502, "launchd_label": tproxy.GEPH_LAUNCHD_LABEL},
+        owner_uid=502,
+        listener_owned=True,
+        runner=timed_out,
+        backend_suspender=lambda: None,
+    )
+
+    assert result == "unavailable"
+    assert len(calls) == 1
+    assert hint["recommended"] is True
+    assert tproxy._geph_restart_draining is False
+    assert tproxy._geph_port_conflict is True
+    assert tproxy._geph_port is None
+    assert tproxy._geph_owned is False
+    assert tproxy._geph_up is False
+
+
 def test_owned_geph_restart_never_touches_unverified_listener(monkeypatch):
     hint = dict(tproxy._geph_restart_hint)
     hint.update({"recommended": True, "last_attempt_at": 0.0})
@@ -7184,6 +7432,12 @@ def test_owned_geph_restart_rate_limits_launchctl_retry(monkeypatch, capsys):
     hint = dict(tproxy._geph_restart_hint)
     hint.update({"recommended": True, "last_attempt_at": 0.0})
     monkeypatch.setattr(tproxy, "_geph_restart_hint", hint)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda *args, **kwargs: True,
+    )
     calls = []
 
     def unavailable(*args):
@@ -7613,7 +7867,7 @@ def test_semantic_confirmation_uses_second_bounded_owned_geph_replacement(
 ):
     host = "second-exit-works.example"
     probes = iter([0, 0, 4096])
-    listener_pids = iter([100, 101, 101, 102])
+    listener_pids = iter([100, 101])
     events = []
     hint = dict(tproxy._geph_restart_hint)
     hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
@@ -7683,7 +7937,7 @@ def test_semantic_confirmation_uses_second_bounded_owned_geph_replacement(
 def test_semantic_confirmation_stops_after_two_owned_geph_replacements(monkeypatch):
     host = "still-unusable.example"
     probes = iter([0, 0, 0])
-    listener_pids = iter([100, 101, 101, 102])
+    listener_pids = iter([100, 101])
     events = []
     hint = dict(tproxy._geph_restart_hint)
     hint.update({"last_requested_at": 0.0, "last_attempt_at": 0.0})
@@ -8330,7 +8584,7 @@ def test_semantic_recovery_performs_two_successful_in_incident_replacements(
     monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
     monkeypatch.setattr(tproxy, "_geph_active_sessions", 0)
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
-    listener_pids = iter([100, 101, 101, 102])
+    listener_pids = iter([100, 100, 101, 101, 101, 102])
     probe_results = iter([0, 512])
     launchctl_calls = []
     blocked_callbacks = []
@@ -8370,7 +8624,11 @@ def test_semantic_recovery_performs_two_successful_in_incident_replacements(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(tproxy, "note_runtime_rearm", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", lambda: "ready")
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "ready",
+    )
 
     result = tproxy._retry_semantic_geph_probe_after_owned_restart(
         "two-replacements.example",
@@ -8685,12 +8943,7 @@ def test_semantic_recovery_reports_replacement_timeout(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "execute_owned_geph_restart",
-        lambda **_kwargs: "restarted",
-    )
-    monkeypatch.setattr(
-        tproxy,
-        "_probe_owned_geph_recovery_state",
-        lambda: "missing",
+        lambda **_kwargs: "unavailable",
     )
 
     assert not tproxy._retry_semantic_geph_probe_after_owned_restart(

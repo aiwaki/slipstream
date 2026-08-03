@@ -496,6 +496,7 @@ GEPH_RESTART_MIN_HOSTS = 2
 GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
 GEPH_RESTART_EXECUTION_RETRY = 30.0
+GEPH_RESTART_SUCCESSOR_GRACE = 15.0
 GEPH_BACKEND_FAILURE_HOLD = 30.0
 FD_PRESSURE_HIGH_CAP = 2048
 FD_PRESSURE_LOW_CAP = 1024
@@ -2973,6 +2974,75 @@ def _ownership_file_uid(path):
     return geph_backend.ownership_file_uid(path)
 
 
+def _owned_geph_restart_command_outcome(result):
+    """Classify a mutating launchctl result without assuming timeout means no-op."""
+    if result.returncode == 0:
+        return "completed"
+    if result.returncode == 124:
+        return "indeterminate"
+    return "rejected"
+
+
+def _wait_for_owned_geph_successor(
+    previous_pid,
+    *,
+    timeout=None,
+    listener_pid=None,
+    recovery_probe=None,
+    monotonic=None,
+    sleeper=None,
+):
+    """Wait for a different, exact-owned listener after one launchd mutation."""
+    global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
+    if (
+        not isinstance(previous_pid, int)
+        or isinstance(previous_pid, bool)
+        or previous_pid <= 0
+    ):
+        return "unverified"
+    timeout = GEPH_RESTART_SUCCESSOR_GRACE if timeout is None else max(0.0, timeout)
+    listener_pid = _geph_listener_pid if listener_pid is None else listener_pid
+    if recovery_probe is None:
+        recovery_probe = lambda expected_pid: _probe_owned_geph_recovery_state(
+            expected_pid,
+            listener_pid_reader=listener_pid,
+        )
+    monotonic = time.monotonic if monotonic is None else monotonic
+    sleeper = time.sleep if sleeper is None else sleeper
+    deadline = monotonic() + timeout
+    while not _shutdown_started.is_set():
+        successor_pid = listener_pid(GEPH_OWNED_PORT)
+        if (
+            not isinstance(successor_pid, int)
+            or isinstance(successor_pid, bool)
+            or successor_pid <= 0
+        ):
+            recovery_state = "down"
+        else:
+            recovery_state = recovery_probe(successor_pid)
+        if recovery_state == "conflict":
+            _geph_port_conflict = True
+            _geph_port = None
+            _geph_owned = False
+            _geph_up = False
+            return "conflict"
+        if (
+            recovery_state == "ready"
+            and successor_pid
+            and successor_pid != previous_pid
+        ):
+            _geph_port_conflict = False
+            _geph_port = GEPH_OWNED_PORT
+            _geph_owned = True
+            _geph_up = True
+            return "ready"
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return "timeout"
+        sleeper(min(AUTO_GEPH_RECOVERY_POLL, remaining))
+    return "shutdown"
+
+
 def execute_owned_geph_restart(
     now=None,
     active_sessions=None,
@@ -3035,21 +3105,75 @@ def execute_owned_geph_restart(
             if managed_drain:
                 _finish_geph_restart_drain()
             return "shutdown"
+        previous_pid = _geph_listener_pid(GEPH_OWNED_PORT)
+        if (
+            not isinstance(previous_pid, int)
+            or isinstance(previous_pid, bool)
+            or previous_pid <= 0
+            or not geph_listener_owned(GEPH_OWNED_PORT)
+        ):
+            if managed_drain:
+                _finish_geph_restart_drain()
+            return "unverified"
         result = runner("/bin/launchctl", "kickstart", "-k", target)
+    except subprocess.TimeoutExpired as error:
+        def timeout_output(value):
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            if isinstance(value, str):
+                return value
+            if value is None:
+                return ""
+            return repr(value)
+
+        result = subprocess.CompletedProcess(
+            ("/bin/launchctl", "kickstart", "-k", target),
+            124,
+            timeout_output(error.stdout),
+            timeout_output(error.stderr),
+        )
     except Exception as error:
         if managed_drain:
             _finish_geph_restart_drain()
         print(f">> owned Geph recovery unavailable: {error}", file=sys.stderr)
         return "unavailable"
-    if result.returncode != 0:
+    command_outcome = _owned_geph_restart_command_outcome(result)
+    if command_outcome == "rejected":
         if managed_drain:
             _finish_geph_restart_drain()
         detail = (result.stderr or result.stdout or "launchctl returned an error").strip()
         print(f">> owned Geph recovery unavailable: {detail[:200]}", file=sys.stderr)
         return "unavailable"
 
+    successor_state = _wait_for_owned_geph_successor(previous_pid)
+    if successor_state == "shutdown":
+        if managed_drain:
+            _finish_geph_restart_drain()
+        return "shutdown"
+    if successor_state != "ready":
+        if managed_drain:
+            _finish_geph_restart_drain()
+        detail = (result.stderr or result.stdout or "").strip()
+        if command_outcome == "indeterminate":
+            reason = "launchctl completion was indeterminate"
+        else:
+            reason = "launchctl completed"
+        print(
+            f">> owned Geph recovery unavailable: {reason}, but no verified "
+            f"owned successor appeared ({successor_state})"
+            + (f": {detail[:120]}" if detail else ""),
+            file=sys.stderr,
+        )
+        return "unavailable"
+
     clear_geph_restart_hint()
     note_runtime_rearm("geph_restart")
+    if command_outcome == "indeterminate":
+        print(
+            ">> launchctl completion was indeterminate; verified the exact owned "
+            "Geph successor before resuming",
+            file=sys.stderr,
+        )
     print(">> owned Geph LaunchAgent restarted after routing became idle", file=sys.stderr)
     return "restarted"
 
@@ -3155,21 +3279,34 @@ def _auto_geph_deferred_candidate_allowed(host):
     )
 
 
-def _probe_owned_geph_recovery_state():
+def _probe_owned_geph_recovery_state(expected_pid=None, listener_pid_reader=None):
     """Observe the exact owned listener without waiting for monitor cadence."""
     if not GEPH_ENABLED:
+        return "down"
+    listener_pid_reader = (
+        _geph_listener_pid if listener_pid_reader is None else listener_pid_reader
+    )
+    if expected_pid is None:
+        expected_pid = listener_pid_reader(GEPH_OWNED_PORT)
+    if (
+        not isinstance(expected_pid, int)
+        or isinstance(expected_pid, bool)
+        or expected_pid <= 0
+    ):
         return "down"
     if not _tcp_listener_present(
         GEPH_OWNED_PORT,
         timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     ):
         return "down"
-    if not geph_listener_owned(GEPH_OWNED_PORT):
+    if not geph_listener_owned(GEPH_OWNED_PORT, listener_pid=expected_pid):
         return "conflict"
     if not _geph_live(
         GEPH_OWNED_PORT,
         timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     ):
+        return "down"
+    if listener_pid_reader(GEPH_OWNED_PORT) != expected_pid:
         return "down"
     return "ready"
 
@@ -3695,7 +3832,6 @@ def _retry_semantic_geph_probe_after_owned_restart(
     on_success=None,
 ):
     """Retry an exact semantic probe after bounded owned-Geph replacement."""
-    global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
     h = normalize_host(host)
     now = time.time()
     last_requested = _geph_restart_hint.get("last_requested_at", 0.0)
@@ -3742,45 +3878,12 @@ def _retry_semantic_geph_probe_after_owned_restart(
             )
             if restart_result != "restarted":
                 if (
-                    restart_result == "unavailable"
+                    restart_result in ("unavailable", "unverified")
                     and on_backend_unavailable is not None
                 ):
                     on_backend_unavailable()
                 return 0
 
-            recovered = False
-            deadline = time.monotonic() + AUTO_GEPH_RECOVERY_GRACE
-            while not _shutdown_started.is_set():
-                new_pid = _geph_listener_pid(GEPH_OWNED_PORT)
-                recovery_state = _probe_owned_geph_recovery_state()
-                if recovery_state == "conflict":
-                    _geph_port_conflict = True
-                    _geph_port = None
-                    _geph_owned = False
-                    _geph_up = False
-                    if on_backend_unavailable is not None:
-                        on_backend_unavailable()
-                    return 0
-                if (
-                    recovery_state == "ready"
-                    and new_pid
-                    and new_pid != old_pid
-                ):
-                    _geph_port_conflict = False
-                    _geph_port = GEPH_OWNED_PORT
-                    _geph_owned = True
-                    _geph_up = True
-                    recovered = True
-                    break
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                time.sleep(min(AUTO_GEPH_RECOVERY_POLL, remaining))
-
-            if not recovered:
-                if on_backend_unavailable is not None:
-                    on_backend_unavailable()
-                return 0
             bytes_read = probe(h)
             if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
                 if on_success is not None:
