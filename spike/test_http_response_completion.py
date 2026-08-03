@@ -1,4 +1,5 @@
 from http_response_completion import (
+    http_response_body,
     http_response_body_length,
     http_response_complete,
     http_response_framing_complete,
@@ -51,6 +52,11 @@ def test_chunked_response_requires_the_terminal_chunk():
         stream_closed=False,
         truncated=False,
     ) == 5
+    assert http_response_body(
+        complete,
+        stream_closed=False,
+        truncated=False,
+    ) == b"hello"
     assert not http_response_complete(
         partial,
         stream_closed=True,

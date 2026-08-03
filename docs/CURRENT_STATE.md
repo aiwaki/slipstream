@@ -21,8 +21,9 @@ eligible unknown host establishes the exact `system/plain` path, the daemon
 may start one background, certificate-validating `GET /` against that same
 public IP. It sends no browser state and is bounded to `128 KiB`, two concurrent
 probes, eight new exact hosts per minute, and one attempt per exact host per ten
-minutes. Only a complete identity-encoded HTTP response with a strong generic
-regional-denial marker may request the existing independent owned-Geph
+minutes. Only a complete identity-encoded HTTP response whose decoded
+representation body contains a strong generic regional-denial marker may
+request the existing independent owned-Geph
 semantic confirmation. `429 local_rate_limited`, incomplete or compressed
 responses, protected/static routes, and unowned Geph remain non-authorizing.
 The current client stream is never delayed, replayed, or rerouted; the learned

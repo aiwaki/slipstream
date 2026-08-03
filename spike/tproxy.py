@@ -55,6 +55,7 @@ import urllib.request
 import connection_probe
 import geph_backend
 from http_response_completion import (
+    http_response_body,
     http_response_body_length,
     http_response_complete,
     http_response_framing_complete,
@@ -3627,12 +3628,17 @@ def _semantic_geph_response_usable(data):
     return not any(marker in lowered for marker in SEMANTIC_GEO_DENIAL_MARKERS)
 
 
-def _semantic_plain_response_is_regional_denial(data):
+def _semantic_plain_response_is_regional_denial(
+    data,
+    *,
+    stream_closed=True,
+    truncated=False,
+):
     """Recognize only a strong regional-denial marker in a plain HTTP reply."""
     if not isinstance(data, bytes) or not data.startswith(b"HTTP/"):
         return False
     try:
-        headers, body = data.split(b"\r\n\r\n", 1)
+        headers, _body = data.split(b"\r\n\r\n", 1)
     except ValueError:
         return False
     first_line = headers.split(b"\r\n", 1)[0].split()
@@ -3652,6 +3658,14 @@ def _semantic_plain_response_is_regional_denial(data):
             and value.strip().lower() not in {b"", b"identity"}
         ):
             return False
+    body = http_response_body(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=True,
+    )
+    if body is None:
+        return False
     lowered = body.lower()
     return any(marker in lowered for marker in SEMANTIC_REGIONAL_DENIAL_MARKERS)
 
@@ -3719,7 +3733,11 @@ def _semantic_plain_denial_probe(
         )
         return bool(
             response_complete
-            and _semantic_plain_response_is_regional_denial(data)
+            and _semantic_plain_response_is_regional_denial(
+                data,
+                stream_closed=stream_closed,
+                truncated=truncated,
+            )
         )
     except Exception:
         return False

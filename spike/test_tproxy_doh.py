@@ -7767,6 +7767,21 @@ def test_plain_semantic_response_recognizes_only_regional_denial():
     assert not tproxy._semantic_plain_response_is_regional_denial(
         b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n" + denial
     )
+    first = b"This content is no l"
+    second = b"onger available in your area"
+    chunked = (
+        b"HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\n\r\n"
+        + f"{len(first):x}\r\n".encode()
+        + first
+        + b"\r\n"
+        + f"{len(second):x}\r\n".encode()
+        + second
+        + b"\r\n0\r\n\r\n"
+    )
+    assert tproxy._semantic_plain_response_is_regional_denial(
+        chunked,
+        stream_closed=False,
+    )
 
 
 @pytest.mark.parametrize("complete", (True, False))

@@ -115,11 +115,11 @@ def _chunked_body_complete(body):
     return _chunked_body_state(body) == "complete"
 
 
-def _chunked_body_length(body):
+def _chunked_body_bytes(body):
     if not _chunked_body_complete(body):
         return None
     cursor = 0
-    total = 0
+    chunks = []
     while True:
         line_end = body.find(b"\r\n", cursor)
         if line_end < 0:
@@ -130,8 +130,8 @@ def _chunked_body_length(body):
             return None
         cursor = line_end + 2
         if size == 0:
-            return total
-        total += size
+            return b"".join(chunks)
+        chunks.append(body[cursor : cursor + size])
         cursor += size + 2
 
 
@@ -202,13 +202,20 @@ def http_response_complete(data, *, stream_closed, truncated):
     )
 
 
-def http_response_body_length(data, *, stream_closed, truncated):
-    """Return representation-body bytes for one proven-complete response."""
+def http_response_body(
+    data,
+    *,
+    stream_closed,
+    truncated,
+    allow_error_status=False,
+):
+    """Return the decoded body of one proven-complete HTTP/1 response."""
 
-    if not http_response_complete(
+    if not _http_response_framing_complete(
         data,
         stream_closed=stream_closed,
         truncated=truncated,
+        allow_error_status=allow_error_status,
     ):
         return None
     boundary = data.find(b"\r\n\r\n")
@@ -217,14 +224,26 @@ def http_response_body_length(data, *, stream_closed, truncated):
         return None
     _version, status, headers = parsed
     if status in _NO_BODY_STATUSES:
-        return 0
+        return b""
     body = data[boundary + 4 :]
     if headers.get(b"transfer-encoding", ()):
-        return _chunked_body_length(body)
+        return _chunked_body_bytes(body)
     length = _content_length(headers)
     if length is False:
         return None
-    return len(body) if length is None else length
+    return body if length is None else body[:length]
+
+
+def http_response_body_length(data, *, stream_closed, truncated):
+    """Return representation-body bytes for one proven-complete response."""
+
+    body = http_response_body(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=False,
+    )
+    return None if body is None else len(body)
 
 
 def http_response_incomplete(data, *, stream_closed, idle_timed_out, truncated):
