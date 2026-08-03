@@ -8698,11 +8698,10 @@ def _prune_protected_local_server_first_closes(now):
 
 def _clear_protected_local_server_first_closes(host, strategy_name=None):
     h = normalize_host(host)
-    if strategy_name is not None:
-        _protected_local_server_first_closes.pop((h, strategy_name), None)
-        return
     for key in tuple(_protected_local_server_first_closes):
-        if key[0] == h:
+        if key[0] == h and (
+            strategy_name is None or key[1] == strategy_name
+        ):
             _protected_local_server_first_closes.pop(key, None)
 
 
@@ -8992,27 +8991,51 @@ def note_protected_local_server_first_close(
     if not h or not _protected_local_runtime_policy(policy):
         return False
 
-    key = (h, strategy_name or "")
+    now = time.monotonic() if now is None else now
     strong_transport_failure = _protected_local_strong_server_first_failure(
         activity,
         duration,
     )
+    short_close = _suspicious_server_first_close(activity, duration)
+    medium_youtube_close = bool(
+        policy["route_class"] == ROUTE_DIRECT_FIRST
+        and policy["service_group"] == SERVICE_YOUTUBE
+        and _ambiguous_large_server_first_close(activity, duration)
+    )
     if (
         not strong_transport_failure
-        and not _suspicious_server_first_close(activity, duration)
+        and not short_close
+        and not medium_youtube_close
     ):
-        _protected_local_server_first_closes.pop(key, None)
+        _clear_protected_local_server_first_closes(h, strategy_name)
         return False
 
-    now = time.monotonic() if now is None else now
+    close_kind = (
+        SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE
+        if medium_youtube_close
+        else SERVER_FIRST_CLOSE_KIND_SHORT
+    )
+    key = (h, strategy_name or "", close_kind)
+    for other_key in tuple(_protected_local_server_first_closes):
+        if other_key[:2] == key[:2] and other_key != key:
+            _protected_local_server_first_closes.pop(other_key, None)
     _prune_protected_local_server_first_closes(now)
     events = _protected_local_server_first_closes.setdefault(key, deque())
     events.append(now)
     _prune_protected_local_server_first_closes(now)
-    if not strong_transport_failure and len(events) < SERVER_FIRST_CLOSE_STORM:
+    fallback_already_active = bool(
+        medium_youtube_close
+        and strategy_name != "plain"
+        and _direct_first_local_fallback_active(h, now=now)
+    )
+    if (
+        not strong_transport_failure
+        and not fallback_already_active
+        and len(events) < SERVER_FIRST_CLOSE_STORM
+    ):
         return False
 
-    _protected_local_server_first_closes.pop(key, None)
+    _clear_protected_local_server_first_closes(h, strategy_name)
     if (
         policy["route_class"] == ROUTE_DIRECT_FIRST
         and strategy_name == "plain"
@@ -9028,6 +9051,12 @@ def note_protected_local_server_first_close(
         "protected local TLS stream closed before completion",
         failed_strategy=strategy_name,
         failure_phase=FAILURE_PHASE_STREAM,
+    )
+    print(
+        "protected-local recovery armed: "
+        f"host={h} service={policy['service_group']} "
+        f"strategy={strategy_name or 'unknown'} close={close_kind} "
+        f"bytes={activity.downstream_bytes} duration={duration:.2f}s"
     )
     return True
 

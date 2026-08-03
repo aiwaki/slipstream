@@ -1649,6 +1649,79 @@ def test_youtube_media_server_first_close_reaches_only_local_recovery(monkeypatc
     assert not tproxy.is_geo_exit_route(host)
 
 
+def test_youtube_medium_media_cuts_move_next_request_to_local_fallback(monkeypatch):
+    original_observer = tproxy.note_protected_local_server_first_close
+    isolate_runtime_state(monkeypatch)
+    host = "rr5---sn-test.googlevideo.com"
+    destination_ip = "203.0.113.45"
+    record_payload = b"m" * (16 * 1024)
+    record = (
+        b"\x17\x03\x03"
+        + len(record_payload).to_bytes(2, "big")
+        + record_payload
+    )
+    response = record * 6
+    calls = []
+    observations = []
+
+    async def one_address(actual_host, fallback_ip):
+        assert (actual_host, fallback_ip) == (host, destination_ip)
+        return [destination_ip]
+
+    async def local_route(ip, port, head, body, actual_host, strategy):
+        assert (ip, port, actual_host) == (destination_ip, 443, host)
+        assert head + body
+        calls.append(strategy["name"])
+        return probed_upstream_response(response)
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    def observe(actual_host, strategy_name, activity, **kwargs):
+        recovered = original_observer(
+            actual_host,
+            strategy_name,
+            activity,
+            **kwargs,
+        )
+        observations.append(
+            (
+                strategy_name,
+                activity.server_ended_first,
+                activity.client_ended_first,
+                activity.downstream_bytes,
+                activity.tls_framing_valid,
+                activity.tls_complete_records,
+                recovered,
+            )
+        )
+        return recovered
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: (destination_ip, 443))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", one_address)
+    monkeypatch.setattr(tproxy, "dial_strategy", local_route)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "note_protected_local_server_first_close",
+        observe,
+    )
+
+    for _attempt in range(3):
+        client, _expected_first_flight = tls_client(
+            host,
+            block_after_hello=True,
+        )
+        writer = CaptureWriter()
+        asyncio.run(run_handler(client, writer))
+        assert bytes(writer.payload) == response
+
+    assert calls[:2] == ["plain", "plain"]
+    assert calls[2] != "plain", observations
+    assert tproxy._direct_first_local_fallback_active(host)
+    assert not tproxy.is_geo_exit_route(host)
+
+
 def test_youtube_media_dead_cooldown_preserves_one_local_fallback(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "rr5---sn-test.googlevideo.com"

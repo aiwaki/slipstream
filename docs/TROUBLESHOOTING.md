@@ -43,14 +43,21 @@ server-first close because Googlevideo is `direct_first`, not literal
 `local_bypass`.
 
 Current protected-local recovery keeps valid TLS framing through the relay. A
-single orderly short close is provisional; one reset or incomplete TLS record,
-or two matching short closes for the same host and strategy within five
-minutes, demotes only that local strategy and starts an exact-host local
-re-sweep. If `plain` failed for Googlevideo, the next request starts with a
-local desync strategy for one minute and then rechecks direct. This path has no
-Geph action. Repeated failures without a corresponding recovery event indicate
-that the installed daemon predates this correction or that the close is outside
-the bounded signal and needs a fresh log-backed investigation.
+single orderly short or medium close is provisional; one reset or incomplete
+TLS record, or two matching closes for the same host, strategy, and close kind
+within five minutes, demotes only that local strategy and starts an exact-host
+local re-sweep. Medium means a complete-record server-first close between
+`32 KiB` and `512 KiB`; it never combines with short-close evidence. If `plain`
+failed for Googlevideo, the next request starts with a local desync strategy for
+one minute and then rechecks direct. If that active fallback produces one
+matching medium close, it is demoted immediately so a client retry can continue
+through the local ladder. This path has no Geph action.
+
+The private daemon log records an armed observation as
+`protected-local recovery armed` with host, service, strategy, close kind,
+bytes, and duration. Repeated failures without that event indicate that the
+installed daemon predates this correction or that the close is outside the
+bounded signal and needs a fresh log-backed investigation.
 
 ## Basic Checks
 
