@@ -10291,6 +10291,42 @@ def test_complete_quiet_tls_record_is_not_a_partial_stall():
     assert not activity.partial_tls_record_stalled
 
 
+def test_downstream_idle_requires_one_complete_valid_tls_record():
+    observations = []
+    cases = (
+        tproxy._RelayActivity(
+            last_downstream_at=tproxy.time.monotonic() - 1.0,
+            first_downstream_seen=True,
+            track_tls_records=True,
+            tls_framing_valid=True,
+            tls_complete_records=0,
+            on_downstream_idle=lambda: observations.append("incomplete"),
+        ),
+        tproxy._RelayActivity(
+            last_downstream_at=tproxy.time.monotonic() - 1.0,
+            first_downstream_seen=True,
+            track_tls_records=True,
+            tls_framing_valid=False,
+            tls_complete_records=1,
+            on_downstream_idle=lambda: observations.append("invalid"),
+        ),
+        tproxy._RelayActivity(
+            last_downstream_at=tproxy.time.monotonic() - 1.0,
+            first_downstream_seen=True,
+            track_tls_records=False,
+            tls_framing_valid=True,
+            tls_complete_records=1,
+            on_downstream_idle=lambda: observations.append("untracked"),
+        ),
+    )
+
+    for activity in cases:
+        asyncio.run(tproxy._watch_downstream_idle(activity, 0.0))
+        assert not activity.downstream_idle_observed
+
+    assert observations == []
+
+
 def test_relay_observes_complete_tls_idle_without_cancelling_stream(monkeypatch):
     record = b"\x17\x03\x03\x00\x08" + b"x" * 8
     observations = []
@@ -11024,7 +11060,7 @@ def test_transport_confirmation_respects_network_wide_failure_guard(monkeypatch)
     monkeypatch.setattr(
         tproxy,
         "_network_wide_unknown_failure_visible",
-        lambda: True,
+        lambda _now=None: True,
     )
 
     assert not tproxy._schedule_transport_incomplete_response_confirmation(
@@ -11049,7 +11085,7 @@ def test_payload_idle_evidence_participates_in_network_wide_failure_guard():
             scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
         )
 
-    assert tproxy._network_wide_unknown_failure_visible()
+    assert tproxy._network_wide_unknown_failure_visible(now=110.0)
     guarded_host = "idle-0.example"
     for stage in (
         tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
@@ -11076,12 +11112,11 @@ def test_payload_idle_evidence_expires_from_network_wide_failure_guard():
             scheduler=lambda *args, **kwargs: True,
         )
 
-    assert tproxy._network_wide_unknown_failure_visible()
-    tproxy._prune_transport_incomplete_probes(
-        101.0 + tproxy.AUTO_GEPH_PARTIAL_STALL_WINDOW
+    assert tproxy._network_wide_unknown_failure_visible(now=100.0)
+    assert not tproxy._network_wide_unknown_failure_visible(
+        now=101.0 + tproxy.AUTO_GEPH_PARTIAL_STALL_WINDOW
     )
     assert not tproxy._local_payload_idle_failures
-    assert not tproxy._network_wide_unknown_failure_visible()
 
 
 def test_server_reset_advances_unknown_host_without_waiting_for_repeat():

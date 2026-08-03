@@ -34,19 +34,22 @@ the client eventually gave up.
 The current branch `codex/partial-payload-idle-observer` adds one
 non-destructive payload-followed-idle observer to eligible generic local TLS
 routes. It neither ends nor reroutes the active stream. Each observation records
-only its actual system, app-owned DNS, or named local-strategy stage. System,
+only its actual system, app-owned DNS, or named local-strategy stage, and only
+after valid TLS framing has produced at least one complete record. System,
 app-owned DNS, and multiple distinct local strategies remain mandatory before
 the existing original-system-public-IP, certificate-validating HTTP completion
-probe may run. Idle incidents are bounded, pruned, and included in the
-network-wide guard. The worker is exact-host cooled and globally capped at four.
+probe may run. Every network-wide guard evaluation prunes expired partial,
+zero-payload, payload-idle, and server-first evidence before counting hosts.
+The worker is exact-host cooled and globally capped at four.
 It learns nothing unless the direct response has strictly proven incomplete
 framing and verified owned Geph independently returns a complete usable
 response. Static policy, PF, DNS, external Geph, Discord, YouTube, and
 Googlevideo behavior do not change.
 
 Focused observer and transport-confirmation regressions pass locally. Full
-Python verification is `974 passed, 41 subtests passed`; the tray Rust suite is
-`83 passed`, and the Chromium companion suite is `21 passed`. PR review,
+Python verification is `975 passed, 41 subtests passed`; the tray Rust suite is
+`83 passed`, and the Chromium companion suite is `21 passed`. The two findings
+from the latest automated PR review are addressed locally; fresh PR review,
 exact-main gates, and one fresh protected qualification remain required before
 another controlled workstation installation. Only that fresh run's exact
 artifact may be used.

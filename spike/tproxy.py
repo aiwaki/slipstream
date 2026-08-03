@@ -4368,7 +4368,39 @@ def _local_route_evidence_complete(observations, strategy_count):
     )
 
 
-def _network_wide_unknown_failure_visible():
+def _prune_transport_incomplete_server_first_evidence(now):
+    cutoff = now - SERVER_FIRST_CLOSE_WINDOW
+    for host, observations in list(
+        _transport_incomplete_server_first_evidence.items()
+    ):
+        fresh = {
+            stage: observed_at
+            for stage, observed_at in observations.items()
+            if observed_at > cutoff
+        }
+        if fresh and _auto_geph_base_host_allowed(host):
+            _transport_incomplete_server_first_evidence[host] = fresh
+        else:
+            _transport_incomplete_server_first_evidence.pop(host, None)
+    while (
+        len(_transport_incomplete_server_first_evidence)
+        > AUTO_GEPH_STATE_MAX
+    ):
+        oldest = min(
+            _transport_incomplete_server_first_evidence,
+            key=lambda host: max(
+                _transport_incomplete_server_first_evidence[host].values()
+            ),
+        )
+        _transport_incomplete_server_first_evidence.pop(oldest, None)
+
+
+def _network_wide_unknown_failure_visible(now=None):
+    now = time.monotonic() if now is None else now
+    _prune_local_partial_stalls(now)
+    _prune_local_zero_payload_failures(now)
+    _prune_local_payload_idle_failures(now)
+    _prune_transport_incomplete_server_first_evidence(now)
     noisy_hosts = {
         host
         for host, observations in _local_partial_stalls.items()
@@ -4443,7 +4475,7 @@ def note_zero_payload_route_failure(host, stage, now=None):
         AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES,
     ):
         return False
-    if _network_wide_unknown_failure_visible():
+    if _network_wide_unknown_failure_visible(now):
         return False
     _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
     return True
@@ -4465,7 +4497,7 @@ def _record_partial_tls_stall_evidence(host, stage, now):
         AUTO_GEPH_PARTIAL_STRATEGIES,
     ):
         return False
-    if _network_wide_unknown_failure_visible():
+    if _network_wide_unknown_failure_visible(now):
         return False
     return True
 
@@ -8646,29 +8678,7 @@ def _prune_transport_incomplete_probes(now):
             key=lambda host: _transport_incomplete_plain_candidates[host][1],
         )
         _transport_incomplete_plain_candidates.pop(oldest, None)
-    for host, observations in list(
-        _transport_incomplete_server_first_evidence.items()
-    ):
-        fresh = {
-            stage: observed_at
-            for stage, observed_at in observations.items()
-            if observed_at > cutoff
-        }
-        if fresh and _auto_geph_base_host_allowed(host):
-            _transport_incomplete_server_first_evidence[host] = fresh
-        else:
-            _transport_incomplete_server_first_evidence.pop(host, None)
-    while (
-        len(_transport_incomplete_server_first_evidence)
-        > AUTO_GEPH_STATE_MAX
-    ):
-        oldest = min(
-            _transport_incomplete_server_first_evidence,
-            key=lambda host: max(
-                _transport_incomplete_server_first_evidence[host].values()
-            ),
-        )
-        _transport_incomplete_server_first_evidence.pop(oldest, None)
+    _prune_transport_incomplete_server_first_evidence(now)
 
 
 def _record_transport_incomplete_server_first_evidence(host, stage, now):
@@ -8688,7 +8698,7 @@ def _record_transport_incomplete_server_first_evidence(host, stage, now):
         AUTO_GEPH_PARTIAL_STRATEGIES,
     ):
         return False
-    if _network_wide_unknown_failure_visible():
+    if _network_wide_unknown_failure_visible(now):
         return False
     return True
 
@@ -8726,7 +8736,7 @@ def _schedule_transport_incomplete_response_confirmation(
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
-        or _network_wide_unknown_failure_visible()
+        or _network_wide_unknown_failure_visible(now)
     ):
         return False
     with _auto_geph_lock:
@@ -8791,7 +8801,7 @@ def _record_transport_incomplete_idle_evidence(
         AUTO_GEPH_PARTIAL_STRATEGIES,
     ):
         return False
-    if _network_wide_unknown_failure_visible():
+    if _network_wide_unknown_failure_visible(now):
         return False
 
     candidate = _transport_incomplete_plain_candidates.get(h)
@@ -8891,7 +8901,7 @@ def _schedule_server_first_transport_confirmation(
     _prune_transport_incomplete_probes(now)
     _prune_local_partial_stalls(now)
     _prune_local_zero_payload_failures(now)
-    if _network_wide_unknown_failure_visible():
+    if _network_wide_unknown_failure_visible(now):
         return False
     runner = transport_confirmation_runner
     if runner is None and confirmation_runner is not None:
@@ -9301,6 +9311,12 @@ async def _watch_downstream_idle(activity, idle_timeout):
         if idle_for < idle_timeout:
             await asyncio.sleep(idle_timeout - idle_for)
             continue
+        if (
+            not activity.track_tls_records
+            or not activity.tls_framing_valid
+            or activity.tls_complete_records < 1
+        ):
+            return
         activity.downstream_idle_observed = True
         callback = activity.on_downstream_idle
         if callback is not None:
