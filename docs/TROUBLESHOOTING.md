@@ -51,7 +51,9 @@ local re-sweep. Medium means a complete-record server-first close between
 failed for Googlevideo, the next request starts with a local desync strategy for
 one minute and then rechecks direct. If that active fallback produces one
 matching medium close, it is demoted immediately so a client retry can continue
-through the local ladder. This path has no Geph action.
+through the local ladder. A provisional medium close is not enough to demote a
+strategy, but it also is not recorded as local-health success. This path has no
+Geph action.
 
 The private daemon log records an armed observation as
 `protected-local recovery armed` with host, service, strategy, close kind,

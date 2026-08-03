@@ -8952,6 +8952,14 @@ def _ambiguous_large_server_first_close(activity, duration):
     )
 
 
+def _protected_youtube_medium_server_first_close(policy, activity, duration):
+    return bool(
+        policy["route_class"] == ROUTE_DIRECT_FIRST
+        and policy["service_group"] == SERVICE_YOUTUBE
+        and _ambiguous_large_server_first_close(activity, duration)
+    )
+
+
 def _protected_local_strong_server_first_failure(activity, duration):
     """Detect a reset or cut TLS record without requiring a complete prefix."""
     if (
@@ -8997,10 +9005,10 @@ def note_protected_local_server_first_close(
         duration,
     )
     short_close = _suspicious_server_first_close(activity, duration)
-    medium_youtube_close = bool(
-        policy["route_class"] == ROUTE_DIRECT_FIRST
-        and policy["service_group"] == SERVICE_YOUTUBE
-        and _ambiguous_large_server_first_close(activity, duration)
+    medium_youtube_close = _protected_youtube_medium_server_first_close(
+        policy,
+        activity,
+        duration,
     )
     if (
         not strong_transport_failure
@@ -10836,9 +10844,13 @@ async def _handle_impl(reader, writer):
     protected_runtime_suspicious = False
     if is_tls and host and _protected_local_runtime_policy(policy):
         if activity.server_ended_first:
-            protected_runtime_suspicious = _suspicious_server_first_close(
-                activity,
-                duration,
+            protected_runtime_suspicious = bool(
+                _suspicious_server_first_close(activity, duration)
+                or _protected_youtube_medium_server_first_close(
+                    policy,
+                    activity,
+                    duration,
+                )
             )
             protected_runtime_failure = note_protected_local_server_first_close(
                 host,

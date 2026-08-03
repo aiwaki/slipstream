@@ -1663,6 +1663,7 @@ def test_youtube_medium_media_cuts_move_next_request_to_local_fallback(monkeypat
     response = record * 6
     calls = []
     observations = []
+    runtime_results = []
 
     async def one_address(actual_host, fallback_ip):
         assert (actual_host, fallback_ip) == (host, destination_ip)
@@ -1703,6 +1704,13 @@ def test_youtube_medium_media_cuts_move_next_request_to_local_fallback(monkeypat
     monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
     monkeypatch.setattr(
         tproxy,
+        "note_local_bypass_runtime_result",
+        lambda actual_host, ok, *args, **kwargs: runtime_results.append(
+            (actual_host, ok, args, kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
         "note_protected_local_server_first_close",
         observe,
     )
@@ -1718,6 +1726,8 @@ def test_youtube_medium_media_cuts_move_next_request_to_local_fallback(monkeypat
 
     assert calls[:2] == ["plain", "plain"]
     assert calls[2] != "plain", observations
+    assert runtime_results
+    assert all(not ok for _host, ok, _args, _kwargs in runtime_results)
     assert tproxy._direct_first_local_fallback_active(host)
     assert not tproxy.is_geo_exit_route(host)
 
