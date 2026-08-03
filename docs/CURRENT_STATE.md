@@ -8,49 +8,59 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: do not reinstall artifact `8865902703`. PR #303
-merged as exact main `c0cdeafc3b774facbb04986605c885fc1016bc37`; CI
-`30837945703`, audit `30837946899`, native Windows qualification
-`30837945170`, and the sole protected owned-Geph qualification `30838499747`
-passed. The protected run proved account-backed payload before tray exit,
-trayless, and after a KeepAlive replacement; both Chromium semantic scenarios,
-cleanup, artifact identity, and system-network non-mutation passed.
+Current user-facing priority: Slipstream is rolled back and must not be
+reinstalled yet. PR #304 merged as exact main
+`40fac7693e229de34adb6988fdf7cd08b28d1cbf`; CI `30845033722`, audit
+`30845035284`, native Windows qualification `30845034732`, and the sole
+protected owned-Geph qualification `30846312090` passed. Protected artifact
+`8868928993` matched exact main and proved account-backed owned-Geph payload
+before tray exit, trayless, and after KeepAlive replacement; both Chromium
+semantic scenarios, cleanup, artifact identity, and system-network
+non-mutation passed.
 
 Controlled workstation transaction
-`B06FF48A-C140-4E53-B052-DBEB9CE780BA` installed only that exact artifact and
-reached active StatusV2. Google, Spotify, Discord updater/gateway, and the
-YouTube page returned payload. A real format-18 Googlevideo download then ended
-all ten retries with Python SSL `UNEXPECTED_EOF_WHILE_READING`. Immediate exact
-rollback restored the prior app SHA-256
+`8E4BA969-2C1D-4B89-B9FA-71478789FF9E` installed only that artifact and reached
+coherent active StatusV2. Google, Spotify, Discord updater/gateway, YouTube plus
+a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT, and Modrinth returned
+payload. Four `xpersonatoy.com` requests returned HTTP `200` but ended with curl
+error `18` after a bounded partial body, so immediate exact rollback restored
+the prior app SHA-256
 `3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
 removed the root daemon, listener, private PF anchor, token, status, socket,
 attestation, witness, and runtime, and preserved DNS `111.88.96.50` /
-`111.88.96.51`, the exact owned Geph listener, proxy/PAC, default route, and
-external owners. The copied private daemon log contained no Googlevideo
-detector or recovery event.
+`111.88.96.51`, owned Geph, proxy/PAC, default route, and external owners. The
+private log contained no event for that host.
 
-PR #303 correctly added protected-local server-first recovery, but its orderly
-close classifier stopped at `32 KiB`. The generic unknown-host observer already
-recognized complete-record closes from `32 KiB` through `512 KiB`; protected
-YouTube `direct_first` traffic did not. The exact encrypted byte count of the
-real download is unavailable, so classifying that incident as a medium framed
-close remains an evidence-consistent inference, not a measured fact. A traffic
-contract with a roughly `96 KiB` Googlevideo close reproduces the missing
-recovery event and repeated selection of `plain`.
+The reproduced blind spot is generic: an HTTP/2 client may detect an
+incomplete body and close its side while the reusable TLS connection remains
+open. Relay cancellation preserved complete TLS-record counters but cancelled
+the downstream-idle observer before it could publish evidence. The current
+branch `codex/generic-semantic-recovery` records two bounded exact-host
+client-first observations only on the unknown system/plain route. They merely
+schedule the existing certificate-validating HTTP completion probe. Opaque
+bytes do not advance app-owned DNS, local strategies, Geph, or the current
+request. A recognized candidate is mutually exclusive with the older clean-EOF
+reducer, so the same observation cannot indirectly advance the local ladder. A
+complete or unproven direct response stops locally; only a strictly incomplete
+local response plus an independently complete verified-owned-Geph response may
+learn a temporary exact-host route. A network-wide guard, exact host cooldown,
+byte/time limits, and Discord/YouTube/Googlevideo/static-policy exclusions
+remain mandatory.
 
-The current branch `codex/googlevideo-runtime-eof-recovery` extends only the
-protected YouTube-media local reducer to this existing bounded medium-close
-class. Two matching closes for the same exact host, strategy, and close kind
-demote that local strategy. After a non-plain fallback is already active, one
-matching medium close demotes it so the next retry can continue through the
-local ladder. Short and medium evidence never mix; late, larger than `512 KiB`,
-or non-YouTube closes remain inert. The path cannot select Geph or change PF,
-DNS, proxy, PAC, VPN, external processes, or any other route class.
+`weather.com` is the separate complete-page semantic class. Its observed text
+`This content is no longer available in your area` already passes the generic
+`regional_access_denied` detector without a hostname rule, and the protected
+Chromium fixture proves confirmation plus one bounded reload. Ordinary Chrome
+and Safari still do not receive that mechanism in production: Chromium needs a
+reviewed store distribution and Safari needs a signed, enabled container plus
+sandbox-to-owner-socket proof. Transport code must not pretend it can infer
+rendered page meaning from encrypted TLS.
 
-Local verification for the current branch passes: `986` Python tests plus `41`
-subtests and `83` Rust tray tests. PR review, exact-main gates, one fresh
-protected qualification, and a new controlled workstation transaction remain
-required. Only that future exact-main protected artifact may be installed.
+Local verification on the current branch passes: `993` Python tests plus `41`
+subtests and all `21` Chromium companion tests; the focused transport subset is
+`10` tests. PR review, exact-main gates, one fresh protected qualification, and
+a controlled workstation transaction remain required. Only that future
+exact-main protected artifact may be installed.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run
