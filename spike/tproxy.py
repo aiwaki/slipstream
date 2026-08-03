@@ -2037,6 +2037,7 @@ SERVER_FIRST_CLOSE_MAX_DURATION = 10.0
 SERVER_FIRST_CLOSE_STATE_MAX = 4096
 TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
 TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
+TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION = 30.0
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
 AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
@@ -2124,7 +2125,7 @@ UNKNOWN_RECOVERY_XBOX_DNS = "xbox_dns"
 UNKNOWN_RECOVERY_LOCAL_LADDER = "local_ladder"
 XBOX_DNS_STATE_MAX = 4096
 _clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
-_server_first_closes = {}     # (host, stage) -> deque[(monotonic, probe_ip)]
+_server_first_closes = {}     # (host, stage) -> deque[(monotonic, probe_ip, kind)]
 _server_first_repeat_stages = {}  # (host, stage) -> (expiry, original_probe_ip)
 _transport_incomplete_confirming = {}  # host -> monotonic probe start
 _transport_incomplete_last_probe = {}  # host -> monotonic last probe start
@@ -8636,6 +8637,24 @@ def _suspicious_server_first_close(activity, duration):
     return True
 
 
+def _ambiguous_large_server_first_close(activity, duration):
+    """Bound a larger close that needs an independent HTTP completion probe."""
+    if not (
+        activity.server_ended_first
+        and not activity.client_ended_first
+        and activity.server_end_at
+        and activity.downstream_bytes > SERVER_FIRST_CLOSE_MAX_BYTES
+        and not activity.downstream_write_failed
+        and activity.tls_framing_valid
+        and activity.tls_complete_records > 0
+    ):
+        return False
+    return bool(
+        duration <= TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION
+        and activity.downstream_bytes <= TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES
+    )
+
+
 def note_server_first_route_close(
     host,
     stage,
@@ -8650,12 +8669,14 @@ def note_server_first_route_close(
     repeat_claimed=False,
     repeat_probe_ip=None,
 ):
-    """Advance one unknown host after repeated early server-side TLS closes.
+    """Evaluate one unknown host after bounded server-side TLS closes.
 
     A server can legitimately close a completed short response, so an orderly
     EOF needs two bounded exact-host observations. A reset or an EOF inside a
     TLS record is already explicit transport evidence and can advance the next
-    client retry immediately. The current connection is never replayed after
+    client retry immediately. Larger framed responses never advance the local
+    ladder from opaque bytes; after a repeat they may only schedule the exact
+    HTTP completion probe. The current connection is never replayed after
     payload reached the client.
     """
     h = normalize_host(host)
@@ -8665,7 +8686,12 @@ def note_server_first_route_close(
         or not _valid_auto_geph_stage(stage)
     ):
         return False
-    if not _suspicious_server_first_close(activity, duration):
+    short_close = _suspicious_server_first_close(activity, duration)
+    ambiguous_large_close = _ambiguous_large_server_first_close(
+        activity,
+        duration,
+    )
+    if not short_close and not ambiguous_large_close:
         _clear_server_first_closes(h, stage)
         return False
 
@@ -8673,17 +8699,29 @@ def note_server_first_route_close(
     _prune_server_first_closes(now)
     key = (h, stage)
     events = _server_first_closes.setdefault(key, deque())
-    events.append((now, probe_ip))
+    close_kind = "ambiguous_large" if ambiguous_large_close else "short"
+    if events and events[-1][2] != close_kind:
+        events.clear()
+    events.append((now, probe_ip, close_kind))
     _prune_server_first_closes(now)
     original_probe_ip = next(
-        (event_ip for _observed_at, event_ip in events if event_ip),
+        (
+            event_ip
+            for _observed_at, event_ip, _kind in events
+            if event_ip
+        ),
         None,
     )
     strong_transport_failure = bool(
-        activity.server_read_failed or _incomplete_tls_record_visible(activity)
+        not ambiguous_large_close
+        and (
+            activity.server_read_failed
+            or _incomplete_tls_record_visible(activity)
+        )
     )
-    repeated_server_first_failure = bool(repeat_claimed) or (
-        len(events) >= SERVER_FIRST_CLOSE_STORM
+    repeated_server_first_failure = bool(
+        (repeat_claimed and not ambiguous_large_close)
+        or len(events) >= SERVER_FIRST_CLOSE_STORM
     )
     if not strong_transport_failure and not repeated_server_first_failure:
         return False
@@ -8697,6 +8735,31 @@ def note_server_first_route_close(
             now,
             probe_ip=original_probe_ip,
         )
+
+    if ambiguous_large_close:
+        # Encrypted byte count cannot distinguish a complete medium response
+        # from a framed body shortfall. Keep the current route unchanged and,
+        # only after a repeated exact system/plain close, reproduce the result
+        # with the bounded TLS-validating HTTP completion probe. That probe is
+        # the local authority; opaque relay bytes never learn a route.
+        if not repeated_server_first_failure:
+            return False
+        if stage != AUTO_GEPH_STAGE_SYSTEM or strategy_name != "plain":
+            return False
+        candidate_ip = original_probe_ip
+        transport_runner = transport_confirmation_runner
+        if transport_runner is None and confirmation_runner is not None:
+            transport_runner = lambda candidate_host, _ip: (
+                confirmation_runner(candidate_host)
+            )
+        _schedule_transport_incomplete_response_confirmation(
+            h,
+            candidate_ip,
+            "plain",
+            now=now,
+            runner=transport_runner,
+        )
+        return False
 
     local_evidence_complete = False
     if repeated_server_first_failure:

@@ -9,14 +9,44 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Current user-facing priority: do not reinstall the artifact qualified for exact
-main `1be02bc8a4a410989b59ec601821e2bd6a9f1b19`. Controlled workstation
-transaction `5CCAE939-C2D8-4843-AF24-0E2D32C7C3D6` exposed a generic
-post-confirmation owned-Geph defect and completed its exact rollback. A new
-artifact may be considered only after the correction on
-`codex/geph-confirmation-convergence` passes full local checks, PR CI/audit,
-exact-main CI/audit, and a fresh protected account-backed qualification.
+main `f8fb0c099c41f7e3bbd810042c8990a49febd665`. Its protected run
+`30764174229` passed, but controlled workstation transaction
+`C3CDCD9F-F3A1-4733-9164-3C0A4A3FF5CB` exposed a generic incomplete-response
+recovery gap and completed its exact rollback. The correction on
+`codex/large-incomplete-response-recovery` must pass full local checks, PR
+CI/audit, exact-main CI/audit, and one fresh protected account-backed
+qualification before another workstation installation.
 
-The sole protected run for that SHA, `30729228620`, passed its only job
+The qualified artifact was `8838433677`, with inner ZIP SHA-256
+`4e46c2c367c67335c60310ce69eeee07be8a628ec3c248559c2e5e62dd9e2c97`.
+The corrected installer transaction reached coherent active StatusV2 and
+preserved DNS `111.88.96.50` / `111.88.96.51`, proxy/PAC, default route,
+global PF, the pre-existing owned Geph process, and Telegram proxy. Google,
+Spotify, Discord, YouTube, Steam, CrystalIDEA, and the ChatGPT HTTP path
+returned payload. Modrinth and `xpersonatoy.com` then returned HTTP `200` but
+ended with curl error `18` after roughly 55-116 KiB. Immediate rollback
+restored the prior app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
+removed every root-owned daemon/PF/runtime artifact, and left owned Geph PID
+`71668`, Telegram PID `49694`, DNS, and proxy/PAC unchanged.
+
+Code tracing found that the existing browser-independent detector cleared any
+orderly server-first TLS close above 32 KiB as a completed response, while its
+content-aware exact HTTP probe already supported bounded bodies up to 512 KiB.
+The current correction introduces no host rule and does not raise the old
+short-close threshold. Two repeated exact system/plain closes between those
+bounds may schedule the existing certificate-validating HTTP completion probe;
+opaque byte count cannot advance Xbox DNS, local strategies, or Geph. A
+complete or otherwise unproven response stops. Only strict local incomplete
+framing plus the independently complete owned-Geph proof may learn the exact
+host. Discord, YouTube, Googlevideo, static routes, external Geph, and external
+DNS/proxy/PAC/VPN/PF state remain excluded.
+
+The chronological checkpoints below predate this 2026-08-03 authority unless
+they explicitly name a later main SHA.
+
+Historical checkpoint for main `1be02bc8a4a410989b59ec601821e2bd6a9f1b19`:
+protected run `30729228620` passed its only job
 `91446387268`. It proved account-backed owned-Geph payload before tray exit,
 after tray exit, and after a KeepAlive replacement; both Chromium semantic
 scenarios (`incomplete_response` and `regional_denial`) completed one reload
