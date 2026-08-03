@@ -222,6 +222,8 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_xbox_dns_attempts", {})
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
     monkeypatch.setattr(tproxy, "_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
     monkeypatch.setattr(tproxy, "_auto_geph", {})
     monkeypatch.setattr(tproxy, "_auto_geph_confirming", {})
     monkeypatch.setattr(tproxy, "_auto_geph_confirmation_tokens", {})
@@ -265,6 +267,11 @@ def isolate_runtime_state(monkeypatch):
         tproxy,
         "note_server_first_route_close",
         lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "note_protected_local_server_first_close",
+        lambda *_args, **_kwargs: False,
     )
     monkeypatch.setattr(tproxy, "note_local_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "_clear_clean_eof_stalls", lambda *_args, **_kwargs: None)
@@ -1586,6 +1593,59 @@ def test_youtube_media_direct_stall_falls_back_locally_without_geph(monkeypatch)
 
     assert calls == ["plain", "split64+fake"]
     assert bytes(writer.payload) == response
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_youtube_media_server_first_close_reaches_only_local_recovery(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "rr5---sn-test.googlevideo.com"
+    destination_ip = "203.0.113.44"
+    response = b"\x17\x03\x03\x00\x08" + b"a" * 8
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    observations = []
+
+    async def one_address(actual_host, fallback_ip):
+        assert (actual_host, fallback_ip) == (host, destination_ip)
+        return [destination_ip]
+
+    async def local_route(ip, port, head, body, actual_host, strategy):
+        assert (ip, port, head + body, actual_host) == (
+            destination_ip,
+            443,
+            expected_first_flight,
+            host,
+        )
+        assert strategy["name"] == "plain"
+        return probed_upstream_response(response)
+
+    async def no_geph(*args, **kwargs):
+        await forbidden_backend("Geph", *args, **kwargs)
+
+    def observe(actual_host, strategy_name, activity, **kwargs):
+        observations.append((actual_host, strategy_name, activity, kwargs))
+        return True
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: (destination_ip, 443))
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", one_address)
+    monkeypatch.setattr(tproxy, "dial_strategy", local_route)
+    monkeypatch.setattr(tproxy, "dial_via_geph", no_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "note_protected_local_server_first_close",
+        observe,
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert len(observations) == 1
+    actual_host, strategy_name, activity, kwargs = observations[0]
+    assert actual_host == host
+    assert strategy_name == "plain"
+    assert activity.server_ended_first
+    assert activity.tls_complete_records == 1
+    assert kwargs["duration"] >= 0
     assert not tproxy.is_geo_exit_route(host)
 
 

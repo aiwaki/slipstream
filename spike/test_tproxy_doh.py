@@ -5803,6 +5803,61 @@ def test_local_bypass_runtime_failure_decays_cache_and_forces_canary(monkeypatch
         q.extend(original_window)
 
 
+def test_youtube_direct_first_runtime_failure_uses_protected_local_recovery(
+    monkeypatch,
+):
+    host = "rr5---sn-test.googlevideo.com"
+    invalidations = []
+    scores = []
+    resweeps = []
+    canaries = []
+    health = []
+    monkeypatch.setattr(
+        tproxy,
+        "clear_route_strategy_cache",
+        lambda **kwargs: invalidations.append(kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_record_strategy_result",
+        lambda *args: scores.append(args),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "schedule_local_bypass_resweep",
+        lambda candidate: resweeps.append(candidate) or True,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "start_canaries_if_due",
+        lambda reason, **kwargs: canaries.append((reason, kwargs)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "route_health_event",
+        lambda *args, **kwargs: health.append((args, kwargs)) or {"state": "ok"},
+    )
+
+    result = tproxy.note_local_bypass_runtime_result(
+        host,
+        False,
+        "protected local TLS stream closed before completion",
+        failed_strategy="plain",
+    )
+
+    assert result == {"state": "ok"}
+    assert invalidations == [{"group": tproxy.SERVICE_YOUTUBE}]
+    assert scores == [(host, "plain", False)]
+    assert resweeps == [host]
+    assert canaries[0][0] == f"runtime:{tproxy.SERVICE_YOUTUBE}"
+    assert health[0][0][:3] == (
+        tproxy.SERVICE_YOUTUBE,
+        tproxy.ROUTE_DIRECT_FIRST,
+        host,
+    )
+    assert not tproxy.is_geo_exit_route(host)
+
+
 def test_local_bypass_resweep_scheduler_deduplicates_and_rejects_other_routes():
     calls = []
 
@@ -5817,6 +5872,11 @@ def test_local_bypass_resweep_scheduler_deduplicates_and_rejects_other_routes():
         now=101.0,
         runner=calls.append,
     )
+    assert tproxy.schedule_local_bypass_resweep(
+        "rr5---sn-test.googlevideo.com",
+        now=200.0,
+        runner=calls.append,
+    )
     assert not tproxy.schedule_local_bypass_resweep(
         "chatgpt.com",
         now=200.0,
@@ -5827,7 +5887,10 @@ def test_local_bypass_resweep_scheduler_deduplicates_and_rejects_other_routes():
         now=200.0,
         runner=calls.append,
     )
-    assert calls == ["updates.discord.com"]
+    assert calls == [
+        "updates.discord.com",
+        "rr5---sn-test.googlevideo.com",
+    ]
 
 
 def test_local_bypass_resweep_scheduler_starts_group_named_thread(monkeypatch):
@@ -10537,6 +10600,149 @@ def _short_server_first_activity(*, read_failed=False, downstream_bytes=16384):
         tls_record_buffer=bytearray(),
         tls_complete_records=2,
     )
+
+
+def _first_tls_record_cut_activity(*, read_failed=False):
+    payload = bytearray(b"\x17\x03\x03\x00\x20partial")
+    return tproxy._RelayActivity(
+        last_downstream_at=100.1,
+        downstream_bytes=len(payload),
+        server_end_at=100.2,
+        server_ended_first=True,
+        first_downstream_seen=True,
+        server_read_failed=read_failed,
+        tls_record_buffer=payload,
+        tls_record_expected=37,
+        tls_complete_records=0,
+    )
+
+
+def test_protected_first_tls_record_cut_recovers_without_repeat(monkeypatch):
+    host = "rr5---sn-test.googlevideo.com"
+    runtime_results = []
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    recovered = tproxy.note_protected_local_server_first_close(
+        host,
+        "plain",
+        _first_tls_record_cut_activity(),
+        duration=0.2,
+        now=100.0,
+    )
+
+    assert recovered
+    assert len(runtime_results) == 1
+    assert runtime_results[0][1]["failed_strategy"] == "plain"
+    assert tproxy._direct_first_local_fallback_active(host, now=100.1)
+
+
+def test_protected_reset_without_a_tls_record_is_not_recovery_evidence(
+    monkeypatch,
+):
+    host = "rr5---sn-test.googlevideo.com"
+    runtime_results = []
+    activity = _first_tls_record_cut_activity(read_failed=True)
+    activity.tls_record_buffer = bytearray(b"\x17\x03\x03\x00")
+    activity.tls_record_expected = 0
+    activity.downstream_bytes = len(activity.tls_record_buffer)
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    recovered = tproxy.note_protected_local_server_first_close(
+        host,
+        "plain",
+        activity,
+        duration=0.2,
+        now=100.0,
+    )
+
+    assert not recovered
+    assert not runtime_results
+
+
+def test_protected_direct_first_close_requires_repeat_then_uses_local_fallback(
+    monkeypatch,
+):
+    host = "rr5---sn-test.googlevideo.com"
+    strategy_name = "plain"
+    now = tproxy.time.monotonic()
+    runtime_results = []
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    first = tproxy.note_protected_local_server_first_close(
+        host,
+        strategy_name,
+        _short_server_first_activity(),
+        duration=0.2,
+        now=now,
+    )
+    second = tproxy.note_protected_local_server_first_close(
+        host,
+        strategy_name,
+        _short_server_first_activity(),
+        duration=0.2,
+        now=now + 1.0,
+    )
+
+    assert not first
+    assert second
+    assert len(runtime_results) == 1
+    args, kwargs = runtime_results[0]
+    assert args[:2] == (host, False)
+    assert kwargs["failed_strategy"] == strategy_name
+    assert tproxy._direct_first_local_fallback_active(host, now=now + 1.1)
+    order = tproxy.strategy_order(host)
+    assert order
+    assert all(strategy["name"] != "plain" for strategy in order)
+
+    monkeypatch.setattr(
+        tproxy.time,
+        "monotonic",
+        lambda: now + tproxy.DIRECT_FIRST_LOCAL_FALLBACK_TTL + 2.0,
+    )
+    assert tproxy.strategy_order(host)[0]["name"] == "plain"
+
+
+def test_protected_local_transport_reset_recovers_without_repeat(monkeypatch):
+    host = "updates.discord.com"
+    runtime_results = []
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    recovered = tproxy.note_protected_local_server_first_close(
+        host,
+        "split64+fake",
+        _short_server_first_activity(read_failed=True),
+        duration=0.2,
+        now=100.0,
+    )
+
+    assert recovered
+    assert len(runtime_results) == 1
+    assert runtime_results[0][1]["failed_strategy"] == "split64+fake"
+    assert not tproxy.is_geo_exit_route(host)
 
 
 def test_repeated_short_server_first_closes_advance_exact_unknown_host():

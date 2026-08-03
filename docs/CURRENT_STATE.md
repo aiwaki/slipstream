@@ -8,51 +8,55 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: do not reinstall any previous artifact. PR #301
-merged as exact main `6da4c85c5e19422029eb8cca67fabfb87d26ef4c`; CI
-`30818005077`, audit `30818006222`, native Windows qualification
-`30818005042`, and the sole protected owned-Geph qualification `30818758283`
-passed. Qualified artifact `8857990162` has GitHub digest
-`sha256:d5aa7517a6c0faefc215ef666978e0eae7accd5ca4e3e704a3f942094b60e6e7`.
+Current user-facing priority: do not reinstall artifact `8862108294`. PR #302
+merged as exact main `00fb7367b2f7262bfd8fa25a2060c3ba487b11ee`; CI
+`30828097393`, audit `30828098120`, native Windows qualification
+`30828097061`, and the sole protected owned-Geph qualification `30828740943`
+passed. The protected run proved account-backed payload before tray exit,
+trayless, and after a KeepAlive replacement; both Chromium semantic scenarios,
+cleanup, artifact identity, and system-network non-mutation passed.
 
-Its controlled workstation transaction installed the exact artifact and
-reached active StatusV2. Google, Spotify, Discord updater/gateway, YouTube plus
-a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT, and Modrinth returned
-payload. Four consecutive `xpersonatoy.com` attempts returned HTTP `200` and
-roughly 53-59 KiB before timing out. No detector or recovery event appeared.
-Immediate exact rollback restored the prior app, removed every root
-daemon/PF/runtime artifact, and preserved DNS `111.88.96.50` /
-`111.88.96.51`, Telegram, owned Geph, and all external proxy/PAC/VPN/PF state.
+Controlled workstation transaction
+`D104F3FA-0B0C-4387-919A-AF6666E097DB` installed only that exact artifact and
+reached active StatusV2. Google, Spotify, Discord updater/gateway, and the
+YouTube page returned payload. The first real Googlevideo download then failed:
+`yt-dlp` selected format 18 successfully, but every one of its ten media
+retries ended with Python SSL `UNEXPECTED_EOF_WHILE_READING`. Immediate exact
+rollback restored the prior app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
+removed the root daemon, listener, private PF anchor, token, status, socket,
+attestation, witness, and runtime, and preserved DNS `111.88.96.50` /
+`111.88.96.51`, the exact owned Geph listener, proxy/PAC, default route, and
+external owners. The copied daemon routing-log delta contained no Googlevideo
+detector or recovery event.
 
-A direct post-rollback HTTP/1.1 control returned HTTP `200` and 20,120 bytes,
-then remained open without progress until the 45-second client deadline. The
-remaining generic defect is therefore not limited to an HTTP/2 browser error,
-server-first close, or partial TLS record. The transparent relay sees complete
-encrypted records followed by silence and previously emitted no event before
-the client eventually gave up.
+Code tracing found a concrete protected-route gap. `_handle_impl()` records a
+local backend and local-bypass health success immediately after the initial TLS
+payload, before `relay_local_stream()` finishes. Complete-record server-first
+closes are evaluated only when an unknown-route `observed_stage` exists.
+Googlevideo is a protected YouTube `direct_first` route, so its short
+server-first close was silently treated as success; every client retry could
+select `plain` again. The recovery reducer already forbids Geph for protected
+service groups, but the Python side-effect adapter and exact-host resweep
+previously rejected every route class except literal `local_bypass`.
 
-The current branch `codex/partial-payload-idle-observer` adds one
-non-destructive payload-followed-idle observer to eligible generic local TLS
-routes. It neither ends nor reroutes the active stream. Each observation records
-only its actual system, app-owned DNS, or named local-strategy stage, and only
-after valid TLS framing has produced at least one complete record. System,
-app-owned DNS, and multiple distinct local strategies remain mandatory before
-the existing original-system-public-IP, certificate-validating HTTP completion
-probe may run. Every network-wide guard evaluation prunes expired partial,
-zero-payload, payload-idle, and server-first evidence before counting hosts.
-The worker is exact-host cooled and globally capped at four.
-It learns nothing unless the direct response has strictly proven incomplete
-framing and verified owned Geph independently returns a complete usable
-response. Static policy, PF, DNS, external Geph, Discord, YouTube, and
-Googlevideo behavior do not change.
+The current branch `codex/local-bypass-server-first-recovery` closes that gap
+without adding a hostname rule. Protected local routes now retain TLS framing
+evidence through the relay. One reset or incomplete TLS record, or two matching
+short server-first closes inside five minutes, invalidates only local strategy
+state and schedules the existing exact-host local re-sweep. A failed named
+strategy is scored after group cache invalidation so the re-sweep cannot simply
+restore it. When the failed route is YouTube media `direct_first/plain`, plain
+is omitted for one minute and the next request starts with the ranked local
+desync ladder. The marker is exact-host, process-local, bounded, and expires
+automatically. It cannot select Geph and does not change PF, DNS, proxy, PAC,
+VPN, external processes, or any other route class.
 
-Focused observer and transport-confirmation regressions pass locally. Full
-Python verification is `975 passed, 41 subtests passed`; the tray Rust suite is
-`83 passed`, and the Chromium companion suite is `21 passed`. The two findings
-from the latest automated PR review are addressed locally; fresh PR review,
-exact-main gates, and one fresh protected qualification remain required before
-another controlled workstation installation. Only that fresh run's exact
-artifact may be used.
+Local verification for the current branch passes: `981` Python tests plus `41`
+subtests, `83` Rust tray tests, and `21` Chromium companion tests. PR review,
+exact-main gates, one fresh protected qualification, and a new controlled
+workstation transaction remain required. Only that future exact-main protected
+artifact may be installed.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run

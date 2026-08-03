@@ -34,6 +34,24 @@ The media host must report `direct_first/direct_first`; the web host must report
 reporting direct-only or fake-only routing, means the packaged daemon is stale
 or misqualified. Do not compensate by enabling Geph for YouTube.
 
+A successful YouTube HTML request does not prove media delivery. The controlled
+2026-08-03 transaction reached the real Googlevideo host and selected an actual
+media format, then all ten `yt-dlp` retries ended with
+`UNEXPECTED_EOF_WHILE_READING`. The affected build had already counted the
+initial TLS payload as local-route success and did not evaluate the later
+server-first close because Googlevideo is `direct_first`, not literal
+`local_bypass`.
+
+Current protected-local recovery keeps valid TLS framing through the relay. A
+single orderly short close is provisional; one reset or incomplete TLS record,
+or two matching short closes for the same host and strategy within five
+minutes, demotes only that local strategy and starts an exact-host local
+re-sweep. If `plain` failed for Googlevideo, the next request starts with a
+local desync strategy for one minute and then rechecks direct. This path has no
+Geph action. Repeated failures without a corresponding recovery event indicate
+that the installed daemon predates this correction or that the close is outside
+the bounded signal and needs a fresh log-backed investigation.
+
 ## Basic Checks
 
 Daemon status:

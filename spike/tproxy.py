@@ -2036,6 +2036,7 @@ SERVER_FIRST_CLOSE_STORM = 2
 SERVER_FIRST_CLOSE_MAX_BYTES = 32 * 1024
 SERVER_FIRST_CLOSE_MAX_DURATION = 10.0
 SERVER_FIRST_CLOSE_STATE_MAX = 4096
+DIRECT_FIRST_LOCAL_FALLBACK_TTL = 60.0
 TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
 TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
 TRANSPORT_INCOMPLETE_CONFIRM_MAX = 4
@@ -2132,6 +2133,8 @@ XBOX_DNS_STATE_MAX = 4096
 _clean_eof_stalls = {}        # host -> deque[monotonic] repeated client-first stalls
 _server_first_closes = {}     # (host, stage) -> deque[(monotonic, probe_ip, kind)]
 _server_first_repeat_stages = {}  # (host, stage) -> (expiry, original_probe_ip)
+_protected_local_server_first_closes = {}  # (host, strategy) -> deque[monotonic]
+_direct_first_local_fallback_until = {}  # host -> monotonic expiry
 _transport_incomplete_confirming = {}  # host -> monotonic probe start
 _transport_incomplete_last_probe = {}  # host -> monotonic last probe start
 _transport_incomplete_plain_candidates = {}  # host -> (ip, monotonic observed)
@@ -2156,6 +2159,14 @@ def _is_geph_infra(host):
 def is_geo_exit_route(host):
     """Return whether the host belongs to the reviewed geo-exit route class."""
     return route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+
+
+def _protected_local_runtime_policy(policy):
+    """Return whether a route must recover locally and can never use Geph."""
+    return bool(
+        policy["route_class"] == ROUTE_LOCAL_BYPASS
+        or policy["service_group"] in POLICY_PROTECTED_LOCAL_BYPASS_GROUPS
+    )
 
 
 def _record_health_event(
@@ -2293,30 +2304,39 @@ def note_local_bypass_runtime_result(
     now=None,
     canary_now=None,
     canary_runner=None,
+    failed_strategy=None,
+    failure_phase=FAILURE_PHASE_FIRST_PAYLOAD,
 ):
     outcome = connection_outcome_for_host(
         host,
         ok,
         BACKEND_LOCAL_ENGINE,
-        failure_phase=FAILURE_PHASE_FIRST_PAYLOAD,
+        failure_phase=failure_phase,
         reason=reason,
     )
-    if outcome.route_class != ROUTE_LOCAL_BYPASS:
+    policy = route_policy(outcome.host)
+    if not _protected_local_runtime_policy(policy):
         return None
     group = outcome.service_group
     if ok:
         return route_health_event(
             group,
-            ROUTE_LOCAL_BYPASS,
+            outcome.route_class,
             host,
             True,
             now=now,
         )
 
-    for action in reduce_connection_outcome(outcome):
+    actions = reduce_connection_outcome(outcome)
+    for action in actions:
         if action.kind == RECOVERY_INVALIDATE_STRATEGY:
             clear_route_strategy_cache(group=action.target)
-        elif action.kind == RECOVERY_RESWEEP_EXACT_HOST:
+
+    if failed_strategy:
+        _record_strategy_result(outcome.host, failed_strategy, False)
+
+    for action in actions:
+        if action.kind == RECOVERY_RESWEEP_EXACT_HOST:
             schedule_local_bypass_resweep(action.target)
         elif action.kind == RECOVERY_RECHECK:
             start_canaries_if_due(
@@ -2327,7 +2347,7 @@ def note_local_bypass_runtime_result(
             )
     item = route_health_event(
         group,
-        ROUTE_LOCAL_BYPASS,
+        outcome.route_class,
         host,
         False,
         reason or "runtime local bypass failed",
@@ -5499,7 +5519,7 @@ async def _run_local_bypass_canary(spec):
 async def _resweep_local_bypass_host(host):
     h = normalize_host(host)
     policy = route_policy(h)
-    if not h or policy["route_class"] != ROUTE_LOCAL_BYPASS:
+    if not h or not _protected_local_runtime_policy(policy):
         return False
     ips = await resolve_connection_ips(h, None)
     if not ips:
@@ -5548,7 +5568,7 @@ def _run_local_bypass_resweep(host):
 def schedule_local_bypass_resweep(host, now=None, runner=None):
     h = normalize_host(host)
     policy = route_policy(h)
-    if not h or policy["route_class"] != ROUTE_LOCAL_BYPASS:
+    if not h or not _protected_local_runtime_policy(policy):
         return False
     now = time.monotonic() if now is None else now
     with _local_bypass_resweep_lock:
@@ -7686,6 +7706,11 @@ def strategy_order(host):
             fallback_names = [cached] + [
                 name for name in fallback_names if name != cached
             ]
+        if _direct_first_local_fallback_active(h):
+            return [
+                STRAT_BY_NAME[name]
+                for name in _rank_strategy_names(h, fallback_names)
+            ]
         return [STRAT_BY_NAME["plain"]] + [
             STRAT_BY_NAME[name] for name in fallback_names
         ]
@@ -8650,6 +8675,44 @@ def _clear_server_first_closes(host, stage=None):
             _server_first_repeat_stages.pop(key, None)
 
 
+def _prune_protected_local_server_first_closes(now):
+    cutoff = now - SERVER_FIRST_CLOSE_WINDOW
+    for key, events in list(_protected_local_server_first_closes.items()):
+        while events and events[0] <= cutoff:
+            events.popleft()
+        if not events:
+            _protected_local_server_first_closes.pop(key, None)
+    while len(_protected_local_server_first_closes) > SERVER_FIRST_CLOSE_STATE_MAX:
+        _protected_local_server_first_closes.pop(
+            next(iter(_protected_local_server_first_closes))
+        )
+
+    for host, expiry in list(_direct_first_local_fallback_until.items()):
+        if expiry <= now or not _protected_local_runtime_policy(route_policy(host)):
+            _direct_first_local_fallback_until.pop(host, None)
+    while len(_direct_first_local_fallback_until) > SERVER_FIRST_CLOSE_STATE_MAX:
+        _direct_first_local_fallback_until.pop(
+            next(iter(_direct_first_local_fallback_until))
+        )
+
+
+def _clear_protected_local_server_first_closes(host, strategy_name=None):
+    h = normalize_host(host)
+    if strategy_name is not None:
+        _protected_local_server_first_closes.pop((h, strategy_name), None)
+        return
+    for key in tuple(_protected_local_server_first_closes):
+        if key[0] == h:
+            _protected_local_server_first_closes.pop(key, None)
+
+
+def _direct_first_local_fallback_active(host, now=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    _prune_protected_local_server_first_closes(now)
+    return _direct_first_local_fallback_until.get(h, 0.0) > now
+
+
 def _prune_transport_incomplete_probes(now):
     _prune_local_payload_idle_failures(now)
     stale = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
@@ -8888,6 +8951,85 @@ def _ambiguous_large_server_first_close(activity, duration):
         duration <= TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION
         and activity.downstream_bytes <= TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES
     )
+
+
+def _protected_local_strong_server_first_failure(activity, duration):
+    """Detect a reset or cut TLS record without requiring a complete prefix."""
+    if (
+        not activity.server_ended_first
+        or activity.client_ended_first
+        or not activity.server_end_at
+        or activity.downstream_bytes <= 0
+        or activity.downstream_write_failed
+        or not activity.tls_framing_valid
+        or duration > SERVER_FIRST_CLOSE_MAX_DURATION
+        or activity.downstream_bytes > SERVER_FIRST_CLOSE_MAX_BYTES
+    ):
+        return False
+    buffer = activity.tls_record_buffer
+    incomplete_record = bool(
+        activity.tls_record_expected > 0
+        and buffer is not None
+        and TLS_RECORD_HEADER_SIZE <= len(buffer) < activity.tls_record_expected
+    )
+    return bool(
+        incomplete_record
+        or (activity.server_read_failed and activity.tls_complete_records > 0)
+    )
+
+
+def note_protected_local_server_first_close(
+    host,
+    strategy_name,
+    activity,
+    *,
+    duration,
+    now=None,
+):
+    """Demote only a protected local strategy after an evidenced early close."""
+    h = normalize_host(host)
+    policy = route_policy(h)
+    if not h or not _protected_local_runtime_policy(policy):
+        return False
+
+    key = (h, strategy_name or "")
+    strong_transport_failure = _protected_local_strong_server_first_failure(
+        activity,
+        duration,
+    )
+    if (
+        not strong_transport_failure
+        and not _suspicious_server_first_close(activity, duration)
+    ):
+        _protected_local_server_first_closes.pop(key, None)
+        return False
+
+    now = time.monotonic() if now is None else now
+    _prune_protected_local_server_first_closes(now)
+    events = _protected_local_server_first_closes.setdefault(key, deque())
+    events.append(now)
+    _prune_protected_local_server_first_closes(now)
+    if not strong_transport_failure and len(events) < SERVER_FIRST_CLOSE_STORM:
+        return False
+
+    _protected_local_server_first_closes.pop(key, None)
+    if (
+        policy["route_class"] == ROUTE_DIRECT_FIRST
+        and strategy_name == "plain"
+    ):
+        _direct_first_local_fallback_until[h] = (
+            now + DIRECT_FIRST_LOCAL_FALLBACK_TTL
+        )
+        _prune_protected_local_server_first_closes(now)
+
+    note_local_bypass_runtime_result(
+        h,
+        False,
+        "protected local TLS stream closed before completion",
+        failed_strategy=strategy_name,
+        failure_phase=FAILURE_PHASE_STREAM,
+    )
+    return True
 
 
 def _schedule_server_first_transport_confirmation(
@@ -9345,7 +9487,9 @@ async def relay_local_stream(
     the bounded cancellation behavior so no pair of FDs remains indefinitely.
     """
     relay_activity = activity or _RelayActivity(last_downstream_at=time.monotonic())
-    relay_activity.track_tls_records = detect_partial_tls_stall
+    relay_activity.track_tls_records = bool(
+        relay_activity.track_tls_records or detect_partial_tls_stall
+    )
     client_task = asyncio.create_task(pump(reader, up_w, relay_activity))
     server_task = asyncio.create_task(splice(up_r, writer, relay_activity))
     tasks = (client_task, server_task)
@@ -10577,7 +10721,7 @@ async def _handle_impl(reader, writer):
             BACKEND_LOCAL_ENGINE,
             False,
         )
-        if policy["route_class"] == ROUTE_LOCAL_BYPASS:
+        if _protected_local_runtime_policy(policy):
             note_local_bypass_runtime_result(
                 host,
                 False,
@@ -10608,8 +10752,6 @@ async def _handle_impl(reader, writer):
             BACKEND_LOCAL_ENGINE,
             True,
         )
-        if policy["route_class"] == ROUTE_LOCAL_BYPASS:
-            note_local_bypass_runtime_result(host, True)
 
     up_r, up_w, server_first = result
     if VERBOSE:
@@ -10629,6 +10771,10 @@ async def _handle_impl(reader, writer):
         last_downstream_at=t0,
         downstream_bytes=len(server_first),
         first_downstream_seen=bool(server_first),
+        track_tls_records=(
+            route_class == ROUTE_UNKNOWN
+            or _protected_local_runtime_policy(policy)
+        ),
     )
     observed_stage = None
     if route_class == ROUTE_UNKNOWN:
@@ -10646,7 +10792,7 @@ async def _handle_impl(reader, writer):
         observed_stage,
     )
     detect_partial_tls_stall = route_class == ROUTE_UNKNOWN
-    if detect_partial_tls_stall:
+    if activity.track_tls_records:
         _track_tls_records(activity, server_first)
     res = await relay_local_stream(
         reader,
@@ -10657,6 +10803,24 @@ async def _handle_impl(reader, writer):
         detect_partial_tls_stall=detect_partial_tls_stall,
     )
     duration = time.monotonic() - t0
+    protected_runtime_failure = False
+    protected_runtime_suspicious = False
+    if is_tls and host and _protected_local_runtime_policy(policy):
+        if activity.server_ended_first:
+            protected_runtime_suspicious = _suspicious_server_first_close(
+                activity,
+                duration,
+            )
+            protected_runtime_failure = note_protected_local_server_first_close(
+                host,
+                chosen_name,
+                activity,
+                duration=duration,
+                now=t0 + duration,
+            )
+        else:
+            _clear_protected_local_server_first_closes(host, chosen_name)
+
     # A partial local stream stall demotes only the exact generic strategy. It
     # teaches the next client retry to use app-owned Xbox DNS locally. Only
     # after Xbox and distinct local strategies show the same one-record stall
@@ -10726,6 +10890,14 @@ async def _handle_impl(reader, writer):
                 len(server_first) + (res[1] or 0),
                 duration,
             )
+    if (
+        is_tls
+        and host
+        and _protected_local_runtime_policy(policy)
+        and not protected_runtime_failure
+        and not protected_runtime_suspicious
+    ):
+        note_local_bypass_runtime_result(host, True)
     if VERBOSE and is_discord_host(host):
         up_b, down_b = res[0] or 0, len(server_first) + (res[1] or 0)
         print(f"  closed {host}: up={up_b} down={down_b} "
