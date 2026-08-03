@@ -237,6 +237,31 @@ or file cleanup.
 - External VPN coexistence remains explicit and non-mutating, especially where
   Android permits only one active VPN service.
 
+### Deferred: bypass-aware tethering
+
+- Add a platform feasibility gate for sharing an app-owned Geph route with
+  devices connected to the user's Wi-Fi/USB hotspot. Do not assume that device
+  VPN routes also cover forwarded hotspot traffic.
+- Android must prove the downstream packets actually enter the owned adapter on
+  each supported OS/device class. `VpnService` covers one user/profile, public
+  tethering control starts at API 36 and may lack change permission, and vendor
+  tethering offload can bypass the app processor. Without a proved native path,
+  offer only an explicit app-owned HTTP/SOCKS relay that the client device opts
+  into; never require root or mutate another VPN.
+- iOS remains a feasibility gate. Public NetworkExtension APIs configure device
+  VPN routes and Wi-Fi join credentials, but expose no ordinary-app contract for
+  creating Personal Hotspot or forcing its downstream clients through a packet
+  tunnel. Do not advertise transparent hotspot coverage unless a signed,
+  supported public-API prototype proves it on disposable devices.
+- Desktop adapters may later expose the same explicit relay on a selected local
+  interface, with authentication, a client cap, no default LAN binding, and no
+  mutation of Internet Sharing, external DNS/proxy/PAC/VPN, or firewall owners.
+
+Gate: a second physical device must receive a complete payload through the
+declared owned backend, direct/local-only services must retain their policy,
+disconnect and uninstall must remove only Slipstream-owned listeners/state, and
+unsupported platforms must fail closed with no network change.
+
 Progress: `crates/slipstream-core` now owns the deterministic address-attempt,
 route-circuit, bounded registry, connection-race, routing-policy, and recovery
 modules. Python and Rust run the same frozen policy and recovery v1 vectors,

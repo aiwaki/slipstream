@@ -8,43 +8,51 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: do not reinstall any previous artifact. Exact
-main `50fa7a07074f5645afb105943b3a80a1435a38a9` passed CI `30811692452`,
-audit `30811692302`, native Windows qualification `30811692540`, and the sole
-protected owned-Geph qualification `30812213963`. Qualified artifact
-`8855325326` matched inner ZIP SHA-256
-`ad0bad2cf354be60bdbcbb7836556f7350ce3b1290f6262b466f4b6fc544e5f5`.
+Current user-facing priority: do not reinstall any previous artifact. PR #301
+merged as exact main `6da4c85c5e19422029eb8cca67fabfb87d26ef4c`; CI
+`30818005077`, audit `30818006222`, native Windows qualification
+`30818005042`, and the sole protected owned-Geph qualification `30818758283`
+passed. Qualified artifact `8857990162` has GitHub digest
+`sha256:d5aa7517a6c0faefc215ef666978e0eae7accd5ca4e3e704a3f942094b60e6e7`.
 
-Controlled workstation transaction `D4B90B18-B73F-418D-AC83-92DA48C4CFE9`
-installed that exact artifact and reached active StatusV2. Google, Spotify,
-Discord updater/gateway, YouTube plus a real Googlevideo fragment, Steam,
-CrystalIDEA, ChatGPT, and Modrinth returned payload. Four consecutive
-`xpersonatoy.com` attempts each returned HTTP `200` but ended with curl error
-`18`. Immediate exact rollback restored the prior app, removed every root
+Its controlled workstation transaction installed the exact artifact and
+reached active StatusV2. Google, Spotify, Discord updater/gateway, YouTube plus
+a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT, and Modrinth returned
+payload. Four consecutive `xpersonatoy.com` attempts returned HTTP `200` and
+roughly 53-59 KiB before timing out. No detector or recovery event appeared.
+Immediate exact rollback restored the prior app, removed every root
 daemon/PF/runtime artifact, and preserved DNS `111.88.96.50` /
 `111.88.96.51`, Telegram, owned Geph, and all external proxy/PAC/VPN/PF state.
-The retained root-log delta contains no detector or recovery event for those
-four attempts.
 
-Source and test tracing found a generic convergence defect rather than a site
-exception. A repeated short system/plain server-first close recorded only the
-system stage and activated the Xbox DNS retry. The old content probe was not
-scheduled until the same close repeated again on Xbox DNS and on two distinct
-local strategies: at least eight matching client-visible failures. The current
-correction on `codex/slow-small-incomplete-response` schedules the existing
-exact-IP, certificate-validating HTTP completion probe after the second
-matching bounded system/plain close. One close remains inert and Xbox DNS
-remains the next local fallback. Opaque TLS bytes never learn a route or select
-Geph; only strict local incomplete framing followed by the independently
-complete owned-Geph proof may learn the exact host. No hostname rule, PF, DNS,
-route-policy, external-Geph, Discord, YouTube, or Googlevideo behavior changes.
-The existing network-wide failure guard blocks this earlier probe.
+A direct post-rollback HTTP/1.1 control returned HTTP `200` and 20,120 bytes,
+then remained open without progress until the 45-second client deadline. The
+remaining generic defect is therefore not limited to an HTTP/2 browser error,
+server-first close, or partial TLS record. The transparent relay sees complete
+encrypted records followed by silence and previously emitted no event before
+the client eventually gave up.
 
-The focused regression and the complete routing file pass; full Python
-verification is `967 passed, 41 subtests passed`, and the tray Rust suite is
-`83 passed`. PR, exact-main, and one fresh protected qualification remain
-required before another controlled workstation installation. Only that fresh
-run's exact artifact may be used.
+The current branch `codex/partial-payload-idle-observer` adds one
+non-destructive payload-followed-idle observer to eligible generic local TLS
+routes. It neither ends nor reroutes the active stream. Each observation records
+only its actual system, app-owned DNS, or named local-strategy stage, and only
+after valid TLS framing has produced at least one complete record. System,
+app-owned DNS, and multiple distinct local strategies remain mandatory before
+the existing original-system-public-IP, certificate-validating HTTP completion
+probe may run. Every network-wide guard evaluation prunes expired partial,
+zero-payload, payload-idle, and server-first evidence before counting hosts.
+The worker is exact-host cooled and globally capped at four.
+It learns nothing unless the direct response has strictly proven incomplete
+framing and verified owned Geph independently returns a complete usable
+response. Static policy, PF, DNS, external Geph, Discord, YouTube, and
+Googlevideo behavior do not change.
+
+Focused observer and transport-confirmation regressions pass locally. Full
+Python verification is `975 passed, 41 subtests passed`; the tray Rust suite is
+`83 passed`, and the Chromium companion suite is `21 passed`. The two findings
+from the latest automated PR review are addressed locally; fresh PR review,
+exact-main gates, and one fresh protected qualification remain required before
+another controlled workstation installation. Only that fresh run's exact
+artifact may be used.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run
@@ -1233,12 +1241,13 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not retry the controlled transaction on the primary workstation yet. The
-next product change must make partial-response evidence from an ordinary
-browser reach the existing bounded exact-host owned-Geph confirmation path.
-Prefer a browser-independent transport trigger when it can distinguish strong
-or repeated server-first failure evidence; otherwise production-deliver and
-qualify the companion. The change must remain exact-host bounded, preserve
+Do not retry the controlled transaction on the primary workstation yet. Finish
+PR #302: its ordinary-client transport observer must record the complete local
+evidence ladder before waking the existing bounded exact-host content
+confirmation, include payload-idle incidents in the network-wide guard, and
+leave the active stream untouched. Require deterministic complete-response,
+protected-route, evidence-ladder, network-wide-guard, concurrency-cap, and
+task-cleanup regressions. The change must remain exact-host bounded, preserve
 static-policy precedence, and add no per-site rule. Discord, YouTube, and
 Googlevideo remain local-only, and external DNS/proxy/PAC/VPN/PF owners remain
 read-only.
