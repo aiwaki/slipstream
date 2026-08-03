@@ -2038,6 +2038,7 @@ SERVER_FIRST_CLOSE_MAX_DURATION = 10.0
 SERVER_FIRST_CLOSE_STATE_MAX = 4096
 TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
 TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
+TRANSPORT_INCOMPLETE_CONFIRM_MAX = 4
 TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION = 30.0
 SERVER_FIRST_CLOSE_KIND_SHORT = "short"
 SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE = "ambiguous_large"
@@ -8358,6 +8359,7 @@ class _RelayActivity:
     client_ended_first: bool = False
     server_ended_first: bool = False
     first_downstream_seen: bool = False
+    downstream_idle_observed: bool = False
     partial_tls_record_stalled: bool = False
     tls_record_buffer: object = None
     tls_record_expected: int = 0
@@ -8365,6 +8367,7 @@ class _RelayActivity:
     tls_framing_valid: bool = True
     track_tls_records: bool = False
     on_first_downstream: object = None
+    on_downstream_idle: object = None
 
 
 def _track_tls_records(activity, data):
@@ -8682,7 +8685,7 @@ def _schedule_transport_incomplete_response_confirmation(
     now=None,
     runner=None,
 ):
-    """Verify one repeated plain-path close without browser integration."""
+    """Verify a bounded plain-path incomplete response out of band."""
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
     try:
@@ -8694,6 +8697,7 @@ def _schedule_transport_incomplete_response_confirmation(
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
+        or _network_wide_unknown_failure_visible()
     ):
         return False
     with _auto_geph_lock:
@@ -8703,7 +8707,10 @@ def _schedule_transport_incomplete_response_confirmation(
             return False
         if h in _transport_incomplete_confirming:
             return False
-        if len(_transport_incomplete_confirming) >= AUTO_GEPH_STATE_MAX:
+        if (
+            len(_transport_incomplete_confirming)
+            >= TRANSPORT_INCOMPLETE_CONFIRM_MAX
+        ):
             return False
         _transport_incomplete_last_probe[h] = now
         _transport_incomplete_confirming[h] = now
@@ -8719,6 +8726,43 @@ def _schedule_transport_incomplete_response_confirmation(
         run()
         return True
     threading.Thread(target=run, daemon=True).start()
+    return True
+
+
+def _arm_transport_incomplete_idle_observer(
+    activity,
+    host,
+    ip,
+    route_class,
+    strategy_name,
+    *,
+    scheduler=None,
+):
+    """Observe one generic plain stream without changing its active route.
+
+    Downstream silence is only a wake-up signal. The scheduled worker must
+    independently prove that the exact direct HTTP response is incomplete and
+    that owned Geph returns a complete usable response before learning a route.
+    """
+    h = normalize_host(host)
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if (
+        route_class != ROUTE_UNKNOWN
+        or strategy_name != "plain"
+        or not address.is_global
+        or not _auto_geph_base_host_allowed(h)
+    ):
+        return False
+
+    schedule = scheduler or _schedule_transport_incomplete_response_confirmation
+
+    def observe():
+        schedule(h, str(address), "plain")
+
+    activity.on_downstream_idle = observe
     return True
 
 
@@ -9170,6 +9214,26 @@ async def _watch_partial_tls_record(activity, idle_timeout):
         return
 
 
+async def _watch_downstream_idle(activity, idle_timeout):
+    """Report one payload-followed idle period without ending the relay."""
+    while True:
+        if not activity.first_downstream_seen:
+            await asyncio.sleep(idle_timeout)
+            continue
+        idle_for = time.monotonic() - activity.last_downstream_at
+        if idle_for < idle_timeout:
+            await asyncio.sleep(idle_timeout - idle_for)
+            continue
+        activity.downstream_idle_observed = True
+        callback = activity.on_downstream_idle
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                pass
+        return
+
+
 async def relay_local_stream(
     reader,
     up_w,
@@ -9202,7 +9266,19 @@ async def relay_local_stream(
         if detect_partial_tls_stall
         else None
     )
+    idle_observer_task = (
+        asyncio.create_task(
+            _watch_downstream_idle(
+                relay_activity,
+                LOCAL_STREAM_IDLE,
+            )
+        )
+        if relay_activity.on_downstream_idle is not None
+        else None
+    )
     try:
+        # The observer is intentionally excluded: silence may trigger a bounded
+        # out-of-band proof, but it must never complete or cancel this relay.
         done, pending = await asyncio.wait(
             tasks + ((watchdog_task,) if watchdog_task is not None else ()),
             return_when=asyncio.FIRST_COMPLETED,
@@ -9279,6 +9355,10 @@ async def relay_local_stream(
         if watchdog_task is not None and not watchdog_task.done():
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
+        if idle_observer_task is not None:
+            if not idle_observer_task.done():
+                idle_observer_task.cancel()
+            await asyncio.gather(idle_observer_task, return_exceptions=True)
         if relay_activity.client_half_closed:
             await _close_stream_writer(up_w)
 
@@ -10456,6 +10536,13 @@ async def _handle_impl(reader, writer):
         last_downstream_at=t0,
         downstream_bytes=len(server_first),
         first_downstream_seen=bool(server_first),
+    )
+    _arm_transport_incomplete_idle_observer(
+        activity,
+        host,
+        chosen,
+        route_class,
+        chosen_name,
     )
     detect_partial_tls_stall = route_class == ROUTE_UNKNOWN
     if detect_partial_tls_stall:

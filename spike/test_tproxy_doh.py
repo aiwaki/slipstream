@@ -10284,6 +10284,108 @@ def test_complete_quiet_tls_record_is_not_a_partial_stall():
     assert not activity.partial_tls_record_stalled
 
 
+def test_relay_observes_complete_tls_idle_without_cancelling_stream(monkeypatch):
+    record = b"\x17\x03\x03\x00\x08" + b"x" * 8
+    observations = []
+
+    class DelayedEofReader:
+        async def read(self, _size):
+            await asyncio.sleep(0.04)
+            return b""
+
+    class RecordThenBlock:
+        def __init__(self):
+            self.sent = False
+
+        async def read(self, _size):
+            if not self.sent:
+                self.sent = True
+                return record
+            await asyncio.Event().wait()
+
+    class Writer:
+        def __init__(self):
+            self.payload = bytearray()
+
+        def write(self, data):
+            self.payload.extend(data)
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    monkeypatch.setattr(tproxy, "LOCAL_STREAM_IDLE", 0.01)
+    downstream = Writer()
+    activity = tproxy._RelayActivity(
+        last_downstream_at=tproxy.time.monotonic(),
+        on_downstream_idle=lambda: observations.append("idle"),
+    )
+
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            DelayedEofReader(),
+            Writer(),
+            RecordThenBlock(),
+            downstream,
+            activity,
+            detect_partial_tls_stall=True,
+        ),
+        timeout=0.2,
+    ))
+
+    assert result == (0, 0)
+    assert bytes(downstream.payload) == record
+    assert observations == ["idle"]
+    assert activity.downstream_idle_observed
+    assert activity.client_ended_first
+    assert not activity.partial_tls_record_stalled
+
+
+def test_idle_observer_arms_only_for_generic_plain_public_routes():
+    scheduled = []
+    activity = tproxy._RelayActivity(last_downstream_at=100.0)
+
+    assert tproxy._arm_transport_incomplete_idle_observer(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        "plain",
+        scheduler=lambda *args: scheduled.append(args),
+    )
+    activity.on_downstream_idle()
+    assert scheduled == [("unknown.example", "1.1.1.1", "plain")]
+
+    for host, ip, route_class, strategy_name in (
+        ("updates.discord.com", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "plain"),
+        (
+            "rr2---sn-ntq7yner.googlevideo.com",
+            "1.1.1.1",
+            tproxy.ROUTE_UNKNOWN,
+            "plain",
+        ),
+        ("www.google.com", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "plain"),
+        ("unknown.example", "127.0.0.1", tproxy.ROUTE_UNKNOWN, "plain"),
+        ("unknown.example", "1.1.1.1", tproxy.ROUTE_DIRECT, "plain"),
+        ("unknown.example", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "split64"),
+    ):
+        rejected = tproxy._RelayActivity(last_downstream_at=100.0)
+        assert not tproxy._arm_transport_incomplete_idle_observer(
+            rejected,
+            host,
+            ip,
+            route_class,
+            strategy_name,
+            scheduler=lambda *args: scheduled.append(args),
+        )
+        assert rejected.on_downstream_idle is None
+
+
 def test_splice_skips_tls_framing_when_partial_detector_is_disabled():
     record = b"\x17\x03\x03\x00\x08" + b"x" * 8
 
@@ -10845,6 +10947,46 @@ def test_transport_confirmation_is_rate_limited_per_exact_host(monkeypatch):
         ("partial-body.example", "1.1.1.1"),
         ("other-partial.example", "8.8.8.8"),
     ]
+
+
+def test_transport_confirmation_has_a_small_global_concurrency_cap(monkeypatch):
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    for index in range(tproxy.TRANSPORT_INCOMPLETE_CONFIRM_MAX):
+        tproxy._transport_incomplete_confirming[f"active-{index}.example"] = 100.0
+
+    assert not tproxy._schedule_transport_incomplete_response_confirmation(
+        "another-partial.example",
+        "1.1.1.1",
+        "plain",
+        now=101.0,
+        runner=lambda host, ip: confirmations.append((host, ip)),
+    )
+    assert confirmations == []
+
+
+def test_transport_confirmation_respects_network_wide_failure_guard(monkeypatch):
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_network_wide_unknown_failure_visible",
+        lambda: True,
+    )
+
+    assert not tproxy._schedule_transport_incomplete_response_confirmation(
+        "guarded-partial.example",
+        "1.1.1.1",
+        "plain",
+        now=101.0,
+        runner=lambda host, ip: confirmations.append((host, ip)),
+    )
+    assert confirmations == []
+    assert "guarded-partial.example" not in tproxy._transport_incomplete_confirming
 
 
 def test_server_reset_advances_unknown_host_without_waiting_for_repeat():
