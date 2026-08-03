@@ -9,11 +9,52 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Current user-facing priority: do not reinstall the artifact qualified for exact
-main `f8fb0c099c41f7e3bbd810042c8990a49febd665`. Its protected run
+main `3d40ce7dbc9c89cdef39f03499062998b3856687`. CI `30803833248`, audit
+`30803833308`, native Windows qualification `30803833447`, and the sole
+protected owned-Geph qualification `30804356739` passed. Artifact `8852219623`
+matched inner ZIP SHA-256
+`9cdfd2b2b46189bf19b7490006a26ecc9d06e641c79e274a88e0519295b72eb0`
+and exact packaged executable identities.
+
+Controlled workstation transaction `F15ED6DF-5F97-4629-833A-34F295543597`
+installed that exact artifact and reached active StatusV2. Google, Spotify,
+Discord, YouTube plus a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT,
+and Modrinth returned payload. CrystalIDEA completed HTTP `200` with 11,951
+bytes, but an operator-only 20 KiB threshold incorrectly rejected it and the
+transaction completed an exact rollback. The corrected transaction
+`38599211-5C24-42B3-953E-D90DD605CB79` repeated the successful protected
+smokes. Four `xpersonatoy.com` attempts then returned HTTP `200` but ended with
+curl error `18` after roughly 53-59 KiB. Immediate rollback restored the prior
+app, removed every root daemon/PF/runtime artifact, and preserved DNS
+`111.88.96.50` / `111.88.96.51` plus external proxy/PAC/VPN/PF state.
+
+The retained root-log delta proves that generic incomplete-response recovery
+was reached. The first exact owned-Geph replacement completed. The second
+`launchctl kickstart -k` exceeded the shared five-second command timeout and
+was reported unavailable, but its verified LaunchAgent later replaced the
+owned listener PID. A timeout from a mutating launchd command therefore cannot
+prove that no mutation occurred. Main's caller released its backend hold too
+early and could observe the delayed replacement outside the recovery window.
+
+The correction on `codex/owned-geph-indeterminate-kickstart` classifies the
+launchctl command as completed, rejected, or indeterminate. Completed and
+indeterminate outcomes retain the session drain until a bounded observer sees
+a different exact-owned, live listener PID. No successor, shutdown, or an
+unknown/external listener fails closed; the same indeterminate command is never
+retried while its successor window is unresolved. The change adds no hostname
+rule and does not alter PF, DNS, route policy, replacement count, external
+Geph, Discord, YouTube, or Googlevideo behavior. Local Python verification is
+`963 passed, 41 subtests passed`. Rust verification is tray `83`, core `32`,
+Windows adapter `241`, userspace evaluation `40`, and effect evaluation `40`;
+all five clippy gates pass with warnings denied. PR, exact-main, and fresh
+protected gates are still required before another workstation installation.
+
+Historical checkpoint for exact main
+`f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run
 `30764174229` passed, but controlled workstation transaction
 `C3CDCD9F-F3A1-4733-9164-3C0A4A3FF5CB` exposed a generic incomplete-response
 recovery gap and completed its exact rollback. The correction on
-`codex/large-incomplete-response-recovery` must pass full local checks, PR
+`codex/large-incomplete-response-recovery` had to pass full local checks, PR
 CI/audit, exact-main CI/audit, and one fresh protected account-backed
 qualification before another workstation installation.
 
@@ -42,8 +83,8 @@ framing plus the independently complete owned-Geph proof may learn the exact
 host. Discord, YouTube, Googlevideo, static routes, external Geph, and external
 DNS/proxy/PAC/VPN/PF state remain excluded.
 
-The chronological checkpoints below predate this 2026-08-03 authority unless
-they explicitly name a later main SHA.
+The chronological checkpoints below predate the live `3d40ce7` workstation
+transaction unless they explicitly name a later main SHA.
 
 Historical checkpoint for main `1be02bc8a4a410989b59ec601821e2bd6a9f1b19`:
 protected run `30729228620` passed its only job

@@ -94,6 +94,15 @@ proof after each and stopping immediately on stable success. The exact host is
 learned only after that proof. A new recovery incident is globally rate-limited
 for ten minutes.
 
+A `launchctl kickstart -k` timeout is not evidence that the mutating command did
+nothing. The 2026-08-03 workstation transaction observed the exact owned
+LaunchAgent replace its listener PID after the shared five-second command bound
+had already expired. Recovery therefore treats this result as indeterminate,
+keeps the backend drain active, and waits only for a different listener that
+passes the complete exact-ownership and readiness checks. If no such successor
+appears within the bounded window, or an unknown listener appears, recovery
+fails closed and does not issue a duplicate kickstart.
+
 For a long-lived one-shot relay, the independent proof starts after its first
 payload rather than after connection close. If that worker fails while the
 relay prevents session drain, Slipstream retains one post-drain retry and
