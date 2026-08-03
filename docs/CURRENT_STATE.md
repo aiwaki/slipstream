@@ -8,55 +8,49 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: do not reinstall artifact `8862108294`. PR #302
-merged as exact main `00fb7367b2f7262bfd8fa25a2060c3ba487b11ee`; CI
-`30828097393`, audit `30828098120`, native Windows qualification
-`30828097061`, and the sole protected owned-Geph qualification `30828740943`
+Current user-facing priority: do not reinstall artifact `8865902703`. PR #303
+merged as exact main `c0cdeafc3b774facbb04986605c885fc1016bc37`; CI
+`30837945703`, audit `30837946899`, native Windows qualification
+`30837945170`, and the sole protected owned-Geph qualification `30838499747`
 passed. The protected run proved account-backed payload before tray exit,
 trayless, and after a KeepAlive replacement; both Chromium semantic scenarios,
 cleanup, artifact identity, and system-network non-mutation passed.
 
 Controlled workstation transaction
-`D104F3FA-0B0C-4387-919A-AF6666E097DB` installed only that exact artifact and
+`B06FF48A-C140-4E53-B052-DBEB9CE780BA` installed only that exact artifact and
 reached active StatusV2. Google, Spotify, Discord updater/gateway, and the
-YouTube page returned payload. The first real Googlevideo download then failed:
-`yt-dlp` selected format 18 successfully, but every one of its ten media
-retries ended with Python SSL `UNEXPECTED_EOF_WHILE_READING`. Immediate exact
+YouTube page returned payload. A real format-18 Googlevideo download then ended
+all ten retries with Python SSL `UNEXPECTED_EOF_WHILE_READING`. Immediate exact
 rollback restored the prior app SHA-256
 `3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
 removed the root daemon, listener, private PF anchor, token, status, socket,
 attestation, witness, and runtime, and preserved DNS `111.88.96.50` /
 `111.88.96.51`, the exact owned Geph listener, proxy/PAC, default route, and
-external owners. The copied daemon routing-log delta contained no Googlevideo
+external owners. The copied private daemon log contained no Googlevideo
 detector or recovery event.
 
-Code tracing found a concrete protected-route gap. `_handle_impl()` records a
-local backend and local-bypass health success immediately after the initial TLS
-payload, before `relay_local_stream()` finishes. Complete-record server-first
-closes are evaluated only when an unknown-route `observed_stage` exists.
-Googlevideo is a protected YouTube `direct_first` route, so its short
-server-first close was silently treated as success; every client retry could
-select `plain` again. The recovery reducer already forbids Geph for protected
-service groups, but the Python side-effect adapter and exact-host resweep
-previously rejected every route class except literal `local_bypass`.
+PR #303 correctly added protected-local server-first recovery, but its orderly
+close classifier stopped at `32 KiB`. The generic unknown-host observer already
+recognized complete-record closes from `32 KiB` through `512 KiB`; protected
+YouTube `direct_first` traffic did not. The exact encrypted byte count of the
+real download is unavailable, so classifying that incident as a medium framed
+close remains an evidence-consistent inference, not a measured fact. A traffic
+contract with a roughly `96 KiB` Googlevideo close reproduces the missing
+recovery event and repeated selection of `plain`.
 
-The current branch `codex/local-bypass-server-first-recovery` closes that gap
-without adding a hostname rule. Protected local routes now retain TLS framing
-evidence through the relay. One reset or incomplete TLS record, or two matching
-short server-first closes inside five minutes, invalidates only local strategy
-state and schedules the existing exact-host local re-sweep. A failed named
-strategy is scored after group cache invalidation so the re-sweep cannot simply
-restore it. When the failed route is YouTube media `direct_first/plain`, plain
-is omitted for one minute and the next request starts with the ranked local
-desync ladder. The marker is exact-host, process-local, bounded, and expires
-automatically. It cannot select Geph and does not change PF, DNS, proxy, PAC,
-VPN, external processes, or any other route class.
+The current branch `codex/googlevideo-runtime-eof-recovery` extends only the
+protected YouTube-media local reducer to this existing bounded medium-close
+class. Two matching closes for the same exact host, strategy, and close kind
+demote that local strategy. After a non-plain fallback is already active, one
+matching medium close demotes it so the next retry can continue through the
+local ladder. Short and medium evidence never mix; late, larger than `512 KiB`,
+or non-YouTube closes remain inert. The path cannot select Geph or change PF,
+DNS, proxy, PAC, VPN, external processes, or any other route class.
 
-Local verification for the current branch passes: `981` Python tests plus `41`
-subtests, `83` Rust tray tests, and `21` Chromium companion tests. PR review,
-exact-main gates, one fresh protected qualification, and a new controlled
-workstation transaction remain required. Only that future exact-main protected
-artifact may be installed.
+Local verification for the current branch passes: `986` Python tests plus `41`
+subtests and `83` Rust tray tests. PR review, exact-main gates, one fresh
+protected qualification, and a new controlled workstation transaction remain
+required. Only that future exact-main protected artifact may be installed.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run

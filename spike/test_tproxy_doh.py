@@ -10602,6 +10602,10 @@ def _short_server_first_activity(*, read_failed=False, downstream_bytes=16384):
     )
 
 
+def _medium_server_first_activity(*, downstream_bytes=96 * 1024):
+    return _short_server_first_activity(downstream_bytes=downstream_bytes)
+
+
 def _first_tls_record_cut_activity(*, read_failed=False):
     payload = bytearray(b"\x17\x03\x03\x00\x20partial")
     return tproxy._RelayActivity(
@@ -10718,6 +10722,127 @@ def test_protected_direct_first_close_requires_repeat_then_uses_local_fallback(
         lambda: now + tproxy.DIRECT_FIRST_LOCAL_FALLBACK_TTL + 2.0,
     )
     assert tproxy.strategy_order(host)[0]["name"] == "plain"
+
+
+def test_youtube_medium_server_close_requires_repeat_then_uses_local_fallback(
+    monkeypatch,
+):
+    host = "rr5---sn-test.googlevideo.com"
+    now = tproxy.time.monotonic()
+    runtime_results = []
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    first = tproxy.note_protected_local_server_first_close(
+        host,
+        "plain",
+        _medium_server_first_activity(),
+        duration=2.0,
+        now=now,
+    )
+    second = tproxy.note_protected_local_server_first_close(
+        host,
+        "plain",
+        _medium_server_first_activity(),
+        duration=2.0,
+        now=now + 1.0,
+    )
+
+    assert not first
+    assert second
+    assert len(runtime_results) == 1
+    assert runtime_results[0][1]["failed_strategy"] == "plain"
+    assert tproxy._direct_first_local_fallback_active(host, now=now + 1.1)
+    assert all(
+        strategy["name"] != "plain" for strategy in tproxy.strategy_order(host)
+    )
+
+
+def test_youtube_medium_close_demotes_first_local_fallback_immediately(
+    monkeypatch,
+):
+    host = "rr5---sn-test.googlevideo.com"
+    now = tproxy.time.monotonic()
+    runtime_results = []
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(
+        tproxy,
+        "_direct_first_local_fallback_until",
+        {host: now + 30.0},
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    recovered = tproxy.note_protected_local_server_first_close(
+        host,
+        "split64+fake",
+        _medium_server_first_activity(),
+        duration=2.0,
+        now=now,
+    )
+
+    assert recovered
+    assert len(runtime_results) == 1
+    assert runtime_results[0][1]["failed_strategy"] == "split64+fake"
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_medium_server_close_does_not_broaden_other_protected_routes(
+    monkeypatch,
+):
+    runtime_results = []
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+    monkeypatch.setattr(
+        tproxy,
+        "note_local_bypass_runtime_result",
+        lambda *args, **kwargs: runtime_results.append((args, kwargs)),
+    )
+
+    for host, strategy in (
+        ("updates.discord.com", "split64+fake"),
+        ("www.google.com", "plain"),
+        ("api.spotify.com", "plain"),
+    ):
+        for observed_at in (100.0, 101.0):
+            assert not tproxy.note_protected_local_server_first_close(
+                host,
+                strategy,
+                _medium_server_first_activity(),
+                duration=2.0,
+                now=observed_at,
+            )
+
+    assert not runtime_results
+    assert not tproxy._protected_local_server_first_closes
+
+
+def test_youtube_server_close_above_probe_cap_remains_inert(monkeypatch):
+    host = "rr5---sn-test.googlevideo.com"
+    monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
+
+    for observed_at in (100.0, 101.0):
+        assert not tproxy.note_protected_local_server_first_close(
+            host,
+            "plain",
+            _medium_server_first_activity(
+                downstream_bytes=tproxy.TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES + 1,
+            ),
+            duration=2.0,
+            now=observed_at,
+        )
+
+    assert not tproxy._protected_local_server_first_closes
+    assert not tproxy._direct_first_local_fallback_active(host, now=101.1)
 
 
 def test_protected_local_transport_reset_recovers_without_repeat(monkeypatch):
