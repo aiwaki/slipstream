@@ -38,9 +38,10 @@ remains the next local fallback. Opaque TLS bytes never learn a route or select
 Geph; only strict local incomplete framing followed by the independently
 complete owned-Geph proof may learn the exact host. No hostname rule, PF, DNS,
 route-policy, external-Geph, Discord, YouTube, or Googlevideo behavior changes.
+The existing network-wide failure guard blocks this earlier probe.
 
 The focused regression and the complete routing file pass; full Python
-verification is `966 passed, 41 subtests passed`, and the tray Rust suite is
+verification is `967 passed, 41 subtests passed`, and the tray Rust suite is
 `83 passed`. PR, exact-main, and one fresh protected qualification remain
 required before another controlled workstation installation. Only that fresh
 run's exact artifact may be used.

@@ -69,8 +69,9 @@ response or an ambiguous response between 32 KiB and 512 KiB, may run one
 bounded HTTP-framing probe against the first public system-selected IP. It no
 longer waits for the same user-visible failure to repeat through Xbox DNS and
 two local strategies. Xbox DNS remains the next local fallback, while opaque
-byte count and repetition cannot select Geph or learn a route. A complete
-response ends the incident. Only a strictly proven local body shortfall
+byte count and repetition cannot select Geph or learn a route. A visible
+network-wide unknown-host failure blocks this early probe. A complete response
+ends the incident. Only a strictly proven local body shortfall
 followed by the existing complete owned-Geph proof can learn a temporary
 exact-host route.
 

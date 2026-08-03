@@ -10463,6 +10463,41 @@ def test_single_system_short_close_does_not_request_content_probe(
     assert not tproxy.is_geo_exit_route(host)
 
 
+def test_repeated_system_short_close_respects_network_wide_failure_guard(
+    monkeypatch,
+):
+    host = "network-guarded-partial.example"
+    activity = _short_server_first_activity()
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for index in range(tproxy.AUTO_GEPH_NET_BAD):
+        tproxy._local_partial_stalls[f"network-wide-{index}.example"] = {
+            tproxy.AUTO_GEPH_STAGE_SYSTEM: 100.0,
+        }
+
+    for now in (100.2, 100.3):
+        tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=0.2,
+            now=now,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == []
+    assert host not in tproxy._transport_incomplete_last_probe
+    assert tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy.is_geo_exit_route(host)
+
+
 def test_repeated_large_system_close_uses_content_probe_without_advancing_ladder(
     monkeypatch,
 ):

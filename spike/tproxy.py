@@ -8767,6 +8767,11 @@ def _schedule_server_first_transport_confirmation(
     confirmation_runner=None,
     transport_confirmation_runner=None,
 ):
+    _prune_transport_incomplete_probes(now)
+    _prune_local_partial_stalls(now)
+    _prune_local_zero_payload_failures(now)
+    if _network_wide_unknown_failure_visible():
+        return False
     runner = transport_confirmation_runner
     if runner is None and confirmation_runner is not None:
         runner = lambda candidate_host, _ip: confirmation_runner(candidate_host)
