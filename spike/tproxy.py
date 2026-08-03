@@ -2106,6 +2106,7 @@ _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
+_local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -4001,6 +4002,7 @@ def _confirm_semantic_geo_exit(host):
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
@@ -4051,6 +4053,7 @@ def _confirm_incomplete_response_geo_exit(host):
         _auto_fail.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
@@ -4116,6 +4119,7 @@ def _remember_auto_geph_host(
         _auto_geph_candidates.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
@@ -4287,6 +4291,7 @@ def _forget_auto_geph_host(host, reason):
         _auto_geph_candidates.pop(h, None)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
+        _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
         _auto_geph_runtime_failures.pop(h, None)
         save_auto_geph()
@@ -4376,6 +4381,11 @@ def _network_wide_unknown_failure_visible():
     )
     noisy_hosts.update(
         host
+        for host, observations in _local_payload_idle_failures.items()
+        if observations
+    )
+    noisy_hosts.update(
+        host
         for host, observations in (
             _transport_incomplete_server_first_evidence.items()
         )
@@ -4398,6 +4408,24 @@ def _prune_local_zero_payload_failures(now):
             _local_zero_payload_failures.pop(host, None)
     while len(_local_zero_payload_failures) > AUTO_GEPH_STATE_MAX:
         _local_zero_payload_failures.pop(next(iter(_local_zero_payload_failures)))
+
+
+def _prune_local_payload_idle_failures(now):
+    cutoff = now - AUTO_GEPH_PARTIAL_STALL_WINDOW
+    for host, stages in list(_local_payload_idle_failures.items()):
+        fresh = {
+            name: observed_at
+            for name, observed_at in stages.items()
+            if observed_at >= cutoff
+        }
+        if fresh and _auto_geph_base_host_allowed(host):
+            _local_payload_idle_failures[host] = fresh
+        else:
+            _local_payload_idle_failures.pop(host, None)
+    while len(_local_payload_idle_failures) > AUTO_GEPH_STATE_MAX:
+        _local_payload_idle_failures.pop(
+            next(iter(_local_payload_idle_failures))
+        )
 
 
 def note_zero_payload_route_failure(host, stage, now=None):
@@ -8591,6 +8619,7 @@ def _clear_server_first_closes(host, stage=None):
 
 
 def _prune_transport_incomplete_probes(now):
+    _prune_local_payload_idle_failures(now)
     stale = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
     for host, started in list(_transport_incomplete_confirming.items()):
         if started < stale:
@@ -8729,20 +8758,64 @@ def _schedule_transport_incomplete_response_confirmation(
     return True
 
 
+def _record_transport_incomplete_idle_evidence(
+    host,
+    ip,
+    stage,
+    *,
+    now=None,
+    scheduler=None,
+):
+    """Record one payload-idle stage before any content confirmation."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if (
+        not address.is_global
+        or not _auto_geph_base_host_allowed(h)
+        or not stage
+        or not _valid_auto_geph_stage(stage)
+    ):
+        return False
+
+    _prune_transport_incomplete_probes(now)
+    observations = _local_payload_idle_failures.setdefault(h, {})
+    observations[stage] = now
+    if stage == AUTO_GEPH_STAGE_SYSTEM:
+        _remember_transport_incomplete_plain_candidate(h, str(address), now)
+    if not _local_route_evidence_complete(
+        observations,
+        AUTO_GEPH_PARTIAL_STRATEGIES,
+    ):
+        return False
+    if _network_wide_unknown_failure_visible():
+        return False
+
+    candidate = _transport_incomplete_plain_candidates.get(h)
+    if candidate is None:
+        return False
+    candidate_ip, _observed_at = candidate
+    schedule = scheduler or _schedule_transport_incomplete_response_confirmation
+    return bool(schedule(h, candidate_ip, "plain", now=now))
+
+
 def _arm_transport_incomplete_idle_observer(
     activity,
     host,
     ip,
     route_class,
-    strategy_name,
+    stage,
     *,
     scheduler=None,
 ):
-    """Observe one generic plain stream without changing its active route.
+    """Observe one generic local route without changing its active stream.
 
-    Downstream silence is only a wake-up signal. The scheduled worker must
-    independently prove that the exact direct HTTP response is incomplete and
-    that owned Geph returns a complete usable response before learning a route.
+    Downstream silence records one stage of the required local evidence ladder.
+    Only a complete ladder may schedule the independent direct HTTP and owned
+    Geph proofs needed before a later exact-host route can be learned.
     """
     h = normalize_host(host)
     try:
@@ -8751,16 +8824,20 @@ def _arm_transport_incomplete_idle_observer(
         return False
     if (
         route_class != ROUTE_UNKNOWN
-        or strategy_name != "plain"
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
+        or not stage
+        or not _valid_auto_geph_stage(stage)
     ):
         return False
 
-    schedule = scheduler or _schedule_transport_incomplete_response_confirmation
-
     def observe():
-        schedule(h, str(address), "plain")
+        _record_transport_incomplete_idle_evidence(
+            h,
+            str(address),
+            stage,
+            scheduler=scheduler,
+        )
 
     activity.on_downstream_idle = observe
     return True
@@ -10537,12 +10614,20 @@ async def _handle_impl(reader, writer):
         downstream_bytes=len(server_first),
         first_downstream_seen=bool(server_first),
     )
+    observed_stage = None
+    if route_class == ROUTE_UNKNOWN:
+        if via_system_exact:
+            observed_stage = AUTO_GEPH_STAGE_SYSTEM
+        elif via_xbox_dns:
+            observed_stage = AUTO_GEPH_STAGE_XBOX_DNS
+        elif chosen_name in GENERAL_STRATS:
+            observed_stage = f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{chosen_name}"
     _arm_transport_incomplete_idle_observer(
         activity,
         host,
         chosen,
         route_class,
-        chosen_name,
+        observed_stage,
     )
     detect_partial_tls_stall = route_class == ROUTE_UNKNOWN
     if detect_partial_tls_stall:
@@ -10556,14 +10641,6 @@ async def _handle_impl(reader, writer):
         detect_partial_tls_stall=detect_partial_tls_stall,
     )
     duration = time.monotonic() - t0
-    observed_stage = None
-    if route_class == ROUTE_UNKNOWN:
-        if via_system_exact:
-            observed_stage = AUTO_GEPH_STAGE_SYSTEM
-        elif via_xbox_dns:
-            observed_stage = AUTO_GEPH_STAGE_XBOX_DNS
-        elif chosen_name in GENERAL_STRATS:
-            observed_stage = f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{chosen_name}"
     # A partial local stream stall demotes only the exact generic strategy. It
     # teaches the next client retry to use app-owned Xbox DNS locally. Only
     # after Xbox and distinct local strategies show the same one-record stall

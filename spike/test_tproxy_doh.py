@@ -55,6 +55,10 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         host: dict(values)
         for host, values in tproxy._local_zero_payload_failures.items()
     }
+    payload_idle_failures = {
+        host: dict(values)
+        for host, values in tproxy._local_payload_idle_failures.items()
+    }
     xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
     xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
     clean_eof_stalls = {
@@ -154,6 +158,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._auto_geph_candidates.clear()
         tproxy._local_partial_stalls.clear()
         tproxy._local_zero_payload_failures.clear()
+        tproxy._local_payload_idle_failures.clear()
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
@@ -244,6 +249,8 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._local_partial_stalls.update(partial_stalls)
         tproxy._local_zero_payload_failures.clear()
         tproxy._local_zero_payload_failures.update(zero_payload_failures)
+        tproxy._local_payload_idle_failures.clear()
+        tproxy._local_payload_idle_failures.update(payload_idle_failures)
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
         tproxy._xbox_dns_attempts.clear()
@@ -10346,33 +10353,74 @@ def test_relay_observes_complete_tls_idle_without_cancelling_stream(monkeypatch)
     assert not activity.partial_tls_record_stalled
 
 
-def test_idle_observer_arms_only_for_generic_plain_public_routes():
+def test_idle_observer_requires_complete_local_ladder_before_confirmation():
     scheduled = []
-    activity = tproxy._RelayActivity(last_downstream_at=100.0)
 
-    assert tproxy._arm_transport_incomplete_idle_observer(
-        activity,
+    def schedule(host, ip, strategy_name, *, now=None):
+        scheduled.append((host, ip, strategy_name, now))
+        return True
+
+    stages = (
+        (tproxy.AUTO_GEPH_STAGE_SYSTEM, "1.1.1.1"),
+        (tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "8.8.8.8"),
+        (f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64", "9.9.9.9"),
+        (f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}fake5", "9.9.9.10"),
+    )
+    for index, (stage, ip) in enumerate(stages):
+        activity = tproxy._RelayActivity(last_downstream_at=100.0)
+        assert tproxy._arm_transport_incomplete_idle_observer(
+            activity,
+            "unknown.example",
+            ip,
+            tproxy.ROUTE_UNKNOWN,
+            stage,
+            scheduler=schedule,
+        )
+        activity.on_downstream_idle()
+        assert len(scheduled) == (1 if index == len(stages) - 1 else 0)
+
+    assert scheduled[0][:3] == (
         "unknown.example",
         "1.1.1.1",
-        tproxy.ROUTE_UNKNOWN,
         "plain",
-        scheduler=lambda *args: scheduled.append(args),
     )
-    activity.on_downstream_idle()
-    assert scheduled == [("unknown.example", "1.1.1.1", "plain")]
 
-    for host, ip, route_class, strategy_name in (
-        ("updates.discord.com", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "plain"),
+
+def test_idle_observer_arms_only_for_generic_public_local_routes():
+    scheduled = []
+    for host, ip, route_class, stage in (
+        (
+            "updates.discord.com",
+            "1.1.1.1",
+            tproxy.ROUTE_UNKNOWN,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        ),
         (
             "rr2---sn-ntq7yner.googlevideo.com",
             "1.1.1.1",
             tproxy.ROUTE_UNKNOWN,
-            "plain",
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
         ),
-        ("www.google.com", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "plain"),
-        ("unknown.example", "127.0.0.1", tproxy.ROUTE_UNKNOWN, "plain"),
-        ("unknown.example", "1.1.1.1", tproxy.ROUTE_DIRECT, "plain"),
-        ("unknown.example", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "split64"),
+        (
+            "www.google.com",
+            "1.1.1.1",
+            tproxy.ROUTE_UNKNOWN,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        ),
+        (
+            "unknown.example",
+            "127.0.0.1",
+            tproxy.ROUTE_UNKNOWN,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        ),
+        (
+            "unknown.example",
+            "1.1.1.1",
+            tproxy.ROUTE_DIRECT,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        ),
+        ("unknown.example", "1.1.1.1", tproxy.ROUTE_UNKNOWN, None),
+        ("unknown.example", "1.1.1.1", tproxy.ROUTE_UNKNOWN, "invalid"),
     ):
         rejected = tproxy._RelayActivity(last_downstream_at=100.0)
         assert not tproxy._arm_transport_incomplete_idle_observer(
@@ -10380,10 +10428,11 @@ def test_idle_observer_arms_only_for_generic_plain_public_routes():
             host,
             ip,
             route_class,
-            strategy_name,
-            scheduler=lambda *args: scheduled.append(args),
+            stage,
+            scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
         )
         assert rejected.on_downstream_idle is None
+    assert scheduled == []
 
 
 def test_splice_skips_tls_framing_when_partial_detector_is_disabled():
@@ -10987,6 +11036,52 @@ def test_transport_confirmation_respects_network_wide_failure_guard(monkeypatch)
     )
     assert confirmations == []
     assert "guarded-partial.example" not in tproxy._transport_incomplete_confirming
+
+
+def test_payload_idle_evidence_participates_in_network_wide_failure_guard():
+    scheduled = []
+    for index in range(tproxy.AUTO_GEPH_NET_BAD):
+        assert not tproxy._record_transport_incomplete_idle_evidence(
+            f"idle-{index}.example",
+            f"1.1.1.{index + 1}",
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            now=100.0 + index,
+            scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+        )
+
+    assert tproxy._network_wide_unknown_failure_visible()
+    guarded_host = "idle-0.example"
+    for stage in (
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64",
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}fake5",
+    ):
+        assert not tproxy._record_transport_incomplete_idle_evidence(
+            guarded_host,
+            "8.8.8.8",
+            stage,
+            now=110.0,
+            scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+        )
+    assert scheduled == []
+
+
+def test_payload_idle_evidence_expires_from_network_wide_failure_guard():
+    for index in range(tproxy.AUTO_GEPH_NET_BAD):
+        tproxy._record_transport_incomplete_idle_evidence(
+            f"stale-idle-{index}.example",
+            f"1.1.1.{index + 1}",
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            now=100.0,
+            scheduler=lambda *args, **kwargs: True,
+        )
+
+    assert tproxy._network_wide_unknown_failure_visible()
+    tproxy._prune_transport_incomplete_probes(
+        101.0 + tproxy.AUTO_GEPH_PARTIAL_STALL_WINDOW
+    )
+    assert not tproxy._local_payload_idle_failures
+    assert not tproxy._network_wide_unknown_failure_visible()
 
 
 def test_server_reset_advances_unknown_host_without_waiting_for_repeat():

@@ -32,18 +32,20 @@ encrypted records followed by silence and previously emitted no event before
 the client eventually gave up.
 
 The current branch `codex/partial-payload-idle-observer` adds one
-non-destructive payload-followed-idle observer only to eligible generic
-unknown/plain TLS routes. It neither ends nor reroutes the active stream. One
-observation may schedule the existing exact-public-IP, certificate-validating
-HTTP completion probe. The worker is exact-host cooled, globally capped at
-four, and blocked by the network-wide guard. It learns nothing unless the
-direct response has strictly proven incomplete framing and verified owned Geph
-independently returns a complete usable response. Non-plain strategies continue
-the local ladder. Static policy, PF, DNS, external Geph, Discord, YouTube, and
+non-destructive payload-followed-idle observer to eligible generic local TLS
+routes. It neither ends nor reroutes the active stream. Each observation records
+only its actual system, app-owned DNS, or named local-strategy stage. System,
+app-owned DNS, and multiple distinct local strategies remain mandatory before
+the existing original-system-public-IP, certificate-validating HTTP completion
+probe may run. Idle incidents are bounded, pruned, and included in the
+network-wide guard. The worker is exact-host cooled and globally capped at four.
+It learns nothing unless the direct response has strictly proven incomplete
+framing and verified owned Geph independently returns a complete usable
+response. Static policy, PF, DNS, external Geph, Discord, YouTube, and
 Googlevideo behavior do not change.
 
 Focused observer and transport-confirmation regressions pass locally. Full
-Python verification is `971 passed, 41 subtests passed`; the tray Rust suite is
+Python verification is `974 passed, 41 subtests passed`; the tray Rust suite is
 `83 passed`, and the Chromium companion suite is `21 passed`. PR review,
 exact-main gates, and one fresh protected qualification remain required before
 another controlled workstation installation. Only that fresh run's exact
@@ -1237,13 +1239,15 @@ and dependency audit in
 ## Next Verified Action
 
 Do not retry the controlled transaction on the primary workstation yet. Finish
-and review `codex/partial-payload-idle-observer`: its ordinary-client transport
-observer must wake the existing bounded exact-host content confirmation while
-leaving the active stream untouched. Require deterministic complete-response,
-protected-route, network-wide-guard, concurrency-cap, and task-cleanup
-regressions. The change must remain exact-host bounded, preserve static-policy
-precedence, and add no per-site rule. Discord, YouTube, and Googlevideo remain
-local-only, and external DNS/proxy/PAC/VPN/PF owners remain read-only.
+PR #302: its ordinary-client transport observer must record the complete local
+evidence ladder before waking the existing bounded exact-host content
+confirmation, include payload-idle incidents in the network-wide guard, and
+leave the active stream untouched. Require deterministic complete-response,
+protected-route, evidence-ladder, network-wide-guard, concurrency-cap, and
+task-cleanup regressions. The change must remain exact-host bounded, preserve
+static-policy precedence, and add no per-site rule. Discord, YouTube, and
+Googlevideo remain local-only, and external DNS/proxy/PAC/VPN/PF owners remain
+read-only.
 
 After that generic delivery/recovery gap is fixed and merged, verify the live
 `main` and matching CI/audit, then run exactly one protected qualification for
