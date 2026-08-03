@@ -3110,11 +3110,20 @@ def execute_owned_geph_restart(
             return "unverified"
         result = runner("/bin/launchctl", "kickstart", "-k", target)
     except subprocess.TimeoutExpired as error:
+        def timeout_output(value):
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            if isinstance(value, str):
+                return value
+            if value is None:
+                return ""
+            return repr(value)
+
         result = subprocess.CompletedProcess(
             ("/bin/launchctl", "kickstart", "-k", target),
             124,
-            error.stdout if isinstance(error.stdout, str) else "",
-            error.stderr if isinstance(error.stderr, str) else "",
+            timeout_output(error.stdout),
+            timeout_output(error.stderr),
         )
     except Exception as error:
         if managed_drain:
@@ -3130,6 +3139,10 @@ def execute_owned_geph_restart(
         return "unavailable"
 
     successor_state = _wait_for_owned_geph_successor(previous_pid)
+    if successor_state == "shutdown":
+        if managed_drain:
+            _finish_geph_restart_drain()
+        return "shutdown"
     if successor_state != "ready":
         if managed_drain:
             _finish_geph_restart_drain()
