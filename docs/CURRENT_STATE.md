@@ -75,6 +75,14 @@ and both `40`-test userspace-stack suites. PR review, exact-main gates, one
 fresh protected qualification, and a controlled workstation transaction remain
 required. Only that future exact-main protected artifact may be installed.
 
+PR #306's first dependency-audit run `30859867860` exposed the newly published
+`CVE-2026-69247` in the pinned `cryptography 49.0.0`; the previous exact-main
+audit had passed before the advisory entered the database. The branch now
+requires patched `cryptography 50.0.0` and regenerates all three Python hash
+locks together. A local checksum-pinned OSV scan of the rebuilt 348-package
+target inventory reports zero blocking advisories; PR CI and audit must repeat
+that result before merge.
+
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run
 `30764174229` passed, but controlled workstation transaction
