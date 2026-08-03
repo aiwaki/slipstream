@@ -222,6 +222,7 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_xbox_dns_attempts", {})
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
     monkeypatch.setattr(tproxy, "_server_first_closes", {})
+    monkeypatch.setattr(tproxy, "_transport_incomplete_client_first_evidence", {})
     monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
     monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
     monkeypatch.setattr(tproxy, "_auto_geph", {})
@@ -1331,6 +1332,65 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
 
     assert bytes(writer.payload) == response
     assert not tproxy._auto_geph_learned_exact_host(host)
+
+
+def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatch):
+    """A browser-side HTTP/2 body failure must survive relay cancellation."""
+    isolate_runtime_state(monkeypatch)
+    host = "partial-body-contract.example"
+    payload = b"R" * 9000
+    response = b"\x17\x03\x03" + len(payload).to_bytes(2, "big") + payload
+    confirmations = []
+    clean_eof_advances = []
+
+    async def pending_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PENDING,
+            (ScriptedReader(), CaptureWriter(), response),
+        )
+
+    async def client_first_abort(
+        _reader,
+        _up_w,
+        _up_r,
+        _writer,
+        activity,
+        **_kwargs,
+    ):
+        activity.client_eof = True
+        activity.client_ended_first = True
+        activity.client_end_at = activity.last_downstream_at + 0.1
+        activity.server_end_at = activity.client_end_at + 0.1
+        return 0, 0
+
+    def schedule(candidate, ip, strategy, *, now):
+        confirmations.append((candidate, ip, strategy, now))
+        return True
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(tproxy, "relay_local_stream", client_first_abort)
+    monkeypatch.setattr(tproxy, "_clean_eof_stream_stalled", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        tproxy,
+        "note_clean_eof_stream_stall",
+        lambda *args, **kwargs: clean_eof_advances.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_transport_incomplete_response_confirmation",
+        schedule,
+    )
+
+    for _ in range(2):
+        client, _first_flight = tls_client(host, block_after_hello=True)
+        asyncio.run(run_handler(client, CaptureWriter()))
+
+    assert len(confirmations) == 1
+    assert confirmations[0][:3] == (host, "1.1.1.1", "plain")
+    assert clean_eof_advances == []
+    assert not tproxy._xbox_dns_candidate_active(host)
+    assert not tproxy.is_geo_exit_route(host)
 
 
 def test_unknown_recovery_never_uses_an_external_geph_listener(monkeypatch):

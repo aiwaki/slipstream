@@ -2041,6 +2041,7 @@ TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
 TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
 TRANSPORT_INCOMPLETE_CONFIRM_MAX = 4
 TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION = 30.0
+TRANSPORT_INCOMPLETE_CLIENT_FIRST_MIN_BYTES = 8 * 1024
 SERVER_FIRST_CLOSE_KIND_SHORT = "short"
 SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE = "ambiguous_large"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
@@ -2139,6 +2140,7 @@ _transport_incomplete_confirming = {}  # host -> monotonic probe start
 _transport_incomplete_last_probe = {}  # host -> monotonic last probe start
 _transport_incomplete_plain_candidates = {}  # host -> (ip, monotonic observed)
 _transport_incomplete_server_first_evidence = {}  # host -> {stage: monotonic}
+_transport_incomplete_client_first_evidence = {}  # host -> deque[(monotonic, ip)]
 
 # Runtime local-bypass failures start a private exact-host re-sweep. The state is
 # deliberately process-local and aggregate-free: status must not become browsing
@@ -4024,6 +4026,7 @@ def _confirm_semantic_geo_exit(host):
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
+        _transport_incomplete_client_first_evidence.pop(h, None)
         save_auto_geph()
         _clear_owned_geph_backend_hold_after_payload()
         _set_auto_geph_status(
@@ -4313,6 +4316,7 @@ def _forget_auto_geph_host(host, reason):
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
         _transport_incomplete_server_first_evidence.pop(h, None)
+        _transport_incomplete_client_first_evidence.pop(h, None)
         _auto_geph_runtime_failures.pop(h, None)
         save_auto_geph()
         _set_auto_geph_status("reset", h, reason)
@@ -4419,8 +4423,7 @@ def _network_wide_unknown_failure_visible(now=None):
     now = time.monotonic() if now is None else now
     _prune_local_partial_stalls(now)
     _prune_local_zero_payload_failures(now)
-    _prune_local_payload_idle_failures(now)
-    _prune_transport_incomplete_server_first_evidence(now)
+    _prune_transport_incomplete_probes(now)
     noisy_hosts = {
         host
         for host, observations in _local_partial_stalls.items()
@@ -4442,6 +4445,11 @@ def _network_wide_unknown_failure_visible(now=None):
             _transport_incomplete_server_first_evidence.items()
         )
         if observations
+    )
+    noisy_hosts.update(
+        host
+        for host, events in _transport_incomplete_client_first_evidence.items()
+        if events
     )
     return len(noisy_hosts) >= AUTO_GEPH_NET_BAD
 
@@ -8741,6 +8749,16 @@ def _prune_transport_incomplete_probes(now):
         )
         _transport_incomplete_plain_candidates.pop(oldest, None)
     _prune_transport_incomplete_server_first_evidence(now)
+    cutoff = now - SERVER_FIRST_CLOSE_WINDOW
+    for host, events in list(_transport_incomplete_client_first_evidence.items()):
+        while events and events[0][0] <= cutoff:
+            events.popleft()
+        if not events or not _auto_geph_base_host_allowed(host):
+            _transport_incomplete_client_first_evidence.pop(host, None)
+    while len(_transport_incomplete_client_first_evidence) > AUTO_GEPH_STATE_MAX:
+        _transport_incomplete_client_first_evidence.pop(
+            next(iter(_transport_incomplete_client_first_evidence))
+        )
 
 
 def _record_transport_incomplete_server_first_evidence(host, stage, now):
@@ -8950,6 +8968,110 @@ def _ambiguous_large_server_first_close(activity, duration):
         duration <= TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION
         and activity.downstream_bytes <= TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES
     )
+
+
+def _ambiguous_client_first_response_abort(activity, duration):
+    """Recognize a bounded client abort after complete opaque TLS records.
+
+    HTTP/2 clients can detect an incomplete body and close their side while the
+    reusable TLS connection is still open. The relay cannot prove the HTTP
+    condition from ciphertext, so this signal is only permission to run the
+    independent content-aware completion probe.
+    """
+    return bool(
+        activity.client_ended_first
+        and not activity.server_ended_first
+        and activity.client_end_at
+        and (activity.client_eof or activity.client_read_failed)
+        and not activity.server_read_failed
+        and not activity.downstream_write_failed
+        and activity.track_tls_records
+        and activity.tls_framing_valid
+        and activity.tls_complete_records > 0
+        and not _incomplete_tls_record_visible(activity)
+        and 0 <= duration <= TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION
+        and activity.downstream_bytes
+        >= TRANSPORT_INCOMPLETE_CLIENT_FIRST_MIN_BYTES
+        and activity.downstream_bytes <= TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES
+    )
+
+
+def _client_first_response_abort_candidate(
+    host,
+    stage,
+    activity,
+    *,
+    duration,
+    probe_ip,
+    strategy_name,
+):
+    h = normalize_host(host)
+    if (
+        not h
+        or route_policy(h)["route_class"] != ROUTE_UNKNOWN
+        or stage != AUTO_GEPH_STAGE_SYSTEM
+        or strategy_name != "plain"
+    ):
+        return None
+    try:
+        address = ipaddress.ip_address(probe_ip)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not address.is_global
+        or not _auto_geph_base_host_allowed(h)
+        or not _ambiguous_client_first_response_abort(activity, duration)
+    ):
+        return None
+    return h, str(address)
+
+
+def note_client_first_response_abort(
+    host,
+    stage,
+    activity,
+    *,
+    duration,
+    probe_ip,
+    strategy_name,
+    now=None,
+    scheduler=None,
+):
+    """Confirm a repeated system/plain client abort out of band.
+
+    The current request is never replayed and opaque bytes never advance the
+    local ladder or learn a route. Two matching exact-host observations merely
+    schedule the existing direct HTTP completion probe; owned Geph is still
+    considered only if that probe proves an incomplete response.
+    """
+    normalized = normalize_host(host)
+    candidate = _client_first_response_abort_candidate(
+        normalized,
+        stage,
+        activity,
+        duration=duration,
+        probe_ip=probe_ip,
+        strategy_name=strategy_name,
+    )
+    if candidate is None:
+        _transport_incomplete_client_first_evidence.pop(normalized, None)
+        return False
+    h, address = candidate
+
+    now = time.monotonic() if now is None else now
+    _prune_transport_incomplete_probes(now)
+    events = _transport_incomplete_client_first_evidence.setdefault(h, deque())
+    events.append((now, address))
+    _prune_transport_incomplete_probes(now)
+    if len(events) < SERVER_FIRST_CLOSE_STORM:
+        return False
+    if _network_wide_unknown_failure_visible(now):
+        _transport_incomplete_client_first_evidence.pop(h, None)
+        return False
+    candidate_ip = events[-1][1]
+    _transport_incomplete_client_first_evidence.pop(h, None)
+    schedule = scheduler or _schedule_transport_incomplete_response_confirmation
+    return bool(schedule(h, candidate_ip, "plain", now=now))
 
 
 def _protected_youtube_medium_server_first_close(policy, activity, duration):
@@ -10840,6 +10962,27 @@ async def _handle_impl(reader, writer):
         detect_partial_tls_stall=detect_partial_tls_stall,
     )
     duration = time.monotonic() - t0
+    client_first_response_candidate = False
+    if is_tls and host and route_class == ROUTE_UNKNOWN:
+        client_first_response_candidate = bool(
+            _client_first_response_abort_candidate(
+                host,
+                observed_stage,
+                activity,
+                duration=duration,
+                probe_ip=chosen,
+                strategy_name=chosen_name,
+            )
+        )
+        note_client_first_response_abort(
+            host,
+            observed_stage,
+            activity,
+            duration=duration,
+            probe_ip=chosen,
+            strategy_name=chosen_name,
+            now=t0 + duration,
+        )
     protected_runtime_failure = False
     protected_runtime_suspicious = False
     if is_tls and host and _protected_local_runtime_policy(policy):
@@ -10895,7 +11038,10 @@ async def _handle_impl(reader, writer):
                     and unknown_stage == UNKNOWN_RECOVERY_LOCAL_LADDER
                 ):
                     note_local_ladder_partial_stall(host, chosen_name)
-        elif _clean_eof_stream_stalled(activity, now=t0 + duration):
+        elif (
+            not client_first_response_candidate
+            and _clean_eof_stream_stalled(activity, now=t0 + duration)
+        ):
             note_clean_eof_stream_stall(
                 host,
                 chosen_name,

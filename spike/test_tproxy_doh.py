@@ -79,6 +79,12 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
             tproxy._transport_incomplete_server_first_evidence.items()
         )
     }
+    transport_client_first_evidence = {
+        host: deque(values)
+        for host, values in (
+            tproxy._transport_incomplete_client_first_evidence.items()
+        )
+    }
     auto_last_status = dict(tproxy._auto_geph_last_status)
     local_resweep_active = dict(tproxy._local_bypass_resweep_active)
     local_resweep_last = dict(tproxy._local_bypass_resweep_last)
@@ -168,6 +174,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._transport_incomplete_last_probe.clear()
         tproxy._transport_incomplete_plain_candidates.clear()
         tproxy._transport_incomplete_server_first_evidence.clear()
+        tproxy._transport_incomplete_client_first_evidence.clear()
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
@@ -272,6 +279,10 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._transport_incomplete_server_first_evidence.clear()
         tproxy._transport_incomplete_server_first_evidence.update(
             transport_server_first_evidence
+        )
+        tproxy._transport_incomplete_client_first_evidence.clear()
+        tproxy._transport_incomplete_client_first_evidence.update(
+            transport_client_first_evidence
         )
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_active.update(local_resweep_active)
@@ -10107,6 +10118,63 @@ def test_relay_local_stream_stops_waiting_when_client_ends_first():
     assert activity.server_end_at
 
 
+def test_relay_client_first_after_framed_payload_is_completion_candidate():
+    payload = b"x" * 9000
+    record = b"\x17\x03\x03" + len(payload).to_bytes(2, "big") + payload
+
+    class DelayedEofReader:
+        async def read(self, _size):
+            await asyncio.sleep(0.02)
+            return b""
+
+    class RecordThenBlockingReader:
+        def __init__(self):
+            self.sent = False
+
+        async def read(self, _size):
+            if not self.sent:
+                self.sent = True
+                return record
+            await asyncio.Event().wait()
+
+    class Writer:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    activity = tproxy._RelayActivity(
+        last_downstream_at=tproxy.time.monotonic(),
+        track_tls_records=True,
+    )
+    result = asyncio.run(asyncio.wait_for(
+        tproxy.relay_local_stream(
+            DelayedEofReader(),
+            Writer(),
+            RecordThenBlockingReader(),
+            Writer(),
+            activity,
+        ),
+        timeout=0.2,
+    ))
+
+    # The pending server task is cancelled when the client closes first, so
+    # its return value is zero even though RelayActivity retains the payload.
+    assert result == (0, 0)
+    assert activity.downstream_bytes == len(record)
+    assert activity.client_ended_first
+    assert not activity.server_ended_first
+    assert activity.tls_complete_records == 1
+    assert tproxy._ambiguous_client_first_response_abort(activity, 0.1)
+
+
 def test_relay_local_stream_preserves_orderly_client_half_close(monkeypatch):
     response = b"delayed response"
 
@@ -10604,6 +10672,21 @@ def _short_server_first_activity(*, read_failed=False, downstream_bytes=16384):
 
 def _medium_server_first_activity(*, downstream_bytes=96 * 1024):
     return _short_server_first_activity(downstream_bytes=downstream_bytes)
+
+
+def _client_first_response_abort_activity(*, downstream_bytes=16 * 1024):
+    return tproxy._RelayActivity(
+        last_downstream_at=100.1,
+        downstream_bytes=downstream_bytes,
+        client_end_at=100.2,
+        server_end_at=100.3,
+        client_eof=True,
+        client_ended_first=True,
+        first_downstream_seen=True,
+        tls_record_buffer=bytearray(),
+        tls_complete_records=2,
+        track_tls_records=True,
+    )
 
 
 def _first_tls_record_cut_activity(*, read_failed=False):
@@ -11113,6 +11196,162 @@ def test_repeated_large_close_requires_exact_public_system_ip(monkeypatch):
     assert confirmations == []
     assert host not in tproxy._transport_incomplete_last_probe
     assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_repeated_client_first_abort_schedules_only_content_probe():
+    host = "partial-http2-body.example"
+    activity = _client_first_response_abort_activity()
+    scheduled = []
+
+    def schedule(candidate, ip, strategy, *, now):
+        scheduled.append((candidate, ip, strategy, now))
+        return True
+
+    assert not tproxy.note_client_first_response_abort(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+        now=100.2,
+        scheduler=schedule,
+    )
+    assert tproxy.note_client_first_response_abort(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        probe_ip="1.0.0.1",
+        strategy_name="plain",
+        now=100.3,
+        scheduler=schedule,
+    )
+
+    assert scheduled == [(host, "1.0.0.1", "plain", 100.3)]
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_completed_response_breaks_client_first_abort_sequence():
+    host = "ordinary-keepalive.example"
+    activity = _client_first_response_abort_activity()
+    scheduled = []
+
+    assert not tproxy.note_client_first_response_abort(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+        now=100.2,
+        scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+    )
+    completed = _short_server_first_activity()
+    assert not tproxy.note_client_first_response_abort(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        completed,
+        duration=0.2,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+        now=100.3,
+        scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+    )
+    assert not tproxy.note_client_first_response_abort(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+        now=100.4,
+        scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+    )
+
+    assert scheduled == []
+    assert len(tproxy._transport_incomplete_client_first_evidence[host]) == 1
+
+
+def test_client_first_abort_excludes_non_system_and_protected_routes():
+    activity = _client_first_response_abort_activity()
+    scheduled = []
+
+    for host, stage in (
+        ("partial-local.example", tproxy.AUTO_GEPH_STAGE_XBOX_DNS),
+        ("updates.discord.com", tproxy.AUTO_GEPH_STAGE_SYSTEM),
+        ("rr2---sn-test.googlevideo.com", tproxy.AUTO_GEPH_STAGE_SYSTEM),
+        ("www.google.com", tproxy.AUTO_GEPH_STAGE_SYSTEM),
+    ):
+        for now in (100.2, 100.3):
+            assert not tproxy.note_client_first_response_abort(
+                host,
+                stage,
+                activity,
+                duration=0.2,
+                probe_ip="1.1.1.1",
+                strategy_name="plain",
+                now=now,
+                scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+            )
+
+    assert scheduled == []
+    assert not tproxy._transport_incomplete_client_first_evidence
+
+
+def test_client_first_abort_is_bounded_before_content_probe():
+    host = "bounded-client-abort.example"
+    scheduled = []
+
+    for activity, duration in (
+        (_client_first_response_abort_activity(downstream_bytes=1024), 0.2),
+        (
+            _client_first_response_abort_activity(
+                downstream_bytes=tproxy.TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES + 1,
+            ),
+            0.2,
+        ),
+        (_client_first_response_abort_activity(), 31.0),
+    ):
+        assert not tproxy.note_client_first_response_abort(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=duration,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            now=100.2,
+            scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+        )
+
+    assert scheduled == []
+    assert host not in tproxy._transport_incomplete_client_first_evidence
+
+
+def test_client_first_abort_respects_network_wide_guard():
+    host = "guarded-client-abort.example"
+    activity = _client_first_response_abort_activity()
+    scheduled = []
+    for index in range(tproxy.AUTO_GEPH_NET_BAD - 1):
+        tproxy._transport_incomplete_client_first_evidence[
+            f"peer-{index}.example"
+        ] = deque(((100.1, "1.1.1.1"),))
+
+    for now in (100.2, 100.3):
+        assert not tproxy.note_client_first_response_abort(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=0.2,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            now=now,
+            scheduler=lambda *args, **kwargs: scheduled.append((args, kwargs)),
+        )
+
+    assert scheduled == []
     assert not tproxy.is_geo_exit_route(host)
 
 

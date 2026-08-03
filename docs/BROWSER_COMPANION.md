@@ -5,6 +5,14 @@ that a successfully rendered page says the service is unavailable in the
 current region. The browser companion supplies that missing semantic evidence
 without decrypting HTTPS or adding per-site rules.
 
+The daemon has a separate browser-independent path for incomplete responses.
+If an HTTP/2 client closes first after receiving complete TLS records, two
+bounded observations on the exact unknown `system/plain` route may trigger an
+independent certificate-validating HTTP completion probe. The encrypted relay
+signal itself never changes a route. This can recover a content-length or
+chunk-framing shortfall without an extension, but it cannot identify a complete
+page whose visible text denies access by region.
+
 ## Chromium Preview
 
 The preview under `browser-companion/chromium/` is a Manifest V3 extension with
@@ -17,7 +25,9 @@ removed on the request's final completion or error.
 
 1. A top-frame content script observes the first ten seconds of an HTTPS page.
    It checks the title, visible dialogs, and a bounded sparse-page snapshot
-   locally for strong regional-denial language.
+   locally for strong regional-denial language. The frozen contract includes
+   the observed `This content is no longer available in your area` page without
+   naming `weather.com` in routing policy.
 2. The content script sends only a fixed category and confidence. It cannot
    provide a hostname, URL, or page text.
 3. The service worker derives the normalized hostname from Chrome's
