@@ -2038,6 +2038,8 @@ SERVER_FIRST_CLOSE_STATE_MAX = 4096
 TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
 TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
 TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION = 30.0
+SERVER_FIRST_CLOSE_KIND_SHORT = "short"
+SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE = "ambiguous_large"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
 AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
@@ -8617,9 +8619,8 @@ def _schedule_transport_incomplete_response_confirmation(
     return True
 
 
-def _suspicious_server_first_close(activity, duration):
-    """Detect a bounded TLS stream cut before the client closes its side."""
-    if not (
+def _valid_server_first_framed_close(activity):
+    return bool(
         activity.server_ended_first
         and not activity.client_ended_first
         and activity.server_end_at
@@ -8627,7 +8628,12 @@ def _suspicious_server_first_close(activity, duration):
         and not activity.downstream_write_failed
         and activity.tls_framing_valid
         and activity.tls_complete_records > 0
-    ):
+    )
+
+
+def _suspicious_server_first_close(activity, duration):
+    """Detect a bounded TLS stream cut before the client closes its side."""
+    if not _valid_server_first_framed_close(activity):
         return False
     if (
         duration > SERVER_FIRST_CLOSE_MAX_DURATION
@@ -8640,13 +8646,8 @@ def _suspicious_server_first_close(activity, duration):
 def _ambiguous_large_server_first_close(activity, duration):
     """Bound a larger close that needs an independent HTTP completion probe."""
     if not (
-        activity.server_ended_first
-        and not activity.client_ended_first
-        and activity.server_end_at
+        _valid_server_first_framed_close(activity)
         and activity.downstream_bytes > SERVER_FIRST_CLOSE_MAX_BYTES
-        and not activity.downstream_write_failed
-        and activity.tls_framing_valid
-        and activity.tls_complete_records > 0
     ):
         return False
     return bool(
@@ -8699,7 +8700,11 @@ def note_server_first_route_close(
     _prune_server_first_closes(now)
     key = (h, stage)
     events = _server_first_closes.setdefault(key, deque())
-    close_kind = "ambiguous_large" if ambiguous_large_close else "short"
+    close_kind = (
+        SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE
+        if ambiguous_large_close
+        else SERVER_FIRST_CLOSE_KIND_SHORT
+    )
     if events and events[-1][2] != close_kind:
         events.clear()
     events.append((now, probe_ip, close_kind))
