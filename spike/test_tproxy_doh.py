@@ -10225,6 +10225,226 @@ def test_system_server_close_never_bypasses_the_local_ladder(monkeypatch):
     assert not tproxy.is_geo_exit_route(host)
 
 
+def test_repeated_large_system_close_uses_content_probe_without_advancing_ladder(
+    monkeypatch,
+):
+    host = "large-partial-body.example"
+    activity = _short_server_first_activity(downstream_bytes=128 * 1024)
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for now, probe_ip in (
+        (100.2, "1.1.1.1"),
+        (100.3, "8.8.8.8"),
+    ):
+        assert not tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=12.0,
+            now=now,
+            probe_ip=probe_ip,
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == [(host, "1.1.1.1")]
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert host not in tproxy._transport_incomplete_server_first_evidence
+    assert tproxy._transport_incomplete_last_probe[host] == 100.3
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_repeated_large_complete_response_does_not_request_geph(monkeypatch):
+    host = "large-complete-body.example"
+    activity = _short_server_first_activity(downstream_bytes=128 * 1024)
+    local_probes = []
+    geph_requests = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(
+        tproxy,
+        "_incomplete_response_plain_payload_probe",
+        lambda ip, candidate: local_probes.append((ip, candidate)) or False,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_request_incomplete_response_geo_exit_confirmation",
+        lambda candidate: geph_requests.append(candidate) or True,
+    )
+
+    for now in (100.2, 100.3):
+        assert not tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=12.0,
+            now=now,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            transport_confirmation_runner=(
+                tproxy._confirm_transport_incomplete_response
+            ),
+        )
+
+    assert local_probes == [("1.1.1.1", host)]
+    assert geph_requests == []
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_repeated_large_close_requires_exact_public_system_ip(monkeypatch):
+    host = "large-no-address.example"
+    activity = _short_server_first_activity(downstream_bytes=128 * 1024)
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for now in (100.2, 100.3):
+        assert not tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=12.0,
+            now=now,
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == []
+    assert host not in tproxy._transport_incomplete_last_probe
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_repeated_large_close_excludes_protected_routes(monkeypatch):
+    activity = _short_server_first_activity(downstream_bytes=128 * 1024)
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for protected in (
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "www.google.com",
+    ):
+        for now in (100.2, 100.3):
+            assert not tproxy.note_server_first_route_close(
+                protected,
+                tproxy.AUTO_GEPH_STAGE_SYSTEM,
+                activity,
+                duration=12.0,
+                now=now,
+                probe_ip="1.1.1.1",
+                strategy_name="plain",
+                transport_confirmation_runner=lambda candidate, ip: (
+                    confirmations.append((candidate, ip)) or True
+                ),
+            )
+        assert not tproxy._xbox_dns_candidate_active(protected, now=100.3)
+
+    assert confirmations == []
+
+
+def test_server_first_close_classes_do_not_complete_each_other(monkeypatch):
+    host = "mixed-close-sizes.example"
+    short = _short_server_first_activity()
+    large = _short_server_first_activity(downstream_bytes=128 * 1024)
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for now, activity, duration in (
+        (100.1, short, 0.2),
+        (100.2, large, 12.0),
+        (100.3, short, 0.2),
+        (100.4, large, 12.0),
+    ):
+        assert not tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+            activity,
+            duration=duration,
+            now=now,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == []
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.4)
+    assert host not in tproxy._transport_incomplete_server_first_evidence
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_short_repeat_claim_cannot_authorize_large_content_probe(monkeypatch):
+    host = "claimed-mixed-close.example"
+    large = _short_server_first_activity(downstream_bytes=128 * 1024)
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        large,
+        duration=12.0,
+        now=100.2,
+        probe_ip="8.8.8.8",
+        strategy_name="plain",
+        repeat_claimed=True,
+        repeat_probe_ip="1.1.1.1",
+        transport_confirmation_runner=lambda candidate, ip: (
+            confirmations.append((candidate, ip)) or True
+        ),
+    )
+
+    assert confirmations == []
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
+    assert host not in tproxy._transport_incomplete_last_probe
+    assert not tproxy.is_geo_exit_route(host)
+
+
+def test_repeated_large_non_system_close_never_schedules_content_probe(monkeypatch):
+    host = "large-local-response.example"
+    activity = _short_server_first_activity(downstream_bytes=128 * 1024)
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for now in (100.2, 100.3):
+        assert not tproxy.note_server_first_route_close(
+            host,
+            tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+            activity,
+            duration=12.0,
+            now=now,
+            probe_ip="1.1.1.1",
+            strategy_name="plain",
+            transport_confirmation_runner=lambda candidate, ip: (
+                confirmations.append((candidate, ip)) or True
+            ),
+        )
+
+    assert confirmations == []
+    assert host not in tproxy._transport_incomplete_last_probe
+    assert not tproxy.is_geo_exit_route(host)
+
+
 def test_server_first_evidence_does_not_mix_with_partial_record_stalls(
     monkeypatch,
 ):
@@ -10589,14 +10809,14 @@ def test_late_server_reset_does_not_advance_unknown_host():
         now=100.2,
     )
     assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
-    assert not tproxy._server_first_closes
+    assert tproxy._server_first_closes
 
 
 def test_large_completed_server_close_clears_provisional_evidence():
     host = "short-close.example"
     short = _short_server_first_activity()
     large = _short_server_first_activity(
-        downstream_bytes=tproxy.SERVER_FIRST_CLOSE_MAX_BYTES + 1
+        downstream_bytes=tproxy.TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES + 1
     )
 
     assert not tproxy.note_server_first_route_close(
@@ -10615,6 +10835,34 @@ def test_large_completed_server_close_clears_provisional_evidence():
         now=100.3,
     )
     assert not tproxy._server_first_closes
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
+
+
+def test_slow_large_server_close_clears_provisional_evidence():
+    host = "slow-large-close.example"
+    large = _short_server_first_activity(downstream_bytes=128 * 1024)
+
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        large,
+        duration=12.0,
+        now=100.2,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+    )
+    assert tproxy._server_first_closes
+    assert not tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        large,
+        duration=tproxy.TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION + 0.1,
+        now=100.3,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+    )
+    assert not tproxy._server_first_closes
+    assert host not in tproxy._transport_incomplete_last_probe
     assert not tproxy._xbox_dns_candidate_active(host, now=100.3)
 
 

@@ -60,6 +60,17 @@ is the explicit action that may reinstall or re-enable it.
 
 ### A site partially loads or owned Geph returns `local_rate_limited`
 
+A partial page can return HTTP `200` and still end with curl error `18`, a
+blank browser document, or missing assets after tens or hundreds of KiB. A
+successful status line, TLS handshake, or first payload is therefore not a
+complete-response check. Slipstream treats an orderly framed close between
+32 KiB and 512 KiB as ambiguous: two exact system/plain observations may run
+one bounded HTTP-framing probe against the first public system-selected IP,
+but may not advance the local ladder or select Geph from encrypted byte count.
+A complete response ends the incident. Only a strictly proven local body
+shortfall followed by the existing complete owned-Geph proof can learn a
+temporary exact-host route.
+
 A live owned Geph process and listener do not guarantee a usable exit session.
 Workstation A/B evidence on 2026-07-30 and 2026-08-01 received partial direct
 responses, then HTTP `429` with body `local_rate_limited` through the verified
