@@ -2875,6 +2875,7 @@ def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
 ):
     calls = []
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 123)
     monkeypatch.setattr(
         tproxy,
         "_tcp_listener_present",
@@ -2885,7 +2886,9 @@ def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
     monkeypatch.setattr(
         tproxy,
         "geph_listener_owned",
-        lambda port: calls.append(("owned", port)) or listener_owned,
+        lambda port, *, listener_pid: (
+            calls.append(("owned", port, listener_pid)) or listener_owned
+        ),
     )
     monkeypatch.setattr(
         tproxy,
@@ -2901,12 +2904,33 @@ def test_owned_geph_recovery_probe_is_bounded_and_owner_exact(
         tproxy.GEPH_OWNED_PORT,
         tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     )
-    assert ("owned", tproxy.GEPH_OWNED_PORT) in calls or not listener_present
+    assert ("owned", tproxy.GEPH_OWNED_PORT, 123) in calls or not listener_present
     assert (
         "live",
         tproxy.GEPH_OWNED_PORT,
         tproxy.AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     ) in calls or not (listener_present and listener_owned)
+
+
+def test_owned_geph_successor_rejects_pid_changed_during_readiness(monkeypatch):
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_tcp_listener_present", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tproxy, "_geph_live", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        tproxy,
+        "geph_listener_owned",
+        lambda _port, *, listener_pid: listener_pid == 101,
+    )
+    listener_pids = iter((101, 100))
+
+    assert (
+        tproxy._wait_for_owned_geph_successor(
+            100,
+            timeout=0.0,
+            listener_pid=lambda _port: next(listener_pids),
+        )
+        == "timeout"
+    )
 
 
 def test_geph_probe_hysteresis_never_invents_cold_start_readiness():
@@ -7131,7 +7155,7 @@ def test_owned_geph_restart_cools_backend_and_kickstarts_exact_launchagent(monke
     monkeypatch.setattr(
         tproxy,
         "_probe_owned_geph_recovery_state",
-        lambda: "ready",
+        lambda _pid=None, **_kwargs: "ready",
     )
     monkeypatch.setattr(
         tproxy,
@@ -7191,8 +7215,9 @@ def test_owned_geph_restart_adopts_delayed_successor_after_command_timeout(
         lambda _port: next(listener_pids),
     )
 
-    def recovery_probe():
+    def recovery_probe(successor_pid, **_kwargs):
         assert tproxy._geph_restart_draining is True
+        assert successor_pid == 101
         return "ready"
 
     monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", recovery_probe)
@@ -7239,7 +7264,11 @@ def test_owned_geph_restart_preserves_timeout_diagnostics(monkeypatch, capsys):
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "GEPH_RESTART_SUCCESSOR_GRACE", 0.0)
     monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
-    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", lambda: "down")
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "down",
+    )
     monkeypatch.setattr(tproxy, "geph_listener_owned", lambda *args, **kwargs: True)
 
     def timed_out(*_args):
@@ -7297,7 +7326,11 @@ def test_owned_geph_restart_timeout_without_successor_fails_closed(monkeypatch, 
     monkeypatch.setattr(tproxy, "_geph_restart_draining", False)
     monkeypatch.setattr(tproxy, "GEPH_RESTART_SUCCESSOR_GRACE", 0.0)
     monkeypatch.setattr(tproxy, "_geph_listener_pid", lambda _port: 100)
-    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", lambda: "down")
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "down",
+    )
     monkeypatch.setattr(
         tproxy,
         "geph_listener_owned",
@@ -7340,7 +7373,7 @@ def test_owned_geph_restart_rejects_unowned_successor_after_timeout(monkeypatch)
     monkeypatch.setattr(
         tproxy,
         "_probe_owned_geph_recovery_state",
-        lambda: "conflict",
+        lambda _pid=None, **_kwargs: "conflict",
     )
     monkeypatch.setattr(
         tproxy,
@@ -8591,7 +8624,11 @@ def test_semantic_recovery_performs_two_successful_in_incident_replacements(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(tproxy, "note_runtime_rearm", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", lambda: "ready")
+    monkeypatch.setattr(
+        tproxy,
+        "_probe_owned_geph_recovery_state",
+        lambda _pid=None, **_kwargs: "ready",
+    )
 
     result = tproxy._retry_semantic_geph_probe_after_owned_restart(
         "two-replacements.example",

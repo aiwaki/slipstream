@@ -3002,17 +3002,24 @@ def _wait_for_owned_geph_successor(
         return "unverified"
     timeout = GEPH_RESTART_SUCCESSOR_GRACE if timeout is None else max(0.0, timeout)
     listener_pid = _geph_listener_pid if listener_pid is None else listener_pid
-    recovery_probe = (
-        _probe_owned_geph_recovery_state
-        if recovery_probe is None
-        else recovery_probe
-    )
+    if recovery_probe is None:
+        recovery_probe = lambda expected_pid: _probe_owned_geph_recovery_state(
+            expected_pid,
+            listener_pid_reader=listener_pid,
+        )
     monotonic = time.monotonic if monotonic is None else monotonic
     sleeper = time.sleep if sleeper is None else sleeper
     deadline = monotonic() + timeout
     while not _shutdown_started.is_set():
         successor_pid = listener_pid(GEPH_OWNED_PORT)
-        recovery_state = recovery_probe()
+        if (
+            not isinstance(successor_pid, int)
+            or isinstance(successor_pid, bool)
+            or successor_pid <= 0
+        ):
+            recovery_state = "down"
+        else:
+            recovery_state = recovery_probe(successor_pid)
         if recovery_state == "conflict":
             _geph_port_conflict = True
             _geph_port = None
@@ -3272,21 +3279,34 @@ def _auto_geph_deferred_candidate_allowed(host):
     )
 
 
-def _probe_owned_geph_recovery_state():
+def _probe_owned_geph_recovery_state(expected_pid=None, listener_pid_reader=None):
     """Observe the exact owned listener without waiting for monitor cadence."""
     if not GEPH_ENABLED:
+        return "down"
+    listener_pid_reader = (
+        _geph_listener_pid if listener_pid_reader is None else listener_pid_reader
+    )
+    if expected_pid is None:
+        expected_pid = listener_pid_reader(GEPH_OWNED_PORT)
+    if (
+        not isinstance(expected_pid, int)
+        or isinstance(expected_pid, bool)
+        or expected_pid <= 0
+    ):
         return "down"
     if not _tcp_listener_present(
         GEPH_OWNED_PORT,
         timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     ):
         return "down"
-    if not geph_listener_owned(GEPH_OWNED_PORT):
+    if not geph_listener_owned(GEPH_OWNED_PORT, listener_pid=expected_pid):
         return "conflict"
     if not _geph_live(
         GEPH_OWNED_PORT,
         timeout=AUTO_GEPH_RECOVERY_PROBE_TIMEOUT,
     ):
+        return "down"
+    if listener_pid_reader(GEPH_OWNED_PORT) != expected_pid:
         return "down"
     return "ready"
 
