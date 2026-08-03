@@ -55,8 +55,10 @@ import urllib.request
 import connection_probe
 import geph_backend
 from http_response_completion import (
+    http_response_body,
     http_response_body_length,
     http_response_complete,
+    http_response_framing_complete,
     http_response_incomplete,
 )
 import install_guard
@@ -2042,6 +2044,11 @@ TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
 TRANSPORT_INCOMPLETE_CONFIRM_MAX = 4
 TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION = 30.0
 TRANSPORT_INCOMPLETE_CLIENT_FIRST_MIN_BYTES = 8 * 1024
+SEMANTIC_PLAIN_PROBE_COOLDOWN = 10 * 60.0
+SEMANTIC_PLAIN_PROBE_MAX_BYTES = 128 * 1024
+SEMANTIC_PLAIN_CONFIRM_MAX = 2
+SEMANTIC_PLAIN_PROBE_WINDOW = 60.0
+SEMANTIC_PLAIN_PROBE_WINDOW_MAX = 8
 SERVER_FIRST_CLOSE_KIND_SHORT = "short"
 SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE = "ambiguous_large"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
@@ -2079,8 +2086,7 @@ AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX = 2
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
 SEMANTIC_GEPH_PROBE_RANGE_END = 262143
 INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 524288
-SEMANTIC_GEO_DENIAL_MARKERS = (
-    b"local_rate_limited",
+SEMANTIC_REGIONAL_DENIAL_MARKERS = (
     b"no longer available in your area",
     b"no longer available in your region",
     b"no longer available in your country",
@@ -2094,6 +2100,10 @@ SEMANTIC_GEO_DENIAL_MARKERS = (
     "недоступен в вашем регионе".encode(),
     "недоступно в вашем регионе".encode(),
     "контент недоступен в вашем регионе".encode(),
+)
+SEMANTIC_GEO_DENIAL_MARKERS = (
+    b"local_rate_limited",
+    *SEMANTIC_REGIONAL_DENIAL_MARKERS,
 )
 AUTO_GEPH_RECOVERY_RETRY_MAX = 4
 AUTO_GEPH_RUNTIME_MISS_WINDOW = 120.0
@@ -2141,6 +2151,9 @@ _transport_incomplete_last_probe = {}  # host -> monotonic last probe start
 _transport_incomplete_plain_candidates = {}  # host -> (ip, monotonic observed)
 _transport_incomplete_server_first_evidence = {}  # host -> {stage: monotonic}
 _transport_incomplete_client_first_evidence = {}  # host -> deque[(monotonic, ip)]
+_semantic_plain_confirming = {}  # host -> monotonic direct semantic probe start
+_semantic_plain_last_probe = {}  # host -> monotonic direct semantic probe start
+_semantic_plain_probe_window = deque()  # monotonic starts across exact hosts
 
 # Runtime local-bypass failures start a private exact-host re-sweep. The state is
 # deliberately process-local and aggregate-free: status must not become browsing
@@ -3574,14 +3587,14 @@ def _auto_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
     return _semantic_geph_payload_probe(host, timeout)
 
 
-def _semantic_geph_probe_request(host):
+def _semantic_geph_probe_request(host, range_end=SEMANTIC_GEPH_PROBE_RANGE_END):
     return (
         "GET / HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         "User-Agent: SlipstreamSemanticGeo/1\r\n"
         "Accept: text/html,application/xhtml+xml\r\n"
         "Accept-Encoding: identity\r\n"
-        f"Range: bytes=0-{SEMANTIC_GEPH_PROBE_RANGE_END}\r\n"
+        f"Range: bytes=0-{int(range_end)}\r\n"
         "Cache-Control: no-cache\r\n"
         "Connection: close\r\n\r\n"
     ).encode("ascii", "ignore")
@@ -3613,6 +3626,126 @@ def _semantic_geph_response_usable(data):
             return False
     lowered = data.lower()
     return not any(marker in lowered for marker in SEMANTIC_GEO_DENIAL_MARKERS)
+
+
+def _semantic_plain_response_is_regional_denial(
+    data,
+    *,
+    stream_closed=True,
+    truncated=False,
+):
+    """Recognize only a strong regional-denial marker in a plain HTTP reply."""
+    if not isinstance(data, bytes) or not data.startswith(b"HTTP/"):
+        return False
+    try:
+        headers, _body = data.split(b"\r\n\r\n", 1)
+    except ValueError:
+        return False
+    first_line = headers.split(b"\r\n", 1)[0].split()
+    if len(first_line) < 2:
+        return False
+    try:
+        status = int(first_line[1])
+    except ValueError:
+        return False
+    if status < 200 or status >= 500 or status == 429:
+        return False
+    for header in headers.split(b"\r\n")[1:]:
+        name, separator, value = header.partition(b":")
+        if (
+            separator
+            and name.strip().lower() == b"content-encoding"
+            and value.strip().lower() not in {b"", b"identity"}
+        ):
+            return False
+    body = http_response_body(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=True,
+    )
+    if body is None:
+        return False
+    lowered = body.lower()
+    return any(marker in lowered for marker in SEMANTIC_REGIONAL_DENIAL_MARKERS)
+
+
+def _semantic_plain_denial_probe(
+    ip,
+    host,
+    timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
+):
+    """Check one exact system-selected IP for a complete regional-denial page."""
+    h = normalize_host(host)
+    if not h or not ip:
+        return False
+    deadline = time.monotonic() + max(float(timeout), 0.001)
+    sock = None
+    tls_sock = None
+    chunks = []
+    size = 0
+    stream_closed = False
+    complete = False
+    try:
+        sock = socket.create_connection(
+            (ip, 443),
+            timeout=max(deadline - time.monotonic(), 0.001),
+        )
+        _set_socket_deadline_timeout(sock, deadline)
+        tls_sock = _local_payload_ssl_context().wrap_socket(
+            sock,
+            server_hostname=h,
+        )
+        _set_socket_deadline_timeout(tls_sock, deadline)
+        tls_sock.sendall(
+            _semantic_geph_probe_request(
+                h,
+                range_end=SEMANTIC_PLAIN_PROBE_MAX_BYTES - 1,
+            )
+        )
+        while size < SEMANTIC_PLAIN_PROBE_MAX_BYTES:
+            try:
+                _set_socket_deadline_timeout(tls_sock, deadline)
+                chunk = tls_sock.recv(
+                    min(4096, SEMANTIC_PLAIN_PROBE_MAX_BYTES - size)
+                )
+            except socket.timeout:
+                break
+            if not chunk:
+                stream_closed = True
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            data = b"".join(chunks)
+            if http_response_framing_complete(
+                data,
+                stream_closed=False,
+                truncated=False,
+            ):
+                complete = True
+                break
+        data = b"".join(chunks)
+        truncated = size >= SEMANTIC_PLAIN_PROBE_MAX_BYTES and not complete
+        response_complete = complete or http_response_framing_complete(
+            data,
+            stream_closed=stream_closed,
+            truncated=truncated,
+        )
+        return bool(
+            response_complete
+            and _semantic_plain_response_is_regional_denial(
+                data,
+                stream_closed=stream_closed,
+                truncated=truncated,
+            )
+        )
+    except Exception:
+        return False
+    finally:
+        try:
+            (tls_sock or sock).close()
+        except Exception:
+            pass
 
 
 def _semantic_geph_payload_probe(host, timeout=AUTO_GEPH_CONFIRM_TIMEOUT):
@@ -4691,6 +4824,106 @@ def _schedule_bounded_geph_confirmation(
             )
             if on_complete is not None:
                 on_complete(h, False)
+        return False
+    return True
+
+
+def _prune_semantic_plain_probes(now):
+    stale = now - AUTO_GEPH_CONFIRM_TIMEOUT * 2
+    for host, started in list(_semantic_plain_confirming.items()):
+        if started < stale:
+            _semantic_plain_confirming.pop(host, None)
+    cutoff = now - SEMANTIC_PLAIN_PROBE_COOLDOWN
+    for host, attempted_at in list(_semantic_plain_last_probe.items()):
+        if (
+            (attempted_at < cutoff or not _auto_geph_base_host_allowed(host))
+            and host not in _semantic_plain_confirming
+        ):
+            _semantic_plain_last_probe.pop(host, None)
+    while len(_semantic_plain_last_probe) > AUTO_GEPH_STATE_MAX:
+        oldest = min(
+            _semantic_plain_last_probe,
+            key=_semantic_plain_last_probe.get,
+        )
+        _semantic_plain_last_probe.pop(oldest, None)
+    cutoff = now - SEMANTIC_PLAIN_PROBE_WINDOW
+    while (
+        _semantic_plain_probe_window
+        and _semantic_plain_probe_window[0] <= cutoff
+    ):
+        _semantic_plain_probe_window.popleft()
+
+
+def _schedule_semantic_plain_denial_probe(
+    host,
+    ip,
+    strategy_name,
+    *,
+    now=None,
+    runner=None,
+    confirmation_runner=None,
+):
+    """Inspect one bounded service root without delaying its client stream."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if (
+        strategy_name != "plain"
+        or not address.is_global
+        or not _auto_geph_base_host_allowed(h)
+        or _auto_geph_learned_exact_host(h)
+        or not _owned_geph_ready_for_semantic_confirmation()
+        or _network_wide_unknown_failure_visible(now)
+    ):
+        return False
+    with _auto_geph_lock:
+        _prune_semantic_plain_probes(now)
+        last = _semantic_plain_last_probe.get(h, 0.0)
+        if last and now - last < SEMANTIC_PLAIN_PROBE_COOLDOWN:
+            return False
+        if h in _semantic_plain_confirming:
+            return False
+        if len(_semantic_plain_confirming) >= SEMANTIC_PLAIN_CONFIRM_MAX:
+            return False
+        if len(_semantic_plain_probe_window) >= SEMANTIC_PLAIN_PROBE_WINDOW_MAX:
+            return False
+        _semantic_plain_last_probe[h] = now
+        _semantic_plain_confirming[h] = now
+        _semantic_plain_probe_window.append(now)
+
+    def run():
+        try:
+            denied = bool((runner or _semantic_plain_denial_probe)(str(address), h))
+            if denied:
+                _request_semantic_geo_exit_confirmation(
+                    h,
+                    now=now if runner is not None else time.monotonic(),
+                    confirmation_runner=confirmation_runner,
+                )
+        finally:
+            with _auto_geph_lock:
+                if _semantic_plain_confirming.get(h) == now:
+                    _semantic_plain_confirming.pop(h, None)
+
+    if runner is not None:
+        run()
+        return True
+    worker = threading.Thread(target=run, daemon=True)
+    try:
+        worker.start()
+    except (OSError, RuntimeError):
+        with _auto_geph_lock:
+            _semantic_plain_confirming.pop(h, None)
+            if _semantic_plain_last_probe.get(h) == now:
+                _semantic_plain_last_probe.pop(h, None)
+            if (
+                _semantic_plain_probe_window
+                and _semantic_plain_probe_window[-1] == now
+            ):
+                _semantic_plain_probe_window.pop()
         return False
     return True
 
@@ -10711,6 +10944,12 @@ async def _handle_impl(reader, writer):
             result = exact
             chosen_name = "plain"
             via_system_exact = True
+            _schedule_semantic_plain_denial_probe(
+                host,
+                dst_ip,
+                chosen_name,
+                now=time.monotonic(),
+            )
         else:
             assert system_probe in (SYSTEM_PROBE_CLOSED, SYSTEM_PROBE_TIMEOUT)
             note_zero_payload_route_failure(host, AUTO_GEPH_STAGE_SYSTEM)

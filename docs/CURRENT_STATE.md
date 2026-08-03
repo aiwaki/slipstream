@@ -9,14 +9,27 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Current user-facing priority: Slipstream is rolled back and must not be
-reinstalled yet. PR #304 merged as exact main
-`40fac7693e229de34adb6988fdf7cd08b28d1cbf`; CI `30845033722`, audit
-`30845035284`, native Windows qualification `30845034732`, and the sole
-protected owned-Geph qualification `30846312090` passed. Protected artifact
-`8868928993` matched exact main and proved account-backed owned-Geph payload
-before tray exit, trayless, and after KeepAlive replacement; both Chromium
-semantic scenarios, cleanup, artifact identity, and system-network
-non-mutation passed.
+reinstalled yet. PR #305 merged as live main
+`675bc4acc7b83bb4f7d5442baf4dbde099696d9e`. Exact-main CI `30853122536`,
+audit `30853121875`, and native Windows qualification `30853121885` passed.
+There is no protected owned-Geph qualification for this live SHA, so no
+artifact from it is authorized for the workstation.
+
+The current branch `codex/generic-semantic-canary` addresses the separate
+complete-page regional-denial class without adding a site rule. Once an
+eligible unknown host establishes the exact `system/plain` path, the daemon
+may start one background, certificate-validating `GET /` against that same
+public IP. It sends no browser state and is bounded to `128 KiB`, two concurrent
+probes, eight new exact hosts per minute, and one attempt per exact host per ten
+minutes. Only a complete identity-encoded HTTP response whose decoded
+representation body contains a strong generic regional-denial marker may
+request the existing independent owned-Geph
+semantic confirmation. `429 local_rate_limited`, incomplete or compressed
+responses, protected/static routes, and unowned Geph remain non-authorizing.
+The current client stream is never delayed, replayed, or rerouted; the learned
+route applies only to a later request. Browser companion delivery remains
+necessary for path-specific or rendered-only denial and for one bounded
+automatic reload.
 
 Controlled workstation transaction
 `8E4BA969-2C1D-4B89-B9FA-71478789FF9E` installed only that artifact and reached
@@ -31,11 +44,11 @@ attestation, witness, and runtime, and preserved DNS `111.88.96.50` /
 `111.88.96.51`, owned Geph, proxy/PAC, default route, and external owners. The
 private log contained no event for that host.
 
-The reproduced blind spot is generic: an HTTP/2 client may detect an
+The earlier reproduced blind spot is generic: an HTTP/2 client may detect an
 incomplete body and close its side while the reusable TLS connection remains
 open. Relay cancellation preserved complete TLS-record counters but cancelled
-the downstream-idle observer before it could publish evidence. The current
-branch `codex/generic-semantic-recovery` records two bounded exact-host
+the downstream-idle observer before it could publish evidence. PR #305 records
+two bounded exact-host
 client-first observations only on the unknown system/plain route. They merely
 schedule the existing certificate-validating HTTP completion probe. Opaque
 bytes do not advance app-owned DNS, local strategies, Geph, or the current
@@ -56,11 +69,20 @@ reviewed store distribution and Safari needs a signed, enabled container plus
 sandbox-to-owner-socket proof. Transport code must not pretend it can infer
 rendered page meaning from encrypted TLS.
 
-Local verification on the current branch passes: `993` Python tests plus `41`
-subtests and all `21` Chromium companion tests; the focused transport subset is
-`10` tests. PR review, exact-main gates, one fresh protected qualification, and
-a controlled workstation transaction remain required. Only that future
-exact-main protected artifact may be installed.
+Local verification for PR #305 passed before merge. The new semantic-canary
+branch passes `1003` Python tests plus `41` subtests, `21` Chromium companion
+tests, `83` Rust tray tests, `32` Rust core tests, `241` Windows adapter tests,
+and both `40`-test userspace-stack suites. PR review, exact-main gates, one
+fresh protected qualification, and a controlled workstation transaction remain
+required. Only that future exact-main protected artifact may be installed.
+
+PR #306's first dependency-audit run `30859867860` exposed the newly published
+`CVE-2026-69247` in the pinned `cryptography 49.0.0`; the previous exact-main
+audit had passed before the advisory entered the database. The branch now
+requires patched `cryptography 50.0.0` and regenerates all three Python hash
+locks together. A local checksum-pinned OSV scan of the rebuilt 348-package
+target inventory reports zero blocking advisories; PR CI and audit must repeat
+that result before merge.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run

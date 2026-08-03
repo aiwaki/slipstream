@@ -5,13 +5,20 @@ that a successfully rendered page says the service is unavailable in the
 current region. The browser companion supplies that missing semantic evidence
 without decrypting HTTPS or adding per-site rules.
 
-The daemon has a separate browser-independent path for incomplete responses.
-If an HTTP/2 client closes first after receiving complete TLS records, two
-bounded observations on the exact unknown `system/plain` route may trigger an
-independent certificate-validating HTTP completion probe. The encrypted relay
-signal itself never changes a route. This can recover a content-length or
-chunk-framing shortfall without an extension, but it cannot identify a complete
-page whose visible text denies access by region.
+The daemon has browser-independent fallbacks for incomplete responses and
+service-root regional denial. If an eligible unknown host establishes an exact
+public `system/plain` route, a background certificate-validating `GET /` may
+inspect at most `128 KiB` from that same IP. It sends no browser cookies, path,
+query, storage, or external-resource requests. A complete response whose
+decoded identity-representation body contains a strong generic regional-denial
+marker may only request a second independent
+confirmation through verified owned Geph; the current client stream is never
+replayed or changed. The transport path also has separate bounded framing
+evidence for incomplete bodies.
+
+These fallbacks can prepare a proven route for a later request, but they cannot
+reload a page or see denial that appears only on a non-root path or after
+JavaScript execution. The companion remains necessary for those cases.
 
 ## Chromium Preview
 

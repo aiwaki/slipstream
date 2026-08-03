@@ -223,6 +223,9 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_clean_eof_stalls", {})
     monkeypatch.setattr(tproxy, "_server_first_closes", {})
     monkeypatch.setattr(tproxy, "_transport_incomplete_client_first_evidence", {})
+    monkeypatch.setattr(tproxy, "_semantic_plain_confirming", {})
+    monkeypatch.setattr(tproxy, "_semantic_plain_last_probe", {})
+    monkeypatch.setattr(tproxy, "_semantic_plain_probe_window", deque())
     monkeypatch.setattr(tproxy, "_protected_local_server_first_closes", {})
     monkeypatch.setattr(tproxy, "_direct_first_local_fallback_until", {})
     monkeypatch.setattr(tproxy, "_auto_geph", {})
@@ -1292,6 +1295,39 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
     assert strategy_name == "plain"
     assert repeat_claimed
     assert repeat_probe_ip == "1.1.1.1"
+
+
+def test_system_plain_route_schedules_semantic_probe_without_replaying(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "regional-denial-contract.example"
+    response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    probes = []
+
+    async def short_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PAYLOAD,
+            probed_upstream_response(response),
+        )
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_semantic_plain_denial_probe",
+        lambda actual_host, ip, strategy, **kwargs: (
+            probes.append((actual_host, ip, strategy, kwargs["now"])) or True
+        ),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert len(probes) == 1
+    assert probes[0][:3] == (host, "1.1.1.1", "plain")
+    assert probes[0][3] >= 0
+    assert not tproxy._auto_geph_learned_exact_host(host)
 
 
 def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):

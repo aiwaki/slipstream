@@ -85,6 +85,9 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
             tproxy._transport_incomplete_client_first_evidence.items()
         )
     }
+    semantic_plain_confirming = dict(tproxy._semantic_plain_confirming)
+    semantic_plain_last_probe = dict(tproxy._semantic_plain_last_probe)
+    semantic_plain_probe_window = deque(tproxy._semantic_plain_probe_window)
     auto_last_status = dict(tproxy._auto_geph_last_status)
     local_resweep_active = dict(tproxy._local_bypass_resweep_active)
     local_resweep_last = dict(tproxy._local_bypass_resweep_last)
@@ -175,6 +178,9 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._transport_incomplete_plain_candidates.clear()
         tproxy._transport_incomplete_server_first_evidence.clear()
         tproxy._transport_incomplete_client_first_evidence.clear()
+        tproxy._semantic_plain_confirming.clear()
+        tproxy._semantic_plain_last_probe.clear()
+        tproxy._semantic_plain_probe_window.clear()
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_last.clear()
         tproxy._auto_geph_last_status.update({
@@ -284,6 +290,12 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._transport_incomplete_client_first_evidence.update(
             transport_client_first_evidence
         )
+        tproxy._semantic_plain_confirming.clear()
+        tproxy._semantic_plain_confirming.update(semantic_plain_confirming)
+        tproxy._semantic_plain_last_probe.clear()
+        tproxy._semantic_plain_last_probe.update(semantic_plain_last_probe)
+        tproxy._semantic_plain_probe_window.clear()
+        tproxy._semantic_plain_probe_window.extend(semantic_plain_probe_window)
         tproxy._local_bypass_resweep_active.clear()
         tproxy._local_bypass_resweep_active.update(local_resweep_active)
         tproxy._local_bypass_resweep_last.clear()
@@ -7736,6 +7748,240 @@ def test_semantic_geph_response_requires_usable_non_denial_http():
         b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
         b"\x1f\x8bopaque"
     )
+
+
+def test_plain_semantic_response_recognizes_only_regional_denial():
+    denial = b"This content is no longer available in your area"
+    assert tproxy._semantic_plain_response_is_regional_denial(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" + denial
+    )
+    assert tproxy._semantic_plain_response_is_regional_denial(
+        b"HTTP/1.1 451 Unavailable For Legal Reasons\r\n\r\n" + denial
+    )
+    assert not tproxy._semantic_plain_response_is_regional_denial(
+        b"HTTP/1.1 200 OK\r\n\r\nOrdinary page"
+    )
+    assert not tproxy._semantic_plain_response_is_regional_denial(
+        b"HTTP/1.1 429 Too Many Requests\r\n\r\nlocal_rate_limited"
+    )
+    assert not tproxy._semantic_plain_response_is_regional_denial(
+        b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n" + denial
+    )
+    first = b"This content is no l"
+    second = b"onger available in your area"
+    chunked = (
+        b"HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\n\r\n"
+        + f"{len(first):x}\r\n".encode()
+        + first
+        + b"\r\n"
+        + f"{len(second):x}\r\n".encode()
+        + second
+        + b"\r\n0\r\n\r\n"
+    )
+    assert tproxy._semantic_plain_response_is_regional_denial(
+        chunked,
+        stream_closed=False,
+    )
+
+
+@pytest.mark.parametrize("complete", (True, False))
+def test_plain_semantic_probe_requires_complete_exact_ip_response(
+    monkeypatch,
+    complete,
+):
+    body = b"This content is no longer available in your area"
+    declared = len(body) if complete else len(body) + 50
+    response = (
+        b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\n"
+        + f"Content-Length: {declared}\r\n\r\n".encode()
+        + body
+    )
+
+    class FakeTlsSocket:
+        def __init__(self):
+            self.chunks = deque((response, b""))
+            self.request = b""
+            self.closed = False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, payload):
+            self.request += payload
+
+        def recv(self, _size):
+            return self.chunks.popleft()
+
+        def close(self):
+            self.closed = True
+
+    tls_socket = FakeTlsSocket()
+    connections = []
+    server_names = []
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda address, timeout: (
+            connections.append((address, timeout)) or tls_socket
+        ),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda _sock, server_hostname: (
+                server_names.append(server_hostname) or tls_socket
+            )
+        ),
+    )
+
+    assert tproxy._semantic_plain_denial_probe(
+        "1.1.1.1",
+        "regional-denial.example",
+    ) is complete
+    assert connections == [(('1.1.1.1', 443), 6.0)]
+    assert server_names == ["regional-denial.example"]
+    assert b"Accept-Encoding: identity\r\n" in tls_socket.request
+    assert b"Range: bytes=0-131071\r\n" in tls_socket.request
+    assert tls_socket.closed
+
+
+def test_plain_semantic_probe_schedules_exact_host_confirmation(monkeypatch):
+    host = "regional-denial.example"
+    direct_probes = []
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert tproxy._schedule_semantic_plain_denial_probe(
+        host,
+        "1.1.1.1",
+        "plain",
+        now=100.0,
+        runner=lambda ip, candidate: (
+            direct_probes.append((ip, candidate)) or True
+        ),
+        confirmation_runner=lambda candidate: (
+            confirmations.append(candidate) or True
+        ),
+    )
+    assert direct_probes == [("1.1.1.1", host)]
+    assert confirmations == [host]
+    assert host not in tproxy._semantic_plain_confirming
+    assert tproxy._semantic_plain_last_probe[host] == 100.0
+    assert not tproxy._schedule_semantic_plain_denial_probe(
+        host,
+        "1.1.1.1",
+        "plain",
+        now=101.0,
+        runner=lambda _ip, _host: True,
+    )
+
+
+def test_plain_semantic_probe_excludes_protected_and_unowned_routes(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    for host in (
+        "updates.discord.com",
+        "rr2---sn-ntq7yner.googlevideo.com",
+        "www.google.com",
+    ):
+        assert not tproxy._schedule_semantic_plain_denial_probe(
+            host,
+            "1.1.1.1",
+            "plain",
+            now=100.0,
+            runner=lambda _ip, _host: True,
+        )
+    assert not tproxy._schedule_semantic_plain_denial_probe(
+        "regional-denial.example",
+        "127.0.0.1",
+        "plain",
+        now=100.0,
+        runner=lambda _ip, _host: True,
+    )
+
+
+def test_plain_semantic_probe_has_a_small_network_wide_budget(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    tproxy._semantic_plain_probe_window.extend(
+        [100.0] * tproxy.SEMANTIC_PLAIN_PROBE_WINDOW_MAX
+    )
+
+    assert not tproxy._schedule_semantic_plain_denial_probe(
+        "budgeted-regional-denial.example",
+        "1.1.1.1",
+        "plain",
+        now=100.1,
+        runner=lambda _ip, _host: True,
+    )
+    assert tproxy._schedule_semantic_plain_denial_probe(
+        "budgeted-regional-denial.example",
+        "1.1.1.1",
+        "plain",
+        now=161.0,
+        runner=lambda _ip, _host: False,
+    )
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    assert not tproxy._schedule_semantic_plain_denial_probe(
+        "regional-denial.example",
+        "1.1.1.1",
+        "plain",
+        now=100.0,
+        runner=lambda _ip, _host: True,
+    )
+
+
+def test_plain_semantic_probe_respects_concurrency_cap(monkeypatch):
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    tproxy._semantic_plain_confirming.update(
+        {
+            "first.example": 100.0,
+            "second.example": 100.0,
+        }
+    )
+
+    assert not tproxy._schedule_semantic_plain_denial_probe(
+        "third.example",
+        "1.1.1.1",
+        "plain",
+        now=101.0,
+        runner=lambda _ip, _host: True,
+    )
+
+
+def test_plain_semantic_probe_thread_failure_releases_its_slot(monkeypatch):
+    host = "thread-failure.example"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    class UnavailableThread:
+        def __init__(self, *, target, daemon):
+            assert callable(target)
+            assert daemon
+
+        def start(self):
+            raise RuntimeError("thread unavailable")
+
+    monkeypatch.setattr(tproxy.threading, "Thread", UnavailableThread)
+
+    assert not tproxy._schedule_semantic_plain_denial_probe(
+        host,
+        "1.1.1.1",
+        "plain",
+        now=100.0,
+    )
+    assert host not in tproxy._semantic_plain_confirming
+    assert host not in tproxy._semantic_plain_last_probe
+    assert not tproxy._semantic_plain_probe_window
 
 
 def test_semantic_confirmation_learns_only_after_denial_clears_through_owned_geph(
