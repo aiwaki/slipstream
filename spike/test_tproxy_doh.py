@@ -10420,38 +10420,23 @@ def test_repeated_plain_server_close_schedules_exact_transport_confirmation(
             )
 
     observe(tproxy.AUTO_GEPH_STAGE_SYSTEM, "plain", (100.2, 100.3))
-    assert confirmations == []
-    observe(tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "plain", (101.2, 101.3))
-    assert confirmations == []
-    observe(
-        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
-        "split64+fake",
-        (102.2, 102.3),
-    )
-    assert confirmations == []
-    observe(
-        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
-        "split16+fake",
-        (103.2, 103.3),
-    )
-
     assert confirmations == [(host, "1.1.1.1")]
     assert set(tproxy._transport_incomplete_server_first_evidence[host]) == {
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
-        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
-        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
-        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     }
     assert tproxy._transport_incomplete_plain_candidates[host] == (
         "1.1.1.1",
         100.3,
     )
     assert host not in tproxy._transport_incomplete_confirming
-    assert tproxy._transport_incomplete_last_probe[host] == 103.3
+    assert tproxy._transport_incomplete_last_probe[host] == 100.3
+    assert tproxy._xbox_dns_candidate_active(host, now=100.3)
     assert not tproxy.is_geo_exit_route(host)
 
 
-def test_system_server_close_never_bypasses_the_local_ladder(monkeypatch):
+def test_single_system_short_close_does_not_request_content_probe(
+    monkeypatch,
+):
     host = "system-only-partial.example"
     activity = _short_server_first_activity()
     confirmations = []
@@ -10459,22 +10444,22 @@ def test_system_server_close_never_bypasses_the_local_ladder(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
-    for now in (100.2, 100.3):
-        tproxy.note_server_first_route_close(
-            host,
-            tproxy.AUTO_GEPH_STAGE_SYSTEM,
-            activity,
-            duration=0.2,
-            now=now,
-            probe_ip="1.1.1.1",
-            strategy_name="plain",
-            transport_confirmation_runner=lambda candidate, ip: (
-                confirmations.append((candidate, ip)) or True
-            ),
-        )
+    tproxy.note_server_first_route_close(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        activity,
+        duration=0.2,
+        now=100.2,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+        transport_confirmation_runner=lambda candidate, ip: (
+            confirmations.append((candidate, ip)) or True
+        ),
+    )
 
     assert confirmations == []
     assert host not in tproxy._transport_incomplete_last_probe
+    assert not tproxy._xbox_dns_candidate_active(host, now=100.2)
     assert not tproxy.is_geo_exit_route(host)
 
 
@@ -10729,7 +10714,7 @@ def test_server_first_evidence_does_not_mix_with_partial_record_stalls(
             ),
         )
 
-    assert confirmations == []
+    assert confirmations == [(host, "1.1.1.1")]
     assert set(tproxy._transport_incomplete_server_first_evidence[host]) == {
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
     }
@@ -10738,7 +10723,7 @@ def test_server_first_evidence_does_not_mix_with_partial_record_stalls(
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
         f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
     }
-    assert host not in tproxy._transport_incomplete_last_probe
+    assert tproxy._transport_incomplete_last_probe[host] == 100.3
 
 
 def test_transport_confirmation_rejects_non_plain_and_protected_routes(monkeypatch):

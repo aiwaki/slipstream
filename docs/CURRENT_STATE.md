@@ -8,46 +8,42 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: do not reinstall the artifact qualified for exact
-main `3d40ce7dbc9c89cdef39f03499062998b3856687`. CI `30803833248`, audit
-`30803833308`, native Windows qualification `30803833447`, and the sole
-protected owned-Geph qualification `30804356739` passed. Artifact `8852219623`
-matched inner ZIP SHA-256
-`9cdfd2b2b46189bf19b7490006a26ecc9d06e641c79e274a88e0519295b72eb0`
-and exact packaged executable identities.
+Current user-facing priority: do not reinstall any previous artifact. Exact
+main `50fa7a07074f5645afb105943b3a80a1435a38a9` passed CI `30811692452`,
+audit `30811692302`, native Windows qualification `30811692540`, and the sole
+protected owned-Geph qualification `30812213963`. Qualified artifact
+`8855325326` matched inner ZIP SHA-256
+`ad0bad2cf354be60bdbcbb7836556f7350ce3b1290f6262b466f4b6fc544e5f5`.
 
-Controlled workstation transaction `F15ED6DF-5F97-4629-833A-34F295543597`
+Controlled workstation transaction `D4B90B18-B73F-418D-AC83-92DA48C4CFE9`
 installed that exact artifact and reached active StatusV2. Google, Spotify,
-Discord, YouTube plus a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT,
-and Modrinth returned payload. CrystalIDEA completed HTTP `200` with 11,951
-bytes, but an operator-only 20 KiB threshold incorrectly rejected it and the
-transaction completed an exact rollback. The corrected transaction
-`38599211-5C24-42B3-953E-D90DD605CB79` repeated the successful protected
-smokes. Four `xpersonatoy.com` attempts then returned HTTP `200` but ended with
-curl error `18` after roughly 53-59 KiB. Immediate rollback restored the prior
-app, removed every root daemon/PF/runtime artifact, and preserved DNS
-`111.88.96.50` / `111.88.96.51` plus external proxy/PAC/VPN/PF state.
+Discord updater/gateway, YouTube plus a real Googlevideo fragment, Steam,
+CrystalIDEA, ChatGPT, and Modrinth returned payload. Four consecutive
+`xpersonatoy.com` attempts each returned HTTP `200` but ended with curl error
+`18`. Immediate exact rollback restored the prior app, removed every root
+daemon/PF/runtime artifact, and preserved DNS `111.88.96.50` /
+`111.88.96.51`, Telegram, owned Geph, and all external proxy/PAC/VPN/PF state.
+The retained root-log delta contains no detector or recovery event for those
+four attempts.
 
-The retained root-log delta proves that generic incomplete-response recovery
-was reached. The first exact owned-Geph replacement completed. The second
-`launchctl kickstart -k` exceeded the shared five-second command timeout and
-was reported unavailable, but its verified LaunchAgent later replaced the
-owned listener PID. A timeout from a mutating launchd command therefore cannot
-prove that no mutation occurred. Main's caller released its backend hold too
-early and could observe the delayed replacement outside the recovery window.
+Source and test tracing found a generic convergence defect rather than a site
+exception. A repeated short system/plain server-first close recorded only the
+system stage and activated the Xbox DNS retry. The old content probe was not
+scheduled until the same close repeated again on Xbox DNS and on two distinct
+local strategies: at least eight matching client-visible failures. The current
+correction on `codex/slow-small-incomplete-response` schedules the existing
+exact-IP, certificate-validating HTTP completion probe after the second
+matching bounded system/plain close. One close remains inert and Xbox DNS
+remains the next local fallback. Opaque TLS bytes never learn a route or select
+Geph; only strict local incomplete framing followed by the independently
+complete owned-Geph proof may learn the exact host. No hostname rule, PF, DNS,
+route-policy, external-Geph, Discord, YouTube, or Googlevideo behavior changes.
 
-The correction on `codex/owned-geph-indeterminate-kickstart` classifies the
-launchctl command as completed, rejected, or indeterminate. Completed and
-indeterminate outcomes retain the session drain until a bounded observer sees
-a different exact-owned, live listener PID. No successor, shutdown, or an
-unknown/external listener fails closed; the same indeterminate command is never
-retried while its successor window is unresolved. The change adds no hostname
-rule and does not alter PF, DNS, route policy, replacement count, external
-Geph, Discord, YouTube, or Googlevideo behavior. Local Python verification is
-`963 passed, 41 subtests passed`. Rust verification is tray `83`, core `32`,
-Windows adapter `241`, userspace evaluation `40`, and effect evaluation `40`;
-all five clippy gates pass with warnings denied. PR, exact-main, and fresh
-protected gates are still required before another workstation installation.
+The focused regression and the complete routing file pass; full Python
+verification is `966 passed, 41 subtests passed`, and the tray Rust suite is
+`83 passed`. PR, exact-main, and one fresh protected qualification remain
+required before another controlled workstation installation. Only that fresh
+run's exact artifact may be used.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run

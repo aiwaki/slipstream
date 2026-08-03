@@ -63,13 +63,16 @@ is the explicit action that may reinstall or re-enable it.
 A partial page can return HTTP `200` and still end with curl error `18`, a
 blank browser document, or missing assets after tens or hundreds of KiB. A
 successful status line, TLS handshake, or first payload is therefore not a
-complete-response check. Slipstream treats an orderly framed close between
-32 KiB and 512 KiB as ambiguous: two exact system/plain observations may run
-one bounded HTTP-framing probe against the first public system-selected IP,
-but may not advance the local ladder or select Geph from encrypted byte count.
-A complete response ends the incident. Only a strictly proven local body
-shortfall followed by the existing complete owned-Geph proof can learn a
-temporary exact-host route.
+complete-response check. One bounded system/plain server-first close remains
+ambiguous and inert. A second matching close, including a short compressed
+response or an ambiguous response between 32 KiB and 512 KiB, may run one
+bounded HTTP-framing probe against the first public system-selected IP. It no
+longer waits for the same user-visible failure to repeat through Xbox DNS and
+two local strategies. Xbox DNS remains the next local fallback, while opaque
+byte count and repetition cannot select Geph or learn a route. A complete
+response ends the incident. Only a strictly proven local body shortfall
+followed by the existing complete owned-Geph proof can learn a temporary
+exact-host route.
 
 A live owned Geph process and listener do not guarantee a usable exit session.
 Workstation A/B evidence on 2026-07-30 and 2026-08-01 received partial direct

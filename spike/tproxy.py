@@ -8759,6 +8759,26 @@ def _ambiguous_large_server_first_close(activity, duration):
     )
 
 
+def _schedule_server_first_transport_confirmation(
+    host,
+    ip,
+    now,
+    *,
+    confirmation_runner=None,
+    transport_confirmation_runner=None,
+):
+    runner = transport_confirmation_runner
+    if runner is None and confirmation_runner is not None:
+        runner = lambda candidate_host, _ip: confirmation_runner(candidate_host)
+    return _schedule_transport_incomplete_response_confirmation(
+        host,
+        ip,
+        "plain",
+        now=now,
+        runner=runner,
+    )
+
+
 def note_server_first_route_close(
     host,
     stage,
@@ -8778,10 +8798,10 @@ def note_server_first_route_close(
     A server can legitimately close a completed short response, so an orderly
     EOF needs two bounded exact-host observations. A reset or an EOF inside a
     TLS record is already explicit transport evidence and can advance the next
-    client retry immediately. Larger framed responses never advance the local
-    ladder from opaque bytes; after a repeat they may only schedule the exact
-    HTTP completion probe. The current connection is never replayed after
-    payload reached the client.
+    client retry immediately. Repeated system/plain closes and larger framed
+    responses may schedule the exact HTTP completion probe, but opaque bytes
+    never authorize a foreign exit. The current connection is never replayed
+    after payload reached the client.
     """
     h = normalize_host(host)
     if (
@@ -8855,17 +8875,12 @@ def note_server_first_route_close(
         if stage != AUTO_GEPH_STAGE_SYSTEM or strategy_name != "plain":
             return False
         candidate_ip = original_probe_ip
-        transport_runner = transport_confirmation_runner
-        if transport_runner is None and confirmation_runner is not None:
-            transport_runner = lambda candidate_host, _ip: (
-                confirmation_runner(candidate_host)
-            )
-        _schedule_transport_incomplete_response_confirmation(
+        _schedule_server_first_transport_confirmation(
             h,
             candidate_ip,
-            "plain",
-            now=now,
-            runner=transport_runner,
+            now,
+            confirmation_runner=confirmation_runner,
+            transport_confirmation_runner=transport_confirmation_runner,
         )
         return False
 
@@ -8876,6 +8891,13 @@ def note_server_first_route_close(
                 repeat_probe_ip if repeat_claimed else original_probe_ip
             )
             _remember_transport_incomplete_plain_candidate(h, candidate_ip, now)
+            _schedule_server_first_transport_confirmation(
+                h,
+                candidate_ip,
+                now,
+                confirmation_runner=confirmation_runner,
+                transport_confirmation_runner=transport_confirmation_runner,
+            )
         local_evidence_complete = (
             _record_transport_incomplete_server_first_evidence(h, stage, now)
         )
