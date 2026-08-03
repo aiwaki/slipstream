@@ -135,9 +135,13 @@ def _chunked_body_length(body):
         cursor += size + 2
 
 
-def http_response_complete(data, *, stream_closed, truncated):
-    """Return whether one bounded HTTP/1 response is proven complete."""
-
+def _http_response_framing_complete(
+    data,
+    *,
+    stream_closed,
+    truncated,
+    allow_error_status,
+):
     if not isinstance(data, bytes) or not data.startswith(b"HTTP/") or truncated:
         return False
     boundary = data.find(b"\r\n\r\n")
@@ -147,7 +151,9 @@ def http_response_complete(data, *, stream_closed, truncated):
     if parsed is None:
         return False
     version, status, headers = parsed
-    if status < 200 or status >= 400:
+    if status < 200 or status >= 600:
+        return False
+    if not allow_error_status and status >= 400:
         return False
     body = data[boundary + 4 :]
     if status in _NO_BODY_STATUSES:
@@ -172,6 +178,28 @@ def http_response_complete(data, *, stream_closed, truncated):
     if length is not None:
         return len(body) == length
     return bool(stream_closed)
+
+
+def http_response_framing_complete(data, *, stream_closed, truncated):
+    """Return whether one bounded final HTTP/1 response is fully framed."""
+
+    return _http_response_framing_complete(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=True,
+    )
+
+
+def http_response_complete(data, *, stream_closed, truncated):
+    """Return whether one bounded successful HTTP/1 response is complete."""
+
+    return _http_response_framing_complete(
+        data,
+        stream_closed=stream_closed,
+        truncated=truncated,
+        allow_error_status=False,
+    )
 
 
 def http_response_body_length(data, *, stream_closed, truncated):

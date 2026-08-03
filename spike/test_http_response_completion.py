@@ -1,6 +1,7 @@
 from http_response_completion import (
     http_response_body_length,
     http_response_complete,
+    http_response_framing_complete,
     http_response_incomplete,
 )
 
@@ -184,6 +185,30 @@ def test_truncated_or_unsuccessful_response_never_qualifies():
     )
     assert not http_response_complete(
         denied,
+        stream_closed=True,
+        truncated=False,
+    )
+
+
+def test_error_response_can_be_framing_complete_without_qualifying():
+    denied = (
+        b"HTTP/1.1 403 Forbidden\r\nContent-Length: 48\r\n\r\n"
+        b"This content is no longer available in your area"
+    )
+    partial = denied[:-1]
+
+    assert http_response_framing_complete(
+        denied,
+        stream_closed=False,
+        truncated=False,
+    )
+    assert not http_response_complete(
+        denied,
+        stream_closed=False,
+        truncated=False,
+    )
+    assert not http_response_framing_complete(
+        partial,
         stream_closed=True,
         truncated=False,
     )
