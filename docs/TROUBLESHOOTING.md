@@ -87,6 +87,21 @@ is the explicit action that may reinstall or re-enable it.
 
 ### A site partially loads or owned Geph returns `local_rate_limited`
 
+An HTTP/2 page may return status `200` and tens of kilobytes before its stream
+ends without `END_STREAM`. Rechecking that host with HTTP/1.1 is not equivalent:
+the origin or network can complete one protocol and truncate the other. Current
+completion recovery therefore advertises `h2` plus `http/1.1` and validates the
+protocol actually negotiated. HTTP/2 is incomplete only after successful
+response headers and body bytes followed by reset, EOF, or deadline before
+`END_STREAM`; a local byte cap is unknown, not failure.
+
+The independent owned-Geph proof must complete the same negotiated protocol.
+It remains bounded to two MiB and 20 seconds because an origin may ignore a
+range request and return a roughly one-MiB document. `429 local_rate_limited`,
+compressed or incomplete data, regional-denial content, an unowned listener,
+and protected/static routes cannot authorize an exact-host overlay. This is a
+generic transport contract, not a rule for the hostname that exposed it.
+
 A partial page can return HTTP `200` and still end with curl error `18`, a
 blank browser document, or missing assets after tens or hundreds of KiB. A
 successful status line, TLS handshake, or first payload is therefore not a

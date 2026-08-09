@@ -9,56 +9,49 @@ required CI, and current source code always win when they disagree with this
 file.
 
 Current user-facing priority: Slipstream is rolled back and must not be
-reinstalled yet. PR #305 merged as live main
-`675bc4acc7b83bb4f7d5442baf4dbde099696d9e`. Exact-main CI `30853122536`,
-audit `30853121875`, and native Windows qualification `30853121885` passed.
-There is no protected owned-Geph qualification for this live SHA, so no
-artifact from it is authorized for the workstation.
+reinstalled yet. Live main is PR #306 at
+`a38c6d12fe2ddc84059c7b77fd7bc97902d0b151`. Exact-main CI `30862641149`,
+audit `30862641178`, native Windows qualification `30862641141`, and the sole
+protected owned-Geph qualification `31326467025` passed. Its exact artifact
+`9041706949` has outer digest
+`sha256:a2dffad4b289a3f690ffcb18ed03f985c2e2a3fbb2f2ff182ec8f6200e137021`
+and inner ZIP SHA-256
+`aed1c30dab6d1e709794002583deffd621717ac6a0d4d0c5e54701bf919dc339`.
 
-The current branch `codex/generic-semantic-canary` addresses the separate
-complete-page regional-denial class without adding a site rule. Once an
-eligible unknown host establishes the exact `system/plain` path, the daemon
-may start one background, certificate-validating `GET /` against that same
-public IP. It sends no browser state and is bounded to `128 KiB`, two concurrent
-probes, eight new exact hosts per minute, and one attempt per exact host per ten
-minutes. Only a complete identity-encoded HTTP response whose decoded
-representation body contains a strong generic regional-denial marker may
-request the existing independent owned-Geph
-semantic confirmation. `429 local_rate_limited`, incomplete or compressed
-responses, protected/static routes, and unowned Geph remain non-authorizing.
-The current client stream is never delayed, replayed, or rerouted; the learned
-route applies only to a later request. Browser companion delivery remains
-necessary for path-specific or rendered-only denial and for one bounded
-automatic reload.
-
-Controlled workstation transaction
-`8E4BA969-2C1D-4B89-B9FA-71478789FF9E` installed only that artifact and reached
-coherent active StatusV2. Google, Spotify, Discord updater/gateway, YouTube plus
-a real Googlevideo fragment, Steam, CrystalIDEA, ChatGPT, and Modrinth returned
-payload. Four `xpersonatoy.com` requests returned HTTP `200` but ended with curl
-error `18` after a bounded partial body, so immediate exact rollback restored
-the prior app SHA-256
+Controlled transaction `C17E2DFE-CC33-4FBE-8C61-8F76418D98C5` installed only
+that exact artifact and reached coherent active StatusV2. Google, Spotify,
+Discord updater/gateway, YouTube plus a real Googlevideo fragment, Steam,
+CrystalIDEA, ChatGPT, and Modrinth returned payload. Four
+`xpersonatoy.com` HTTP/2 requests returned `200` but ended with curl error `18`
+after 55-70 KiB. Immediate exact rollback restored the prior app SHA-256
 `3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
 removed the root daemon, listener, private PF anchor, token, status, socket,
 attestation, witness, and runtime, and preserved DNS `111.88.96.50` /
-`111.88.96.51`, owned Geph, proxy/PAC, default route, and external owners. The
-private log contained no event for that host.
+`111.88.96.51`, Slipstream-owned Geph PID `887`, external Geph PID `574`,
+proxy/PAC, default route, and external owners. The private log contained no
+recovery event for those requests.
 
-The earlier reproduced blind spot is generic: an HTTP/2 client may detect an
-incomplete body and close its side while the reusable TLS connection remains
-open. Relay cancellation preserved complete TLS-record counters but cancelled
-the downstream-idle observer before it could publish evidence. PR #305 records
-two bounded exact-host
-client-first observations only on the unknown system/plain route. They merely
-schedule the existing certificate-validating HTTP completion probe. Opaque
-bytes do not advance app-owned DNS, local strategies, Geph, or the current
-request. A recognized candidate is mutually exclusive with the older clean-EOF
-reducer, so the same observation cannot indirectly advance the local ladder. A
-complete or unproven direct response stops locally; only a strictly incomplete
-local response plus an independently complete verified-owned-Geph response may
-learn a temporary exact-host route. A network-wide guard, exact host cooldown,
-byte/time limits, and Discord/YouTube/Googlevideo/static-policy exclusions
-remain mandatory.
+The current branch `codex/partial-response-recovery` fixes the protocol mismatch
+without adding a hostname rule. PR #305 correctly records bounded HTTP/2
+client-first and server-first candidates, but the independent completion probe
+advertised no ALPN and sent HTTP/1.1. A complete HTTP/1.1 response could
+therefore reject evidence from a genuinely truncated HTTP/2 route. Completion
+probes now advertise `h2` and `http/1.1`; negotiated HTTP/2 is complete only on
+`END_STREAM` and incomplete only after successful response headers plus body
+bytes followed by reset, EOF, or deadline. HTTP/1.1 remains the fallback when
+HTTP/2 is not negotiated.
+
+A non-mutating live control on the rolled-back workstation proved the corrected
+direct HTTP/2 probe incomplete for the affected origin. The first owned-Geph
+control exposed two additional bounded false negatives: the origin ignored the
+requested range and completed at 1,045,719 identity-encoded bytes, above the old
+512-KiB cap, while the six-second probe stopped after 470,846 bytes. Reusing the
+existing two-MiB semantic cap and a background-only 20-second deadline produced
+a complete 1,045,719-byte owned-Geph response through the unchanged verified
+listener. Route learning still requires both independent proofs and applies
+only to a later request. Opaque bytes, local truncation, `429`, compressed or
+denial content, unowned Geph, static policy, Discord, YouTube, Googlevideo, and
+external DNS/proxy/PAC/VPN/PF remain non-authorizing.
 
 `weather.com` is the separate complete-page semantic class. Its observed text
 `This content is no longer available in your area` already passes the generic
@@ -69,20 +62,17 @@ reviewed store distribution and Safari needs a signed, enabled container plus
 sandbox-to-owner-socket proof. Transport code must not pretend it can infer
 rendered page meaning from encrypted TLS.
 
-Local verification for PR #305 passed before merge. The new semantic-canary
-branch passes `1003` Python tests plus `41` subtests, `21` Chromium companion
-tests, `83` Rust tray tests, `32` Rust core tests, `241` Windows adapter tests,
-and both `40`-test userspace-stack suites. PR review, exact-main gates, one
-fresh protected qualification, and a controlled workstation transaction remain
-required. Only that future exact-main protected artifact may be installed.
-
-PR #306's first dependency-audit run `30859867860` exposed the newly published
-`CVE-2026-69247` in the pinned `cryptography 49.0.0`; the previous exact-main
-audit had passed before the advisory entered the database. The branch now
-requires patched `cryptography 50.0.0` and regenerates all three Python hash
-locks together. A local checksum-pinned OSV scan of the rebuilt 348-package
-target inventory reports zero blocking advisories; PR CI and audit must repeat
-that result before merge.
+The correction adds the pure-Python `h2` stack as a hashed runtime dependency
+and copies the protocol helper into the root script runtime. Local verification
+passes with `758` Python tests, `255` script tests, `21` Chromium companion
+tests, `83` Rust tray tests, and `32` Rust core tests; version continuity,
+project-state continuity, and `git diff --check` also pass. A clean Python 3.13
+PyInstaller build succeeds, its frozen `--status` command runs daemon-free, and
+the archive contains the new protocol helper. PR review remains required. After
+merge, exact-main CI/audit/native gates and one fresh protected account-backed
+qualification must pass before another workstation install. That controlled
+smoke must pass the partial HTTP/2 case before checking the separate Weather
+regional-denial scenario; the first failure triggers exact rollback.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run

@@ -535,6 +535,7 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "connection_race_io.py": "VALUE = 4\n",
     "geph_backend.py": "VALUE = 5\n",
     "http_response_completion.py": "VALUE = 20\n",
+    "http2_response_probe.py": "VALUE = 21\n",
     "install_guard.py": "VALUE = 6\n",
     "pf_adapter.py": "VALUE = 7\n",
     "primes.py": "VALUE = 8\n",
@@ -8514,6 +8515,131 @@ def test_plain_transport_probe_requires_a_proven_body_shortfall(
     assert addresses and addresses[0][0] == ("1.1.1.1", 443)
     assert b"Range:" not in tls_socket.request
     assert b"Accept-Encoding: identity\r\n" in tls_socket.request
+    assert tls_socket.closed
+
+
+def test_plain_transport_probe_uses_http2_completion_when_negotiated(monkeypatch):
+    class FakeTlsSocket:
+        def __init__(self):
+            self.closed = False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def selected_alpn_protocol(self):
+            return "h2"
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self, tls_socket):
+            self.tls_socket = tls_socket
+            self.protocols = None
+
+        def set_alpn_protocols(self, protocols):
+            self.protocols = protocols
+
+        def wrap_socket(self, _sock, server_hostname):
+            assert server_hostname == "partial-response.example"
+            return self.tls_socket
+
+    tls_socket = FakeTlsSocket()
+    context = FakeContext(tls_socket)
+    calls = []
+    monkeypatch.setattr(
+        tproxy.socket,
+        "create_connection",
+        lambda _address, timeout: tls_socket,
+    )
+    monkeypatch.setattr(tproxy, "_local_payload_ssl_context", lambda: context)
+    monkeypatch.setattr(
+        tproxy,
+        "probe_http2_response",
+        lambda sock, host, **kwargs: (
+            calls.append((sock, host, kwargs))
+            or SimpleNamespace(incomplete=True)
+        ),
+    )
+
+    assert tproxy._incomplete_response_plain_payload_probe(
+        "1.1.1.1",
+        "partial-response.example",
+    )
+    assert context.protocols == ["h2", "http/1.1"]
+    assert calls[0][0] is tls_socket
+    assert calls[0][1] == "partial-response.example"
+    assert calls[0][2]["bounded_range"] is False
+    assert tls_socket.closed
+
+
+@pytest.mark.parametrize(
+    ("status", "complete", "identity", "body", "expected"),
+    [
+        (200, True, True, b"x" * 4096, 4096),
+        (429, True, True, b"local_rate_limited", 0),
+        (200, False, True, b"x" * 4096, 0),
+        (200, True, False, b"x" * 4096, 0),
+    ],
+)
+def test_geph_transport_probe_requires_usable_complete_http2(
+    monkeypatch,
+    status,
+    complete,
+    identity,
+    body,
+    expected,
+):
+    class FakeTlsSocket:
+        def __init__(self):
+            self.closed = False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def selected_alpn_protocol(self):
+            return "h2"
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def set_alpn_protocols(self, protocols):
+            assert protocols == ["h2", "http/1.1"]
+
+        def wrap_socket(self, sock, server_hostname):
+            assert server_hostname == "partial-response.example"
+            return sock
+
+    tls_socket = FakeTlsSocket()
+    monkeypatch.setattr(
+        tproxy,
+        "_socks5_connect_blocking",
+        lambda host, port, timeout: tls_socket,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        FakeContext,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "probe_http2_response",
+        lambda sock, host, **kwargs: SimpleNamespace(
+            status=status,
+            complete=complete,
+            content_encoding_is_identity=identity,
+            body=body,
+            body_length=len(body),
+        ),
+    )
+
+    assert (
+        tproxy._incomplete_response_geph_payload_probe(
+            "partial-response.example"
+        )
+        == expected
+    )
     assert tls_socket.closed
 
 
