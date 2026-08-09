@@ -11,6 +11,7 @@ from hyperframe.frame import (
     DataFrame,
     GoAwayFrame,
     HeadersFrame,
+    PushPromiseFrame,
 )
 
 from http2_response_probe import probe_http2_response
@@ -29,6 +30,7 @@ class FakeHttp2ServerSocket:
         goaway_last_stream_id=None,
         protocol_error_after_body=False,
         goaway_during_headers=False,
+        push_promise_after_goaway=False,
     ):
         self._server = H2Connection(
             config=H2Configuration(client_side=False, header_encoding=None)
@@ -44,6 +46,7 @@ class FakeHttp2ServerSocket:
         self._goaway_last_stream_id = goaway_last_stream_id
         self._protocol_error_after_body = protocol_error_after_body
         self._goaway_during_headers = goaway_during_headers
+        self._push_promise_after_goaway = push_promise_after_goaway
         self.request_headers = ()
         self.closed = False
 
@@ -80,6 +83,34 @@ class FakeHttp2ServerSocket:
                     + goaway.serialize()
                     + continuation.serialize()
                     + response_data.serialize()
+                )
+                continue
+
+            if self._push_promise_after_goaway:
+                self._server.send_headers(event.stream_id, response_headers)
+                self._server.send_data(
+                    event.stream_id,
+                    self._body,
+                    end_stream=False,
+                )
+                goaway = GoAwayFrame(0)
+                goaway.error_code = int(ErrorCodes.NO_ERROR)
+                goaway.last_stream_id = event.stream_id
+                push = PushPromiseFrame(event.stream_id)
+                push.promised_stream_id = 2
+                push.data = Encoder().encode(
+                    [
+                        (b":method", b"GET"),
+                        (b":scheme", b"https"),
+                        (b":authority", b"partial-response.example"),
+                        (b":path", b"/pushed"),
+                    ]
+                )
+                push.flags.add("END_HEADERS")
+                self._chunks.append(
+                    self._server.data_to_send()
+                    + goaway.serialize()
+                    + push.serialize()
                 )
                 continue
 
@@ -238,6 +269,22 @@ def test_goaway_during_header_block_is_unknown():
 
     result = _probe(sock)
 
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_new_push_promise_after_goaway_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        push_promise_after_goaway=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
     assert result.protocol_error
     assert not result.interrupted
     assert not result.incomplete

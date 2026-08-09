@@ -154,6 +154,7 @@ def probe_http2_response(
     protocol_error = False
     receive_buffer = bytearray()
     header_block_stream_id = None
+    graceful_goaway_received = False
 
     while not (
         complete or interrupted or truncated or protocol_error
@@ -214,7 +215,12 @@ def probe_http2_response(
                 # hyper-h2 closes its connection state immediately on GOAWAY,
                 # although RFC 9113 permits eligible existing streams to
                 # finish.  Keep its parser open for that stream.
+                graceful_goaway_received = True
                 continue
+
+            if graceful_goaway_received and isinstance(frame, PushPromiseFrame):
+                protocol_error = True
+                break
 
             try:
                 events = connection.receive_data(raw_frame)

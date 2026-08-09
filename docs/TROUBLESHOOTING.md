@@ -100,7 +100,9 @@ HTTP/2 framing errors are also unknown and cannot authorize a route. A
 is a normal connection drain: Slipstream keeps reading that stream until
 `END_STREAM`, a real transport interruption, or the existing deadline. A
 `GOAWAY` with an error code or one that excludes the stream is unknown rather
-than evidence of truncation.
+than evidence of truncation. Once an eligible graceful drain begins, any new
+`PUSH_PROMISE` is a protocol error; only streams that were already eligible may
+finish.
 
 The independent owned-Geph proof must complete the same negotiated protocol.
 It remains bounded to two MiB and 20 seconds because an origin may ignore a
