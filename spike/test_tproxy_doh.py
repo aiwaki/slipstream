@@ -8574,21 +8574,23 @@ def test_plain_transport_probe_uses_http2_completion_when_negotiated(monkeypatch
 
 
 @pytest.mark.parametrize(
-    ("status", "complete", "identity", "body", "expected"),
+    ("status", "complete", "protocol_error", "identity", "body", "expected"),
     [
-        (200, True, True, b"x" * 4096, 4096),
-        (204, True, True, b"invalid body", 0),
-        (205, True, True, b"invalid body", 0),
-        (304, True, True, b"invalid body", 0),
-        (429, True, True, b"local_rate_limited", 0),
-        (200, False, True, b"x" * 4096, 0),
-        (200, True, False, b"x" * 4096, 0),
+        (200, True, False, True, b"x" * 4096, 4096),
+        (200, True, True, True, b"x" * 4096, 0),
+        (204, True, False, True, b"invalid body", 0),
+        (205, True, False, True, b"invalid body", 0),
+        (304, True, False, True, b"invalid body", 0),
+        (429, True, False, True, b"local_rate_limited", 0),
+        (200, False, False, True, b"x" * 4096, 0),
+        (200, True, False, False, b"x" * 4096, 0),
     ],
 )
 def test_geph_transport_probe_requires_usable_complete_http2(
     monkeypatch,
     status,
     complete,
+    protocol_error,
     identity,
     body,
     expected,
@@ -8631,6 +8633,7 @@ def test_geph_transport_probe_requires_usable_complete_http2(
         lambda sock, host, **kwargs: SimpleNamespace(
             status=status,
             complete=complete,
+            protocol_error=protocol_error,
             content_encoding_is_identity=identity,
             body=body,
             body_length=len(body),

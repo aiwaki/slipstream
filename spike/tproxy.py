@@ -3960,6 +3960,7 @@ def _incomplete_response_geph_payload_probe(
             )
             if (
                 result.complete
+                and not result.protocol_error
                 and result.status is not None
                 and 200 <= result.status < 400
                 and result.status not in {204, 205, 304}
