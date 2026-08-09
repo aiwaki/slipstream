@@ -49,7 +49,9 @@ active stream is treated as a graceful drain and the stream is read through
 probe intercepts only GOAWAY at the frame boundary because `hyper-h2` otherwise
 closes its connection state before an eligible existing stream can finish. A
 compressed response is also unknown even when status and payload preceded the
-interruption; neither direct nor owned-Geph evidence may authorize from it.
+interruption; neither direct nor owned-Geph evidence may authorize from it. A
+GOAWAY interleaved inside an unfinished HEADERS/CONTINUATION block is a protocol
+error and cannot be hidden by graceful-drain handling.
 
 A non-mutating live control on the rolled-back workstation proved the corrected
 direct HTTP/2 probe incomplete for the affected origin. The first owned-Geph
@@ -74,7 +76,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1018` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1019` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command

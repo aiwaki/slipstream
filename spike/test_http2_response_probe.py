@@ -5,7 +5,13 @@ from h2.config import H2Configuration
 from h2.connection import H2Connection
 from h2.errors import ErrorCodes
 from h2.events import RequestReceived
-from hyperframe.frame import DataFrame, GoAwayFrame
+from hpack import Encoder
+from hyperframe.frame import (
+    ContinuationFrame,
+    DataFrame,
+    GoAwayFrame,
+    HeadersFrame,
+)
 
 from http2_response_probe import probe_http2_response
 
@@ -22,6 +28,7 @@ class FakeHttp2ServerSocket:
         goaway_error_code=ErrorCodes.NO_ERROR,
         goaway_last_stream_id=None,
         protocol_error_after_body=False,
+        goaway_during_headers=False,
     ):
         self._server = H2Connection(
             config=H2Configuration(client_side=False, header_encoding=None)
@@ -36,6 +43,7 @@ class FakeHttp2ServerSocket:
         self._goaway_error_code = goaway_error_code
         self._goaway_last_stream_id = goaway_last_stream_id
         self._protocol_error_after_body = protocol_error_after_body
+        self._goaway_during_headers = goaway_during_headers
         self.request_headers = ()
         self.closed = False
 
@@ -52,6 +60,29 @@ class FakeHttp2ServerSocket:
                 (b"content-type", b"text/html"),
                 (b"content-encoding", self._content_encoding),
             ]
+
+            if self._goaway_during_headers:
+                header_block = Encoder().encode(response_headers)
+                split_at = max(1, len(header_block) // 2)
+                headers = HeadersFrame(event.stream_id)
+                headers.data = header_block[:split_at]
+                goaway = GoAwayFrame(0)
+                goaway.error_code = int(ErrorCodes.NO_ERROR)
+                goaway.last_stream_id = event.stream_id
+                continuation = ContinuationFrame(event.stream_id)
+                continuation.data = header_block[split_at:]
+                continuation.flags.add("END_HEADERS")
+                response_data = DataFrame(event.stream_id)
+                response_data.data = self._body
+                self._chunks.append(
+                    self._server.data_to_send()
+                    + headers.serialize()
+                    + goaway.serialize()
+                    + continuation.serialize()
+                    + response_data.serialize()
+                )
+                continue
+
             self._server.send_headers(event.stream_id, response_headers)
 
             if self._graceful_goaway:
@@ -193,6 +224,20 @@ def test_protocol_error_after_payload_is_unknown():
 
     assert result.status == 200
     assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_goaway_during_header_block_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        goaway_during_headers=True,
+    )
+
+    result = _probe(sock)
+
     assert result.protocol_error
     assert not result.interrupted
     assert not result.incomplete

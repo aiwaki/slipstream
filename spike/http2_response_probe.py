@@ -22,7 +22,13 @@ from h2.events import (
 )
 from h2.exceptions import H2Error
 from hyperframe.exceptions import HyperframeError
-from hyperframe.frame import Frame, GoAwayFrame
+from hyperframe.frame import (
+    ContinuationFrame,
+    Frame,
+    GoAwayFrame,
+    HeadersFrame,
+    PushPromiseFrame,
+)
 
 
 @dataclass(frozen=True)
@@ -147,6 +153,7 @@ def probe_http2_response(
     truncated = False
     protocol_error = False
     receive_buffer = bytearray()
+    header_block_stream_id = None
 
     while not (
         complete or interrupted or truncated or protocol_error
@@ -189,6 +196,9 @@ def probe_http2_response(
             frame, raw_frame = parsed_frame
 
             if isinstance(frame, GoAwayFrame):
+                if header_block_stream_id is not None:
+                    protocol_error = True
+                    break
                 try:
                     stream_may_finish = _graceful_goaway_allows_stream(
                         frame,
@@ -211,6 +221,16 @@ def probe_http2_response(
             except H2Error:
                 protocol_error = True
                 break
+            if (
+                isinstance(frame, (HeadersFrame, PushPromiseFrame))
+                and "END_HEADERS" not in frame.flags
+            ):
+                header_block_stream_id = frame.stream_id
+            elif (
+                isinstance(frame, ContinuationFrame)
+                and "END_HEADERS" in frame.flags
+            ):
+                header_block_stream_id = None
             for event in events:
                 if isinstance(
                     event,
