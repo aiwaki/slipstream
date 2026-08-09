@@ -277,6 +277,9 @@ def probe_http2_response(
             except (ssl.SSLError, OSError):
                 interrupted = True
 
+    if body_length >= max_bytes and not complete:
+        truncated = True
+
     return Http2ProbeResult(
         status=status,
         headers=response_headers,

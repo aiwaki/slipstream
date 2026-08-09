@@ -309,6 +309,26 @@ def test_truncated_http2_stream_is_not_called_incomplete():
     assert not result.incomplete
 
 
+def test_exact_cap_unfinished_http2_stream_is_truncated():
+    sock = FakeHttp2ServerSocket(body=b"x" * 64, complete=False)
+
+    result = _probe(sock, max_bytes=64)
+
+    assert result.truncated
+    assert not result.complete
+    assert not result.incomplete
+
+
+def test_exact_cap_completed_http2_stream_is_complete():
+    sock = FakeHttp2ServerSocket(body=b"x" * 64, complete=True)
+
+    result = _probe(sock, max_bytes=64)
+
+    assert result.complete
+    assert not result.truncated
+    assert not result.incomplete
+
+
 def test_http2_non_success_is_not_called_incomplete():
     sock = FakeHttp2ServerSocket(
         status=429,

@@ -104,6 +104,10 @@ than evidence of truncation. Once an eligible graceful drain begins, any new
 `PUSH_PROMISE` is a protocol error; only streams that were already eligible may
 finish.
 
+If the body reaches the probe's local byte cap without `END_STREAM`, it is
+capped and unknown rather than proven incomplete. A response exactly at the cap
+is accepted only when HTTP/2 also proves stream completion.
+
 The independent owned-Geph proof must complete the same negotiated protocol.
 It remains bounded to two MiB and 20 seconds because an origin may ignore a
 range request and return a roughly one-MiB document. `429 local_rate_limited`,
