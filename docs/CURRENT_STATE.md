@@ -71,7 +71,10 @@ settings and any `PUSH_PROMISE` remains a protocol error. An available padded
 frame prefix is also checked immediately, so impossible padding cannot turn a
 missing remainder into interruption evidence. Header-block sequencing is
 validated at the frame header too: only the matching `CONTINUATION` may follow
-an open block, and an orphaned `CONTINUATION` is rejected. An unfinished body
+an open block, and an orphaned `CONTINUATION` is rejected. A GOAWAY mandatory
+prefix is validated as soon as it is available. More generally, interruption
+may prove an unfinished HTTP/2 response only at an exact frame boundary; any
+partial frame left in the receive buffer remains unknown. An unfinished body
 that reaches the local byte cap is capped evidence and
 remains unknown; an exact-cap body is complete only when `END_STREAM` arrives.
 
@@ -98,7 +101,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1041` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1043` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command

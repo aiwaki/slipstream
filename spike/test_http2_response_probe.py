@@ -42,6 +42,8 @@ class FakeHttp2ServerSocket:
         idle_stream_frame_header_after_body=False,
         impossible_padding_after_body=False,
         orphan_continuation_header_after_body=False,
+        partial_goaway_prefix_after_body=None,
+        partial_data_frame_after_body=False,
         invalid_ping_length_header_after_body=False,
         goaway_stream_id_after_body=None,
     ):
@@ -84,6 +86,10 @@ class FakeHttp2ServerSocket:
         self._orphan_continuation_header_after_body = (
             orphan_continuation_header_after_body
         )
+        self._partial_goaway_prefix_after_body = (
+            partial_goaway_prefix_after_body
+        )
+        self._partial_data_frame_after_body = partial_data_frame_after_body
         self._invalid_ping_length_header_after_body = (
             invalid_ping_length_header_after_body
         )
@@ -246,6 +252,22 @@ class FakeHttp2ServerSocket:
                     (1).to_bytes(3, "big")
                     + b"\x09\x00"
                     + event.stream_id.to_bytes(4, "big")
+                )
+            if self._partial_goaway_prefix_after_body is not None:
+                last_stream_id, error_code = self._partial_goaway_prefix_after_body
+                response += (
+                    (9).to_bytes(3, "big")
+                    + b"\x07\x00"
+                    + b"\x00" * 4
+                    + last_stream_id.to_bytes(4, "big")
+                    + int(error_code).to_bytes(4, "big")
+                )
+            if self._partial_data_frame_after_body:
+                response += (
+                    (2).to_bytes(3, "big")
+                    + b"\x00\x00"
+                    + event.stream_id.to_bytes(4, "big")
+                    + b"x"
                 )
             if self._invalid_ping_length_header_after_body:
                 response += (7).to_bytes(3, "big") + b"\x06\x00" + b"\x00" * 4
@@ -434,6 +456,38 @@ def test_orphan_continuation_header_after_payload_is_unknown():
         body=b"x" * 512,
         complete=False,
         orphan_continuation_header_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_disqualifying_partial_goaway_prefix_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        partial_goaway_prefix_after_body=(1, ErrorCodes.INTERNAL_ERROR),
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_partial_valid_data_frame_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        partial_data_frame_after_body=True,
     )
 
     result = _probe(sock)

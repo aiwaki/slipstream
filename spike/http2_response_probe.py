@@ -179,8 +179,29 @@ def _frame_header_is_valid(
     return True
 
 
-def _available_frame_prefix_is_valid(frame, body_length, receive_buffer):
-    """Reject impossible padded frames before their full body is available."""
+def _available_frame_prefix_is_valid(
+    frame,
+    body_length,
+    receive_buffer,
+    *,
+    active_stream_id,
+    graceful_goaway_last_stream_id,
+):
+    """Reject disqualifying prefixes before the full frame is available."""
+    if isinstance(frame, GoAwayFrame) and len(receive_buffer) >= 17:
+        last_stream_id = (
+            int.from_bytes(receive_buffer[9:13], "big") & 0x7FFFFFFF
+        )
+        error_code = int.from_bytes(receive_buffer[13:17], "big")
+        if error_code != int(ErrorCodes.NO_ERROR):
+            return False
+        if last_stream_id < active_stream_id:
+            return False
+        if (
+            graceful_goaway_last_stream_id is not None
+            and last_stream_id > graceful_goaway_last_stream_id
+        ):
+            return False
     if "PADDED" not in frame.flags or not isinstance(
         frame,
         (DataFrame, HeadersFrame, PushPromiseFrame),
@@ -203,6 +224,7 @@ def _pop_complete_frame(
     max_frame_size,
     active_stream_id,
     header_block_stream_id,
+    graceful_goaway_last_stream_id,
 ):
     """Pop one complete HTTP/2 frame while preserving partial socket reads."""
     if len(receive_buffer) < 9:
@@ -223,8 +245,10 @@ def _pop_complete_frame(
         frame,
         body_length,
         receive_buffer,
+        active_stream_id=active_stream_id,
+        graceful_goaway_last_stream_id=graceful_goaway_last_stream_id,
     ):
-        raise HyperframeError("invalid HTTP/2 frame padding")
+        raise HyperframeError("invalid HTTP/2 frame prefix")
     frame_length = 9 + body_length
     if len(receive_buffer) < frame_length:
         return None
@@ -321,6 +345,9 @@ def probe_http2_response(
                     max_frame_size=connection.max_inbound_frame_size,
                     active_stream_id=stream_id,
                     header_block_stream_id=header_block_stream_id,
+                    graceful_goaway_last_stream_id=(
+                        graceful_goaway_last_stream_id
+                    ),
                 )
             except HyperframeError:
                 protocol_error = True
@@ -452,6 +479,9 @@ def probe_http2_response(
             except (ssl.SSLError, OSError):
                 protocol_error = True
 
+    if interrupted and receive_buffer:
+        interrupted = False
+        protocol_error = True
     if body_length >= max_bytes and not complete:
         truncated = True
     if (
