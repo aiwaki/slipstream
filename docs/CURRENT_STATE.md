@@ -67,7 +67,9 @@ validated from the header before an absent payload can resemble an EOF. Frames
 that carry response state must target the probe's sole active stream;
 idle-stream targets are rejected from the frame header before their missing
 payload can resemble an interruption. Server push is disabled in the client
-settings and any `PUSH_PROMISE` remains a protocol error. An unfinished body
+settings and any `PUSH_PROMISE` remains a protocol error. An available padded
+frame prefix is also checked immediately, so impossible padding cannot turn a
+missing remainder into interruption evidence. An unfinished body
 that reaches the local byte cap is capped evidence and
 remains unknown; an exact-cap body is complete only when `END_STREAM` arrives.
 
@@ -94,7 +96,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1039` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1040` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command

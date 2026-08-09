@@ -166,6 +166,24 @@ def _frame_header_is_valid(frame, body_length, *, active_stream_id):
     return True
 
 
+def _available_frame_prefix_is_valid(frame, body_length, receive_buffer):
+    """Reject impossible padded frames before their full body is available."""
+    if "PADDED" not in frame.flags or not isinstance(
+        frame,
+        (DataFrame, HeadersFrame, PushPromiseFrame),
+    ):
+        return True
+    if len(receive_buffer) < 10:
+        return True
+    fixed_prefix_length = 1
+    if isinstance(frame, HeadersFrame) and "PRIORITY" in frame.flags:
+        fixed_prefix_length += 5
+    if isinstance(frame, PushPromiseFrame):
+        fixed_prefix_length += 4
+    padding_length = receive_buffer[9]
+    return padding_length <= body_length - fixed_prefix_length
+
+
 def _pop_complete_frame(
     receive_buffer,
     *,
@@ -186,6 +204,12 @@ def _pop_complete_frame(
         active_stream_id=active_stream_id,
     ):
         raise HyperframeError("invalid HTTP/2 frame header")
+    if not _available_frame_prefix_is_valid(
+        frame,
+        body_length,
+        receive_buffer,
+    ):
+        raise HyperframeError("invalid HTTP/2 frame padding")
     frame_length = 9 + body_length
     if len(receive_buffer) < frame_length:
         return None
