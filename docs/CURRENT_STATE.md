@@ -59,7 +59,10 @@ Repeated graceful GOAWAY frames may only retain or lower the accepted
 or local acknowledgement-write failures after payload remain unknown rather
 than proving that the remote HTTP/2 stream was incomplete. An oversized frame
 header is rejected before its missing payload can turn into apparent EOF
-evidence, and DATA on `204`, `205`, or `304` is also a protocol error.
+evidence, and DATA on `204`, `205`, or `304` is also a protocol error. The
+server preface must begin with non-ACK SETTINGS; generic local socket errors
+remain unknown, and a declared `Content-Length` is validated before body bytes
+can exceed it.
 An unfinished body that reaches the local byte cap is capped evidence and
 remains unknown; an exact-cap body is complete only when `END_STREAM` arrives.
 
@@ -86,7 +89,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1032` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1035` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command

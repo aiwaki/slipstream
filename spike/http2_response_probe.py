@@ -28,6 +28,7 @@ from hyperframe.frame import (
     GoAwayFrame,
     HeadersFrame,
     PushPromiseFrame,
+    SettingsFrame,
 )
 
 
@@ -77,6 +78,19 @@ def _status_from_headers(headers):
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def _content_length_from_headers(headers):
+    values = [
+        value
+        for name, value in headers
+        if name.strip().lower() == b"content-length"
+    ]
+    if not values:
+        return None
+    if len(values) != 1 or not values[0] or not values[0].isdigit():
+        raise ValueError("invalid HTTP/2 content-length")
+    return int(values[0])
 
 
 def _request_headers(host, *, bounded_range):
@@ -157,6 +171,8 @@ def probe_http2_response(
     receive_buffer = bytearray()
     header_block_stream_id = None
     graceful_goaway_last_stream_id = None
+    server_settings_received = False
+    expected_content_length = None
 
     while not (
         complete or interrupted or truncated or protocol_error
@@ -182,7 +198,7 @@ def probe_http2_response(
             protocol_error = True
             break
         except OSError:
-            interrupted = True
+            protocol_error = True
             break
         if not data:
             interrupted = True
@@ -203,6 +219,15 @@ def probe_http2_response(
             if parsed_frame is None:
                 break
             frame, raw_frame = parsed_frame
+
+            if not server_settings_received:
+                if (
+                    not isinstance(frame, SettingsFrame)
+                    or "ACK" in frame.flags
+                ):
+                    protocol_error = True
+                    break
+                server_settings_received = True
 
             if isinstance(frame, GoAwayFrame):
                 if header_block_stream_id is not None:
@@ -265,8 +290,21 @@ def probe_http2_response(
                         parsed_status = _status_from_headers(response_headers)
                         if parsed_status is not None:
                             status = parsed_status
+                        try:
+                            expected_content_length = (
+                                _content_length_from_headers(response_headers)
+                            )
+                        except ValueError:
+                            protocol_error = True
+                            break
                 elif isinstance(event, TrailersReceived):
                     if event.stream_id == stream_id:
+                        if any(
+                            name.strip().lower() == b"content-length"
+                            for name, _value in event.headers
+                        ):
+                            protocol_error = True
+                            break
                         response_headers += tuple(event.headers)
                 elif isinstance(event, DataReceived):
                     if status in {204, 205, 304}:
@@ -280,6 +318,13 @@ def probe_http2_response(
                         continue
                     if body_length + len(event.data) > max_bytes:
                         truncated = True
+                        break
+                    if (
+                        expected_content_length is not None
+                        and body_length + len(event.data)
+                        > expected_content_length
+                    ):
+                        protocol_error = True
                         break
                     body_chunks.append(event.data)
                     body_length += len(event.data)
@@ -300,6 +345,13 @@ def probe_http2_response(
 
     if body_length >= max_bytes and not complete:
         truncated = True
+    if (
+        complete
+        and expected_content_length is not None
+        and body_length != expected_content_length
+    ):
+        complete = False
+        protocol_error = True
 
     return Http2ProbeResult(
         status=status,

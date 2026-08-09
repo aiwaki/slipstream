@@ -36,12 +36,20 @@ class FakeHttp2ServerSocket:
         push_promise_after_goaway=False,
         recv_error_after_response=None,
         oversized_frame_header_after_body=False,
+        goaway_before_settings=False,
+        declared_content_length=None,
     ):
         self._server = H2Connection(
             config=H2Configuration(client_side=False, header_encoding=None)
         )
         self._server.initiate_connection()
-        self._chunks = deque([self._server.data_to_send()])
+        server_preface = self._server.data_to_send()
+        if goaway_before_settings:
+            goaway = GoAwayFrame(0)
+            goaway.error_code = int(ErrorCodes.NO_ERROR)
+            goaway.last_stream_id = 1
+            server_preface = goaway.serialize() + server_preface
+        self._chunks = deque([server_preface])
         self._status = status
         self._body = body
         self._complete = complete
@@ -59,6 +67,7 @@ class FakeHttp2ServerSocket:
         self._push_promise_after_goaway = push_promise_after_goaway
         self._recv_error_after_response = recv_error_after_response
         self._oversized_frame_header_after_body = oversized_frame_header_after_body
+        self._declared_content_length = declared_content_length
         self.request_headers = ()
         self.closed = False
 
@@ -75,6 +84,22 @@ class FakeHttp2ServerSocket:
                 (b"content-type", b"text/html"),
                 (b"content-encoding", self._content_encoding),
             ]
+            if self._declared_content_length is not None:
+                response_headers.append(
+                    (
+                        b"content-length",
+                        str(self._declared_content_length).encode("ascii"),
+                    )
+                )
+                headers = HeadersFrame(event.stream_id)
+                headers.data = Encoder().encode(response_headers)
+                headers.flags.add("END_HEADERS")
+                response_data = DataFrame(event.stream_id)
+                response_data.data = self._body
+                if self._complete:
+                    response_data.flags.add("END_STREAM")
+                self._chunks.append(headers.serialize() + response_data.serialize())
+                continue
 
             if self._goaway_during_headers:
                 header_block = Encoder().encode(response_headers)
@@ -322,11 +347,56 @@ def test_tls_protocol_error_after_payload_is_unknown():
     assert not result.incomplete
 
 
+def test_generic_receive_error_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        recv_error_after_response=OSError("bad file descriptor"),
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_body_exceeding_declared_content_length_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 64,
+        complete=False,
+        declared_content_length=32,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
 def test_goaway_during_header_block_is_unknown():
     sock = FakeHttp2ServerSocket(
         body=b"x" * 512,
         complete=False,
         goaway_during_headers=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_goaway_before_server_settings_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        goaway_before_settings=True,
     )
 
     result = _probe(sock)
