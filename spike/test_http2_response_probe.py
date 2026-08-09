@@ -1,4 +1,5 @@
 from collections import deque
+import ssl
 import time
 
 from h2.config import H2Configuration
@@ -32,6 +33,7 @@ class FakeHttp2ServerSocket:
         protocol_error_after_body=False,
         goaway_during_headers=False,
         push_promise_after_goaway=False,
+        recv_error_after_response=None,
     ):
         self._server = H2Connection(
             config=H2Configuration(client_side=False, header_encoding=None)
@@ -53,6 +55,7 @@ class FakeHttp2ServerSocket:
         self._protocol_error_after_body = protocol_error_after_body
         self._goaway_during_headers = goaway_during_headers
         self._push_promise_after_goaway = push_promise_after_goaway
+        self._recv_error_after_response = recv_error_after_response
         self.request_headers = ()
         self.closed = False
 
@@ -175,6 +178,10 @@ class FakeHttp2ServerSocket:
     def recv(self, _size):
         if self._chunks:
             return self._chunks.popleft()
+        if self._recv_error_after_response is not None:
+            error = self._recv_error_after_response
+            self._recv_error_after_response = None
+            raise error
         return b""
 
     def close(self):
@@ -263,6 +270,22 @@ def test_protocol_error_after_payload_is_unknown():
         body=b"x" * 512,
         complete=False,
         protocol_error_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_tls_protocol_error_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        recv_error_after_response=ssl.SSLError("bad record mac"),
     )
 
     result = _probe(sock)

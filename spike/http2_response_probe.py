@@ -176,7 +176,10 @@ def probe_http2_response(
         ):
             interrupted = True
             break
-        except (ssl.SSLError, OSError):
+        except ssl.SSLError:
+            protocol_error = True
+            break
+        except OSError:
             interrupted = True
             break
         if not data:
@@ -285,7 +288,7 @@ def probe_http2_response(
             try:
                 tls_socket.sendall(pending)
             except (ssl.SSLError, OSError):
-                interrupted = True
+                protocol_error = True
 
     if body_length >= max_bytes and not complete:
         truncated = True

@@ -55,7 +55,9 @@ error and cannot be hidden by graceful-drain handling. Once graceful drain has
 started, a newly received `PUSH_PROMISE` is also a protocol error; existing
 eligible streams may finish, but the peer cannot create new work after GOAWAY.
 Repeated graceful GOAWAY frames may only retain or lower the accepted
-`last_stream_id`; an increase is a protocol error.
+`last_stream_id`; an increase is a protocol error. Generic TLS protocol errors
+or local acknowledgement-write failures after payload remain unknown rather
+than proving that the remote HTTP/2 stream was incomplete.
 An unfinished body that reaches the local byte cap is capped evidence and
 remains unknown; an exact-cap body is complete only when `END_STREAM` arrives.
 
@@ -82,7 +84,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1024` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1025` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command
