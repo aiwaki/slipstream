@@ -3962,6 +3962,7 @@ def _incomplete_response_geph_payload_probe(
                 result.complete
                 and result.status is not None
                 and 200 <= result.status < 400
+                and result.status not in {204, 205, 304}
                 and result.content_encoding_is_identity
                 and not any(
                     marker in result.body.lower()

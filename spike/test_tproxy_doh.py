@@ -8577,6 +8577,9 @@ def test_plain_transport_probe_uses_http2_completion_when_negotiated(monkeypatch
     ("status", "complete", "identity", "body", "expected"),
     [
         (200, True, True, b"x" * 4096, 4096),
+        (204, True, True, b"invalid body", 0),
+        (205, True, True, b"invalid body", 0),
+        (304, True, True, b"invalid body", 0),
         (429, True, True, b"local_rate_limited", 0),
         (200, False, True, b"x" * 4096, 0),
         (200, True, False, b"x" * 4096, 0),

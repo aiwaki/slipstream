@@ -2,6 +2,7 @@ from collections import deque
 import ssl
 import time
 
+import pytest
 from h2.config import H2Configuration
 from h2.connection import H2Connection
 from h2.errors import ErrorCodes
@@ -34,6 +35,7 @@ class FakeHttp2ServerSocket:
         goaway_during_headers=False,
         push_promise_after_goaway=False,
         recv_error_after_response=None,
+        oversized_frame_header_after_body=False,
     ):
         self._server = H2Connection(
             config=H2Configuration(client_side=False, header_encoding=None)
@@ -56,6 +58,7 @@ class FakeHttp2ServerSocket:
         self._goaway_during_headers = goaway_during_headers
         self._push_promise_after_goaway = push_promise_after_goaway
         self._recv_error_after_response = recv_error_after_response
+        self._oversized_frame_header_after_body = oversized_frame_header_after_body
         self.request_headers = ()
         self.closed = False
 
@@ -173,6 +176,12 @@ class FakeHttp2ServerSocket:
                 invalid_data = DataFrame(event.stream_id + 2)
                 invalid_data.data = b"invalid stream"
                 response += invalid_data.serialize()
+            if self._oversized_frame_header_after_body:
+                response += (
+                    (16385).to_bytes(3, "big")
+                    + b"\x00\x00"
+                    + event.stream_id.to_bytes(4, "big")
+                )
             self._chunks.append(response)
 
     def recv(self, _size):
@@ -270,6 +279,22 @@ def test_protocol_error_after_payload_is_unknown():
         body=b"x" * 512,
         complete=False,
         protocol_error_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_oversized_frame_header_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        oversized_frame_header_after_body=True,
     )
 
     result = _probe(sock)
@@ -405,6 +430,22 @@ def test_http2_non_success_is_not_called_incomplete():
     result = _probe(sock)
 
     assert result.status == 429
+    assert not result.incomplete
+
+
+@pytest.mark.parametrize("status", [204, 205, 304])
+def test_http2_no_content_status_with_data_is_unknown(status):
+    sock = FakeHttp2ServerSocket(
+        status=status,
+        body=b"invalid response body",
+        complete=False,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == status
+    assert result.protocol_error
+    assert not result.interrupted
     assert not result.incomplete
 
 

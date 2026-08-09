@@ -96,13 +96,15 @@ def _request_headers(host, *, bounded_range):
     return headers
 
 
-def _pop_complete_frame(receive_buffer):
+def _pop_complete_frame(receive_buffer, *, max_frame_size):
     """Pop one complete HTTP/2 frame while preserving partial socket reads."""
     if len(receive_buffer) < 9:
         return None
     frame, body_length = Frame.parse_frame_header(
         memoryview(bytes(receive_buffer[:9]))
     )
+    if body_length > max_frame_size:
+        raise HyperframeError("frame payload exceeds local maximum")
     frame_length = 9 + body_length
     if len(receive_buffer) < frame_length:
         return None
@@ -191,7 +193,10 @@ def probe_http2_response(
             complete or interrupted or truncated or protocol_error
         ):
             try:
-                parsed_frame = _pop_complete_frame(receive_buffer)
+                parsed_frame = _pop_complete_frame(
+                    receive_buffer,
+                    max_frame_size=connection.max_inbound_frame_size,
+                )
             except HyperframeError:
                 protocol_error = True
                 break
@@ -264,6 +269,9 @@ def probe_http2_response(
                     if event.stream_id == stream_id:
                         response_headers += tuple(event.headers)
                 elif isinstance(event, DataReceived):
+                    if status in {204, 205, 304}:
+                        protocol_error = True
+                        break
                     connection.acknowledge_received_data(
                         event.flow_controlled_length,
                         event.stream_id,
