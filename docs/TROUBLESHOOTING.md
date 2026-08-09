@@ -95,6 +95,13 @@ protocol actually negotiated. HTTP/2 is incomplete only after successful
 response headers and body bytes followed by reset, EOF, or deadline before
 `END_STREAM`; a local byte cap is unknown, not failure.
 
+HTTP/2 framing errors are also unknown and cannot authorize a route. A
+`GOAWAY(NO_ERROR)` whose `last_stream_id` still includes the active probe stream
+is a normal connection drain: Slipstream keeps reading that stream until
+`END_STREAM`, a real transport interruption, or the existing deadline. A
+`GOAWAY` with an error code or one that excludes the stream is unknown rather
+than evidence of truncation.
+
 The independent owned-Geph proof must complete the same negotiated protocol.
 It remains bounded to two MiB and 20 seconds because an origin may ignore a
 range request and return a roughly one-MiB document. `429 local_rate_limited`,

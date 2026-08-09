@@ -41,6 +41,14 @@ probes now advertise `h2` and `http/1.1`; negotiated HTTP/2 is complete only on
 bytes followed by reset, EOF, or deadline. HTTP/1.1 remains the fallback when
 HTTP/2 is not negotiated.
 
+PR review found two authorization edge cases in that new parser. A protocol
+parse error after valid headers and payload is now explicitly unknown instead
+of proven incomplete. A `GOAWAY(NO_ERROR)` whose `last_stream_id` includes the
+active stream is treated as a graceful drain and the stream is read through
+`END_STREAM`; an error GOAWAY or one that excludes the stream is unknown. The
+probe intercepts only GOAWAY at the frame boundary because `hyper-h2` otherwise
+closes its connection state before an eligible existing stream can finish.
+
 A non-mutating live control on the rolled-back workstation proved the corrected
 direct HTTP/2 probe incomplete for the affected origin. The first owned-Geph
 control exposed two additional bounded false negatives: the origin ignored the
@@ -64,15 +72,16 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `758` Python tests, `255` script tests, `21` Chromium companion
-tests, `83` Rust tray tests, and `32` Rust core tests; version continuity,
-project-state continuity, and `git diff --check` also pass. A clean Python 3.13
-PyInstaller build succeeds, its frozen `--status` command runs daemon-free, and
-the archive contains the new protocol helper. PR review remains required. After
-merge, exact-main CI/audit/native gates and one fresh protected account-backed
-qualification must pass before another workstation install. That controlled
-smoke must pass the partial HTTP/2 case before checking the separate Weather
-regional-denial scenario; the first failure triggers exact rollback.
+passes with `1017` Python tests plus `41` subtests, `255` script tests, `21`
+Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
+version continuity, project-state continuity, and `git diff --check` also pass.
+A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command
+runs daemon-free, and the archive contains the new protocol helper. The review
+hardening still requires fresh PR checks. After merge, exact-main
+CI/audit/native gates and one fresh protected account-backed qualification must
+pass before another workstation install. That controlled smoke must pass the
+partial HTTP/2 case before checking the separate Weather regional-denial
+scenario; the first failure triggers exact rollback.
 
 Historical checkpoint for exact main
 `f8fb0c099c41f7e3bbd810042c8990a49febd665`: the protected run

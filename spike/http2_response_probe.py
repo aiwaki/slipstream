@@ -11,8 +11,8 @@ import time
 
 from h2.config import H2Configuration
 from h2.connection import H2Connection
+from h2.errors import ErrorCodes
 from h2.events import (
-    ConnectionTerminated,
     DataReceived,
     InformationalResponseReceived,
     ResponseReceived,
@@ -21,6 +21,8 @@ from h2.events import (
     TrailersReceived,
 )
 from h2.exceptions import H2Error
+from hyperframe.exceptions import HyperframeError
+from hyperframe.frame import Frame, GoAwayFrame
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class Http2ProbeResult:
     complete: bool
     interrupted: bool
     truncated: bool
+    protocol_error: bool
 
     @property
     def body_length(self):
@@ -43,6 +46,7 @@ class Http2ProbeResult:
             self.interrupted
             and not self.complete
             and not self.truncated
+            and not self.protocol_error
             and self.status is not None
             and 200 <= self.status < 400
             and self.body
@@ -85,6 +89,31 @@ def _request_headers(host, *, bounded_range):
     return headers
 
 
+def _pop_complete_frame(receive_buffer):
+    """Pop one complete HTTP/2 frame while preserving partial socket reads."""
+    if len(receive_buffer) < 9:
+        return None
+    frame, body_length = Frame.parse_frame_header(
+        memoryview(bytes(receive_buffer[:9]))
+    )
+    frame_length = 9 + body_length
+    if len(receive_buffer) < frame_length:
+        return None
+    raw_frame = bytes(receive_buffer[:frame_length])
+    del receive_buffer[:frame_length]
+    return frame, raw_frame
+
+
+def _graceful_goaway_allows_stream(frame, raw_frame, stream_id):
+    """Whether GOAWAY permits an already-open stream to finish normally."""
+    frame.parse_body(memoryview(raw_frame[9:]))
+    last_stream_id = frame.last_stream_id & 0x7FFFFFFF
+    return bool(
+        int(frame.error_code) == int(ErrorCodes.NO_ERROR)
+        and last_stream_id >= stream_id
+    )
+
+
 def probe_http2_response(
     tls_socket,
     host,
@@ -115,8 +144,12 @@ def probe_http2_response(
     complete = False
     interrupted = False
     truncated = False
+    protocol_error = False
+    receive_buffer = bytearray()
 
-    while not complete and not interrupted and not truncated:
+    while not (
+        complete or interrupted or truncated or protocol_error
+    ):
         remaining = deadline - clock()
         if remaining <= 0:
             interrupted = True
@@ -134,49 +167,84 @@ def probe_http2_response(
         ):
             interrupted = True
             break
-        except (H2Error, ssl.SSLError, OSError):
+        except (ssl.SSLError, OSError):
             interrupted = True
             break
         if not data:
             interrupted = True
             break
 
-        try:
-            events = connection.receive_data(data)
-        except H2Error:
-            interrupted = True
-            break
-        for event in events:
-            if isinstance(event, (ResponseReceived, InformationalResponseReceived)):
-                if event.stream_id == stream_id:
-                    response_headers = tuple(event.headers)
-                    parsed_status = _status_from_headers(response_headers)
-                    if parsed_status is not None:
-                        status = parsed_status
-            elif isinstance(event, TrailersReceived):
-                if event.stream_id == stream_id:
-                    response_headers += tuple(event.headers)
-            elif isinstance(event, DataReceived):
-                connection.acknowledge_received_data(
-                    event.flow_controlled_length,
-                    event.stream_id,
-                )
-                if event.stream_id != stream_id:
-                    continue
-                if body_length + len(event.data) > max_bytes:
-                    truncated = True
+        receive_buffer.extend(data)
+        while not (
+            complete or interrupted or truncated or protocol_error
+        ):
+            try:
+                parsed_frame = _pop_complete_frame(receive_buffer)
+            except HyperframeError:
+                protocol_error = True
+                break
+            if parsed_frame is None:
+                break
+            frame, raw_frame = parsed_frame
+
+            if isinstance(frame, GoAwayFrame):
+                try:
+                    stream_may_finish = _graceful_goaway_allows_stream(
+                        frame,
+                        raw_frame,
+                        stream_id,
+                    )
+                except HyperframeError:
+                    protocol_error = True
                     break
-                body_chunks.append(event.data)
-                body_length += len(event.data)
-            elif isinstance(event, StreamEnded) and event.stream_id == stream_id:
-                complete = True
-            elif isinstance(event, StreamReset) and event.stream_id == stream_id:
-                interrupted = True
-            elif isinstance(event, ConnectionTerminated):
-                interrupted = True
+                if not stream_may_finish:
+                    protocol_error = True
+                    break
+                # hyper-h2 closes its connection state immediately on GOAWAY,
+                # although RFC 9113 permits eligible existing streams to
+                # finish.  Keep its parser open for that stream.
+                continue
+
+            try:
+                events = connection.receive_data(raw_frame)
+            except H2Error:
+                protocol_error = True
+                break
+            for event in events:
+                if isinstance(
+                    event,
+                    (ResponseReceived, InformationalResponseReceived),
+                ):
+                    if event.stream_id == stream_id:
+                        response_headers = tuple(event.headers)
+                        parsed_status = _status_from_headers(response_headers)
+                        if parsed_status is not None:
+                            status = parsed_status
+                elif isinstance(event, TrailersReceived):
+                    if event.stream_id == stream_id:
+                        response_headers += tuple(event.headers)
+                elif isinstance(event, DataReceived):
+                    connection.acknowledge_received_data(
+                        event.flow_controlled_length,
+                        event.stream_id,
+                    )
+                    if event.stream_id != stream_id:
+                        continue
+                    if body_length + len(event.data) > max_bytes:
+                        truncated = True
+                        break
+                    body_chunks.append(event.data)
+                    body_length += len(event.data)
+                elif (
+                    isinstance(event, StreamEnded)
+                    and event.stream_id == stream_id
+                ):
+                    complete = True
+                elif isinstance(event, StreamReset) and event.stream_id == stream_id:
+                    interrupted = True
 
         pending = connection.data_to_send()
-        if pending and not interrupted:
+        if pending and not interrupted and not protocol_error:
             try:
                 tls_socket.sendall(pending)
             except (ssl.SSLError, OSError):
@@ -189,4 +257,5 @@ def probe_http2_response(
         complete=complete,
         interrupted=interrupted,
         truncated=truncated,
+        protocol_error=protocol_error,
     )
