@@ -41,6 +41,7 @@ class FakeHttp2ServerSocket:
         invalid_stream_frame_header_after_body=False,
         idle_stream_frame_header_after_body=False,
         impossible_padding_after_body=False,
+        orphan_continuation_header_after_body=False,
         invalid_ping_length_header_after_body=False,
         goaway_stream_id_after_body=None,
     ):
@@ -80,6 +81,9 @@ class FakeHttp2ServerSocket:
             idle_stream_frame_header_after_body
         )
         self._impossible_padding_after_body = impossible_padding_after_body
+        self._orphan_continuation_header_after_body = (
+            orphan_continuation_header_after_body
+        )
         self._invalid_ping_length_header_after_body = (
             invalid_ping_length_header_after_body
         )
@@ -236,6 +240,12 @@ class FakeHttp2ServerSocket:
                     + b"\x00\x08"
                     + event.stream_id.to_bytes(4, "big")
                     + b"\x02"
+                )
+            if self._orphan_continuation_header_after_body:
+                response += (
+                    (1).to_bytes(3, "big")
+                    + b"\x09\x00"
+                    + event.stream_id.to_bytes(4, "big")
                 )
             if self._invalid_ping_length_header_after_body:
                 response += (7).to_bytes(3, "big") + b"\x06\x00" + b"\x00" * 4
@@ -408,6 +418,22 @@ def test_impossible_padding_after_payload_is_unknown():
         body=b"x" * 512,
         complete=False,
         impossible_padding_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_orphan_continuation_header_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        orphan_continuation_header_after_body=True,
     )
 
     result = _probe(sock)

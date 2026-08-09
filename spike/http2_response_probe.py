@@ -116,7 +116,13 @@ def _request_headers(host, *, bounded_range):
     return headers
 
 
-def _frame_header_is_valid(frame, body_length, *, active_stream_id):
+def _frame_header_is_valid(
+    frame,
+    body_length,
+    *,
+    active_stream_id,
+    header_block_stream_id,
+):
     connection_frames = (SettingsFrame, PingFrame, GoAwayFrame)
     stream_frames = (
         DataFrame,
@@ -129,6 +135,13 @@ def _frame_header_is_valid(frame, body_length, *, active_stream_id):
     if isinstance(frame, connection_frames) and frame.stream_id != 0:
         return False
     if isinstance(frame, stream_frames) and frame.stream_id == 0:
+        return False
+    if header_block_stream_id is not None:
+        if not isinstance(frame, ContinuationFrame):
+            return False
+        if frame.stream_id != header_block_stream_id:
+            return False
+    elif isinstance(frame, ContinuationFrame):
         return False
     if isinstance(
         frame,
@@ -189,6 +202,7 @@ def _pop_complete_frame(
     *,
     max_frame_size,
     active_stream_id,
+    header_block_stream_id,
 ):
     """Pop one complete HTTP/2 frame while preserving partial socket reads."""
     if len(receive_buffer) < 9:
@@ -202,6 +216,7 @@ def _pop_complete_frame(
         frame,
         body_length,
         active_stream_id=active_stream_id,
+        header_block_stream_id=header_block_stream_id,
     ):
         raise HyperframeError("invalid HTTP/2 frame header")
     if not _available_frame_prefix_is_valid(
@@ -305,6 +320,7 @@ def probe_http2_response(
                     receive_buffer,
                     max_frame_size=connection.max_inbound_frame_size,
                     active_stream_id=stream_id,
+                    header_block_stream_id=header_block_stream_id,
                 )
             except HyperframeError:
                 protocol_error = True
