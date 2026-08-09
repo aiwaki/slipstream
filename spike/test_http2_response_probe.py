@@ -228,3 +228,18 @@ def test_http2_non_success_is_not_called_incomplete():
 
     assert result.status == 429
     assert not result.incomplete
+
+
+def test_compressed_http2_stream_is_not_called_incomplete():
+    sock = FakeHttp2ServerSocket(
+        body=b"compressed response bytes",
+        complete=False,
+        content_encoding=b"gzip",
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.interrupted
+    assert not result.content_encoding_is_identity
+    assert not result.incomplete

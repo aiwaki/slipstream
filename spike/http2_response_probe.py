@@ -50,6 +50,7 @@ class Http2ProbeResult:
             and self.status is not None
             and 200 <= self.status < 400
             and self.body
+            and self.content_encoding_is_identity
         )
 
     @property
