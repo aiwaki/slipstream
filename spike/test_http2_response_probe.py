@@ -27,6 +27,7 @@ class FakeHttp2ServerSocket:
         body=b"response body",
         complete=True,
         content_encoding=b"identity",
+        content_range=None,
         graceful_goaway=False,
         goaway_error_code=ErrorCodes.NO_ERROR,
         goaway_last_stream_id=None,
@@ -62,6 +63,7 @@ class FakeHttp2ServerSocket:
         self._body = body
         self._complete = complete
         self._content_encoding = content_encoding
+        self._content_range = content_range
         self._graceful_goaway = graceful_goaway
         self._goaway_error_code = goaway_error_code
         self._goaway_last_stream_id = goaway_last_stream_id
@@ -110,6 +112,8 @@ class FakeHttp2ServerSocket:
                 (b"content-type", b"text/html"),
                 (b"content-encoding", self._content_encoding),
             ]
+            if self._content_range is not None:
+                response_headers.append((b"content-range", self._content_range))
             if self._declared_content_length is not None:
                 response_headers.append(
                     (
@@ -496,6 +500,49 @@ def test_partial_valid_data_frame_after_payload_is_unknown():
     assert result.body_length == 512
     assert result.protocol_error
     assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_unsolicited_partial_content_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        status=206,
+        body=b"x" * 512,
+        complete=False,
+        content_range=b"bytes 0-511/1024",
+    )
+
+    result = _probe(sock, bounded_range=False)
+
+    assert result.protocol_error
+    assert not result.incomplete
+
+
+def test_malformed_ranged_partial_content_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        status=206,
+        body=b"x" * 512,
+        complete=False,
+        content_range=b"bytes 1-512/1024",
+    )
+
+    result = _probe(sock, bounded_range=True)
+
+    assert result.protocol_error
+    assert not result.incomplete
+
+
+def test_valid_ranged_partial_content_can_complete():
+    sock = FakeHttp2ServerSocket(
+        status=206,
+        body=b"x" * 512,
+        complete=True,
+        content_range=b"bytes 0-511/1024",
+    )
+
+    result = _probe(sock, bounded_range=True)
+
+    assert result.complete
+    assert not result.protocol_error
     assert not result.incomplete
 
 

@@ -77,6 +77,9 @@ may prove an unfinished HTTP/2 response only at an exact frame boundary; any
 partial frame left in the receive buffer remains unknown. An unfinished body
 that reaches the local byte cap is capped evidence and
 remains unknown; an exact-cap body is complete only when `END_STREAM` arrives.
+An unsolicited `206` is rejected; a ranged `206` requires one syntactically
+valid `Content-Range` that begins at zero, remains inside the requested bound,
+and agrees with any `Content-Length` and the completed body length.
 
 A non-mutating live control on the rolled-back workstation proved the corrected
 direct HTTP/2 probe incomplete for the affected origin. The first owned-Geph
@@ -101,7 +104,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1043` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1046` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command

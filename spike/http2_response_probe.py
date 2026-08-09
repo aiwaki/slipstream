@@ -5,6 +5,7 @@ TLS socket.  It does not resolve hosts, choose routes, or mutate routing state.
 """
 
 from dataclasses import dataclass
+import re
 import socket
 import ssl
 import time
@@ -97,6 +98,32 @@ def _content_length_from_headers(headers):
     if len(values) != 1 or not values[0] or not values[0].isdigit():
         raise ValueError("invalid HTTP/2 content-length")
     return int(values[0])
+
+
+def _content_range_from_headers(headers):
+    values = [
+        value.strip().lower()
+        for name, value in headers
+        if name.strip().lower() == b"content-range"
+    ]
+    if not values:
+        return None
+    if len(values) != 1:
+        raise ValueError("invalid HTTP/2 content-range")
+    match = re.fullmatch(
+        rb"bytes ([0-9]+)-([0-9]+)/([0-9]+|\*)",
+        values[0],
+    )
+    if match is None:
+        raise ValueError("invalid HTTP/2 content-range")
+    start = int(match.group(1))
+    end = int(match.group(2))
+    total = None if match.group(3) == b"*" else int(match.group(3))
+    if start != 0 or end < start or end > 262143:
+        raise ValueError("unexpected HTTP/2 content-range")
+    if total is not None and total <= end:
+        raise ValueError("invalid HTTP/2 content-range total")
+    return start, end, total
 
 
 def _request_headers(host, *, bounded_range):
@@ -430,7 +457,25 @@ def probe_http2_response(
                             expected_content_length = (
                                 _content_length_from_headers(response_headers)
                             )
+                            content_range = _content_range_from_headers(
+                                response_headers
+                            )
                         except ValueError:
+                            protocol_error = True
+                            break
+                        if status == 206:
+                            if not bounded_range or content_range is None:
+                                protocol_error = True
+                                break
+                            range_length = content_range[1] - content_range[0] + 1
+                            if (
+                                expected_content_length is not None
+                                and expected_content_length != range_length
+                            ):
+                                protocol_error = True
+                                break
+                            expected_content_length = range_length
+                        elif content_range is not None:
                             protocol_error = True
                             break
                 elif isinstance(event, TrailersReceived):
