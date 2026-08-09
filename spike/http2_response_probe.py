@@ -24,11 +24,16 @@ from h2.exceptions import H2Error
 from hyperframe.exceptions import HyperframeError
 from hyperframe.frame import (
     ContinuationFrame,
+    DataFrame,
     Frame,
     GoAwayFrame,
     HeadersFrame,
+    PingFrame,
+    PriorityFrame,
     PushPromiseFrame,
+    RstStreamFrame,
     SettingsFrame,
+    WindowUpdateFrame,
 )
 
 
@@ -110,6 +115,47 @@ def _request_headers(host, *, bounded_range):
     return headers
 
 
+def _frame_header_is_valid(frame, body_length):
+    connection_frames = (SettingsFrame, PingFrame, GoAwayFrame)
+    stream_frames = (
+        DataFrame,
+        HeadersFrame,
+        PriorityFrame,
+        RstStreamFrame,
+        PushPromiseFrame,
+        ContinuationFrame,
+    )
+    if isinstance(frame, connection_frames) and frame.stream_id != 0:
+        return False
+    if isinstance(frame, stream_frames) and frame.stream_id == 0:
+        return False
+    if isinstance(frame, PriorityFrame):
+        return body_length == 5
+    if isinstance(frame, RstStreamFrame):
+        return body_length == 4
+    if isinstance(frame, SettingsFrame):
+        if "ACK" in frame.flags:
+            return body_length == 0
+        return body_length % 6 == 0
+    if isinstance(frame, PingFrame):
+        return body_length == 8
+    if isinstance(frame, GoAwayFrame):
+        return body_length >= 8
+    if isinstance(frame, WindowUpdateFrame):
+        return body_length == 4
+    if isinstance(frame, HeadersFrame):
+        minimum = int("PADDED" in frame.flags) + 5 * int(
+            "PRIORITY" in frame.flags
+        )
+        return body_length >= minimum
+    if isinstance(frame, PushPromiseFrame):
+        minimum = 4 + int("PADDED" in frame.flags)
+        return body_length >= minimum
+    if isinstance(frame, DataFrame) and "PADDED" in frame.flags:
+        return body_length >= 1
+    return True
+
+
 def _pop_complete_frame(receive_buffer, *, max_frame_size):
     """Pop one complete HTTP/2 frame while preserving partial socket reads."""
     if len(receive_buffer) < 9:
@@ -119,6 +165,8 @@ def _pop_complete_frame(receive_buffer, *, max_frame_size):
     )
     if body_length > max_frame_size:
         raise HyperframeError("frame payload exceeds local maximum")
+    if not _frame_header_is_valid(frame, body_length):
+        raise HyperframeError("invalid HTTP/2 frame header")
     frame_length = 9 + body_length
     if len(receive_buffer) < frame_length:
         return None

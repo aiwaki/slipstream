@@ -38,6 +38,9 @@ class FakeHttp2ServerSocket:
         oversized_frame_header_after_body=False,
         goaway_before_settings=False,
         declared_content_length=None,
+        invalid_stream_frame_header_after_body=False,
+        invalid_ping_length_header_after_body=False,
+        goaway_stream_id_after_body=None,
     ):
         self._server = H2Connection(
             config=H2Configuration(client_side=False, header_encoding=None)
@@ -68,6 +71,13 @@ class FakeHttp2ServerSocket:
         self._recv_error_after_response = recv_error_after_response
         self._oversized_frame_header_after_body = oversized_frame_header_after_body
         self._declared_content_length = declared_content_length
+        self._invalid_stream_frame_header_after_body = (
+            invalid_stream_frame_header_after_body
+        )
+        self._invalid_ping_length_header_after_body = (
+            invalid_ping_length_header_after_body
+        )
+        self._goaway_stream_id_after_body = goaway_stream_id_after_body
         self.request_headers = ()
         self.closed = False
 
@@ -207,6 +217,18 @@ class FakeHttp2ServerSocket:
                     + b"\x00\x00"
                     + event.stream_id.to_bytes(4, "big")
                 )
+            if self._invalid_stream_frame_header_after_body:
+                response += (1).to_bytes(3, "big") + b"\x00\x00" + b"\x00" * 4
+            if self._invalid_ping_length_header_after_body:
+                response += (7).to_bytes(3, "big") + b"\x06\x00" + b"\x00" * 4
+            if self._goaway_stream_id_after_body is not None:
+                response += (
+                    (8).to_bytes(3, "big")
+                    + b"\x07\x00"
+                    + self._goaway_stream_id_after_body.to_bytes(4, "big")
+                    + event.stream_id.to_bytes(4, "big")
+                    + int(ErrorCodes.NO_ERROR).to_bytes(4, "big")
+                )
             self._chunks.append(response)
 
     def recv(self, _size):
@@ -320,6 +342,54 @@ def test_oversized_frame_header_after_payload_is_unknown():
         body=b"x" * 512,
         complete=False,
         oversized_frame_header_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_invalid_stream_id_header_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        invalid_stream_frame_header_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_invalid_fixed_frame_length_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        invalid_ping_length_header_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_goaway_on_nonzero_stream_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        goaway_stream_id_after_body=1,
     )
 
     result = _probe(sock)
