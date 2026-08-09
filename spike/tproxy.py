@@ -54,6 +54,7 @@ import urllib.request
 
 import connection_probe
 import geph_backend
+from http2_response_probe import probe_http2_response
 from http_response_completion import (
     http_response_body,
     http_response_body_length,
@@ -2085,7 +2086,8 @@ AUTO_GEPH_RECOVERY_PROBE_TIMEOUT = 0.5
 AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX = 2
 SEMANTIC_GEPH_PROBE_MAX_BYTES = 2 * 1024 * 1024
 SEMANTIC_GEPH_PROBE_RANGE_END = 262143
-INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = 524288
+INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES = SEMANTIC_GEPH_PROBE_MAX_BYTES
+INCOMPLETE_RESPONSE_GEPH_PROBE_TIMEOUT = 20.0
 SEMANTIC_REGIONAL_DENIAL_MARKERS = (
     b"no longer available in your area",
     b"no longer available in your region",
@@ -3827,6 +3829,23 @@ def _incomplete_response_probe_request(host, *, bounded_range):
     ).encode("ascii", "ignore")
 
 
+def _incomplete_response_ssl_context():
+    """Advertise HTTP/2 only for completion-aware independent probes."""
+    ctx = _local_payload_ssl_context()
+    try:
+        ctx.set_alpn_protocols(["h2", "http/1.1"])
+    except (AttributeError, NotImplementedError):
+        pass
+    return ctx
+
+
+def _selected_alpn_protocol(tls_sock):
+    try:
+        return tls_sock.selected_alpn_protocol()
+    except (AttributeError, NotImplementedError):
+        return None
+
+
 def _incomplete_response_plain_payload_probe(
     ip,
     host,
@@ -3849,11 +3868,20 @@ def _incomplete_response_plain_payload_probe(
             timeout=max(deadline - time.monotonic(), 0.001),
         )
         _set_socket_deadline_timeout(sock, deadline)
-        tls_sock = _local_payload_ssl_context().wrap_socket(
+        tls_sock = _incomplete_response_ssl_context().wrap_socket(
             sock,
             server_hostname=h,
         )
         _set_socket_deadline_timeout(tls_sock, deadline)
+        if _selected_alpn_protocol(tls_sock) == "h2":
+            result = probe_http2_response(
+                tls_sock,
+                h,
+                deadline=deadline,
+                max_bytes=TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES,
+                bounded_range=False,
+            )
+            return result.incomplete
         tls_sock.sendall(
             _incomplete_response_probe_request(h, bounded_range=False)
         )
@@ -3906,7 +3934,7 @@ def _incomplete_response_plain_payload_probe(
 
 def _incomplete_response_geph_payload_probe(
     host,
-    timeout=AUTO_GEPH_CONFIRM_TIMEOUT,
+    timeout=INCOMPLETE_RESPONSE_GEPH_PROBE_TIMEOUT,
 ):
     deadline = time.monotonic() + max(float(timeout), 0.001)
     sock = _socks5_connect_blocking(
@@ -3918,10 +3946,32 @@ def _incomplete_response_geph_payload_probe(
         return 0
     tls_sock = None
     try:
-        ctx = _local_payload_ssl_context()
+        ctx = _incomplete_response_ssl_context()
         _set_socket_deadline_timeout(sock, deadline)
         tls_sock = ctx.wrap_socket(sock, server_hostname=host)
         _set_socket_deadline_timeout(tls_sock, deadline)
+        if _selected_alpn_protocol(tls_sock) == "h2":
+            result = probe_http2_response(
+                tls_sock,
+                host,
+                deadline=deadline,
+                max_bytes=INCOMPLETE_RESPONSE_GEPH_PROBE_MAX_BYTES,
+                bounded_range=True,
+            )
+            if (
+                result.complete
+                and not result.protocol_error
+                and result.status is not None
+                and 200 <= result.status < 400
+                and result.status not in {204, 205, 304}
+                and result.content_encoding_is_identity
+                and not any(
+                    marker in result.body.lower()
+                    for marker in SEMANTIC_GEO_DENIAL_MARKERS
+                )
+            ):
+                return result.body_length
+            return 0
         tls_sock.sendall(
             _incomplete_response_probe_request(host, bounded_range=True)
         )
@@ -7576,6 +7626,10 @@ def _script_runtime_payload(source_file):
         (
             os.path.join(source_dir, "http_response_completion.py"),
             "http_response_completion.py",
+        ),
+        (
+            os.path.join(source_dir, "http2_response_probe.py"),
+            "http2_response_probe.py",
         ),
         (os.path.join(source_dir, "install_guard.py"), "install_guard.py"),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
