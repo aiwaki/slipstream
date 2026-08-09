@@ -28,6 +28,7 @@ class FakeHttp2ServerSocket:
         graceful_goaway=False,
         goaway_error_code=ErrorCodes.NO_ERROR,
         goaway_last_stream_id=None,
+        goaway_last_stream_ids=None,
         protocol_error_after_body=False,
         goaway_during_headers=False,
         push_promise_after_goaway=False,
@@ -44,6 +45,11 @@ class FakeHttp2ServerSocket:
         self._graceful_goaway = graceful_goaway
         self._goaway_error_code = goaway_error_code
         self._goaway_last_stream_id = goaway_last_stream_id
+        self._goaway_last_stream_ids = (
+            None
+            if goaway_last_stream_ids is None
+            else tuple(goaway_last_stream_ids)
+        )
         self._protocol_error_after_body = protocol_error_after_body
         self._goaway_during_headers = goaway_during_headers
         self._push_promise_after_goaway = push_promise_after_goaway
@@ -123,20 +129,28 @@ class FakeHttp2ServerSocket:
                     self._body[:split_at],
                     end_stream=False,
                 )
-                goaway = GoAwayFrame(0)
-                goaway.error_code = int(self._goaway_error_code)
-                goaway.last_stream_id = (
+                goaway_last_stream_ids = self._goaway_last_stream_ids or (
                     event.stream_id
                     if self._goaway_last_stream_id is None
-                    else self._goaway_last_stream_id
+                    else self._goaway_last_stream_id,
                 )
+                goaways = []
+                for goaway_last_stream_id in goaway_last_stream_ids:
+                    goaway = GoAwayFrame(0)
+                    goaway.error_code = int(self._goaway_error_code)
+                    goaway.last_stream_id = goaway_last_stream_id
+                    goaways.append(goaway)
                 self._chunks.append(
-                    self._server.data_to_send() + goaway.serialize()
+                    self._server.data_to_send()
+                    + b"".join(goaway.serialize() for goaway in goaways)
                 )
                 if (
                     self._complete
-                    and goaway.error_code == int(ErrorCodes.NO_ERROR)
-                    and goaway.last_stream_id >= event.stream_id
+                    and all(
+                        goaway.error_code == int(ErrorCodes.NO_ERROR)
+                        and goaway.last_stream_id >= event.stream_id
+                        for goaway in goaways
+                    )
                 ):
                     self._server.send_data(
                         event.stream_id,
@@ -288,6 +302,35 @@ def test_new_push_promise_after_goaway_is_unknown():
     assert result.protocol_error
     assert not result.interrupted
     assert not result.incomplete
+
+
+def test_goaway_stream_boundary_cannot_increase():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        graceful_goaway=True,
+        goaway_last_stream_ids=(1, 3),
+    )
+
+    result = _probe(sock)
+
+    assert result.protocol_error
+    assert not result.incomplete
+
+
+def test_goaway_stream_boundary_may_decrease_for_active_stream():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        graceful_goaway=True,
+        goaway_last_stream_ids=(3, 1),
+    )
+
+    result = _probe(sock)
+
+    assert not result.protocol_error
+    assert result.interrupted
+    assert result.incomplete
 
 
 def test_http2_probe_sends_bounded_range_only_when_requested():

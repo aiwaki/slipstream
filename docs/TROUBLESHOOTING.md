@@ -102,7 +102,8 @@ is a normal connection drain: Slipstream keeps reading that stream until
 `GOAWAY` with an error code or one that excludes the stream is unknown rather
 than evidence of truncation. Once an eligible graceful drain begins, any new
 `PUSH_PROMISE` is a protocol error; only streams that were already eligible may
-finish.
+finish. A later GOAWAY may retain or lower the accepted `last_stream_id`, but
+cannot increase it.
 
 If the body reaches the probe's local byte cap without `END_STREAM`, it is
 capped and unknown rather than proven incomplete. A response exactly at the cap
