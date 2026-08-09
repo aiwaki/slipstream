@@ -63,8 +63,12 @@ evidence, and DATA on `204`, `205`, or `304` is also a protocol error. The
 server preface must begin with non-ACK SETTINGS; generic local socket errors
 remain unknown, and a declared `Content-Length` is validated before body bytes
 can exceed it. Standard frame stream-ID and fixed-length constraints are also
-validated from the header before an absent payload can resemble an EOF.
-An unfinished body that reaches the local byte cap is capped evidence and
+validated from the header before an absent payload can resemble an EOF. Frames
+that carry response state must target the probe's sole active stream;
+idle-stream targets are rejected from the frame header before their missing
+payload can resemble an interruption. Server push is disabled in the client
+settings and any `PUSH_PROMISE` remains a protocol error. An unfinished body
+that reaches the local byte cap is capped evidence and
 remains unknown; an exact-cap body is complete only when `END_STREAM` arrives.
 
 A non-mutating live control on the rolled-back workstation proved the corrected
@@ -90,7 +94,7 @@ rendered page meaning from encrypted TLS.
 
 The correction adds the pure-Python `h2` stack as a hashed runtime dependency
 and copies the protocol helper into the root script runtime. Local verification
-passes with `1038` Python tests plus `41` subtests, `255` script tests, `21`
+passes with `1039` Python tests plus `41` subtests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, and `32` Rust core tests;
 version continuity, project-state continuity, and `git diff --check` also pass.
 A clean Python 3.13 PyInstaller build succeeds, its frozen `--status` command

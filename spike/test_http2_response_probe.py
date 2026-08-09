@@ -39,6 +39,7 @@ class FakeHttp2ServerSocket:
         goaway_before_settings=False,
         declared_content_length=None,
         invalid_stream_frame_header_after_body=False,
+        idle_stream_frame_header_after_body=False,
         invalid_ping_length_header_after_body=False,
         goaway_stream_id_after_body=None,
     ):
@@ -73,6 +74,9 @@ class FakeHttp2ServerSocket:
         self._declared_content_length = declared_content_length
         self._invalid_stream_frame_header_after_body = (
             invalid_stream_frame_header_after_body
+        )
+        self._idle_stream_frame_header_after_body = (
+            idle_stream_frame_header_after_body
         )
         self._invalid_ping_length_header_after_body = (
             invalid_ping_length_header_after_body
@@ -219,6 +223,11 @@ class FakeHttp2ServerSocket:
                 )
             if self._invalid_stream_frame_header_after_body:
                 response += (1).to_bytes(3, "big") + b"\x00\x00" + b"\x00" * 4
+            if self._idle_stream_frame_header_after_body:
+                response += (1).to_bytes(3, "big") + b"\x00\x00" + (3).to_bytes(
+                    4,
+                    "big",
+                )
             if self._invalid_ping_length_header_after_body:
                 response += (7).to_bytes(3, "big") + b"\x06\x00" + b"\x00" * 4
             if self._goaway_stream_id_after_body is not None:
@@ -358,6 +367,22 @@ def test_invalid_stream_id_header_after_payload_is_unknown():
         body=b"x" * 512,
         complete=False,
         invalid_stream_frame_header_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_idle_stream_header_after_payload_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        idle_stream_frame_header_after_body=True,
     )
 
     result = _probe(sock)

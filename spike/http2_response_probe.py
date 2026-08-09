@@ -21,6 +21,7 @@ from h2.events import (
     TrailersReceived,
 )
 from h2.exceptions import H2Error
+from h2.settings import SettingCodes
 from hyperframe.exceptions import HyperframeError
 from hyperframe.frame import (
     ContinuationFrame,
@@ -115,7 +116,7 @@ def _request_headers(host, *, bounded_range):
     return headers
 
 
-def _frame_header_is_valid(frame, body_length):
+def _frame_header_is_valid(frame, body_length, *, active_stream_id):
     connection_frames = (SettingsFrame, PingFrame, GoAwayFrame)
     stream_frames = (
         DataFrame,
@@ -128,6 +129,18 @@ def _frame_header_is_valid(frame, body_length):
     if isinstance(frame, connection_frames) and frame.stream_id != 0:
         return False
     if isinstance(frame, stream_frames) and frame.stream_id == 0:
+        return False
+    if isinstance(
+        frame,
+        (DataFrame, HeadersFrame, RstStreamFrame, ContinuationFrame),
+    ) and frame.stream_id != active_stream_id:
+        return False
+    if isinstance(frame, WindowUpdateFrame) and frame.stream_id not in {
+        0,
+        active_stream_id,
+    }:
+        return False
+    if isinstance(frame, PushPromiseFrame):
         return False
     if isinstance(frame, PriorityFrame):
         return body_length == 5
@@ -148,15 +161,17 @@ def _frame_header_is_valid(frame, body_length):
             "PRIORITY" in frame.flags
         )
         return body_length >= minimum
-    if isinstance(frame, PushPromiseFrame):
-        minimum = 4 + int("PADDED" in frame.flags)
-        return body_length >= minimum
     if isinstance(frame, DataFrame) and "PADDED" in frame.flags:
         return body_length >= 1
     return True
 
 
-def _pop_complete_frame(receive_buffer, *, max_frame_size):
+def _pop_complete_frame(
+    receive_buffer,
+    *,
+    max_frame_size,
+    active_stream_id,
+):
     """Pop one complete HTTP/2 frame while preserving partial socket reads."""
     if len(receive_buffer) < 9:
         return None
@@ -165,7 +180,11 @@ def _pop_complete_frame(receive_buffer, *, max_frame_size):
     )
     if body_length > max_frame_size:
         raise HyperframeError("frame payload exceeds local maximum")
-    if not _frame_header_is_valid(frame, body_length):
+    if not _frame_header_is_valid(
+        frame,
+        body_length,
+        active_stream_id=active_stream_id,
+    ):
         raise HyperframeError("invalid HTTP/2 frame header")
     frame_length = 9 + body_length
     if len(receive_buffer) < frame_length:
@@ -200,6 +219,7 @@ def probe_http2_response(
         config=H2Configuration(client_side=True, header_encoding=None)
     )
     connection.initiate_connection()
+    connection.update_settings({SettingCodes.ENABLE_PUSH: 0})
     stream_id = connection.get_next_available_stream_id()
     connection.send_headers(
         stream_id,
@@ -260,6 +280,7 @@ def probe_http2_response(
                 parsed_frame = _pop_complete_frame(
                     receive_buffer,
                     max_frame_size=connection.max_inbound_frame_size,
+                    active_stream_id=stream_id,
                 )
             except HyperframeError:
                 protocol_error = True
