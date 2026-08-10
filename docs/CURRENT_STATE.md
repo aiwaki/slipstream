@@ -50,9 +50,13 @@ four-second absolute deadline across SOCKS setup and the target read. Timeout,
 EOF, or reset closes only that exact Geph stream, records the backend failure,
 and continues the same buffered request through the original PF destination.
 No DNS, PF, policy table, hostname, Discord, YouTube, Googlevideo, proxy/PAC,
-VPN, or external-Geph behavior changes. The full daemon test file passes `460`
+VPN, or external-Geph behavior changes. Review hardening keeps the first-byte
+gate strictly on ownership-verified Geph; an unowned external Geph retains its
+previous streaming relay lifecycle. A first-payload failure is recorded before
+the owned backend is suspended and contributes to the existing bounded,
+multi-host restart evidence. The full daemon test file passes `461`
 tests including the cancellation regression. The complete Python
-and script suite passes `1063` tests plus `41` subtests; traffic contracts pass
+and script suite passes `1064` tests plus `41` subtests; traffic contracts pass
 `55`, Rust tray `83`, core `32`, Windows adapter `241`, and both userspace
 evaluation crates `40` tests each. All five Clippy runs are warning-free, and
 Python compilation, project continuity, and `git diff --check` pass. PR review,

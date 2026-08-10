@@ -2219,6 +2219,7 @@ def test_geo_exit_zero_payload_falls_back_on_the_same_system_request(monkeypatch
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.18", 443))
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "dial_via_geph", empty_geph)
