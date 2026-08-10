@@ -2062,6 +2062,7 @@ AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES = 2
 AUTO_GEPH_STAGE_SYSTEM = "system"
 AUTO_GEPH_STAGE_XBOX_DNS = "xbox_dns"
 AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
+PLAIN_STRATEGY = "plain"
 SYSTEM_PROBE_PAYLOAD = "payload"
 SYSTEM_PROBE_CLOSED = "closed"
 SYSTEM_PROBE_TIMEOUT = "timeout"
@@ -4719,18 +4720,50 @@ def note_partial_tls_stall(
     *,
     now=None,
     confirmation_runner=None,
+    probe_ip=None,
+    strategy_name=None,
+    transport_confirmation_runner=None,
 ):
-    """Record one framed TLS truncation without treating attempts as proof."""
+    """Record one framed TLS truncation without bypassing the local ladder."""
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
-    if not _record_partial_tls_stall_evidence(h, stage, now):
-        return False
-    _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
-    return _schedule_auto_geph_confirmation(
-        h,
-        now=now,
-        runner=confirmation_runner,
-    )
+    local_ladder_complete = _record_partial_tls_stall_evidence(h, stage, now)
+
+    # The six-second partial-record watchdog intentionally ends the live relay
+    # before the fifteen-second payload-idle observer can run. Preserve the
+    # exact system/plain address, but do not probe or authorize Geph until the
+    # independent system, app-owned DNS, and local-strategy ladder is complete.
+    if (
+        stage == AUTO_GEPH_STAGE_SYSTEM
+        and strategy_name == PLAIN_STRATEGY
+        and probe_ip is not None
+    ):
+        _remember_transport_incomplete_plain_candidate(h, probe_ip, now)
+
+    transport_confirmation_scheduled = False
+    auto_geph_scheduled = False
+    if local_ladder_complete:
+        _prune_transport_incomplete_probes(now)
+        candidate = _transport_incomplete_plain_candidates.get(h)
+        if candidate is not None:
+            candidate_ip, _observed_at = candidate
+            transport_confirmation_scheduled = (
+                _schedule_transport_incomplete_response_confirmation(
+                    h,
+                    candidate_ip,
+                    PLAIN_STRATEGY,
+                    now=now,
+                    runner=transport_confirmation_runner,
+                )
+            )
+        else:
+            _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
+            auto_geph_scheduled = _schedule_auto_geph_confirmation(
+                h,
+                now=now,
+                runner=confirmation_runner,
+            )
+    return bool(transport_confirmation_scheduled or auto_geph_scheduled)
 
 
 def note_local_ladder_partial_stall(
@@ -4921,7 +4954,7 @@ def _schedule_semantic_plain_denial_probe(
     except ValueError:
         return False
     if (
-        strategy_name != "plain"
+        strategy_name != PLAIN_STRATEGY
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or _auto_geph_learned_exact_host(h)
@@ -7985,7 +8018,14 @@ YOUTUBE_CONTROL_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # the TLS probe can't see the throttle — so try fake first everywhere (the decoy
 # hides the SNI from the throttler). Non-fake variants remain as fallbacks for the
 # rare host the decoy upsets. Inject is cheap (not DoH); the pool absorbs it.
-GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
+GENERAL_STRATS = [
+    "split64+fake",
+    "split16+fake",
+    "fake5",
+    "split64",
+    "split16",
+    PLAIN_STRATEGY,
+]
 
 
 def strategy_order(host):
@@ -9099,7 +9139,7 @@ def _schedule_transport_incomplete_response_confirmation(
     except ValueError:
         return False
     if (
-        strategy_name != "plain"
+        strategy_name != PLAIN_STRATEGY
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
@@ -10551,6 +10591,8 @@ async def _try_exact_system_passthrough(
                     host,
                     AUTO_GEPH_STAGE_SYSTEM,
                     now=started_at + duration,
+                    probe_ip=dst_ip,
+                    strategy_name="plain",
                 )
             note_local_stream_stall(host, "plain")
         elif _clean_eof_stream_stalled(activity, now=started_at + duration):
@@ -11311,6 +11353,8 @@ async def _handle_impl(reader, writer):
                         host,
                         AUTO_GEPH_STAGE_SYSTEM,
                         now=t0 + duration,
+                        probe_ip=chosen,
+                        strategy_name=chosen_name,
                     )
                 note_local_stream_stall(host, chosen_name)
             elif via_xbox_dns:

@@ -105,6 +105,26 @@ than evidence of truncation. Once an eligible graceful drain begins, any new
 finish. A later GOAWAY may retain or lower the accepted `last_stream_id`, but
 cannot increase it.
 
+One narrow partial-frame case is not a framing error. After valid response
+headers and earlier identity body bytes, the peer may send a valid DATA header
+for the active stream and then stop before that declared DATA payload is
+complete. Slipstream treats this as an interrupted response only when the frame
+header, negotiated size, stream identity, available payload prefix, and padding
+are all valid and its declared data length does not exceed any `Content-Length`.
+The complete nine-byte header is sufficient for a nonempty unpadded DATA frame;
+a padded frame also requires its padding-length byte. A partial DATA frame
+without earlier body bytes, or any partial header, control, wrong-stream,
+oversized, malformed, or length-exceeding frame remains unknown.
+
+The live relay's partial TLS-record watchdog expires before its longer
+payload-idle observer. For an exact unknown `system/plain` connection, that
+watchdog therefore preserves the exact public-IP candidate. It does not probe,
+select Geph, or learn from encrypted bytes until the independent system,
+app-owned DNS, and multiple local-strategy evidence ladder is complete. The
+route can change only after that ladder, a direct certificate-validating probe
+that independently proves incomplete, and a complete usable response through
+the currently verified owned-Geph listener.
+
 If the body reaches the probe's local byte cap without `END_STREAM`, it is
 capped and unknown rather than proven incomplete. A response exactly at the cap
 is accepted only when HTTP/2 also proves stream completion.

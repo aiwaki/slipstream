@@ -1,4 +1,5 @@
 from collections import deque
+import socket
 import ssl
 import time
 
@@ -45,6 +46,7 @@ class FakeHttp2ServerSocket:
         orphan_continuation_header_after_body=False,
         partial_goaway_prefix_after_body=None,
         partial_data_frame_after_body=False,
+        partial_data_header_only=False,
         invalid_ping_length_header_after_body=False,
         goaway_stream_id_after_body=None,
     ):
@@ -92,6 +94,7 @@ class FakeHttp2ServerSocket:
             partial_goaway_prefix_after_body
         )
         self._partial_data_frame_after_body = partial_data_frame_after_body
+        self._partial_data_header_only = partial_data_header_only
         self._invalid_ping_length_header_after_body = (
             invalid_ping_length_header_after_body
         )
@@ -101,6 +104,18 @@ class FakeHttp2ServerSocket:
 
     def settimeout(self, _timeout):
         return None
+
+    def _partial_data_fragment(self, stream_id):
+        if not self._partial_data_frame_after_body:
+            return b""
+        fragment = (
+            (2).to_bytes(3, "big")
+            + b"\x00\x00"
+            + stream_id.to_bytes(4, "big")
+        )
+        if not self._partial_data_header_only:
+            fragment += b"x"
+        return fragment
 
     def sendall(self, data):
         for event in self._server.receive_data(data):
@@ -128,7 +143,11 @@ class FakeHttp2ServerSocket:
                 response_data.data = self._body
                 if self._complete:
                     response_data.flags.add("END_STREAM")
-                self._chunks.append(headers.serialize() + response_data.serialize())
+                self._chunks.append(
+                    headers.serialize()
+                    + response_data.serialize()
+                    + self._partial_data_fragment(event.stream_id)
+                )
                 continue
 
             if self._goaway_during_headers:
@@ -267,12 +286,7 @@ class FakeHttp2ServerSocket:
                     + int(error_code).to_bytes(4, "big")
                 )
             if self._partial_data_frame_after_body:
-                response += (
-                    (2).to_bytes(3, "big")
-                    + b"\x00\x00"
-                    + event.stream_id.to_bytes(4, "big")
-                    + b"x"
-                )
+                response += self._partial_data_fragment(event.stream_id)
             if self._invalid_ping_length_header_after_body:
                 response += (7).to_bytes(3, "big") + b"\x06\x00" + b"\x00" * 4
             if self._goaway_stream_id_after_body is not None:
@@ -487,7 +501,7 @@ def test_disqualifying_partial_goaway_prefix_after_payload_is_unknown():
     assert not result.incomplete
 
 
-def test_partial_valid_data_frame_after_payload_is_unknown():
+def test_partial_valid_data_frame_after_payload_is_incomplete():
     sock = FakeHttp2ServerSocket(
         body=b"x" * 512,
         complete=False,
@@ -498,6 +512,73 @@ def test_partial_valid_data_frame_after_payload_is_unknown():
 
     assert result.status == 200
     assert result.body_length == 512
+    assert not result.protocol_error
+    assert result.interrupted
+    assert result.incomplete
+
+
+def test_partial_valid_data_frame_timeout_after_payload_is_incomplete():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        partial_data_frame_after_body=True,
+        recv_error_after_response=socket.timeout(),
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert not result.protocol_error
+    assert result.interrupted
+    assert result.incomplete
+
+
+def test_partial_data_header_after_payload_is_incomplete():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        partial_data_frame_after_body=True,
+        partial_data_header_only=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert not result.protocol_error
+    assert result.interrupted
+    assert result.incomplete
+
+
+def test_partial_data_exceeding_declared_content_length_is_unknown():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 32,
+        complete=False,
+        declared_content_length=32,
+        partial_data_frame_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 32
+    assert result.protocol_error
+    assert not result.interrupted
+    assert not result.incomplete
+
+
+def test_partial_valid_data_frame_without_prior_payload_is_not_proof():
+    sock = FakeHttp2ServerSocket(
+        body=b"",
+        complete=False,
+        partial_data_frame_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 0
     assert result.protocol_error
     assert not result.interrupted
     assert not result.incomplete

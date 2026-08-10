@@ -284,6 +284,55 @@ def _pop_complete_frame(
     return frame, raw_frame
 
 
+def _partial_active_data_frame_visible(
+    receive_buffer,
+    *,
+    max_frame_size,
+    active_stream_id,
+    header_block_stream_id,
+    graceful_goaway_last_stream_id,
+    received_body_length,
+    expected_content_length,
+):
+    """Recognize only a validated, unfinished DATA frame on the active stream."""
+    if len(receive_buffer) < 9:
+        return False
+    frame, body_length = Frame.parse_frame_header(memoryview(receive_buffer)[:9])
+    if (
+        not isinstance(frame, DataFrame)
+        or body_length > max_frame_size
+        or len(receive_buffer) >= 9 + body_length
+        or not _frame_header_is_valid(
+            frame,
+            body_length,
+            active_stream_id=active_stream_id,
+            header_block_stream_id=header_block_stream_id,
+        )
+        or not _available_frame_prefix_is_valid(
+            frame,
+            body_length,
+            receive_buffer,
+            active_stream_id=active_stream_id,
+            graceful_goaway_last_stream_id=graceful_goaway_last_stream_id,
+        )
+    ):
+        return False
+    if "PADDED" in frame.flags:
+        if len(receive_buffer) < 10:
+            return False
+        data_length = body_length - 1 - receive_buffer[9]
+    else:
+        data_length = body_length
+    if data_length <= 0:
+        return False
+    if (
+        expected_content_length is not None
+        and received_body_length + data_length > expected_content_length
+    ):
+        return False
+    return True
+
+
 def _graceful_goaway_allows_stream(frame, raw_frame, stream_id):
     """Whether GOAWAY permits an already-open stream to finish normally."""
     frame.parse_body(memoryview(raw_frame[9:]))
@@ -525,8 +574,21 @@ def probe_http2_response(
                 protocol_error = True
 
     if interrupted and receive_buffer:
-        interrupted = False
-        protocol_error = True
+        try:
+            partial_active_data = _partial_active_data_frame_visible(
+                receive_buffer,
+                max_frame_size=connection.max_inbound_frame_size,
+                active_stream_id=stream_id,
+                header_block_stream_id=header_block_stream_id,
+                graceful_goaway_last_stream_id=graceful_goaway_last_stream_id,
+                received_body_length=body_length,
+                expected_content_length=expected_content_length,
+            )
+        except HyperframeError:
+            partial_active_data = False
+        if not partial_active_data or not body_length:
+            interrupted = False
+            protocol_error = True
     if body_length >= max_bytes and not complete:
         truncated = True
     if (
