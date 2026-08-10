@@ -139,6 +139,18 @@ fresh complete proof on a quiet network. A failed one-shot attempt is not
 reusable. This path remains unavailable to static routes, Discord, YouTube,
 Googlevideo, external Geph, and external network settings.
 
+The first one-shot may still finish its local proof near the browser's own TLS
+deadline. When owned Geph then returns real server payload but the downstream
+client has already closed, current builds retain one exact-host successor for
+30 seconds. The next request consumes it before any network wait and tries the
+same ownership-verified Geph backend before repeating system, app-owned DNS,
+and local-strategy checks. A missing first payload falls back to the normal
+sequence with no token left. A consumed successor cannot create another one,
+and it never learns or persists a route. A log line containing
+`retained one bounded successor` followed by `successor` on the next request is
+the expected recovery; repeated full local ladders without those events need a
+fresh timing investigation.
+
 ### A site partially loads or owned Geph returns `local_rate_limited`
 
 An HTTP/2 page may return status `200` and tens of kilobytes before its stream
