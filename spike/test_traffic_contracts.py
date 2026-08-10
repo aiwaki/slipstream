@@ -1140,6 +1140,7 @@ def test_candidate_request_becomes_spent_one_shot_when_noise_arrives_mid_dial(
     response = b"\x16\x03\x03\x00\x60" + (b"R" * 96)
     client_writer = CaptureWriter()
     confirmations = []
+    status_events = []
     now = time.monotonic()
     tproxy._local_zero_payload_failures[host] = {
         tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
@@ -1163,6 +1164,13 @@ def test_candidate_request_becomes_spent_one_shot_when_noise_arrives_mid_dial(
         "_schedule_auto_geph_confirmation_before_relay",
         lambda actual_host, **_kwargs: confirmations.append(actual_host) or True,
     )
+    original_set_status = tproxy._set_auto_geph_status
+
+    def record_status(state, actual_host="", reason="", bytes_read=0):
+        status_events.append((state, actual_host, reason, bytes_read))
+        original_set_status(state, actual_host, reason, bytes_read)
+
+    monkeypatch.setattr(tproxy, "_set_auto_geph_status", record_status)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
@@ -1184,7 +1192,10 @@ def test_candidate_request_becomes_spent_one_shot_when_noise_arrives_mid_dial(
     assert not tproxy._auto_geph_one_shot_request_proven(host)
     assert not tproxy._auto_geph_learned_exact_host(host)
     assert confirmations == []
-    assert tproxy._auto_geph_last_status["state"] == "one_shot"
+    assert any(
+        state == "one_shot" and actual_host == host
+        for state, actual_host, _reason, _bytes_read in status_events
+    )
     assert tproxy.geph_active_session_count() == 0
 
 
