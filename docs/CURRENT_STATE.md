@@ -30,15 +30,16 @@ state.
 
 The current branch `codex/partial-tls-content-confirmation` fixes two generic
 defects without adding a hostname rule. First, the six-second partial TLS-record
-watchdog ended the relay before the fifteen-second content observer and required
-the user to repeat the failure through the full local ladder before running the
-independent HTTP proof. An exact unknown `system/plain` partial-record signal may
-now schedule only that bounded proof; opaque TLS bytes still cannot authorize a
-route. Second, the HTTP/2 parser classified every interrupted partial frame as a
-protocol error. A fully validated unfinished DATA frame on the already active
-response stream, after valid headers and earlier body bytes, is now incomplete;
-partial headers, control frames, wrong-stream frames, malformed padding, and a
-DATA frame without prior body remain unknown.
+watchdog ended the relay before the fifteen-second content observer. It now
+preserves the exact public `system/plain` address, but neither probes nor
+authorizes Geph until independent system, app-owned DNS, and two local-strategy
+failures complete the normal evidence ladder. Opaque TLS bytes still cannot
+authorize a route. Second, the HTTP/2 parser classified every interrupted
+partial frame as a protocol error. A fully validated unfinished DATA frame on
+the already active response stream, after valid headers and earlier body bytes,
+is now incomplete. The declared DATA length must remain compatible with any
+`Content-Length`; partial headers, control frames, wrong-stream frames,
+malformed padding, and a DATA frame without prior body remain unknown.
 
 Read-only workstation controls reproduce the production contract. The direct
 HTTP/2 probe against the exact public address reports incomplete after 25
@@ -48,7 +49,7 @@ seconds. Route learning still requires both independent results, applies only
 to a later exact-host request, and remains unavailable to static policy,
 Discord, YouTube, Googlevideo, unowned Geph, or external DNS/proxy/PAC/VPN/PF.
 
-Local verification passes `797` Python daemon tests, `255` script tests, `21`
+Local verification passes `799` Python daemon tests, `255` script tests, `21`
 Chromium companion tests, `83` Rust tray tests, `32` Rust core tests, `241`
 Windows-adapter tests, and `40` tests in each userspace-stack evaluation crate.
 The modified Python files compile; version continuity, project-state

@@ -291,13 +291,13 @@ def _partial_active_data_frame_visible(
     active_stream_id,
     header_block_stream_id,
     graceful_goaway_last_stream_id,
+    received_body_length,
+    expected_content_length,
 ):
     """Recognize only a validated, unfinished DATA frame on the active stream."""
-    if len(receive_buffer) <= 9:
+    if len(receive_buffer) < 9:
         return False
-    frame, body_length = Frame.parse_frame_header(
-        memoryview(bytes(receive_buffer[:9]))
-    )
+    frame, body_length = Frame.parse_frame_header(memoryview(receive_buffer)[:9])
     if (
         not isinstance(frame, DataFrame)
         or body_length > max_frame_size
@@ -315,6 +315,19 @@ def _partial_active_data_frame_visible(
             active_stream_id=active_stream_id,
             graceful_goaway_last_stream_id=graceful_goaway_last_stream_id,
         )
+    ):
+        return False
+    if "PADDED" in frame.flags:
+        if len(receive_buffer) < 10:
+            return False
+        data_length = body_length - 1 - receive_buffer[9]
+    else:
+        data_length = body_length
+    if data_length <= 0:
+        return False
+    if (
+        expected_content_length is not None
+        and received_body_length + data_length > expected_content_length
     ):
         return False
     return True
@@ -568,6 +581,8 @@ def probe_http2_response(
                 active_stream_id=stream_id,
                 header_block_stream_id=header_block_stream_id,
                 graceful_goaway_last_stream_id=graceful_goaway_last_stream_id,
+                received_body_length=body_length,
+                expected_content_length=expected_content_length,
             )
         except HyperframeError:
             partial_active_data = False

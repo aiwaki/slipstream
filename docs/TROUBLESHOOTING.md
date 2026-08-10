@@ -110,16 +110,20 @@ headers and earlier identity body bytes, the peer may send a valid DATA header
 for the active stream and then stop before that declared DATA payload is
 complete. Slipstream treats this as an interrupted response only when the frame
 header, negotiated size, stream identity, available payload prefix, and padding
-are all valid. A partial DATA frame without earlier body bytes, or any partial
-header, control, wrong-stream, oversized, or malformed frame remains unknown.
+are all valid and its declared data length does not exceed any `Content-Length`.
+The complete nine-byte header is sufficient for a nonempty unpadded DATA frame;
+a padded frame also requires its padding-length byte. A partial DATA frame
+without earlier body bytes, or any partial header, control, wrong-stream,
+oversized, malformed, or length-exceeding frame remains unknown.
 
 The live relay's partial TLS-record watchdog expires before its longer
 payload-idle observer. For an exact unknown `system/plain` connection, that
-watchdog may therefore schedule the same bounded certificate-validating HTTP
-probe directly. It does not select Geph or learn from encrypted bytes. The
-route can change only after the direct probe independently proves incomplete
-and the currently verified owned-Geph listener independently returns a
-complete usable response.
+watchdog therefore preserves the exact public-IP candidate. It does not probe,
+select Geph, or learn from encrypted bytes until the independent system,
+app-owned DNS, and multiple local-strategy evidence ladder is complete. The
+route can change only after that ladder, a direct certificate-validating probe
+that independently proves incomplete, and a complete usable response through
+the currently verified owned-Geph listener.
 
 If the body reaches the probe's local byte cap without `END_STREAM`, it is
 capped and unknown rather than proven incomplete. A response exactly at the cap

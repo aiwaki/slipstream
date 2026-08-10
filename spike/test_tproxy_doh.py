@@ -12671,7 +12671,7 @@ def test_distinct_local_partial_stalls_schedule_owned_geph_confirmation(monkeypa
     assert tproxy._auto_geph_candidates[host] > 101.0
 
 
-def test_exact_system_partial_tls_stall_schedules_content_confirmation(
+def test_exact_system_partial_tls_stall_waits_for_full_local_ladder(
     monkeypatch,
 ):
     confirmations = []
@@ -12680,12 +12680,39 @@ def test_exact_system_partial_tls_stall_schedules_content_confirmation(
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
-    assert tproxy.note_partial_tls_stall(
+    assert not tproxy.note_partial_tls_stall(
         host,
         tproxy.AUTO_GEPH_STAGE_SYSTEM,
         now=100.0,
         probe_ip="1.1.1.1",
         strategy_name="plain",
+        transport_confirmation_runner=(
+            lambda candidate, ip: confirmations.append((candidate, ip))
+        ),
+    )
+
+    assert confirmations == []
+    assert tproxy._transport_incomplete_plain_candidates[host][0] == "1.1.1.1"
+    assert not tproxy.note_partial_tls_stall(
+        host,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS,
+        now=101.0,
+        transport_confirmation_runner=(
+            lambda candidate, ip: confirmations.append((candidate, ip))
+        ),
+    )
+    assert not tproxy.note_partial_tls_stall(
+        host,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake",
+        now=102.0,
+        transport_confirmation_runner=(
+            lambda candidate, ip: confirmations.append((candidate, ip))
+        ),
+    )
+    assert tproxy.note_partial_tls_stall(
+        host,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake",
+        now=103.0,
         transport_confirmation_runner=(
             lambda candidate, ip: confirmations.append((candidate, ip))
         ),

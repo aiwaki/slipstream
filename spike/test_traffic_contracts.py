@@ -1429,8 +1429,10 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
     assert not tproxy.is_geo_exit_route(host)
 
 
-def test_unknown_partial_tls_watchdog_reaches_content_confirmation(monkeypatch):
-    """A framed system-route stall must not wait for manual route retries."""
+def test_unknown_partial_tls_watchdog_preserves_candidate_without_bypassing_ladder(
+    monkeypatch,
+):
+    """A framed system-route stall preserves evidence but cannot authorize."""
     isolate_runtime_state(monkeypatch)
     host = "partial-record-contract.example"
     response = b"\x17\x03\x03\x00\x08" + b"R" * 8
@@ -1472,9 +1474,8 @@ def test_unknown_partial_tls_watchdog_reaches_content_confirmation(monkeypatch):
     client, _first_flight = tls_client(host, block_after_hello=True)
     asyncio.run(run_handler(client, CaptureWriter()))
 
-    assert len(confirmations) == 1
-    assert confirmations[0][:3] == (host, "1.1.1.1", "plain")
-    assert confirmations[0][4] is None
+    assert confirmations == []
+    assert tproxy._transport_incomplete_plain_candidates[host][0] == "1.1.1.1"
     assert not tproxy.is_geo_exit_route(host)
 
 

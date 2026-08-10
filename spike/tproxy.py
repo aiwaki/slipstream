@@ -2062,6 +2062,7 @@ AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES = 2
 AUTO_GEPH_STAGE_SYSTEM = "system"
 AUTO_GEPH_STAGE_XBOX_DNS = "xbox_dns"
 AUTO_GEPH_STAGE_STRATEGY_PREFIX = "strategy:"
+PLAIN_STRATEGY = "plain"
 SYSTEM_PROBE_PAYLOAD = "payload"
 SYSTEM_PROBE_CLOSED = "closed"
 SYSTEM_PROBE_TIMEOUT = "timeout"
@@ -4723,41 +4724,45 @@ def note_partial_tls_stall(
     strategy_name=None,
     transport_confirmation_runner=None,
 ):
-    """Record one framed TLS truncation and reproduce exact system failures."""
+    """Record one framed TLS truncation without bypassing the local ladder."""
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
     local_ladder_complete = _record_partial_tls_stall_evidence(h, stage, now)
 
     # The six-second partial-record watchdog intentionally ends the live relay
-    # before the fifteen-second payload-idle observer can run. For an exact
-    # system/plain route, let that strong framed signal schedule only the
-    # independent HTTP completion probe. Opaque bytes still cannot learn a
-    # route: direct HTTP must prove incomplete and owned Geph must separately
-    # prove complete before the exact-host overlay is admitted.
-    transport_confirmation_scheduled = False
+    # before the fifteen-second payload-idle observer can run. Preserve the
+    # exact system/plain address, but do not probe or authorize Geph until the
+    # independent system, app-owned DNS, and local-strategy ladder is complete.
     if (
         stage == AUTO_GEPH_STAGE_SYSTEM
-        and strategy_name == "plain"
+        and strategy_name == PLAIN_STRATEGY
         and probe_ip is not None
     ):
-        transport_confirmation_scheduled = (
-            _schedule_transport_incomplete_response_confirmation(
-                h,
-                probe_ip,
-                strategy_name,
-                now=now,
-                runner=transport_confirmation_runner,
-            )
-        )
+        _remember_transport_incomplete_plain_candidate(h, probe_ip, now)
 
+    transport_confirmation_scheduled = False
     auto_geph_scheduled = False
     if local_ladder_complete:
-        _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
-        auto_geph_scheduled = _schedule_auto_geph_confirmation(
-            h,
-            now=now,
-            runner=confirmation_runner,
-        )
+        _prune_transport_incomplete_probes(now)
+        candidate = _transport_incomplete_plain_candidates.get(h)
+        if candidate is not None:
+            candidate_ip, _observed_at = candidate
+            transport_confirmation_scheduled = (
+                _schedule_transport_incomplete_response_confirmation(
+                    h,
+                    candidate_ip,
+                    PLAIN_STRATEGY,
+                    now=now,
+                    runner=transport_confirmation_runner,
+                )
+            )
+        else:
+            _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
+            auto_geph_scheduled = _schedule_auto_geph_confirmation(
+                h,
+                now=now,
+                runner=confirmation_runner,
+            )
     return bool(transport_confirmation_scheduled or auto_geph_scheduled)
 
 
@@ -4949,7 +4954,7 @@ def _schedule_semantic_plain_denial_probe(
     except ValueError:
         return False
     if (
-        strategy_name != "plain"
+        strategy_name != PLAIN_STRATEGY
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or _auto_geph_learned_exact_host(h)
@@ -8013,7 +8018,14 @@ YOUTUBE_CONTROL_STRATS = ["split64+fake", "split16+fake", "fake5"]   # fake-ONLY
 # the TLS probe can't see the throttle — so try fake first everywhere (the decoy
 # hides the SNI from the throttler). Non-fake variants remain as fallbacks for the
 # rare host the decoy upsets. Inject is cheap (not DoH); the pool absorbs it.
-GENERAL_STRATS = ["split64+fake", "split16+fake", "fake5", "split64", "split16", "plain"]
+GENERAL_STRATS = [
+    "split64+fake",
+    "split16+fake",
+    "fake5",
+    "split64",
+    "split16",
+    PLAIN_STRATEGY,
+]
 
 
 def strategy_order(host):
@@ -9127,7 +9139,7 @@ def _schedule_transport_incomplete_response_confirmation(
     except ValueError:
         return False
     if (
-        strategy_name != "plain"
+        strategy_name != PLAIN_STRATEGY
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
