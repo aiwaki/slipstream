@@ -500,6 +500,9 @@ GEPH_RESTART_WAKE_WINDOW = 10 * 60.0
 GEPH_RESTART_COOLDOWN = 10 * 60.0
 GEPH_RESTART_EXECUTION_RETRY = 30.0
 GEPH_RESTART_SUCCESSOR_GRACE = 15.0
+GEPH_RESTART_PAYLOAD_READY_GRACE = 20.0
+GEPH_RESTART_PAYLOAD_PROBE_TIMEOUT = 4.0
+GEPH_RESTART_PAYLOAD_POLL = 0.25
 GEPH_BACKEND_FAILURE_HOLD = 30.0
 FD_PRESSURE_HIGH_CAP = 2048
 FD_PRESSURE_LOW_CAP = 1024
@@ -4092,10 +4095,38 @@ def _retry_semantic_geph_probe_after_owned_restart(
                     on_backend_unavailable()
                 return 0
 
+            successor_pid = _owned_geph_confirmation_pid()
+            if not successor_pid:
+                if on_backend_unavailable is not None:
+                    on_backend_unavailable()
+                return 0
+            readiness_state = _wait_for_owned_geph_payload_ready(successor_pid)
+            if readiness_state != "ready":
+                if readiness_state in {
+                    "conflict",
+                    "down",
+                    "replaced",
+                    "unverified",
+                }:
+                    if on_backend_unavailable is not None:
+                        on_backend_unavailable()
+                    return 0
+                if readiness_state == "shutdown":
+                    return 0
+                continue
+
+            if not _owned_geph_confirmation_pid_matches(successor_pid):
+                if on_backend_unavailable is not None:
+                    on_backend_unavailable()
+                return 0
             bytes_read = probe(h)
+            if not _owned_geph_confirmation_pid_matches(successor_pid):
+                if on_backend_unavailable is not None:
+                    on_backend_unavailable()
+                return 0
             if bytes_read >= AUTO_GEPH_CONFIRM_MIN_BYTES:
                 if on_success is not None:
-                    on_success(bytes_read)
+                    on_success(bytes_read, successor_pid)
                 print(
                     ">> owned Geph replacement "
                     f"{replacement}/{AUTO_GEPH_SEMANTIC_REPLACEMENT_MAX} "
@@ -4107,6 +4138,92 @@ def _retry_semantic_geph_probe_after_owned_restart(
     finally:
         if not drain_reserved:
             _finish_geph_restart_drain()
+
+
+def _wait_for_owned_geph_payload_ready(
+    expected_pid=None,
+    *,
+    timeout=None,
+    payload_probe=None,
+    listener_pid=None,
+    monotonic=None,
+    sleeper=None,
+):
+    """Wait until one exact owned-Geph successor carries HTTPS payload."""
+    timeout = (
+        GEPH_RESTART_PAYLOAD_READY_GRACE
+        if timeout is None
+        else max(0.0, timeout)
+    )
+    listener_pid = _geph_listener_pid if listener_pid is None else listener_pid
+    monotonic = time.monotonic if monotonic is None else monotonic
+    sleeper = time.sleep if sleeper is None else sleeper
+    payload_probe = (
+        _geph_payload_probe if payload_probe is None else payload_probe
+    )
+    expected_pid = (
+        _owned_geph_confirmation_pid()
+        if expected_pid is None
+        else expected_pid
+    )
+    if (
+        not isinstance(expected_pid, int)
+        or isinstance(expected_pid, bool)
+        or expected_pid <= 0
+    ):
+        return "unverified"
+
+    deadline = monotonic() + timeout
+    specs = tuple(OWNED_GEPH_PAYLOAD_CANARY_SPECS)
+    if not specs:
+        return "unverified"
+    attempt = 0
+    while not _shutdown_started.is_set():
+        current_pid = listener_pid(GEPH_OWNED_PORT)
+        if current_pid is None:
+            return "down"
+        if current_pid != expected_pid:
+            return "replaced"
+        if not geph_listener_owned(
+            GEPH_OWNED_PORT,
+            listener_pid=expected_pid,
+        ):
+            return "conflict"
+
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return "timeout"
+        spec = specs[attempt % len(specs)]
+        attempt += 1
+        probe_timeout = min(GEPH_RESTART_PAYLOAD_PROBE_TIMEOUT, remaining)
+        payload_bytes = payload_probe(
+            spec["host"],
+            spec,
+            timeout=probe_timeout,
+        )
+
+        current_pid = listener_pid(GEPH_OWNED_PORT)
+        if current_pid is None:
+            return "down"
+        if current_pid != expected_pid:
+            return "replaced"
+        if not geph_listener_owned(
+            GEPH_OWNED_PORT,
+            listener_pid=expected_pid,
+        ):
+            return "conflict"
+        if (
+            isinstance(payload_bytes, int)
+            and not isinstance(payload_bytes, bool)
+            and payload_bytes >= _local_payload_min_bytes(spec)
+        ):
+            return "ready"
+
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return "timeout"
+        sleeper(min(GEPH_RESTART_PAYLOAD_POLL, remaining))
+    return "shutdown"
 
 
 def _owned_geph_confirmation_pid():
@@ -4183,13 +4300,31 @@ def _confirm_semantic_geo_exit(host):
     ):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
-    bytes_read = _semantic_geph_payload_probe(h)
+    confirmed_pid = _owned_geph_confirmation_pid()
+    if not confirmed_pid:
+        bytes_read = 0
+    else:
+        bytes_read = _semantic_geph_payload_probe(h)
+        if not _owned_geph_confirmation_pid_matches(confirmed_pid):
+            bytes_read = 0
+            confirmed_pid = None
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        confirmed_pid = None
+
+        def capture_recovered_pid(_bytes_read, pinned_pid):
+            nonlocal confirmed_pid
+            confirmed_pid = pinned_pid
+
         bytes_read = _retry_semantic_geph_probe_after_owned_restart(
             h,
             _semantic_geph_payload_probe,
+            on_success=capture_recovered_pid,
         )
-    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+    if (
+        bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES
+        or not confirmed_pid
+        or not _owned_geph_confirmation_pid_matches(confirmed_pid)
+    ):
         _set_auto_geph_status(
             "rejected",
             h,
@@ -4201,6 +4336,7 @@ def _confirm_semantic_geo_exit(host):
         if (
             not _auto_geph_base_host_allowed(h)
             or not _owned_geph_ready_for_semantic_confirmation()
+            or not _owned_geph_confirmation_pid_matches(confirmed_pid)
         ):
             _set_auto_geph_status("skipped", h, "route changed")
             return False
@@ -4235,13 +4371,31 @@ def _confirm_incomplete_response_geo_exit(host):
     ):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
-    bytes_read = _incomplete_response_geph_payload_probe(h)
+    confirmed_pid = _owned_geph_confirmation_pid()
+    if not confirmed_pid:
+        bytes_read = 0
+    else:
+        bytes_read = _incomplete_response_geph_payload_probe(h)
+        if not _owned_geph_confirmation_pid_matches(confirmed_pid):
+            bytes_read = 0
+            confirmed_pid = None
     if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+        confirmed_pid = None
+
+        def capture_recovered_pid(_bytes_read, pinned_pid):
+            nonlocal confirmed_pid
+            confirmed_pid = pinned_pid
+
         bytes_read = _retry_semantic_geph_probe_after_owned_restart(
             h,
             _incomplete_response_geph_payload_probe,
+            on_success=capture_recovered_pid,
         )
-    if bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES:
+    if (
+        bytes_read < AUTO_GEPH_CONFIRM_MIN_BYTES
+        or not confirmed_pid
+        or not _owned_geph_confirmation_pid_matches(confirmed_pid)
+    ):
         _set_auto_geph_status(
             "rejected",
             h,
@@ -4253,6 +4407,7 @@ def _confirm_incomplete_response_geo_exit(host):
         if (
             not _auto_geph_base_host_allowed(h)
             or not _owned_geph_ready_for_semantic_confirmation()
+            or not _owned_geph_confirmation_pid_matches(confirmed_pid)
         ):
             _set_auto_geph_status("skipped", h, "route changed")
             return False
@@ -5253,10 +5408,13 @@ def retry_pending_auto_geph_confirmations(now=None, runner=None):
 def auto_geo_exit_status_snapshot(now=None):
     prune_auto_geph(now)
     with _auto_geph_lock:
+        pending_hosts = set(_auto_geph_confirming)
+        pending_hosts.update(_transport_incomplete_confirming)
+        pending_hosts.update(_semantic_plain_confirming)
         return {
             "enabled": AUTO_GEPH_ENABLED,
             "learned": len(_auto_geph),
-            "pending": len(_auto_geph_confirming),
+            "pending": len(pending_hosts),
             "last_state": _auto_geph_last_status["state"],
             "last_host": _auto_geph_last_status["host"],
             "last_reason": _auto_geph_last_status["reason"],
