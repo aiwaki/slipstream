@@ -174,6 +174,20 @@ proof after each and stopping immediately on stable success. The exact host is
 learned only after that proof. A new recovery incident is globally rate-limited
 for ten minutes.
 
+Listener and control-port liveness are not payload readiness. Transaction
+`7D29A3E8-1B4C-4E51-A2D8-8A2E6A5164C7` observed a new exact owned listener
+before Geph had completed authentication and opened a usable exit session. An
+immediate semantic retry therefore failed without opening the target tunnel and
+spent both replacements. After each replacement, current recovery pins the
+successor PID and waits in the background for one existing portfolio HTTPS
+canary to meet its payload threshold through that same PID. Only then does it
+retry the target's independent semantic probe. This wait is bounded to twenty
+seconds by one absolute deadline across SOCKS, TLS, request, and response
+operations; PID drift, ownership conflict, listener loss, shutdown, or no payload
+remains fail-closed and cannot learn a route. The target response itself and
+the final route write are checked against the same pinned PID, so a KeepAlive
+replacement during the target probe also fails closed.
+
 A `launchctl kickstart -k` timeout is not evidence that the mutating command did
 nothing. The 2026-08-03 workstation transaction observed the exact owned
 LaunchAgent replace its listener PID after the shared five-second command bound

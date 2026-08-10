@@ -11,51 +11,47 @@ file.
 ## Current Checkpoint
 
 Current user-facing priority: Slipstream remains rolled back and must not be
-reinstalled from this branch. Live main is PR #307 at
-`00c48edad207dfa53442b9b6b713b02908bdeb7e`. Its exact-main gates and protected
-owned-Geph qualification `31340620408` passed. The qualified artifact is
-`9045740737`, with outer digest
-`sha256:2975d682caee3b0e28183a7373a4c7ca64c9b4cb7265692a9305018325911106`
-and inner ZIP SHA-256
-`eaeb743f5a7e7a0c4d1e2508e0d58e5dd2c0948e7ce0e2d241b344b16cf39e83`.
+reinstalled from this branch. Live main is PR #308 at
+`b9b989680abe4519a8ba2656697d83f175693a89`. Exact-main CI `31379340333`,
+dependency audit `31379340286`, Windows qualification `31379340326`, and the
+single protected owned-Geph qualification `31380099738` passed. The protected
+artifact is `9059610687`, with outer digest
+`sha256:cdb1c66bb9f3ae0d50e2bd635c397b19b5f5a4d7f42565db47a74d9d7862ef02`.
 
 Controlled workstation transaction
-`82D444BE-2F5C-4E7F-85EE-01220B50474F` installed only that exact artifact and
-reached coherent active StatusV2. Its first required smoke failed twice:
-`xpersonatoy.com` returned HTTP/2 `200`, then curl error `18` after `15,041`
-bytes and about 6.6 seconds. No recovery event was recorded. Immediate exact
-rollback removed the root daemon, private PF state, token, status, and listener
-while preserving user DNS `111.88.96.50` / `111.88.96.51` and external network
-state.
+`7D29A3E8-1B4C-4E51-A2D8-8A2E6A5164C7` installed only that artifact and
+reached coherent active StatusV2. Four sequential HTTP/2 identity requests to
+the generic incomplete-response fixture origin returned status `200` and curl
+error `18`. After the bounded local evidence ladder, StatusV2 remained
+unlearned and ended with `last_state=rejected`. The private root log records two
+owned-Geph replacements: each replacement exposed a live owned listener and
+control port, but the immediate target semantic probe still reported the
+backend unavailable. Immediate exact rollback removed the root daemon,
+listener, private PF state, token, and status while preserving user DNS
+`111.88.96.50` / `111.88.96.51`, proxy/PAC, and external network state. The
+pre-existing user-owned Geph LaunchAgent remained under its exact label.
 
-The current branch `codex/partial-tls-content-confirmation` fixes two generic
-defects without adding a hostname rule. First, the six-second partial TLS-record
-watchdog ended the relay before the fifteen-second content observer. It now
-preserves the exact public `system/plain` address, but neither probes nor
-authorizes Geph until independent system, app-owned DNS, and two local-strategy
-failures complete the normal evidence ladder. Opaque TLS bytes still cannot
-authorize a route. Second, the HTTP/2 parser classified every interrupted
-partial frame as a protocol error. A fully validated unfinished DATA frame on
-the already active response stream, after valid headers and earlier body bytes,
-is now incomplete. The declared DATA length must remain compatible with any
-`Content-Length`; partial headers, control frames, wrong-stream frames,
-malformed padding, and a DATA frame without prior body remain unknown.
+Read-only inspection of the user-owned Geph log found no target tunnel for the
+failed semantic probes. The replacement listener appeared before Geph finished
+authentication and established a payload-capable session. The current branch
+`codex/geph-semantic-readiness` therefore adds no hostname rule and does not
+relax semantic proof. After every bounded owned-Geph replacement it pins the
+exact successor PID and waits up to twenty seconds for one existing portfolio
+HTTPS canary to meet its payload threshold through that same PID. PID drift,
+unknown ownership, shutdown, or no payload remains fail-closed; only then may
+the exact target semantic probe run. The target response and route persistence
+are also pinned to that same successor PID, so a replacement during the probe
+cannot authorize learning. StatusV2 `auto_geo_exit.pending` now counts
+ordinary, incomplete-transport, and regional-denial confirmation workers once
+per host, without exposing hostnames.
 
-Read-only workstation controls reproduce the production contract. The direct
-HTTP/2 probe against the exact public address reports incomplete after 25
-seconds. The unchanged verified app-owned Geph listener on `127.0.0.1:9954`
-returns a complete identity-encoded body of `1,113,091` bytes in about nine
-seconds. Route learning still requires both independent results, applies only
-to a later exact-host request, and remains unavailable to static policy,
-Discord, YouTube, Googlevideo, unowned Geph, or external DNS/proxy/PAC/VPN/PF.
-
-Local verification passes `799` Python daemon tests, `255` script tests, `21`
-Chromium companion tests, `83` Rust tray tests, `32` Rust core tests, `241`
-Windows-adapter tests, and `40` tests in each userspace-stack evaluation crate.
-The modified Python files compile; version continuity, project-state
-continuity, and `git diff --check` pass. PR review, exact-main gates, and one
-fresh protected qualification remain required before another controlled
-workstation installation.
+Focused recovery verification passes `22` tests. The full Python and script
+suite passes `1061` tests plus `41` subtests. Chromium companion passes `21`
+tests; Rust tray passes `83`, core `32`, Windows adapter `241`, and both
+userspace evaluation crates `40` tests each. All five Rust Clippy runs are
+warning-free, and Python compilation plus the project continuity contract pass.
+PR review, exact-main gates, and one fresh protected qualification remain
+required before another controlled workstation installation.
 
 ## Previous Checkpoint
 
