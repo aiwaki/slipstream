@@ -11,47 +11,57 @@ file.
 ## Current Checkpoint
 
 Current user-facing priority: Slipstream remains rolled back and must not be
-reinstalled from this branch. Live main is PR #308 at
-`b9b989680abe4519a8ba2656697d83f175693a89`. Exact-main CI `31379340333`,
-dependency audit `31379340286`, Windows qualification `31379340326`, and the
-single protected owned-Geph qualification `31380099738` passed. The protected
-artifact is `9059610687`, with outer digest
-`sha256:cdb1c66bb9f3ae0d50e2bd635c397b19b5f5a4d7f42565db47a74d9d7862ef02`.
+reinstalled from this branch. Live main is PR #309 at
+`99da0eded9eaf0a0d629c9bd48f758b013f6d051`. Its exact-main CI
+`31389275678`, dependency audit `31389275710`, Windows qualification
+`31389275692`, and single protected owned-Geph qualification `31389915668`
+passed. Protected artifact `9063320265` has outer digest
+`sha256:f3c5d11848d8f12b801cbea9ff4f534391f87fba6545fe9a1437a31cff779c06`,
+inner ZIP SHA-256
+`b1baa2a44d7da2811a3d8ac0c815445614d09edc283aae2fa0846df3f93a6dec`,
+and app binary SHA-256
+`fb95f6758adc694b98dc7b7534832d545eeb3d4a98568e6deebe5e8902295a92`.
 
 Controlled workstation transaction
-`7D29A3E8-1B4C-4E51-A2D8-8A2E6A5164C7` installed only that artifact and
-reached coherent active StatusV2. Four sequential HTTP/2 identity requests to
-the generic incomplete-response fixture origin returned status `200` and curl
-error `18`. After the bounded local evidence ladder, StatusV2 remained
-unlearned and ended with `last_state=rejected`. The private root log records two
-owned-Geph replacements: each replacement exposed a live owned listener and
-control port, but the immediate target semantic probe still reported the
-backend unavailable. Immediate exact rollback removed the root daemon,
-listener, private PF state, token, and status while preserving user DNS
-`111.88.96.50` / `111.88.96.51`, proxy/PAC, and external network state. The
-pre-existing user-owned Geph LaunchAgent remained under its exact label.
+`8EAF7313-02F9-44EE-90C6-F08F341A6E89` installed only that artifact and
+reached coherent active StatusV2. Google, Spotify, Discord updater/gateway,
+YouTube, and a real Googlevideo request returned payload. Steam Store then
+timed out during TLS setup through Slipstream after about eight seconds. Exact
+rollback removed the root daemon, listener, private PF anchor, token, status,
+socket, and transaction runtime, restored the previous app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
+preserved user DNS `111.88.96.50` / `111.88.96.51`, proxy/PAC, default route,
+external PF owners, and the pre-existing user-owned Geph process. A read-only
+post-rollback control retrieved Steam Store directly with HTTP `200`,
+`1,061,394` bytes, in about one second.
 
-Read-only inspection of the user-owned Geph log found no target tunnel for the
-failed semantic probes. The replacement listener appeared before Geph finished
-authentication and established a payload-capable session. The current branch
-`codex/geph-semantic-readiness` therefore adds no hostname rule and does not
-relax semantic proof. After every bounded owned-Geph replacement it pins the
-exact successor PID and waits up to twenty seconds for one existing portfolio
-HTTPS canary to meet its payload threshold through that same PID. PID drift,
-unknown ownership, shutdown, or no payload remains fail-closed; only then may
-the exact target semantic probe run. The target response and route persistence
-are also pinned to that same successor PID, so a replacement during the probe
-cannot authorize learning. StatusV2 `auto_geo_exit.pending` now counts
-ordinary, incomplete-transport, and regional-denial confirmation workers once
-per host, without exposing hostnames.
+Code tracing found a generic runtime handoff gap, not a Steam hostname rule.
+`dial_via_geph()` committed a reviewed geo-exit request after the local owned
+SOCKS listener accepted `CONNECT` and received the buffered ClientHello. It did
+not require a byte from the target server. A live listener whose target stream
+stalled therefore trapped the current request in `relay_local_stream()`, so the
+existing original-destination system fallback was never reached. The root log
+could also omit this failure when that fallback later succeeded because failure
+logging occurred below the return.
 
-Focused recovery verification passes `22` tests. The full Python and script
-suite passes `1061` tests plus `41` subtests. Chromium companion passes `21`
-tests; Rust tray passes `83`, core `32`, Windows adapter `241`, and both
-userspace evaluation crates `40` tests each. All five Rust Clippy runs are
-warning-free, and Python compilation plus the project continuity contract pass.
-PR review, exact-main gates, and one fresh protected qualification remain
-required before another controlled workstation installation.
+The current branch `codex/geo-exit-first-payload-fallback` keeps Geph first but
+does not expose the client stream until one target byte arrives under one
+four-second absolute deadline across SOCKS setup and the target read. Timeout,
+EOF, or reset closes only that exact Geph stream, records the backend failure,
+and continues the same buffered request through the original PF destination.
+No DNS, PF, policy table, hostname, Discord, YouTube, Googlevideo, proxy/PAC,
+VPN, or external-Geph behavior changes. Review hardening keeps the first-byte
+gate strictly on ownership-verified Geph; an unowned external Geph retains its
+previous streaming relay lifecycle. A first-payload failure is recorded before
+the owned backend is suspended and contributes to the existing bounded,
+multi-host restart evidence. The full daemon test file passes `461`
+tests including the cancellation regression. The complete Python
+and script suite passes `1064` tests plus `41` subtests; traffic contracts pass
+`55`, Rust tray `83`, core `32`, Windows adapter `241`, and both userspace
+evaluation crates `40` tests each. All five Clippy runs are warning-free, and
+Python compilation, project continuity, and `git diff --check` pass. PR review,
+exact-main gates, and one fresh protected qualification are required before
+another controlled workstation installation.
 
 ## Previous Checkpoint
 

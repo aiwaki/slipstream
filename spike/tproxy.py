@@ -490,6 +490,7 @@ LOCAL_BYPASS_RUNTIME_DEGRADE_AFTER = 3
 LOCAL_BYPASS_RESWEEP_COOLDOWN = 60.0
 LOCAL_BYPASS_RESWEEP_STALE_AFTER = 120.0
 GEO_PAYLOAD_CANARY_TIMEOUT = 6.0
+GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT = 4.0
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
@@ -2875,6 +2876,7 @@ def note_geph_restart_failure(host, reason, now=None):
         return evidence
     if reason not in {
         "SOCKS connect failed",
+        "first payload timeout",
         "remote closed without response",
         "payload probe failed",
         "payload throughput below threshold",
@@ -10429,6 +10431,53 @@ async def dial_via_geph(host, port, first_flight):
             await _close_stream_writer(gw)
 
 
+async def _dial_via_geph_first_payload(
+    host,
+    port,
+    first_flight,
+    timeout=GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT,
+):
+    """Require one target byte before committing a client stream to Geph.
+
+    A successful SOCKS CONNECT only proves that the local listener accepted a
+    stream.  The exit may still stall before the target TLS response.  Keep one
+    absolute deadline across SOCKS setup and the first target byte so the same
+    client request can fall back to its original system route.
+    """
+    deadline = time.monotonic() + max(float(timeout), 0.001)
+    upstream = None
+    try:
+        try:
+            upstream = await asyncio.wait_for(
+                dial_via_geph(host, port, first_flight),
+                timeout=max(deadline - time.monotonic(), 0.001),
+            )
+        except asyncio.TimeoutError:
+            return None, "SOCKS connect failed"
+        if upstream is None:
+            return None, "SOCKS connect failed"
+        up_r, up_w = upstream
+        try:
+            first_payload = await asyncio.wait_for(
+                up_r.read(65536),
+                timeout=max(deadline - time.monotonic(), 0.001),
+            )
+        except asyncio.TimeoutError:
+            await _close_stream_writer(up_w)
+            return None, "first payload timeout"
+        except (ConnectionError, OSError):
+            await _close_stream_writer(up_w)
+            return None, "remote closed without response"
+        if not first_payload:
+            await _close_stream_writer(up_w)
+            return None, "remote closed without response"
+        return (up_r, up_w, first_payload), None
+    except asyncio.CancelledError:
+        if upstream is not None:
+            await _close_stream_writer(upstream[1])
+        raise
+
+
 async def dial_plain(ip, port, first_flight):
     """Open an exact direct stream with no DNS rewrite, desync, or tunnel.
 
@@ -11002,6 +11051,8 @@ async def _handle_impl(reader, writer):
         )
         geph_failure = "tunnel down"
         geph_suspend = "geo-exit tunnel down"
+        geph_failure_logged = False
+        geph_attempt_failed = False
         if geph_ready and _geph_session_started():
             try:
                 if runtime_route_circuit_allows(
@@ -11009,61 +11060,107 @@ async def _handle_impl(reader, writer):
                     GEO_BACKEND_GEPH,
                     owned=geph_owned,
                 ):
-                    g = await dial_via_geph(host, dst_port, head + body)
-                    if g:
-                        gr, gw = g
+                    if not geph_owned:
+                        g = await dial_via_geph(host, dst_port, head + body)
+                        if g:
+                            gr, gw = g
+                            if VERBOSE:
+                                print(
+                                    f"OK {host}:{dst_port} via external geph tunnel",
+                                    file=sys.stderr,
+                                )
+                            t0 = time.monotonic()
+                            geph_result_recorded = False
+
+                            def record_first_geph_payload():
+                                nonlocal geph_result_recorded
+                                if geph_result_recorded:
+                                    return
+                                runtime_route_circuit_record_result(
+                                    policy,
+                                    GEO_BACKEND_GEPH,
+                                    True,
+                                    owned=False,
+                                )
+                                clear_geph_route_failure()
+                                geph_result_recorded = True
+
+                            activity = _RelayActivity(
+                                last_downstream_at=t0,
+                                on_first_downstream=record_first_geph_payload,
+                            )
+                            res = await relay_local_stream(
+                                reader,
+                                gw,
+                                gr,
+                                writer,
+                                activity,
+                            )
+                            down_b = res[1] or 0
+                            if down_b == 0 and time.monotonic() - t0 < 10:
+                                runtime_route_circuit_record_result(
+                                    policy,
+                                    GEO_BACKEND_GEPH,
+                                    False,
+                                    owned=False,
+                                )
+                                log_geph_route_failure(
+                                    host,
+                                    "remote closed without response",
+                                )
+                                suspend_geo_exit_backend(
+                                    "geo-exit remote close before payload"
+                                )
+                            elif not geph_result_recorded:
+                                runtime_route_circuit_record_result(
+                                    policy,
+                                    GEO_BACKEND_GEPH,
+                                    True,
+                                    owned=False,
+                                )
+                                clear_geph_route_failure()
+                            return
+                        geph_failure = "SOCKS connect failed"
+                    else:
+                        g, geph_failure = await _dial_via_geph_first_payload(
+                            host,
+                            dst_port,
+                            head + body,
+                        )
+                    if geph_owned and g:
+                        gr, gw, server_first = g
                         if VERBOSE:
                             print(f"OK {host}:{dst_port} via geph tunnel", file=sys.stderr)
                         t0 = time.monotonic()
-                        geph_result_recorded = False
-
-                        def record_first_geph_payload():
-                            nonlocal geph_result_recorded
-                            if geph_result_recorded:
-                                return
-                            runtime_route_circuit_record_result(
-                                policy,
-                                GEO_BACKEND_GEPH,
-                                True,
-                                owned=geph_owned,
-                            )
-                            clear_geph_route_failure()
-                            geph_result_recorded = True
-
+                        runtime_route_circuit_record_result(
+                            policy,
+                            GEO_BACKEND_GEPH,
+                            True,
+                            owned=geph_owned,
+                        )
+                        clear_geph_route_failure()
+                        try:
+                            writer.write(server_first)
+                            await writer.drain()
+                        except asyncio.CancelledError:
+                            await _close_stream_writer(gw)
+                            raise
+                        except (ConnectionError, OSError):
+                            await _close_stream_writer(gw)
+                            writer.close()
+                            return
                         activity = _RelayActivity(
                             last_downstream_at=t0,
-                            on_first_downstream=record_first_geph_payload,
+                            downstream_bytes=len(server_first),
+                            first_downstream_seen=True,
                         )
-                        res = await relay_local_stream(
+                        await relay_local_stream(
                             reader,
                             gw,
                             gr,
                             writer,
                             activity,
                         )
-                        down_b = res[1] or 0
-                        if down_b == 0 and time.monotonic() - t0 < 10:
-                            runtime_route_circuit_record_result(
-                                policy,
-                                GEO_BACKEND_GEPH,
-                                False,
-                                owned=geph_owned,
-                            )
-                            log_geph_route_failure(host, "remote closed without response")
-                            # The current client stream cannot be replayed after a
-                            # zero-byte close. Cool down only Geph; the next client
-                            # retry can use the preserved system route.
-                            suspend_geo_exit_backend(
-                                "geo-exit remote close before payload"
-                            )
-                        elif not geph_result_recorded:
-                            runtime_route_circuit_record_result(
-                                policy,
-                                GEO_BACKEND_GEPH,
-                                True,
-                                owned=geph_owned,
-                            )
-                            clear_geph_route_failure()
                         return
                     runtime_route_circuit_record_result(
                         policy,
@@ -11071,8 +11168,12 @@ async def _handle_impl(reader, writer):
                         False,
                         owned=geph_owned,
                     )
-                    geph_failure = "SOCKS connect failed"
-                    geph_suspend = "geo-exit SOCKS connect unavailable"
+                    geph_attempt_failed = True
+                    geph_suspend = (
+                        "geo-exit SOCKS connect unavailable"
+                        if geph_failure == "SOCKS connect failed"
+                        else "geo-exit first payload unavailable"
+                    )
                 else:
                     geph_failure = "backend cooling down"
                     geph_suspend = "geo-exit backend cooling down"
@@ -11090,6 +11191,9 @@ async def _handle_impl(reader, writer):
                 owned=geph_owned,
             )
 
+        if geph_attempt_failed:
+            log_geph_route_failure(host, geph_failure)
+            geph_failure_logged = True
         if geph_expected and not geph_cooling:
             suspend_geo_exit_backend(geph_suspend)
         if await _try_system_geo_connect(
@@ -11102,7 +11206,8 @@ async def _handle_impl(reader, writer):
         ):
             return
         if geph_expected:
-            log_geph_route_failure(host, geph_failure)
+            if not geph_failure_logged:
+                log_geph_route_failure(host, geph_failure)
         else:
             route_health_event(
                 policy["service_group"],
