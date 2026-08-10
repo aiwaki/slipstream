@@ -12671,6 +12671,58 @@ def test_distinct_local_partial_stalls_schedule_owned_geph_confirmation(monkeypa
     assert tproxy._auto_geph_candidates[host] > 101.0
 
 
+def test_exact_system_partial_tls_stall_schedules_content_confirmation(
+    monkeypatch,
+):
+    confirmations = []
+    host = "partial-body.example.com"
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    assert tproxy.note_partial_tls_stall(
+        host,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        now=100.0,
+        probe_ip="1.1.1.1",
+        strategy_name="plain",
+        transport_confirmation_runner=(
+            lambda candidate, ip: confirmations.append((candidate, ip))
+        ),
+    )
+
+    assert confirmations == [(host, "1.1.1.1")]
+    assert not tproxy.is_geo_exit_route(host)
+    assert host not in tproxy._auto_geph
+
+
+def test_partial_tls_content_confirmation_excludes_non_system_routes(
+    monkeypatch,
+):
+    confirmations = []
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    for host, stage, strategy in (
+        ("updates.discord.com", tproxy.AUTO_GEPH_STAGE_SYSTEM, "plain"),
+        ("partial-body.example.com", tproxy.AUTO_GEPH_STAGE_XBOX_DNS, "plain"),
+        ("partial-body.example.com", tproxy.AUTO_GEPH_STAGE_SYSTEM, "split16+fake"),
+    ):
+        assert not tproxy.note_partial_tls_stall(
+            host,
+            stage,
+            now=100.0,
+            probe_ip="1.1.1.1",
+            strategy_name=strategy,
+            transport_confirmation_runner=(
+                lambda candidate, ip: confirmations.append((candidate, ip))
+            ),
+        )
+
+    assert confirmations == []
+
+
 def test_local_strategy_stalls_without_system_and_xbox_proof_do_not_confirm(
     monkeypatch,
 ):

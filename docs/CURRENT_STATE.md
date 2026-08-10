@@ -8,15 +8,55 @@ The checkpoint is a locator, not authority. Repository state, merged PRs,
 required CI, and current source code always win when they disagree with this
 file.
 
-Current user-facing priority: Slipstream is rolled back and must not be
-reinstalled yet. Live main is PR #306 at
-`a38c6d12fe2ddc84059c7b77fd7bc97902d0b151`. Exact-main CI `30862641149`,
-audit `30862641178`, native Windows qualification `30862641141`, and the sole
-protected owned-Geph qualification `31326467025` passed. Its exact artifact
-`9041706949` has outer digest
-`sha256:a2dffad4b289a3f690ffcb18ed03f985c2e2a3fbb2f2ff182ec8f6200e137021`
+## Current Checkpoint
+
+Current user-facing priority: Slipstream remains rolled back and must not be
+reinstalled from this branch. Live main is PR #307 at
+`00c48edad207dfa53442b9b6b713b02908bdeb7e`. Its exact-main gates and protected
+owned-Geph qualification `31340620408` passed. The qualified artifact is
+`9045740737`, with outer digest
+`sha256:2975d682caee3b0e28183a7373a4c7ca64c9b4cb7265692a9305018325911106`
 and inner ZIP SHA-256
-`aed1c30dab6d1e709794002583deffd621717ac6a0d4d0c5e54701bf919dc339`.
+`eaeb743f5a7e7a0c4d1e2508e0d58e5dd2c0948e7ce0e2d241b344b16cf39e83`.
+
+Controlled workstation transaction
+`82D444BE-2F5C-4E7F-85EE-01220B50474F` installed only that exact artifact and
+reached coherent active StatusV2. Its first required smoke failed twice:
+`xpersonatoy.com` returned HTTP/2 `200`, then curl error `18` after `15,041`
+bytes and about 6.6 seconds. No recovery event was recorded. Immediate exact
+rollback removed the root daemon, private PF state, token, status, and listener
+while preserving user DNS `111.88.96.50` / `111.88.96.51` and external network
+state.
+
+The current branch `codex/partial-tls-content-confirmation` fixes two generic
+defects without adding a hostname rule. First, the six-second partial TLS-record
+watchdog ended the relay before the fifteen-second content observer and required
+the user to repeat the failure through the full local ladder before running the
+independent HTTP proof. An exact unknown `system/plain` partial-record signal may
+now schedule only that bounded proof; opaque TLS bytes still cannot authorize a
+route. Second, the HTTP/2 parser classified every interrupted partial frame as a
+protocol error. A fully validated unfinished DATA frame on the already active
+response stream, after valid headers and earlier body bytes, is now incomplete;
+partial headers, control frames, wrong-stream frames, malformed padding, and a
+DATA frame without prior body remain unknown.
+
+Read-only workstation controls reproduce the production contract. The direct
+HTTP/2 probe against the exact public address reports incomplete after 25
+seconds. The unchanged verified app-owned Geph listener on `127.0.0.1:9954`
+returns a complete identity-encoded body of `1,113,091` bytes in about nine
+seconds. Route learning still requires both independent results, applies only
+to a later exact-host request, and remains unavailable to static policy,
+Discord, YouTube, Googlevideo, unowned Geph, or external DNS/proxy/PAC/VPN/PF.
+
+Local verification passes `797` Python daemon tests, `255` script tests, `21`
+Chromium companion tests, `83` Rust tray tests, `32` Rust core tests, `241`
+Windows-adapter tests, and `40` tests in each userspace-stack evaluation crate.
+The modified Python files compile; version continuity, project-state
+continuity, and `git diff --check` pass. PR review, exact-main gates, and one
+fresh protected qualification remain required before another controlled
+workstation installation.
+
+## Previous Checkpoint
 
 Controlled transaction `C17E2DFE-CC33-4FBE-8C61-8F76418D98C5` installed only
 that exact artifact and reached coherent active StatusV2. Google, Spotify,
@@ -31,7 +71,7 @@ attestation, witness, and runtime, and preserved DNS `111.88.96.50` /
 proxy/PAC, default route, and external owners. The private log contained no
 recovery event for those requests.
 
-The current branch `codex/partial-response-recovery` fixes the protocol mismatch
+The follow-up branch `codex/partial-response-recovery` fixed the protocol mismatch
 without adding a hostname rule. PR #305 correctly records bounded HTTP/2
 client-first and server-first candidates, but the independent completion probe
 advertised no ALPN and sent HTTP/1.1. A complete HTTP/1.1 response could
@@ -1304,26 +1344,22 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not retry the controlled transaction on the primary workstation yet. Finish
-PR #302: its ordinary-client transport observer must record the complete local
-evidence ladder before waking the existing bounded exact-host content
-confirmation, include payload-idle incidents in the network-wide guard, and
-leave the active stream untouched. Require deterministic complete-response,
-protected-route, evidence-ladder, network-wide-guard, concurrency-cap, and
-task-cleanup regressions. The change must remain exact-host bounded, preserve
-static-policy precedence, and add no per-site rule. Discord, YouTube, and
+Do not retry the controlled transaction on the primary workstation yet. Open a
+small PR from `codex/partial-tls-content-confirmation` for the exact watchdog and
+HTTP/2 DATA-frame corrections recorded in the current checkpoint. Merge only
+after green review, CI, and audit. Then reconcile live `main`, require all
+exact-main gates, and dispatch exactly one fresh protected owned-Geph
+qualification for that SHA.
+
+Only that fresh run's exact qualified artifact may be used for the next
+controlled workstation transaction. The first smoke must prove that a generic
+unknown partial HTTP/2 response autonomously reaches exact-host confirmation
+and completes on a later retry; Weather's separate regional-denial scenario
+follows only after the transport case passes. The first failure triggers exact
+rollback. Do not reuse artifact `9045740737`, install a branch/local build, or
+repeat a failed workstation attempt in the same session. Discord, YouTube, and
 Googlevideo remain local-only, and external DNS/proxy/PAC/VPN/PF owners remain
 read-only.
-
-After that generic delivery/recovery gap is fixed and merged, verify the live
-`main` and matching CI/audit, then run exactly one protected qualification for
-that SHA. Require complete account-backed owned-Geph payload initially,
-without the tray, and after KeepAlive recovery; semantic and transport
-regressions; exact cleanup; artifact identity; and no system-network mutation.
-Only a passing run may publish the artifact used by another controlled
-workstation transaction with the existing snapshot and immediate rollback
-boundary. Do not reuse an older artifact, substitute a release or local build,
-or repeat a failed workstation attempt in the same session.
 
 Safari may advance through deterministic source, Swift contract tests, and
 unsigned packaging, but the signed app-extension sandbox/socket path must be

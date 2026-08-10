@@ -1429,6 +1429,55 @@ def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatc
     assert not tproxy.is_geo_exit_route(host)
 
 
+def test_unknown_partial_tls_watchdog_reaches_content_confirmation(monkeypatch):
+    """A framed system-route stall must not wait for manual route retries."""
+    isolate_runtime_state(monkeypatch)
+    host = "partial-record-contract.example"
+    response = b"\x17\x03\x03\x00\x08" + b"R" * 8
+    confirmations = []
+
+    async def pending_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PENDING,
+            (ScriptedReader(), CaptureWriter(), response),
+        )
+
+    async def partial_record_stall(
+        _reader,
+        _up_w,
+        _up_r,
+        _writer,
+        activity,
+        **_kwargs,
+    ):
+        activity.partial_tls_record_stalled = True
+        activity.tls_complete_records = 1
+        activity.tls_record_expected = 4096
+        activity.tls_record_buffer = bytearray(b"partial")
+        return 0, 0
+
+    def schedule(candidate, ip, strategy, *, now, runner=None):
+        confirmations.append((candidate, ip, strategy, now, runner))
+        return True
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(tproxy, "relay_local_stream", partial_record_stall)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_transport_incomplete_response_confirmation",
+        schedule,
+    )
+
+    client, _first_flight = tls_client(host, block_after_hello=True)
+    asyncio.run(run_handler(client, CaptureWriter()))
+
+    assert len(confirmations) == 1
+    assert confirmations[0][:3] == (host, "1.1.1.1", "plain")
+    assert confirmations[0][4] is None
+    assert not tproxy.is_geo_exit_route(host)
+
+
 def test_unknown_recovery_never_uses_an_external_geph_listener(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "external-geph-is-not-owned.example"

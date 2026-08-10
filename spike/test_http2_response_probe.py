@@ -1,4 +1,5 @@
 from collections import deque
+import socket
 import ssl
 import time
 
@@ -487,7 +488,7 @@ def test_disqualifying_partial_goaway_prefix_after_payload_is_unknown():
     assert not result.incomplete
 
 
-def test_partial_valid_data_frame_after_payload_is_unknown():
+def test_partial_valid_data_frame_after_payload_is_incomplete():
     sock = FakeHttp2ServerSocket(
         body=b"x" * 512,
         complete=False,
@@ -498,6 +499,39 @@ def test_partial_valid_data_frame_after_payload_is_unknown():
 
     assert result.status == 200
     assert result.body_length == 512
+    assert not result.protocol_error
+    assert result.interrupted
+    assert result.incomplete
+
+
+def test_partial_valid_data_frame_timeout_after_payload_is_incomplete():
+    sock = FakeHttp2ServerSocket(
+        body=b"x" * 512,
+        complete=False,
+        partial_data_frame_after_body=True,
+        recv_error_after_response=socket.timeout(),
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 512
+    assert not result.protocol_error
+    assert result.interrupted
+    assert result.incomplete
+
+
+def test_partial_valid_data_frame_without_prior_payload_is_not_proof():
+    sock = FakeHttp2ServerSocket(
+        body=b"",
+        complete=False,
+        partial_data_frame_after_body=True,
+    )
+
+    result = _probe(sock)
+
+    assert result.status == 200
+    assert result.body_length == 0
     assert result.protocol_error
     assert not result.interrupted
     assert not result.incomplete

@@ -4719,18 +4719,46 @@ def note_partial_tls_stall(
     *,
     now=None,
     confirmation_runner=None,
+    probe_ip=None,
+    strategy_name=None,
+    transport_confirmation_runner=None,
 ):
-    """Record one framed TLS truncation without treating attempts as proof."""
+    """Record one framed TLS truncation and reproduce exact system failures."""
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
-    if not _record_partial_tls_stall_evidence(h, stage, now):
-        return False
-    _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
-    return _schedule_auto_geph_confirmation(
-        h,
-        now=now,
-        runner=confirmation_runner,
-    )
+    local_ladder_complete = _record_partial_tls_stall_evidence(h, stage, now)
+
+    # The six-second partial-record watchdog intentionally ends the live relay
+    # before the fifteen-second payload-idle observer can run. For an exact
+    # system/plain route, let that strong framed signal schedule only the
+    # independent HTTP completion probe. Opaque bytes still cannot learn a
+    # route: direct HTTP must prove incomplete and owned Geph must separately
+    # prove complete before the exact-host overlay is admitted.
+    transport_confirmation_scheduled = False
+    if (
+        stage == AUTO_GEPH_STAGE_SYSTEM
+        and strategy_name == "plain"
+        and probe_ip is not None
+    ):
+        transport_confirmation_scheduled = (
+            _schedule_transport_incomplete_response_confirmation(
+                h,
+                probe_ip,
+                strategy_name,
+                now=now,
+                runner=transport_confirmation_runner,
+            )
+        )
+
+    auto_geph_scheduled = False
+    if local_ladder_complete:
+        _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
+        auto_geph_scheduled = _schedule_auto_geph_confirmation(
+            h,
+            now=now,
+            runner=confirmation_runner,
+        )
+    return bool(transport_confirmation_scheduled or auto_geph_scheduled)
 
 
 def note_local_ladder_partial_stall(
@@ -10551,6 +10579,8 @@ async def _try_exact_system_passthrough(
                     host,
                     AUTO_GEPH_STAGE_SYSTEM,
                     now=started_at + duration,
+                    probe_ip=dst_ip,
+                    strategy_name="plain",
                 )
             note_local_stream_stall(host, "plain")
         elif _clean_eof_stream_stalled(activity, now=started_at + duration):
@@ -11311,6 +11341,8 @@ async def _handle_impl(reader, writer):
                         host,
                         AUTO_GEPH_STAGE_SYSTEM,
                         now=t0 + duration,
+                        probe_ip=chosen,
+                        strategy_name=chosen_name,
                     )
                 note_local_stream_stall(host, chosen_name)
             elif via_xbox_dns:
