@@ -2059,6 +2059,7 @@ SERVER_FIRST_CLOSE_KIND_AMBIGUOUS_LARGE = "ambiguous_large"
 AUTO_GEPH_NET_BAD = 5         # this many hosts failing at once = network problem
 AUTO_GEPH_TTL = 60 * 60.0     # re-evaluate the local path after one hour
 AUTO_GEPH_CANDIDATE_TTL = 10 * 60.0
+AUTO_GEPH_SUCCESSOR_TTL = 30.0
 AUTO_GEPH_PARTIAL_STALL_WINDOW = 5 * 60.0
 AUTO_GEPH_PARTIAL_STRATEGIES = 2
 AUTO_GEPH_ZERO_PAYLOAD_WINDOW = 5 * 60.0
@@ -2123,6 +2124,16 @@ _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
 _auto_geph_retry_after_drain = {}  # host -> monotonic retained authorization
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
+_auto_geph_successor_requests = {}  # host -> one request-only Geph retry expiry
+_AUTO_GEPH_SUCCESSOR_CLAIM = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _AutoGephSuccessorClaim:
+    marker: object
+    host: str
+
+
 _auto_geph_noise_invalidated = set()  # active proofs invalidated by global noise
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
@@ -4935,6 +4946,66 @@ def _claim_auto_geph_one_shot_request(host, now=None):
         _auto_geph_candidates.pop(h, None)
         _auto_geph_retry_after_drain.pop(h, None)
         return True
+
+
+def _prune_auto_geph_successor_requests_locked(now):
+    for host, expiry in list(_auto_geph_successor_requests.items()):
+        if (
+            expiry <= now
+            or not AUTO_GEPH_ENABLED
+            or not GEPH_ENABLED
+            or not _auto_geph_base_host_allowed(host)
+            or _auto_geph_learned_exact_host(host)
+        ):
+            _auto_geph_successor_requests.pop(host, None)
+    while len(_auto_geph_successor_requests) > AUTO_GEPH_STATE_MAX:
+        oldest = min(
+            _auto_geph_successor_requests,
+            key=_auto_geph_successor_requests.get,
+        )
+        _auto_geph_successor_requests.pop(oldest, None)
+
+
+def _grant_auto_geph_successor_request(host, now=None):
+    """Retain one short request-only retry after a proven late Geph handoff."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        _prune_auto_geph_successor_requests_locked(now)
+        if not (
+            AUTO_GEPH_ENABLED
+            and GEPH_ENABLED
+            and _auto_geph_base_host_allowed(h)
+            and not _auto_geph_learned_exact_host(h)
+        ):
+            return False
+        _auto_geph_successor_requests.pop(h, None)
+        _auto_geph_successor_requests[h] = now + AUTO_GEPH_SUCCESSOR_TTL
+        _prune_auto_geph_successor_requests_locked(now)
+        return True
+
+
+def _claim_auto_geph_successor_request(host, now=None):
+    """Atomically consume one late-handoff retry before any network await."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        _prune_auto_geph_successor_requests_locked(now)
+        expiry = _auto_geph_successor_requests.pop(h, None)
+        if expiry is None or expiry <= now:
+            return None
+        return _AutoGephSuccessorClaim(_AUTO_GEPH_SUCCESSOR_CLAIM, h)
+
+
+def _retain_auto_geph_successor_after_late_handoff(host):
+    if not _grant_auto_geph_successor_request(host):
+        return False
+    print(
+        f">> auto-route: {normalize_host(host)} retained one bounded successor "
+        "after the client closed during a proven owned-Geph handoff",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _prune_local_zero_payload_failures(now):
@@ -11010,6 +11081,8 @@ async def _try_unknown_owned_geph_route(
     first_flight,
     reader,
     writer,
+    *,
+    successor_claim=None,
 ):
     """Use owned Geph only after the complete zero-payload local proof.
 
@@ -11018,14 +11091,23 @@ async def _try_unknown_owned_geph_route(
     against owned-Geph restart until the relay finishes.
     """
     h = normalize_host(host)
-    candidate_authorized = _auto_geph_learning_candidate_proven(h)
-    request_authorized = bool(
-        candidate_authorized
-        and _consume_auto_geph_exact_request_proof(h)
+    successor_authorized = bool(
+        isinstance(successor_claim, _AutoGephSuccessorClaim)
+        and successor_claim.marker is _AUTO_GEPH_SUCCESSOR_CLAIM
+        and successor_claim.host == h
+        and _auto_geph_base_host_allowed(h)
     )
+    candidate_authorized = False
+    request_authorized = successor_authorized
     if not request_authorized:
-        candidate_authorized = False
-        request_authorized = _claim_auto_geph_one_shot_request(h)
+        candidate_authorized = _auto_geph_learning_candidate_proven(h)
+        request_authorized = bool(
+            candidate_authorized
+            and _consume_auto_geph_exact_request_proof(h)
+        )
+        if not request_authorized:
+            candidate_authorized = False
+            request_authorized = _claim_auto_geph_one_shot_request(h)
     one_shot_authorized = bool(request_authorized and not candidate_authorized)
     # A complete exact-host proof may outlive a short monitor transition.
     # Its own bounded payload confirmation is allowed during the global backend
@@ -11070,6 +11152,13 @@ async def _try_unknown_owned_geph_route(
         )
         if confirm_after_session:
             _schedule_auto_geph_confirmation_before_relay(h)
+        elif successor_authorized:
+            _set_auto_geph_status(
+                "successor",
+                h,
+                "bounded retry after a proven late owned-Geph handoff",
+                len(server_first),
+            )
         elif one_shot_authorized:
             _set_auto_geph_status(
                 "one_shot",
@@ -11085,9 +11174,33 @@ async def _try_unknown_owned_geph_route(
         try:
             writer.write(server_first)
             await writer.drain()
-        except OSError:
+        except (ConnectionError, OSError):
+            if not successor_authorized:
+                _retain_auto_geph_successor_after_late_handoff(h)
             return True
-        await relay_local_stream(reader, up_w, up_r, writer)
+        activity = _RelayActivity(
+            last_downstream_at=time.monotonic(),
+            downstream_bytes=len(server_first),
+            first_downstream_seen=True,
+        )
+        relay_result = await relay_local_stream(
+            reader,
+            up_w,
+            up_r,
+            writer,
+            activity,
+        )
+        client_bytes = relay_result[0] if relay_result is not None else None
+        late_handoff = bool(
+            activity.downstream_write_failed
+            or (
+                activity.client_ended_first
+                and (activity.client_eof or activity.client_read_failed)
+                and client_bytes == 0
+            )
+        )
+        if late_handoff and not successor_authorized:
+            _retain_auto_geph_successor_after_late_handoff(h)
         return True
     finally:
         if up_w is not None:
@@ -11462,6 +11575,21 @@ async def _handle_impl(reader, writer):
 
     policy = runtime_policy
     route_class = policy["route_class"]
+    successor_claim = (
+        _claim_auto_geph_successor_request(host)
+        if is_tls and host and route_class == ROUTE_UNKNOWN
+        else None
+    )
+    if successor_claim is not None:
+        if await _try_unknown_owned_geph_route(
+            host,
+            dst_port,
+            head + body,
+            reader,
+            writer,
+            successor_claim=successor_claim,
+        ):
+            return
     server_first_repeat_claim = (
         _claim_server_first_repeat_stage(host)
         if is_tls and host and route_class == ROUTE_UNKNOWN

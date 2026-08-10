@@ -11,88 +11,64 @@ file.
 ## Current Checkpoint
 
 Current user-facing priority: Slipstream remains exactly rolled back and must
-not be reinstalled from the current development branch. Live main is
-`4dca2cb602c509ef081a10b85f59ef0b0996a314`. Its exact-main CI
-`31400498678`, dependency audit `31400495433`, Windows qualification
-`31400495510`, and single protected owned-Geph qualification `31401394701`
-passed. Protected artifact `9067906813` has outer digest
-`sha256:4589200cdce43786d84ca8431a98b09aef5987ad05313ef86a1fb859fd1b2b93`
+not be reinstalled from the current development branch. PR #311 is merged as
+live main `38e601e7f52a21805a15b18d62147685431adc1f`. Exact-main CI
+`31423659071`, dependency audit `31423659346`, Windows qualification
+`31423659158`, and the single protected owned-Geph qualification
+`31424182604` passed. Protected artifact `9076656013` has outer digest
+`sha256:3c05ad45caea65f35191fdc4b25b069a18c809247d5ede4a4e0dd3dba24c84b4`
 and inner ZIP SHA-256
-`408476c471de492f883a39d74d1a3ff713ea6be9d136da1e111c309ee6d338af`.
+`f7068ee0a23412bf1297cf14c82aa772f5820c28a01b896c5d3c1aec5a00aecd`.
 
 Controlled workstation transaction
-`A4FBBC17-F27F-4327-8171-A89E22C27B0C` installed only that exact artifact and
+`C7208EA1-0999-4BD7-B6AC-3AEFFBDC5133` installed only that exact artifact and
 reached coherent active StatusV2. Steam, Google, Spotify, Discord
 updater/gateway, YouTube HTML, real headed-Chromium Googlevideo playback,
 CrystalIDEA, and ChatGPT transport returned payload. Four Modrinth attempts
-then ended before TLS payload. Immediate exact rollback restored the previous
-app, removed the root daemon, listener, private PF anchor, token, status,
-socket, and transaction runtime, and preserved DNS `111.88.96.50` /
-`111.88.96.51`, proxy/PAC, default route, external PF owners, Telegram, and the
-pre-existing owned Geph process.
+then ended before TLS payload, so immediate exact rollback restored the prior
+app byte-for-byte, removed the root daemon, listener, private PF anchor, token,
+status, socket, and transaction runtime, and preserved DNS `111.88.96.50` /
+`111.88.96.51`, proxy/PAC, default route, external PF owners, Telegram, owned
+Geph PID `8022`, and external Geph PID `574`.
 
-Post-rollback A/B proved the unresolved route class: direct Modrinth timed out,
-while the unchanged ownership-verified SOCKS listener on `127.0.0.1:9954`
-returned a complete HTTP `200`. A no-PF production-stage probe independently
-reproduced zero-payload closes through the original system destination,
-app-owned Xbox DNS, and multiple local strategies. The private daemon log had
-no Modrinth route event, proving the request never reached the existing owned
-Geph first-payload gate.
+The private log records that the final local proof did reach the one-shot owned
+Geph route, but only at the intercepted client's roughly 15-second TLS
+deadline. Owned Geph produced server payload while the original client was
+already closing. The proof had been spent correctly and route learning stayed
+paused during network-wide noise, so later requests had no reusable
+authorization and restarted the slow local ladder.
 
-Code tracing found a generic authorization gap rather than a Modrinth hostname
-rule. `note_zero_payload_route_failure()` retained the complete exact-host
-observations, but refused to create `_auto_geph_candidates[host]` whenever five
-arbitrary unknown hosts were also noisy. `_try_unknown_owned_geph_route()`
-accepted only that candidate, so the current exact request could never test the
-known-live owned backend. The branch
-`codex/unknown-host-one-shot-rescue` preserves the network-wide guard for every
-background confirmation and persistent route write, but permits one current
-replay-safe request through owned Geph after complete exact-host system,
-app-owned DNS, and multi-strategy zero-payload proof. The volatile
-authorization and any stale candidate are marked spent before the first await,
-while the observations remain present so the network-wide guard cannot fall
-below threshold. Every stage must be observed again before another one-shot is
-possible. First payload remains mandatory; success schedules no confirmation
-and learns no route; failure leaves no reusable authorization. Static/direct
-policy, Discord, YouTube, Googlevideo, external Geph, and external
-DNS/proxy/PAC/VPN/PF remain excluded.
+Post-rollback A/B separated backend health from handoff timing: direct Modrinth
+timed out, while the unchanged ownership-verified SOCKS listener on
+`127.0.0.1:9954` returned a complete HTTP `200` in about 1.3 seconds. Replaying
+the production `dial_via_geph()` MemoryBIO TLS flow without PF also completed
+TLS and returned HTTP `200`. The unresolved defect is therefore generic late
+handoff, not hostname classification, app-owned DNS, SOCKS domain connect, or
+the owned tunnel.
 
-PR review exposed one remaining persistence path: a pre-noise candidate could
-leave a post-drain confirmation marker behind until the five-minute noise
-window expired. Network-wide noise now immediately removes every candidate and
-post-drain marker and invalidates any already-running confirmation authority.
-Expiration of the noisy observations cannot revive that incident; persistent
-learning requires a new complete proof collected after the quiet state
-returns. The exact observations and spent watermark used by the request-only
-fallback are not removed. A candidate-backed exact request also consumes that
-watermark before its first await, so noise appearing during the owned-Geph dial
-cannot authorize a second request from the same proof. Regional-denial and
-incomplete-response workers recheck both current noise and revoked authority
-inside the final persistence lock before writing a route. Every production
-noise-evidence writer now uses that same lock, so evidence appearance and route
-persistence have one deterministic order instead of a final-check race. The
-browser companion's incomplete-response path now enters the same token-backed
-bounded scheduler instead of invoking its worker directly. Eligibility and
-token reservation are one locked operation, and active semantic/plain and
-transport-incomplete precursor probes are revoked by the same noise transition.
-A candidate-backed request that already spent its exact proof retains only its
-current-request authorization while waiting for owned Geph; lost learning
-authority cannot strand that request or become persistent later. One-shot
-watermark reads, writes, and pruning are protected by that lock as well.
+Branch `codex/unknown-host-successor-rescue` adds one volatile exact-host
+successor only when an original proof-authorized owned-Geph request passed the
+first-payload gate but its downstream write failed, or the client ended first
+without sending any post-ClientHello bytes. The token lasts 30 seconds, is
+bounded by the existing state limit, is removed before any network await, and
+cannot create another successor when consumed. The next request tries the
+ownership-verified bundled Geph path before system DNS, app-owned DNS, or the
+local ladder. If that attempt has no first payload, it may continue locally but
+the token is gone. This is request-only state: it never schedules confirmation,
+persists a route, changes external network state, or applies to static/direct
+policy, Discord, YouTube, Googlevideo, or external Geph.
 
-Local verification passes `1087` Python/script tests plus `41` subtests,
+Local verification passes `1092` Python/script tests plus `41` subtests,
 browser companion `21`, Rust tray `83`, core `32`, Windows adapter `241`, and
 both userspace evaluation crates `40` tests each. All five Clippy runs are
 clean; version and project continuity, Python compilation, and
-`git diff --check` pass. The regressions cover successful and empty-payload
-one-shot cases, pre-wait authorization consumption, mid-dial noise,
-preservation of the global noise evidence, revoked semantic persistence,
-fresh-proof reauthorization, protected-host exclusions, precursor revocation,
-atomic browser-token reservation, overlapping worker ownership, and a direct
-assertion that network noise prevents background confirmation. PR review, exact-main
-CI/audit/Windows, and exactly one fresh protected qualification are required.
-Only the new qualification artifact may enter another controlled workstation
-transaction, with immediate exact rollback on its first failed smoke.
+`git diff --check` pass. Regressions cover late client close, downstream write
+failure, exact-host claim binding, pre-await consumption, no successor
+chaining, TTL/state bounds, and protected-host exclusions. The next verified
+action is a small PR. After merge, require exact-main CI/audit/Windows and
+exactly one fresh protected qualification. Only that new artifact may enter
+another controlled workstation transaction, with Modrinth early in the smoke
+and immediate exact rollback on the first failure.
 
 ## Previous Checkpoint
 
