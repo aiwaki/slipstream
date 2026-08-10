@@ -85,6 +85,25 @@ The watchdog runs only when launchd reports the Slipstream label explicitly
 enabled. A missing or disabled label is not repaired at startup. `Restart Proxy`
 is the explicit action that may reinstall or re-enable it.
 
+### A reviewed Geph route stalls while the direct site works
+
+A live owned SOCKS listener proves only that the local Geph process accepted a
+stream. It does not prove that the selected exit has delivered the target
+server's TLS response. The 2026-08-10 workstation transaction reached active
+StatusV2 and passed the shared Geph canaries, but a later Steam Store session
+still stalled before its first target byte; the same origin returned more than
+one MiB directly after exact rollback.
+
+Runtime geo-exit handoff therefore keeps the buffered client first flight until
+one target byte arrives through that exact Geph stream. SOCKS setup and the
+first target read share one four-second deadline. Timeout, EOF, or reset before
+payload closes only that stream, cools only the owned geo backend, logs the
+reason, and tries the frozen original system destination on the same request.
+Once a target byte has reached the client, replay is forbidden and normal relay
+recovery applies. This fallback never changes the route policy, DNS, PF,
+proxy/PAC/VPN, or external Geph and cannot send Discord, YouTube, or
+Googlevideo through Geph.
+
 ### A site partially loads or owned Geph returns `local_rate_limited`
 
 An HTTP/2 page may return status `200` and tens of kilobytes before its stream

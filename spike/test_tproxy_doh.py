@@ -4089,25 +4089,188 @@ def test_geo_exit_tunnel_down_cools_geph_but_keeps_private_pf(monkeypatch):
     assert writer.closed is True
 
 
-@pytest.mark.parametrize(
-    ("downstream_bytes", "expected_failure", "expected_suspend", "expected_clear"),
-    [
-        (
-            0,
-            [("chatgpt.com", "remote closed without response")],
-            ["geo-exit remote close before payload"],
-            [],
-        ),
-        (1, [], [], [True]),
-    ],
-)
-def test_geo_exit_payload_result_controls_geph_backend(
+def test_geph_runtime_first_payload_guard_closes_a_stalled_stream(monkeypatch):
+    class UpReader:
+        async def read(self, _size):
+            await asyncio.Event().wait()
+
+    class UpWriter:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+        async def wait_closed(self):
+            return None
+
+    up_writer = UpWriter()
+
+    async def connected(*_args):
+        return UpReader(), up_writer
+
+    monkeypatch.setattr(tproxy, "dial_via_geph", connected)
+
+    result, reason = asyncio.run(
+        tproxy._dial_via_geph_first_payload(
+            "store.steampowered.com",
+            443,
+            b"client-hello",
+            timeout=0.01,
+        )
+    )
+
+    assert result is None
+    assert reason == "first payload timeout"
+    assert up_writer.closed is True
+
+
+def test_geo_exit_commits_geph_only_after_first_target_payload(monkeypatch):
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class Writer:
+        def __init__(self):
+            self.writes = []
+
+        def get_extra_info(self, _name):
+            return object()
+
+        def write(self, data):
+            self.writes.append(data)
+
+        async def drain(self):
+            return None
+
+    async def geph_ready(*_args):
+        return (object(), object(), b"server-first"), None
+
+    relay_activity = []
+
+    async def relay(*_args):
+        relay_activity.append(_args[4])
+        return 0, 0
+
+    async def system_should_not_run(*_args):
+        raise AssertionError("healthy Geph unexpectedly fell back to system route")
+
+    failures = []
+    cleared = []
+    suspended = []
+    circuit_results = []
+    writer = Writer()
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "_dial_via_geph_first_payload", geph_ready)
+    monkeypatch.setattr(tproxy, "relay_local_stream", relay)
+    monkeypatch.setattr(tproxy, "_try_system_geo_connect", system_should_not_run)
+    monkeypatch.setattr(tproxy, "geo_exit_backend_ready", lambda now=None: True)
+    monkeypatch.setattr(tproxy, "_geph_session_started", lambda: True)
+    monkeypatch.setattr(tproxy, "_geph_session_finished", lambda: None)
+    monkeypatch.setattr(tproxy, "runtime_route_circuit_allows", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_record_result",
+        lambda _policy, _backend, ok, **_kwargs: circuit_results.append(ok),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "log_geph_route_failure",
+        lambda host, reason: failures.append((host, reason)),
+    )
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: cleared.append(True))
+    monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspended.append)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    asyncio.run(tproxy._handle_impl(Reader(), writer))
+
+    assert writer.writes == [b"server-first"]
+    assert circuit_results == [True]
+    assert cleared == [True]
+    assert failures == []
+    assert suspended == []
+    assert len(relay_activity) == 1
+    assert relay_activity[0].downstream_bytes == len(b"server-first")
+    assert relay_activity[0].first_downstream_seen is True
+
+
+def test_geo_exit_cancellation_while_delivering_first_payload_closes_geph(
     monkeypatch,
-    downstream_bytes,
-    expected_failure,
-    expected_suspend,
-    expected_clear,
 ):
+    class Reader:
+        def __init__(self):
+            self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
+
+        async def readexactly(self, _size):
+            return self.parts.pop(0)
+
+    class ClientWriter:
+        def get_extra_info(self, _name):
+            return object()
+
+        def write(self, _data):
+            return None
+
+        async def drain(self):
+            await asyncio.Event().wait()
+
+    class GephWriter:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+        async def wait_closed(self):
+            return None
+
+    geph_writer = GephWriter()
+
+    async def geph_ready(*_args):
+        return (object(), geph_writer, b"server-first"), None
+
+    async def exercise():
+        task = asyncio.create_task(tproxy._handle_impl(Reader(), ClientWriter()))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
+    monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
+    monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
+    monkeypatch.setattr(tproxy, "_dial_via_geph_first_payload", geph_ready)
+    monkeypatch.setattr(tproxy, "geo_exit_backend_ready", lambda now=None: True)
+    monkeypatch.setattr(tproxy, "_geph_session_started", lambda: True)
+    monkeypatch.setattr(tproxy, "_geph_session_finished", lambda: None)
+    monkeypatch.setattr(
+        tproxy, "runtime_route_circuit_allows", lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_record_result",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: None)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    asyncio.run(exercise())
+
+    assert geph_writer.closed is True
+
+
+def test_geo_exit_first_payload_timeout_falls_back_on_same_request(monkeypatch):
     class Reader:
         def __init__(self):
             self.parts = [b"\x16\x03\x01\x00\x01", b"x"]
@@ -4119,40 +4282,59 @@ def test_geo_exit_payload_result_controls_geph_backend(
         def get_extra_info(self, _name):
             return object()
 
-    async def connected(*_args):
-        return object(), object()
+    events = []
+    circuit_results = []
 
-    async def empty_client_pump(*_args):
-        return 0
+    async def stalled_geph(*_args):
+        return None, "first payload timeout"
 
-    async def geph_response(*_args):
-        return downstream_bytes
+    async def system_route(host, ip, port, first_flight, *_args):
+        events.append(("system", host, ip, port, first_flight))
+        return True
 
-    failures = []
-    cleared = []
-    suspended = []
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.8", 443))
     monkeypatch.setattr(tproxy, "parse_sni", lambda _body: "chatgpt.com")
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
-    monkeypatch.setattr(tproxy, "dial_via_geph", connected)
-    monkeypatch.setattr(tproxy, "pump", empty_client_pump)
-    monkeypatch.setattr(tproxy, "splice", geph_response)
+    monkeypatch.setattr(tproxy, "_dial_via_geph_first_payload", stalled_geph)
+    monkeypatch.setattr(tproxy, "_try_system_geo_connect", system_route)
+    monkeypatch.setattr(tproxy, "geo_exit_backend_ready", lambda now=None: True)
+    monkeypatch.setattr(tproxy, "_geph_session_started", lambda: True)
+    monkeypatch.setattr(tproxy, "_geph_session_finished", lambda: None)
+    monkeypatch.setattr(tproxy, "runtime_route_circuit_allows", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_circuit_record_result",
+        lambda _policy, _backend, ok, **_kwargs: circuit_results.append(ok),
+    )
     monkeypatch.setattr(
         tproxy,
         "log_geph_route_failure",
-        lambda host, reason: failures.append((host, reason)),
+        lambda host, reason: events.append(("failure", host, reason)),
     )
-    monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: cleared.append(True))
-    monkeypatch.setattr(tproxy, "suspend_geo_exit_backend", suspended.append)
+    monkeypatch.setattr(
+        tproxy,
+        "suspend_geo_exit_backend",
+        lambda reason: events.append(("suspend", reason)),
+    )
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
 
     asyncio.run(tproxy._handle_impl(Reader(), Writer()))
 
-    assert failures == expected_failure
-    assert suspended == expected_suspend
-    assert cleared == expected_clear
+    assert circuit_results == [False]
+    assert events == [
+        ("suspend", "geo-exit first payload unavailable"),
+        ("failure", "chatgpt.com", "first payload timeout"),
+        (
+            "system",
+            "chatgpt.com",
+            "203.0.113.8",
+            443,
+            b"\x16\x03\x01\x00\x01x",
+        ),
+    ]
 
 
 def test_route_policy_classifies_service_groups():

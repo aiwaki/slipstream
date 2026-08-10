@@ -2189,18 +2189,29 @@ def test_learned_unknown_host_without_ready_owned_geph_uses_exact_system_route(
     assert calls[0][:3] == ("system", *destination)
 
 
-def test_geo_exit_early_close_cools_only_geph_without_replaying_the_stream(monkeypatch):
-    """A consumed zero-byte stream cannot be replayed, but local PF stays active."""
+def test_geo_exit_zero_payload_falls_back_on_the_same_system_request(monkeypatch):
+    """No server byte was exposed, so the frozen first flight remains replay-safe."""
     isolate_runtime_state(monkeypatch)
     host = "ws.chatgpt.com"
     client, expected_first_flight = tls_client(host, block_after_hello=False)
     writer = CaptureWriter()
     failures = []
     suspensions = []
+    direct_calls = []
+    response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
 
     async def empty_geph(actual_host, port, first_flight):
         assert (actual_host, port, first_flight) == (host, 443, expected_first_flight)
         return streaming_upstream_response(b"")
+
+    async def system_route(ip, port, first_flight):
+        assert (ip, port, first_flight) == (
+            "203.0.113.18",
+            443,
+            expected_first_flight,
+        )
+        direct_calls.append(ip)
+        return streaming_upstream_response(response)
 
     async def no_backend(name, *args, **kwargs):
         await forbidden_backend(name, *args, **kwargs)
@@ -2212,7 +2223,7 @@ def test_geo_exit_early_close_cools_only_geph_without_replaying_the_stream(monke
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "dial_via_geph", empty_geph)
     monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
-    monkeypatch.setattr(tproxy, "dial_plain", lambda *args, **kwargs: no_backend("direct dial", *args, **kwargs))
+    monkeypatch.setattr(tproxy, "dial_plain", system_route)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs))
     monkeypatch.setattr(tproxy, "log_geph_route_failure", lambda actual_host, reason: failures.append((actual_host, reason)))
     monkeypatch.setattr(tproxy, "clear_geph_route_failure", lambda: pytest.fail("empty payload must not clear failure"))
@@ -2220,9 +2231,10 @@ def test_geo_exit_early_close_cools_only_geph_without_replaying_the_stream(monke
 
     asyncio.run(run_handler(client, writer))
 
-    assert bytes(writer.payload) == b""
+    assert bytes(writer.payload) == response
+    assert direct_calls == ["203.0.113.18"]
     assert failures == [(host, "remote closed without response")]
-    assert suspensions == ["geo-exit remote close before payload"]
+    assert suspensions == ["geo-exit first payload unavailable"]
 
 
 @pytest.mark.parametrize(
