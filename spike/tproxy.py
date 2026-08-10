@@ -2126,6 +2126,14 @@ _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
 _auto_geph_successor_requests = {}  # host -> one request-only Geph retry expiry
 _AUTO_GEPH_SUCCESSOR_CLAIM = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _AutoGephSuccessorClaim:
+    marker: object
+    host: str
+
+
 _auto_geph_noise_invalidated = set()  # active proofs invalidated by global noise
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
@@ -4986,7 +4994,7 @@ def _claim_auto_geph_successor_request(host, now=None):
         expiry = _auto_geph_successor_requests.pop(h, None)
         if expiry is None or expiry <= now:
             return None
-        return (_AUTO_GEPH_SUCCESSOR_CLAIM, h)
+        return _AutoGephSuccessorClaim(_AUTO_GEPH_SUCCESSOR_CLAIM, h)
 
 
 def _retain_auto_geph_successor_after_late_handoff(host):
@@ -11084,10 +11092,9 @@ async def _try_unknown_owned_geph_route(
     """
     h = normalize_host(host)
     successor_authorized = bool(
-        isinstance(successor_claim, tuple)
-        and len(successor_claim) == 2
-        and successor_claim[0] is _AUTO_GEPH_SUCCESSOR_CLAIM
-        and successor_claim[1] == h
+        isinstance(successor_claim, _AutoGephSuccessorClaim)
+        and successor_claim.marker is _AUTO_GEPH_SUCCESSOR_CLAIM
+        and successor_claim.host == h
         and _auto_geph_base_host_allowed(h)
     )
     candidate_authorized = False
