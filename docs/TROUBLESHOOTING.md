@@ -104,6 +104,41 @@ recovery applies. This fallback never changes the route policy, DNS, PF,
 proxy/PAC/VPN, or external Geph and cannot send Discord, YouTube, or
 Googlevideo through Geph.
 
+### An unknown site fails while unrelated pages are also noisy
+
+The network-wide unknown-host guard prevents a burst of unrelated failures from
+teaching Slipstream that many sites need a foreign exit. An older build also
+used that guard to discard a complete proof for the exact request already in
+progress. In the reproduced case, Modrinth closed before TLS payload through
+the system route, app-owned DNS, and multiple local strategies while the exact
+owned Geph listener independently returned a complete HTTP `200`; the daemon
+never attempted it and logged no host outcome.
+
+Current behavior keeps the guard for every learned or persisted route but may
+spend the complete exact-host zero-payload proof once on the current replay-safe
+request. Its authorization and any older candidate are marked spent before the
+owned-Geph attempt, while the observations remain until normal expiry so the
+global guard stays active. Every mandatory stage must fail again before another
+one-shot is possible. A successful first-payload gate serves that request only
+and logs `used one-shot owned Geph`; it does not schedule background
+confirmation. Any candidate, post-drain retry, or active confirmation created
+before the wider noise appeared is invalidated immediately and cannot wake up
+after the noise window expires. A candidate-backed request spends the same
+exact proof before waiting for Geph, so noise that appears during its dial or
+first-payload read cannot make that proof reusable by another request. If the
+owned backend is briefly recovering, the spent proof still authorizes only
+that current request; loss of learning authority does not strand it.
+Regional-denial and incomplete-response workers also recheck revoked authority
+immediately before persistence, including workers still performing their plain
+precursor probe when noise appears. Eligibility, confirmation-token reservation,
+noise evidence, and route persistence share the same lock, so an observation
+cannot appear between authorization and reservation or between the final check
+and the write.
+Persistent learning starts again only from a
+fresh complete proof on a quiet network. A failed one-shot attempt is not
+reusable. This path remains unavailable to static routes, Discord, YouTube,
+Googlevideo, external Geph, and external network settings.
+
 ### A site partially loads or owned Geph returns `local_rate_limited`
 
 An HTTP/2 page may return status `200` and tens of kilobytes before its stream

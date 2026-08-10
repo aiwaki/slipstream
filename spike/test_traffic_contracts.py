@@ -236,6 +236,8 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "_auto_geph_candidates", {})
     monkeypatch.setattr(tproxy, "_local_partial_stalls", {})
     monkeypatch.setattr(tproxy, "_local_zero_payload_failures", {})
+    monkeypatch.setattr(tproxy, "_auto_geph_one_shot_consumed_at", {})
+    monkeypatch.setattr(tproxy, "_auto_geph_noise_invalidated", set())
     monkeypatch.setattr(
         tproxy,
         "_transport_incomplete_server_first_evidence",
@@ -280,6 +282,15 @@ def isolate_runtime_state(monkeypatch):
     monkeypatch.setattr(tproxy, "note_local_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "_clear_clean_eof_stalls", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tproxy, "route_health_event", lambda *_args, **_kwargs: None)
+
+
+def seed_complete_unknown_zero_payload_proof(host, now):
+    tproxy._local_zero_payload_failures[host] = {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
+    }
 
 
 @pytest.mark.parametrize("contract", CORE_TRAFFIC_CONTRACTS, ids=lambda item: item.name)
@@ -775,6 +786,269 @@ def test_unknown_exhaustion_uses_only_verified_owned_geph_same_request(
     assert tproxy.geph_active_session_count() == 0
 
 
+def _assert_one_shot_geph_watermark_for_host(host):
+    assert host in tproxy._auto_geph_one_shot_consumed_at
+    assert tproxy._auto_geph_one_shot_consumed_at[host] == max(
+        tproxy._local_zero_payload_failures[host].values()
+    )
+
+
+def test_unknown_exact_proof_uses_one_shot_geph_during_network_noise(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "network-noisy-foreign-exit.example"
+    local_ip = "198.51.100.62"
+    response = b"\x16\x03\x03\x00\x60" + (b"N" * 96)
+    client, expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    calls = []
+    confirmations = []
+    strategies = (
+        tproxy.STRAT_BY_NAME["split64+fake"],
+        tproxy.STRAT_BY_NAME["split16+fake"],
+    )
+    now = time.monotonic()
+
+    for index in range(tproxy.AUTO_GEPH_NET_BAD):
+        tproxy._local_zero_payload_failures[
+            f"background-noise-{index}.example"
+        ] = {tproxy.AUTO_GEPH_STAGE_SYSTEM: now}
+    # The route candidate was authorized before unrelated failures made the
+    # network-wide guard noisy. It must be downgraded, not learned later.
+    tproxy._auto_geph_candidates[host] = now + 60.0
+
+    async def failed_system(ip, port, first_flight):
+        calls.append(("system", ip, port, first_flight))
+        return tproxy.SYSTEM_PROBE_CLOSED, None
+
+    async def failed_xbox(
+        actual_host,
+        port,
+        head,
+        body,
+        *,
+        attempt_summary=None,
+    ):
+        calls.append(("xbox", actual_host, port, head + body))
+        if attempt_summary is not None:
+            attempt_summary["attempted"] = 1
+            attempt_summary["outcomes"] = {
+                "198.51.100.60": tproxy.ROUTE_PROBE_CLOSED,
+            }
+        return None
+
+    async def local_dns(actual_host, fallback_ip):
+        calls.append(("dns", actual_host, fallback_ip))
+        return [local_ip]
+
+    async def failed_local(ip, port, head, body, actual_host, strategy):
+        calls.append(("local", ip, port, actual_host, strategy["name"]))
+        assert head + body == expected_first_flight
+        tproxy._publish_route_probe_outcome(tproxy.ROUTE_PROBE_CLOSED)
+        return None
+
+    async def healthy_owned_geph(actual_host, port, first_flight):
+        calls.append(("geph", actual_host, port, first_flight))
+        return streaming_upstream_response(response)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.62", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", failed_system)
+    monkeypatch.setattr(tproxy, "_try_xbox_dns_local_connect", failed_xbox)
+    monkeypatch.setattr(tproxy, "resolve_connection_ips", local_dns)
+    monkeypatch.setattr(tproxy, "strategy_order", lambda _host: strategies)
+    monkeypatch.setattr(tproxy, "dial_strategy", failed_local)
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(tproxy, "save_auto_geph", lambda: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_auto_geph_confirmation_before_relay",
+        lambda actual_host, **_kwargs: confirmations.append(actual_host) or True,
+    )
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    asyncio.run(run_handler(client, writer))
+
+    assert [call[0] for call in calls] == [
+        "system",
+        "xbox",
+        "dns",
+        "local",
+        "local",
+        "geph",
+    ]
+    assert bytes(writer.payload) == response
+    assert host not in tproxy._auto_geph_candidates
+    assert host in tproxy._local_zero_payload_failures
+    _assert_one_shot_geph_watermark_for_host(host)
+    assert not tproxy._auto_geph_one_shot_request_proven(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert confirmations == []
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_unknown_one_shot_geph_without_payload_is_not_reused(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "network-noisy-empty-geph.example"
+    first_flight = static_tls_fixture_record(host)
+    upstream_writer = CaptureWriter()
+    confirmations = []
+    now = time.monotonic()
+    stages = {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
+    }
+
+    for index in range(tproxy.AUTO_GEPH_NET_BAD):
+        tproxy._local_zero_payload_failures[
+            f"background-empty-{index}.example"
+        ] = {tproxy.AUTO_GEPH_STAGE_SYSTEM: now}
+    tproxy._local_zero_payload_failures[host] = dict(stages)
+
+    async def empty_owned_geph(_host, _port, _payload):
+        return ScriptedReader(), upstream_writer
+
+    monkeypatch.setattr(tproxy, "dial_via_geph", empty_owned_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_auto_geph_confirmation_before_relay",
+        lambda actual_host, **_kwargs: confirmations.append(actual_host) or True,
+    )
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    selected = asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            first_flight,
+            ScriptedReader(),
+            CaptureWriter(),
+        )
+    )
+
+    assert not selected
+    assert upstream_writer.closed is True
+    assert host in tproxy._local_zero_payload_failures
+    _assert_one_shot_geph_watermark_for_host(host)
+    assert not tproxy._auto_geph_one_shot_request_proven(host)
+    assert host not in tproxy._auto_geph_candidates
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert confirmations == []
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_candidate_request_becomes_spent_one_shot_when_noise_arrives_mid_dial(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "candidate-noise-during-dial.example"
+    first_flight = static_tls_fixture_record(host)
+    response = b"\x16\x03\x03\x00\x60" + (b"R" * 96)
+    client_writer = CaptureWriter()
+    confirmations = []
+    now = time.monotonic()
+    tproxy._local_zero_payload_failures[host] = {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
+    }
+    tproxy._auto_geph_candidates[host] = now + 60.0
+
+    async def noisy_owned_geph(_host, _port, _payload):
+        for index in range(tproxy.AUTO_GEPH_NET_BAD):
+            tproxy._local_zero_payload_failures[
+                f"mid-dial-noise-{index}.example"
+            ] = {tproxy.AUTO_GEPH_STAGE_SYSTEM: time.monotonic()}
+        assert tproxy._network_wide_unknown_failure_visible()
+        return streaming_upstream_response(response)
+
+    monkeypatch.setattr(tproxy, "dial_via_geph", noisy_owned_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_auto_geph_confirmation_before_relay",
+        lambda actual_host, **_kwargs: confirmations.append(actual_host) or True,
+    )
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
+    selected = asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            first_flight,
+            ScriptedReader(),
+            client_writer,
+        )
+    )
+
+    assert selected
+    assert bytes(client_writer.payload) == response
+    assert host not in tproxy._auto_geph_candidates
+    _assert_one_shot_geph_watermark_for_host(host)
+    assert not tproxy._auto_geph_one_shot_request_proven(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert confirmations == []
+    assert tproxy._auto_geph_last_status["state"] == "one_shot"
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_unknown_one_shot_proof_is_consumed_before_backend_wait(monkeypatch):
+    isolate_runtime_state(monkeypatch)
+    host = "network-noisy-backend-wait.example"
+    now = time.monotonic()
+    stages = {
+        tproxy.AUTO_GEPH_STAGE_SYSTEM: now,
+        tproxy.AUTO_GEPH_STAGE_XBOX_DNS: now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split64+fake": now,
+        f"{tproxy.AUTO_GEPH_STAGE_STRATEGY_PREFIX}split16+fake": now,
+    }
+    other_candidate = "background-wait-0.example"
+    for index in range(tproxy.AUTO_GEPH_NET_BAD - 1):
+        tproxy._local_zero_payload_failures[
+            f"background-wait-{index}.example"
+        ] = dict(stages)
+    tproxy._auto_geph_candidates[other_candidate] = now + 60.0
+    tproxy._local_zero_payload_failures[host] = dict(stages)
+
+    async def unavailable_after_claim(_host, *, one_shot_authorized=False):
+        assert one_shot_authorized
+        assert host in tproxy._local_zero_payload_failures
+        assert not tproxy._auto_geph_one_shot_request_proven(host)
+        assert tproxy._network_wide_unknown_failure_visible()
+        assert not tproxy._auto_geph_candidate_allowed(other_candidate)
+        return False
+
+    monkeypatch.setattr(
+        tproxy,
+        "_wait_for_owned_geph_candidate",
+        unavailable_after_claim,
+    )
+
+    selected = asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            static_tls_fixture_record(host),
+            ScriptedReader(),
+            CaptureWriter(),
+        )
+    )
+
+    assert not selected
+    assert host in tproxy._local_zero_payload_failures
+    assert not tproxy._auto_geph_one_shot_request_proven(host)
+    assert host not in tproxy._auto_geph_candidates
+    assert not tproxy._auto_geph_candidate_allowed(other_candidate)
+
+
 def test_proven_unknown_waits_for_owned_geph_recovery_during_backend_hold(
     monkeypatch,
 ):
@@ -834,6 +1108,7 @@ def test_proven_unknown_waits_for_owned_geph_recovery_during_backend_hold(
         "_geph_backend_hold_reason",
         "earlier payload miss",
     )
+    seed_complete_unknown_zero_payload_proof(host, now)
     tproxy._auto_geph_candidates[host] = now + 10.0
 
     assert asyncio.run(
@@ -852,6 +1127,60 @@ def test_proven_unknown_waits_for_owned_geph_recovery_during_backend_hold(
     assert confirmations == [host]
     assert tproxy._geph_backend_hold_until > time.time()
     assert tproxy._geph_backend_hold_reason == "earlier payload miss"
+    assert tproxy.geph_active_session_count() == 0
+
+
+def test_spent_candidate_survives_noise_during_owned_geph_recovery(
+    monkeypatch,
+):
+    isolate_runtime_state(monkeypatch)
+    host = "candidate-noise-during-recovery.example"
+    first_flight = static_tls_fixture_record(host)
+    response = b"\x16\x03\x03\x00\x60" + (b"N" * 96)
+    writer = CaptureWriter()
+    confirmations = []
+    now = time.monotonic()
+    seed_complete_unknown_zero_payload_proof(host, now)
+    tproxy._auto_geph_candidates[host] = now + 10.0
+
+    def recover_after_noise():
+        observed_at = time.monotonic()
+        for index in range(tproxy.AUTO_GEPH_NET_BAD):
+            tproxy._local_zero_payload_failures[
+                f"recovery-noise-{index}.example"
+            ] = {tproxy.AUTO_GEPH_STAGE_SYSTEM: observed_at}
+        assert tproxy._network_wide_unknown_failure_visible(observed_at)
+        assert host not in tproxy._auto_geph_candidates
+        return "ready"
+
+    async def healthy_owned_geph(_host, _port, _payload):
+        return streaming_upstream_response(response)
+
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy, "_probe_owned_geph_recovery_state", recover_after_noise)
+    monkeypatch.setattr(tproxy, "dial_via_geph", healthy_owned_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_schedule_auto_geph_confirmation_before_relay",
+        lambda actual_host, **_kwargs: confirmations.append(actual_host) or True,
+    )
+
+    assert asyncio.run(
+        tproxy._try_unknown_owned_geph_route(
+            host,
+            443,
+            first_flight,
+            ScriptedReader(),
+            writer,
+        )
+    )
+    assert bytes(writer.payload) == response
+    _assert_one_shot_geph_watermark_for_host(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+    assert confirmations == []
+    assert tproxy._auto_geph_last_status["state"] == "one_shot"
     assert tproxy.geph_active_session_count() == 0
 
 
@@ -892,6 +1221,7 @@ def test_proven_unknown_learns_only_from_independent_confirmation(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    seed_complete_unknown_zero_payload_proof(host, now)
     tproxy._auto_geph_candidates[host] = now + 10.0
 
     async def exercise():
@@ -938,7 +1268,9 @@ def test_proven_unknown_schedules_confirmation_before_long_lived_relay(
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
-    tproxy._auto_geph_candidates[host] = time.monotonic() + 10.0
+    now = time.monotonic()
+    seed_complete_unknown_zero_payload_proof(host, now)
+    tproxy._auto_geph_candidates[host] = now + 10.0
 
     assert asyncio.run(
         tproxy._try_unknown_owned_geph_route(
@@ -1005,7 +1337,9 @@ def test_failed_early_confirmation_retries_once_after_relay_drain(monkeypatch):
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
-    tproxy._auto_geph_candidates[host] = time.monotonic() + 10.0
+    now = time.monotonic()
+    seed_complete_unknown_zero_payload_proof(host, now)
+    tproxy._auto_geph_candidates[host] = now + 10.0
 
     assert asyncio.run(
         tproxy._try_unknown_owned_geph_route(
