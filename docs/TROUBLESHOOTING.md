@@ -182,7 +182,8 @@ spent both replacements. After each replacement, current recovery pins the
 successor PID and waits in the background for one existing portfolio HTTPS
 canary to meet its payload threshold through that same PID. Only then does it
 retry the target's independent semantic probe. This wait is bounded to twenty
-seconds; PID drift, ownership conflict, listener loss, shutdown, or no payload
+seconds by one absolute deadline across SOCKS, TLS, request, and response
+operations; PID drift, ownership conflict, listener loss, shutdown, or no payload
 remains fail-closed and cannot learn a route. The target response itself and
 the final route write are checked against the same pinned PID, so a KeepAlive
 replacement during the target probe also fails closed.

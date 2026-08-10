@@ -348,6 +348,52 @@ def test_local_payload_ssl_context_prefers_certifi(monkeypatch):
     assert calls == [{"cafile": "/tmp/fake-ca.pem"}]
 
 
+def test_geph_payload_probe_uses_one_absolute_deadline(monkeypatch):
+    clock = {"now": 0.0}
+    timeouts = []
+
+    class FakeSocket:
+        def settimeout(self, timeout):
+            timeouts.append(timeout)
+
+        def sendall(self, _data):
+            return None
+
+        def recv(self, _size):
+            return b"payload"
+
+        def close(self):
+            return None
+
+    fake_socket = FakeSocket()
+
+    def connect(_host, _port, timeout):
+        assert timeout == pytest.approx(4.0)
+        clock["now"] = 3.0
+        return fake_socket
+
+    def wrap_socket(sock, *, server_hostname):
+        assert sock is fake_socket
+        assert server_hostname == "ready.example"
+        clock["now"] = 3.5
+        return fake_socket
+
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+    monkeypatch.setattr(tproxy.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(tproxy, "_socks5_connect_blocking", connect)
+    monkeypatch.setattr(
+        tproxy,
+        "_local_payload_ssl_context",
+        lambda: SimpleNamespace(wrap_socket=wrap_socket),
+    )
+    monkeypatch.setattr(tproxy, "_local_payload_min_bytes", lambda _spec: 1)
+
+    result = tproxy._geph_payload_probe("ready.example", timeout=4.0)
+
+    assert result == len(b"payload")
+    assert timeouts == pytest.approx([1.0, 0.5, 0.5])
+
+
 def test_doh_request_percent_encodes_host():
     req = _doh_request("good.example\r\nX-Bad: yes", "dns.google")
     first_line = req.split(b"\r\n", 1)[0]
@@ -1856,7 +1902,10 @@ def test_write_status_includes_core_runtime_state(monkeypatch, tmp_path):
         assert private_value not in public_text
 
 
-def test_auto_geo_exit_pending_counts_every_confirmation_phase():
+def test_auto_geo_exit_pending_counts_every_confirmation_phase(monkeypatch):
+    monkeypatch.setattr(tproxy, "_auto_geph_confirming", {})
+    monkeypatch.setattr(tproxy, "_transport_incomplete_confirming", {})
+    monkeypatch.setattr(tproxy, "_semantic_plain_confirming", {})
     tproxy._auto_geph_confirming["auto.example"] = 1.0
     tproxy._transport_incomplete_confirming["transport.example"] = 2.0
     tproxy._semantic_plain_confirming["semantic.example"] = 3.0

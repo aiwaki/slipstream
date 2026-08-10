@@ -5759,39 +5759,23 @@ def _geph_payload_probe(host, spec=None, timeout=GEO_PAYLOAD_CANARY_TIMEOUT):
     sock = None
     total = 0
     min_bytes = _local_payload_min_bytes(spec)
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + max(float(timeout), 0.001)
     try:
-        sock = socket.create_connection(("127.0.0.1", port_socks), timeout=timeout)
-        sock.settimeout(timeout)
-        sock.sendall(b"\x05\x01\x00")
-        if sock.recv(2)[:2] != b"\x05\x00":
-            return 0
-        hb = host.encode("ascii", "ignore")[:255]
-        sock.sendall(
-            b"\x05\x01\x00\x03" + bytes([len(hb)]) + hb + struct.pack("!H", 443)
+        sock = _socks5_connect_blocking(
+            host,
+            443,
+            timeout=max(deadline - time.monotonic(), 0.001),
         )
-        rep = sock.recv(4)
-        if len(rep) < 4 or rep[1] != 0x00:
+        if sock is None:
             return 0
-        atyp = rep[3]
-        if atyp == 0x01:
-            sock.recv(4)
-        elif atyp == 0x03:
-            ln = sock.recv(1)
-            if not ln:
-                return 0
-            sock.recv(ln[0])
-        elif atyp == 0x04:
-            sock.recv(16)
-        sock.recv(2)
-
+        _set_socket_deadline_timeout(sock, deadline)
         ctx = _local_payload_ssl_context()
         tls = ctx.wrap_socket(sock, server_hostname=host)
         sock = tls
-        tls.settimeout(timeout)
+        _set_socket_deadline_timeout(tls, deadline)
         tls.sendall(_local_payload_canary_request(host, spec))
         while time.monotonic() < deadline:
-            tls.settimeout(max(0.1, deadline - time.monotonic()))
+            _set_socket_deadline_timeout(tls, deadline)
             try:
                 data = tls.recv(65536)
             except socket.timeout:

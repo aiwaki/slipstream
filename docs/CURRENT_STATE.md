@@ -45,8 +45,8 @@ cannot authorize learning. StatusV2 `auto_geo_exit.pending` now counts
 ordinary, incomplete-transport, and regional-denial confirmation workers once
 per host, without exposing hostnames.
 
-Focused recovery verification passes `20` tests. The full Python and script
-suite passes `1060` tests plus `41` subtests. Chromium companion passes `21`
+Focused recovery verification passes `22` tests. The full Python and script
+suite passes `1061` tests plus `41` subtests. Chromium companion passes `21`
 tests; Rust tray passes `83`, core `32`, Windows adapter `241`, and both
 userspace evaluation crates `40` tests each. All five Rust Clippy runs are
 warning-free, and Python compilation plus the project continuity contract pass.
