@@ -2123,8 +2123,10 @@ _auto_geph_last_probe = {}    # host -> monotonic last proof attempt
 _auto_geph_retry_after_drain = {}  # host -> monotonic retained authorization
 _auto_geph_runtime_failures = {}  # host -> list[wall-clock] recent Geph misses
 _auto_geph_candidates = {}    # host -> monotonic expiry after local ladder proof
+_auto_geph_noise_invalidated = set()  # active proofs invalidated by global noise
 _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
+_auto_geph_one_shot_consumed_at = {}  # host -> latest stage timestamp spent
 _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
 _auto_geph_last_status = {
     "state": "idle",
@@ -3302,9 +3304,41 @@ def _auto_geph_candidate_proven(host, now=None):
     )
 
 
+def _discard_auto_geph_learning_authorizations_for_noise():
+    """Irrevocably downgrade pre-noise learning state to request-only proof."""
+    with _auto_geph_lock:
+        invalidated = (
+            set(_auto_geph_confirming)
+            | set(_auto_geph_confirmation_tokens)
+            | set(_semantic_plain_confirming)
+            | set(_transport_incomplete_confirming)
+        )
+        _auto_geph_noise_invalidated.update(invalidated)
+        _auto_geph_candidates.clear()
+        _auto_geph_retry_after_drain.clear()
+
+
+def _auto_geph_learning_candidate_proven(host, now=None):
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if not _auto_geph_persistent_learning_allowed(h, now):
+        return False
+    return _auto_geph_candidate_proven(h, now)
+
+
+def _auto_geph_persistent_learning_allowed(host, now=None):
+    """Reject every persistent write after network noise revokes authority."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    return bool(
+        not _network_wide_unknown_failure_visible(now)
+        and h not in _auto_geph_noise_invalidated
+    )
+
+
 def _auto_geph_candidate_allowed(host, now=None):
     return bool(
-        _auto_geph_candidate_proven(host, now)
+        _auto_geph_learning_candidate_proven(host, now)
         and _geph_up
         and _geph_owned
         and _geph_port == GEPH_OWNED_PORT
@@ -3314,10 +3348,18 @@ def _auto_geph_candidate_allowed(host, now=None):
 def _auto_geph_deferred_candidate_allowed(host):
     """Keep one proven incident eligible after its active relay outlives TTL."""
     h = normalize_host(host)
+    if _network_wide_unknown_failure_visible():
+        return False
     return bool(
         AUTO_GEPH_ENABLED
         and GEPH_ENABLED
         and _auto_geph_base_host_allowed(h)
+        and h not in _auto_geph_noise_invalidated
+        and (
+            h in _auto_geph_retry_after_drain
+            or h in _auto_geph_confirming
+            or h in _auto_geph_confirmation_tokens
+        )
         and _geph_up
         and _geph_owned
         and _geph_port == GEPH_OWNED_PORT
@@ -3356,11 +3398,11 @@ def _probe_owned_geph_recovery_state(expected_pid=None, listener_pid_reader=None
     return "ready"
 
 
-async def _wait_for_owned_geph_candidate(host):
-    """Let a proven exact host survive one brief owned-backend transition."""
+async def _wait_for_owned_geph_candidate(host, *, one_shot_authorized=False):
+    """Let one exact-host authorization survive a brief backend transition."""
     global _geph_port, _geph_owned, _geph_port_conflict, _geph_up
     h = normalize_host(host)
-    if not _auto_geph_candidate_proven(h):
+    if not _auto_geph_learning_candidate_proven(h) and not one_shot_authorized:
         return False
     deadline = time.monotonic() + AUTO_GEPH_RECOVERY_GRACE
     while True:
@@ -3376,15 +3418,17 @@ async def _wait_for_owned_geph_candidate(host):
             and _geph_port == GEPH_OWNED_PORT
         )
         if owned_ready and (
-            _auto_geph_candidate_proven(h, now)
+            _auto_geph_learning_candidate_proven(h, now)
             or learned
+            or one_shot_authorized
         ):
             return True
         if _geph_up:
             return False
         if now >= deadline or (
-            not _auto_geph_candidate_proven(h, now)
+            not _auto_geph_learning_candidate_proven(h, now)
             and not learned
+            and not one_shot_authorized
         ):
             return False
         remaining = deadline - now
@@ -3436,6 +3480,7 @@ def _request_semantic_geo_exit_confirmation(
     if (
         not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
+        or not _auto_geph_persistent_learning_allowed(h, now)
     ):
         return False
     return _schedule_bounded_geph_confirmation(
@@ -3446,6 +3491,7 @@ def _request_semantic_geo_exit_confirmation(
         eligible=lambda candidate, _now: (
             _auto_geph_base_host_allowed(candidate)
             and _owned_geph_ready_for_semantic_confirmation()
+            and _auto_geph_persistent_learning_allowed(candidate, _now)
         ),
         evidence_reason="regional denial observed",
     )
@@ -3462,6 +3508,7 @@ def _request_incomplete_response_geo_exit_confirmation(
     if (
         not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
+        or not _auto_geph_persistent_learning_allowed(h, now)
     ):
         return False
     return _schedule_bounded_geph_confirmation(
@@ -3472,6 +3519,7 @@ def _request_incomplete_response_geo_exit_confirmation(
         eligible=lambda candidate, _now: (
             _auto_geph_base_host_allowed(candidate)
             and _owned_geph_ready_for_semantic_confirmation()
+            and _auto_geph_persistent_learning_allowed(candidate, _now)
         ),
         evidence_reason="incomplete response confirmed locally",
     )
@@ -3489,7 +3537,7 @@ def _get_semantic_route_signal_runtime():
                     owned_geph_ready=_owned_geph_ready_for_semantic_confirmation,
                     request_confirmation=_request_semantic_geo_exit_confirmation,
                     request_incomplete_confirmation=(
-                        _confirm_incomplete_response_geo_exit
+                        _request_incomplete_response_geo_exit_confirmation
                     ),
                 )
             )
@@ -4299,6 +4347,7 @@ def _confirm_semantic_geo_exit(host):
     if (
         not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
+        or not _auto_geph_persistent_learning_allowed(h)
     ):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
@@ -4339,8 +4388,9 @@ def _confirm_semantic_geo_exit(host):
             not _auto_geph_base_host_allowed(h)
             or not _owned_geph_ready_for_semantic_confirmation()
             or not _owned_geph_confirmation_pid_matches(confirmed_pid)
+            or not _auto_geph_persistent_learning_allowed(h)
         ):
-            _set_auto_geph_status("skipped", h, "route changed")
+            _set_auto_geph_status("skipped", h, "route changed or noise visible")
             return False
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
@@ -4370,6 +4420,7 @@ def _confirm_incomplete_response_geo_exit(host):
     if (
         not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
+        or not _auto_geph_persistent_learning_allowed(h)
     ):
         _set_auto_geph_status("skipped", h, "not eligible")
         return False
@@ -4410,8 +4461,9 @@ def _confirm_incomplete_response_geo_exit(host):
             not _auto_geph_base_host_allowed(h)
             or not _owned_geph_ready_for_semantic_confirmation()
             or not _owned_geph_confirmation_pid_matches(confirmed_pid)
+            or not _auto_geph_persistent_learning_allowed(h)
         ):
-            _set_auto_geph_status("skipped", h, "route changed")
+            _set_auto_geph_status("skipped", h, "route changed or noise visible")
             return False
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
@@ -4481,6 +4533,7 @@ def _remember_auto_geph_host(
         _auto_geph[h] = time.time() + AUTO_GEPH_TTL
         _auto_fail.pop(h, None)
         _auto_geph_candidates.pop(h, None)
+        _auto_geph_noise_invalidated.discard(h)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
@@ -4653,6 +4706,7 @@ def _forget_auto_geph_host(host, reason):
         _auto_geph.pop(h, None)
         _auto_fail.pop(h, None)
         _auto_geph_candidates.pop(h, None)
+        _auto_geph_noise_invalidated.discard(h)
         _local_partial_stalls.pop(h, None)
         _local_zero_payload_failures.pop(h, None)
         _local_payload_idle_failures.pop(h, None)
@@ -4762,53 +4816,151 @@ def _prune_transport_incomplete_server_first_evidence(now):
 
 def _network_wide_unknown_failure_visible(now=None):
     now = time.monotonic() if now is None else now
-    _prune_local_partial_stalls(now)
-    _prune_local_zero_payload_failures(now)
-    _prune_transport_incomplete_probes(now)
-    noisy_hosts = {
-        host
-        for host, observations in _local_partial_stalls.items()
-        if observations
-    }
-    noisy_hosts.update(
-        host
-        for host, observations in _local_zero_payload_failures.items()
-        if observations
-    )
-    noisy_hosts.update(
-        host
-        for host, observations in _local_payload_idle_failures.items()
-        if observations
-    )
-    noisy_hosts.update(
-        host
-        for host, observations in (
-            _transport_incomplete_server_first_evidence.items()
+    with _auto_geph_lock:
+        _prune_local_partial_stalls(now)
+        _prune_local_zero_payload_failures(now)
+        _prune_transport_incomplete_probes(now)
+        noisy_hosts = {
+            host
+            for host, observations in _local_partial_stalls.items()
+            if observations
+        }
+        noisy_hosts.update(
+            host
+            for host, observations in _local_zero_payload_failures.items()
+            if observations
         )
-        if observations
-    )
-    noisy_hosts.update(
-        host
-        for host, events in _transport_incomplete_client_first_evidence.items()
-        if events
-    )
-    return len(noisy_hosts) >= AUTO_GEPH_NET_BAD
+        noisy_hosts.update(
+            host
+            for host, observations in _local_payload_idle_failures.items()
+            if observations
+        )
+        noisy_hosts.update(
+            host
+            for host, observations in (
+                _transport_incomplete_server_first_evidence.items()
+            )
+            if observations
+        )
+        noisy_hosts.update(
+            host
+            for host, events in (
+                _transport_incomplete_client_first_evidence.items()
+            )
+            if events
+        )
+        visible = len(noisy_hosts) >= AUTO_GEPH_NET_BAD
+        if visible:
+            _discard_auto_geph_learning_authorizations_for_noise()
+        return visible
+
+
+def _store_auto_geph_candidate(host, now):
+    """Create fresh persistent-learning authority only on a quiet network."""
+    h = normalize_host(host)
+    if not h or _network_wide_unknown_failure_visible(now):
+        return False
+    with _auto_geph_lock:
+        _auto_geph_noise_invalidated.discard(h)
+        _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
+    return True
+
+
+def _auto_geph_one_shot_request_proven(host, now=None):
+    """Recognize fresh volatile proof while persistent learning is blocked."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if not (
+        AUTO_GEPH_ENABLED
+        and GEPH_ENABLED
+        and _auto_geph_base_host_allowed(h)
+    ):
+        return False
+    with _auto_geph_lock:
+        _prune_local_zero_payload_failures(now)
+        observations = _local_zero_payload_failures.get(h, {})
+        consumed_at = _auto_geph_one_shot_consumed_at.get(h, float("-inf"))
+        fresh_observations = {
+            stage: observed_at
+            for stage, observed_at in observations.items()
+            if observed_at > consumed_at
+        }
+        return bool(
+            _local_route_evidence_complete(
+                fresh_observations,
+                AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES,
+            )
+            and _network_wide_unknown_failure_visible(now)
+        )
+
+
+def _consume_auto_geph_exact_request_proof(host, now=None):
+    """Spend the exact zero-payload proof before a Geph request can await."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        _prune_local_zero_payload_failures(now)
+        observations = _local_zero_payload_failures.get(h, {})
+        consumed_at = _auto_geph_one_shot_consumed_at.get(
+            h,
+            float("-inf"),
+        )
+        fresh_observations = {
+            stage: observed_at
+            for stage, observed_at in observations.items()
+            if observed_at > consumed_at
+        }
+        if not _local_route_evidence_complete(
+            fresh_observations,
+            AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES,
+        ):
+            return False
+        _auto_geph_one_shot_consumed_at.pop(h, None)
+        _auto_geph_one_shot_consumed_at[h] = max(observations.values())
+        return True
+
+
+def _claim_auto_geph_one_shot_request(host, now=None):
+    """Atomically spend one proof without weakening the global noise guard."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        if not _auto_geph_one_shot_request_proven(h, now):
+            return False
+        # No await can occur between proof validation and this watermark update.
+        # Retaining observations keeps this host counted as network noise, while
+        # requiring every stage to be newer prevents reuse until a fresh proof.
+        if not _consume_auto_geph_exact_request_proof(h, now):
+            return False
+        _auto_geph_candidates.pop(h, None)
+        _auto_geph_retry_after_drain.pop(h, None)
+        return True
 
 
 def _prune_local_zero_payload_failures(now):
-    cutoff = now - AUTO_GEPH_ZERO_PAYLOAD_WINDOW
-    for host, stages in list(_local_zero_payload_failures.items()):
-        fresh = {
-            name: observed_at
-            for name, observed_at in stages.items()
-            if observed_at >= cutoff
-        }
-        if fresh:
-            _local_zero_payload_failures[host] = fresh
-        else:
-            _local_zero_payload_failures.pop(host, None)
-    while len(_local_zero_payload_failures) > AUTO_GEPH_STATE_MAX:
-        _local_zero_payload_failures.pop(next(iter(_local_zero_payload_failures)))
+    with _auto_geph_lock:
+        cutoff = now - AUTO_GEPH_ZERO_PAYLOAD_WINDOW
+        for host, stages in list(_local_zero_payload_failures.items()):
+            fresh = {
+                name: observed_at
+                for name, observed_at in stages.items()
+                if observed_at >= cutoff
+            }
+            if fresh:
+                _local_zero_payload_failures[host] = fresh
+            else:
+                _local_zero_payload_failures.pop(host, None)
+        while len(_local_zero_payload_failures) > AUTO_GEPH_STATE_MAX:
+            _local_zero_payload_failures.pop(
+                next(iter(_local_zero_payload_failures))
+            )
+        for host, consumed_at in list(_auto_geph_one_shot_consumed_at.items()):
+            if consumed_at < cutoff:
+                _auto_geph_one_shot_consumed_at.pop(host, None)
+        while len(_auto_geph_one_shot_consumed_at) > AUTO_GEPH_STATE_MAX:
+            _auto_geph_one_shot_consumed_at.pop(
+                next(iter(_auto_geph_one_shot_consumed_at))
+            )
 
 
 def _prune_local_payload_idle_failures(now):
@@ -4835,19 +4987,17 @@ def note_zero_payload_route_failure(host, stage, now=None):
     now = time.monotonic() if now is None else now
     if not _auto_geph_base_host_allowed(h) or not _valid_auto_geph_stage(stage):
         return False
-    _prune_local_partial_stalls(now)
-    _prune_local_zero_payload_failures(now)
-    observations = _local_zero_payload_failures.setdefault(h, {})
-    observations[stage] = now
-    if not _local_route_evidence_complete(
-        observations,
-        AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES,
-    ):
-        return False
-    if _network_wide_unknown_failure_visible(now):
-        return False
-    _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
-    return True
+    with _auto_geph_lock:
+        _prune_local_partial_stalls(now)
+        _prune_local_zero_payload_failures(now)
+        observations = _local_zero_payload_failures.setdefault(h, {})
+        observations[stage] = now
+        if not _local_route_evidence_complete(
+            observations,
+            AUTO_GEPH_ZERO_PAYLOAD_STRATEGIES,
+        ):
+            return False
+        return _store_auto_geph_candidate(h, now)
 
 
 def _record_partial_tls_stall_evidence(host, stage, now):
@@ -4857,18 +5007,19 @@ def _record_partial_tls_stall_evidence(host, stage, now):
         or not _valid_auto_geph_stage(stage)
     ):
         return False
-    _prune_local_partial_stalls(now)
-    _prune_local_zero_payload_failures(now)
-    observations = _local_partial_stalls.setdefault(h, {})
-    observations[stage] = now
-    if not _local_route_evidence_complete(
-        observations,
-        AUTO_GEPH_PARTIAL_STRATEGIES,
-    ):
-        return False
-    if _network_wide_unknown_failure_visible(now):
-        return False
-    return True
+    with _auto_geph_lock:
+        _prune_local_partial_stalls(now)
+        _prune_local_zero_payload_failures(now)
+        observations = _local_partial_stalls.setdefault(h, {})
+        observations[stage] = now
+        if not _local_route_evidence_complete(
+            observations,
+            AUTO_GEPH_PARTIAL_STRATEGIES,
+        ):
+            return False
+        if _network_wide_unknown_failure_visible(now):
+            return False
+        return True
 
 
 def note_partial_tls_stall(
@@ -4914,12 +5065,12 @@ def note_partial_tls_stall(
                 )
             )
         else:
-            _auto_geph_candidates[h] = now + AUTO_GEPH_CANDIDATE_TTL
-            auto_geph_scheduled = _schedule_auto_geph_confirmation(
-                h,
-                now=now,
-                runner=confirmation_runner,
-            )
+            if _store_auto_geph_candidate(h, now):
+                auto_geph_scheduled = _schedule_auto_geph_confirmation(
+                    h,
+                    now=now,
+                    runner=confirmation_runner,
+                )
     return bool(transport_confirmation_scheduled or auto_geph_scheduled)
 
 
@@ -5006,6 +5157,17 @@ def _reserve_auto_geph_confirmation_locked(
     return token
 
 
+def _auto_geph_learning_worker_active_locked(host):
+    """Return whether any worker can still act on this host's authority."""
+    h = normalize_host(host)
+    return bool(
+        h in _auto_geph_confirming
+        or h in _auto_geph_confirmation_tokens
+        or h in _semantic_plain_confirming
+        or h in _transport_incomplete_confirming
+    )
+
+
 def _finish_auto_geph_confirmation(host, token):
     """Release confirmation state only for the worker that reserved it."""
     h = normalize_host(host)
@@ -5014,6 +5176,13 @@ def _finish_auto_geph_confirmation(host, token):
             return False
         _auto_geph_confirmation_tokens.pop(h, None)
         _auto_geph_confirming.pop(h, None)
+        if (
+            h not in _auto_geph_candidates
+            and h not in _auto_geph_retry_after_drain
+            and h not in _semantic_plain_confirming
+            and h not in _transport_incomplete_confirming
+        ):
+            _auto_geph_noise_invalidated.discard(h)
         return True
 
 
@@ -5028,9 +5197,12 @@ def _schedule_bounded_geph_confirmation(
     on_complete=None,
 ):
     h = normalize_host(host)
-    if not eligible(h, now):
-        return False
     with _auto_geph_lock:
+        # Eligibility and token reservation are one authorization operation.
+        # Every network-noise producer uses this same lock, so noise either
+        # blocks the reservation or invalidates the newly reserved token.
+        if not eligible(h, now):
+            return False
         token = _reserve_auto_geph_confirmation_locked(h, now)
         if token is None:
             return False
@@ -5116,11 +5288,14 @@ def _schedule_semantic_plain_denial_probe(
         or not _auto_geph_base_host_allowed(h)
         or _auto_geph_learned_exact_host(h)
         or not _owned_geph_ready_for_semantic_confirmation()
-        or _network_wide_unknown_failure_visible(now)
     ):
         return False
     with _auto_geph_lock:
+        if _network_wide_unknown_failure_visible(now):
+            return False
+        _prune_auto_geph_confirmation_state(now)
         _prune_semantic_plain_probes(now)
+        _prune_transport_incomplete_probes(now)
         last = _semantic_plain_last_probe.get(h, 0.0)
         if last and now - last < SEMANTIC_PLAIN_PROBE_COOLDOWN:
             return False
@@ -5130,6 +5305,11 @@ def _schedule_semantic_plain_denial_probe(
             return False
         if len(_semantic_plain_probe_window) >= SEMANTIC_PLAIN_PROBE_WINDOW_MAX:
             return False
+        if _auto_geph_learning_worker_active_locked(h):
+            return False
+        # A completed pre-noise worker must observe its revocation before a
+        # later, quiet incident can begin with fresh authority.
+        _auto_geph_noise_invalidated.discard(h)
         _semantic_plain_last_probe[h] = now
         _semantic_plain_confirming[h] = now
         _semantic_plain_probe_window.append(now)
@@ -5147,6 +5327,8 @@ def _schedule_semantic_plain_denial_probe(
             with _auto_geph_lock:
                 if _semantic_plain_confirming.get(h) == now:
                     _semantic_plain_confirming.pop(h, None)
+                if not _auto_geph_learning_worker_active_locked(h):
+                    _auto_geph_noise_invalidated.discard(h)
 
     if runner is not None:
         run()
@@ -5269,6 +5451,8 @@ def _retry_pending_auto_geph_confirmations_after_drain():
 
 def _prune_auto_geph_retry_after_drain_locked():
     """Keep deferred incident authorization valid but globally bounded."""
+    if _network_wide_unknown_failure_visible():
+        return
     for host in list(_auto_geph_retry_after_drain):
         if (
             _auto_geph_learned_exact_host(host)
@@ -5283,17 +5467,18 @@ def _prune_auto_geph_retry_after_drain_locked():
 def _retain_auto_geph_retry_after_drain_locked(host, now=None):
     """Retain one authorization and evict the oldest excess incident."""
     h = normalize_host(host)
+    now = time.monotonic() if now is None else now
     if (
         not h
         or _auto_geph_learned_exact_host(h)
         or not _auto_geph_base_host_allowed(h)
+        or _network_wide_unknown_failure_visible(now)
+        or h in _auto_geph_noise_invalidated
     ):
         return False
     _prune_auto_geph_retry_after_drain_locked()
     _auto_geph_retry_after_drain.pop(h, None)
-    _auto_geph_retry_after_drain[h] = (
-        time.monotonic() if now is None else now
-    )
+    _auto_geph_retry_after_drain[h] = now
     _prune_auto_geph_retry_after_drain_locked()
     return h in _auto_geph_retry_after_drain
 
@@ -9239,19 +9424,23 @@ def _record_transport_incomplete_server_first_evidence(host, stage, now):
         or not _valid_auto_geph_stage(stage)
     ):
         return False
-    _prune_transport_incomplete_probes(now)
-    _prune_local_partial_stalls(now)
-    _prune_local_zero_payload_failures(now)
-    observations = _transport_incomplete_server_first_evidence.setdefault(h, {})
-    observations[stage] = now
-    if not _local_route_evidence_complete(
-        observations,
-        AUTO_GEPH_PARTIAL_STRATEGIES,
-    ):
-        return False
-    if _network_wide_unknown_failure_visible(now):
-        return False
-    return True
+    with _auto_geph_lock:
+        _prune_transport_incomplete_probes(now)
+        _prune_local_partial_stalls(now)
+        _prune_local_zero_payload_failures(now)
+        observations = _transport_incomplete_server_first_evidence.setdefault(
+            h,
+            {},
+        )
+        observations[stage] = now
+        if not _local_route_evidence_complete(
+            observations,
+            AUTO_GEPH_PARTIAL_STRATEGIES,
+        ):
+            return False
+        if _network_wide_unknown_failure_visible(now):
+            return False
+        return True
 
 
 def _remember_transport_incomplete_plain_candidate(host, ip, now):
@@ -9287,11 +9476,14 @@ def _schedule_transport_incomplete_response_confirmation(
         or not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or not _owned_geph_ready_for_semantic_confirmation()
-        or _network_wide_unknown_failure_visible(now)
     ):
         return False
     with _auto_geph_lock:
+        if _network_wide_unknown_failure_visible(now):
+            return False
+        _prune_auto_geph_confirmation_state(now)
         _prune_transport_incomplete_probes(now)
+        _prune_semantic_plain_probes(now)
         last = _transport_incomplete_last_probe.get(h, 0.0)
         if last and now - last < TRANSPORT_INCOMPLETE_PROBE_COOLDOWN:
             return False
@@ -9302,6 +9494,9 @@ def _schedule_transport_incomplete_response_confirmation(
             >= TRANSPORT_INCOMPLETE_CONFIRM_MAX
         ):
             return False
+        if _auto_geph_learning_worker_active_locked(h):
+            return False
+        _auto_geph_noise_invalidated.discard(h)
         _transport_incomplete_last_probe[h] = now
         _transport_incomplete_confirming[h] = now
 
@@ -9310,7 +9505,10 @@ def _schedule_transport_incomplete_response_confirmation(
             (runner or _confirm_transport_incomplete_response)(h, str(address))
         finally:
             with _auto_geph_lock:
-                _transport_incomplete_confirming.pop(h, None)
+                if _transport_incomplete_confirming.get(h) == now:
+                    _transport_incomplete_confirming.pop(h, None)
+                if not _auto_geph_learning_worker_active_locked(h):
+                    _auto_geph_noise_invalidated.discard(h)
 
     if runner is not None:
         run()
@@ -9342,23 +9540,24 @@ def _record_transport_incomplete_idle_evidence(
     ):
         return False
 
-    _prune_transport_incomplete_probes(now)
-    observations = _local_payload_idle_failures.setdefault(h, {})
-    observations[stage] = now
-    if stage == AUTO_GEPH_STAGE_SYSTEM:
-        _remember_transport_incomplete_plain_candidate(h, str(address), now)
-    if not _local_route_evidence_complete(
-        observations,
-        AUTO_GEPH_PARTIAL_STRATEGIES,
-    ):
-        return False
-    if _network_wide_unknown_failure_visible(now):
-        return False
+    with _auto_geph_lock:
+        _prune_transport_incomplete_probes(now)
+        observations = _local_payload_idle_failures.setdefault(h, {})
+        observations[stage] = now
+        if stage == AUTO_GEPH_STAGE_SYSTEM:
+            _remember_transport_incomplete_plain_candidate(h, str(address), now)
+        if not _local_route_evidence_complete(
+            observations,
+            AUTO_GEPH_PARTIAL_STRATEGIES,
+        ):
+            return False
+        if _network_wide_unknown_failure_visible(now):
+            return False
 
-    candidate = _transport_incomplete_plain_candidates.get(h)
-    if candidate is None:
-        return False
-    candidate_ip, _observed_at = candidate
+        candidate = _transport_incomplete_plain_candidates.get(h)
+        if candidate is None:
+            return False
+        candidate_ip, _observed_at = candidate
     schedule = scheduler or _schedule_transport_incomplete_response_confirmation
     return bool(schedule(h, candidate_ip, "plain", now=now))
 
@@ -9525,22 +9724,27 @@ def note_client_first_response_abort(
         strategy_name=strategy_name,
     )
     if candidate is None:
-        _transport_incomplete_client_first_evidence.pop(normalized, None)
+        with _auto_geph_lock:
+            _transport_incomplete_client_first_evidence.pop(normalized, None)
         return False
     h, address = candidate
 
     now = time.monotonic() if now is None else now
-    _prune_transport_incomplete_probes(now)
-    events = _transport_incomplete_client_first_evidence.setdefault(h, deque())
-    events.append((now, address))
-    _prune_transport_incomplete_probes(now)
-    if len(events) < SERVER_FIRST_CLOSE_STORM:
-        return False
-    if _network_wide_unknown_failure_visible(now):
+    with _auto_geph_lock:
+        _prune_transport_incomplete_probes(now)
+        events = _transport_incomplete_client_first_evidence.setdefault(
+            h,
+            deque(),
+        )
+        events.append((now, address))
+        _prune_transport_incomplete_probes(now)
+        if len(events) < SERVER_FIRST_CLOSE_STORM:
+            return False
+        if _network_wide_unknown_failure_visible(now):
+            _transport_incomplete_client_first_evidence.pop(h, None)
+            return False
+        candidate_ip = events[-1][1]
         _transport_incomplete_client_first_evidence.pop(h, None)
-        return False
-    candidate_ip = events[-1][1]
-    _transport_incomplete_client_first_evidence.pop(h, None)
     schedule = scheduler or _schedule_transport_incomplete_response_confirmation
     return bool(schedule(h, candidate_ip, "plain", now=now))
 
@@ -10814,11 +11018,23 @@ async def _try_unknown_owned_geph_route(
     against owned-Geph restart until the relay finishes.
     """
     h = normalize_host(host)
+    candidate_authorized = _auto_geph_learning_candidate_proven(h)
+    request_authorized = bool(
+        candidate_authorized
+        and _consume_auto_geph_exact_request_proof(h)
+    )
+    if not request_authorized:
+        candidate_authorized = False
+        request_authorized = _claim_auto_geph_one_shot_request(h)
+    one_shot_authorized = bool(request_authorized and not candidate_authorized)
     # A complete exact-host proof may outlive a short monitor transition.
     # Its own bounded payload confirmation is allowed during the global backend
     # hold, just like the independent background confirmation. Static and
     # learned geo-exit traffic still obeys geo_exit_backend_ready().
-    if not await _wait_for_owned_geph_candidate(h):
+    if not await _wait_for_owned_geph_candidate(
+        h,
+        one_shot_authorized=request_authorized,
+    ):
         return False
     if not _geph_session_started():
         return False
@@ -10845,9 +11061,27 @@ async def _try_unknown_owned_geph_route(
                 len(server_first),
             )
             return False
-        confirm_after_session = not _auto_geph_learned_exact_host(h)
+        if candidate_authorized and not _auto_geph_learning_candidate_proven(h):
+            candidate_authorized = False
+            one_shot_authorized = True
+        confirm_after_session = bool(
+            candidate_authorized
+            and not _auto_geph_learned_exact_host(h)
+        )
         if confirm_after_session:
             _schedule_auto_geph_confirmation_before_relay(h)
+        elif one_shot_authorized:
+            _set_auto_geph_status(
+                "one_shot",
+                h,
+                "exact-host rescue; route learning paused during network noise",
+                len(server_first),
+            )
+            print(
+                f">> auto-route: {h} used one-shot owned Geph after exact local "
+                "failures; route learning remains paused during network noise",
+                file=sys.stderr,
+            )
         try:
             writer.write(server_first)
             await writer.drain()

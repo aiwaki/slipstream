@@ -10,58 +10,89 @@ file.
 
 ## Current Checkpoint
 
-Current user-facing priority: Slipstream remains rolled back and must not be
-reinstalled from this branch. Live main is PR #309 at
-`99da0eded9eaf0a0d629c9bd48f758b013f6d051`. Its exact-main CI
-`31389275678`, dependency audit `31389275710`, Windows qualification
-`31389275692`, and single protected owned-Geph qualification `31389915668`
-passed. Protected artifact `9063320265` has outer digest
-`sha256:f3c5d11848d8f12b801cbea9ff4f534391f87fba6545fe9a1437a31cff779c06`,
-inner ZIP SHA-256
-`b1baa2a44d7da2811a3d8ac0c815445614d09edc283aae2fa0846df3f93a6dec`,
-and app binary SHA-256
-`fb95f6758adc694b98dc7b7534832d545eeb3d4a98568e6deebe5e8902295a92`.
+Current user-facing priority: Slipstream remains exactly rolled back and must
+not be reinstalled from the current development branch. Live main is
+`4dca2cb602c509ef081a10b85f59ef0b0996a314`. Its exact-main CI
+`31400498678`, dependency audit `31400495433`, Windows qualification
+`31400495510`, and single protected owned-Geph qualification `31401394701`
+passed. Protected artifact `9067906813` has outer digest
+`sha256:4589200cdce43786d84ca8431a98b09aef5987ad05313ef86a1fb859fd1b2b93`
+and inner ZIP SHA-256
+`408476c471de492f883a39d74d1a3ff713ea6be9d136da1e111c309ee6d338af`.
 
 Controlled workstation transaction
-`8EAF7313-02F9-44EE-90C6-F08F341A6E89` installed only that artifact and
-reached coherent active StatusV2. Google, Spotify, Discord updater/gateway,
-YouTube, and a real Googlevideo request returned payload. Steam Store then
-timed out during TLS setup through Slipstream after about eight seconds. Exact
-rollback removed the root daemon, listener, private PF anchor, token, status,
-socket, and transaction runtime, restored the previous app SHA-256
-`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
-preserved user DNS `111.88.96.50` / `111.88.96.51`, proxy/PAC, default route,
-external PF owners, and the pre-existing user-owned Geph process. A read-only
-post-rollback control retrieved Steam Store directly with HTTP `200`,
-`1,061,394` bytes, in about one second.
+`A4FBBC17-F27F-4327-8171-A89E22C27B0C` installed only that exact artifact and
+reached coherent active StatusV2. Steam, Google, Spotify, Discord
+updater/gateway, YouTube HTML, real headed-Chromium Googlevideo playback,
+CrystalIDEA, and ChatGPT transport returned payload. Four Modrinth attempts
+then ended before TLS payload. Immediate exact rollback restored the previous
+app, removed the root daemon, listener, private PF anchor, token, status,
+socket, and transaction runtime, and preserved DNS `111.88.96.50` /
+`111.88.96.51`, proxy/PAC, default route, external PF owners, Telegram, and the
+pre-existing owned Geph process.
 
-Code tracing found a generic runtime handoff gap, not a Steam hostname rule.
-`dial_via_geph()` committed a reviewed geo-exit request after the local owned
-SOCKS listener accepted `CONNECT` and received the buffered ClientHello. It did
-not require a byte from the target server. A live listener whose target stream
-stalled therefore trapped the current request in `relay_local_stream()`, so the
-existing original-destination system fallback was never reached. The root log
-could also omit this failure when that fallback later succeeded because failure
-logging occurred below the return.
+Post-rollback A/B proved the unresolved route class: direct Modrinth timed out,
+while the unchanged ownership-verified SOCKS listener on `127.0.0.1:9954`
+returned a complete HTTP `200`. A no-PF production-stage probe independently
+reproduced zero-payload closes through the original system destination,
+app-owned Xbox DNS, and multiple local strategies. The private daemon log had
+no Modrinth route event, proving the request never reached the existing owned
+Geph first-payload gate.
 
-The current branch `codex/geo-exit-first-payload-fallback` keeps Geph first but
-does not expose the client stream until one target byte arrives under one
-four-second absolute deadline across SOCKS setup and the target read. Timeout,
-EOF, or reset closes only that exact Geph stream, records the backend failure,
-and continues the same buffered request through the original PF destination.
-No DNS, PF, policy table, hostname, Discord, YouTube, Googlevideo, proxy/PAC,
-VPN, or external-Geph behavior changes. Review hardening keeps the first-byte
-gate strictly on ownership-verified Geph; an unowned external Geph retains its
-previous streaming relay lifecycle. A first-payload failure is recorded before
-the owned backend is suspended and contributes to the existing bounded,
-multi-host restart evidence. The full daemon test file passes `461`
-tests including the cancellation regression. The complete Python
-and script suite passes `1064` tests plus `41` subtests; traffic contracts pass
-`55`, Rust tray `83`, core `32`, Windows adapter `241`, and both userspace
-evaluation crates `40` tests each. All five Clippy runs are warning-free, and
-Python compilation, project continuity, and `git diff --check` pass. PR review,
-exact-main gates, and one fresh protected qualification are required before
-another controlled workstation installation.
+Code tracing found a generic authorization gap rather than a Modrinth hostname
+rule. `note_zero_payload_route_failure()` retained the complete exact-host
+observations, but refused to create `_auto_geph_candidates[host]` whenever five
+arbitrary unknown hosts were also noisy. `_try_unknown_owned_geph_route()`
+accepted only that candidate, so the current exact request could never test the
+known-live owned backend. The branch
+`codex/unknown-host-one-shot-rescue` preserves the network-wide guard for every
+background confirmation and persistent route write, but permits one current
+replay-safe request through owned Geph after complete exact-host system,
+app-owned DNS, and multi-strategy zero-payload proof. The volatile
+authorization and any stale candidate are marked spent before the first await,
+while the observations remain present so the network-wide guard cannot fall
+below threshold. Every stage must be observed again before another one-shot is
+possible. First payload remains mandatory; success schedules no confirmation
+and learns no route; failure leaves no reusable authorization. Static/direct
+policy, Discord, YouTube, Googlevideo, external Geph, and external
+DNS/proxy/PAC/VPN/PF remain excluded.
+
+PR review exposed one remaining persistence path: a pre-noise candidate could
+leave a post-drain confirmation marker behind until the five-minute noise
+window expired. Network-wide noise now immediately removes every candidate and
+post-drain marker and invalidates any already-running confirmation authority.
+Expiration of the noisy observations cannot revive that incident; persistent
+learning requires a new complete proof collected after the quiet state
+returns. The exact observations and spent watermark used by the request-only
+fallback are not removed. A candidate-backed exact request also consumes that
+watermark before its first await, so noise appearing during the owned-Geph dial
+cannot authorize a second request from the same proof. Regional-denial and
+incomplete-response workers recheck both current noise and revoked authority
+inside the final persistence lock before writing a route. Every production
+noise-evidence writer now uses that same lock, so evidence appearance and route
+persistence have one deterministic order instead of a final-check race. The
+browser companion's incomplete-response path now enters the same token-backed
+bounded scheduler instead of invoking its worker directly. Eligibility and
+token reservation are one locked operation, and active semantic/plain and
+transport-incomplete precursor probes are revoked by the same noise transition.
+A candidate-backed request that already spent its exact proof retains only its
+current-request authorization while waiting for owned Geph; lost learning
+authority cannot strand that request or become persistent later. One-shot
+watermark reads, writes, and pruning are protected by that lock as well.
+
+Local verification passes `1087` Python/script tests plus `41` subtests,
+browser companion `21`, Rust tray `83`, core `32`, Windows adapter `241`, and
+both userspace evaluation crates `40` tests each. All five Clippy runs are
+clean; version and project continuity, Python compilation, and
+`git diff --check` pass. The regressions cover successful and empty-payload
+one-shot cases, pre-wait authorization consumption, mid-dial noise,
+preservation of the global noise evidence, revoked semantic persistence,
+fresh-proof reauthorization, protected-host exclusions, precursor revocation,
+atomic browser-token reservation, overlapping worker ownership, and a direct
+assertion that network noise prevents background confirmation. PR review, exact-main
+CI/audit/Windows, and exactly one fresh protected qualification are required.
+Only the new qualification artifact may enter another controlled workstation
+transaction, with immediate exact rollback on its first failed smoke.
 
 ## Previous Checkpoint
 
