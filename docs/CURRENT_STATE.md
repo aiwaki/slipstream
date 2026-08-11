@@ -10,11 +10,14 @@ file.
 
 ## Current Checkpoint
 
-PR #321 is merged as live main
-`32857808fa2b7cf43f85ae96ad1e4ad55d762d55`. Exact-main CI
-`31521726147`, dependency audit `31521725942`, and Windows qualification
-`31521725947` passed. The most recent protected owned-Geph qualification is
-still run `31511415912` for earlier main
+PR #322 is merged as live main
+`2635f59f742b63a553f0df20f57e79f625b9a2f9`. Its exact-main dependency
+audit `31523112491` and Windows qualification `31523112520` passed. Exact-main
+CI `31523112515` cannot qualify the SHA because its required `checks` job failed
+the existing
+`test_unknown_handshake_only_idle_waits_for_browser_pending_signal` traffic
+contract. The most recent protected owned-Geph qualification is still run
+`31511415912` for earlier main
 `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its `navigation_pending` scenario emitted one
 privacy-bounded v3 signal, performed one reload, and reached the styled
 CSS/JavaScript/image-ready callback; the incomplete-response and regional-denial
@@ -61,9 +64,19 @@ rejects dynamic or remotely loaded code, and adds privacy and store listing
 disclosures. Local verification passes `271` script tests, `850`
 daemon/traffic tests, `24` Chromium tests, and `12` native-messaging Rust tests,
 plus Python compilation, project continuity, packaged-browser dry-run, repeat
-archive hash, ZIP integrity, and diff checks; all six PR jobs and the three
-exact-main runs above passed. The next verified action is the manual external
-distribution gate: upload the deterministic ZIP to the publisher dashboard,
+archive hash, ZIP integrity, and diff checks. PR #321 passed all six PR jobs
+plus exact-main CI `31521726147`, dependency audit `31521725942`, and Windows
+qualification `31521725947`. The next verified action is the manual external
+distribution gate, but first the required exact-main CI regression must be
+cleared. The failure is a test-only floating-point boundary: adding the exact
+`8.0`-second duration to one monotonic timestamp and subtracting the original
+produced `7.999999999999986` on the runner. The current correction brackets the
+unchanged runtime gate at one millisecond before and after the threshold; it
+does not change product timing or routing. Local verification passes `25`
+focused repetitions, all `66` traffic contracts, all `850` daemon tests,
+Python compilation, project continuity, and diff checks. Land that small PR
+and require fresh exact-main CI/audit/Windows evidence. Then upload the
+deterministic ZIP to the publisher dashboard,
 stop before review, and prove that the dashboard Item ID and public key match
 exact extension ID `cecdingohhpfggapnlbghppcegbaciam`. Then supply listing
 assets and a public privacy URL, complete Web Store review/publication, and
