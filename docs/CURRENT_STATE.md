@@ -10,81 +10,60 @@ file.
 
 ## Current Checkpoint
 
-PR #322 is merged as live main
-`2635f59f742b63a553f0df20f57e79f625b9a2f9`. Its exact-main dependency
-audit `31523112491` and Windows qualification `31523112520` passed. Exact-main
-CI `31523112515` cannot qualify the SHA because its required `checks` job failed
-the existing
-`test_unknown_handshake_only_idle_waits_for_browser_pending_signal` traffic
-contract. The most recent protected owned-Geph qualification is still run
-`31511415912` for earlier main
-`8fe21229994e0ddc643762d0ece2203bc79313cc`. Its `navigation_pending` scenario emitted one
-privacy-bounded v3 signal, performed one reload, and reached the styled
-CSS/JavaScript/image-ready callback; the incomplete-response and regional-denial
-scenarios passed the same styled-resource requirement. Owned Geph returned
-HTTP 200 payload initially, trayless, and after KeepAlive replacement. Cleanup
-preserved the external listener, left the root daemon absent and disabled, and
-did not mutate system network state.
+PR #323 is merged as live main
+`a0ffe73f007fc1b970cd2826a0eeb761f2e70389`. Its test-only correction brackets
+the unchanged eight-second browser-pending runtime gate at one millisecond
+before and after the threshold; no product timing or routing changed. Exact-main
+CI `31524737394`, dependency audit `31524737364`, and Windows qualification
+`31524737350` all passed for that exact SHA, including required jobs `checks`
+and `packaged-app-lifecycle`.
 
-No protected artifact is installable for live main. Artifact `9110154812` was
-the exact input to the rolled-back workstation transaction below and belongs
-to earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
-GitHub artifact digest is
-`sha256:40f8c054bea7657e986e3a62952f2e5a8acf245d8729ce9048f561b156d9f0e2`;
-the downloaded inner ZIP matches its manifest at
-`21f85aa034e4dc201a91de37d3159099ceb7cbc71038292eaf7b1f3233e06e5e`
-and passes `unzip -t`. The extracted app passes strict deep code-signature
-verification. Its tray, bundled Geph, and daemon SHA-256 values are
-`89fc65fe03ca1d90ba6cc830a709afbca587007b3b96ac20f473cecdb0ef5de0`,
-`8674b76114b43b3b475c5209065ccf38c756579b59bba89cb4a58c994fee6fc5`,
-and
-`e0aa3a8b60cbba96aad7ebd9273271ce48a8d22dc20adae8056500d7b832005a`.
+The most recent protected owned-Geph qualification is still run `31511415912`
+for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
+`navigation_pending` scenario emitted one privacy-bounded v3 signal, performed
+one reload, and reached the styled CSS/JavaScript/image-ready callback; the
+incomplete-response and regional-denial scenarios passed the same
+styled-resource requirement. Owned Geph returned HTTP 200 payload initially,
+trayless, and after KeepAlive replacement. Cleanup preserved the external
+listener, left the root daemon absent and disabled, and did not mutate system
+network state. No protected artifact is installable for live main.
 
-Controlled workstation transaction
-`271C43D9-4906-4AF3-88E8-C2EF146A33ED` installed only that artifact. The
-packaged daemon became coherent and active, but the first required smoke was a
-fresh isolated headed branded-Chrome visit to `xpersonatoy.com`; it remained
-pending at `about:blank` for 75 seconds. The transaction immediately performed
-exact rollback. Independent verification restored the prior tray, bundled
-Geph, and daemon hashes; removed the root daemon, listener, private PF/runtime
-state, status, token, and sockets; and preserved byte-identical DNS, proxy/PAC,
-VPN, and default-route snapshots.
+Artifact `9110154812` was the exact input to controlled workstation transaction
+`271C43D9-4906-4AF3-88E8-C2EF146A33ED` and belongs to earlier main
+`8fe21229994e0ddc643762d0ece2203bc79313cc`. The packaged daemon became coherent
+and active, but a fresh isolated headed branded-Chrome visit to
+`xpersonatoy.com` remained pending at `about:blank` for 75 seconds. The
+transaction immediately performed exact rollback, restored prior app hashes,
+removed Slipstream's privileged/runtime state, and preserved byte-identical
+DNS, proxy/PAC, VPN, and default-route snapshots. The exact native-host manifest
+was registered, but the clean browser profile did not contain the unpublished
+companion; the root log therefore contained no semantic or recovery event.
+Protected unpacked-extension success cannot qualify production browser
+distribution.
 
-The failure is a distribution qualification gap, not new routing evidence.
-The exact Chrome native-host manifest was registered, but the clean browser
-profile did not contain the unpublished companion. The protected gate instead
-loads the reviewed source as an unpacked extension. The transaction's root log
-therefore contained no semantic or recovery event. Native-host registration
-alone cannot make a clean branded-Chrome profile send a signal, and protected
-unpacked-extension success cannot qualify production browser distribution.
+PR #321 supplies the reviewed deterministic Chrome Web Store package and
+provenance builder, frozen extension/native-host identity and source allowlist,
+privacy disclosures, and store listing copy. The v0.2.1 archive
+`output/chromium-store-0.2.1/slipstream-chromium-companion-0.2.1.zip` has
+SHA-256
+`6b2ea8a616095e26377feb77002aacc10b999e74ef1b78b8265132752956fa69`
+and passes `unzip -t`.
 
-PR #321 adds a deterministic Chrome Web Store ZIP and provenance builder,
-validates the frozen extension/native-host identity and source allowlist,
-rejects dynamic or remotely loaded code, and adds privacy and store listing
-disclosures. Local verification passes `271` script tests, `850`
-daemon/traffic tests, `24` Chromium tests, and `12` native-messaging Rust tests,
-plus Python compilation, project continuity, packaged-browser dry-run, repeat
-archive hash, ZIP integrity, and diff checks. PR #321 passed all six PR jobs
-plus exact-main CI `31521726147`, dependency audit `31521725942`, and Windows
-qualification `31521725947`. The next verified action is the manual external
-distribution gate, but first the required exact-main CI regression must be
-cleared. The failure is a test-only floating-point boundary: adding the exact
-`8.0`-second duration to one monotonic timestamp and subtracting the original
-produced `7.999999999999986` on the runner. The current correction brackets the
-unchanged runtime gate at one millisecond before and after the threshold; it
-does not change product timing or routing. Local verification passes `25`
-focused repetitions, all `66` traffic contracts, all `850` daemon tests,
-Python compilation, project continuity, and diff checks. Land that small PR
-and require fresh exact-main CI/audit/Windows evidence. Then upload the
-deterministic ZIP to the publisher dashboard,
-stop before review, and prove that the dashboard Item ID and public key match
-exact extension ID `cecdingohhpfggapnlbghppcegbaciam`. Then supply listing
-assets and a public privacy URL, complete Web Store review/publication, and
-prove the exact extension installed and enabled in a clean branded-Chrome
-profile. Any identity mismatch returns to reviewed code; never add a second
-allowed origin. Only after the distribution gate passes should the then-current
-exact main receive one fresh protected qualification and a controlled
-workstation transaction. Do not install any existing artifact meanwhile.
+On 2026-08-12 the publisher-console gate was attempted in the only available
+Codex browser. Chrome Web Store redirected to Google sign-in, and that browser
+had no authenticated publisher session. No ZIP was uploaded, no store item was
+created, and no review or publication action was taken. Manual publisher
+authentication is therefore the immediate external prerequisite.
+
+After authentication, upload the deterministic ZIP and stop before review.
+Prove that the dashboard Item ID and public key match exact extension ID
+`cecdingohhpfggapnlbghppcegbaciam`. Any identity mismatch returns to reviewed
+code; never add a second allowed origin. Then supply listing assets and a public
+privacy URL, complete Web Store review/publication, and prove the exact
+extension installed and enabled in a clean branded-Chrome profile. Only after
+that distribution gate passes should the then-current exact main receive one
+fresh protected qualification and a controlled workstation transaction. Do not
+install any existing artifact meanwhile.
 
 ## Previous Checkpoint
 
