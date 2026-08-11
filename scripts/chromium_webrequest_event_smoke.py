@@ -17,6 +17,9 @@ import chromium_semantic_packaged_smoke as semantic
 
 MAX_NATIVE_MESSAGE = 64 * 1024
 WORKER_READY_MARKER = b"\nglobalThis.__slipstreamWorkerReadyV1 = true;\n"
+HEADLESS_WORKER_READY_BUDGET_MS = 15_000
+HEADLESS_SEMANTIC_READY_BUDGET_MS = 25_000
+HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB = 768 * 1024
 
 
 def _write_owner_file(
@@ -293,6 +296,48 @@ def _validate_signal(path: Path, uid: int) -> dict[str, object]:
     return payload
 
 
+def _validate_headless_performance(
+    metrics: dict[str, int],
+) -> dict[str, int]:
+    budgets = {
+        "launch_to_worker_ready_ms": HEADLESS_WORKER_READY_BUDGET_MS,
+        "launch_to_semantic_ready_ms": HEADLESS_SEMANTIC_READY_BUDGET_MS,
+        "physical_footprint_kib": HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB,
+    }
+    for key, budget in budgets.items():
+        value = metrics.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise semantic.QualificationError(
+                f"unified headless metric is missing or invalid: {key}"
+            )
+        if value > budget:
+            raise semantic.QualificationError(
+                f"unified headless budget exceeded: {key}={value}, budget={budget}"
+            )
+    samples = metrics.get("rss_samples")
+    if not isinstance(samples, int) or isinstance(samples, bool) or samples < 2:
+        raise semantic.QualificationError(
+            "unified headless resident memory was not sampled at both milestones"
+        )
+    aggregate_rss = metrics.get("peak_rss_kib")
+    if (
+        not isinstance(aggregate_rss, int)
+        or isinstance(aggregate_rss, bool)
+        or aggregate_rss <= 0
+    ):
+        raise semantic.QualificationError(
+            "unified headless aggregate RSS diagnostic is missing"
+        )
+    return {
+        **{key: metrics[key] for key in budgets},
+        "peak_aggregate_rss_kib": aggregate_rss,
+        "rss_samples": samples,
+        "worker_ready_budget_ms": HEADLESS_WORKER_READY_BUDGET_MS,
+        "semantic_ready_budget_ms": HEADLESS_SEMANTIC_READY_BUDGET_MS,
+        "physical_footprint_budget_kib": HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB,
+    }
+
+
 def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
     uid, gid = semantic._require_disposable_ci()
     chrome_executable = semantic._validate_chrome_for_testing(chrome_executable)
@@ -311,6 +356,7 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
     cleanup_errors: list[str] = []
     result: dict[str, object] = {}
     trace: list[dict[str, object]] = []
+    metrics: dict[str, int] = {}
     try:
         os.chown(root, uid, gid)
         root.chmod(0o700)
@@ -364,13 +410,17 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             chrome_executable,
             manifest_path,
             stub_path,
+            headless=True,
+            metrics=metrics,
         )
         semantic._assert_fixture_complete(snapshot)
         signal = _validate_signal(signal_path, uid)
+        performance = _validate_headless_performance(metrics)
         result = {
             "result": "pass",
             "restricted_to": "disposable GitHub Actions macOS runner",
             "browser": "Chrome for Testing with a fresh owner-only profile",
+            "browser_launch": "unified headless Chrome via LaunchServices",
             "observer": "real read-only webRequest incomplete-response event",
             "native_boundary": "owner-only fixed-response stub",
             "signal_schema_version": signal["schema_version"],
@@ -382,6 +432,7 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
                 "image": snapshot.image_requests,
             },
             "system_network_state": "not mutated",
+            "performance": performance,
         }
     except BaseException as exc:
         failure = exc

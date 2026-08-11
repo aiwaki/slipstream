@@ -142,12 +142,39 @@ contains one exact `allowed_origins` entry. Confirmed uninstall removes only a
 manifest whose name, type, and origin identify it as Slipstream-owned; a
 foreign file or symlink is refused without blocking removal of the application.
 
-The extension is not yet published to the Chrome Web Store. For development,
-load `browser-companion/chromium/` with Chrome's **Load unpacked** action after
+The extension is not published to the Chrome Web Store. For development, load
+`browser-companion/chromium/` with Chrome's **Load unpacked** action after
 starting a packaged Slipstream app. The public key in `manifest.json` keeps the
-preview extension ID stable. Production distribution in branded Chrome requires
-a reviewed Chrome Web Store package installed and enabled in the actual browser
-profile; the disposable CI gate does not replace that distribution path.
+preview extension ID stable. This manual development step is not an acceptable
+installed-product workflow. Production must provide an owned automatic local
+integration that arrives with Slipstream and needs no separate browser setup.
+A local browser worker is equivalent only if it preserves the same bounded
+signal authority and automatically completes the original user-visible
+navigation; successfully loading a separate synthetic page is not sufficient.
+The disposable CI gate proves browser behavior but not that delivery boundary.
+
+The ordinary macOS Chromium CI gate has a unified-headless mode for the
+first worker qualification slice. It runs the reviewed extension without an
+first worker qualification slice. It runs the reviewed extension without a
+visible browser window or `--no-sandbox`; on macOS LaunchServices supplies the
+application bootstrap context required for sandboxed helpers to reach Chrome's
+Mach rendezvous service. Direct binary LaunchAgent attempts failed even with an
+Aqua session declaration. The gate requires the exact native-message boundary
+and styled resource callback, and reports
+launch-to-worker, launch-to-semantic, de-duplicated physical footprint, and
+aggregate owned-process RSS measurements. Its conservative regression budgets
+are 15 seconds, 25 seconds, and 768 MiB of physical footprint respectively.
+Aggregate RSS is diagnostic only because it counts shared mappings once per
+Chrome process. This is qualification infrastructure, not yet an installed
+runtime component and not authority over an unrelated user tab.
+
+Ordinary CI run `31533358388`, job `93918488548`, passed on Chrome for Testing
+151: worker readiness was 5,476 ms, semantic-ready was 6,495 ms, physical
+footprint was 374,369 KiB, and aggregate RSS was 1,234,672 KiB across four
+samples. The real incomplete-frame event crossed native messaging, triggered
+one reload, and reached the CSS, JavaScript, and image callback. The result
+qualifies the worker mechanism and measurement boundary only; it does not yet
+prove installed delivery or correlation to another browser's original relay.
 
 ## Chrome Web Store Package
 
@@ -316,14 +343,18 @@ uninstall, and an unsigned Safari app-extension build.
 ## Remaining Gates
 
 - Deterministic Chrome Web Store packaging, local privacy disclosure, and
-  source/update provenance are implemented and CI-checked. Publisher upload,
-  listing assets, a public privacy-policy URL, store review, publication, and a
-  clean branded-Chrome profile with the exact extension installed and enabled
-  remain external gates.
+  source/update provenance are implemented and CI-checked, but publisher
+  registration and publication are deferred. The replacement gate is an
+  automatic local integration delivered by Slipstream, with exact identity,
+  update, privacy, ownership, uninstall, and clean-profile evidence.
+- The unified-headless extension/native-message path and conservative
+  launch/physical-footprint budgets are implemented in the ordinary Chrome for
+  Testing gate and passed real-browser CI. An original-navigation correlation
+  fixture is still required before any runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
-  incomplete-response v2. Protected unpacked-extension success does not replace
-  reviewed Chrome Web Store distribution.
+  incomplete-response v2. Protected unpacked-extension success does not prove
+  automatic installed-product delivery or recovery of the original navigation.
 - Safari requires a signed container, browser enablement, and a disposable
   runtime proof that the sandboxed app extension can reach the owner-only
   daemon socket. The unsigned source and package build exist, but are not

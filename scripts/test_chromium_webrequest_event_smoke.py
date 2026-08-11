@@ -213,6 +213,56 @@ class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
             ):
                 smoke._validate_signal(signal_path, os.getuid())
 
+    def test_headless_performance_requires_bounded_launch_and_memory(self) -> None:
+        metrics = {
+            "launch_to_worker_ready_ms": 1_200,
+            "launch_to_semantic_ready_ms": 1_800,
+            "physical_footprint_kib": 180_000,
+            "peak_rss_kib": 245_000,
+            "rss_samples": 3,
+        }
+        result = smoke._validate_headless_performance(metrics)
+        self.assertEqual(result["launch_to_worker_ready_ms"], 1_200)
+        self.assertEqual(result["launch_to_semantic_ready_ms"], 1_800)
+        self.assertEqual(result["physical_footprint_kib"], 180_000)
+        self.assertEqual(result["peak_aggregate_rss_kib"], 245_000)
+        self.assertEqual(
+            result["physical_footprint_budget_kib"],
+            smoke.HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB,
+        )
+
+    def test_headless_performance_rejects_missing_samples_and_overruns(
+        self,
+    ) -> None:
+        baseline = {
+            "launch_to_worker_ready_ms": 1_200,
+            "launch_to_semantic_ready_ms": 1_800,
+            "physical_footprint_kib": 180_000,
+            "peak_rss_kib": 245_000,
+            "rss_samples": 3,
+        }
+        for key, value in (
+            ("rss_samples", 1),
+            (
+                "launch_to_worker_ready_ms",
+                smoke.HEADLESS_WORKER_READY_BUDGET_MS + 1,
+            ),
+            (
+                "launch_to_semantic_ready_ms",
+                smoke.HEADLESS_SEMANTIC_READY_BUDGET_MS + 1,
+            ),
+            (
+                "physical_footprint_kib",
+                smoke.HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB + 1,
+            ),
+        ):
+            with self.subTest(key=key), self.assertRaises(
+                semantic.QualificationError
+            ):
+                smoke._validate_headless_performance(
+                    {**baseline, key: value}
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

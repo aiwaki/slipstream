@@ -522,6 +522,22 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertIn("--remote-debugging-port=0", command)
         self.assertEqual(command[-1], "about:blank")
 
+    def test_chrome_command_uses_unified_headless_without_disabling_sandbox(
+        self,
+    ) -> None:
+        command = smoke._chrome_command(
+            Path("/Applications/Google Chrome for Testing"),
+            Path("/tmp/profile"),
+            Path("/repo/browser-companion/chromium"),
+            18443,
+            headless=True,
+        )
+        self.assertIn("--headless", command)
+        self.assertNotIn("--headless=new", command)
+        self.assertNotIn("--new-window", command)
+        self.assertNotIn("--no-sandbox", command)
+        self.assertEqual(command[-1], "about:blank")
+
     def test_chrome_command_maps_the_selected_fixture_host(self) -> None:
         command = smoke._chrome_command(
             Path("/Applications/Google Chrome"),
@@ -874,6 +890,91 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertNotIn("/bin/sh", command)
         self.assertNotIn("/usr/bin/sudo", command)
         self.assertNotIn("/bin/launchctl", command)
+
+    def test_headless_launch_agent_uses_launchservices_without_a_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = _fake_chrome_for_testing(Path(tmp))
+            payload = smoke._chrome_launch_agent_payload(
+                "dev.slipstream.chromium-semantic.4242",
+                {"HOME": "/Users/runner", "USER": "runner"},
+                Path("/Users/runner"),
+                Path("/tmp/profile/chrome.stdout"),
+                Path("/tmp/profile/chrome.stderr"),
+                Path("/tmp/profile/launcher.stdout"),
+                Path("/tmp/profile/launcher.stderr"),
+                executable,
+                Path("/tmp/profile"),
+                Path("/repo/browser-companion/chromium"),
+                18443,
+                headless=True,
+            )
+
+        command = payload["ProgramArguments"]
+        self.assertEqual(payload["ProcessType"], "Interactive")
+        self.assertEqual(payload["LimitLoadToSessionType"], "Aqua")
+        self.assertEqual(command[0], "/usr/bin/open")
+        self.assertIn("-W", command)
+        self.assertIn("-j", command)
+        self.assertIn("--headless", command)
+        self.assertNotIn("--new-window", command)
+        self.assertNotIn("--no-sandbox", command)
+
+    def test_owned_chrome_rss_sums_only_enumerated_processes(self) -> None:
+        processes = (
+            smoke.ChromeProcess(101, 101, "/tmp/chrome --user-data-dir=/tmp/p"),
+            smoke.ChromeProcess(102, 101, "/tmp/chrome-helper"),
+        )
+        completed = smoke.subprocess.CompletedProcess(
+            ("/bin/ps",),
+            0,
+            stdout="12000\n8000\n",
+            stderr="",
+        )
+        with mock.patch.object(
+            smoke,
+            "_owned_chrome_processes",
+            return_value=processes,
+        ), mock.patch.object(smoke, "_run", return_value=completed) as run:
+            resident_kib = smoke._owned_chrome_rss_kib(
+                501,
+                Path("/tmp/chrome"),
+                Path("/tmp/p"),
+            )
+
+        self.assertEqual(resident_kib, 20_000)
+        run.assert_called_once_with(
+            ("/bin/ps", "-p", "101,102", "-o", "rss="),
+            check=False,
+        )
+
+    def test_physical_footprint_parser_uses_the_deduplicated_total(self) -> None:
+        payload = json.dumps(
+            {
+                "processes": [
+                    {"pid": 101, "footprint": 400_000_000},
+                    {"pid": 102, "footprint": 300_000_000},
+                ],
+                "total footprint": 524_288_001,
+                "unit": "bytes",
+            }
+        ).encode("utf-8")
+        self.assertEqual(
+            smoke._parse_physical_footprint_kib(
+                payload,
+                Path("/tmp/footprint.json"),
+            ),
+            512_001,
+        )
+
+    def test_physical_footprint_parser_rejects_missing_total(self) -> None:
+        with self.assertRaisesRegex(
+            smoke.QualificationError,
+            "physical footprint total",
+        ):
+            smoke._parse_physical_footprint_kib(
+                b'{"unit":"bytes"}',
+                Path("/tmp/footprint.json"),
+            )
 
     def test_launchservices_copies_an_extensionless_bundle_into_the_profile(
         self,

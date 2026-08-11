@@ -233,7 +233,7 @@ jobs:
         with:
           python-version: "3.13.14"
 
-      - name: Qualify real Chromium incomplete-response observation
+      - name: Qualify unified headless Chromium observation and budgets
         env:
           CI: "true"
           GITHUB_ACTIONS: "true"

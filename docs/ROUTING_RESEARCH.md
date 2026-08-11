@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-12 | Automatic local browser-signal delivery on unmanaged macOS | Official Chrome surfaces reviewed; no supported silent self-hosted extension install exists for ordinary unmanaged branded Chrome | Chrome's external-extension preference file on macOS must point to the Chrome Web Store and still presents an enable confirmation. A self-hosted extension may be force-installed silently only when Chrome is managed through MDM, MCX/domain membership, or Chrome Enterprise Core. Treating a personal installation as enterprise-managed would add external enrollment or machine policy ownership and is not the local zero-setup product path. Unified Headless Chrome can run extensions and is suitable for a bounded local worker experiment, but a separate synthetic navigation is not route authority unless it safely correlates to and completes the original user-visible navigation. Crawlee and `microlinkhq/browserless` are crawler/Puppeteer orchestration layers, while CloakBrowser and `puppeteer-real-browser` target anti-bot behavior; none supplies ownership of an existing user tab. | Add a headless Chrome for Testing qualification mode to the existing frozen-origin companion harness. Prove extension/native messaging and measure launch/RSS first, then add a closed original-navigation correlation fixture before considering runtime composition. |
 | 2026-08-11 | Exact eight-second pending-navigation fixture crossed a floating-point cancellation boundary | Exact-main `checks` failed; the same source passed local, PR, and previous exact-main runs; runner value reproduces locally | Docs-only main `2635f59f742b63a553f0df20f57e79f625b9a2f9` passed audit `31523112491` and Windows `31523112520`, but CI `31523112515` computed `(last_downstream_at + 8.0) - last_downstream_at` as `7.999999999999986` in `test_unknown_handshake_only_idle_waits_for_browser_pending_signal`, so the production `>= 8.0` guard correctly rejected the nominal boundary. This is fixture arithmetic, not routing evidence. Keep `UNKNOWN_PRE_RESPONSE_IDLE = 8.0` and bracket the contract at one millisecond before and after the threshold. | Land the test-only correction, require its PR checks and fresh exact-main CI/audit/Windows evidence, then resume the Chrome Web Store distribution gate. |
 | 2026-08-11 | Protected unpacked Chromium success did not transfer to a clean branded-Chrome profile | Exact protected artifact passed; controlled workstation transaction rolled back on the first browser smoke | Main `8fe21229994e0ddc643762d0ece2203bc79313cc` passed CI `31509795963`, audit `31511314605`, Windows `31509795798`, and protected owned-Geph run `31511415912`. Its artifact `9110154812` passed semantic v1/v2/v3, styled-resource, owned-Geph lifecycle, signature, manifest, and ZIP-integrity checks. Transaction `271C43D9-4906-4AF3-88E8-C2EF146A33ED` reached coherent active daemon state, but a fresh isolated headed branded Chrome kept `xpersonatoy.com` pending for 75 seconds and exact rollback restored all binary hashes and network/runtime invariants. The registered native-host manifest was present, yet the clean profile had no unpublished companion; the root log consequently contained no semantic or recovery event. The protected gate loads the source as an unpacked extension, so it proves the product path but not production distribution. This does not justify changing routing, byte-only authority, or the evidence ladder. | Land a deterministic store ZIP/provenance gate plus privacy/listing disclosures. Then require publisher review and a clean branded-Chrome profile with the exact published/enabled extension ID before another exact-main workstation transaction. |
 | 2026-08-11 | Browser target remains pending as `about:blank` after valid TLS records | Workstation symptom reproduced; PR #313 review rejected byte-only closure and the branch now requires a browser-owned pending-navigation signal | Main `58a67d0262fc8331dae05e615aaa61ce032a41a6` passed CI `31431925679`, audit `31431925668`, Windows qualification `31431925670`, and protected run `31432845423`. Exact artifact `9079910704` passed the broad local/geo browser matrix in transactions `257E1EB0-1DED-4F17-8963-22550D568B9B` and `D64565C3-A494-4C82-8C15-ABB69275C259`, but fresh headed Chrome kept `xpersonatoy.com` pending for 75 seconds with and without QUIC. Copying the visible `about:blank` address yielded the target URL, proving an uncommitted navigation rather than a wrong destination. Direct Chrome used IPv4 `23.227.38.70:443`; owned Geph loaded the origin, and curl's Cloudflare challenge was not representative. Review correctly identified that a quiet WebSocket can share the same byte shape, so relay silence cannot be closure authority. Frozen semantic signal v3 now reports only a still-loading same-host top-level `pendingUrl` after eight seconds. The daemon correlates its privacy-bounded hostname/request start to one eligible live relay, advances only one incomplete local stage, and leaves the final relay open whenever independent confirmation is not actually scheduled or does not succeed. No hostname rule was added. Full verification passes Python/script `1105` plus `41` subtests, Chromium `24`, Safari `7`, Rust tray `84`, core `35`, Windows `241`, and userspace evaluation `40`/`40`, with all Clippy and continuity checks clean. | Update PR #313, resolve both review threads, and merge only when green. Then require exact-main gates and one fresh protected qualification; install only its artifact and place the real browser case early in a controlled smoke with exact rollback on first failure. |
@@ -196,6 +197,108 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 | 2026-07-10 | Wake canary recovery rerun | Implemented | Forced canary triggers that arrive during an in-flight wake check are queued for a short rerun instead of being dropped by the force cooldown. | Keep wake recovery event-driven; do not lengthen normal canary cadence. |
 | 2026-07-10 | Exact-host local-bypass re-sweep | Implemented | A real Discord/YouTube runtime miss starts a deduplicated background strategy sweep for that exact host and clears its negative cache only after a fake/desync strategy succeeds. | Tune cooldowns only from observed runtime evidence. |
 | 2026-07-10 | Geph-down log semantics | Superseded 2026-07-11 | A proxied geo-exit attempt still never falls through local desync, but persistent fail-close under an active global redirect was unsafe. Backend loss now pauses only the private PF anchor and leaves native networking in control. | Keep runtime messages aligned with dormant/active PF state. |
+
+## Automatic Local Browser Signal (2026-08-12)
+
+The installed-product requirement is `install Slipstream -> sites work`,
+including rendered regional denial, incomplete top-level responses, and a
+pre-document navigation that remains pending after valid TLS records. Manual
+Developer Mode, a separate extension install, a publisher account, and a cloud
+browser are not acceptable production prerequisites. The normal transport path
+must remain browser-free; a heavier worker may run only behind bounded concrete
+failure evidence.
+
+Official Chrome distribution boundaries:
+
+- Chrome documents only Chrome Web Store distribution or self-hosting in a
+  managed environment. Windows and macOS allow self-hosted extensions only
+  through enterprise policy:
+  <https://developer.chrome.com/docs/extensions/how-to/distribute>.
+- The macOS external-extension preference file may associate an installed app
+  with an extension, but its update URL must point to the Chrome Web Store and
+  the user must still enable the extension. Local CRX installation on macOS has
+  been rejected since Chrome 44:
+  <https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions>.
+- `ExtensionInstallForcelist` installs silently, but an extension outside the
+  store is admitted on macOS only when Chrome is managed by MDM, joined through
+  MCX/domain management, or enrolled in Chrome Enterprise Core:
+  <https://chromeenterprise.google/policies/extension-install-forcelist/>.
+- Unified Headless Chrome uses the normal Chrome implementation and supports
+  extensions during automation. It is a valid local qualification candidate,
+  not automatic authority over a separate user tab:
+  <https://developer.chrome.com/docs/chromium/headless> and
+  <https://developer.chrome.com/blog/tools-from-chrome-for-frictionless-testing>.
+
+Adjacent browser projects do not remove that ownership boundary. Crawlee is a
+crawling framework with queues, sessions, proxy rotation, and Playwright or
+Puppeteer integration (<https://github.com/apify/crawlee>).
+`microlinkhq/browserless` is a Puppeteer wrapper around isolated headless
+contexts (<https://github.com/microlinkhq/browserless>). CloakBrowser supplies a
+separately downloaded fingerprint-modified Chromium binary aimed at anti-bot
+automation (<https://github.com/CloakHQ/CloakBrowser>).
+`puppeteer-real-browser` targets anti-bot/headful automation and its README says
+it no longer receives updates
+(<https://github.com/ZFC-Digital/puppeteer-real-browser>). None observes or
+reloads an already-running user tab merely by being launched locally.
+
+PR #324 implements the immediate experiment without runtime composition. The
+ordinary macOS Chrome for Testing gate now launches the exact-origin companion
+through LaunchServices in unified-headless mode, keeps the Chrome sandbox and
+avoids a visible browser window, uses an owner-private fresh profile, and
+requires the existing native-message and styled-resource callbacks. It records
+launch-to-worker latency,
+launch-to-semantic latency, and sampled aggregate RSS for the exact owned Chrome
+process family. The fail-closed budgets are 15 seconds, 25 seconds, and 768 MiB
+of de-duplicated physical footprint. Aggregate RSS remains diagnostic because
+shared mappings appear in each process's RSS. Local unit and daemon suites
+pass; successful real-browser evidence is recorded below.
+
+The first two CI attempts (`31532156159` job `93914552229` and `31532531700`
+job `93915774541`) also established a macOS constraint: direct binary launch
+both outside and nominally inside the Aqua session starts the parent process,
+but sandboxed helpers cannot look up Chrome's per-process Mach rendezvous
+service (`bootstrap_look_up ... Permission denied`). The worker therefore
+remains absent. The harness now uses LaunchServices for the macOS application
+bootstrap context while still passing `--headless`; this keeps the sandbox and
+does not create a visible browser window. The later successful run below
+validates that boundary.
+
+The third attempt (`31532847620`, job `93916800053`) passed the actual browser
+path: extension worker readiness, native messaging, the real incomplete-frame
+`webRequest` event, one reload, and styled-page completion. The sole failure was
+the initial memory metric: summing per-process RSS produced 1,142,496 KiB and
+crossed the 768 MiB budget, but that sum counts shared mappings once per Chrome
+process. The corrected measurement uses Apple's multi-process `footprint`
+total, which de-duplicates shared objects, and keeps the RSS sum only as a
+diagnostic. The 768 MiB gate is unchanged and now applies to physical
+footprint.
+
+Run `31533358388`, job `93918488548`, passed on Chrome for Testing 151 with the
+corrected metric. Worker readiness was 5,476 ms, the real incomplete-frame
+event crossed the native boundary, one reload completed the styled page in
+6,495 ms, and the de-duplicated physical footprint was 374,369 KiB against the
+786,432 KiB budget. Aggregate RSS was 1,234,672 KiB across four samples,
+confirming why it remains diagnostic rather than the physical-memory gate.
+System network state was not mutated.
+
+Code discovery for the following correlation slice attempted the repository's
+required knowledge-graph search first, but the MCP transport returned
+`Transport closed`. The fallback was therefore limited to exact v3 signal,
+active-relay, and native-message symbols. That inspection confirms the existing
+browser extension correlates only a tab it owns: `onBeforeRequest` records its
+request start, `chrome.tabs.get` proves the same tab still has the same pending
+host, and the daemon matches that timestamp to one live relay. A separate
+headless probe cannot reuse that authority merely by loading the same host; the
+next design must use an owned daemon-issued probe identity tied to the original
+relay, or choose a local browser surface that actually owns the original
+navigation. Expanding the existing semantic signal with an unbound hostname is
+not acceptable.
+
+The following closed fixture must prove that the worker's evidence can be
+correlated to one original pending relay and that the original navigation
+completes. A synthetic worker page by itself cannot authorize production
+routing. Installed package size, update/uninstall behavior, idle cost, and
+clean-profile behavior remain separate product gates.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

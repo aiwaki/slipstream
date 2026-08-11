@@ -99,6 +99,7 @@ CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
 DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
 DEVTOOLS_TIMEOUT = 15.0
 MAX_DEVTOOLS_RESPONSE = 64 * 1024
+MAX_FOOTPRINT_RESPONSE = 1024 * 1024
 MAX_WEBSOCKET_HEADERS = 16 * 1024
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WORKER_READY_EXPRESSION = """
@@ -937,8 +938,10 @@ def _chrome_command(
     extension: Path,
     fixture_port: int,
     fixture_host: str = FIXTURE_HOST,
+    *,
+    headless: bool = False,
 ) -> tuple[str, ...]:
-    return (
+    command = [
         str(executable),
         "--disable-background-networking",
         "--disable-component-update",
@@ -950,7 +953,6 @@ def _chrome_command(
         "--no-default-browser-check",
         "--no-first-run",
         "--no-proxy-server",
-        "--new-window",
         "--password-store=basic",
         "--ignore-certificate-errors",
         f"--disable-extensions-except={extension}",
@@ -959,7 +961,9 @@ def _chrome_command(
         "--remote-debugging-port=0",
         f"--user-data-dir={profile}",
         "about:blank",
-    )
+    ]
+    command.insert(-1, "--headless" if headless else "--new-window")
+    return tuple(command)
 
 
 def _chrome_app_bundle(executable: Path) -> Path:
@@ -1038,6 +1042,8 @@ def _chrome_open_command(
     stderr_path: Path,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
+    *,
+    headless: bool = False,
 ) -> tuple[str, ...]:
     chrome = _chrome_command(
         executable,
@@ -1045,6 +1051,7 @@ def _chrome_open_command(
         extension,
         fixture_port,
         fixture_host,
+        headless=headless,
     )
     return (
         "/usr/bin/open",
@@ -1076,21 +1083,25 @@ def _chrome_launch_agent_payload(
     fixture_port: int,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
+    *,
+    headless: bool = False,
 ) -> dict[str, object]:
-    return {
+    program_arguments = list(
+        _chrome_open_command(
+            executable,
+            profile,
+            extension,
+            fixture_port,
+            chrome_stdout_path,
+            chrome_stderr_path,
+            application_bundle,
+            fixture_host,
+            headless=headless,
+        )
+    )
+    payload: dict[str, object] = {
         "Label": label,
-        "ProgramArguments": list(
-            _chrome_open_command(
-                executable,
-                profile,
-                extension,
-                fixture_port,
-                chrome_stdout_path,
-                chrome_stderr_path,
-                application_bundle,
-                fixture_host,
-            )
-        ),
+        "ProgramArguments": program_arguments,
         "RunAtLoad": True,
         "ProcessType": "Interactive",
         "LimitLoadToSessionType": "Aqua",
@@ -1100,6 +1111,7 @@ def _chrome_launch_agent_payload(
         "StandardOutPath": str(launcher_stdout_path),
         "StandardErrorPath": str(launcher_stderr_path),
     }
+    return payload
 
 
 def _write_owner_private_file(
@@ -1660,6 +1672,117 @@ def _owned_chrome_processes(
     return tuple(sorted(matches, key=lambda process: process.pid))
 
 
+def _owned_chrome_rss_kib(
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+) -> int:
+    processes = _owned_chrome_processes(uid, executable, profile, ownership)
+    if not processes:
+        raise QualificationError("cannot measure absent owned Chrome processes")
+    result = _run(
+        (
+            "/bin/ps",
+            "-p",
+            ",".join(str(process.pid) for process in processes),
+            "-o",
+            "rss=",
+        ),
+        check=False,
+    )
+    if result.returncode != 0:
+        raise QualificationError("cannot measure exact Chrome resident memory")
+    try:
+        samples = tuple(int(line.strip()) for line in result.stdout.splitlines())
+    except ValueError as exc:
+        raise QualificationError("Chrome resident memory sample is invalid") from exc
+    if not samples or any(sample <= 0 for sample in samples):
+        raise QualificationError("Chrome resident memory sample is empty")
+    return sum(samples)
+
+
+def _parse_physical_footprint_kib(payload: bytes, path: Path) -> int:
+    document = _decode_json_object(payload, path)
+    footprint_bytes = document.get("total footprint")
+    if (
+        not isinstance(footprint_bytes, int)
+        or isinstance(footprint_bytes, bool)
+        or footprint_bytes <= 0
+    ):
+        raise QualificationError("Chrome physical footprint total is invalid")
+    return (footprint_bytes + 1023) // 1024
+
+
+def _owned_chrome_physical_footprint_kib(
+    uid: int,
+    gid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+) -> int:
+    processes = _owned_chrome_processes(uid, executable, profile, ownership)
+    if not processes:
+        raise QualificationError("cannot measure absent owned Chrome processes")
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix=".chrome-footprint-",
+        suffix=".json",
+        dir=profile,
+    )
+    output_path = Path(raw_path)
+    try:
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
+    try:
+        command = [
+            "/usr/bin/footprint",
+            "-j",
+            str(output_path),
+            "-f",
+            "bytes",
+            "--noCategories",
+        ]
+        for process in processes:
+            command.extend(("-p", str(process.pid)))
+        result = _run(tuple(command), check=False)
+        if result.returncode != 0:
+            raise QualificationError("cannot measure Chrome physical footprint")
+        payload = _read_owner_bounded_file(
+            output_path,
+            uid,
+            MAX_FOOTPRINT_RESPONSE,
+        )
+        return _parse_physical_footprint_kib(payload, output_path)
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
+def _record_chrome_metrics(
+    metrics: dict[str, int],
+    *,
+    started_at: float,
+    milestone: str,
+    uid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership,
+) -> None:
+    metrics[f"launch_to_{milestone}_ms"] = max(
+        1,
+        round((time.monotonic() - started_at) * 1000),
+    )
+    resident_kib = _owned_chrome_rss_kib(
+        uid,
+        executable,
+        profile,
+        ownership,
+    )
+    metrics["peak_rss_kib"] = max(metrics.get("peak_rss_kib", 0), resident_kib)
+    metrics["rss_samples"] = metrics.get("rss_samples", 0) + 1
+
+
 def _wait_for_owned_chrome_process(
     uid: int,
     executable: Path,
@@ -1689,7 +1812,7 @@ def _wait_for_owned_chrome_process(
                 "fresh Chrome profile is owned by multiple browser processes"
             )
         time.sleep(0.1)
-    raise QualificationError("LaunchServices did not publish the exact Chrome process")
+    raise QualificationError("launcher did not publish the exact Chrome process")
 
 
 def _owned_chrome_process_alive(
@@ -1800,7 +1923,7 @@ def _stop_owned_chrome_processes(
             settle_time=settle_time,
         ):
             raise QualificationError(
-                "exact LaunchServices Chrome processes survived cleanup"
+                "exact owned Chrome processes survived cleanup"
             )
 
 
@@ -1942,11 +2065,11 @@ def _stop_chrome_launch_agent(
         ) from launchd_error
     if _owned_chrome_processes(uid, executable, profile, ownership):
         raise QualificationError(
-            "exact LaunchServices Chrome processes appeared after cleanup"
+            "exact owned Chrome processes appeared after cleanup"
         )
     if browser_error is not None:
         raise QualificationError(
-            "exact LaunchServices Chrome process cleanup could not be verified"
+            "exact owned Chrome process cleanup could not be verified"
         ) from browser_error
 
 
@@ -2167,6 +2290,9 @@ def _run_chrome(
     executable: Path,
     native_host_manifest: Path,
     native_host_executable: Path,
+    *,
+    headless: bool = False,
+    metrics: dict[str, int] | None = None,
 ) -> FixtureSnapshot:
     executable = executable.resolve(strict=True)
     environment, home = lifecycle._user_environment(uid)
@@ -2190,6 +2316,7 @@ def _run_chrome(
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
+    launch_started_at: float | None = None
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
@@ -2248,6 +2375,7 @@ def _run_chrome(
             fixture.port,
             application_bundle,
             fixture.host,
+            headless=headless,
         )
         _write_owner_private_file(
             plist_path,
@@ -2256,6 +2384,7 @@ def _run_chrome(
             gid,
         )
         bootstrap_started = True
+        launch_started_at = time.monotonic()
         launch = _bootstrap_chrome_launch_agent(
             uid,
             label,
@@ -2268,11 +2397,31 @@ def _run_chrome(
             ownership,
         )
         devtools_port = _wait_for_extension_worker(profile, uid)
+        if metrics is not None:
+            _record_chrome_metrics(
+                metrics,
+                started_at=launch_started_at,
+                milestone="worker_ready",
+                uid=uid,
+                executable=executable,
+                profile=profile,
+                ownership=ownership,
+            )
         _open_fixture_with_devtools(devtools_port, fixture)
 
         deadline = time.monotonic() + CHROME_TIMEOUT
         while time.monotonic() < deadline:
             snapshot = fixture.snapshot()
+            if metrics is not None:
+                _record_chrome_metrics(
+                    metrics,
+                    started_at=launch_started_at,
+                    milestone="semantic_ready",
+                    uid=uid,
+                    executable=executable,
+                    profile=profile,
+                    ownership=ownership,
+                )
             if snapshot.ready_requests == 1:
                 break
             if snapshot.ready_requests > 1:
@@ -2290,13 +2439,23 @@ def _run_chrome(
                 )
             ):
                 raise QualificationError(
-                    "LaunchServices Chrome exited before semantic completion"
+                    "owned Chrome exited before semantic completion"
                 )
             time.sleep(0.1)
         else:
             raise QualificationError(
                 f"Chrome semantic page timed out with fixture evidence: "
                 f"{fixture.snapshot()!r}"
+            )
+        if metrics is not None:
+            metrics["physical_footprint_kib"] = (
+                _owned_chrome_physical_footprint_kib(
+                    uid,
+                    gid,
+                    executable,
+                    profile,
+                    ownership,
+                )
             )
     except BaseException as exc:
         failure = exc
@@ -2352,7 +2511,10 @@ def _run_chrome(
                 )
         diagnostics: list[tuple[str, bytes]] = []
         for name, path in (
-            ("LaunchServices", launcher_stderr_path),
+            (
+                "Headless Chrome" if headless else "LaunchServices",
+                launcher_stderr_path,
+            ),
             ("Chrome", stderr_path),
             ("Native message tap", native_tap_status),
         ):
