@@ -26,6 +26,7 @@ const CHROME_LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CHROME_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_DEVTOOLS_FILE_BYTES: u64 = 4_096;
+const MAX_LAUNCH_DIAGNOSTIC_BYTES: u64 = 4_096;
 const MAX_HTTP_BYTES: u64 = 256 * 1024;
 const MAX_WEBSOCKET_BYTES: usize = 1024 * 1024;
 const WEBSOCKET_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
@@ -623,8 +624,14 @@ impl ChromeSession {
     fn start(&mut self) -> ProbeResult<()> {
         let stdout_path = self.profile.join("chrome.stdout.log");
         let stderr_path = self.profile.join("chrome.stderr.log");
+        let launcher_stderr_path = self.profile.join("launcher.stderr.log");
         create_private_file(&stdout_path)?;
         create_private_file(&stderr_path)?;
+        create_private_file(&launcher_stderr_path)?;
+        let launcher_stderr = OpenOptions::new()
+            .write(true)
+            .open(&launcher_stderr_path)
+            .map_err(|_| error("profile_create_failed"))?;
         let mut command = Command::new("/usr/bin/open");
         command
             .args(["-n", "-W", "-j", "--stdout"])
@@ -637,7 +644,7 @@ impl ChromeSession {
             .args(self.config.chrome_arguments(&self.profile))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::from(launcher_stderr));
         self.launcher = Some(command.spawn().map_err(|_| error("chrome_launch_failed"))?);
 
         let deadline = Instant::now() + CHROME_LAUNCH_TIMEOUT;
@@ -680,7 +687,10 @@ impl ChromeSession {
             std::thread::sleep(Duration::from_millis(100));
         }
         if launcher_exited && !observed_owned_chrome {
-            Err(error("chrome_launch_failed"))
+            Err(error(chrome_launch_failure_class(
+                &launcher_stderr_path,
+                self.uid,
+            )))
         } else {
             Err(error("chrome_launch_timeout"))
         }
@@ -948,6 +958,66 @@ fn create_private_file(path: &Path) -> ProbeResult<()> {
         .open(path)
         .map(|_| ())
         .map_err(|_| error("profile_create_failed"))
+}
+
+fn classify_launch_diagnostic(diagnostic: &str) -> &'static str {
+    if diagnostic.contains("Code=-10827") || diagnostic.contains("error -10827") {
+        "chrome_launch_executable_missing"
+    } else if diagnostic.contains("Code=-10814") || diagnostic.contains("error -10814") {
+        "chrome_launch_application_missing"
+    } else if diagnostic.contains("Code=-10825") || diagnostic.contains("error -10825") {
+        "chrome_launch_system_incompatible"
+    } else if diagnostic.contains("Code=-10826") || diagnostic.contains("error -10826") {
+        "chrome_launch_architecture_invalid"
+    } else if diagnostic.contains("Code=-10810")
+        || diagnostic.contains("error -10810")
+        || diagnostic.contains("Code=-10673")
+        || diagnostic.contains("error -10673")
+    {
+        "chrome_launchservices_failed"
+    } else if diagnostic.is_empty() {
+        "chrome_launch_failed"
+    } else {
+        "chrome_launchservices_rejected"
+    }
+}
+
+fn chrome_launch_failure_class(path: &Path, uid: u32) -> &'static str {
+    let Ok(path_metadata) = fs::symlink_metadata(path) else {
+        return "chrome_launch_failed";
+    };
+    if !path_metadata.is_file()
+        || path_metadata.file_type().is_symlink()
+        || path_metadata.uid() != uid
+        || path_metadata.mode() & 0o777 != 0o600
+        || path_metadata.len() > MAX_LAUNCH_DIAGNOSTIC_BYTES
+    {
+        return "chrome_launch_failed";
+    }
+    let Ok(mut source) = File::open(path) else {
+        return "chrome_launch_failed";
+    };
+    let Ok(open_metadata) = source.metadata() else {
+        return "chrome_launch_failed";
+    };
+    if open_metadata.dev() != path_metadata.dev()
+        || open_metadata.ino() != path_metadata.ino()
+        || open_metadata.uid() != uid
+        || open_metadata.mode() & 0o777 != 0o600
+        || open_metadata.len() != path_metadata.len()
+    {
+        return "chrome_launch_failed";
+    }
+    let mut payload = Vec::with_capacity(path_metadata.len() as usize);
+    if source.read_to_end(&mut payload).is_err()
+        || payload.len() as u64 != path_metadata.len()
+        || payload.len() as u64 > MAX_LAUNCH_DIAGNOSTIC_BYTES
+    {
+        return "chrome_launch_failed";
+    }
+    std::str::from_utf8(&payload)
+        .map(classify_launch_diagnostic)
+        .unwrap_or("chrome_launch_failed")
 }
 
 fn random_hex(bytes: usize) -> ProbeResult<String> {
@@ -1483,6 +1553,23 @@ mod tests {
             MAX_HTTP_BYTES
         );
         assert!(http_response_extent(oversized.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn launchservices_diagnostics_are_reduced_to_static_classes() {
+        assert_eq!(
+            classify_launch_diagnostic("NSOSStatusErrorDomain Code=-10827 executable missing"),
+            "chrome_launch_executable_missing"
+        );
+        assert_eq!(
+            classify_launch_diagnostic("LSOpenURLsWithRole() failed with error -10810"),
+            "chrome_launchservices_failed"
+        );
+        assert_eq!(
+            classify_launch_diagnostic("unexpected private path and payload"),
+            "chrome_launchservices_rejected"
+        );
+        assert_eq!(classify_launch_diagnostic(""), "chrome_launch_failed");
     }
 
     #[test]
