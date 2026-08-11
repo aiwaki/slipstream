@@ -297,8 +297,53 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             self.assertEqual(launched.returncode, 2)
             self.assertEqual(
                 json.loads(tap.status.read_text(encoding="utf-8")),
-                {"argv_count": 0, "stage": "host_started"},
+                {
+                    "argv_count": 0,
+                    "attempts": 1,
+                    "stage": "host_started",
+                    "stage_rank": 0,
+                },
             )
+
+    def test_pending_navigation_tap_status_never_regresses_across_attempts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "echo-native-host"
+            target.write_text(
+                "#!/usr/bin/python3\n"
+                "import sys\n"
+                "sys.stdout.buffer.write(sys.stdin.buffer.read())\n",
+                encoding="utf-8",
+            )
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            body = b'{"source":"qualification_worker_ready"}'
+            framed = struct.pack("=I", len(body)) + body
+            first = subprocess.run(
+                (str(tap.executable),),
+                input=framed,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(first.stdout, framed)
+            second = subprocess.run(
+                (str(tap.executable),),
+                input=b"",
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(second.returncode, 2)
+            status = json.loads(tap.status.read_text(encoding="utf-8"))
+            self.assertEqual(status["attempts"], 2)
+            self.assertEqual(status["stage"], "response_forwarded")
+            self.assertEqual(status["stage_rank"], 4)
 
     def test_pending_navigation_fixture_closes_only_after_v3_signal(self) -> None:
         fixture = smoke.SemanticHttpsFixture(

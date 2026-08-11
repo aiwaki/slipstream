@@ -35,12 +35,15 @@ tap reads stdin and changes the worker-ready probe from an opaque boolean to a
 strict finite stage: missing worker marker, host not found/forbidden/exited,
 communication failure, invalid response, or received response. It never emits
 the native error text, path, payload, URL, hostname, secret, or user identifier.
-Focused verification passes `55` tests plus `9` subtests for the packaged
-Chromium harness. The next verified action is a small PR, exact-main gates, and
-exactly one fresh protected qualification for the new main SHA. Installation
-remains forbidden until that run proves all three Chromium scenarios and
-cleanup; only its exact artifact may enter a controlled workstation transaction
-with immediate rollback on the first failed smoke.
+Concurrent DevTools retries share a locked monotonic aggregate: the attempt
+count may increase, but a later `host_started` cannot overwrite evidence that
+an earlier process read, forwarded, or acknowledged a message. Focused
+verification passes `56` tests plus `9` subtests for the packaged Chromium
+harness. The next verified action is a small PR, exact-main gates, and exactly
+one fresh protected qualification for the new main SHA. Installation remains
+forbidden until that run proves all three Chromium scenarios and cleanup; only
+its exact artifact may enter a controlled workstation transaction with
+immediate rollback on the first failed smoke.
 
 ## Previous Checkpoint
 
