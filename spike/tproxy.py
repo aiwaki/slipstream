@@ -9202,6 +9202,7 @@ class _RelayActivity:
     on_downstream_idle: object = None
     retry_loop: object = None
     retry_event: object = None
+    retry_closed: bool = False
     downstream_idle_retry: bool = False
 
 
@@ -9691,6 +9692,9 @@ def _advance_transport_idle_retry(host, stage, now=None):
 
 
 def _request_transport_idle_retry(activity, prepare=None):
+    """Signal only a live relay; late confirmation callbacks are inert."""
+    if activity.retry_closed:
+        return False
     loop = activity.retry_loop
     event = activity.retry_event
     if loop is None or event is None:
@@ -9700,6 +9704,8 @@ def _request_transport_idle_retry(activity, prepare=None):
         return False
 
     def signal():
+        if activity.retry_closed:
+            return
         if prepare is not None and not prepare():
             return
         activity.downstream_idle_retry = True
@@ -10307,6 +10313,8 @@ def _strategy_order_for_attempt(host, repeat_stage=None):
         if stage.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
     }
     if idle_names:
+        # Keep both groups stable: untried strategies retain their ranking and
+        # observed idle strategies retain theirs while moving behind them.
         ordered = [
             *[strategy for strategy in ordered if strategy["name"] not in idle_names],
             *[strategy for strategy in ordered if strategy["name"] in idle_names],
@@ -10540,6 +10548,7 @@ async def relay_local_stream(
     )
     retry_task = None
     if relay_activity.on_downstream_idle is not None:
+        relay_activity.retry_closed = False
         relay_activity.retry_loop = asyncio.get_running_loop()
         relay_activity.retry_event = asyncio.Event()
         if relay_activity.downstream_idle_retry:
@@ -10626,6 +10635,10 @@ async def relay_local_stream(
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
     finally:
+        # The observer and any background confirmation callback share this
+        # activity. Close their signaling contract before yielding to cleanup.
+        relay_activity.retry_closed = True
+        relay_activity.on_downstream_idle = None
         if watchdog_task is not None and not watchdog_task.done():
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)

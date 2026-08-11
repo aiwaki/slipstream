@@ -11900,6 +11900,21 @@ def test_relay_closes_handshake_only_idle_when_observer_requests_retry(
     assert not activity.server_ended_first
 
 
+def test_late_idle_confirmation_cannot_mutate_a_closed_relay():
+    prepared = []
+    activity = tproxy._RelayActivity(
+        last_downstream_at=100.0,
+        retry_closed=True,
+    )
+
+    assert not tproxy._request_transport_idle_retry(
+        activity,
+        prepare=lambda: prepared.append(True) or True,
+    )
+    assert prepared == []
+    assert not activity.downstream_idle_retry
+
+
 def test_idle_observer_preserves_stream_after_real_payload():
     activity = tproxy._RelayActivity(
         last_downstream_at=100.0,

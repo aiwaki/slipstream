@@ -60,7 +60,7 @@ can make the next browser retry use Geph. Static/direct/protected policy,
 Discord, YouTube, Googlevideo, external Geph, and external network settings are
 excluded. No hostname rule was added.
 
-Local verification passes `1099` Python/script tests plus `41` subtests,
+Local verification passes `1100` Python/script tests plus `41` subtests,
 browser companion `21`, Rust tray `83`, core `32`, Windows adapter `241`, and
 both userspace evaluation crates `40` tests each. Python compilation and
 `git diff --check` pass; version/project continuity and all five Clippy checks
