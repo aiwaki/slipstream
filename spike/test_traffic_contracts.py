@@ -1903,6 +1903,62 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
+def test_unknown_handshake_only_idle_arms_next_local_retry(monkeypatch):
+    """A committed TLS handshake may advance locally before any document."""
+    isolate_runtime_state(monkeypatch)
+    host = "idle-system-route.example"
+    response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+
+    async def pending_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PENDING,
+            (ScriptedReader(), CaptureWriter(), response),
+        )
+
+    async def handshake_idle(
+        _reader,
+        _up_w,
+        _up_r,
+        _writer,
+        activity,
+        **_kwargs,
+    ):
+        assert activity.on_downstream_idle is not None
+        assert activity.on_downstream_idle()
+        assert activity.downstream_idle_retry
+        return 0, 0
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(tproxy, "relay_local_stream", handshake_idle)
+    monkeypatch.setattr(
+        tproxy,
+        "_try_xbox_dns_local_connect",
+        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert tproxy._xbox_dns_candidate_active(host)
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
 def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatch):
     """A browser-side HTTP/2 body failure must survive relay cancellation."""
     isolate_runtime_state(monkeypatch)

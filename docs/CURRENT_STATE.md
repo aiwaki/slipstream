@@ -11,64 +11,64 @@ file.
 ## Current Checkpoint
 
 Current user-facing priority: Slipstream remains exactly rolled back and must
-not be reinstalled from the current development branch. PR #311 is merged as
-live main `38e601e7f52a21805a15b18d62147685431adc1f`. Exact-main CI
-`31423659071`, dependency audit `31423659346`, Windows qualification
-`31423659158`, and the single protected owned-Geph qualification
-`31424182604` passed. Protected artifact `9076656013` has outer digest
-`sha256:3c05ad45caea65f35191fdc4b25b069a18c809247d5ede4a4e0dd3dba24c84b4`
+not be installed from the current development branch. PR #312 is merged as
+live main `58a67d0262fc8331dae05e615aaa61ce032a41a6`. Exact-main CI
+`31431925679`, dependency audit `31431925668`, Windows qualification
+`31431925670`, and the single protected owned-Geph qualification
+`31432845423` passed. Protected artifact `9079910704` has outer digest
+`sha256:1fe5eb0791e485fc20a4ae0101bf56400cb137bf330d05130e346151ca724f83`
 and inner ZIP SHA-256
-`f7068ee0a23412bf1297cf14c82aa772f5820c28a01b896c5d3c1aec5a00aecd`.
+`eb58df06b921fb577826796f90dda81ebc86dc6ff254ba246944252335e141fd`.
 
-Controlled workstation transaction
-`C7208EA1-0999-4BD7-B6AC-3AEFFBDC5133` installed only that exact artifact and
-reached coherent active StatusV2. Steam, Google, Spotify, Discord
-updater/gateway, YouTube HTML, real headed-Chromium Googlevideo playback,
-CrystalIDEA, and ChatGPT transport returned payload. Four Modrinth attempts
-then ended before TLS payload, so immediate exact rollback restored the prior
-app byte-for-byte, removed the root daemon, listener, private PF anchor, token,
-status, socket, and transaction runtime, and preserved DNS `111.88.96.50` /
-`111.88.96.51`, proxy/PAC, default route, external PF owners, Telegram, owned
-Geph PID `8022`, and external Geph PID `574`.
+Controlled workstation transactions
+`257E1EB0-1DED-4F17-8963-22550D568B9B` and
+`D64565C3-A494-4C82-8C15-ABB69275C259` installed only that exact artifact.
+Modrinth, Steam, Google, Spotify, Discord updater/gateway, YouTube, real
+Googlevideo playback, CrystalIDEA, and ChatGPT transport passed on the first
+attempt. A fresh headed Chrome navigation to `xpersonatoy.com` remained pending
+for 75 seconds both normally and with QUIC disabled. The browser displayed
+`about:blank`, while copying its address produced `xpersonatoy.com`: the target
+navigation existed but had not committed its first document. Both transactions
+performed exact rollback and preserved DNS `111.88.96.50` / `111.88.96.51`,
+proxy/PAC, VPN, default route, external PF owners, and process ownership.
 
-The private log records that the final local proof did reach the one-shot owned
-Geph route, but only at the intercepted client's roughly 15-second TLS
-deadline. Owned Geph produced server payload while the original client was
-already closing. The proof had been spent correctly and route learning stayed
-paused during network-wide noise, so later requests had no reusable
-authorization and restarted the slow local ladder.
+Read-only A/B controls separated the remaining failure from browser cache,
+QUIC, IPv6, and the owned tunnel. Fresh direct Chrome used IPv4
+`23.227.38.70:443` and stalled with QUIC disabled, while the same origin loaded
+through the unchanged ownership-verified Geph listener. Curl received a
+Cloudflare JavaScript challenge, so it is not a semantic authority for this
+browser-visible case. The private daemon log contained no route event for the
+host.
 
-Post-rollback A/B separated backend health from handoff timing: direct Modrinth
-timed out, while the unchanged ownership-verified SOCKS listener on
-`127.0.0.1:9954` returned a complete HTTP `200` in about 1.3 seconds. Replaying
-the production `dial_via_geph()` MemoryBIO TLS flow without PF also completed
-TLS and returned HTTP `200`. The unresolved defect is therefore generic late
-handoff, not hostname classification, app-owned DNS, SOCKS domain connect, or
-the owned tunnel.
+Code tracing found that an unknown local route committed after valid TLS server
+records and then waited indefinitely when no first real document followed.
+The existing idle observer recorded evidence but was deliberately excluded
+from relay completion, so the browser could not retry and recovery never
+advanced from system destination to app-owned DNS, local strategies, or the
+independent owned-Geph proof. A local browser fixture confirmed that Chrome can
+retry one top-level navigation across bounded pre-response connection closes
+and commit the later response.
 
-Branch `codex/unknown-host-successor-rescue` adds one volatile exact-host
-successor only when an original proof-authorized owned-Geph request passed the
-first-payload gate but its downstream write failed, or the client ended first
-without sending any post-ClientHello bytes. The token lasts 30 seconds, is
-bounded by the existing state limit, is removed before any network await, and
-cannot create another successor when consumed. The next request tries the
-ownership-verified bundled Geph path before system DNS, app-owned DNS, or the
-local ladder. If that attempt has no first payload, it may continue locally but
-the token is gone. This is request-only state: it never schedules confirmation,
-persists a route, changes external network state, or applies to static/direct
-policy, Discord, YouTube, Googlevideo, or external Geph.
+Branch `codex/unknown-host-pre-response-retry` adds a per-relay retry signal for
+this generic encrypted pre-response stall. It applies only to a public exact
+unknown host after valid complete TLS records, less than 8 KiB downstream, and
+eight seconds without progress. Each browser retry advances only one local
+stage; two distinct local strategies are still required after system and
+app-owned DNS evidence. The final local relay remains open while independent
+direct and owned-Geph completion probes run, and only their successful proof
+can make the next browser retry use Geph. Static/direct/protected policy,
+Discord, YouTube, Googlevideo, external Geph, and external network settings are
+excluded. No hostname rule was added.
 
-Local verification passes `1092` Python/script tests plus `41` subtests,
+Local verification passes `1099` Python/script tests plus `41` subtests,
 browser companion `21`, Rust tray `83`, core `32`, Windows adapter `241`, and
-both userspace evaluation crates `40` tests each. All five Clippy runs are
-clean; version and project continuity, Python compilation, and
-`git diff --check` pass. Regressions cover late client close, downstream write
-failure, exact-host claim binding, pre-await consumption, no successor
-chaining, TTL/state bounds, and protected-host exclusions. The next verified
-action is a small PR. After merge, require exact-main CI/audit/Windows and
-exactly one fresh protected qualification. Only that new artifact may enter
-another controlled workstation transaction, with Modrinth early in the smoke
-and immediate exact rollback on the first failure.
+both userspace evaluation crates `40` tests each. Python compilation and
+`git diff --check` pass; version/project continuity and all five Clippy checks
+are also clean. The next verified action is a small PR. After merge, require
+exact-main CI/audit/Windows and exactly one fresh protected qualification.
+Only that newly qualified artifact may enter another controlled workstation
+transaction, with `xpersonatoy.com` early in the real browser smoke and
+immediate exact rollback on the first failure.
 
 ## Previous Checkpoint
 
