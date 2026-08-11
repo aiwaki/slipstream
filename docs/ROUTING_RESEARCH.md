@@ -342,10 +342,11 @@ dependency audit `31538670392`, and Windows qualification `31538670429`
 passed for that SHA. Lazy lifecycle and a proof that worker traffic cannot
 recursively create probe jobs remain the next gate.
 
-Branch `codex/lazy-pending-navigation-worker` adds that closed lifecycle seam
-without pretending that a browser is already composed. A one-shot client
-checks the exact owner UID and mode `0600` before connecting, applies the same
-2 KiB frame limit in both directions, rejects duplicate or expanded responses,
+Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds that
+closed lifecycle seam without pretending that a browser is already composed.
+A one-shot client checks the exact owner UID and mode `0600` before connecting,
+applies the same 2 KiB frame limit in both directions, rejects duplicate or
+expanded responses,
 and exposes only claim and submit. The lazy controller creates no thread until
 the broker has a live job, admits only one blocking worker, stops as soon as the
 queue is empty, and retries a vanished worker only after the existing

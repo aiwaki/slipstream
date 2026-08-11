@@ -132,9 +132,10 @@ and `git diff --check`. Its six PR checks passed, it merged as
 `31538670468`, dependency audit `31538670392`, and Windows qualification
 `31538670429` passed for that exact SHA.
 
-Branch `codex/lazy-pending-navigation-worker` adds a closed one-shot worker
-client and lazy lifecycle controller. The client accepts only the exact
-owner-owned mode-`0600` Unix socket and exact bounded claim/submit responses.
+Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds a closed
+one-shot worker client and lazy lifecycle controller. The client accepts only
+the exact owner-owned mode-`0600` Unix socket and exact bounded claim/submit
+responses.
 No lifecycle thread exists before a live job; at most one blocking worker runs,
 and a lost worker is retried only after the five-second claim lease while the
 job remains live. Same-host capability exclusion now prevents a synthetic
@@ -143,9 +144,9 @@ that host eligible again. The full daemon suite passes 866 tests. The real
 browser observer and platform process launcher are deliberately not composed
 by this closed lifecycle slice.
 
-The next verified action is to finish validation and review of this lifecycle
-seam, then connect it to the real sandboxed headless observer and exact
-console-user process launcher.
+The next verified action is to complete review and exact-main qualification of
+PR #327, then connect the seam to the real sandboxed headless observer and
+exact console-user process launcher.
 That composed gate must still prove completion of the original user-visible
 navigation. Package size, installed update, uninstall, idle cost, and
 clean-profile evidence remain required before production runtime composition.
