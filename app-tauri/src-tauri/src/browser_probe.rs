@@ -715,8 +715,7 @@ impl ChromeSession {
                     "Network.responseReceived"
                         | "Network.loadingFailed"
                         | "Network.loadingFinished"
-                )
-                    && event_request_id == Some(expected)
+                ) && event_request_id == Some(expected)
                 {
                     let _ = websocket_send_json(
                         &mut websocket,
@@ -905,21 +904,34 @@ fn random_hex(bytes: usize) -> ProbeResult<String> {
 
 fn read_devtools_port(profile: &Path, uid: u32) -> ProbeResult<Option<u16>> {
     let path = profile.join("DevToolsActivePort");
-    let metadata = match fs::symlink_metadata(&path) {
+    let path_metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(failure) if failure.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(error("devtools_file_invalid")),
     };
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
+    if !path_metadata.is_file() || path_metadata.file_type().is_symlink() {
+        return Err(error("devtools_file_invalid"));
+    }
+    let file = File::open(&path).map_err(|_| error("devtools_file_invalid"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| error("devtools_file_invalid"))?;
+    if metadata.dev() != path_metadata.dev()
+        || metadata.ino() != path_metadata.ino()
         || metadata.uid() != uid
-        || metadata.mode() & 0o077 != 0
+        || metadata.mode() & 0o022 != 0
         || metadata.len() == 0
         || metadata.len() > MAX_DEVTOOLS_FILE_BYTES
     {
         return Err(error("devtools_file_invalid"));
     }
-    let payload = fs::read_to_string(&path).map_err(|_| error("devtools_file_invalid"))?;
+    let mut payload = String::new();
+    file.take(MAX_DEVTOOLS_FILE_BYTES + 1)
+        .read_to_string(&mut payload)
+        .map_err(|_| error("devtools_file_invalid"))?;
+    if payload.len() as u64 != metadata.len() {
+        return Err(error("devtools_file_invalid"));
+    }
     let mut lines = payload.lines();
     let port = lines
         .next()
