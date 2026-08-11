@@ -711,9 +711,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                     49152,
                     "Page.navigate",
                     {"url": "https://example.net:18443/"},
+                    response_timeout=12.0,
                 ),
                 {"frameId": "frame-1"},
             )
+        connection.settimeout.assert_called_once_with(12.0)
         send.assert_called_once_with(
             connection,
             {
@@ -762,6 +764,43 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             49152,
             "Page.navigate",
             {"url": target},
+        )
+
+    def test_pending_navigation_allows_its_bounded_signal_delay(self) -> None:
+        fixture = mock.Mock(
+            host="example.edu",
+            port=18443,
+            scenario=smoke.PENDING_NAVIGATION_SCENARIO,
+        )
+        with mock.patch.object(
+            smoke,
+            "_devtools_json",
+            return_value=[
+                {
+                    "type": "page",
+                    "url": "about:blank",
+                    "webSocketDebuggerUrl": (
+                        "ws://127.0.0.1:49152/devtools/page/owned"
+                    ),
+                }
+            ],
+        ), mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={"frameId": "frame-1", "loaderId": "loader-1"},
+        ) as command:
+            smoke._open_fixture_with_devtools(49152, fixture)
+        command.assert_called_once_with(
+            "ws://127.0.0.1:49152/devtools/page/owned",
+            49152,
+            "Page.navigate",
+            {
+                "url": (
+                    "https://example.edu:18443/"
+                    "?slipstream-semantic=1"
+                )
+            },
+            response_timeout=smoke.PENDING_NAVIGATION_DEVTOOLS_TIMEOUT,
         )
 
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:
