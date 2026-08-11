@@ -5,6 +5,8 @@ import io
 import json
 import os
 import ssl
+import struct
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -38,6 +40,22 @@ def _fake_extensionless_chrome_for_testing(root: Path) -> Path:
 
 
 class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
+    @staticmethod
+    def _pending_navigation_signal(host: str) -> dict[str, object]:
+        return {
+            "category": smoke.PENDING_NAVIGATION_SCENARIO,
+            "confidence_bps": smoke.PENDING_NAVIGATION_CONFIDENCE_BPS,
+            "host": host,
+            "observed_at_unix_ms": (
+                1_000_000 + smoke.PENDING_NAVIGATION_MIN_DELAY_MS
+            ),
+            "request_started_at_unix_ms": 1_000_000,
+            "schema_version": 3,
+            "signal_id": "0123456789abcdef0123456789abcdef",
+            "source": "browser_extension",
+            "top_level": True,
+        }
+
     def test_extension_validator_accepts_the_reviewed_webrequest_manifest(self) -> None:
         extension = ROOT / "browser-companion" / "chromium"
         self.assertEqual(smoke._validate_extension(extension), extension.resolve())
@@ -174,6 +192,138 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             if connection is not None:
                 connection.close()
             fixture.close()
+
+    def test_pending_navigation_signal_is_strict_and_privacy_bounded(self) -> None:
+        payload = self._pending_navigation_signal(
+            smoke.PENDING_NAVIGATION_FIXTURE_HOST
+        )
+        smoke._validate_pending_navigation_signal(
+            payload,
+            smoke.PENDING_NAVIGATION_FIXTURE_HOST,
+        )
+        payload["url"] = "https://example.edu/private?token=secret"
+        with self.assertRaisesRegex(smoke.QualificationError, "non-contract"):
+            smoke._validate_pending_navigation_signal(
+                payload,
+                smoke.PENDING_NAVIGATION_FIXTURE_HOST,
+            )
+
+    def test_pending_navigation_tap_is_owner_private_and_exact_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "packaged-native-host"
+            target.write_text(
+                "#!/usr/bin/python3\n"
+                "import sys\n"
+                "sys.stdout.buffer.write(sys.stdin.buffer.read())\n",
+                encoding="utf-8",
+            )
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            manifest = json.loads(tap.manifest.read_text(encoding="utf-8"))
+            self.assertTrue(smoke._is_exact_native_host(manifest, tap.executable))
+            self.assertEqual(tap.executable.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(tap.manifest.stat().st_mode & 0o777, 0o600)
+            compile(
+                tap.executable.read_text(encoding="utf-8"),
+                str(tap.executable),
+                "exec",
+            )
+            body = json.dumps(
+                self._pending_navigation_signal(
+                    smoke.PENDING_NAVIGATION_FIXTURE_HOST
+                ),
+                sort_keys=True,
+            ).encode("utf-8")
+            framed = struct.pack("=I", len(body)) + body
+            forwarded = subprocess.run(
+                (str(tap.executable),),
+                input=framed,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(forwarded.stdout, framed)
+            self.assertEqual(tap.capture.read_bytes(), body)
+
+    def test_pending_navigation_fixture_closes_only_after_v3_signal(self) -> None:
+        fixture = smoke.SemanticHttpsFixture(
+            smoke.PENDING_NAVIGATION_FIXTURE_HOST,
+            smoke.PENDING_NAVIGATION_SCENARIO,
+        )
+        first: http.client.HTTPSConnection | None = None
+        second: http.client.HTTPSConnection | None = None
+        try:
+            fixture.start()
+            assert fixture.directory is not None
+            capture = fixture.directory / "pending-navigation-signal.json"
+            smoke._write_owner_private_file(
+                capture,
+                json.dumps(
+                    self._pending_navigation_signal(fixture.host),
+                    sort_keys=True,
+                ).encode("utf-8"),
+                os.getuid(),
+                os.getgid(),
+            )
+            fixture.arm_pending_navigation_tap(capture, os.getuid())
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            first = http.client.HTTPSConnection(
+                "127.0.0.1", fixture.port, timeout=1.0, context=context
+            )
+            first.request("GET", "/", headers={"Host": fixture.host})
+            with self.assertRaises(http.client.RemoteDisconnected):
+                first.getresponse()
+
+            second = http.client.HTTPSConnection(
+                "127.0.0.1", fixture.port, timeout=1.0, context=context
+            )
+            second.request("GET", "/", headers={"Host": fixture.host})
+            response = second.getresponse()
+            self.assertIn(b"/style.css", response.read())
+            snapshot = fixture.snapshot()
+            self.assertEqual(snapshot.root_visits, 2)
+            self.assertEqual(snapshot.pending_navigation_signals, 1)
+            self.assertIsNone(snapshot.pending_navigation_error)
+        finally:
+            if first is not None:
+                first.close()
+            if second is not None:
+                second.close()
+            fixture.close()
+
+    def test_pending_navigation_tap_does_not_ack_failed_native_forward(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "failing-native-host"
+            target.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            body = json.dumps(
+                self._pending_navigation_signal(
+                    smoke.PENDING_NAVIGATION_FIXTURE_HOST
+                ),
+                sort_keys=True,
+            ).encode("utf-8")
+            forwarded = subprocess.run(
+                (str(tap.executable),),
+                input=struct.pack("=I", len(body)) + body,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(forwarded.returncode, 7)
+            self.assertFalse(tap.capture.exists())
 
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
         command = smoke._chrome_command(

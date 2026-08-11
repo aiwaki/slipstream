@@ -3,9 +3,11 @@
 
 The harness composes the real unpacked extension, packaged native host,
 owner-only daemon socket, packaged root daemon, and an already-qualified
-account-backed owned Geph. A local HTTPS page provides deterministic semantic
-denial and styled-success states; the daemon independently confirms the same
-hostname through real Geph before learning it.
+account-backed owned Geph. Local HTTPS pages provide deterministic semantic
+denial, incomplete-response, pending-navigation, and styled-success states.
+The pending-navigation fixture observes and forwards the exact privacy-bounded
+v3 native message before emulating the correlated relay close; route-learning
+scenarios independently confirm the same hostname through real Geph.
 """
 
 from __future__ import annotations
@@ -57,13 +59,37 @@ SEMANTIC_SOCKET = Path("/var/run/slipstream-semantic.sock")
 AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
 FIXTURE_HOST = "example.org"
 INCOMPLETE_FIXTURE_HOST = "example.net"
+PENDING_NAVIGATION_FIXTURE_HOST = "example.edu"
 REGIONAL_DENIAL_SCENARIO = "regional_denial"
 INCOMPLETE_RESPONSE_SCENARIO = "incomplete_response"
+PENDING_NAVIGATION_SCENARIO = "navigation_pending"
 FIXTURE_SCENARIOS = frozenset(
-    (REGIONAL_DENIAL_SCENARIO, INCOMPLETE_RESPONSE_SCENARIO)
+    (
+        REGIONAL_DENIAL_SCENARIO,
+        INCOMPLETE_RESPONSE_SCENARIO,
+        PENDING_NAVIGATION_SCENARIO,
+    )
 )
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
+PENDING_NAVIGATION_SIGNAL_TIMEOUT = 20.0
+PENDING_NAVIGATION_MIN_DELAY_MS = 8_000
+PENDING_NAVIGATION_CONFIDENCE_BPS = 10_000
+NATIVE_MESSAGE_MAX_BODY = 64 * 1024
+NATIVE_MESSAGE_FORWARD_TIMEOUT = 15.0
+PENDING_NAVIGATION_SIGNAL_KEYS = frozenset(
+    (
+        "category",
+        "confidence_bps",
+        "host",
+        "observed_at_unix_ms",
+        "request_started_at_unix_ms",
+        "schema_version",
+        "signal_id",
+        "source",
+        "top_level",
+    )
+)
 CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
 DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
 DEVTOOLS_TIMEOUT = 15.0
@@ -103,6 +129,8 @@ class FixtureSnapshot:
     script_requests: int
     image_requests: int
     ready_requests: int
+    pending_navigation_signals: int = 0
+    pending_navigation_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +156,13 @@ class ChromeOwnership:
 class NativeHostRegistration:
     path: Path
     created_directories: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class NativeMessageTap:
+    executable: Path
+    manifest: Path
+    capture: Path
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -217,6 +252,134 @@ def _decode_json_object(payload: bytes, path: Path) -> dict[str, object]:
 
 def _read_private_json(path: Path, expected_uid: int) -> dict[str, object]:
     return _decode_json_object(_read_private_bytes(path, expected_uid), path)
+
+
+def _validate_pending_navigation_signal(
+    payload: dict[str, object],
+    expected_host: str,
+) -> None:
+    if set(payload) != PENDING_NAVIGATION_SIGNAL_KEYS:
+        raise QualificationError(
+            "pending-navigation signal contains non-contract fields"
+        )
+    if (
+        payload.get("schema_version") != 3
+        or payload.get("source") != "browser_extension"
+        or payload.get("host") != expected_host
+        or payload.get("category") != PENDING_NAVIGATION_SCENARIO
+        or payload.get("confidence_bps") != PENDING_NAVIGATION_CONFIDENCE_BPS
+        or payload.get("top_level") is not True
+    ):
+        raise QualificationError("pending-navigation signal metadata is invalid")
+    signal_id = payload.get("signal_id")
+    observed_at = payload.get("observed_at_unix_ms")
+    request_started_at = payload.get("request_started_at_unix_ms")
+    if (
+        not isinstance(signal_id, str)
+        or len(signal_id) != 32
+        or any(character not in "0123456789abcdef" for character in signal_id)
+        or type(observed_at) is not int
+        or type(request_started_at) is not int
+        or request_started_at <= 0
+        or observed_at < request_started_at + PENDING_NAVIGATION_MIN_DELAY_MS
+    ):
+        raise QualificationError("pending-navigation signal timing is invalid")
+
+
+def _pending_navigation_tap_source(
+    target_executable: Path,
+    capture: Path,
+) -> bytes:
+    target = json.dumps(str(target_executable))
+    destination = json.dumps(str(capture))
+    return (
+        "#!/usr/bin/python3\n"
+        "import json, os, struct, subprocess, sys\n"
+        f"TARGET = {target}\n"
+        f"CAPTURE = {destination}\n"
+        "def read_exact(stream, size):\n"
+        "    data = bytearray()\n"
+        "    while len(data) < size:\n"
+        "        chunk = stream.read(size - len(data))\n"
+        "        if not chunk:\n"
+        "            raise SystemExit(2)\n"
+        "        data.extend(chunk)\n"
+        "    return bytes(data)\n"
+        "header = read_exact(sys.stdin.buffer, 4)\n"
+        "length = struct.unpack('=I', header)[0]\n"
+        f"if length <= 0 or length > {NATIVE_MESSAGE_MAX_BODY}:\n"
+        "    raise SystemExit(3)\n"
+        "body = read_exact(sys.stdin.buffer, length)\n"
+        "payload = json.loads(body)\n"
+        "child = subprocess.Popen(\n"
+        "    [TARGET, *sys.argv[1:]],\n"
+        "    stdin=subprocess.PIPE,\n"
+        "    stdout=subprocess.PIPE,\n"
+        "    stderr=subprocess.DEVNULL,\n"
+        ")\n"
+        "try:\n"
+        "    output, _ = child.communicate(\n"
+        f"        header + body, timeout={NATIVE_MESSAGE_FORWARD_TIMEOUT!r}\n"
+        "    )\n"
+        "except subprocess.TimeoutExpired:\n"
+        "    child.kill()\n"
+        "    child.communicate()\n"
+        "    raise SystemExit(4)\n"
+        "if child.returncode != 0:\n"
+        "    raise SystemExit(child.returncode)\n"
+        "if payload.get('category') == 'navigation_pending':\n"
+        "    temporary = f'{CAPTURE}.{os.getpid()}.tmp'\n"
+        "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+        "    try:\n"
+        "        remaining = memoryview(body)\n"
+        "        while remaining:\n"
+        "            written = os.write(fd, remaining)\n"
+        "            if written <= 0:\n"
+        "                raise SystemExit(5)\n"
+        "            remaining = remaining[written:]\n"
+        "        os.fsync(fd)\n"
+        "    finally:\n"
+        "        os.close(fd)\n"
+        "    os.replace(temporary, CAPTURE)\n"
+        "if output:\n"
+        "    sys.stdout.buffer.write(output)\n"
+        "    sys.stdout.buffer.flush()\n"
+        "raise SystemExit(0)\n"
+    ).encode("utf-8")
+
+
+def _create_pending_navigation_tap(
+    profile: Path,
+    uid: int,
+    gid: int,
+    target_executable: Path,
+) -> NativeMessageTap:
+    executable = profile / "pending-navigation-native-host.py"
+    manifest = profile / "pending-navigation-native-host.json"
+    capture = profile / "pending-navigation-signal.json"
+    _write_owner_private_file(
+        executable,
+        _pending_navigation_tap_source(target_executable, capture),
+        uid,
+        gid,
+    )
+    executable.chmod(0o700)
+    _write_owner_private_file(
+        manifest,
+        json.dumps(
+            {
+                "allowed_origins": [NATIVE_HOST_ORIGIN],
+                "name": NATIVE_HOST_NAME,
+                "path": str(executable),
+                "type": "stdio",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        uid,
+        gid,
+    )
+    return NativeMessageTap(executable, manifest, capture)
 
 
 def _is_exact_native_host(
@@ -336,6 +499,10 @@ class SemanticHttpsFixture:
         self.script_requests = 0
         self.image_requests = 0
         self.ready_requests = 0
+        self.pending_navigation_signals = 0
+        self.pending_navigation_error: str | None = None
+        self.pending_navigation_capture: Path | None = None
+        self.pending_navigation_uid: int | None = None
 
     @property
     def port(self) -> int:
@@ -413,6 +580,22 @@ class SemanticHttpsFixture:
                         fixture.image_requests += 1
                     elif path == "/ready":
                         fixture.ready_requests += 1
+                if (
+                    fixture.scenario == PENDING_NAVIGATION_SCENARIO
+                    and path == "/"
+                    and root_visit == 1
+                ):
+                    try:
+                        payload = fixture._wait_for_pending_navigation_signal()
+                        _validate_pending_navigation_signal(payload, fixture.host)
+                    except QualificationError as exc:
+                        with fixture.lock:
+                            fixture.pending_navigation_error = str(exc)
+                    else:
+                        with fixture.lock:
+                            fixture.pending_navigation_signals += 1
+                    self.close_connection = True
+                    return
                 status, content_type, body = _fixture_response(
                     path,
                     root_visit=root_visit,
@@ -454,6 +637,31 @@ class SemanticHttpsFixture:
         )
         self.thread.start()
 
+    def arm_pending_navigation_tap(self, capture: Path, uid: int) -> None:
+        if self.scenario != PENDING_NAVIGATION_SCENARIO:
+            raise QualificationError("native-message tap is only valid for pending navigation")
+        self.pending_navigation_capture = capture
+        self.pending_navigation_uid = uid
+
+    def _wait_for_pending_navigation_signal(self) -> dict[str, object]:
+        capture = self.pending_navigation_capture
+        uid = self.pending_navigation_uid
+        if capture is None or uid is None:
+            raise QualificationError("pending-navigation native-message tap is not armed")
+        deadline = time.monotonic() + PENDING_NAVIGATION_SIGNAL_TIMEOUT
+        last_error: BaseException | None = None
+        while time.monotonic() < deadline:
+            try:
+                return _read_private_json(capture, uid)
+            except FileNotFoundError:
+                pass
+            except (OSError, QualificationError, ValueError) as exc:
+                last_error = exc
+            time.sleep(0.05)
+        raise QualificationError(
+            f"pending-navigation signal was not captured: {last_error}"
+        )
+
     def snapshot(self) -> FixtureSnapshot:
         with self.lock:
             return FixtureSnapshot(
@@ -462,6 +670,8 @@ class SemanticHttpsFixture:
                 script_requests=self.script_requests,
                 image_requests=self.image_requests,
                 ready_requests=self.ready_requests,
+                pending_navigation_signals=self.pending_navigation_signals,
+                pending_navigation_error=self.pending_navigation_error,
             )
 
     def close(self) -> None:
@@ -1759,6 +1969,8 @@ def _run_chrome(
     ownership = ChromeOwnership(set())
     bootstrap_started = False
     native_host_registration: NativeHostRegistration | None = None
+    registered_native_host_executable = native_host_executable
+    registered_native_host_manifest = native_host_manifest
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -1775,19 +1987,29 @@ def _run_chrome(
             executable,
             application_bundle,
         )
+        if fixture.scenario == PENDING_NAVIGATION_SCENARIO:
+            tap = _create_pending_navigation_tap(
+                profile,
+                uid,
+                gid,
+                native_host_executable,
+            )
+            fixture.arm_pending_navigation_tap(tap.capture, uid)
+            registered_native_host_executable = tap.executable
+            registered_native_host_manifest = tap.manifest
         native_host_registration = _install_chrome_for_testing_native_host(
             home,
-            native_host_manifest,
+            registered_native_host_manifest,
             uid,
             gid,
-            native_host_executable,
+            registered_native_host_executable,
         )
         _install_profile_native_host(
             profile,
-            native_host_manifest,
+            registered_native_host_manifest,
             uid,
             gid,
-            native_host_executable,
+            registered_native_host_executable,
         )
         _write_owner_private_file(stdout_path, b"", uid, gid)
         _write_owner_private_file(stderr_path, b"", uid, gid)
@@ -1902,7 +2124,7 @@ def _run_chrome(
             try:
                 _remove_chrome_for_testing_native_host(
                     native_host_registration,
-                    native_host_executable,
+                    registered_native_host_executable,
                     uid,
                 )
             except Exception as exc:
@@ -1948,7 +2170,10 @@ def _run_chrome(
     return snapshot
 
 
-def _assert_fixture_complete(snapshot: FixtureSnapshot) -> None:
+def _assert_fixture_complete(
+    snapshot: FixtureSnapshot,
+    scenario: str = REGIONAL_DENIAL_SCENARIO,
+) -> None:
     if snapshot.root_visits != 2:
         raise QualificationError(
             f"semantic page did not reload exactly once: {snapshot!r}"
@@ -1965,6 +2190,14 @@ def _assert_fixture_complete(snapshot: FixtureSnapshot) -> None:
         raise QualificationError(
             f"styled semantic page did not emit one ready callback: {snapshot!r}"
         )
+    if scenario == PENDING_NAVIGATION_SCENARIO:
+        if snapshot.pending_navigation_error is not None:
+            raise QualificationError(snapshot.pending_navigation_error)
+        if snapshot.pending_navigation_signals != 1:
+            raise QualificationError(
+                "pending navigation did not emit exactly one v3 signal: "
+                f"{snapshot!r}"
+            )
 
 
 def _assert_daemon_absent_and_disabled() -> None:
@@ -2020,6 +2253,13 @@ def run_qualification(
                 INCOMPLETE_RESPONSE_SCENARIO,
             ),
         ),
+        (
+            PENDING_NAVIGATION_SCENARIO,
+            SemanticHttpsFixture(
+                PENDING_NAVIGATION_FIXTURE_HOST,
+                PENDING_NAVIGATION_SCENARIO,
+            ),
+        ),
     )
     installed = False
     failure: BaseException | None = None
@@ -2051,20 +2291,28 @@ def run_qualification(
                 raise QualificationError(
                     f"{scenario} browser qualification failed: {exc}"
                 ) from exc
-            expiry = _wait_for_learned_host(fixture.host)
-            _assert_fixture_complete(snapshot)
+            expiry = (
+                None
+                if scenario == PENDING_NAVIGATION_SCENARIO
+                else _wait_for_learned_host(fixture.host)
+            )
+            _assert_fixture_complete(snapshot, scenario)
             scenario_results[scenario] = {
                 "host": fixture.host,
                 "reloads": snapshot.root_visits - 1,
                 "browser_ready_callbacks": snapshot.ready_requests,
+                "pending_navigation_v3_signals": (
+                    snapshot.pending_navigation_signals
+                ),
                 "mandatory_resources": {
                     "css": snapshot.css_requests,
                     "javascript": snapshot.script_requests,
                     "image": snapshot.image_requests,
                 },
-                "learned_route_ttl_seconds": max(
-                    0,
-                    int(expiry - time.time()),
+                "learned_route_ttl_seconds": (
+                    None
+                    if expiry is None
+                    else max(0, int(expiry - time.time()))
                 ),
             }
             fixture.close()
