@@ -10,32 +10,32 @@ file.
 
 ## Current Checkpoint
 
-PR #317 is merged as live main
-`66c94654dad165db50277ad91a15ac2f7d2d6e39`. Exact-main dependency audit
-`31500762534`, Windows qualification `31500762315`, and CI `31500762244`
-passed. Its single protected owned-Geph qualification `31501513573` failed, so
+PR #318 is merged as live main
+`1336ab0ae06eaa5a832550cae52e81dda191edb7`. Exact-main dependency audit
+`31503719714`, Windows qualification `31503719352`, and CI `31503719694`
+passed. Its single protected owned-Geph qualification `31504410156` failed, so
 it produced no installable artifact and no workstation transaction was
 attempted. Cleanup passed: the root daemon was absent and disabled, owned Geph
 passed its initial, trayless, and KeepAlive-recovered HTTP 200 payload checks,
 the external listener was preserved, and system network state was not mutated.
 
 The failure remains isolated to the deterministic Chromium
-`navigation_pending` scenario before navigation began. Moving the generated
-tap from the Chrome profile into an owner-only Application Support runtime did
-not change `native_host_not_found`, and the tap status remained absent. Source
-comparison then found the exact manifest defect: the generated tap omitted the
-required string `description` present in the working packaged Rust manifest.
-The local `_is_exact_native_host` predicate also omitted that field, allowing
-the malformed manifest to pass unit validation before Chrome rejected it.
+`navigation_pending` scenario. The manifest fix removed
+`native_host_not_found`: Chrome launched the exact owner-private tap, which
+forwarded the packaged host's bounded response. The next step then timed out
+because `Page.navigate` inherited the generic two-second DevTools socket
+timeout while this scenario deliberately waits at least eight seconds before
+publishing its correlated pending-navigation signal.
 
-Branch `codex/chromium-tap-required-description` adds the missing field and
-makes a non-empty description part of the exact local manifest contract. It
-does not change routing, PF, DNS, Geph, product lifecycle, or workstation
-state. The next verified action is a small PR, exact-main gates, and exactly
-one fresh protected qualification for the new main SHA. Installation remains
-forbidden until that run proves all Chromium scenarios and cleanup; only its
-exact artifact may enter a controlled workstation transaction with immediate
-rollback on the first failed smoke.
+Branch `codex/chromium-pending-navigation-timeout` gives only that
+`Page.navigate` command a bounded timeout longer than its own signal delay;
+all other DevTools commands retain the two-second limit. It does not change
+routing, PF, DNS, Geph, product lifecycle, or workstation state. The next
+verified action is a small PR, exact-main gates, and exactly one fresh protected
+qualification for the new main SHA. Installation remains forbidden until that
+run proves all Chromium scenarios and cleanup; only its exact artifact may
+enter a controlled workstation transaction with immediate rollback on the
+first failed smoke.
 
 ## Previous Checkpoint
 

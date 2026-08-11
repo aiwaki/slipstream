@@ -77,6 +77,7 @@ FIXTURE_SCENARIOS = frozenset(
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
 PENDING_NAVIGATION_SIGNAL_TIMEOUT = 20.0
+PENDING_NAVIGATION_DEVTOOLS_TIMEOUT = PENDING_NAVIGATION_SIGNAL_TIMEOUT + 5.0
 PENDING_NAVIGATION_MIN_DELAY_MS = 8_000
 PENDING_NAVIGATION_CONFIDENCE_BPS = 10_000
 NATIVE_MESSAGE_MAX_BODY = 64 * 1024
@@ -1391,9 +1392,12 @@ def _devtools_command(
     port: int,
     method: str,
     params: dict[str, object],
+    *,
+    response_timeout: float = 2.0,
 ) -> dict[str, object]:
     connection = _connect_worker_debugger(debugger_url, port)
     try:
+        connection.settimeout(response_timeout)
         _send_websocket_json(
             connection,
             {
@@ -1530,11 +1534,15 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
     debugger_url = pages[0].get("webSocketDebuggerUrl")
     if not isinstance(debugger_url, str):
         raise QualificationError("owned about:blank page has no debugger endpoint")
+    command_options: dict[str, float] = {}
+    if fixture.scenario == PENDING_NAVIGATION_SCENARIO:
+        command_options["response_timeout"] = PENDING_NAVIGATION_DEVTOOLS_TIMEOUT
     result = _devtools_command(
         debugger_url,
         port,
         "Page.navigate",
         {"url": target_url},
+        **command_options,
     )
     if not isinstance(result.get("frameId"), str) or not result["frameId"]:
         raise QualificationError("DevTools did not navigate the owned page")
