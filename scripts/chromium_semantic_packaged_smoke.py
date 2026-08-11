@@ -55,6 +55,9 @@ CHROME_FOR_TESTING_NATIVE_HOST_RELATIVE_PATH = Path(
 PROFILE_NATIVE_HOST_RELATIVE_PATH = (
     Path("NativeMessagingHosts") / f"{NATIVE_HOST_NAME}.json"
 )
+NATIVE_MESSAGE_TAP_RUNTIME_RELATIVE_PATH = Path(
+    "Library/Application Support/dev.slipstream.tray/qualification"
+)
 SEMANTIC_SOCKET = Path("/var/run/slipstream-semantic.sock")
 AUTO_GEPH_STATE = lifecycle.AUTO_GEPH_STATE_PATH
 FIXTURE_HOST = "example.org"
@@ -187,10 +190,12 @@ class NativeHostRegistration:
 
 @dataclass(frozen=True)
 class NativeMessageTap:
+    runtime_directory: Path
     executable: Path
     manifest: Path
     capture: Path
     status: Path
+    created_directories: tuple[Path, ...]
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -439,44 +444,73 @@ def _pending_navigation_tap_source(
 
 
 def _create_pending_navigation_tap(
+    home: Path,
     profile: Path,
     uid: int,
     gid: int,
     target_executable: Path,
 ) -> NativeMessageTap:
-    executable = profile / "pending-navigation-native-host.py"
-    manifest = profile / "pending-navigation-native-host.json"
-    capture = profile / "pending-navigation-signal.json"
-    status = profile / "pending-navigation-native-host-status.json"
+    runtime_parent, created_directories = _ensure_owner_directory_path(
+        home,
+        NATIVE_MESSAGE_TAP_RUNTIME_RELATIVE_PATH,
+        uid,
+        gid,
+    )
+    runtime_directory = runtime_parent / profile.name
+    try:
+        runtime_directory.mkdir(mode=0o700)
+    except FileExistsError as exc:
+        raise QualificationError(
+            "pending-navigation native host runtime already exists"
+        ) from exc
+    os.chown(runtime_directory, uid, gid)
+    runtime_directory.chmod(0o700)
+    created_directories = (*created_directories, runtime_directory)
+    executable = runtime_directory / "pending-navigation-native-host.py"
+    manifest = runtime_directory / "pending-navigation-native-host.json"
+    capture = runtime_directory / "pending-navigation-signal.json"
+    status = runtime_directory / "pending-navigation-native-host-status.json"
     interpreter = Path(sys.executable).resolve(strict=True)
-    _write_owner_private_file(
+    tap = NativeMessageTap(
+        runtime_directory,
         executable,
-        _pending_navigation_tap_source(
-            target_executable,
-            capture,
-            status,
-            interpreter,
-        ),
-        uid,
-        gid,
-    )
-    executable.chmod(0o700)
-    _write_owner_private_file(
         manifest,
-        json.dumps(
-            {
-                "allowed_origins": [NATIVE_HOST_ORIGIN],
-                "name": NATIVE_HOST_NAME,
-                "path": str(executable),
-                "type": "stdio",
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8"),
-        uid,
-        gid,
+        capture,
+        status,
+        created_directories,
     )
-    return NativeMessageTap(executable, manifest, capture, status)
+    try:
+        _write_owner_private_file(
+            executable,
+            _pending_navigation_tap_source(
+                target_executable,
+                capture,
+                status,
+                interpreter,
+            ),
+            uid,
+            gid,
+        )
+        executable.chmod(0o700)
+        _write_owner_private_file(
+            manifest,
+            json.dumps(
+                {
+                    "allowed_origins": [NATIVE_HOST_ORIGIN],
+                    "name": NATIVE_HOST_NAME,
+                    "path": str(executable),
+                    "type": "stdio",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            uid,
+            gid,
+        )
+    except BaseException:
+        _remove_native_message_tap(tap, uid)
+        raise
+    return tap
 
 
 def _is_exact_native_host(
@@ -1973,6 +2007,16 @@ def _install_profile_native_host(
     )
 
 
+def _require_owner_directory(path: Path, uid: int, description: str) -> None:
+    metadata = os.lstat(path)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != uid
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise QualificationError(f"{description} is not owner-controlled: {path}")
+
+
 def _ensure_owner_directory_path(
     home: Path,
     relative: Path,
@@ -1984,21 +2028,20 @@ def _ensure_owner_directory_path(
     for component in relative.parts:
         current = current / component
         try:
-            metadata = os.lstat(current)
+            _require_owner_directory(
+                current,
+                uid,
+                "Chrome for Testing native host directory",
+            )
         except FileNotFoundError:
             current.mkdir(mode=0o700)
             os.chown(current, uid, gid)
             current.chmod(0o700)
             created.append(current)
-            metadata = os.lstat(current)
-        if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != uid
-            or stat.S_IMODE(metadata.st_mode) & 0o022
-        ):
-            raise QualificationError(
-                f"Chrome for Testing native host directory is not owner-controlled: "
-                f"{current}"
+            _require_owner_directory(
+                current,
+                uid,
+                "Chrome for Testing native host directory",
             )
     return current, tuple(created)
 
@@ -2040,16 +2083,57 @@ def _remove_chrome_for_testing_native_host(
 ) -> None:
     _remove_exact_native_host(registration.path, expected_executable, uid)
     for directory in reversed(registration.created_directories):
-        metadata = os.lstat(directory)
-        if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != uid
-            or stat.S_IMODE(metadata.st_mode) & 0o022
-        ):
-            raise QualificationError(
-                f"refusing to remove an unowned Chrome for Testing directory: "
-                f"{directory}"
+        _require_owner_directory(
+            directory,
+            uid,
+            "Chrome for Testing native host directory",
+        )
+        try:
+            directory.rmdir()
+        except OSError as exc:
+            if exc.errno == errno.ENOTEMPTY:
+                break
+            raise
+
+
+def _remove_native_message_tap(tap: NativeMessageTap, uid: int) -> None:
+    if (
+        not tap.created_directories
+        or tap.created_directories[-1] != tap.runtime_directory
+    ):
+        raise QualificationError(
+            "native message tap runtime is not the final created directory"
+        )
+    expected_paths = (
+        tap.executable,
+        tap.manifest,
+        tap.capture,
+        tap.status,
+        Path(f"{tap.status}.lock"),
+    )
+    if any(path.parent != tap.runtime_directory for path in expected_paths):
+        raise QualificationError("native message tap escaped its runtime")
+    try:
+        _require_owner_directory(
+            tap.runtime_directory,
+            uid,
+            "native message tap runtime",
+        )
+    except FileNotFoundError:
+        pass
+    else:
+        shutil.rmtree(tap.runtime_directory)
+        if tap.runtime_directory.exists():
+            raise QualificationError("native message tap runtime survived cleanup")
+    for directory in reversed(tap.created_directories[:-1]):
+        try:
+            _require_owner_directory(
+                directory,
+                uid,
+                "native message tap parent",
             )
+        except FileNotFoundError:
+            continue
         try:
             directory.rmdir()
         except OSError as exc:
@@ -2082,6 +2166,7 @@ def _run_chrome(
     ownership = ChromeOwnership(set())
     bootstrap_started = False
     native_host_registration: NativeHostRegistration | None = None
+    native_message_tap: NativeMessageTap | None = None
     registered_native_host_executable = native_host_executable
     registered_native_host_manifest = native_host_manifest
     native_tap_status: Path | None = None
@@ -2103,11 +2188,13 @@ def _run_chrome(
         )
         if fixture.scenario == PENDING_NAVIGATION_SCENARIO:
             tap = _create_pending_navigation_tap(
+                home,
                 profile,
                 uid,
                 gid,
                 native_host_executable,
             )
+            native_message_tap = tap
             fixture.arm_pending_navigation_tap(tap.capture, uid)
             registered_native_host_executable = tap.executable
             registered_native_host_manifest = tap.manifest
@@ -2262,6 +2349,11 @@ def _run_chrome(
                 captured = b""
                 cleanup_errors.append(f"{name} diagnostic capture: {exc}")
             diagnostics.append((name, captured))
+        if native_message_tap is not None:
+            try:
+                _remove_native_message_tap(native_message_tap, uid)
+            except Exception as exc:
+                cleanup_errors.append(f"Native message tap cleanup: {exc}")
         if profile_cleanup_safe:
             try:
                 _remove_owned_profile(profile)

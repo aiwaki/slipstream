@@ -210,7 +210,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
     def test_pending_navigation_tap_is_owner_private_and_exact_origin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp)
+            root = Path(tmp)
+            home = root / "home"
+            profile = root / "profile"
+            home.mkdir()
+            profile.mkdir()
             target = profile / "packaged-native-host"
             target.write_text(
                 "#!/usr/bin/python3\n"
@@ -220,6 +224,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
             target.chmod(0o700)
             tap = smoke._create_pending_navigation_tap(
+                home,
                 profile,
                 os.getuid(),
                 os.getgid(),
@@ -227,8 +232,13 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
             manifest = json.loads(tap.manifest.read_text(encoding="utf-8"))
             self.assertTrue(smoke._is_exact_native_host(manifest, tap.executable))
+            self.assertFalse(tap.executable.is_relative_to(profile))
+            self.assertTrue(tap.executable.is_relative_to(home))
+            self.assertEqual(tap.runtime_directory.stat().st_mode & 0o777, 0o700)
             self.assertEqual(tap.executable.stat().st_mode & 0o777, 0o700)
             self.assertEqual(tap.manifest.stat().st_mode & 0o777, 0o600)
+            self.assertGreaterEqual(len(tap.created_directories), 1)
+            self.assertIs(tap.created_directories[-1], tap.runtime_directory)
             compile(
                 tap.executable.read_text(encoding="utf-8"),
                 str(tap.executable),
@@ -275,14 +285,24 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 json.loads(tap.status.read_text(encoding="utf-8"))["stage"],
                 "ack_published",
             )
+            runtime_directory = tap.runtime_directory
+            smoke._remove_native_message_tap(tap, os.getuid())
+            smoke._remove_native_message_tap(tap, os.getuid())
+            self.assertFalse(runtime_directory.exists())
+            self.assertTrue(profile.exists())
 
     def test_pending_navigation_tap_marks_launch_before_reading_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp)
+            root = Path(tmp)
+            home = root / "home"
+            profile = root / "profile"
+            home.mkdir()
+            profile.mkdir()
             target = profile / "unused-native-host"
             target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             target.chmod(0o700)
             tap = smoke._create_pending_navigation_tap(
+                home,
                 profile,
                 os.getuid(),
                 os.getgid(),
@@ -309,7 +329,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp)
+            root = Path(tmp)
+            home = root / "home"
+            profile = root / "profile"
+            home.mkdir()
+            profile.mkdir()
             target = profile / "echo-native-host"
             target.write_text(
                 "#!/usr/bin/python3\n"
@@ -319,6 +343,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
             target.chmod(0o700)
             tap = smoke._create_pending_navigation_tap(
+                home,
                 profile,
                 os.getuid(),
                 os.getgid(),
@@ -395,11 +420,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
     def test_pending_navigation_tap_does_not_ack_failed_native_forward(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp)
+            root = Path(tmp)
+            home = root / "home"
+            profile = root / "profile"
+            home.mkdir()
+            profile.mkdir()
             target = profile / "failing-native-host"
             target.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
             target.chmod(0o700)
             tap = smoke._create_pending_navigation_tap(
+                home,
                 profile,
                 os.getuid(),
                 os.getgid(),
@@ -425,11 +455,16 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
 
     def test_pending_navigation_tap_rejects_empty_native_response(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp)
+            root = Path(tmp)
+            home = root / "home"
+            profile = root / "profile"
+            home.mkdir()
+            profile.mkdir()
             target = profile / "empty-native-host"
             target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             target.chmod(0o700)
             tap = smoke._create_pending_navigation_tap(
+                home,
                 profile,
                 os.getuid(),
                 os.getgid(),

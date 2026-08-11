@@ -10,40 +10,34 @@ file.
 
 ## Current Checkpoint
 
-PR #315 is merged as live main
-`6f95f2a28c19fd47eb311e76d3ead37b89b7a767`. Exact-main dependency audit
-`31490022235` passed on its second attempt after the first attempt received an
-external OSV API `403`; Windows qualification `31490022237` and CI
-`31490022306` passed. Its single protected owned-Geph qualification
-`31490845964` failed, so it produced no installable artifact and no workstation
-transaction was attempted. Cleanup passed: the root daemon was absent and
-disabled, the owned Geph initial/trayless/KeepAlive-recovered payloads all
-returned HTTP 200, the external listener was preserved, and system network
-state was not mutated.
+PR #316 is merged as live main
+`d799e261a077d81d5fe849e30d32fc5cc414a7b6`. Exact-main dependency audit
+`31495068046`, Windows qualification `31495067934`, and CI `31495067928`
+passed. Its single protected owned-Geph qualification `31495901891` failed, so
+it produced no installable artifact and no workstation transaction was
+attempted. Cleanup passed: the root daemon was absent and disabled, owned Geph
+passed its initial, trayless, and KeepAlive-recovered payload checks, the
+external listener was preserved, and system network state was not mutated.
 
 The failure remains isolated to the deterministic Chromium
-`navigation_pending` scenario before navigation began. The exact service-worker
-target appeared, but the bounded native roundtrip never became runtime-ready.
-The owner-private tap status file was absent from failure diagnostics, which
-proves that the previous stages did not distinguish an unlaunched host from a
-host launched without a complete native message. This is a qualification
-observability gap, not evidence that routing, Geph, or the packaged native host
-failed; the account-backed Geph lifecycle and cleanup evidence passed.
+`navigation_pending` scenario before navigation began. The finite worker probe
+reported `native_host_not_found`, while the owner-private tap status file was
+absent. The same registration path starts the exact packaged Rust host in the
+other semantic scenarios, and the tap passes a direct framed-message
+roundtrip. The remaining evidence therefore points to the generated tap
+executable living inside the disposable Chrome profile, before any routing or
+owned-Geph request occurs.
 
-Branch `codex/chromium-native-launch-evidence` writes `host_started` before the
-tap reads stdin and changes the worker-ready probe from an opaque boolean to a
-strict finite stage: missing worker marker, host not found/forbidden/exited,
-communication failure, invalid response, or received response. It never emits
-the native error text, path, payload, URL, hostname, secret, or user identifier.
-Concurrent DevTools retries share a locked monotonic aggregate: the attempt
-count may increase, but a later `host_started` cannot overwrite evidence that
-an earlier process read, forwarded, or acknowledged a message. Focused
-verification passes `56` tests plus `9` subtests for the packaged Chromium
-harness. The next verified action is a small PR, exact-main gates, and exactly
-one fresh protected qualification for the new main SHA. Installation remains
-forbidden until that run proves all three Chromium scenarios and cleanup; only
-its exact artifact may enter a controlled workstation transaction with
-immediate rollback on the first failed smoke.
+Branch `codex/chromium-tap-owner-runtime` moves only this qualification tap to
+a unique owner-only runtime below the target user's Application Support,
+retains the Chrome profile only for browser state, and removes the exact tap
+runtime after diagnostic capture. The routing daemon, PF, DNS, Geph product
+lifecycle, and workstation remain unchanged. Focused verification passes all
+`56` Chromium harness tests. The next verified action is a small PR,
+exact-main gates, and exactly one fresh protected qualification for the new
+main SHA. Installation remains forbidden until that run proves all Chromium
+scenarios and cleanup; only its exact artifact may enter a controlled
+workstation transaction with immediate rollback on the first failed smoke.
 
 ## Previous Checkpoint
 
