@@ -35,6 +35,13 @@
     ],
     "runtime_composed": false
   },
+  "worker_lifecycle": {
+    "lazy": true,
+    "max_concurrent_workers": 1,
+    "retry_after_worker_loss_ms": 5000,
+    "same_host_recursive_jobs": false,
+    "browser_observer_composed": false
+  },
   "privacy": {
     "job_fields": [
       "schema_version",

@@ -5,8 +5,11 @@ from pathlib import Path
 import stat
 import struct
 import tempfile
+import threading
+import time
 
 import pending_navigation_probe_runtime as probe_runtime
+import pytest
 import tproxy
 from semantic_route_signal_runtime import (
     encode_frame,
@@ -101,6 +104,15 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             "job",
         ],
         "runtime_composed": False,
+    }
+    assert CONTRACT["worker_lifecycle"] == {
+        "lazy": True,
+        "max_concurrent_workers": 1,
+        "retry_after_worker_loss_ms": int(
+            probe_runtime.CLAIM_LEASE_SECONDS * 1000
+        ),
+        "same_host_recursive_jobs": False,
+        "browser_observer_composed": False,
     }
 
 
@@ -211,6 +223,27 @@ def test_request_parser_rejects_duplicates_extra_fields_and_wrong_shapes():
         }
 
 
+def test_worker_response_parser_rejects_duplicate_expanded_and_wrong_operation():
+    valid = {
+        "schema_version": 1,
+        "accepted": True,
+        "operation": "claim",
+        "reason": "no_job",
+        "job": None,
+    }
+    invalid = (
+        (
+            b'{"schema_version":1,"accepted":true,"accepted":true,'
+            b'"operation":"claim","reason":"no_job","job":null}'
+        ),
+        json.dumps({**valid, "unexpected": True}).encode(),
+        json.dumps({**valid, "operation": "submit"}).encode(),
+    )
+    for payload in invalid:
+        with pytest.raises(probe_runtime.PendingNavigationProbeRuntimeError):
+            probe_runtime._parse_response(payload, "claim")
+
+
 def test_owner_only_socket_carries_one_job_to_its_exact_relay():
     async def round_trip(path, payload):
         reader, writer = await asyncio.open_unix_connection(path)
@@ -306,3 +339,114 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         tproxy._xbox_dns_candidates.pop("unknown.example", None)
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._active_pending_navigation_relays.clear()
+
+
+def test_worker_client_requires_owner_socket_and_exact_responses():
+    async def scenario():
+        clock = {"wall": 1_010_000, "mono": 100.0}
+        submitted = []
+        runtime = _runtime(clock, submitted)
+        job = _job()
+        result = _result(job)
+        assert runtime.enqueue(job)
+
+        with tempfile.TemporaryDirectory(prefix="ss-worker-", dir="/tmp") as directory:
+            socket_path = Path(directory) / "probe.sock"
+            owned = await start_owned_semantic_signal_server(
+                str(socket_path),
+                os.getuid(),
+                os.getgid(),
+                runtime,
+            )
+            client = probe_runtime.PendingNavigationProbeWorkerClient(
+                str(socket_path)
+            )
+            assert await asyncio.to_thread(client.claim) == job
+            response = await asyncio.to_thread(client.submit, result)
+            assert response["accepted"] is True
+            assert submitted == [result]
+
+            socket_path.chmod(0o660)
+            with pytest.raises(
+                probe_runtime.PendingNavigationProbeRuntimeError,
+                match="unowned_socket",
+            ):
+                await asyncio.to_thread(client.claim)
+            socket_path.chmod(0o600)
+            await owned.close()
+            assert not socket_path.exists()
+
+    asyncio.run(scenario())
+
+
+def test_lazy_worker_starts_once_only_for_a_live_job():
+    clock = {"wall": 1_010_000, "mono": 100.0}
+    runtime = _runtime(clock)
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    launches = []
+
+    def launch_worker():
+        launches.append("started")
+        entered.set()
+        assert release.wait(1.0)
+        claimed = runtime.handle(_request("claim"))["job"]
+        assert claimed == _job()
+        assert runtime.handle(
+            _request("submit", result=_result(claimed))
+        )["accepted"]
+        finished.set()
+
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=runtime.state_size,
+        launch_worker=launch_worker,
+        retry_seconds=0.01,
+    )
+    assert not worker.notify_job_ready()
+    assert not worker.active()
+    assert runtime.enqueue(_job())
+    assert worker.notify_job_ready()
+    assert entered.wait(1.0)
+    assert not worker.notify_job_ready()
+    release.set()
+    assert finished.wait(1.0)
+    deadline = time.monotonic() + 1.0
+    while worker.active() and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert launches == ["started"]
+    assert runtime.state_size() == 0
+    assert not worker.active()
+    assert worker.close()
+
+
+def test_lazy_worker_retries_after_a_lost_claim_lease():
+    clock = {"wall": 1_010_000, "mono": 100.0}
+    runtime = _runtime(clock)
+    assert runtime.enqueue(_job())
+    completed = threading.Event()
+    launches = []
+
+    def launch_worker():
+        claimed = runtime.handle(_request("claim"))["job"]
+        launches.append(claimed)
+        if len(launches) == 1:
+            assert claimed == _job()
+            clock["mono"] += probe_runtime.CLAIM_LEASE_SECONDS + 0.001
+            raise RuntimeError("worker disappeared")
+        assert claimed == _job()
+        assert runtime.handle(
+            _request("submit", result=_result(claimed))
+        )["accepted"]
+        completed.set()
+
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=runtime.state_size,
+        launch_worker=launch_worker,
+        retry_seconds=0.001,
+    )
+    assert worker.notify_job_ready()
+    assert completed.wait(1.0)
+    assert launches == [_job(), _job()]
+    assert runtime.state_size() == 0
+    assert worker.close()

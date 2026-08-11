@@ -4,7 +4,11 @@ from collections import OrderedDict
 from dataclasses import dataclass
 import ipaddress
 import json
+import os
 import re
+import socket
+import stat
+import struct
 import threading
 import time
 
@@ -26,6 +30,7 @@ CLAIM_LEASE_SECONDS = 5.0
 MAX_LIVE_JOBS = 32
 MAX_ENQUEUE_AGE_MS = 5_000
 MAX_IPC_BYTES = 2_048
+IPC_TIMEOUT_SECONDS = 2.0
 PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
     "/var/run/slipstream-browser-probe.sock"
 )
@@ -91,6 +96,39 @@ def _parse_request(payload):
     if not isinstance(request, dict):
         raise PendingNavigationProbeRuntimeError("invalid_shape")
     return request
+
+
+def _read_exact(connection, size):
+    chunks = []
+    remaining = size
+    while remaining:
+        chunk = connection.recv(remaining)
+        if not chunk:
+            raise PendingNavigationProbeRuntimeError("incomplete_frame")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _parse_response(payload, operation):
+    response = _parse_request(payload)
+    if set(response) != {
+        "schema_version",
+        "accepted",
+        "operation",
+        "reason",
+        "job",
+    }:
+        raise PendingNavigationProbeRuntimeError("invalid_response_shape")
+    if (
+        type(response.get("schema_version")) is not int
+        or response["schema_version"] != SCHEMA_VERSION
+        or type(response.get("accepted")) is not bool
+        or response.get("operation") != operation
+        or not isinstance(response.get("reason"), str)
+    ):
+        raise PendingNavigationProbeRuntimeError("invalid_response")
+    return response
 
 
 def _canonical_host(value):
@@ -273,3 +311,203 @@ class PendingNavigationProbeRuntime:
         with self._lock:
             self._prune_locked(now_monotonic)
             return len(self._jobs)
+
+
+class PendingNavigationProbeWorkerClient:
+    """One-shot owner client for the exact claim/submit protocol."""
+
+    def __init__(
+        self,
+        path=PENDING_NAVIGATION_PROBE_SOCKET_PATH,
+        *,
+        expected_uid=None,
+        timeout=IPC_TIMEOUT_SECONDS,
+    ):
+        if (
+            not isinstance(path, str)
+            or not path
+            or type(expected_uid) is bool
+            or (
+                expected_uid is not None
+                and (not isinstance(expected_uid, int) or expected_uid < 0)
+            )
+            or not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
+            raise ValueError("pending-navigation worker client is invalid")
+        self._path = path
+        self._expected_uid = (
+            os.getuid() if expected_uid is None else expected_uid
+        )
+        self._timeout = float(timeout)
+
+    def _validate_socket(self):
+        record = os.lstat(self._path)
+        if (
+            not stat.S_ISSOCK(record.st_mode)
+            or record.st_uid != self._expected_uid
+            or stat.S_IMODE(record.st_mode) != 0o600
+        ):
+            raise PendingNavigationProbeRuntimeError("unowned_socket")
+
+    def _request(self, operation, request):
+        payload = json.dumps(
+            request,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        if not payload or len(payload) > MAX_IPC_BYTES:
+            raise PendingNavigationProbeRuntimeError("request_too_large")
+        self._validate_socket()
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.settimeout(self._timeout)
+            connection.connect(self._path)
+            connection.sendall(struct.pack("<I", len(payload)) + payload)
+            length = struct.unpack("<I", _read_exact(connection, 4))[0]
+            if length <= 0 or length > MAX_IPC_BYTES:
+                raise PendingNavigationProbeRuntimeError(
+                    "invalid_response_frame"
+                )
+            return _parse_response(
+                _read_exact(connection, length),
+                operation,
+            )
+        except (OSError, struct.error) as error:
+            raise PendingNavigationProbeRuntimeError(
+                "ipc_unavailable"
+            ) from error
+        finally:
+            connection.close()
+
+    def claim(self):
+        response = self._request(
+            OPERATION_CLAIM,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "operation": OPERATION_CLAIM,
+            },
+        )
+        if not response["accepted"]:
+            raise PendingNavigationProbeRuntimeError("claim_rejected")
+        if response["reason"] == REASON_NO_JOB and response["job"] is None:
+            return None
+        job = response["job"]
+        if response["reason"] != REASON_JOB_READY or not isinstance(job, dict):
+            raise PendingNavigationProbeRuntimeError("invalid_claim_response")
+        issued_at = job.get("issued_at_unix_ms")
+        validated = _validate_job(
+            job,
+            issued_at if _valid_positive_int(issued_at) else 0,
+        )
+        if validated is None:
+            raise PendingNavigationProbeRuntimeError("invalid_claimed_job")
+        return validated
+
+    def submit(self, result):
+        response = self._request(
+            OPERATION_SUBMIT,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "operation": OPERATION_SUBMIT,
+                "result": result,
+            },
+        )
+        valid_reason = (
+            response["reason"] == REASON_ACCEPTED
+            if response["accepted"]
+            else response["reason"] in {
+                REASON_EFFECT_UNAVAILABLE,
+                REASON_INVALID_REQUEST,
+                REASON_RESULT_REJECTED,
+            }
+        )
+        if response["job"] is not None or not valid_reason:
+            raise PendingNavigationProbeRuntimeError("invalid_submit_response")
+        return response
+
+
+class LazyPendingNavigationProbeWorker:
+    """Start at most one blocking one-shot worker only while jobs exist."""
+
+    def __init__(
+        self,
+        *,
+        pending_jobs,
+        launch_worker,
+        retry_seconds=CLAIM_LEASE_SECONDS,
+        thread_factory=None,
+    ):
+        if (
+            not callable(pending_jobs)
+            or not callable(launch_worker)
+            or not isinstance(retry_seconds, (int, float))
+            or isinstance(retry_seconds, bool)
+            or retry_seconds <= 0
+        ):
+            raise ValueError("pending-navigation worker lifecycle is invalid")
+        self._pending_jobs = pending_jobs
+        self._launch_worker = launch_worker
+        self._retry_seconds = float(retry_seconds)
+        self._thread_factory = thread_factory or threading.Thread
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _job_count(self):
+        try:
+            count = self._pending_jobs()
+        except Exception:
+            return 0
+        return count if type(count) is int and count > 0 else 0
+
+    def _run(self):
+        try:
+            while not self._stop.is_set() and self._job_count():
+                try:
+                    self._launch_worker()
+                except Exception:
+                    pass
+                if not self._job_count():
+                    break
+                self._stop.wait(self._retry_seconds)
+        finally:
+            with self._lock:
+                self._thread = None
+                restart = not self._stop.is_set() and bool(self._job_count())
+            if restart:
+                self.notify_job_ready()
+
+    def notify_job_ready(self):
+        if self._stop.is_set() or not self._job_count():
+            return False
+        with self._lock:
+            if self._thread is not None:
+                return False
+            thread = self._thread_factory(
+                target=self._run,
+                name="slipstream-browser-probe",
+                daemon=True,
+            )
+            self._thread = thread
+        try:
+            thread.start()
+        except BaseException:
+            with self._lock:
+                if self._thread is thread:
+                    self._thread = None
+            raise
+        return True
+
+    def active(self):
+        with self._lock:
+            return self._thread is not None
+
+    def close(self, timeout=IPC_TIMEOUT_SECONDS):
+        self._stop.set()
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, float(timeout)))
+        return not self.active()

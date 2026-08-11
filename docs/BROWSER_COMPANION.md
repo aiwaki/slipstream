@@ -155,7 +155,6 @@ The disposable CI gate proves browser behavior but not that delivery boundary.
 
 The ordinary macOS Chromium CI gate has a unified-headless mode for the
 first worker qualification slice. It runs the reviewed extension without an
-first worker qualification slice. It runs the reviewed extension without a
 visible browser window or `--no-sandbox`; on macOS LaunchServices supplies the
 application bootstrap context required for sandboxed helpers to reach Chrome's
 Mach rendezvous service. Direct binary LaunchAgent attempts failed even with an
@@ -354,8 +353,14 @@ uninstall, and an unsigned Safari app-extension build.
   only that relay completes among two same-host candidates. A separate
   owner-only job/result IPC seam now also proves bounded claim leases, worker
   loss redelivery, exact submit delegation, socket mode, and exact cleanup on a
-  disposable path. The production socket is not created. Lazy worker lifecycle
-  and self-probe loop suppression remain required before runtime composition.
+  disposable path. The production socket is not created. A closed lazy-worker
+  controller now starts no thread before a live job, permits only one blocking
+  worker at a time, retries only after the five-second lost-claim lease, and
+  stops when the queue is empty. Its owner-only client rejects a foreign,
+  non-socket, or mis-mode socket path. While a capability is live, another
+  relay for the same host cannot mint a recursive worker job. The real browser
+  observer and platform
+  process launcher remain required before runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
   incomplete-response v2. Protected unpacked-extension success does not prove

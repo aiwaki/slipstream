@@ -12200,9 +12200,10 @@ def test_pending_navigation_probe_capability_state_is_bounded_and_revoked():
     jobs = []
     for index in range(tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX + 1):
         activity = _eligible_pending_navigation_activity(1_000_000 + index)
+        host = f"unknown-{index}.example"
         assert tproxy._register_pending_navigation_relay(
             activity,
-            "unknown.example",
+            host,
             "1.1.1.1",
             tproxy.ROUTE_UNKNOWN,
             tproxy.AUTO_GEPH_STAGE_SYSTEM,
@@ -12232,6 +12233,43 @@ def test_pending_navigation_probe_capability_state_is_bounded_and_revoked():
     assert jobs[-1]["capability"] not in (
         tproxy._pending_navigation_probe_capabilities
     )
+
+
+def test_pending_navigation_probe_suppresses_same_host_worker_recursion():
+    first = _eligible_pending_navigation_activity(1_000_000)
+    second = _eligible_pending_navigation_activity(1_000_001)
+    for activity, address in ((first, "1.1.1.1"), (second, "8.8.8.8")):
+        assert tproxy._register_pending_navigation_relay(
+            activity,
+            "unknown.example",
+            address,
+            tproxy.ROUTE_UNKNOWN,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        )
+
+    first_job = tproxy._issue_pending_navigation_probe(
+        first,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "1" * 32,
+    )
+    assert first_job is not None
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "2" * 32,
+    ) is None
+
+    tproxy._unregister_pending_navigation_relay(first)
+    second_job = tproxy._issue_pending_navigation_probe(
+        second,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "2" * 32,
+    )
+    assert second_job is not None
+    assert second_job["capability"] == "2" * 32
 
 
 def test_pending_navigation_signal_advances_only_the_exact_unknown_stage():

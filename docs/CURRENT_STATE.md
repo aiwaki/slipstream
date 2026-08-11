@@ -10,9 +10,9 @@ file.
 
 ## Current Checkpoint
 
-PR #325 is merged as live main
-`a0ef6bfc6bb1b42f07bdcf9a438f679ea67e26b5`. Exact-main CI `31536552779`,
-dependency audit `31536552821`, and Windows qualification `31536552834` all
+PR #326 is merged as live main
+`2f37488d3c55f3ca29a622f6cc00455267ce1028`. Exact-main CI `31538670468`,
+dependency audit `31538670392`, and Windows qualification `31538670429` all
 passed for that exact SHA, including required jobs `checks`,
 `chromium-webrequest-contract`, and `packaged-app-lifecycle`.
 
@@ -113,7 +113,7 @@ tests, 24 Chromium companion tests, the 556-test focused relay/traffic set,
 Python compilation, project continuity, and `git diff --check`. The seam is
 deliberately not runtime-wired yet.
 
-PR #326 implements the next closed boundary:
+PR #326 implements the owner-only IPC boundary:
 a dedicated versioned owner-only local job/result broker, separate from the
 extension native-messaging protocol. The frozen production path is
 `/var/run/slipstream-browser-probe.sock` with console-user ownership and mode
@@ -127,11 +127,25 @@ reducer. The module is included in the script install payload but no socket,
 poller, worker, browser, or routing effect is runtime-composed.
 Local verification passes 861 daemon tests, 278 script tests, 24 unchanged
 Chromium companion tests, Python compilation, JSON parsing, project continuity,
-and `git diff --check`.
+and `git diff --check`. Its six PR checks passed, it merged as
+`2f37488d3c55f3ca29a622f6cc00455267ce1028`, and exact-main CI
+`31538670468`, dependency audit `31538670392`, and Windows qualification
+`31538670429` passed for that exact SHA.
 
-The next verified action is to finish PR review and exact-main qualification of
-this IPC seam, then compose the lazy worker lifecycle with self-probe loop
-suppression.
+Branch `codex/lazy-pending-navigation-worker` adds a closed one-shot worker
+client and lazy lifecycle controller. The client accepts only the exact
+owner-owned mode-`0600` Unix socket and exact bounded claim/submit responses.
+No lifecycle thread exists before a live job; at most one blocking worker runs,
+and a lost worker is retried only after the five-second claim lease while the
+job remains live. Same-host capability exclusion now prevents a synthetic
+worker relay from minting a recursive job; revoking the first capability makes
+that host eligible again. The full daemon suite passes 866 tests. The real
+browser observer and platform process launcher are deliberately not composed
+by this closed lifecycle slice.
+
+The next verified action is to finish validation and review of this lifecycle
+seam, then connect it to the real sandboxed headless observer and exact
+console-user process launcher.
 That composed gate must still prove completion of the original user-visible
 navigation. Package size, installed update, uninstall, idle cost, and
 clean-profile evidence remain required before production runtime composition.
