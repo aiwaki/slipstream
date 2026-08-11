@@ -10,36 +10,38 @@ file.
 
 ## Current Checkpoint
 
-PR #313 is merged as live main
-`8535b7bcf1c8007c4636a2b6a638890c1177773a`. Exact-main dependency audit
-`31481725501`, Windows qualification `31481725524`, and CI `31481725573`
-passed. Protected owned-Geph qualification `31482370335` also passed and
-produced artifact `9097835929` with outer digest
-`sha256:01d4ce7d985bf543e603dca8157b6774dad5273e18fe45105b8f205bef99b541`.
-That artifact is deliberately non-installable: its Chromium semantic gate
-covered regional denial and incomplete response, but not the newly introduced
-v3 `navigation_pending` source path that addresses the observed uncommitted
-`about:blank` navigation.
+PR #314 is merged as live main
+`39241dc4708c9f6cf46e68a1bc34f70e4d450fd2`. Exact-main dependency audit
+`31486581787`, Windows qualification `31486581809`, and CI `31486581823`
+passed. Its single protected owned-Geph qualification `31487143181` failed, so
+it produced no installable artifact and no workstation transaction was
+attempted. Cleanup passed: the root daemon was absent and disabled, the owned
+Geph initial/trayless/KeepAlive-recovered payloads all returned HTTP 200, the
+external listener was preserved, and system network state was not mutated.
 
-Branch `codex/qualify-pending-navigation-v3` adds the missing deterministic
-real-Chromium scenario to the protected harness. A local HTTPS request with no
-first document must cause the exact packaged companion to emit one strict,
-privacy-bounded v3 native message after eight seconds. An owner-private
-qualification tap records and forwards that message byte-for-byte to the exact
-packaged native host, then the fixture emulates closing only the correlated
-relay. Chrome must retry exactly once and commit a styled page with CSS,
-JavaScript, image, and ready callback. Daemon relay correlation and the
-four-stage local recovery reducer remain covered by their production unit and
-golden tests; the qualification tap introduces no production routing hook.
+The failure is isolated to the new deterministic Chromium
+`navigation_pending` scenario before navigation began. Regional denial and
+incomplete-response scenarios completed, but the qualification tap did not
+complete the existing `qualification_worker_ready` native roundtrip. A local
+reproduction against the real debug Rust binary proves framing, forwarded
+origin arguments, response bytes, and child exit work outside Chrome. Branch
+`codex/pending-native-host-transport` replaces the hard-coded system-Python
+shebang with the exact qualification interpreter and records only bounded,
+owner-private stage metadata. Failed CI can now distinguish host launch,
+message read, child start, child exit, and acknowledgement before exact profile
+cleanup. A response is authoritative only after the exact child succeeds and
+its bounded native response is flushed back to Chrome; empty or failed child
+responses cannot publish the navigation acknowledgement. No signal payload,
+URL, hostname, secret, or user identifier enters the stage diagnostic.
 
-Focused verification currently passes `51` tests plus `9` subtests for the
-packaged Chromium harness, Python compilation, and `git diff --check`. The next
-verified action is to finish regression checks, update this branch through a
-small PR, merge only when green, then run exact-main gates and exactly one fresh
-protected qualification for that new main SHA. Installation remains forbidden
-until that fresh run proves all three Chromium scenarios and cleanup. Only its
-exact artifact may enter a controlled workstation transaction with immediate
-rollback on the first failed smoke.
+Focused verification passes `53` tests plus `9` subtests for the packaged
+Chromium harness, Python compilation, `git diff --check`, and a direct roundtrip
+through the generated tap into the real Rust native host. The next verified
+action is a small PR for this transport fix. After merge, exact-main gates and
+exactly one fresh protected qualification are required. Installation remains
+forbidden until that run proves all three Chromium scenarios and cleanup; only
+its exact artifact may enter a controlled workstation transaction with
+immediate rollback on the first failed smoke.
 
 ## Previous Checkpoint
 

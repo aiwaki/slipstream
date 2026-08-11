@@ -163,6 +163,7 @@ class NativeMessageTap:
     executable: Path
     manifest: Path
     capture: Path
+    status: Path
 
 
 def _require_disposable_ci() -> tuple[int, int]:
@@ -289,14 +290,37 @@ def _validate_pending_navigation_signal(
 def _pending_navigation_tap_source(
     target_executable: Path,
     capture: Path,
+    status: Path,
+    interpreter: Path,
 ) -> bytes:
     target = json.dumps(str(target_executable))
     destination = json.dumps(str(capture))
+    status_path = json.dumps(str(status))
     return (
-        "#!/usr/bin/python3\n"
+        f"#!{interpreter}\n"
         "import json, os, struct, subprocess, sys\n"
         f"TARGET = {target}\n"
         f"CAPTURE = {destination}\n"
+        f"STATUS = {status_path}\n"
+        "def write_private(path, body):\n"
+        "    temporary = f'{path}.{os.getpid()}.tmp'\n"
+        "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+        "    try:\n"
+        "        remaining = memoryview(body)\n"
+        "        while remaining:\n"
+        "            written = os.write(fd, remaining)\n"
+        "            if written <= 0:\n"
+        "                raise SystemExit(5)\n"
+        "            remaining = remaining[written:]\n"
+        "        os.fsync(fd)\n"
+        "    finally:\n"
+        "        os.close(fd)\n"
+        "    os.replace(temporary, path)\n"
+        "def mark(stage, **fields):\n"
+        "    fields['stage'] = stage\n"
+        "    write_private(STATUS, json.dumps(\n"
+        "        fields, sort_keys=True, separators=(',', ':')\n"
+        "    ).encode())\n"
         "def read_exact(stream, size):\n"
         "    data = bytearray()\n"
         "    while len(data) < size:\n"
@@ -311,12 +335,16 @@ def _pending_navigation_tap_source(
         "    raise SystemExit(3)\n"
         "body = read_exact(sys.stdin.buffer, length)\n"
         "payload = json.loads(body)\n"
+        "category = payload.get('category') if isinstance(payload, dict) else None\n"
+        "mark('message_read', argv_count=len(sys.argv) - 1, "
+        "body_bytes=len(body), category=category)\n"
         "child = subprocess.Popen(\n"
         "    [TARGET, *sys.argv[1:]],\n"
         "    stdin=subprocess.PIPE,\n"
         "    stdout=subprocess.PIPE,\n"
         "    stderr=subprocess.DEVNULL,\n"
         ")\n"
+        "mark('child_started', child_pid=child.pid, category=category)\n"
         "try:\n"
         "    output, _ = child.communicate(\n"
         f"        header + body, timeout={NATIVE_MESSAGE_FORWARD_TIMEOUT!r}\n"
@@ -324,26 +352,23 @@ def _pending_navigation_tap_source(
         "except subprocess.TimeoutExpired:\n"
         "    child.kill()\n"
         "    child.communicate()\n"
+        "    mark('child_timeout', category=category)\n"
         "    raise SystemExit(4)\n"
+        "mark('child_completed', category=category, "
+        "child_returncode=child.returncode, child_output_bytes=len(output))\n"
         "if child.returncode != 0:\n"
         "    raise SystemExit(child.returncode)\n"
+        "if not output:\n"
+        "    mark('empty_child_response', category=category)\n"
+        "    raise SystemExit(6)\n"
+        "sys.stdout.buffer.write(output)\n"
+        "sys.stdout.buffer.flush()\n"
+        "mark('response_forwarded', category=category, "
+        "child_output_bytes=len(output))\n"
         "if payload.get('category') == 'navigation_pending':\n"
-        "    temporary = f'{CAPTURE}.{os.getpid()}.tmp'\n"
-        "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
-        "    try:\n"
-        "        remaining = memoryview(body)\n"
-        "        while remaining:\n"
-        "            written = os.write(fd, remaining)\n"
-        "            if written <= 0:\n"
-        "                raise SystemExit(5)\n"
-        "            remaining = remaining[written:]\n"
-        "        os.fsync(fd)\n"
-        "    finally:\n"
-        "        os.close(fd)\n"
-        "    os.replace(temporary, CAPTURE)\n"
-        "if output:\n"
-        "    sys.stdout.buffer.write(output)\n"
-        "    sys.stdout.buffer.flush()\n"
+        "    write_private(CAPTURE, body)\n"
+        "    mark('ack_published', category=category, "
+        "child_output_bytes=len(output))\n"
         "raise SystemExit(0)\n"
     ).encode("utf-8")
 
@@ -357,9 +382,16 @@ def _create_pending_navigation_tap(
     executable = profile / "pending-navigation-native-host.py"
     manifest = profile / "pending-navigation-native-host.json"
     capture = profile / "pending-navigation-signal.json"
+    status = profile / "pending-navigation-native-host-status.json"
+    interpreter = Path(sys.executable).resolve(strict=True)
     _write_owner_private_file(
         executable,
-        _pending_navigation_tap_source(target_executable, capture),
+        _pending_navigation_tap_source(
+            target_executable,
+            capture,
+            status,
+            interpreter,
+        ),
         uid,
         gid,
     )
@@ -379,7 +411,7 @@ def _create_pending_navigation_tap(
         uid,
         gid,
     )
-    return NativeMessageTap(executable, manifest, capture)
+    return NativeMessageTap(executable, manifest, capture, status)
 
 
 def _is_exact_native_host(
@@ -1971,6 +2003,7 @@ def _run_chrome(
     native_host_registration: NativeHostRegistration | None = None
     registered_native_host_executable = native_host_executable
     registered_native_host_manifest = native_host_manifest
+    native_tap_status: Path | None = None
     snapshot: FixtureSnapshot | None = None
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -1997,6 +2030,7 @@ def _run_chrome(
             fixture.arm_pending_navigation_tap(tap.capture, uid)
             registered_native_host_executable = tap.executable
             registered_native_host_manifest = tap.manifest
+            native_tap_status = tap.status
         native_host_registration = _install_chrome_for_testing_native_host(
             home,
             registered_native_host_manifest,
@@ -2135,7 +2169,10 @@ def _run_chrome(
         for name, path in (
             ("LaunchServices", launcher_stderr_path),
             ("Chrome", stderr_path),
+            ("Native message tap", native_tap_status),
         ):
+            if path is None:
+                continue
             try:
                 captured = _read_owner_private_tail(path, uid)
             except FileNotFoundError:
