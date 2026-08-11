@@ -10,32 +10,60 @@ file.
 
 ## Current Checkpoint
 
-PR #319 is merged as live main
-`e6a8b54770ffd10cac266e144962491ad532ac43`. Exact-main dependency audit
-`31507339889`, Windows qualification `31507339880`, and CI `31507339877`
-passed. Its single protected owned-Geph qualification `31508041955` failed, so
-it produced no installable artifact and no workstation transaction was
-attempted. Cleanup passed: the root daemon was absent and disabled, owned Geph
-passed its initial, trayless, and KeepAlive-recovered HTTP 200 payload checks,
-the external listener was preserved, and system network state was not mutated.
+PR #320 is merged as live main
+`8fe21229994e0ddc643762d0ece2203bc79313cc`. Exact-main CI
+`31509795963`, dependency audit `31511314605`, and Windows qualification
+`31509795798` passed. The single fresh protected owned-Geph qualification
+`31511415912` also passed. Its `navigation_pending` scenario emitted one
+privacy-bounded v3 signal, performed one reload, and reached the styled
+CSS/JavaScript/image-ready callback; the incomplete-response and regional-denial
+scenarios passed the same styled-resource requirement. Owned Geph returned
+HTTP 200 payload initially, trayless, and after KeepAlive replacement. Cleanup
+preserved the external listener, left the root daemon absent and disabled, and
+did not mutate system network state.
 
-The failure remains isolated to the deterministic Chromium
-`navigation_pending` scenario. Chrome launched the exact owner-private tap,
-the browser companion published the bounded `navigation_pending` signal, and
-the tap forwarded the packaged host response before recording
-`ack_published`. The deterministic fixture then deliberately closed the first
-pre-response connection, so DevTools returned `net::ERR_EMPTY_RESPONSE`.
-The harness treated this expected trigger as a final navigation failure before
-its post-command loop could observe the browser retry and styled success.
+Only protected artifact `9110154812` is installable for this checkpoint. Its
+GitHub artifact digest is
+`sha256:40f8c054bea7657e986e3a62952f2e5a8acf245d8729ce9048f561b156d9f0e2`;
+the downloaded inner ZIP matches its manifest at
+`21f85aa034e4dc201a91de37d3159099ceb7cbc71038292eaf7b1f3233e06e5e`
+and passes `unzip -t`. The extracted app passes strict deep code-signature
+verification. Its tray, bundled Geph, and daemon SHA-256 values are
+`89fc65fe03ca1d90ba6cc830a709afbca587007b3b96ac20f473cecdb0ef5de0`,
+`8674b76114b43b3b475c5209065ccf38c756579b59bba89cb4a58c994fee6fc5`,
+and
+`e0aa3a8b60cbba96aad7ebd9273271ce48a8d22dc20adae8056500d7b832005a`.
 
-Branch `codex/chromium-expected-empty-response` accepts only that exact error
-for the pending-navigation scenario; every other scenario still rejects it.
-It does not change routing, PF, DNS, Geph, product lifecycle, or workstation
-state. The next verified action is a small PR, exact-main gates, and exactly
-one fresh protected qualification for the new main SHA. Installation remains
-forbidden until that run proves all Chromium scenarios and cleanup; only its
-exact artifact may enter a controlled workstation transaction with immediate
-rollback on the first failed smoke.
+Controlled workstation transaction
+`271C43D9-4906-4AF3-88E8-C2EF146A33ED` installed only that artifact. The
+packaged daemon became coherent and active, but the first required smoke was a
+fresh isolated headed branded-Chrome visit to `xpersonatoy.com`; it remained
+pending at `about:blank` for 75 seconds. The transaction immediately performed
+exact rollback. Independent verification restored the prior tray, bundled
+Geph, and daemon hashes; removed the root daemon, listener, private PF/runtime
+state, status, token, and sockets; and preserved byte-identical DNS, proxy/PAC,
+VPN, and default-route snapshots.
+
+The failure is a distribution qualification gap, not new routing evidence.
+The exact Chrome native-host manifest was registered, but the clean browser
+profile did not contain the unpublished companion. The protected gate instead
+loads the reviewed source as an unpacked extension. The transaction's root log
+therefore contained no semantic or recovery event. Native-host registration
+alone cannot make a clean branded-Chrome profile send a signal, and protected
+unpacked-extension success cannot qualify production browser distribution.
+
+The current change adds a deterministic Chrome Web Store ZIP and provenance
+builder, validates the frozen extension/native-host identity and source
+allowlist, rejects dynamic or remotely loaded code, and adds privacy and store
+listing disclosures. Local verification passes `271` script tests, `850`
+daemon/traffic tests, `24` Chromium tests, and `12` native-messaging Rust tests,
+plus Python compilation, project continuity, packaged-browser dry-run, repeat
+archive hash, ZIP integrity, and diff checks. The next verified action is to
+open the small delivery PR and require its checks. Publication, review, and an
+actual clean branded-Chrome install/enabled proof for exact extension ID
+`cecdingohhpfggapnlbghppcegbaciam` remain manual external gates. Do not repeat
+a workstation installation until that exact distribution gate and a newly
+qualified exact-main artifact both pass.
 
 ## Previous Checkpoint
 
