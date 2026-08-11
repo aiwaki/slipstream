@@ -613,6 +613,7 @@ _SCRIPT_RUNTIME_FIXTURE = {
     "http_response_completion.py": "VALUE = 20\n",
     "http2_response_probe.py": "VALUE = 21\n",
     "install_guard.py": "VALUE = 6\n",
+    "pending_navigation_probe_runtime.py": "VALUE = 22\n",
     "pf_adapter.py": "VALUE = 7\n",
     "primes.py": "VALUE = 8\n",
     "route_circuit.py": "VALUE = 9\n",
@@ -724,6 +725,26 @@ def test_copy_script_runtime_requires_semantic_signal_runtime_before_install(
     )
 
     with pytest.raises(FileNotFoundError, match="semantic_route_signal_runtime.py"):
+        tproxy._copy_script_runtime(source / "tproxy.py", install)
+
+    assert not install.exists()
+
+
+def test_copy_script_runtime_requires_pending_navigation_probe_runtime(
+    tmp_path,
+):
+    source = tmp_path / "source"
+    install = tmp_path / "install"
+    source.mkdir()
+    _write_script_runtime_fixture(
+        source,
+        missing={"pending_navigation_probe_runtime.py"},
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="pending_navigation_probe_runtime.py",
+    ):
         tproxy._copy_script_runtime(source / "tproxy.py", install)
 
     assert not install.exists()

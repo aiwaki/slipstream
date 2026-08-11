@@ -110,6 +110,7 @@ jobs:
             spike/connection_race_io.py \
             spike/http_response_completion.py \
             spike/install_guard.py \
+            spike/pending_navigation_probe_runtime.py \
             spike/route_circuit.py \
             spike/route_circuit_registry.py \
             spike/route_policy_activation.py \
@@ -128,6 +129,7 @@ jobs:
             spike/test_connection_probe.py \
             spike/test_http_response_completion.py \
             spike/test_install_guard.py \
+            spike/test_pending_navigation_probe_runtime.py \
             spike/test_routing_contract_vectors.py \
             spike/test_semantic_route_signal.py \
             spike/test_semantic_route_signal_runtime.py \

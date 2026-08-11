@@ -10,9 +10,9 @@ file.
 
 ## Current Checkpoint
 
-PR #324 is merged as live main
-`e037fbf5050205c575d4303d287ffd0f0404ae51`. Exact-main CI `31534286516`,
-dependency audit `31534286451`, and Windows qualification `31534286450` all
+PR #325 is merged as live main
+`a0ef6bfc6bb1b42f07bdcf9a438f679ea67e26b5`. Exact-main CI `31536552779`,
+dependency audit `31536552821`, and Windows qualification `31536552834` all
 passed for that exact SHA, including required jobs `checks`,
 `chromium-webrequest-contract`, and `packaged-app-lifecycle`.
 
@@ -96,7 +96,7 @@ reloaded exactly once, and reached the CSS/JavaScript/image-ready callback in
 786,432 KiB budget; aggregate RSS was 1,234,672 KiB across four samples and is
 diagnostic only. The job did not mutate system network state.
 
-Branch `codex/owned-browser-probe-correlation` implements the next closed seam
+PR #325 implements the closed correlation seam
 and freezes its cross-process shape in
 `contracts/pending-navigation-probe-v1.json`. A daemon-minted random 128-bit
 capability is bound directly to one already-live
@@ -113,12 +113,29 @@ tests, 24 Chromium companion tests, the 556-test focused relay/traffic set,
 Python compilation, project continuity, and `git diff --check`. The seam is
 deliberately not runtime-wired yet.
 
-The next verified action is to finish full validation and review of this closed
-seam, then add the owner-only job/result IPC and lazy worker lifecycle with
-self-probe loop suppression. That composed gate must still prove completion of
-the original user-visible navigation. Package size, installed update, uninstall,
-idle cost, and clean-profile evidence remain required before production runtime
-composition. Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
+PR #326 implements the next closed boundary:
+a dedicated versioned owner-only local job/result broker, separate from the
+extension native-messaging protocol. The frozen production path is
+`/var/run/slipstream-browser-probe.sock` with console-user ownership and mode
+`0600`, while the current fixture proves those properties and exact cleanup on
+a temporary socket without creating the production path. Requests are bounded
+to 2 KiB and exact `claim`/`submit` shapes. At most 32 copied jobs exist; a job
+must be freshly issued within five seconds, receives one monotonic expiry, and
+a five-second claim lease allows safe redelivery after worker loss. Submit
+removes the queued copy and delegates to the existing one-shot relay capability
+reducer. The module is included in the script install payload but no socket,
+poller, worker, browser, or routing effect is runtime-composed.
+Local verification passes 861 daemon tests, 278 script tests, 24 unchanged
+Chromium companion tests, Python compilation, JSON parsing, project continuity,
+and `git diff --check`.
+
+The next verified action is to finish PR review and exact-main qualification of
+this IPC seam, then compose the lazy worker lifecycle with self-probe loop
+suppression.
+That composed gate must still prove completion of the original user-visible
+navigation. Package size, installed update, uninstall, idle cost, and
+clean-profile evidence remain required before production runtime composition.
+Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the
 then-current exact main receive one fresh protected qualification and a

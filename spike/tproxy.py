@@ -8091,6 +8091,10 @@ def _script_runtime_payload(source_file):
             "http2_response_probe.py",
         ),
         (os.path.join(source_dir, "install_guard.py"), "install_guard.py"),
+        (
+            os.path.join(source_dir, "pending_navigation_probe_runtime.py"),
+            "pending_navigation_probe_runtime.py",
+        ),
         (os.path.join(source_dir, "pf_adapter.py"), "pf_adapter.py"),
         (os.path.join(source_dir, "primes.py"), "primes.py"),
         (os.path.join(source_dir, "route_circuit.py"), "route_circuit.py"),

@@ -303,10 +303,11 @@ clean-profile behavior remain separate product gates.
 Branch `codex/owned-browser-probe-correlation` now implements that closed
 daemon-side seam without composing a runtime worker and freezes its job/result
 shape in `contracts/pending-navigation-probe-v1.json`. The daemon mints a
-random 128-bit capability only for an already-live relay that independently satisfies
-the existing public unknown-host, eight-second idle, low-byte, complete TLS
-record, and policy exclusions. The capability retains the exact relay object,
-host, browser-request start, and local recovery stage; it is process-local,
+random 128-bit capability only for an already-live relay that independently
+satisfies the existing public unknown-host, eight-second idle, low-byte,
+complete TLS record, and policy exclusions. The capability retains the exact
+relay object, host, browser-request start, and local recovery stage; it is
+process-local,
 one-shot, capped at 32 entries, expires after 30 seconds, and is revoked when
 the relay closes. Its result must report the same host/start after a separate
 eight-second `navigation_pending` observation. A valid capability is consumed
@@ -319,6 +320,24 @@ tests; the complete daemon suite passes 854, script tests pass 278, and the
 unchanged Chromium companion passes 24. The next boundary is owner-only
 job/result IPC plus a lazy worker that cannot recursively create its own probe
 jobs; neither is runtime-composed yet.
+
+PR #326 adds the next closed boundary as a
+dedicated owner-only local protocol, not an extension/native-message variant.
+The contract freezes `/var/run/slipstream-browser-probe.sock`, console-user
+mode `0600`, exact versioned `claim` and `submit` envelopes, and a 2 KiB request
+cap. The current fixture uses a temporary path and proves ownership plus exact
+socket removal, so no production socket is created. The broker copies only the
+existing privacy-bounded job, retains at most 32 entries, rejects stale or
+future issue times, derives one monotonic expiry, leases a claim for five
+seconds, and redelivers it after worker loss only while the original 30-second
+capability remains live. Submit removes the queue copy and calls the existing
+capability reducer; it has no independent relay-selection authority. The full
+daemon suite passes 861 tests. The module is present in the script install
+payload for reproducibility, but no socket supervisor, poller, browser process,
+or routing effect is composed. Script tests pass 278 and the unchanged
+Chromium companion passes 24. Python compilation, JSON parsing, project
+continuity, and `git diff --check` also pass. Lazy lifecycle and a proof that
+worker traffic cannot recursively create probe jobs remain the next gate.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 
