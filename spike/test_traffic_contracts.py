@@ -1903,13 +1903,14 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
-def test_unknown_handshake_only_idle_arms_next_local_retry(monkeypatch):
-    """A committed TLS handshake may advance locally before any document."""
+def test_unknown_handshake_only_idle_waits_for_browser_pending_signal(monkeypatch):
+    """A quiet TLS relay advances only after a correlated browser signal."""
     isolate_runtime_state(monkeypatch)
     host = "idle-system-route.example"
     response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
+    signal_times = []
 
     async def pending_system(_ip, _port, _first_flight):
         return (
@@ -1925,8 +1926,20 @@ def test_unknown_handshake_only_idle_arms_next_local_retry(monkeypatch):
         activity,
         **_kwargs,
     ):
-        assert activity.on_downstream_idle is not None
-        assert activity.on_downstream_idle()
+        assert activity.on_downstream_idle is None
+        assert activity.pending_navigation_eligible
+        assert not activity.downstream_idle_retry
+        assert not tproxy._xbox_dns_candidate_active(
+            host,
+            now=activity.last_downstream_at,
+        )
+        signal_now = activity.last_downstream_at + tproxy.UNKNOWN_PRE_RESPONSE_IDLE
+        assert tproxy._request_pending_navigation_retry(
+            host,
+            activity.pending_navigation_started_at_unix_ms,
+            now=signal_now,
+        )
+        signal_times.append(signal_now)
         assert activity.downstream_idle_retry
         return 0, 0
 
@@ -1955,7 +1968,7 @@ def test_unknown_handshake_only_idle_arms_next_local_retry(monkeypatch):
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response
-    assert tproxy._xbox_dns_candidate_active(host)
+    assert tproxy._xbox_dns_candidate_active(host, now=signal_times[0])
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 

@@ -183,6 +183,78 @@ test("accepts a top-level GET when parentFrameId is omitted", () => {
   assert.equal(candidate.request_id, "request-without-parent");
   assert.equal(candidate.tab_id, 9);
   assert.equal(candidate.host, "example.net");
+  assert.equal(candidate.request_started_at_unix_ms, 900_000);
+});
+
+test("maps only a still-loading same-host pendingUrl to v3", () => {
+  const candidate = core.incompleteResponseCandidate(
+    {
+      requestId: "pending-request",
+      tabId: 23,
+      type: "main_frame",
+      method: "GET",
+      frameId: 0,
+      url: "https://Pending.Example/private?secret=yes"
+    },
+    1_000_000
+  );
+  const signal = core.buildPendingNavigationSignal(
+    candidate,
+    {
+      status: "loading",
+      url: "about:blank",
+      pendingUrl: "https://pending.example/private?secret=yes"
+    },
+    1_008_000,
+    new Uint8Array(16).fill(13)
+  );
+
+  assert.deepEqual(Object.keys(signal).sort(), [
+    "category",
+    "confidence_bps",
+    "host",
+    "observed_at_unix_ms",
+    "request_started_at_unix_ms",
+    "schema_version",
+    "signal_id",
+    "source",
+    "top_level"
+  ]);
+  assert.equal(signal.schema_version, 3);
+  assert.equal(signal.category, "navigation_pending");
+  assert.equal(signal.host, "pending.example");
+  assert.equal(signal.request_started_at_unix_ms, 1_000_000);
+  assert.equal(JSON.stringify(signal).includes("/private"), false);
+  assert.equal(JSON.stringify(signal).includes("secret=yes"), false);
+
+  for (const tab of [
+    { status: "complete", pendingUrl: "https://pending.example/" },
+    { status: "loading", pendingUrl: "https://other.example/" },
+    { status: "loading", url: "https://pending.example/" },
+    { status: "loading", pendingUrl: "about:blank" }
+  ]) {
+    assert.equal(
+      core.buildPendingNavigationSignal(
+        candidate,
+        tab,
+        1_008_000,
+        new Uint8Array(16)
+      ),
+      null
+    );
+  }
+  assert.equal(
+    core.buildPendingNavigationSignal(
+      candidate,
+      {
+        status: "loading",
+        pendingUrl: "https://pending.example/"
+      },
+      1_007_999,
+      new Uint8Array(16)
+    ),
+    null
+  );
 });
 
 test("rejects ambiguous, subframe, non-HTTPS, and IP request errors", () => {
@@ -326,6 +398,7 @@ test("request correlation survives a service-worker restart", async () => {
     requestId: before.requestId
   });
   assert.equal(candidate.host, "example.net");
+  assert.equal(candidate.request_started_at_unix_ms, 900_000);
   assert.equal(JSON.stringify(candidate).includes("private"), false);
   assert.equal(JSON.stringify(candidate).includes("secret"), false);
   assert.equal(

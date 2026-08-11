@@ -1,0 +1,161 @@
+{
+  "schema_version": 3,
+  "contract": "slipstream.semantic-route-signal",
+  "contract_version": 3,
+  "limits": {
+    "max_payload_bytes": 2048,
+    "max_age_ms": 120000,
+    "max_future_skew_ms": 5000,
+    "cooldown_ms": 5000,
+    "min_confidence_bps": 9000,
+    "min_pending_ms": 8000,
+    "max_pending_ms": 300000
+  },
+  "privacy": {
+    "allowed_fields": [
+      "schema_version",
+      "signal_id",
+      "source",
+      "host",
+      "category",
+      "confidence_bps",
+      "observed_at_unix_ms",
+      "request_started_at_unix_ms",
+      "top_level"
+    ],
+    "forbidden_fields": [
+      "url",
+      "path",
+      "query",
+      "title",
+      "text",
+      "body",
+      "cookies",
+      "form_data",
+      "browser_error",
+      "request_id",
+      "tab_id"
+    ]
+  },
+  "signal_defaults": {
+    "schema_version": 3,
+    "signal_id": "0123456789abcdef0123456789abcdef",
+    "source": "browser_extension",
+    "host": "example.net",
+    "category": "navigation_pending",
+    "confidence_bps": 10000,
+    "observed_at_unix_ms": 1000000,
+    "request_started_at_unix_ms": 990000,
+    "top_level": true
+  },
+  "context_defaults": {
+    "now_unix_ms": 1001000,
+    "route_class": "unknown",
+    "owned_geph_payload_ready": false,
+    "last_accepted_at_unix_ms": null,
+    "signal_id_seen": false
+  },
+  "parser_vectors": [
+    {
+      "name": "missing-request-start",
+      "remove": "request_started_at_unix_ms",
+      "expected_error": "invalid_shape"
+    },
+    {
+      "name": "invalid-request-start",
+      "replace": {
+        "request_started_at_unix_ms": 0
+      },
+      "expected_error": "invalid_request_started_at"
+    },
+    {
+      "name": "privacy-expanding-request-id",
+      "add": {
+        "request_id": "browser-private"
+      },
+      "expected_error": "invalid_shape"
+    },
+    {
+      "name": "v2-remains-a-separate-contract",
+      "replace": {
+        "schema_version": 2
+      },
+      "expected_error": "unsupported_version"
+    },
+    {
+      "name": "wrong-category",
+      "replace": {
+        "category": "incomplete_response"
+      },
+      "expected_error": "invalid_category"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "fresh-pending-unknown-navigation-can-request-one-local-retry",
+      "signal": {
+        "host": "Example.NET."
+      },
+      "expected": {
+        "accepted": true,
+        "action": "retry_pending_navigation",
+        "reason": "accepted",
+        "host": "example.net"
+      }
+    },
+    {
+      "name": "owned-geph-is-not-required-for-local-ladder-retry",
+      "context": {
+        "owned_geph_payload_ready": false
+      },
+      "expected": {
+        "accepted": true,
+        "action": "retry_pending_navigation",
+        "reason": "accepted",
+        "host": "example.net"
+      }
+    },
+    {
+      "name": "eight-seconds-is-required",
+      "signal": {
+        "request_started_at_unix_ms": 993000
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "navigation_not_pending",
+        "host": "example.net"
+      }
+    },
+    {
+      "name": "local-bypass-route-is-protected",
+      "signal": {
+        "host": "gateway.discord.gg"
+      },
+      "context": {
+        "route_class": "local_bypass"
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "protected_route",
+        "host": "gateway.discord.gg"
+      }
+    },
+    {
+      "name": "direct-route-is-protected",
+      "signal": {
+        "host": "www.google.com"
+      },
+      "context": {
+        "route_class": "direct_passthrough"
+      },
+      "expected": {
+        "accepted": false,
+        "action": "none",
+        "reason": "protected_route",
+        "host": "www.google.com"
+      }
+    }
+  ]
+}

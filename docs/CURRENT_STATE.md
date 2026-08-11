@@ -49,26 +49,39 @@ independent owned-Geph proof. A local browser fixture confirmed that Chrome can
 retry one top-level navigation across bounded pre-response connection closes
 and commit the later response.
 
-Branch `codex/unknown-host-pre-response-retry` adds a per-relay retry signal for
-this generic encrypted pre-response stall. It applies only to a public exact
-unknown host after valid complete TLS records, less than 8 KiB downstream, and
-eight seconds without progress. Each browser retry advances only one local
-stage; two distinct local strategies are still required after system and
-app-owned DNS evidence. The final local relay remains open while independent
-direct and owned-Geph completion probes run, and only their successful proof
-can make the next browser retry use Geph. Static/direct/protected policy,
-Discord, YouTube, Googlevideo, external Geph, and external network settings are
-excluded. No hostname rule was added.
+PR #313 on `codex/unknown-host-pre-response-retry` is open. Its pre-hardening
+branch HEAD `b6be0a925359cc339ff2855c49836a47f53a0265` passed CI/audit run
+`31474229009`, but two review conversations remain unresolved. Review correctly
+rejected the original byte-only idle authority because a healthy quiet
+WebSocket can have the same shape, and it required the final relay to remain
+open when confirmation cannot be scheduled.
 
-Local verification passes `1100` Python/script tests plus `41` subtests,
-browser companion `21`, Rust tray `83`, core `32`, Windows adapter `241`, and
-both userspace evaluation crates `40` tests each. Python compilation and
-`git diff --check` pass; version/project continuity and all five Clippy checks
-are also clean. The next verified action is a small PR. After merge, require
-exact-main CI/audit/Windows and exactly one fresh protected qualification.
-Only that newly qualified artifact may enter another controlled workstation
-transaction, with `xpersonatoy.com` early in the real browser smoke and
-immediate exact rollback on the first failure.
+The current review hardening introduces frozen semantic signal v3. Chromium
+or Safari source may report `navigation_pending` only after the browser still
+owns one top-level HTTPS request for eight seconds and the tab remains loading
+the same normalized `pendingUrl`. The signal contains no URL, path, query,
+request ID, tab ID, page text, or cookie. The daemon correlates its hostname and
+request start to one live public exact unknown-host relay within five seconds,
+then rechecks valid complete TLS records, less than 8 KiB downstream, and no
+recent progress. Relay silence alone can no longer close a connection. Each
+accepted signal advances only one incomplete local stage. After system,
+app-owned DNS, and two distinct local strategies, the final relay closes only
+after independent direct/owned-Geph confirmation succeeds; refusal or failure
+keeps it open. Static/direct/protected policy, Discord, YouTube, Googlevideo,
+external Geph, and external network settings remain excluded. No hostname rule
+was added.
+
+Current verification passes Python/script `1105` plus `41` subtests, Chromium
+`24`, Safari bridge `7`, Rust tray `84`, core `35`, Windows adapter `241`, and
+both userspace evaluation crates `40` each. Python compilation, Rust formatting,
+all five Clippy checks, project continuity, and `git diff --check` pass. The next
+verified action is to complete remaining full Rust/project checks, push this
+review hardening to PR #313, resolve both review conversations, and merge only
+after required checks are green. Then require exact-main CI/audit/Windows and
+exactly one fresh protected qualification. Only that newly qualified artifact
+may enter another controlled workstation transaction, with `xpersonatoy.com`
+early in the real browser smoke and immediate exact rollback on the first
+failure.
 
 ## Previous Checkpoint
 

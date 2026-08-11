@@ -35,6 +35,20 @@ private func validIncompleteResponseSignal() -> [String: Any] {
   ]
 }
 
+private func validPendingNavigationSignal() -> [String: Any] {
+  [
+    "schema_version": 3,
+    "signal_id": "abcdef0123456789abcdef0123456789",
+    "source": "browser_extension",
+    "host": "example.net",
+    "category": "navigation_pending",
+    "confidence_bps": 10_000,
+    "observed_at_unix_ms": 1_008_000,
+    "request_started_at_unix_ms": 1_000_000,
+    "top_level": true,
+  ]
+}
+
 final class SemanticBridgeTests: XCTestCase {
   func testAcceptsExactSemanticSignal() throws {
     let data = try XCTUnwrap(
@@ -53,6 +67,17 @@ final class SemanticBridgeTests: XCTestCase {
     let object = try XCTUnwrap(value as? [String: Any])
     XCTAssertEqual(object["schema_version"] as? Int, 2)
     XCTAssertEqual(object["category"] as? String, "incomplete_response")
+  }
+
+  func testAcceptsPrivacyBoundedPendingNavigationSignal() throws {
+    let data = try XCTUnwrap(
+      SemanticBridge.validatedSignalData(validPendingNavigationSignal())
+    )
+    let value = try JSONSerialization.jsonObject(with: data)
+    let object = try XCTUnwrap(value as? [String: Any])
+    XCTAssertEqual(object["schema_version"] as? Int, 3)
+    XCTAssertEqual(object["category"] as? String, "navigation_pending")
+    XCTAssertEqual(object["request_started_at_unix_ms"] as? Int, 1_000_000)
   }
 
   func testRejectsExpandedOrMalformedSignal() {
@@ -75,6 +100,14 @@ final class SemanticBridgeTests: XCTestCase {
     var wrongV2Category = validIncompleteResponseSignal()
     wrongV2Category["category"] = "regional_access_denied"
     XCTAssertNil(SemanticBridge.validatedSignalData(wrongV2Category))
+
+    var missingV3Start = validPendingNavigationSignal()
+    missingV3Start.removeValue(forKey: "request_started_at_unix_ms")
+    XCTAssertNil(SemanticBridge.validatedSignalData(missingV3Start))
+
+    var expandedV3 = validPendingNavigationSignal()
+    expandedV3["request_id"] = "browser-private"
+    XCTAssertNil(SemanticBridge.validatedSignalData(expandedV3))
   }
 
   func testNativeFrameIsLittleEndianAndBounded() throws {

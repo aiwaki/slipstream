@@ -24,6 +24,10 @@ enum SemanticBridge {
     "top_level",
   ]
 
+  private static let pendingNavigationSignalFields = signalFields.union([
+    "request_started_at_unix_ms",
+  ])
+
   private static let responseFields: Set<String> = [
     "accepted",
     "action",
@@ -47,11 +51,14 @@ enum SemanticBridge {
   static func validatedSignalData(_ value: Any) -> Data? {
     guard
       let object = value as? [String: Any],
-      Set(object.keys) == signalFields,
       let version = integer(object["schema_version"]),
+      Set(object.keys) == (
+        version == 3 ? pendingNavigationSignalFields : signalFields
+      ),
       let category = object["category"] as? String,
       (version == 1 && category == "regional_access_denied")
-        || (version == 2 && category == "incomplete_response"),
+        || (version == 2 && category == "incomplete_response")
+        || (version == 3 && category == "navigation_pending"),
       let signalID = object["signal_id"] as? String,
       signalID.count == 32,
       signalID.utf8.allSatisfy({
@@ -64,6 +71,8 @@ enum SemanticBridge {
       confidence <= 10_000,
       let observedAt = integer(object["observed_at_unix_ms"]),
       observedAt > 0,
+      version != 3
+        || integer(object["request_started_at_unix_ms"]).map({ $0 > 0 }) == true,
       isBoolean(object["top_level"]),
       JSONSerialization.isValidJSONObject(object),
       let data = try? JSONSerialization.data(withJSONObject: object),

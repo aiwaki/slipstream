@@ -18,12 +18,17 @@ function createWorker({
     accepted: true,
     action: "confirm_exact_host_geo_exit"
   },
-  currentTabUrl = "https://partial.example/page"
+  currentTab = {
+    status: "complete",
+    url: "https://partial.example/page"
+  }
 } = {}) {
+  let nowUnixMs = 1_700_000_000_000;
   const calls = {
     native: [],
     reload: [],
     timeout: [],
+    pendingTimeouts: [],
     beforeRequestListener: null,
     beforeRedirectListener: null,
     completedListener: null,
@@ -61,7 +66,7 @@ function createWorker({
     },
     tabs: {
       get() {
-        return Promise.resolve({ url: currentTabUrl });
+        return Promise.resolve(currentTab);
       },
       reload(tabId) {
         calls.reload.push(tabId);
@@ -108,13 +113,17 @@ function createWorker({
     },
     Date: {
       now() {
-        return 1_700_000_000_000;
+        return nowUnixMs;
       }
     },
     importScripts() {},
     setTimeout(callback, delay) {
       calls.timeout.push(delay);
-      callback();
+      if (delay === 8000) {
+        calls.pendingTimeouts.push(callback);
+      } else {
+        callback();
+      }
       return 1;
     }
   });
@@ -126,6 +135,9 @@ function createWorker({
   });
   return {
     before: calls.beforeRequestListener,
+    advanceClock(milliseconds) {
+      nowUnixMs += milliseconds;
+    },
     calls,
     completed: calls.completedListener,
     error: calls.errorListener,
@@ -189,13 +201,16 @@ test("incomplete top-frame request confirms and reloads the same host once", asy
     observed_at_unix_ms: 1_700_000_000_000,
     top_level: true
   });
-  assert.deepEqual(calls.timeout, [250]);
+  assert.deepEqual(calls.timeout, [8000, 250]);
   assert.deepEqual(calls.reload, [17]);
 });
 
 test("accepted confirmation does not reload after the tab changes host", async () => {
   const { before, calls, error } = createWorker({
-    currentTabUrl: "https://other.example/"
+    currentTab: {
+      status: "complete",
+      url: "https://other.example/"
+    }
   });
 
   before({
@@ -252,8 +267,79 @@ test("rejected confirmation never schedules a reload", async () => {
   await settleWorkerPromises();
 
   assert.equal(calls.native.length, 1);
-  assert.deepEqual(calls.timeout, []);
+  assert.deepEqual(calls.timeout, [8000]);
   assert.deepEqual(calls.reload, []);
+});
+
+test("still-pending about:blank navigation sends one privacy-bounded v3 signal", async () => {
+  const { advanceClock, before, calls } = createWorker({
+    nativeResponse: {
+      schema_version: 1,
+      accepted: true,
+      action: "retry_pending_navigation"
+    },
+    currentTab: {
+      status: "loading",
+      url: "about:blank",
+      pendingUrl: "https://Pending.Example/private?secret=yes"
+    }
+  });
+
+  before({
+    requestId: "request-pending",
+    type: "main_frame",
+    method: "GET",
+    frameId: 0,
+    parentFrameId: -1,
+    tabId: 31,
+    url: "https://Pending.Example/private?secret=yes"
+  });
+  await settleWorkerPromises();
+  advanceClock(8000);
+  calls.pendingTimeouts[0]();
+  await settleWorkerPromises();
+
+  assert.equal(calls.native.length, 1);
+  assert.deepEqual(plain(calls.native[0].signal), {
+    schema_version: 3,
+    signal_id: "2a".repeat(16),
+    source: "browser_extension",
+    host: "pending.example",
+    category: "navigation_pending",
+    confidence_bps: 10000,
+    observed_at_unix_ms: 1_700_000_008_000,
+    request_started_at_unix_ms: 1_700_000_000_000,
+    top_level: true
+  });
+  assert.deepEqual(calls.reload, []);
+});
+
+test("committed, completed, and cross-host tabs never send pending signals", async () => {
+  for (const currentTab of [
+    { status: "complete", url: "https://pending.example/" },
+    {
+      status: "loading",
+      url: "about:blank",
+      pendingUrl: "https://other.example/"
+    },
+    { status: "loading", url: "https://pending.example/" }
+  ]) {
+    const { advanceClock, before, calls } = createWorker({ currentTab });
+    before({
+      requestId: `request-${calls.timeout.length}`,
+      type: "main_frame",
+      method: "GET",
+      frameId: 0,
+      parentFrameId: -1,
+      tabId: 32,
+      url: "https://pending.example/"
+    });
+    await settleWorkerPromises();
+    advanceClock(8000);
+    calls.pendingTimeouts[0]();
+    await settleWorkerPromises();
+    assert.deepEqual(calls.native, []);
+  }
 });
 
 test("ambiguous request errors never cross native messaging", async () => {

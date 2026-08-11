@@ -11,6 +11,7 @@ from semantic_route_signal import (
     parse_semantic_route_signal,
     parse_semantic_route_signal_v1,
     parse_semantic_route_signal_v2,
+    parse_semantic_route_signal_v3,
     reduce_semantic_route_signal,
 )
 
@@ -18,6 +19,7 @@ from semantic_route_signal import (
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts" / "semantic-route-signal-v1.json"
 CONTRACT_V2 = ROOT / "contracts" / "semantic-route-signal-v2.json"
+CONTRACT_V3 = ROOT / "contracts" / "semantic-route-signal-v3.json"
 
 
 def _merged(defaults, override):
@@ -140,9 +142,43 @@ def test_python_executes_semantic_route_signal_v2_parser_contract():
         assert caught.value.code == vector["expected_error"], vector["name"]
 
 
-def test_dispatcher_accepts_frozen_v1_and_additive_v2():
+def test_python_executes_semantic_route_signal_v3_contract():
+    contract = json.loads(CONTRACT_V3.read_text())
+
+    for vector in contract["vectors"]:
+        signal_payload = _merged(contract["signal_defaults"], vector.get("signal"))
+        signal = parse_semantic_route_signal_v3(json.dumps(signal_payload))
+        context = SemanticRouteSignalContext(
+            **_merged(contract["context_defaults"], vector.get("context"))
+        )
+
+        decision = reduce_semantic_route_signal(signal, context)
+
+        assert decision.__dict__ == vector["expected"], vector["name"]
+
+
+def test_python_executes_semantic_route_signal_v3_parser_contract():
+    contract = json.loads(CONTRACT_V3.read_text())
+    for vector in contract["parser_vectors"]:
+        payload = {
+            **contract["signal_defaults"],
+            **vector.get("replace", {}),
+            **vector.get("add", {}),
+        }
+        if field := vector.get("remove"):
+            payload.pop(field)
+
+        with pytest.raises(SemanticSignalError) as caught:
+            parse_semantic_route_signal_v3(json.dumps(payload))
+
+        assert caught.value.code == vector["expected_error"], vector["name"]
+
+
+def test_dispatcher_accepts_frozen_v1_and_additive_v2_v3():
     v1 = json.loads(CONTRACT.read_text())["signal_defaults"]
     v2 = json.loads(CONTRACT_V2.read_text())["signal_defaults"]
+    v3 = json.loads(CONTRACT_V3.read_text())["signal_defaults"]
 
     assert parse_semantic_route_signal(json.dumps(v1)).schema_version == 1
     assert parse_semantic_route_signal(json.dumps(v2)).schema_version == 2
+    assert parse_semantic_route_signal(json.dumps(v3)).schema_version == 3

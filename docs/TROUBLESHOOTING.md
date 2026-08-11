@@ -990,15 +990,19 @@ strategies. It never changes the system resolver.
 If a browser visibly remains on `about:blank` but copying the address produces
 the requested site, the target navigation is pending and has not committed its
 first document. This is not evidence that the browser opened the wrong URL.
-For an eligible public unknown host, valid complete TLS records followed by
-eight seconds without downstream progress and less than 8 KiB of total server
-data may close only that exact relay. The browser decides whether to retry; the
-daemon does not replay the encrypted request. Each retry advances one local
-stage, and the full system, app-owned DNS, and two-strategy evidence ladder is
-still required before independent owned-Geph confirmation can authorize a later
-request. Direct, static, and protected routes are excluded. A curl response
-that consists of a JavaScript challenge does not replace a fresh real-browser
-check for this symptom.
+The daemon must not infer this browser state from a quiet connection. After
+eight seconds, the companion may send a privacy-bounded `navigation_pending`
+signal only while the same top-level HTTPS `pendingUrl` is still loading. The
+daemon then correlates its hostname and request start to one live public
+unknown-host relay with valid complete TLS records, less than 8 KiB of server
+data, and no recent downstream progress. Only that relay may close so the
+browser can decide whether to retry; the daemon does not replay the encrypted
+request. Each retry advances one local stage. After the full system, app-owned
+DNS, and two-strategy ladder, the final relay remains open unless independent
+direct and owned-Geph confirmation was actually scheduled and succeeded.
+Direct, static, and protected routes are excluded. A curl response that consists
+of a JavaScript challenge does not replace a fresh real-browser check for this
+symptom.
 
 If every required local stage completes one TLS record but then leaves the next
 framed record incomplete, the daemon may confirm a real HTTPS payload through

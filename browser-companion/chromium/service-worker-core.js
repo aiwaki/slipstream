@@ -11,6 +11,7 @@
   const CONFIRMATION_RELOAD_DELAY_MS = 7000;
   const COMPLETED_CONFIRMATION_RELOAD_DELAY_MS = 250;
   const INCOMPLETE_RESPONSE_CANDIDATE_TTL_MS = 5 * 60 * 1000;
+  const PENDING_NAVIGATION_DELAY_MS = 8000;
   const INCOMPLETE_RESPONSE_STORAGE_PREFIX =
     "slipstream.incomplete-response.";
 
@@ -122,6 +123,7 @@
       request_id: details.requestId,
       tab_id: details.tabId,
       host,
+      request_started_at_unix_ms: nowUnixMs,
       expires_at_unix_ms:
         nowUnixMs + INCOMPLETE_RESPONSE_CANDIDATE_TTL_MS
     };
@@ -140,16 +142,67 @@
       typeof candidate !== "object" ||
       Array.isArray(candidate) ||
       Object.keys(candidate).sort().join(",") !==
-        "expires_at_unix_ms,host,request_id,tab_id" ||
+        "expires_at_unix_ms,host,request_id,request_started_at_unix_ms,tab_id" ||
       candidate.request_id !== details.requestId ||
       candidate.tab_id !== details.tabId ||
       candidate.host !== normalizedHttpsHostname(details.url) ||
+      !Number.isSafeInteger(candidate.request_started_at_unix_ms) ||
+      candidate.request_started_at_unix_ms <= 0 ||
       !Number.isSafeInteger(candidate.expires_at_unix_ms) ||
       candidate.expires_at_unix_ms < nowUnixMs
     ) {
       return false;
     }
     return true;
+  }
+
+  function tabHasPendingNavigation(tab, candidate) {
+    return Boolean(
+      tab &&
+        candidate &&
+        tab.status === "loading" &&
+        normalizedHttpsHostname(tab.pendingUrl) === candidate.host
+    );
+  }
+
+  function buildPendingNavigationSignal(
+    candidate,
+    tab,
+    nowUnixMs,
+    randomBytes
+  ) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      Object.keys(candidate).sort().join(",") !==
+        "expires_at_unix_ms,host,request_id,request_started_at_unix_ms,tab_id" ||
+      !Number.isSafeInteger(nowUnixMs) ||
+      nowUnixMs <= 0 ||
+      !Number.isSafeInteger(candidate.request_started_at_unix_ms) ||
+      candidate.request_started_at_unix_ms <= 0 ||
+      nowUnixMs - candidate.request_started_at_unix_ms <
+        PENDING_NAVIGATION_DELAY_MS ||
+      candidate.expires_at_unix_ms < nowUnixMs ||
+      !tabHasPendingNavigation(tab, candidate)
+    ) {
+      return null;
+    }
+    const id = signalId(randomBytes);
+    if (!id) {
+      return null;
+    }
+    return {
+      schema_version: 3,
+      signal_id: id,
+      source: "browser_extension",
+      host: candidate.host,
+      category: "navigation_pending",
+      confidence_bps: MAX_CONFIDENCE_BPS,
+      observed_at_unix_ms: nowUnixMs,
+      request_started_at_unix_ms: candidate.request_started_at_unix_ms,
+      top_level: true
+    };
   }
 
   function buildIncompleteResponseSignal(
@@ -246,6 +299,21 @@
       });
     }
 
+    function peek(details) {
+      return enqueue(async () => {
+        const key = incompleteResponseStorageKey(details?.requestId);
+        if (!key) {
+          return null;
+        }
+        let candidate = memory.get(key) ?? null;
+        if (!candidate && durable) {
+          const stored = await durable.get(key);
+          candidate = stored?.[key] ?? null;
+        }
+        return candidate;
+      });
+    }
+
     function discard(details) {
       return enqueue(async () => {
         const key = incompleteResponseStorageKey(details?.requestId);
@@ -259,7 +327,7 @@
       });
     }
 
-    return Object.freeze({ discard, remember, take });
+    return Object.freeze({ discard, peek, remember, take });
   }
 
   function reloadInstruction(nativeResponse, signal) {
@@ -295,6 +363,7 @@
 
   scope.SlipstreamServiceWorkerCore = Object.freeze({
     buildIncompleteResponseSignal,
+    buildPendingNavigationSignal,
     buildSemanticSignal,
     browserOwnedHostname,
     createIncompleteResponseTracker,
@@ -302,8 +371,10 @@
     incompleteResponseCandidate,
     incompleteResponseStorageKey,
     normalizedHttpsHostname,
+    pendingNavigationDelayMs: PENDING_NAVIGATION_DELAY_MS,
     reloadInstruction,
     signalId,
+    tabHasPendingNavigation,
     tabStillOnSignalHost
   });
 })(globalThis);
