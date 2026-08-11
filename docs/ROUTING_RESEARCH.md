@@ -300,6 +300,26 @@ completes. A synthetic worker page by itself cannot authorize production
 routing. Installed package size, update/uninstall behavior, idle cost, and
 clean-profile behavior remain separate product gates.
 
+Branch `codex/owned-browser-probe-correlation` now implements that closed
+daemon-side seam without composing a runtime worker and freezes its job/result
+shape in `contracts/pending-navigation-probe-v1.json`. The daemon mints a
+random 128-bit capability only for an already-live relay that independently satisfies
+the existing public unknown-host, eight-second idle, low-byte, complete TLS
+record, and policy exclusions. The capability retains the exact relay object,
+host, browser-request start, and local recovery stage; it is process-local,
+one-shot, capped at 32 entries, expires after 30 seconds, and is revoked when
+the relay closes. Its result must report the same host/start after a separate
+eight-second `navigation_pending` observation. A valid capability is consumed
+even if wrong-host, early, expired, rebound, or otherwise invalid, and replay is
+inert. Acceptance calls the existing local-stage reducer on the bound relay,
+never another same-host lookup. The async fixture starts two same-host relays
+with the same request timestamp and proves only the capability owner exits;
+the second remains open. Focused relay and traffic verification covers 556
+tests; the complete daemon suite passes 854, script tests pass 278, and the
+unchanged Chromium companion passes 24. The next boundary is owner-only
+job/result IPC plus a lazy worker that cannot recursively create its own probe
+jobs; neither is runtime-composed yet.
+
 ## Adjacent Routing Projects Audit (2026-08-02)
 
 This audit read implementation code at the commits below rather than treating
