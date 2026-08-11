@@ -99,6 +99,7 @@ CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
 DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
 DEVTOOLS_TIMEOUT = 15.0
 MAX_DEVTOOLS_RESPONSE = 64 * 1024
+MAX_FOOTPRINT_RESPONSE = 1024 * 1024
 MAX_WEBSOCKET_HEADERS = 16 * 1024
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WORKER_READY_EXPRESSION = """
@@ -1701,6 +1702,63 @@ def _owned_chrome_rss_kib(
     return sum(samples)
 
 
+def _parse_physical_footprint_kib(payload: bytes, path: Path) -> int:
+    document = _decode_json_object(payload, path)
+    footprint_bytes = document.get("total footprint")
+    if (
+        not isinstance(footprint_bytes, int)
+        or isinstance(footprint_bytes, bool)
+        or footprint_bytes <= 0
+    ):
+        raise QualificationError("Chrome physical footprint total is invalid")
+    return (footprint_bytes + 1023) // 1024
+
+
+def _owned_chrome_physical_footprint_kib(
+    uid: int,
+    gid: int,
+    executable: Path,
+    profile: Path,
+    ownership: ChromeOwnership | None = None,
+) -> int:
+    processes = _owned_chrome_processes(uid, executable, profile, ownership)
+    if not processes:
+        raise QualificationError("cannot measure absent owned Chrome processes")
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix=".chrome-footprint-",
+        suffix=".json",
+        dir=profile,
+    )
+    output_path = Path(raw_path)
+    try:
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
+    try:
+        command = [
+            "/usr/bin/footprint",
+            "-j",
+            str(output_path),
+            "-f",
+            "bytes",
+            "--noCategories",
+        ]
+        for process in processes:
+            command.extend(("-p", str(process.pid)))
+        result = _run(tuple(command), check=False)
+        if result.returncode != 0:
+            raise QualificationError("cannot measure Chrome physical footprint")
+        payload = _read_owner_bounded_file(
+            output_path,
+            uid,
+            MAX_FOOTPRINT_RESPONSE,
+        )
+        return _parse_physical_footprint_kib(payload, output_path)
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
 def _record_chrome_metrics(
     metrics: dict[str, int],
     *,
@@ -2388,6 +2446,16 @@ def _run_chrome(
             raise QualificationError(
                 f"Chrome semantic page timed out with fixture evidence: "
                 f"{fixture.snapshot()!r}"
+            )
+        if metrics is not None:
+            metrics["physical_footprint_kib"] = (
+                _owned_chrome_physical_footprint_kib(
+                    uid,
+                    gid,
+                    executable,
+                    profile,
+                    ownership,
+                )
             )
     except BaseException as exc:
         failure = exc

@@ -947,6 +947,35 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             check=False,
         )
 
+    def test_physical_footprint_parser_uses_the_deduplicated_total(self) -> None:
+        payload = json.dumps(
+            {
+                "processes": [
+                    {"pid": 101, "footprint": 400_000_000},
+                    {"pid": 102, "footprint": 300_000_000},
+                ],
+                "total footprint": 524_288_001,
+                "unit": "bytes",
+            }
+        ).encode("utf-8")
+        self.assertEqual(
+            smoke._parse_physical_footprint_kib(
+                payload,
+                Path("/tmp/footprint.json"),
+            ),
+            512_001,
+        )
+
+    def test_physical_footprint_parser_rejects_missing_total(self) -> None:
+        with self.assertRaisesRegex(
+            smoke.QualificationError,
+            "physical footprint total",
+        ):
+            smoke._parse_physical_footprint_kib(
+                b'{"unit":"bytes"}',
+                Path("/tmp/footprint.json"),
+            )
+
     def test_launchservices_copies_an_extensionless_bundle_into_the_profile(
         self,
     ) -> None:

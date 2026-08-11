@@ -160,10 +160,12 @@ application bootstrap context required for sandboxed helpers to reach Chrome's
 Mach rendezvous service. Direct binary LaunchAgent attempts failed even with an
 Aqua session declaration. The gate requires the exact native-message boundary
 and styled resource callback, and reports
-launch-to-worker, launch-to-semantic, and aggregate owned-process RSS
-measurements. Its conservative regression budgets are 15 seconds, 25 seconds,
-and 768 MiB respectively. This is qualification infrastructure, not yet an
-installed runtime component and not authority over an unrelated user tab.
+launch-to-worker, launch-to-semantic, de-duplicated physical footprint, and
+aggregate owned-process RSS measurements. Its conservative regression budgets
+are 15 seconds, 25 seconds, and 768 MiB of physical footprint respectively.
+Aggregate RSS is diagnostic only because it counts shared mappings once per
+Chrome process. This is qualification infrastructure, not yet an installed
+runtime component and not authority over an unrelated user tab.
 
 ## Chrome Web Store Package
 
@@ -337,7 +339,8 @@ uninstall, and an unsigned Safari app-extension build.
   automatic local integration delivered by Slipstream, with exact identity,
   update, privacy, ownership, uninstall, and clean-profile evidence.
 - The unified-headless extension/native-message path and conservative
-  launch/RSS budgets are implemented in the ordinary Chrome for Testing gate;
+  launch/physical-footprint budgets are implemented in the ordinary Chrome for
+  Testing gate;
   real-browser CI evidence and an original-navigation correlation fixture are
   still required before any runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit

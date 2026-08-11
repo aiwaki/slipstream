@@ -67,10 +67,11 @@ the first local-worker qualification slice. The ordinary Chromium
 `webRequest` CI gate now starts Chrome for Testing through LaunchServices in
 unified-headless mode without a browser window, retains the sandbox and exact
 owner-private profile, loads the frozen-origin companion, exercises native
-messaging and styled-page
-completion, and fails if worker readiness exceeds 15 seconds, semantic
-completion exceeds 25 seconds, or sampled aggregate Chrome RSS exceeds 768
-MiB. Local evidence is green: 276 script tests, 850 daemon tests, 66 focused
+messaging and styled-page completion, and fails if worker readiness exceeds 15
+seconds, semantic completion exceeds 25 seconds, or de-duplicated physical
+footprint exceeds 768 MiB. Aggregate RSS remains a diagnostic because macOS
+counts shared mappings once per process. Local evidence is green: 276 script
+tests, 850 daemon tests, 66 focused
 traffic contracts, project-state validation, Python compilation, and
 `git diff --check`. Real Chrome for Testing evidence for this draft commit is
 still pending CI. The first two real-browser attempts, run `31532156159` job
@@ -80,12 +81,19 @@ helpers could not look up the parent Mach rendezvous service and reported
 bootstrap `Permission denied`, so the extension worker never appeared. The
 correction keeps unified-headless mode and the sandbox but launches the app
 through LaunchServices, the same macOS application boundary already proven by
-the headed protected gate; a rerun is required.
+the headed protected gate. The third attempt, run `31532847620` job
+`93916800053`, then passed worker readiness, native messaging, the real
+incomplete-response observation, reload, and styled-page completion. It failed
+only because the first memory gate summed per-process RSS to 1,142,496 KiB,
+which double-counts shared mappings. The corrected gate uses Apple's
+multi-process `footprint` total, which de-duplicates shared objects, while
+retaining aggregate RSS as a diagnostic; a rerun is required.
 
 The next verified action is to obtain green CI evidence for PR #324 and record
-its measured latency/RSS. Then add a closed correlation fixture proving that
-one bounded worker observation maps to one original pending relay and that the
-original user-visible navigation completes. Package-size, installed update,
+its measured latency/physical-footprint values. Then add a closed correlation
+fixture proving that one bounded worker observation maps to one original
+pending relay and that the original user-visible navigation completes.
+Package-size, installed update,
 uninstall, idle-cost, and clean-profile evidence remain required before runtime
 composition. Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is

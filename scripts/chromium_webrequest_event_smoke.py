@@ -19,7 +19,7 @@ MAX_NATIVE_MESSAGE = 64 * 1024
 WORKER_READY_MARKER = b"\nglobalThis.__slipstreamWorkerReadyV1 = true;\n"
 HEADLESS_WORKER_READY_BUDGET_MS = 15_000
 HEADLESS_SEMANTIC_READY_BUDGET_MS = 25_000
-HEADLESS_PEAK_RSS_BUDGET_KIB = 768 * 1024
+HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB = 768 * 1024
 
 
 def _write_owner_file(
@@ -302,7 +302,7 @@ def _validate_headless_performance(
     budgets = {
         "launch_to_worker_ready_ms": HEADLESS_WORKER_READY_BUDGET_MS,
         "launch_to_semantic_ready_ms": HEADLESS_SEMANTIC_READY_BUDGET_MS,
-        "peak_rss_kib": HEADLESS_PEAK_RSS_BUDGET_KIB,
+        "physical_footprint_kib": HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB,
     }
     for key, budget in budgets.items():
         value = metrics.get(key)
@@ -319,12 +319,22 @@ def _validate_headless_performance(
         raise semantic.QualificationError(
             "unified headless resident memory was not sampled at both milestones"
         )
+    aggregate_rss = metrics.get("peak_rss_kib")
+    if (
+        not isinstance(aggregate_rss, int)
+        or isinstance(aggregate_rss, bool)
+        or aggregate_rss <= 0
+    ):
+        raise semantic.QualificationError(
+            "unified headless aggregate RSS diagnostic is missing"
+        )
     return {
         **{key: metrics[key] for key in budgets},
+        "peak_aggregate_rss_kib": aggregate_rss,
         "rss_samples": samples,
         "worker_ready_budget_ms": HEADLESS_WORKER_READY_BUDGET_MS,
         "semantic_ready_budget_ms": HEADLESS_SEMANTIC_READY_BUDGET_MS,
-        "peak_rss_budget_kib": HEADLESS_PEAK_RSS_BUDGET_KIB,
+        "physical_footprint_budget_kib": HEADLESS_PHYSICAL_FOOTPRINT_BUDGET_KIB,
     }
 
 

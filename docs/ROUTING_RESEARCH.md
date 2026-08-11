@@ -248,9 +248,10 @@ avoids a visible browser window, uses an owner-private fresh profile, and
 requires the existing native-message and styled-resource callbacks. It records
 launch-to-worker latency,
 launch-to-semantic latency, and sampled aggregate RSS for the exact owned Chrome
-process family, with conservative fail-closed budgets of 15 seconds, 25
-seconds, and 768 MiB. Local unit and daemon suites pass; real-browser CI evidence
-for the draft commit remains pending.
+process family. The fail-closed budgets are 15 seconds, 25 seconds, and 768 MiB
+of de-duplicated physical footprint. Aggregate RSS remains diagnostic because
+shared mappings appear in each process's RSS. Local unit and daemon suites
+pass; real-browser CI evidence for the draft commit remains pending.
 
 The first two CI attempts (`31532156159` job `93914552229` and `31532531700`
 job `93915774541`) also established a macOS constraint: direct binary launch
@@ -261,6 +262,16 @@ remains absent. The harness now uses LaunchServices for the macOS application
 bootstrap context while still passing `--headless`; this keeps the sandbox and
 does not create a visible browser window. It must pass on the rerun before the
 mechanism is accepted.
+
+The third attempt (`31532847620`, job `93916800053`) passed the actual browser
+path: extension worker readiness, native messaging, the real incomplete-frame
+`webRequest` event, one reload, and styled-page completion. The sole failure was
+the initial memory metric: summing per-process RSS produced 1,142,496 KiB and
+crossed the 768 MiB budget, but that sum counts shared mappings once per Chrome
+process. The corrected measurement uses Apple's multi-process `footprint`
+total, which de-duplicates shared objects, and keeps the RSS sum only as a
+diagnostic. The 768 MiB gate is unchanged and now applies to physical
+footprint.
 
 The following closed fixture must prove that the worker's evidence can be
 correlated to one original pending relay and that the original navigation
