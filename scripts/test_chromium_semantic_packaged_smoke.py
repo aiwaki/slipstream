@@ -44,9 +44,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
     def _pending_navigation_signal(host: str) -> dict[str, object]:
         return {
             "category": smoke.PENDING_NAVIGATION_SCENARIO,
-            "confidence_bps": 10_000,
+            "confidence_bps": smoke.PENDING_NAVIGATION_CONFIDENCE_BPS,
             "host": host,
-            "observed_at_unix_ms": 1_008_000,
+            "observed_at_unix_ms": (
+                1_000_000 + smoke.PENDING_NAVIGATION_MIN_DELAY_MS
+            ),
             "request_started_at_unix_ms": 1_000_000,
             "schema_version": 3,
             "signal_id": "0123456789abcdef0123456789abcdef",
@@ -295,6 +297,33 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             if second is not None:
                 second.close()
             fixture.close()
+
+    def test_pending_navigation_tap_does_not_ack_failed_native_forward(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "failing-native-host"
+            target.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            body = json.dumps(
+                self._pending_navigation_signal(
+                    smoke.PENDING_NAVIGATION_FIXTURE_HOST
+                ),
+                sort_keys=True,
+            ).encode("utf-8")
+            forwarded = subprocess.run(
+                (str(tap.executable),),
+                input=struct.pack("=I", len(body)) + body,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(forwarded.returncode, 7)
+            self.assertFalse(tap.capture.exists())
 
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
         command = smoke._chrome_command(

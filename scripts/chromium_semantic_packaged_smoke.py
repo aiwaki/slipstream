@@ -73,6 +73,23 @@ FIXTURE_SCENARIOS = frozenset(
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
 CHROME_TIMEOUT = 55.0
 PENDING_NAVIGATION_SIGNAL_TIMEOUT = 20.0
+PENDING_NAVIGATION_MIN_DELAY_MS = 8_000
+PENDING_NAVIGATION_CONFIDENCE_BPS = 10_000
+NATIVE_MESSAGE_MAX_BODY = 64 * 1024
+NATIVE_MESSAGE_FORWARD_TIMEOUT = 15.0
+PENDING_NAVIGATION_SIGNAL_KEYS = frozenset(
+    (
+        "category",
+        "confidence_bps",
+        "host",
+        "observed_at_unix_ms",
+        "request_started_at_unix_ms",
+        "schema_version",
+        "signal_id",
+        "source",
+        "top_level",
+    )
+)
 CHROME_JOB_PREFIX = "dev.slipstream.chromium-semantic"
 DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
 DEVTOOLS_TIMEOUT = 15.0
@@ -241,18 +258,7 @@ def _validate_pending_navigation_signal(
     payload: dict[str, object],
     expected_host: str,
 ) -> None:
-    expected_keys = {
-        "category",
-        "confidence_bps",
-        "host",
-        "observed_at_unix_ms",
-        "request_started_at_unix_ms",
-        "schema_version",
-        "signal_id",
-        "source",
-        "top_level",
-    }
-    if set(payload) != expected_keys:
+    if set(payload) != PENDING_NAVIGATION_SIGNAL_KEYS:
         raise QualificationError(
             "pending-navigation signal contains non-contract fields"
         )
@@ -261,7 +267,7 @@ def _validate_pending_navigation_signal(
         or payload.get("source") != "browser_extension"
         or payload.get("host") != expected_host
         or payload.get("category") != PENDING_NAVIGATION_SCENARIO
-        or payload.get("confidence_bps") != 10_000
+        or payload.get("confidence_bps") != PENDING_NAVIGATION_CONFIDENCE_BPS
         or payload.get("top_level") is not True
     ):
         raise QualificationError("pending-navigation signal metadata is invalid")
@@ -275,7 +281,7 @@ def _validate_pending_navigation_signal(
         or type(observed_at) is not int
         or type(request_started_at) is not int
         or request_started_at <= 0
-        or observed_at < request_started_at + 8_000
+        or observed_at < request_started_at + PENDING_NAVIGATION_MIN_DELAY_MS
     ):
         raise QualificationError("pending-navigation signal timing is invalid")
 
@@ -301,19 +307,10 @@ def _pending_navigation_tap_source(
         "    return bytes(data)\n"
         "header = read_exact(sys.stdin.buffer, 4)\n"
         "length = struct.unpack('=I', header)[0]\n"
-        "if length <= 0 or length > 65536:\n"
+        f"if length <= 0 or length > {NATIVE_MESSAGE_MAX_BODY}:\n"
         "    raise SystemExit(3)\n"
         "body = read_exact(sys.stdin.buffer, length)\n"
         "payload = json.loads(body)\n"
-        "if payload.get('category') == 'navigation_pending':\n"
-        "    temporary = f'{CAPTURE}.{os.getpid()}.tmp'\n"
-        "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
-        "    try:\n"
-        "        os.write(fd, body)\n"
-        "        os.fsync(fd)\n"
-        "    finally:\n"
-        "        os.close(fd)\n"
-        "    os.replace(temporary, CAPTURE)\n"
         "child = subprocess.Popen(\n"
         "    [TARGET, *sys.argv[1:]],\n"
         "    stdin=subprocess.PIPE,\n"
@@ -321,15 +318,33 @@ def _pending_navigation_tap_source(
         "    stderr=subprocess.DEVNULL,\n"
         ")\n"
         "try:\n"
-        "    output, _ = child.communicate(header + body, timeout=15)\n"
+        "    output, _ = child.communicate(\n"
+        f"        header + body, timeout={NATIVE_MESSAGE_FORWARD_TIMEOUT!r}\n"
+        "    )\n"
         "except subprocess.TimeoutExpired:\n"
         "    child.kill()\n"
         "    child.communicate()\n"
         "    raise SystemExit(4)\n"
+        "if child.returncode != 0:\n"
+        "    raise SystemExit(child.returncode)\n"
+        "if payload.get('category') == 'navigation_pending':\n"
+        "    temporary = f'{CAPTURE}.{os.getpid()}.tmp'\n"
+        "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+        "    try:\n"
+        "        remaining = memoryview(body)\n"
+        "        while remaining:\n"
+        "            written = os.write(fd, remaining)\n"
+        "            if written <= 0:\n"
+        "                raise SystemExit(5)\n"
+        "            remaining = remaining[written:]\n"
+        "        os.fsync(fd)\n"
+        "    finally:\n"
+        "        os.close(fd)\n"
+        "    os.replace(temporary, CAPTURE)\n"
         "if output:\n"
         "    sys.stdout.buffer.write(output)\n"
         "    sys.stdout.buffer.flush()\n"
-        "raise SystemExit(child.returncode)\n"
+        "raise SystemExit(0)\n"
     ).encode("utf-8")
 
 

@@ -48,8 +48,8 @@
   resumed agent should need the checkpoint plus live git/PR/CI verification,
   not a reconstruction from conversation history.
 - After compaction, reconcile once and continue the next verified action. Do
-  not repeat broad discovery that the checkpoint and current source already
-  settle.
+  not repeat broad discovery when the checkpoint and current source have
+  already settled the question.
 
 ## Routing Invariants
 
