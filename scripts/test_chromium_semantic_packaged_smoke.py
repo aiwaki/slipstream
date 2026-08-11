@@ -232,6 +232,17 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
             manifest = json.loads(tap.manifest.read_text(encoding="utf-8"))
             self.assertTrue(smoke._is_exact_native_host(manifest, tap.executable))
+            self.assertEqual(
+                manifest["description"], smoke.NATIVE_HOST_DESCRIPTION
+            )
+            missing_description = dict(manifest)
+            missing_description.pop("description")
+            self.assertFalse(
+                smoke._is_exact_native_host(
+                    missing_description,
+                    tap.executable,
+                )
+            )
             self.assertFalse(tap.executable.is_relative_to(profile))
             self.assertTrue(tap.executable.is_relative_to(home))
             self.assertEqual(tap.runtime_directory.stat().st_mode & 0o777, 0o700)
@@ -2095,6 +2106,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             payload = json.dumps(
                 {
                     "name": smoke.NATIVE_HOST_NAME,
+                    "description": "Slipstream Browser Companion",
                     "path": str(expected_executable),
                     "type": "stdio",
                     "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
@@ -2154,6 +2166,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             payload = json.dumps(
                 {
                     "name": smoke.NATIVE_HOST_NAME,
+                    "description": "Slipstream Browser Companion",
                     "path": str(expected_executable),
                     "type": "stdio",
                     "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],
@@ -2201,6 +2214,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 json.dumps(
                     {
                         "name": smoke.NATIVE_HOST_NAME,
+                        "description": "Slipstream Browser Companion",
                         "path": str(expected_executable),
                         "type": "stdio",
                         "allowed_origins": [smoke.NATIVE_HOST_ORIGIN],

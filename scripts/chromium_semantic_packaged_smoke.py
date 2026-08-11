@@ -46,6 +46,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXTENSION = ROOT / "browser-companion" / "chromium"
 NATIVE_HOST_NAME = "dev.slipstream.semantic"
 NATIVE_HOST_ORIGIN = "chrome-extension://cecdingohhpfggapnlbghppcegbaciam/"
+NATIVE_HOST_DESCRIPTION = "Slipstream Browser Companion Qualification"
 NATIVE_HOST_RELATIVE_PATH = Path(
     "Library/Application Support/Google/Chrome/NativeMessagingHosts"
 ) / f"{NATIVE_HOST_NAME}.json"
@@ -497,6 +498,7 @@ def _create_pending_navigation_tap(
             json.dumps(
                 {
                     "allowed_origins": [NATIVE_HOST_ORIGIN],
+                    "description": NATIVE_HOST_DESCRIPTION,
                     "name": NATIVE_HOST_NAME,
                     "path": str(executable),
                     "type": "stdio",
@@ -519,6 +521,8 @@ def _is_exact_native_host(
 ) -> bool:
     return (
         payload.get("name") == NATIVE_HOST_NAME
+        and isinstance(payload.get("description"), str)
+        and bool(str(payload["description"]).strip())
         and payload.get("path") == str(expected_executable)
         and payload.get("type") == "stdio"
         and payload.get("allowed_origins") == [NATIVE_HOST_ORIGIN]

@@ -10,34 +10,32 @@ file.
 
 ## Current Checkpoint
 
-PR #316 is merged as live main
-`d799e261a077d81d5fe849e30d32fc5cc414a7b6`. Exact-main dependency audit
-`31495068046`, Windows qualification `31495067934`, and CI `31495067928`
-passed. Its single protected owned-Geph qualification `31495901891` failed, so
+PR #317 is merged as live main
+`66c94654dad165db50277ad91a15ac2f7d2d6e39`. Exact-main dependency audit
+`31500762534`, Windows qualification `31500762315`, and CI `31500762244`
+passed. Its single protected owned-Geph qualification `31501513573` failed, so
 it produced no installable artifact and no workstation transaction was
 attempted. Cleanup passed: the root daemon was absent and disabled, owned Geph
-passed its initial, trayless, and KeepAlive-recovered payload checks, the
-external listener was preserved, and system network state was not mutated.
+passed its initial, trayless, and KeepAlive-recovered HTTP 200 payload checks,
+the external listener was preserved, and system network state was not mutated.
 
 The failure remains isolated to the deterministic Chromium
-`navigation_pending` scenario before navigation began. The finite worker probe
-reported `native_host_not_found`, while the owner-private tap status file was
-absent. The same registration path starts the exact packaged Rust host in the
-other semantic scenarios, and the tap passes a direct framed-message
-roundtrip. The remaining evidence therefore points to the generated tap
-executable living inside the disposable Chrome profile, before any routing or
-owned-Geph request occurs.
+`navigation_pending` scenario before navigation began. Moving the generated
+tap from the Chrome profile into an owner-only Application Support runtime did
+not change `native_host_not_found`, and the tap status remained absent. Source
+comparison then found the exact manifest defect: the generated tap omitted the
+required string `description` present in the working packaged Rust manifest.
+The local `_is_exact_native_host` predicate also omitted that field, allowing
+the malformed manifest to pass unit validation before Chrome rejected it.
 
-Branch `codex/chromium-tap-owner-runtime` moves only this qualification tap to
-a unique owner-only runtime below the target user's Application Support,
-retains the Chrome profile only for browser state, and removes the exact tap
-runtime after diagnostic capture. The routing daemon, PF, DNS, Geph product
-lifecycle, and workstation remain unchanged. Focused verification passes all
-`56` Chromium harness tests. The next verified action is a small PR,
-exact-main gates, and exactly one fresh protected qualification for the new
-main SHA. Installation remains forbidden until that run proves all Chromium
-scenarios and cleanup; only its exact artifact may enter a controlled
-workstation transaction with immediate rollback on the first failed smoke.
+Branch `codex/chromium-tap-required-description` adds the missing field and
+makes a non-empty description part of the exact local manifest contract. It
+does not change routing, PF, DNS, Geph, product lifecycle, or workstation
+state. The next verified action is a small PR, exact-main gates, and exactly
+one fresh protected qualification for the new main SHA. Installation remains
+forbidden until that run proves all Chromium scenarios and cleanup; only its
+exact artifact may enter a controlled workstation transaction with immediate
+rollback on the first failed smoke.
 
 ## Previous Checkpoint
 
