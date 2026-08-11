@@ -281,6 +281,18 @@ event crossed the native boundary, one reload completed the styled page in
 confirming why it remains diagnostic rather than the physical-memory gate.
 System network state was not mutated.
 
+Two PR #328 jobs later resolved `stable` to Chrome for Testing
+`151.0.7922.138` rather than the proven `151.0.7922.77`. Both unchanged legacy
+extension runs failed because the exact MV3 service-worker target never became
+available; setup and LaunchServices completed, and the final DevTools retry
+reported connection refusal. This is upstream browser drift, not evidence
+against the new worker: the legacy job does not build or invoke the new Rust
+observer. The extension/webRequest contract is therefore pinned to the exact
+proven `.77` version for reproducibility. The new packaged extensionless CDP
+observer deliberately stays on current `stable`, so current-Chrome drift is
+still a required failure rather than being hidden; it is simply tested at the
+delivery path Slipstream now intends to ship.
+
 Code discovery for the following correlation slice attempted the repository's
 required knowledge-graph search first, but the MCP transport returned
 `Transport closed`. The fallback was therefore limited to exact v3 signal,
