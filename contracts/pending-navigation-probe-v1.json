@@ -9,6 +9,32 @@
     "max_live_capabilities": 32,
     "min_pending_observation_ms": 8000
   },
+  "ipc": {
+    "socket_path": "/var/run/slipstream-browser-probe.sock",
+    "claim_lease_ms": 5000,
+    "max_enqueue_age_ms": 5000,
+    "max_request_bytes": 2048,
+    "owner_only_mode": "0600",
+    "request_fields": {
+      "claim": [
+        "schema_version",
+        "operation"
+      ],
+      "submit": [
+        "schema_version",
+        "operation",
+        "result"
+      ]
+    },
+    "response_fields": [
+      "schema_version",
+      "accepted",
+      "operation",
+      "reason",
+      "job"
+    ],
+    "runtime_composed": false
+  },
   "privacy": {
     "job_fields": [
       "schema_version",

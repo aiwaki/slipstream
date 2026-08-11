@@ -351,9 +351,11 @@ uninstall, and an unsigned Safari app-extension build.
   launch/physical-footprint budgets are implemented in the ordinary Chrome for
   Testing gate and passed real-browser CI. The closed daemon-side correlation
   fixture now binds a one-shot capability to one original relay and proves that
-  only that relay completes among two same-host candidates. Owner-only
-  job/result IPC, lazy worker lifecycle, and self-probe loop suppression remain
-  required before runtime composition.
+  only that relay completes among two same-host candidates. A separate
+  owner-only job/result IPC seam now also proves bounded claim leases, worker
+  loss redelivery, exact submit delegation, socket mode, and exact cleanup on a
+  disposable path. The production socket is not created. Lazy worker lifecycle
+  and self-probe loop suppression remain required before runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
   incomplete-response v2. Protected unpacked-extension success does not prove
