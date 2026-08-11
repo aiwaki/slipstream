@@ -641,16 +641,17 @@ impl ChromeSession {
         self.launcher = Some(command.spawn().map_err(|_| error("chrome_launch_failed"))?);
 
         let deadline = Instant::now() + CHROME_LAUNCH_TIMEOUT;
+        let mut launcher_exited = false;
+        let mut observed_owned_chrome = false;
         while Instant::now() < deadline {
-            if let Some(status) = self
+            // Some Chrome builds let `open -W` return after LaunchServices has
+            // delegated the app. Readiness belongs to the exact owned Chrome
+            // process and DevTools file, not to the intermediary's lifetime.
+            launcher_exited |= self
                 .launcher
                 .as_mut()
                 .and_then(|launcher| launcher.try_wait().ok())
-            {
-                if status.is_some() {
-                    return Err(error("chrome_launch_failed"));
-                }
-            }
+                .is_some_and(|status| status.is_some());
             let processes = owned_chrome_processes(
                 self.uid,
                 &self.config.executable,
@@ -670,6 +671,7 @@ impl ChromeSession {
             {
                 return Err(error("chrome_ownership_ambiguous"));
             }
+            observed_owned_chrome |= !processes.is_empty();
             if !processes.is_empty()
                 && matches!(read_devtools_port(&self.profile, self.uid), Ok(Some(_)))
             {
@@ -677,7 +679,11 @@ impl ChromeSession {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        Err(error("chrome_launch_timeout"))
+        if launcher_exited && !observed_owned_chrome {
+            Err(error("chrome_launch_failed"))
+        } else {
+            Err(error("chrome_launch_timeout"))
+        }
     }
 
     fn observe_navigation(&mut self) -> ProbeResult<NavigationObservation> {
@@ -1139,6 +1145,45 @@ fn loopback_stream(port: u16, timeout: Duration) -> ProbeResult<TcpStream> {
     Ok(stream)
 }
 
+fn http_response_extent(response: &[u8]) -> ProbeResult<Option<(usize, usize)>> {
+    let Some(body_offset) = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|offset| offset + 4)
+    else {
+        return Ok(None);
+    };
+    let header = std::str::from_utf8(&response[..body_offset])
+        .map_err(|_| error("devtools_http_invalid"))?;
+    if !header.starts_with("HTTP/1.1 200 ") && !header.starts_with("HTTP/1.0 200 ") {
+        return Err(error("devtools_http_invalid"));
+    }
+    let mut content_length = None;
+    for line in header.lines().skip(1) {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(error("devtools_http_invalid"));
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            if content_length.is_some() {
+                return Err(error("devtools_http_invalid"));
+            }
+            content_length = value.trim().parse::<usize>().ok();
+            if content_length.is_none() {
+                return Err(error("devtools_http_invalid"));
+            }
+        }
+    }
+    let content_length = content_length.ok_or_else(|| error("devtools_http_invalid"))?;
+    let response_length = body_offset
+        .checked_add(content_length)
+        .filter(|length| *length as u64 <= MAX_HTTP_BYTES)
+        .ok_or_else(|| error("devtools_http_invalid"))?;
+    Ok(Some((body_offset, response_length)))
+}
+
 fn http_get(port: u16, path: &str) -> ProbeResult<Vec<u8>> {
     if !path.starts_with('/') || path.bytes().any(|byte| byte.is_ascii_whitespace()) {
         return Err(error("devtools_http_invalid"));
@@ -1150,21 +1195,28 @@ fn http_get(port: u16, path: &str) -> ProbeResult<Vec<u8>> {
     )
     .map_err(|_| error("devtools_http_invalid"))?;
     let mut response = Vec::new();
-    stream
-        .take(MAX_HTTP_BYTES + 1)
-        .read_to_end(&mut response)
-        .map_err(|_| error("devtools_http_invalid"))?;
-    if response.len() as u64 > MAX_HTTP_BYTES {
-        return Err(error("devtools_http_invalid"));
-    }
-    let body_offset = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|offset| offset + 4)
-        .ok_or_else(|| error("devtools_http_invalid"))?;
-    let header = std::str::from_utf8(&response[..body_offset])
-        .map_err(|_| error("devtools_http_invalid"))?;
-    if !header.starts_with("HTTP/1.1 200 ") && !header.starts_with("HTTP/1.0 200 ") {
+    let mut chunk = [0_u8; 4_096];
+    let (body_offset, response_length) = loop {
+        let received = stream
+            .read(&mut chunk)
+            .map_err(|_| error("devtools_http_invalid"))?;
+        if received == 0 {
+            return Err(error("devtools_http_invalid"));
+        }
+        response.extend_from_slice(&chunk[..received]);
+        if response.len() as u64 > MAX_HTTP_BYTES {
+            return Err(error("devtools_http_invalid"));
+        }
+        if let Some(extent) = http_response_extent(&response)? {
+            if response.len() > extent.1 {
+                return Err(error("devtools_http_invalid"));
+            }
+            if response.len() == extent.1 {
+                break extent;
+            }
+        }
+    };
+    if response.len() != response_length {
         return Err(error("devtools_http_invalid"));
     }
     Ok(response[body_offset..].to_vec())
@@ -1409,6 +1461,28 @@ mod tests {
         assert!(
             parse_websocket_location("ws://127.0.0.1:9222/devtools/browser/abc", 9222).is_err()
         );
+    }
+
+    #[test]
+    fn devtools_http_extent_uses_one_bounded_content_length() {
+        assert_eq!(
+            http_response_extent(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]").unwrap(),
+            Some((38, 40))
+        );
+        assert_eq!(
+            http_response_extent(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n").unwrap(),
+            None
+        );
+        assert!(http_response_extent(b"HTTP/1.1 200 OK\r\n\r\n[]").is_err());
+        assert!(http_response_extent(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n[]"
+        )
+        .is_err());
+        let oversized = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+            MAX_HTTP_BYTES
+        );
+        assert!(http_response_extent(oversized.as_bytes()).is_err());
     }
 
     #[test]
