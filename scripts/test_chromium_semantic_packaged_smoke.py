@@ -249,6 +249,10 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
             self.assertEqual(forwarded.stdout, framed)
             self.assertEqual(tap.capture.read_bytes(), body)
+            self.assertEqual(
+                json.loads(tap.status.read_text(encoding="utf-8"))["stage"],
+                "ack_published",
+            )
 
     def test_pending_navigation_fixture_closes_only_after_v3_signal(self) -> None:
         fixture = smoke.SemanticHttpsFixture(
@@ -324,6 +328,9 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             )
             self.assertEqual(forwarded.returncode, 7)
             self.assertFalse(tap.capture.exists())
+            status = json.loads(tap.status.read_text(encoding="utf-8"))
+            self.assertEqual(status["stage"], "child_completed")
+            self.assertEqual(status["child_returncode"], 7)
 
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
         command = smoke._chrome_command(
