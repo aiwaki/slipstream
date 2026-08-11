@@ -113,7 +113,7 @@ tests, 24 Chromium companion tests, the 556-test focused relay/traffic set,
 Python compilation, project continuity, and `git diff --check`. The seam is
 deliberately not runtime-wired yet.
 
-Branch `codex/pending-navigation-probe-ipc` implements the next closed boundary:
+PR #326 implements the next closed boundary:
 a dedicated versioned owner-only local job/result broker, separate from the
 extension native-messaging protocol. The frozen production path is
 `/var/run/slipstream-browser-probe.sock` with console-user ownership and mode
@@ -129,8 +129,9 @@ Local verification passes 861 daemon tests, 278 script tests, 24 unchanged
 Chromium companion tests, Python compilation, JSON parsing, project continuity,
 and `git diff --check`.
 
-The next verified action is to finish full validation and review of this IPC
-seam, then compose the lazy worker lifecycle with self-probe loop suppression.
+The next verified action is to finish PR review and exact-main qualification of
+this IPC seam, then compose the lazy worker lifecycle with self-probe loop
+suppression.
 That composed gate must still prove completion of the original user-visible
 navigation. Package size, installed update, uninstall, idle cost, and
 clean-profile evidence remain required before production runtime composition.

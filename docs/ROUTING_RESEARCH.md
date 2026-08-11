@@ -321,7 +321,7 @@ unchanged Chromium companion passes 24. The next boundary is owner-only
 job/result IPC plus a lazy worker that cannot recursively create its own probe
 jobs; neither is runtime-composed yet.
 
-Branch `codex/pending-navigation-probe-ipc` adds the next closed boundary as a
+PR #326 adds the next closed boundary as a
 dedicated owner-only local protocol, not an extension/native-message variant.
 The contract freezes `/var/run/slipstream-browser-probe.sock`, console-user
 mode `0600`, exact versioned `claim` and `submit` envelopes, and a 2 KiB request
