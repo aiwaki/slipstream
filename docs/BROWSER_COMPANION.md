@@ -146,8 +146,37 @@ The extension is not yet published to the Chrome Web Store. For development,
 load `browser-companion/chromium/` with Chrome's **Load unpacked** action after
 starting a packaged Slipstream app. The public key in `manifest.json` keeps the
 preview extension ID stable. Production distribution in branded Chrome requires
-a reviewed Chrome Web Store package; the disposable CI gate does not replace
-that distribution path.
+a reviewed Chrome Web Store package installed and enabled in the actual browser
+profile; the disposable CI gate does not replace that distribution path.
+
+## Chrome Web Store Package
+
+Build the deterministic source-only upload archive and provenance record with:
+
+```bash
+python3 scripts/package_chromium_companion.py \
+  --output /tmp/slipstream-chromium-store
+```
+
+The builder accepts only the frozen runtime files, `manifest.json`, and the
+reviewed 128-pixel icon. It validates Manifest V3 identity, permissions, host
+access, service worker and content-script declarations, the public-key-derived
+extension ID, and the native host's exact name and allowed origin. Symlinks,
+unexpected files, oversized inputs, dynamic code generation, remote
+`importScripts`, and runtime `fetch` are rejected. Archive entries are sorted,
+uncompressed, and timestamped consistently; the adjacent provenance JSON pins
+the archive and every packaged file by SHA-256.
+
+[`PRIVACY.md`](../browser-companion/chromium/PRIVACY.md) records the reviewed
+local-only data flow, retention, and user controls. [`STORE_LISTING.md`](../browser-companion/chromium/STORE_LISTING.md)
+contains the store description, prominent disclosure, permission
+justifications, and reviewer notes. These are source-of-truth inputs, not proof
+of publication. Publisher upload, store review, public listing/privacy URLs,
+and a clean branded-Chrome install/enabled proof remain manual external gates.
+The first dashboard upload must stop before review and prove that its Item ID
+and public key match the committed manifest identity. Any mismatch requires a
+reviewed native-host/origin update and complete requalification; it must never
+be papered over by accepting a second origin.
 
 ## Protected Chromium Qualification
 
@@ -286,11 +315,15 @@ uninstall, and an unsigned Safari app-extension build.
 
 ## Remaining Gates
 
-- Chrome Web Store packaging, privacy disclosure, and update provenance.
+- Deterministic Chrome Web Store packaging, local privacy disclosure, and
+  source/update provenance are implemented and CI-checked. Publisher upload,
+  listing assets, a public privacy-policy URL, store review, publication, and a
+  clean branded-Chrome profile with the exact extension installed and enabled
+  remain external gates.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
-  incomplete-response v2. Branded Chrome still requires reviewed Chrome Web
-  Store distribution.
+  incomplete-response v2. Protected unpacked-extension success does not replace
+  reviewed Chrome Web Store distribution.
 - Safari requires a signed container, browser enablement, and a disposable
   runtime proof that the sandboxed app extension can reach the owner-only
   daemon socket. The unsigned source and package build exist, but are not

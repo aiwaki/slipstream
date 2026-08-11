@@ -58,6 +58,8 @@ jobs:
           node --check browser-companion/chromium/service-worker.js
           node --check browser-companion/safari/service-worker.js
           node --test browser-companion/chromium/tests/*.test.mjs
+          python3 scripts/package_chromium_companion.py \
+            --output "${RUNNER_TEMP}/slipstream-chromium-store"
 
       - name: Appcast CLI smoke
         run: |
@@ -141,6 +143,7 @@ jobs:
             scripts/make_release_manifest.py \
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
+            scripts/package_chromium_companion.py \
             scripts/check_project_state.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
@@ -150,6 +153,7 @@ jobs:
             scripts/test_make_release_manifest.py \
             scripts/test_make_release_sbom.py \
             scripts/test_make_route_policy_bundle.py \
+            scripts/test_package_chromium_companion.py \
             scripts/test_browser_companion.py \
             scripts/test_slipstream_core.py \
             scripts/test_verify_release_artifacts.py

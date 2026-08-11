@@ -112,24 +112,27 @@ anchor, state entry, and live connection remain unchanged. A protected,
 main-only account-backed gate now exercises the packaged tray, exact owned
 Geph listener, a real Steam HTTPS payload, tray-independent operation, and
 LaunchAgent `KeepAlive` PID replacement while preserving an unrelated `:9909`
-listener. The account-backed protected gate and controlled exact-artifact
-workstation transaction have passed for frozen semantic v1. That transaction
-exposed a generic partial top-level response on one otherwise eligible unknown
-host. Additive semantic-signal v2 now models only Chromium-owned incomplete
-navigation evidence, requires a distinct complete response through exact-owned
-Geph, and permits one same-host reload without replaying the failed transparent
-request. PR #250 and its exact-main gates passed, but protected run
-`30393151116` showed that `webNavigation` did not expose the post-commit
-truncated-body fixture even though owned Geph and cleanup passed. Chromium now
-uses read-only top-level `webRequest` correlation. PR #254 corrected the real
-Chrome final-event contract, added redirect-safe ephemeral cleanup, and merged
-as `45db4321bafe244c87986c4c08daf1c3afaf8bf2`; its local, PR, and exact-main
-CI/audit gates passed. Only one protected two-scenario account-backed run
-remains after the next UTC-day budget reset for the then-current live `main`
-that contains this product merge and has green exact-main gates. Workstation
-installation remains closed until that run publishes its exact qualified
-artifact. A physical default-route/lid-close transition on a disposable Mac
-remains a separate M1 gate.
+listener. Semantic signals v1, v2, and v3 now require browser-owned evidence,
+independent exact-host confirmation, and one bounded reload without replaying
+the failed transparent request. Live main
+`8fe21229994e0ddc643762d0ece2203bc79313cc` passed exact-main CI, audit,
+Windows, and protected owned-Geph qualification. Protected artifact
+`9110154812` passed all three semantic scenarios, styled resources, owned-Geph
+lifecycle, packaging, signing, and cleanup checks.
+
+Controlled workstation transaction
+`271C43D9-4906-4AF3-88E8-C2EF146A33ED` then exposed the remaining Chromium
+distribution boundary: the exact native-host manifest was registered, but a
+fresh isolated branded-Chrome profile did not contain the unpublished
+extension, so the first semantic smoke stayed pending and emitted no daemon
+event. Exact rollback restored application hashes and every network/runtime
+invariant. The in-repository deterministic Web Store ZIP, provenance,
+privacy disclosure, and listing inputs are now the next M1 delivery gate.
+Publisher upload, review, publication, and proof that the exact extension is
+installed and enabled in a clean branded-Chrome profile remain external gates.
+No further workstation install is authorized until that proof and a newly
+qualified exact-main artifact both exist. A physical default-route/lid-close
+transition on a disposable Mac remains a separate M1 gate.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.

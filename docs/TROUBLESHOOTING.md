@@ -18,6 +18,26 @@ unknown-host promotion.
 Use Geph only for services that need a foreign exit because the service rejects
 Russian IP addresses. Do not route Discord or YouTube through Geph as a fix.
 
+### A clean Chrome profile stays at `about:blank` after protected qualification
+
+First verify that the exact Slipstream companion is installed and enabled in
+the affected branded-Chrome profile. The user native-host manifest proves only
+that an already installed extension with the allowed origin may start the
+host; it does not install the extension. The protected qualification uses a
+fresh profile with the reviewed source loaded as an unpacked extension, so its
+success does not prove Chrome Web Store delivery to an ordinary clean profile.
+
+Transaction `271C43D9-4906-4AF3-88E8-C2EF146A33ED` exposed this boundary: the
+packaged daemon was active and the native-host manifest was present, but the
+clean browser profile had no companion, emitted no semantic/recovery event,
+and remained pending for 75 seconds. Exact rollback restored the previous
+application and all network/runtime invariants. Do not compensate by weakening
+the navigation signal, closing a quiet relay from byte count alone, or routing
+the host through Geph without the normal independent evidence. Production
+qualification requires the reviewed extension ID
+`cecdingohhpfggapnlbghppcegbaciam` to be installed and enabled in that actual
+profile.
+
 ### YouTube page loads but video playback fails
 
 Check the effective packaged policy without starting or installing the daemon:
