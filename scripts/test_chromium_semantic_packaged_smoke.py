@@ -234,6 +234,28 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 str(tap.executable),
                 "exec",
             )
+            ready_body = json.dumps(
+                {
+                    "phase": "native_ready",
+                    "schema_version": 0,
+                    "source": "qualification_worker_ready",
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+            ready_frame = struct.pack("=I", len(ready_body)) + ready_body
+            ready = subprocess.run(
+                (str(tap.executable),),
+                input=ready_frame,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(ready.stdout, ready_frame)
+            self.assertFalse(tap.capture.exists())
+            self.assertEqual(
+                json.loads(tap.status.read_text(encoding="utf-8"))["stage"],
+                "response_forwarded",
+            )
+
             body = json.dumps(
                 self._pending_navigation_signal(
                     smoke.PENDING_NAVIGATION_FIXTURE_HOST
@@ -331,6 +353,35 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             status = json.loads(tap.status.read_text(encoding="utf-8"))
             self.assertEqual(status["stage"], "child_completed")
             self.assertEqual(status["child_returncode"], 7)
+
+    def test_pending_navigation_tap_rejects_empty_native_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "empty-native-host"
+            target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            body = json.dumps(
+                self._pending_navigation_signal(
+                    smoke.PENDING_NAVIGATION_FIXTURE_HOST
+                ),
+                sort_keys=True,
+            ).encode("utf-8")
+            forwarded = subprocess.run(
+                (str(tap.executable),),
+                input=struct.pack("=I", len(body)) + body,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(forwarded.returncode, 6)
+            self.assertFalse(tap.capture.exists())
+            status = json.loads(tap.status.read_text(encoding="utf-8"))
+            self.assertEqual(status["stage"], "empty_child_response")
 
     def test_chrome_command_loads_only_the_companion_in_a_fresh_profile(self) -> None:
         command = smoke._chrome_command(

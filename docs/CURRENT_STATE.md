@@ -29,10 +29,12 @@ origin arguments, response bytes, and child exit work outside Chrome. Branch
 shebang with the exact qualification interpreter and records only bounded,
 owner-private stage metadata. Failed CI can now distinguish host launch,
 message read, child start, child exit, and acknowledgement before exact profile
-cleanup; no signal payload, URL, hostname, secret, or user identifier enters
-that diagnostic.
+cleanup. A response is authoritative only after the exact child succeeds and
+its bounded native response is flushed back to Chrome; empty or failed child
+responses cannot publish the navigation acknowledgement. No signal payload,
+URL, hostname, secret, or user identifier enters the stage diagnostic.
 
-Focused verification passes `52` tests plus `9` subtests for the packaged
+Focused verification passes `53` tests plus `9` subtests for the packaged
 Chromium harness, Python compilation, `git diff --check`, and a direct roundtrip
 through the generated tap into the real Rust native host. The next verified
 action is a small PR for this transport fix. After merge, exact-main gates and
