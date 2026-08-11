@@ -99,7 +99,7 @@ WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WORKER_READY_EXPRESSION = """
 (async () => {
   if (globalThis.__slipstreamWorkerReadyV1 !== true) {
-    return false;
+    return {ready: false, stage: "worker_marker_missing"};
   }
   try {
     const response = await chrome.runtime.sendNativeMessage(
@@ -110,12 +110,39 @@ WORKER_READY_EXPRESSION = """
         phase: "native_ready"
       }
     );
-    return response !== null && typeof response === "object";
-  } catch (_error) {
-    return false;
+    const ready = response !== null && typeof response === "object";
+    return {
+      ready,
+      stage: ready ? "native_response_received" : "native_response_invalid"
+    };
+  } catch (error) {
+    const message = String(error && error.message || "").toLowerCase();
+    let stage = "native_host_error";
+    if (message.includes("host not found")) {
+      stage = "native_host_not_found";
+    } else if (message.includes("forbidden")) {
+      stage = "native_host_forbidden";
+    } else if (message.includes("exited")) {
+      stage = "native_host_exited";
+    } else if (message.includes("communication")) {
+      stage = "native_host_communication_failed";
+    }
+    return {ready: false, stage};
   }
 })()
 """.strip()
+WORKER_READY_STAGES = frozenset(
+    {
+        "worker_marker_missing",
+        "native_response_received",
+        "native_response_invalid",
+        "native_host_not_found",
+        "native_host_forbidden",
+        "native_host_exited",
+        "native_host_communication_failed",
+        "native_host_error",
+    }
+)
 
 
 class QualificationError(RuntimeError):
@@ -298,10 +325,21 @@ def _pending_navigation_tap_source(
     status_path = json.dumps(str(status))
     return (
         f"#!{interpreter}\n"
-        "import json, os, struct, subprocess, sys\n"
+        "import fcntl, json, os, struct, subprocess, sys\n"
         f"TARGET = {target}\n"
         f"CAPTURE = {destination}\n"
         f"STATUS = {status_path}\n"
+        "STATUS_LOCK = f'{STATUS}.lock'\n"
+        "STAGE_RANK = {\n"
+        "    'host_started': 0,\n"
+        "    'message_read': 1,\n"
+        "    'child_started': 2,\n"
+        "    'child_timeout': 3,\n"
+        "    'child_completed': 3,\n"
+        "    'empty_child_response': 3,\n"
+        "    'response_forwarded': 4,\n"
+        "    'ack_published': 5,\n"
+        "}\n"
         "def write_private(path, body):\n"
         "    temporary = f'{path}.{os.getpid()}.tmp'\n"
         "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
@@ -317,10 +355,36 @@ def _pending_navigation_tap_source(
         "        os.close(fd)\n"
         "    os.replace(temporary, path)\n"
         "def mark(stage, **fields):\n"
-        "    fields['stage'] = stage\n"
-        "    write_private(STATUS, json.dumps(\n"
-        "        fields, sort_keys=True, separators=(',', ':')\n"
-        "    ).encode())\n"
+        "    lock_fd = os.open(\n"
+        "        STATUS_LOCK, os.O_RDWR | os.O_CREAT, 0o600\n"
+        "    )\n"
+        "    try:\n"
+        "        fcntl.flock(lock_fd, fcntl.LOCK_EX)\n"
+        "        try:\n"
+        "            with open(STATUS, 'rb') as stream:\n"
+        "                previous = json.loads(stream.read())\n"
+        "        except (FileNotFoundError, OSError, ValueError):\n"
+        "            previous = {}\n"
+        "        attempts = previous.get('attempts', 0)\n"
+        "        if type(attempts) is not int or attempts < 0:\n"
+        "            attempts = 0\n"
+        "        if stage == 'host_started':\n"
+        "            attempts += 1\n"
+        "        previous_rank = previous.get('stage_rank', -1)\n"
+        "        if type(previous_rank) is not int:\n"
+        "            previous_rank = -1\n"
+        "        stage_rank = STAGE_RANK[stage]\n"
+        "        if previous_rank > stage_rank:\n"
+        "            fields = previous\n"
+        "        fields['attempts'] = attempts\n"
+        "        fields['stage'] = fields.get('stage', stage)\n"
+        "        fields['stage_rank'] = fields.get('stage_rank', stage_rank)\n"
+        "        write_private(STATUS, json.dumps(\n"
+        "            fields, sort_keys=True, separators=(',', ':')\n"
+        "        ).encode())\n"
+        "    finally:\n"
+        "        fcntl.flock(lock_fd, fcntl.LOCK_UN)\n"
+        "        os.close(lock_fd)\n"
         "def read_exact(stream, size):\n"
         "    data = bytearray()\n"
         "    while len(data) < size:\n"
@@ -329,6 +393,7 @@ def _pending_navigation_tap_source(
         "            raise SystemExit(2)\n"
         "        data.extend(chunk)\n"
         "    return bytes(data)\n"
+        "mark('host_started', argv_count=len(sys.argv) - 1)\n"
         "header = read_exact(sys.stdin.buffer, 4)\n"
         "length = struct.unpack('=I', header)[0]\n"
         f"if length <= 0 or length > {NATIVE_MESSAGE_MAX_BODY}:\n"
@@ -1321,7 +1386,7 @@ def _devtools_command(
         connection.close()
 
 
-def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+def _worker_runtime_probe(debugger_url: str, port: int) -> tuple[bool, str]:
     result = _devtools_command(
         debugger_url,
         port,
@@ -1333,11 +1398,20 @@ def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
         },
     )
     evaluation = result.get("result")
-    return (
-        isinstance(evaluation, dict)
-        and evaluation.get("type") == "boolean"
-        and evaluation.get("value") is True
-    )
+    if not isinstance(evaluation, dict) or evaluation.get("type") != "object":
+        return False, "invalid_devtools_result"
+    value = evaluation.get("value")
+    if not isinstance(value, dict):
+        return False, "invalid_devtools_result"
+    ready = value.get("ready")
+    stage = value.get("stage")
+    if not isinstance(ready, bool) or stage not in WORKER_READY_STAGES:
+        return False, "invalid_devtools_result"
+    return ready, stage
+
+
+def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+    return _worker_runtime_probe(debugger_url, port)[0]
 
 
 def _wait_for_extension_worker(
@@ -1374,11 +1448,18 @@ def _wait_for_extension_worker(
                     raise QualificationError(
                         "Slipstream service worker has no debugger endpoint"
                     )
-                if _worker_runtime_ready(debugger_url, port):
+                ready, stage = _worker_runtime_probe(debugger_url, port)
+                if ready:
                     return port
-            last_error = QualificationError(
-                "exact Slipstream service worker is not runtime-ready"
-            )
+                last_error = QualificationError(
+                    "exact Slipstream service worker is not runtime-ready: "
+                    f"{stage}"
+                )
+            else:
+                last_error = QualificationError(
+                    "exact Slipstream service worker is not runtime-ready: "
+                    "worker_target_missing"
+                )
         except (OSError, QualificationError) as exc:
             last_error = exc
         time.sleep(0.1)

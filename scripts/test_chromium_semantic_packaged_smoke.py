@@ -276,6 +276,75 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "ack_published",
             )
 
+    def test_pending_navigation_tap_marks_launch_before_reading_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "unused-native-host"
+            target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            launched = subprocess.run(
+                (str(tap.executable),),
+                input=b"",
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(launched.returncode, 2)
+            self.assertEqual(
+                json.loads(tap.status.read_text(encoding="utf-8")),
+                {
+                    "argv_count": 0,
+                    "attempts": 1,
+                    "stage": "host_started",
+                    "stage_rank": 0,
+                },
+            )
+
+    def test_pending_navigation_tap_status_never_regresses_across_attempts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            target = profile / "echo-native-host"
+            target.write_text(
+                "#!/usr/bin/python3\n"
+                "import sys\n"
+                "sys.stdout.buffer.write(sys.stdin.buffer.read())\n",
+                encoding="utf-8",
+            )
+            target.chmod(0o700)
+            tap = smoke._create_pending_navigation_tap(
+                profile,
+                os.getuid(),
+                os.getgid(),
+                target,
+            )
+            body = b'{"source":"qualification_worker_ready"}'
+            framed = struct.pack("=I", len(body)) + body
+            first = subprocess.run(
+                (str(tap.executable),),
+                input=framed,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(first.stdout, framed)
+            second = subprocess.run(
+                (str(tap.executable),),
+                input=b"",
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(second.returncode, 2)
+            status = json.loads(tap.status.read_text(encoding="utf-8"))
+            self.assertEqual(status["attempts"], 2)
+            self.assertEqual(status["stage"], "response_forwarded")
+            self.assertEqual(status["stage_rank"], 4)
+
     def test_pending_navigation_fixture_closes_only_after_v3_signal(self) -> None:
         fixture = smoke.SemanticHttpsFixture(
             smoke.PENDING_NAVIGATION_FIXTURE_HOST,
@@ -475,9 +544,9 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             side_effect=targets,
         ) as request, mock.patch.object(
             smoke,
-            "_worker_runtime_ready",
-            return_value=True,
-        ) as runtime_ready, mock.patch.object(
+            "_worker_runtime_probe",
+            return_value=(True, "native_response_received"),
+        ) as runtime_probe, mock.patch.object(
             smoke.time,
             "sleep",
         ):
@@ -496,7 +565,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 mock.call(49152, "/json/list"),
             ],
         )
-        runtime_ready.assert_called_once_with(
+        runtime_probe.assert_called_once_with(
             "ws://127.0.0.1:49152/devtools/page/worker",
             49152,
         )
@@ -520,14 +589,17 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             ):
                 smoke._worker_debugger_path(url, 49152)
 
-    def test_worker_runtime_gate_requires_the_terminal_boolean_marker(self) -> None:
+    def test_worker_runtime_gate_requires_the_terminal_structured_marker(self) -> None:
         with mock.patch.object(
             smoke,
             "_devtools_command",
             return_value={
                 "result": {
-                    "type": "boolean",
-                    "value": True,
+                    "type": "object",
+                    "value": {
+                        "ready": True,
+                        "stage": "native_response_received",
+                    },
                 },
             },
         ) as command:
@@ -547,6 +619,28 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
                 "awaitPromise": True,
             },
         )
+
+    def test_worker_runtime_probe_rejects_unbounded_stage_values(self) -> None:
+        with mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={
+                "result": {
+                    "type": "object",
+                    "value": {
+                        "ready": False,
+                        "stage": "/Users/example/private/native-host-error",
+                    },
+                },
+            },
+        ):
+            self.assertEqual(
+                smoke._worker_runtime_probe(
+                    "ws://127.0.0.1:49152/devtools/page/worker",
+                    49152,
+                ),
+                (False, "invalid_devtools_result"),
+            )
 
     def test_devtools_command_waits_for_its_bounded_response(self) -> None:
         connection = mock.Mock()
@@ -589,6 +683,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertIn("sendNativeMessage", smoke.WORKER_READY_EXPRESSION)
         self.assertNotIn("http://", smoke.WORKER_READY_EXPRESSION)
         self.assertNotIn("https://", smoke.WORKER_READY_EXPRESSION)
+        self.assertNotIn("return {ready: false, message", smoke.WORKER_READY_EXPRESSION)
+        self.assertIn("native_host_not_found", smoke.WORKER_READY_EXPRESSION)
 
     def test_fixture_navigation_uses_page_navigate_for_the_exact_url(self) -> None:
         fixture = mock.Mock(host="example.net", port=18443)
