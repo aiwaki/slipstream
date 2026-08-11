@@ -10,32 +10,32 @@ file.
 
 ## Current Checkpoint
 
-PR #318 is merged as live main
-`1336ab0ae06eaa5a832550cae52e81dda191edb7`. Exact-main dependency audit
-`31503719714`, Windows qualification `31503719352`, and CI `31503719694`
-passed. Its single protected owned-Geph qualification `31504410156` failed, so
+PR #319 is merged as live main
+`e6a8b54770ffd10cac266e144962491ad532ac43`. Exact-main dependency audit
+`31507339889`, Windows qualification `31507339880`, and CI `31507339877`
+passed. Its single protected owned-Geph qualification `31508041955` failed, so
 it produced no installable artifact and no workstation transaction was
 attempted. Cleanup passed: the root daemon was absent and disabled, owned Geph
 passed its initial, trayless, and KeepAlive-recovered HTTP 200 payload checks,
 the external listener was preserved, and system network state was not mutated.
 
 The failure remains isolated to the deterministic Chromium
-`navigation_pending` scenario. The manifest fix removed
-`native_host_not_found`: Chrome launched the exact owner-private tap, which
-forwarded the packaged host's bounded response. The next step then timed out
-because `Page.navigate` inherited the generic two-second DevTools socket
-timeout while this scenario deliberately waits at least eight seconds before
-publishing its correlated pending-navigation signal.
+`navigation_pending` scenario. Chrome launched the exact owner-private tap,
+the browser companion published the bounded `navigation_pending` signal, and
+the tap forwarded the packaged host response before recording
+`ack_published`. The deterministic fixture then deliberately closed the first
+pre-response connection, so DevTools returned `net::ERR_EMPTY_RESPONSE`.
+The harness treated this expected trigger as a final navigation failure before
+its post-command loop could observe the browser retry and styled success.
 
-Branch `codex/chromium-pending-navigation-timeout` gives only that
-`Page.navigate` command a bounded timeout longer than its own signal delay;
-all other DevTools commands retain the two-second limit. It does not change
-routing, PF, DNS, Geph, product lifecycle, or workstation state. The next
-verified action is a small PR, exact-main gates, and exactly one fresh protected
-qualification for the new main SHA. Installation remains forbidden until that
-run proves all Chromium scenarios and cleanup; only its exact artifact may
-enter a controlled workstation transaction with immediate rollback on the
-first failed smoke.
+Branch `codex/chromium-expected-empty-response` accepts only that exact error
+for the pending-navigation scenario; every other scenario still rejects it.
+It does not change routing, PF, DNS, Geph, product lifecycle, or workstation
+state. The next verified action is a small PR, exact-main gates, and exactly
+one fresh protected qualification for the new main SHA. Installation remains
+forbidden until that run proves all Chromium scenarios and cleanup; only its
+exact artifact may enter a controlled workstation transaction with immediate
+rollback on the first failed smoke.
 
 ## Previous Checkpoint
 
