@@ -10,11 +10,12 @@ file.
 
 ## Current Checkpoint
 
-PR #320 is merged as live main
-`8fe21229994e0ddc643762d0ece2203bc79313cc`. Exact-main CI
-`31509795963`, dependency audit `31511314605`, and Windows qualification
-`31509795798` passed. The single fresh protected owned-Geph qualification
-`31511415912` also passed. Its `navigation_pending` scenario emitted one
+PR #321 is merged as live main
+`32857808fa2b7cf43f85ae96ad1e4ad55d762d55`. Exact-main CI
+`31521726147`, dependency audit `31521725942`, and Windows qualification
+`31521725947` passed. The most recent protected owned-Geph qualification is
+still run `31511415912` for earlier main
+`8fe21229994e0ddc643762d0ece2203bc79313cc`. Its `navigation_pending` scenario emitted one
 privacy-bounded v3 signal, performed one reload, and reached the styled
 CSS/JavaScript/image-ready callback; the incomplete-response and regional-denial
 scenarios passed the same styled-resource requirement. Owned Geph returned
@@ -22,7 +23,9 @@ HTTP 200 payload initially, trayless, and after KeepAlive replacement. Cleanup
 preserved the external listener, left the root daemon absent and disabled, and
 did not mutate system network state.
 
-Only protected artifact `9110154812` is installable for this checkpoint. Its
+No protected artifact is installable for live main. Artifact `9110154812` was
+the exact input to the rolled-back workstation transaction below and belongs
+to earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
 GitHub artifact digest is
 `sha256:40f8c054bea7657e986e3a62952f2e5a8acf245d8729ce9048f561b156d9f0e2`;
 the downloaded inner ZIP matches its manifest at
@@ -52,18 +55,23 @@ therefore contained no semantic or recovery event. Native-host registration
 alone cannot make a clean branded-Chrome profile send a signal, and protected
 unpacked-extension success cannot qualify production browser distribution.
 
-The current change adds a deterministic Chrome Web Store ZIP and provenance
-builder, validates the frozen extension/native-host identity and source
-allowlist, rejects dynamic or remotely loaded code, and adds privacy and store
-listing disclosures. Local verification passes `271` script tests, `850`
+PR #321 adds a deterministic Chrome Web Store ZIP and provenance builder,
+validates the frozen extension/native-host identity and source allowlist,
+rejects dynamic or remotely loaded code, and adds privacy and store listing
+disclosures. Local verification passes `271` script tests, `850`
 daemon/traffic tests, `24` Chromium tests, and `12` native-messaging Rust tests,
 plus Python compilation, project continuity, packaged-browser dry-run, repeat
-archive hash, ZIP integrity, and diff checks. The next verified action is to
-open the small delivery PR and require its checks. Publication, review, and an
-actual clean branded-Chrome install/enabled proof for exact extension ID
-`cecdingohhpfggapnlbghppcegbaciam` remain manual external gates. Do not repeat
-a workstation installation until that exact distribution gate and a newly
-qualified exact-main artifact both pass.
+archive hash, ZIP integrity, and diff checks; all six PR jobs and the three
+exact-main runs above passed. The next verified action is the manual external
+distribution gate: upload the deterministic ZIP to the publisher dashboard,
+stop before review, and prove that the dashboard Item ID and public key match
+exact extension ID `cecdingohhpfggapnlbghppcegbaciam`. Then supply listing
+assets and a public privacy URL, complete Web Store review/publication, and
+prove the exact extension installed and enabled in a clean branded-Chrome
+profile. Any identity mismatch returns to reviewed code; never add a second
+allowed origin. Only after the distribution gate passes should the then-current
+exact main receive one fresh protected qualification and a controlled
+workstation transaction. Do not install any existing artifact meanwhile.
 
 ## Previous Checkpoint
 
