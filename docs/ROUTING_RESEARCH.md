@@ -288,10 +288,26 @@ available; setup and LaunchServices completed, and the final DevTools retry
 reported connection refusal. This is upstream browser drift, not evidence
 against the new worker: the legacy job does not build or invoke the new Rust
 observer. The extension/webRequest contract is therefore pinned to the exact
-proven `.77` version for reproducibility. The new packaged extensionless CDP
-observer deliberately stays on current `stable`, so current-Chrome drift is
-still a required failure rather than being hidden; it is simply tested at the
-delivery path Slipstream now intends to ship.
+proven `.77` version for reproducibility.
+
+The new observer then exposed a separate `.138` macOS packaging failure. PR
+runs `31545667200` and `31546818641` both copied the setup action's complete
+extensionless bundle into a real private `.app`, but LaunchServices exited
+without creating any exact profile-owned Chrome process. Downloading the same
+official arm64 archive locally reproduced the failure: both the source and
+private copy lack `_CodeSignature/CodeResources`, and
+`codesign --verify --deep --strict` reports `code has no resources but signature
+indicates they must be present`. Ad-hoc deep signing made LaunchServices create
+a process but the DevTools listener disappeared before the bounded client could
+use it. That workaround would also replace the production signing authority,
+so it is rejected. The official
+[GitHub macOS image manifest](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#browsers)
+already lists installed Google Chrome. The packaged observer gate now omits its
+executable override and lets
+the worker discover and verify that installed browser through the exact
+production bundle/team boundary. This also removes the setup download and
+private bundle-copy cost from the required gate while the pinned legacy job
+continues to qualify the old extension independently.
 
 Code discovery for the following correlation slice attempted the repository's
 required knowledge-graph search first, but the MCP transport returned
@@ -407,12 +423,12 @@ browser, revalidates and removes only the exact profile-owned Chrome family and
 LaunchServices waiter, waits for stable absence, and removes the profile before
 submitting either outcome. Production paths are fixed. Executable, socket,
 origin, resolver, and certificate overrides require the complete disposable
-GitHub Actions gate and exist only for the packaged deterministic HTTPS
-qualification. The setup action exposes a metadata-valid bundle root whose
-name lacks `.app`; only in that gate the worker copies the complete root into
-`Chrome for Testing.app` inside its private profile, then binds process
-ownership and cleanup to the copied executable and helper family. Production
-never adapts an extensionless root. That gate requires one hanging
+GitHub Actions gate. Extensionless Chrome-for-Testing materialization remains a
+disposable diagnostic path, not qualification authority. The packaged gate
+deliberately omits the executable override so Chrome discovery, signature,
+bundle ID, and Team ID are the production path; only its deterministic local
+HTTPS origin, socket, resolver, and certificate are overridden. That gate
+requires one hanging
 main-document request, one
 privacy-bounded pending result, no `--no-sandbox`, no visible window, no profile
 residue, and at most 25 seconds end to end. The remaining product gate is still

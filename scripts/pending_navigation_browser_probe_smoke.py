@@ -290,7 +290,7 @@ def _job(now_ms: int) -> dict[str, object]:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", required=True, type=Path)
-    parser.add_argument("--chrome-executable", required=True, type=Path)
+    parser.add_argument("--chrome-executable", type=Path)
     return parser.parse_args()
 
 
@@ -298,7 +298,11 @@ def main() -> int:
     _require_disposable_ci()
     arguments = _parse_args()
     app_bundle = arguments.app_bundle.resolve(strict=True)
-    chrome = arguments.chrome_executable.resolve(strict=True)
+    chrome = (
+        arguments.chrome_executable.resolve(strict=True)
+        if arguments.chrome_executable is not None
+        else None
+    )
     executable = app_bundle / "Contents" / "MacOS" / "slipstream"
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise QualificationError("packaged browser worker is unavailable")
@@ -326,7 +330,6 @@ def main() -> int:
                 "CI": "true",
                 "GITHUB_ACTIONS": "true",
                 "SLIPSTREAM_DISPOSABLE_CI": "1",
-                "SLIPSTREAM_BROWSER_PROBE_CHROME": str(chrome),
                 "SLIPSTREAM_BROWSER_PROBE_SOCKET": str(socket_path),
                 "SLIPSTREAM_BROWSER_PROBE_ORIGIN": (
                     f"https://{FIXTURE_HOST}:{fixture.port}/"
@@ -336,6 +339,8 @@ def main() -> int:
                 ),
                 "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS": "1",
             }
+            if chrome is not None:
+                environment["SLIPSTREAM_BROWSER_PROBE_CHROME"] = str(chrome)
             launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
                 executable=executable,
                 runtime_root=directory / "launchers",
@@ -370,7 +375,11 @@ def main() -> int:
         if residue:
             raise QualificationError("owner-private Chrome profile survived cleanup")
         print(json.dumps({
-            "browser": "chrome_for_testing",
+            "browser": (
+                "chrome_for_testing"
+                if chrome is not None
+                else "installed_google_chrome"
+            ),
             "end_to_end_ms": elapsed_ms,
             "navigation_requests": fixture.requests,
             "outcome": broker.submitted[0]["outcome"],

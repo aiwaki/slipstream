@@ -164,8 +164,8 @@ socket, origin, resolver, and certificate overrides exist only behind the full
 disposable-GitHub-Actions gate. The ordinary path still creates no worker,
 browser, thread, socket, or routing effect.
 
-Local verification passes 868 daemon tests, 278 script tests plus 54 subtests,
-90 Rust tray tests, focused Python compilation, Rust Clippy with warnings denied,
+Local verification passes 869 daemon tests, 278 script tests plus 54 subtests,
+93 Rust tray tests, focused Python compilation, Rust Clippy with warnings denied,
 contract JSON parsing, and `git diff --check`. Required graph discovery was
 attempted first and again returned `Transport closed`; fallback inspection was
 limited to the existing browser launch, ownership, IPC, and cleanup seams. A
@@ -174,10 +174,25 @@ the LaunchServices waiter is now stopped even when process enumeration fails;
 the profile is retained rather than deleted whenever exact Chrome absence
 cannot be proven.
 
-The next verified action is to commit and push this branch, run its packaged
-real-Chrome CI gate, resolve review, and merge only after all required checks
-pass. The slice remains closed from the production daemon until that evidence
-is green. The later composed gate must still prove completion of the original
+The packaged gate exposed two current-Chrome compatibility boundaries before
+route composition. Chrome for Testing `151.0.7922.138` no longer publishes the
+legacy MV3 worker target, so only that superseded extension contract is pinned
+to the proven `.77`. The `.138` macOS archive also has no outer bundle
+`CodeResources`; a complete private copy therefore fails strict code-signature
+verification and LaunchServices creates no process. Local reproduction reached
+the same result. Ad-hoc signing was rejected because it no longer proves the
+production identity and its DevTools endpoint died before use. The packaged
+observer gate now omits the browser override and uses the runner's signed
+installed Google Chrome, which exercises the exact production discovery and
+signature boundary. A local run through that path produced one exact hanging
+HTTPS request, one `navigation_pending` result after eight seconds, and complete
+cleanup in 10,797 ms. CDP HTTP reads now stop at one bounded `Content-Length`
+instead of waiting for Chrome to close its persistent response connection.
+
+The next verified action is to pass the packaged installed-Chrome CI gate,
+resolve review, and merge only after all required checks pass. The slice remains
+closed from the production daemon until that evidence is green. The later
+composed gate must still prove completion of the original
 user-visible navigation. Package size, installed update, uninstall, idle cost,
 and clean-profile evidence remain required before production runtime
 composition.
