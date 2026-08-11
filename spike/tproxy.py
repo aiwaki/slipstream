@@ -2031,6 +2031,12 @@ AUTO_GEPH_HANG = 5.0          # a connection held this long with no content = ST
 AUTO_GEPH_STORM = 3           # stuck retries in the window = geo-blocked
 AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 LOCAL_STREAM_IDLE = 15.0      # client-visible downstream silence after payload
+UNKNOWN_PRE_RESPONSE_IDLE = 8.0  # bounded retry before a first real response
+PENDING_NAVIGATION_RELAY_START_SKEW_MS = 5_000
+TRANSPORT_IDLE_EVIDENCE_REJECTED = "rejected"
+TRANSPORT_IDLE_EVIDENCE_ADVANCE = "advance"
+TRANSPORT_IDLE_EVIDENCE_CONFIRMING = "confirming"
+TRANSPORT_IDLE_EVIDENCE_HOLD = "hold"
 PARTIAL_TLS_RECORD_IDLE = 6.0
 TLS_RECORD_HEADER_SIZE = 5
 TLS_RECORD_MAX_CIPHERTEXT = (1 << 14) + 2048
@@ -2139,6 +2145,7 @@ _local_partial_stalls = {}    # host -> {stage: monotonic partial-record proof}
 _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
 _auto_geph_one_shot_consumed_at = {}  # host -> latest stage timestamp spent
 _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
+_active_pending_navigation_relays = {}  # host -> {activity id: activity}
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -3513,6 +3520,7 @@ def _request_incomplete_response_geo_exit_confirmation(
     *,
     now=None,
     confirmation_runner=None,
+    on_complete=None,
 ):
     h = normalize_host(host)
     now = time.monotonic() if now is None else now
@@ -3521,6 +3529,8 @@ def _request_incomplete_response_geo_exit_confirmation(
         or not _owned_geph_ready_for_semantic_confirmation()
         or not _auto_geph_persistent_learning_allowed(h, now)
     ):
+        if on_complete is not None:
+            on_complete(h, False)
         return False
     return _schedule_bounded_geph_confirmation(
         h,
@@ -3533,6 +3543,7 @@ def _request_incomplete_response_geo_exit_confirmation(
             and _auto_geph_persistent_learning_allowed(candidate, _now)
         ),
         evidence_reason="incomplete response confirmed locally",
+        on_complete=on_complete,
     )
 
 
@@ -3549,6 +3560,9 @@ def _get_semantic_route_signal_runtime():
                     request_confirmation=_request_semantic_geo_exit_confirmation,
                     request_incomplete_confirmation=(
                         _request_incomplete_response_geo_exit_confirmation
+                    ),
+                    request_pending_navigation=(
+                        _request_pending_navigation_retry
                     ),
                 )
             )
@@ -4497,7 +4511,7 @@ def _confirm_incomplete_response_geo_exit(host):
     return True
 
 
-def _confirm_transport_incomplete_response(host, ip):
+def _confirm_transport_incomplete_response(host, ip, *, on_complete=None):
     """Require an exact local partial body before testing owned Geph."""
     h = normalize_host(host)
     if (
@@ -4505,8 +4519,15 @@ def _confirm_transport_incomplete_response(host, ip):
         or not _owned_geph_ready_for_semantic_confirmation()
         or not _incomplete_response_plain_payload_probe(ip, h)
     ):
+        if on_complete is not None:
+            on_complete(h, False)
         return False
-    return _request_incomplete_response_geo_exit_confirmation(h)
+    if on_complete is None:
+        return _request_incomplete_response_geo_exit_confirmation(h)
+    return _request_incomplete_response_geo_exit_confirmation(
+        h,
+        on_complete=on_complete,
+    )
 
 
 def _remember_auto_geph_host(
@@ -9188,6 +9209,16 @@ class _RelayActivity:
     track_tls_records: bool = False
     on_first_downstream: object = None
     on_downstream_idle: object = None
+    retry_loop: object = None
+    retry_event: object = None
+    retry_closed: bool = False
+    downstream_idle_retry: bool = False
+    pending_navigation_eligible: bool = False
+    pending_navigation_host: str = ""
+    pending_navigation_ip: str = ""
+    pending_navigation_stage: str = ""
+    pending_navigation_started_at_unix_ms: int = 0
+    pending_navigation_scheduler: object = None
 
 
 def _track_tls_records(activity, data):
@@ -9534,6 +9565,7 @@ def _schedule_transport_incomplete_response_confirmation(
     *,
     now=None,
     runner=None,
+    on_complete=None,
 ):
     """Verify a bounded plain-path incomplete response out of band."""
     h = normalize_host(host)
@@ -9573,7 +9605,16 @@ def _schedule_transport_incomplete_response_confirmation(
 
     def run():
         try:
-            (runner or _confirm_transport_incomplete_response)(h, str(address))
+            if runner is not None:
+                succeeded = bool(runner(h, str(address)))
+                if on_complete is not None:
+                    on_complete(h, succeeded)
+            else:
+                _confirm_transport_incomplete_response(
+                    h,
+                    str(address),
+                    on_complete=on_complete,
+                )
         finally:
             with _auto_geph_lock:
                 if _transport_incomplete_confirming.get(h) == now:
@@ -9595,6 +9636,7 @@ def _record_transport_incomplete_idle_evidence(
     *,
     now=None,
     scheduler=None,
+    on_complete=None,
 ):
     """Record one payload-idle stage before any content confirmation."""
     h = normalize_host(host)
@@ -9602,14 +9644,14 @@ def _record_transport_incomplete_idle_evidence(
     try:
         address = ipaddress.ip_address(ip)
     except ValueError:
-        return False
+        return TRANSPORT_IDLE_EVIDENCE_REJECTED
     if (
         not address.is_global
         or not _auto_geph_base_host_allowed(h)
         or not stage
         or not _valid_auto_geph_stage(stage)
     ):
-        return False
+        return TRANSPORT_IDLE_EVIDENCE_REJECTED
 
     with _auto_geph_lock:
         _prune_transport_incomplete_probes(now)
@@ -9621,19 +9663,84 @@ def _record_transport_incomplete_idle_evidence(
             observations,
             AUTO_GEPH_PARTIAL_STRATEGIES,
         ):
-            return False
+            return TRANSPORT_IDLE_EVIDENCE_ADVANCE
         if _network_wide_unknown_failure_visible(now):
-            return False
+            return TRANSPORT_IDLE_EVIDENCE_HOLD
 
         candidate = _transport_incomplete_plain_candidates.get(h)
         if candidate is None:
-            return False
+            return TRANSPORT_IDLE_EVIDENCE_HOLD
         candidate_ip, _observed_at = candidate
     schedule = scheduler or _schedule_transport_incomplete_response_confirmation
-    return bool(schedule(h, candidate_ip, "plain", now=now))
+    if on_complete is None:
+        scheduled = bool(schedule(h, candidate_ip, "plain", now=now))
+    else:
+        scheduled = bool(schedule(
+            h,
+            candidate_ip,
+            "plain",
+            now=now,
+            on_complete=on_complete,
+        ))
+    return (
+        TRANSPORT_IDLE_EVIDENCE_CONFIRMING
+        if scheduled
+        else TRANSPORT_IDLE_EVIDENCE_HOLD
+    )
 
 
-def _arm_transport_incomplete_idle_observer(
+def _advance_transport_idle_retry(host, stage, now=None):
+    """Advance one exact unknown host after a handshake-only idle."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if (
+        not h
+        or not _auto_geph_base_host_allowed(h)
+        or not _valid_auto_geph_stage(stage)
+        or _network_wide_unknown_failure_visible(now)
+    ):
+        return False
+    if stage == AUTO_GEPH_STAGE_SYSTEM:
+        _mark_xbox_dns_candidate(h, now)
+    elif stage == AUTO_GEPH_STAGE_XBOX_DNS:
+        _mark_xbox_dns_exhausted(h, now)
+    else:
+        strategy_name = stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
+        _record_strategy_result(h, strategy_name, False)
+    return True
+
+
+def _request_transport_idle_retry(activity, prepare=None):
+    """Signal only a live relay; late confirmation callbacks are inert."""
+    if activity.retry_closed:
+        return False
+    loop = activity.retry_loop
+    event = activity.retry_event
+    if loop is None or event is None:
+        if prepare is not None and not prepare():
+            return False
+        activity.downstream_idle_retry = True
+        return True
+
+    def signal():
+        if activity.retry_closed:
+            return
+        if prepare is not None and not prepare():
+            return
+        activity.downstream_idle_retry = True
+        event.set()
+
+    try:
+        loop.call_soon_threadsafe(signal)
+    except RuntimeError:
+        # The browser may have abandoned this exact relay while the bounded
+        # confirmation was still running. A closed loop has nothing left to
+        # retry and must not turn background completion into a daemon error.
+        return False
+    return True
+
+
+def _register_pending_navigation_relay(
     activity,
     host,
     ip,
@@ -9642,12 +9749,7 @@ def _arm_transport_incomplete_idle_observer(
     *,
     scheduler=None,
 ):
-    """Observe one generic local route without changing its active stream.
-
-    Downstream silence records one stage of the required local evidence ladder.
-    Only a complete ladder may schedule the independent direct HTTP and owned
-    Geph proofs needed before a later exact-host route can be learned.
-    """
+    """Register one generic relay for an explicit browser pending signal."""
     h = normalize_host(host)
     try:
         address = ipaddress.ip_address(ip)
@@ -9662,16 +9764,99 @@ def _arm_transport_incomplete_idle_observer(
     ):
         return False
 
-    def observe():
-        _record_transport_incomplete_idle_evidence(
-            h,
-            str(address),
-            stage,
-            scheduler=scheduler,
-        )
-
-    activity.on_downstream_idle = observe
+    activity.pending_navigation_eligible = True
+    activity.pending_navigation_host = h
+    activity.pending_navigation_ip = str(address)
+    activity.pending_navigation_stage = stage
+    activity.pending_navigation_scheduler = scheduler
+    with _auto_geph_lock:
+        relays = _active_pending_navigation_relays.setdefault(h, {})
+        relays[id(activity)] = activity
     return True
+
+
+def _unregister_pending_navigation_relay(activity):
+    h = normalize_host(activity.pending_navigation_host)
+    if not h:
+        return
+    with _auto_geph_lock:
+        relays = _active_pending_navigation_relays.get(h)
+        if relays is None:
+            return
+        relays.pop(id(activity), None)
+        if not relays:
+            _active_pending_navigation_relays.pop(h, None)
+
+
+def _request_pending_navigation_retry(
+    host,
+    request_started_at_unix_ms,
+    *,
+    now=None,
+):
+    """Act only on the one live relay correlated to a browser navigation."""
+    h = normalize_host(host)
+    now = time.monotonic() if now is None else now
+    if (
+        not h
+        or type(request_started_at_unix_ms) is not int
+        or request_started_at_unix_ms <= 0
+        or route_policy(h)["route_class"] != ROUTE_UNKNOWN
+        or not _auto_geph_base_host_allowed(h)
+    ):
+        return False
+    with _auto_geph_lock:
+        candidates = tuple(
+            activity
+            for activity in _active_pending_navigation_relays.get(h, {}).values()
+            if (
+                activity.pending_navigation_eligible
+                and not activity.retry_closed
+                and activity.pending_navigation_started_at_unix_ms > 0
+                and abs(
+                    activity.pending_navigation_started_at_unix_ms
+                    - request_started_at_unix_ms
+                ) <= PENDING_NAVIGATION_RELAY_START_SKEW_MS
+                and now - activity.last_downstream_at
+                >= UNKNOWN_PRE_RESPONSE_IDLE
+                and 0 < activity.downstream_bytes < AUTO_GEPH_FAIL_BYTES
+                and activity.track_tls_records
+                and activity.tls_framing_valid
+                and activity.tls_complete_records > 0
+                and not _incomplete_tls_record_visible(activity)
+            )
+        )
+    if not candidates:
+        return False
+    activity = min(
+        candidates,
+        key=lambda candidate: abs(
+            candidate.pending_navigation_started_at_unix_ms
+            - request_started_at_unix_ms
+        ),
+    )
+
+    def confirmation_completed(_host, succeeded):
+        if succeeded:
+            _request_transport_idle_retry(activity)
+
+    evidence = _record_transport_incomplete_idle_evidence(
+        h,
+        activity.pending_navigation_ip,
+        activity.pending_navigation_stage,
+        now=now,
+        scheduler=activity.pending_navigation_scheduler,
+        on_complete=confirmation_completed,
+    )
+    if evidence == TRANSPORT_IDLE_EVIDENCE_ADVANCE:
+        if not _advance_transport_idle_retry(
+            h,
+            activity.pending_navigation_stage,
+            now=now,
+        ):
+            return False
+        return _request_transport_idle_retry(activity)
+    return evidence == TRANSPORT_IDLE_EVIDENCE_CONFIRMING
 
 
 def _valid_server_first_framed_close(activity):
@@ -10191,6 +10376,24 @@ def _unknown_recovery_stage_for_attempt(host, repeat_stage=None, now=None):
 
 def _strategy_order_for_attempt(host, repeat_stage=None):
     ordered = strategy_order(host)
+    now = time.monotonic()
+    with _auto_geph_lock:
+        _prune_local_payload_idle_failures(now)
+        idle_stages = set(
+            _local_payload_idle_failures.get(normalize_host(host), {})
+        )
+    idle_names = {
+        stage[len(AUTO_GEPH_STAGE_STRATEGY_PREFIX):]
+        for stage in idle_stages
+        if stage.startswith(AUTO_GEPH_STAGE_STRATEGY_PREFIX)
+    }
+    if idle_names:
+        # Keep both groups stable: untried strategies retain their ranking and
+        # observed idle strategies retain theirs while moving behind them.
+        ordered = [
+            *[strategy for strategy in ordered if strategy["name"] not in idle_names],
+            *[strategy for strategy in ordered if strategy["name"] in idle_names],
+        ]
     if not repeat_stage or not repeat_stage.startswith(
         AUTO_GEPH_STAGE_STRATEGY_PREFIX
     ):
@@ -10349,7 +10552,7 @@ async def _watch_partial_tls_record(activity, idle_timeout):
 
 
 async def _watch_downstream_idle(activity, idle_timeout):
-    """Report one payload-followed idle period without ending the relay."""
+    """Report one complete-record idle period to its bounded route observer."""
     while True:
         if not activity.first_downstream_seen:
             await asyncio.sleep(idle_timeout)
@@ -10412,19 +10615,35 @@ async def relay_local_stream(
         asyncio.create_task(
             _watch_downstream_idle(
                 relay_activity,
-                LOCAL_STREAM_IDLE,
+                UNKNOWN_PRE_RESPONSE_IDLE,
             )
         )
         if relay_activity.on_downstream_idle is not None
         else None
     )
+    retry_task = None
+    if (
+        relay_activity.on_downstream_idle is not None
+        or relay_activity.pending_navigation_eligible
+    ):
+        relay_activity.retry_closed = False
+        relay_activity.retry_loop = asyncio.get_running_loop()
+        relay_activity.retry_event = asyncio.Event()
+        if relay_activity.downstream_idle_retry:
+            relay_activity.retry_event.set()
+        retry_task = asyncio.create_task(relay_activity.retry_event.wait())
     try:
-        # The observer is intentionally excluded: silence may trigger a bounded
-        # out-of-band proof, but it must never complete or cancel this relay.
+        wait_tasks = tasks + tuple(
+            task
+            for task in (watchdog_task, retry_task)
+            if task is not None
+        )
         done, pending = await asyncio.wait(
-            tasks + ((watchdog_task,) if watchdog_task is not None else ()),
+            wait_tasks,
             return_when=asyncio.FIRST_COMPLETED,
         )
+        if retry_task is not None and retry_task in done:
+            pending = {task for task in tasks if not task.done()}
         if watchdog_task is not None and watchdog_task in done:
             pending = {task for task in tasks if not task.done()}
         elif watchdog_task is not None:
@@ -10494,6 +10713,10 @@ async def relay_local_stream(
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
     finally:
+        # The observer and any background confirmation callback share this
+        # activity. Close their signaling contract before yielding to cleanup.
+        relay_activity.retry_closed = True
+        relay_activity.on_downstream_idle = None
         if watchdog_task is not None and not watchdog_task.done():
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
@@ -10501,6 +10724,13 @@ async def relay_local_stream(
             if not idle_observer_task.done():
                 idle_observer_task.cancel()
             await asyncio.gather(idle_observer_task, return_exceptions=True)
+        if retry_task is not None:
+            if not retry_task.done():
+                retry_task.cancel()
+            await asyncio.gather(retry_task, return_exceptions=True)
+        relay_activity.retry_loop = None
+        relay_activity.retry_event = None
+        _unregister_pending_navigation_relay(relay_activity)
         if relay_activity.client_half_closed:
             await _close_stream_writer(up_w)
 
@@ -11271,6 +11501,7 @@ async def handle(reader, writer):
 
 
 async def _handle_impl(reader, writer):
+    connection_started_at_unix_ms = int(time.time() * 1000)
     sock = writer.get_extra_info("socket")
     try:
         dst_ip, dst_port = orig_dst(sock)
@@ -11874,6 +12105,9 @@ async def _handle_impl(reader, writer):
         last_downstream_at=t0,
         downstream_bytes=len(server_first),
         first_downstream_seen=bool(server_first),
+        pending_navigation_started_at_unix_ms=(
+            connection_started_at_unix_ms
+        ),
         track_tls_records=(
             route_class == ROUTE_UNKNOWN
             or _protected_local_runtime_policy(policy)
@@ -11887,7 +12121,7 @@ async def _handle_impl(reader, writer):
             observed_stage = AUTO_GEPH_STAGE_XBOX_DNS
         elif chosen_name in GENERAL_STRATS:
             observed_stage = f"{AUTO_GEPH_STAGE_STRATEGY_PREFIX}{chosen_name}"
-    _arm_transport_incomplete_idle_observer(
+    _register_pending_navigation_relay(
         activity,
         host,
         chosen,

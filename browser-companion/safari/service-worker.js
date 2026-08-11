@@ -45,7 +45,36 @@ if (
 ) {
   webRequest.onBeforeRequest.addListener(
     (details) => {
-      incompleteResponseTracker.remember(details, Date.now()).catch(() => {});
+      incompleteResponseTracker
+        .remember(details, Date.now())
+        .then((remembered) => {
+          if (!remembered) {
+            return;
+          }
+          setTimeout(() => {
+            incompleteResponseTracker
+              .peek(details)
+              .then((candidate) =>
+                Promise.resolve(tabs.get(details.tabId)).then((tab) => ({
+                  candidate,
+                  tab
+                }))
+              )
+              .then(({ candidate, tab }) => {
+                const randomBytes = new Uint8Array(16);
+                crypto.getRandomValues(randomBytes);
+                return core.buildPendingNavigationSignal(
+                  candidate,
+                  tab,
+                  Date.now(),
+                  randomBytes
+                );
+              })
+              .then((signal) => (signal ? sendToNative(signal) : null))
+              .catch(() => {});
+          }, core.pendingNavigationDelayMs);
+        })
+        .catch(() => {});
     },
     {
       urls: ["https://*/*"],

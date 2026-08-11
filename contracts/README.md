@@ -32,6 +32,12 @@ Slipstream routing decisions and bounded recovery primitives.
   remains authoritative; an eligible unknown host can be learned only after
   the currently ownership-verified bundled Geph returns one syntactically
   complete bounded HTTP response.
+- `semantic-route-signal-v3.json` adds a frozen `navigation_pending` category
+  for a top-level HTTPS navigation that is still loading the same normalized
+  `pendingUrl` after eight seconds. The browser sends only the hostname and
+  request/observation timestamps. The daemon must correlate that signal to one
+  live exact-host relay before advancing a local recovery stage; relay byte
+  silence alone is never authority to close a connection.
 - `route-policy-manifest-v1.json` freezes manifest normalization, structured
   validation failures, bounded input limits, and effective first-match
   protection for local-bypass and direct-first domains.

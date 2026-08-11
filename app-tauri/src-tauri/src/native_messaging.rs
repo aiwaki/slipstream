@@ -396,6 +396,21 @@ mod tests {
         .unwrap()
     }
 
+    fn pending_navigation_signal() -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "schema_version": 3,
+            "signal_id": "abcdef0123456789abcdef0123456789",
+            "source": "browser_extension",
+            "host": "example.net",
+            "category": "navigation_pending",
+            "confidence_bps": 10000,
+            "observed_at_unix_ms": 1_008_000,
+            "request_started_at_unix_ms": 1_000_000,
+            "top_level": true,
+        }))
+        .unwrap()
+    }
+
     fn daemon_response() -> Vec<u8> {
         fixed_response(true, "confirm_exact_host_geo_exit", "accepted")
     }
@@ -434,6 +449,20 @@ mod tests {
     #[test]
     fn additive_incomplete_response_signal_is_forwarded_byte_for_byte() {
         let payload = incomplete_response_signal();
+        let observed = Cell::new(false);
+        let response = process_message(CHROMIUM_EXTENSION_ORIGIN, &payload, |forwarded| {
+            assert_eq!(forwarded, payload);
+            observed.set(true);
+            Ok(daemon_response())
+        });
+
+        assert!(observed.get());
+        assert_eq!(response, daemon_response());
+    }
+
+    #[test]
+    fn additive_pending_navigation_signal_is_forwarded_byte_for_byte() {
+        let payload = pending_navigation_signal();
         let observed = Cell::new(false);
         let response = process_message(CHROMIUM_EXTENSION_ORIGIN, &payload, |forwarded| {
             assert_eq!(forwarded, payload);

@@ -8,10 +8,14 @@ use std::str::FromStr;
 
 pub const SEMANTIC_ROUTE_SIGNAL_VERSION: u8 = 1;
 pub const SEMANTIC_ROUTE_SIGNAL_V2_VERSION: u8 = 2;
+pub const SEMANTIC_ROUTE_SIGNAL_V3_VERSION: u8 = 3;
 pub const MAX_SEMANTIC_SIGNAL_BYTES: usize = 2048;
 pub const MAX_SEMANTIC_SIGNAL_AGE_MS: u64 = 120_000;
 pub const MAX_SEMANTIC_SIGNAL_FUTURE_SKEW_MS: u64 = 5_000;
 pub const SEMANTIC_SIGNAL_COOLDOWN_MS: u64 = 300_000;
+pub const PENDING_NAVIGATION_COOLDOWN_MS: u64 = 5_000;
+pub const PENDING_NAVIGATION_MIN_AGE_MS: u64 = 8_000;
+pub const PENDING_NAVIGATION_MAX_AGE_MS: u64 = 300_000;
 pub const MIN_SEMANTIC_SIGNAL_CONFIDENCE_BPS: u16 = 9_000;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -38,6 +42,19 @@ pub struct SemanticRouteSignalV2 {
     pub top_level: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SemanticRouteSignalV3 {
+    pub schema_version: u8,
+    pub signal_id: String,
+    pub source: String,
+    pub host: String,
+    pub category: String,
+    pub confidence_bps: u16,
+    pub observed_at_unix_ms: u64,
+    pub request_started_at_unix_ms: u64,
+    pub top_level: bool,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticSignalErrorCode {
@@ -52,6 +69,7 @@ pub enum SemanticSignalErrorCode {
     InvalidCategory,
     InvalidConfidence,
     InvalidObservedAt,
+    InvalidRequestStartedAt,
     InvalidTopLevel,
 }
 
@@ -74,6 +92,7 @@ pub struct SemanticRouteSignalContext {
 pub enum SemanticRouteSignalAction {
     None,
     ConfirmExactHostGeoExit,
+    RetryPendingNavigation,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -89,6 +108,7 @@ pub enum SemanticRouteSignalReason {
     AlreadyGeoExit,
     BackendUnavailable,
     RateLimited,
+    NavigationNotPending,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -138,6 +158,32 @@ fn exact_signal_object(value: Value) -> Result<Map<String, Value>, SemanticSigna
         "category",
         "confidence_bps",
         "observed_at_unix_ms",
+        "top_level",
+    ];
+
+    let object = value
+        .as_object()
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidShape))?;
+    if object.len() != REQUIRED_FIELDS.len()
+        || !REQUIRED_FIELDS
+            .iter()
+            .all(|field| object.contains_key(*field))
+    {
+        return Err(error(SemanticSignalErrorCode::InvalidShape));
+    }
+    Ok(object.clone())
+}
+
+fn exact_signal_object_v3(value: Value) -> Result<Map<String, Value>, SemanticSignalError> {
+    const REQUIRED_FIELDS: [&str; 9] = [
+        "schema_version",
+        "signal_id",
+        "source",
+        "host",
+        "category",
+        "confidence_bps",
+        "observed_at_unix_ms",
+        "request_started_at_unix_ms",
         "top_level",
     ];
 
@@ -292,6 +338,80 @@ pub fn parse_semantic_route_signal_v2(
     })
 }
 
+pub fn parse_semantic_route_signal_v3(
+    payload: &[u8],
+) -> Result<SemanticRouteSignalV3, SemanticSignalError> {
+    if payload.is_empty() {
+        return Err(error(SemanticSignalErrorCode::EmptyInput));
+    }
+    if payload.len() > MAX_SEMANTIC_SIGNAL_BYTES {
+        return Err(error(SemanticSignalErrorCode::PayloadTooLarge));
+    }
+    let value: Value =
+        serde_json::from_slice(payload).map_err(|_| error(SemanticSignalErrorCode::InvalidJson))?;
+    let wire = exact_signal_object_v3(value)?;
+    let schema_version = wire["schema_version"]
+        .as_u64()
+        .and_then(|version| u8::try_from(version).ok())
+        .ok_or_else(|| error(SemanticSignalErrorCode::UnsupportedVersion))?;
+    if schema_version != SEMANTIC_ROUTE_SIGNAL_V3_VERSION {
+        return Err(error(SemanticSignalErrorCode::UnsupportedVersion));
+    }
+    let signal_id = wire["signal_id"]
+        .as_str()
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidSignalId))?;
+    if signal_id.len() != 32
+        || !signal_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(error(SemanticSignalErrorCode::InvalidSignalId));
+    }
+    let source = wire["source"]
+        .as_str()
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidSource))?;
+    if source != "browser_extension" {
+        return Err(error(SemanticSignalErrorCode::InvalidSource));
+    }
+    let host = wire["host"]
+        .as_str()
+        .and_then(normalize_hostname)
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidHost))?;
+    let category = wire["category"]
+        .as_str()
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidCategory))?;
+    if category != "navigation_pending" {
+        return Err(error(SemanticSignalErrorCode::InvalidCategory));
+    }
+    let confidence_bps = wire["confidence_bps"]
+        .as_u64()
+        .and_then(|confidence| u16::try_from(confidence).ok())
+        .filter(|confidence| *confidence <= 10_000)
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidConfidence))?;
+    let observed_at_unix_ms = wire["observed_at_unix_ms"]
+        .as_u64()
+        .filter(|observed_at| *observed_at > 0)
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidObservedAt))?;
+    let request_started_at_unix_ms = wire["request_started_at_unix_ms"]
+        .as_u64()
+        .filter(|started_at| *started_at > 0)
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidRequestStartedAt))?;
+    let top_level = wire["top_level"]
+        .as_bool()
+        .ok_or_else(|| error(SemanticSignalErrorCode::InvalidTopLevel))?;
+    Ok(SemanticRouteSignalV3 {
+        schema_version,
+        signal_id: signal_id.to_owned(),
+        source: source.to_owned(),
+        host,
+        category: category.to_owned(),
+        confidence_bps,
+        observed_at_unix_ms,
+        request_started_at_unix_ms,
+        top_level,
+    })
+}
+
 pub fn validate_semantic_route_signal(payload: &[u8]) -> Result<(), SemanticSignalError> {
     if payload.is_empty() {
         return Err(error(SemanticSignalErrorCode::EmptyInput));
@@ -301,13 +421,19 @@ pub fn validate_semantic_route_signal(payload: &[u8]) -> Result<(), SemanticSign
     }
     let value: Value =
         serde_json::from_slice(payload).map_err(|_| error(SemanticSignalErrorCode::InvalidJson))?;
-    let wire = exact_signal_object(value)?;
-    match wire["schema_version"].as_u64() {
+    let version = value
+        .as_object()
+        .and_then(|wire| wire.get("schema_version"))
+        .and_then(Value::as_u64);
+    match version {
         Some(version) if version == u64::from(SEMANTIC_ROUTE_SIGNAL_VERSION) => {
             parse_semantic_route_signal_v1(payload).map(|_| ())
         }
         Some(version) if version == u64::from(SEMANTIC_ROUTE_SIGNAL_V2_VERSION) => {
             parse_semantic_route_signal_v2(payload).map(|_| ())
+        }
+        Some(version) if version == u64::from(SEMANTIC_ROUTE_SIGNAL_V3_VERSION) => {
+            parse_semantic_route_signal_v3(payload).map(|_| ())
         }
         _ => Err(error(SemanticSignalErrorCode::UnsupportedVersion)),
     }
@@ -332,12 +458,13 @@ fn reduce_semantic_route_signal_fields(
     top_level: bool,
     confidence_bps: u16,
     observed_at_unix_ms: u64,
+    request_started_at_unix_ms: Option<u64>,
     context: &SemanticRouteSignalContext,
 ) -> SemanticRouteSignalDecision {
-    use SemanticRouteSignalAction::{ConfirmExactHostGeoExit, None};
+    use SemanticRouteSignalAction::{ConfirmExactHostGeoExit, None, RetryPendingNavigation};
     use SemanticRouteSignalReason::{
-        Accepted, AlreadyGeoExit, BackendUnavailable, Future, LowConfidence, NotTopLevel,
-        ProtectedRoute, RateLimited, Replay, Stale,
+        Accepted, AlreadyGeoExit, BackendUnavailable, Future, LowConfidence, NavigationNotPending,
+        NotTopLevel, ProtectedRoute, RateLimited, Replay, Stale,
     };
 
     if !top_level {
@@ -356,6 +483,18 @@ fn reduce_semantic_route_signal_fields(
     if context.now_unix_ms.saturating_sub(observed_at_unix_ms) > MAX_SEMANTIC_SIGNAL_AGE_MS {
         return decision_for_host(host, false, None, Stale);
     }
+    if let Some(started_at) = request_started_at_unix_ms {
+        if started_at > observed_at_unix_ms
+            || observed_at_unix_ms.saturating_sub(started_at) < PENDING_NAVIGATION_MIN_AGE_MS
+        {
+            return decision_for_host(host, false, None, NavigationNotPending);
+        }
+        if observed_at_unix_ms.saturating_sub(started_at) > PENDING_NAVIGATION_MAX_AGE_MS
+            || context.now_unix_ms.saturating_sub(started_at) > PENDING_NAVIGATION_MAX_AGE_MS
+        {
+            return decision_for_host(host, false, None, Stale);
+        }
+    }
     if context.signal_id_seen {
         return decision_for_host(host, false, None, Replay);
     }
@@ -371,16 +510,31 @@ fn reduce_semantic_route_signal_fields(
     if context.route_class != RouteClass::Unknown {
         return decision_for_host(host, false, None, ProtectedRoute);
     }
-    if !context.owned_geph_payload_ready {
+    let pending_navigation = request_started_at_unix_ms.is_some();
+    if !pending_navigation && !context.owned_geph_payload_ready {
         return decision_for_host(host, false, None, BackendUnavailable);
     }
+    let cooldown_ms = if pending_navigation {
+        PENDING_NAVIGATION_COOLDOWN_MS
+    } else {
+        SEMANTIC_SIGNAL_COOLDOWN_MS
+    };
     if context
         .last_accepted_at_unix_ms
-        .is_some_and(|last| context.now_unix_ms.saturating_sub(last) < SEMANTIC_SIGNAL_COOLDOWN_MS)
+        .is_some_and(|last| context.now_unix_ms.saturating_sub(last) < cooldown_ms)
     {
         return decision_for_host(host, false, None, RateLimited);
     }
-    decision_for_host(host, true, ConfirmExactHostGeoExit, Accepted)
+    decision_for_host(
+        host,
+        true,
+        if pending_navigation {
+            RetryPendingNavigation
+        } else {
+            ConfirmExactHostGeoExit
+        },
+        Accepted,
+    )
 }
 
 pub fn reduce_semantic_route_signal(
@@ -392,6 +546,7 @@ pub fn reduce_semantic_route_signal(
         signal.top_level,
         signal.confidence_bps,
         signal.observed_at_unix_ms,
+        None,
         context,
     )
 }
@@ -405,6 +560,21 @@ pub fn reduce_semantic_route_signal_v2(
         signal.top_level,
         signal.confidence_bps,
         signal.observed_at_unix_ms,
+        None,
+        context,
+    )
+}
+
+pub fn reduce_semantic_route_signal_v3(
+    signal: &SemanticRouteSignalV3,
+    context: &SemanticRouteSignalContext,
+) -> SemanticRouteSignalDecision {
+    reduce_semantic_route_signal_fields(
+        &signal.host,
+        signal.top_level,
+        signal.confidence_bps,
+        signal.observed_at_unix_ms,
+        Some(signal.request_started_at_unix_ms),
         context,
     )
 }

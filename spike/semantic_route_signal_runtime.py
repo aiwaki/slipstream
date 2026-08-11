@@ -14,6 +14,7 @@ import time
 from semantic_route_signal import (
     ACTION_NONE,
     CATEGORY_INCOMPLETE_RESPONSE,
+    CATEGORY_NAVIGATION_PENDING,
     MAX_SIGNAL_BYTES,
     ROUTE_UNKNOWN,
     SemanticRouteSignalContext,
@@ -55,6 +56,7 @@ class SemanticRouteSignalRuntime:
         owned_geph_ready,
         request_confirmation,
         request_incomplete_confirmation=None,
+        request_pending_navigation=None,
         wall_clock_ms=None,
         monotonic_clock=None,
         max_entries=MAX_RUNTIME_ENTRIES,
@@ -66,6 +68,7 @@ class SemanticRouteSignalRuntime:
         self._owned_geph_ready = owned_geph_ready
         self._request_confirmation = request_confirmation
         self._request_incomplete_confirmation = request_incomplete_confirmation
+        self._request_pending_navigation = request_pending_navigation
         self._wall_clock_ms = wall_clock_ms or (lambda: int(time.time() * 1000))
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._max_entries = max_entries
@@ -102,7 +105,10 @@ class SemanticRouteSignalRuntime:
             route_class = self._route_class_for_host(signal.host)
             backend_ready = (
                 bool(self._owned_geph_ready())
-                if route_class == ROUTE_UNKNOWN
+                if (
+                    route_class == ROUTE_UNKNOWN
+                    and signal.category != CATEGORY_NAVIGATION_PENDING
+                )
                 else False
             )
         except Exception:
@@ -111,7 +117,8 @@ class SemanticRouteSignalRuntime:
         with self._lock:
             self._prune_locked(now_mono)
             signal_id_seen = signal.signal_id in self._seen_signal_ids
-            accepted_host = self._accepted_hosts.get(signal.host)
+            accepted_key = (signal.host, signal.category)
+            accepted_host = self._accepted_hosts.get(accepted_key)
             last_accepted_at = accepted_host[0] if accepted_host else None
             decision = reduce_semantic_route_signal(
                 signal,
@@ -133,7 +140,7 @@ class SemanticRouteSignalRuntime:
             if decision.accepted:
                 self._remember_locked(
                     self._accepted_hosts,
-                    signal.host,
+                    accepted_key,
                     now_ms,
                     now_mono,
                 )
@@ -143,15 +150,26 @@ class SemanticRouteSignalRuntime:
         confirmation = self._request_confirmation
         if signal.category == CATEGORY_INCOMPLETE_RESPONSE:
             confirmation = self._request_incomplete_confirmation
+        elif signal.category == CATEGORY_NAVIGATION_PENDING:
+            confirmation = self._request_pending_navigation
         try:
-            scheduled = bool(confirmation and confirmation(signal.host))
+            if signal.category == CATEGORY_NAVIGATION_PENDING:
+                scheduled = bool(
+                    confirmation
+                    and confirmation(
+                        signal.host,
+                        signal.request_started_at_unix_ms,
+                    )
+                )
+            else:
+                scheduled = bool(confirmation and confirmation(signal.host))
         except Exception:
             scheduled = False
         if not scheduled:
             with self._lock:
-                accepted_host = self._accepted_hosts.get(signal.host)
+                accepted_host = self._accepted_hosts.get(accepted_key)
                 if accepted_host is not None and accepted_host[0] == now_ms:
-                    self._accepted_hosts.pop(signal.host, None)
+                    self._accepted_hosts.pop(accepted_key, None)
             return _response(False, ACTION_NONE, REASON_CONFIRMATION_NOT_SCHEDULED)
         return _response(True, decision.action, decision.reason)
 

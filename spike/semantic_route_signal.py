@@ -8,18 +8,24 @@ import re
 
 SCHEMA_VERSION = 1
 SCHEMA_VERSION_V2 = 2
+SCHEMA_VERSION_V3 = 3
 MAX_SIGNAL_BYTES = 2048
 MAX_SIGNAL_AGE_MS = 120_000
 MAX_FUTURE_SKEW_MS = 5_000
 SIGNAL_COOLDOWN_MS = 300_000
+PENDING_NAVIGATION_COOLDOWN_MS = 5_000
+PENDING_NAVIGATION_MIN_AGE_MS = 8_000
+PENDING_NAVIGATION_MAX_AGE_MS = 300_000
 MIN_CONFIDENCE_BPS = 9_000
 
 SOURCE_BROWSER_EXTENSION = "browser_extension"
 CATEGORY_REGIONAL_ACCESS_DENIED = "regional_access_denied"
 CATEGORY_INCOMPLETE_RESPONSE = "incomplete_response"
+CATEGORY_NAVIGATION_PENDING = "navigation_pending"
 
 ACTION_NONE = "none"
 ACTION_CONFIRM_EXACT_HOST_GEO_EXIT = "confirm_exact_host_geo_exit"
+ACTION_RETRY_PENDING_NAVIGATION = "retry_pending_navigation"
 
 REASON_ACCEPTED = "accepted"
 REASON_NOT_TOP_LEVEL = "not_top_level"
@@ -31,6 +37,7 @@ REASON_PROTECTED_ROUTE = "protected_route"
 REASON_ALREADY_GEO_EXIT = "already_geo_exit"
 REASON_BACKEND_UNAVAILABLE = "backend_unavailable"
 REASON_RATE_LIMITED = "rate_limited"
+REASON_NAVIGATION_NOT_PENDING = "navigation_not_pending"
 
 ROUTE_DIRECT = "direct_passthrough"
 ROUTE_DIRECT_FIRST = "direct_first"
@@ -52,6 +59,7 @@ _REQUIRED_FIELDS = frozenset(
         "top_level",
     )
 )
+_REQUIRED_FIELDS_V3 = _REQUIRED_FIELDS | frozenset(("request_started_at_unix_ms",))
 
 
 class SemanticSignalError(ValueError):
@@ -82,6 +90,19 @@ class SemanticRouteSignalV2:
     source: str = SOURCE_BROWSER_EXTENSION
     category: str = CATEGORY_INCOMPLETE_RESPONSE
     schema_version: int = SCHEMA_VERSION_V2
+
+
+@dataclass(frozen=True)
+class SemanticRouteSignalV3:
+    signal_id: str
+    host: str
+    confidence_bps: int
+    observed_at_unix_ms: int
+    request_started_at_unix_ms: int
+    top_level: bool
+    source: str = SOURCE_BROWSER_EXTENSION
+    category: str = CATEGORY_NAVIGATION_PENDING
+    schema_version: int = SCHEMA_VERSION_V3
 
 
 @dataclass(frozen=True)
@@ -212,6 +233,57 @@ def parse_semantic_route_signal_v2(payload):
     )
 
 
+def parse_semantic_route_signal_v3(payload):
+    if isinstance(payload, str):
+        raw = payload.encode("utf-8")
+    elif isinstance(payload, bytes):
+        raw = payload
+    else:
+        raise SemanticSignalError("invalid_shape")
+    if not raw:
+        raise SemanticSignalError("empty_input")
+    if len(raw) > MAX_SIGNAL_BYTES:
+        raise SemanticSignalError("payload_too_large")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SemanticSignalError("invalid_json") from error
+    if not isinstance(value, dict) or frozenset(value) != _REQUIRED_FIELDS_V3:
+        raise SemanticSignalError("invalid_shape")
+    if (
+        type(value["schema_version"]) is not int
+        or value["schema_version"] != SCHEMA_VERSION_V3
+    ):
+        raise SemanticSignalError("unsupported_version")
+    signal_id = value["signal_id"]
+    if not isinstance(signal_id, str) or not _SIGNAL_ID_RE.fullmatch(signal_id):
+        raise SemanticSignalError("invalid_signal_id")
+    if value["source"] != SOURCE_BROWSER_EXTENSION:
+        raise SemanticSignalError("invalid_source")
+    host = _normalize_hostname(value["host"])
+    if value["category"] != CATEGORY_NAVIGATION_PENDING:
+        raise SemanticSignalError("invalid_category")
+    confidence = value["confidence_bps"]
+    if type(confidence) is not int or not 0 <= confidence <= 10_000:
+        raise SemanticSignalError("invalid_confidence")
+    observed_at = value["observed_at_unix_ms"]
+    if type(observed_at) is not int or observed_at <= 0:
+        raise SemanticSignalError("invalid_observed_at")
+    request_started_at = value["request_started_at_unix_ms"]
+    if type(request_started_at) is not int or request_started_at <= 0:
+        raise SemanticSignalError("invalid_request_started_at")
+    if type(value["top_level"]) is not bool:
+        raise SemanticSignalError("invalid_top_level")
+    return SemanticRouteSignalV3(
+        signal_id=signal_id,
+        host=host,
+        confidence_bps=confidence,
+        observed_at_unix_ms=observed_at,
+        request_started_at_unix_ms=request_started_at,
+        top_level=value["top_level"],
+    )
+
+
 def parse_semantic_route_signal(payload):
     if isinstance(payload, str):
         raw = payload.encode("utf-8")
@@ -234,6 +306,8 @@ def parse_semantic_route_signal(payload):
         return parse_semantic_route_signal_v1(raw)
     if version == SCHEMA_VERSION_V2:
         return parse_semantic_route_signal_v2(raw)
+    if version == SCHEMA_VERSION_V3:
+        return parse_semantic_route_signal_v3(raw)
     raise SemanticSignalError("unsupported_version")
 
 
@@ -247,6 +321,7 @@ def _decision(signal, accepted, action, reason):
 
 
 def reduce_semantic_route_signal(signal, context):
+    pending_navigation = isinstance(signal, SemanticRouteSignalV3)
     if not signal.top_level:
         return _decision(signal, False, ACTION_NONE, REASON_NOT_TOP_LEVEL)
     if signal.confidence_bps < MIN_CONFIDENCE_BPS:
@@ -255,6 +330,23 @@ def reduce_semantic_route_signal(signal, context):
         return _decision(signal, False, ACTION_NONE, REASON_FUTURE)
     if context.now_unix_ms - signal.observed_at_unix_ms > MAX_SIGNAL_AGE_MS:
         return _decision(signal, False, ACTION_NONE, REASON_STALE)
+    if pending_navigation:
+        pending_age = (
+            signal.observed_at_unix_ms - signal.request_started_at_unix_ms
+        )
+        if pending_age < PENDING_NAVIGATION_MIN_AGE_MS:
+            return _decision(
+                signal,
+                False,
+                ACTION_NONE,
+                REASON_NAVIGATION_NOT_PENDING,
+            )
+        if (
+            pending_age > PENDING_NAVIGATION_MAX_AGE_MS
+            or context.now_unix_ms - signal.request_started_at_unix_ms
+            > PENDING_NAVIGATION_MAX_AGE_MS
+        ):
+            return _decision(signal, False, ACTION_NONE, REASON_STALE)
     if context.signal_id_seen:
         return _decision(signal, False, ACTION_NONE, REASON_REPLAY)
     if context.route_class in (ROUTE_DIRECT, ROUTE_DIRECT_FIRST, ROUTE_LOCAL_BYPASS):
@@ -263,17 +355,26 @@ def reduce_semantic_route_signal(signal, context):
         return _decision(signal, False, ACTION_NONE, REASON_ALREADY_GEO_EXIT)
     if context.route_class != ROUTE_UNKNOWN:
         return _decision(signal, False, ACTION_NONE, REASON_PROTECTED_ROUTE)
-    if not context.owned_geph_payload_ready:
+    if not pending_navigation and not context.owned_geph_payload_ready:
         return _decision(signal, False, ACTION_NONE, REASON_BACKEND_UNAVAILABLE)
+    cooldown_ms = (
+        PENDING_NAVIGATION_COOLDOWN_MS
+        if pending_navigation
+        else SIGNAL_COOLDOWN_MS
+    )
     if (
         context.last_accepted_at_unix_ms is not None
         and context.now_unix_ms - context.last_accepted_at_unix_ms
-        < SIGNAL_COOLDOWN_MS
+        < cooldown_ms
     ):
         return _decision(signal, False, ACTION_NONE, REASON_RATE_LIMITED)
     return _decision(
         signal,
         True,
-        ACTION_CONFIRM_EXACT_HOST_GEO_EXIT,
+        (
+            ACTION_RETRY_PENDING_NAVIGATION
+            if pending_navigation
+            else ACTION_CONFIRM_EXACT_HOST_GEO_EXIT
+        ),
         REASON_ACCEPTED,
     )

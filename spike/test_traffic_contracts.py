@@ -1903,6 +1903,75 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
+def test_unknown_handshake_only_idle_waits_for_browser_pending_signal(monkeypatch):
+    """A quiet TLS relay advances only after a correlated browser signal."""
+    isolate_runtime_state(monkeypatch)
+    host = "idle-system-route.example"
+    response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
+    client, _expected_first_flight = tls_client(host, block_after_hello=True)
+    writer = CaptureWriter()
+    signal_times = []
+
+    async def pending_system(_ip, _port, _first_flight):
+        return (
+            tproxy.SYSTEM_PROBE_PENDING,
+            (ScriptedReader(), CaptureWriter(), response),
+        )
+
+    async def handshake_idle(
+        _reader,
+        _up_w,
+        _up_r,
+        _writer,
+        activity,
+        **_kwargs,
+    ):
+        assert activity.on_downstream_idle is None
+        assert activity.pending_navigation_eligible
+        assert not activity.downstream_idle_retry
+        assert not tproxy._xbox_dns_candidate_active(
+            host,
+            now=activity.last_downstream_at,
+        )
+        signal_now = activity.last_downstream_at + tproxy.UNKNOWN_PRE_RESPONSE_IDLE
+        assert tproxy._request_pending_navigation_retry(
+            host,
+            activity.pending_navigation_started_at_unix_ms,
+            now=signal_now,
+        )
+        signal_times.append(signal_now)
+        assert activity.downstream_idle_retry
+        return 0, 0
+
+    async def no_backend(name, *args, **kwargs):
+        await forbidden_backend(name, *args, **kwargs)
+
+    monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
+    monkeypatch.setattr(tproxy, "_try_exact_system_probe", pending_system)
+    monkeypatch.setattr(tproxy, "relay_local_stream", handshake_idle)
+    monkeypatch.setattr(
+        tproxy,
+        "_try_xbox_dns_local_connect",
+        lambda *args, **kwargs: no_backend("Xbox DNS", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_strategy",
+        lambda *args, **kwargs: no_backend("local strategy", *args, **kwargs),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "dial_via_geph",
+        lambda *args, **kwargs: no_backend("Geph", *args, **kwargs),
+    )
+
+    asyncio.run(run_handler(client, writer))
+
+    assert bytes(writer.payload) == response
+    assert tproxy._xbox_dns_candidate_active(host, now=signal_times[0])
+    assert not tproxy._auto_geph_learned_exact_host(host)
+
+
 def test_unknown_client_first_body_abort_reaches_content_confirmation(monkeypatch):
     """A browser-side HTTP/2 body failure must survive relay cancellation."""
     isolate_runtime_state(monkeypatch)

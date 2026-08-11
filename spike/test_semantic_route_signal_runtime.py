@@ -12,6 +12,7 @@ import pytest
 from semantic_route_signal import (
     ACTION_CONFIRM_EXACT_HOST_GEO_EXIT,
     ACTION_NONE,
+    ACTION_RETRY_PENDING_NAVIGATION,
     ROUTE_DIRECT,
     ROUTE_UNKNOWN,
 )
@@ -32,6 +33,9 @@ CONTRACT = json.loads(
 CONTRACT_V2 = json.loads(
     (ROOT / "contracts" / "semantic-route-signal-v2.json").read_text()
 )
+CONTRACT_V3 = json.loads(
+    (ROOT / "contracts" / "semantic-route-signal-v3.json").read_text()
+)
 
 
 def _payload(**overrides):
@@ -47,6 +51,15 @@ def _payload_v2(**overrides):
     return json.dumps(
         {
             **CONTRACT_V2["signal_defaults"],
+            **overrides,
+        }
+    ).encode()
+
+
+def _payload_v3(**overrides):
+    return json.dumps(
+        {
+            **CONTRACT_V3["signal_defaults"],
             **overrides,
         }
     ).encode()
@@ -169,6 +182,68 @@ def test_v2_never_falls_back_to_the_regional_confirmation_effect():
     assert response["accepted"] is False
     assert response["reason"] == REASON_CONFIRMATION_NOT_SCHEDULED
     assert regional == []
+
+
+def test_v3_retries_only_the_correlated_pending_navigation():
+    backend_calls = []
+    pending = []
+    runtime = SemanticRouteSignalRuntime(
+        route_class_for_host=lambda _host: ROUTE_UNKNOWN,
+        owned_geph_ready=lambda: backend_calls.append(True),
+        request_confirmation=lambda _host: False,
+        request_pending_navigation=lambda host, started_at: (
+            pending.append((host, started_at)) is None
+        ),
+        wall_clock_ms=lambda: 1_001_000,
+        monotonic_clock=lambda: 10.0,
+    )
+
+    response = runtime.handle(_payload_v3(host="Example.NET."))
+
+    assert response == {
+        "schema_version": 1,
+        "accepted": True,
+        "action": ACTION_RETRY_PENDING_NAVIGATION,
+        "reason": "accepted",
+    }
+    assert backend_calls == []
+    assert pending == [("example.net", 990_000)]
+
+
+def test_v3_scheduler_refusal_does_not_claim_or_rate_limit_retry():
+    scheduled = iter((False, True))
+    runtime = SemanticRouteSignalRuntime(
+        route_class_for_host=lambda _host: ROUTE_UNKNOWN,
+        owned_geph_ready=lambda: False,
+        request_confirmation=lambda _host: False,
+        request_pending_navigation=lambda _host, _started_at: next(scheduled),
+        wall_clock_ms=lambda: 1_001_000,
+        monotonic_clock=lambda: 10.0,
+    )
+
+    first = runtime.handle(_payload_v3())
+    second = runtime.handle(
+        _payload_v3(signal_id="fedcba9876543210fedcba9876543210")
+    )
+
+    assert first["reason"] == REASON_CONFIRMATION_NOT_SCHEDULED
+    assert second["accepted"] is True
+
+
+def test_v3_has_a_category_scoped_cooldown():
+    runtime = SemanticRouteSignalRuntime(
+        route_class_for_host=lambda _host: ROUTE_UNKNOWN,
+        owned_geph_ready=lambda: True,
+        request_confirmation=lambda _host: True,
+        request_pending_navigation=lambda _host, _started_at: True,
+        wall_clock_ms=lambda: 1_050_000,
+        monotonic_clock=lambda: 10.0,
+    )
+
+    assert runtime.handle(_payload())["accepted"] is True
+    assert runtime.handle(
+        _payload_v3(signal_id="fedcba9876543210fedcba9876543210")
+    )["accepted"] is True
 
 
 def test_scheduler_refusal_does_not_rate_limit_a_new_signal():
