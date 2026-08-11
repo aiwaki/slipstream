@@ -1933,7 +1933,22 @@ def test_unknown_handshake_only_idle_waits_for_browser_pending_signal(monkeypatc
             host,
             now=activity.last_downstream_at,
         )
-        signal_now = activity.last_downstream_at + tproxy.UNKNOWN_PRE_RESPONSE_IDLE
+        assert not tproxy._request_pending_navigation_retry(
+            host,
+            activity.pending_navigation_started_at_unix_ms,
+            now=(
+                activity.last_downstream_at
+                + tproxy.UNKNOWN_PRE_RESPONSE_IDLE
+                - 0.001
+            ),
+        )
+        # Bracket the duration gate instead of relying on floating-point
+        # cancellation to reproduce the exact inclusive boundary.
+        signal_now = (
+            activity.last_downstream_at
+            + tproxy.UNKNOWN_PRE_RESPONSE_IDLE
+            + 0.001
+        )
         assert tproxy._request_pending_navigation_retry(
             host,
             activity.pending_navigation_started_at_unix_ms,
