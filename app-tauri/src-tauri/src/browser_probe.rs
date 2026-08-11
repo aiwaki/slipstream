@@ -101,6 +101,7 @@ struct OwnedProcess {
 #[derive(Debug)]
 struct ChromeConfig {
     executable: PathBuf,
+    source_bundle: PathBuf,
     application_bundle: PathBuf,
     target_url: String,
     host_resolver_rules: Option<String>,
@@ -392,16 +393,16 @@ impl ChromeConfig {
         {
             return Err(error("chrome_untrusted"));
         }
-        let application_bundle = chrome_application_bundle(&executable)?;
+        let source_bundle = chrome_source_bundle(&executable, require_google_identity)?;
         let bundle_metadata =
-            fs::metadata(&application_bundle).map_err(|_| error("chrome_untrusted"))?;
+            fs::metadata(&source_bundle).map_err(|_| error("chrome_untrusted"))?;
         if bundle_metadata.uid() != 0 && bundle_metadata.uid() != uid
             || bundle_metadata.mode() & 0o002 != 0
         {
             return Err(error("chrome_untrusted"));
         }
         if require_google_identity {
-            verify_google_chrome_identity(&application_bundle)?;
+            verify_google_chrome_identity(&source_bundle)?;
         }
 
         let mut target_url = format!("https://{}/", job.host);
@@ -421,7 +422,8 @@ impl ChromeConfig {
         }
         Ok(Self {
             executable,
-            application_bundle,
+            application_bundle: source_bundle.clone(),
+            source_bundle,
             target_url,
             host_resolver_rules,
             ignore_certificate_errors,
@@ -455,6 +457,55 @@ impl ChromeConfig {
         }
         arguments.push(OsString::from("about:blank"));
         arguments
+    }
+
+    fn materialize_ci_application(&mut self, profile: &Path, uid: u32) -> ProbeResult<()> {
+        if self.application_bundle.extension() == Some(OsStr::new("app")) {
+            return Ok(());
+        }
+        if !disposable_ci() {
+            return Err(error("chrome_untrusted"));
+        }
+        let destination = profile.join("Chrome for Testing.app");
+        if destination.exists() || fs::symlink_metadata(&destination).is_ok() {
+            return Err(error("chrome_materialization_failed"));
+        }
+        let status = Command::new("/usr/bin/ditto")
+            .arg(&self.source_bundle)
+            .arg(&destination)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| error("chrome_materialization_failed"))?;
+        if !status.success() {
+            return Err(error("chrome_materialization_failed"));
+        }
+        let relative_executable = self
+            .executable
+            .strip_prefix(&self.source_bundle)
+            .map_err(|_| error("chrome_materialization_failed"))?;
+        let executable = destination.join(relative_executable);
+        let executable_metadata = fs::symlink_metadata(&executable)
+            .map_err(|_| error("chrome_materialization_failed"))?;
+        let bundle_metadata = fs::symlink_metadata(&destination)
+            .map_err(|_| error("chrome_materialization_failed"))?;
+        if !bundle_metadata.is_dir()
+            || bundle_metadata.file_type().is_symlink()
+            || bundle_metadata.uid() != uid
+            || bundle_metadata.mode() & 0o002 != 0
+            || !destination.join("Contents/Info.plist").is_file()
+            || !executable_metadata.is_file()
+            || executable_metadata.file_type().is_symlink()
+            || executable_metadata.uid() != uid
+            || executable_metadata.mode() & 0o111 == 0
+            || executable_metadata.mode() & 0o002 != 0
+        {
+            return Err(error("chrome_materialization_failed"));
+        }
+        self.application_bundle = destination;
+        self.executable = executable;
+        Ok(())
     }
 }
 
@@ -504,7 +555,7 @@ fn discover_production_chrome() -> Option<PathBuf> {
     user.is_file().then_some(user)
 }
 
-fn chrome_application_bundle(executable: &Path) -> ProbeResult<PathBuf> {
+fn chrome_source_bundle(executable: &Path, require_app_suffix: bool) -> ProbeResult<PathBuf> {
     let macos = executable
         .parent()
         .ok_or_else(|| error("chrome_untrusted"))?;
@@ -512,7 +563,7 @@ fn chrome_application_bundle(executable: &Path) -> ProbeResult<PathBuf> {
     let bundle = contents.parent().ok_or_else(|| error("chrome_untrusted"))?;
     if macos.file_name() != Some(OsStr::new("MacOS"))
         || contents.file_name() != Some(OsStr::new("Contents"))
-        || bundle.extension() != Some(OsStr::new("app"))
+        || require_app_suffix && bundle.extension() != Some(OsStr::new("app"))
         || !contents.join("Info.plist").is_file()
     {
         return Err(error("chrome_untrusted"));
@@ -550,6 +601,11 @@ fn validate_ci_origin(origin: &str, host: &str) -> ProbeResult<()> {
 impl ChromeSession {
     fn launch(uid: u32, config: ChromeConfig) -> ProbeResult<Self> {
         let profile = create_private_profile()?;
+        let mut config = config;
+        if let Err(failure) = config.materialize_ci_application(&profile, uid) {
+            let _ = fs::remove_dir_all(&profile);
+            return Err(failure);
+        }
         let mut session = Self {
             uid,
             config,
@@ -1361,6 +1417,7 @@ mod tests {
             executable: PathBuf::from(
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             ),
+            source_bundle: PathBuf::from("/Applications/Google Chrome.app"),
             application_bundle: PathBuf::from("/Applications/Google Chrome.app"),
             target_url: "https://unknown.example/".to_string(),
             host_resolver_rules: None,
@@ -1392,6 +1449,21 @@ mod tests {
         assert!(!google_chrome_identity(
             "Identifier=com.google.Chrome.canary\nTeamIdentifier=EQHXZ8M8AV\n"
         ));
+    }
+
+    #[test]
+    fn extensionless_chrome_bundle_is_disposable_ci_only() {
+        let root = std::env::temp_dir().join(format!(
+            "slipstream-extensionless-chrome-test-{}",
+            std::process::id()
+        ));
+        let executable = root.join("Contents/MacOS/Google Chrome for Testing");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(root.join("Contents/Info.plist"), b"plist").unwrap();
+        fs::write(&executable, b"chrome").unwrap();
+        assert_eq!(chrome_source_bundle(&executable, false).unwrap(), root);
+        assert!(chrome_source_bundle(&executable, true).is_err());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

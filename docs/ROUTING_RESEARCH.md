@@ -408,7 +408,12 @@ LaunchServices waiter, waits for stable absence, and removes the profile before
 submitting either outcome. Production paths are fixed. Executable, socket,
 origin, resolver, and certificate overrides require the complete disposable
 GitHub Actions gate and exist only for the packaged deterministic HTTPS
-qualification. That gate requires one hanging main-document request, one
+qualification. The setup action exposes a metadata-valid bundle root whose
+name lacks `.app`; only in that gate the worker copies the complete root into
+`Chrome for Testing.app` inside its private profile, then binds process
+ownership and cleanup to the copied executable and helper family. Production
+never adapts an extensionless root. That gate requires one hanging
+main-document request, one
 privacy-bounded pending result, no `--no-sandbox`, no visible window, no profile
 residue, and at most 25 seconds end to end. The remaining product gate is still
 to compose this with the daemon and prove that the original user-visible
