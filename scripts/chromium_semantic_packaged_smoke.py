@@ -99,7 +99,7 @@ WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WORKER_READY_EXPRESSION = """
 (async () => {
   if (globalThis.__slipstreamWorkerReadyV1 !== true) {
-    return false;
+    return {ready: false, stage: "worker_marker_missing"};
   }
   try {
     const response = await chrome.runtime.sendNativeMessage(
@@ -110,12 +110,39 @@ WORKER_READY_EXPRESSION = """
         phase: "native_ready"
       }
     );
-    return response !== null && typeof response === "object";
-  } catch (_error) {
-    return false;
+    const ready = response !== null && typeof response === "object";
+    return {
+      ready,
+      stage: ready ? "native_response_received" : "native_response_invalid"
+    };
+  } catch (error) {
+    const message = String(error && error.message || "").toLowerCase();
+    let stage = "native_host_error";
+    if (message.includes("host not found")) {
+      stage = "native_host_not_found";
+    } else if (message.includes("forbidden")) {
+      stage = "native_host_forbidden";
+    } else if (message.includes("exited")) {
+      stage = "native_host_exited";
+    } else if (message.includes("communication")) {
+      stage = "native_host_communication_failed";
+    }
+    return {ready: false, stage};
   }
 })()
 """.strip()
+WORKER_READY_STAGES = frozenset(
+    {
+        "worker_marker_missing",
+        "native_response_received",
+        "native_response_invalid",
+        "native_host_not_found",
+        "native_host_forbidden",
+        "native_host_exited",
+        "native_host_communication_failed",
+        "native_host_error",
+    }
+)
 
 
 class QualificationError(RuntimeError):
@@ -329,6 +356,7 @@ def _pending_navigation_tap_source(
         "            raise SystemExit(2)\n"
         "        data.extend(chunk)\n"
         "    return bytes(data)\n"
+        "mark('host_started', argv_count=len(sys.argv) - 1)\n"
         "header = read_exact(sys.stdin.buffer, 4)\n"
         "length = struct.unpack('=I', header)[0]\n"
         f"if length <= 0 or length > {NATIVE_MESSAGE_MAX_BODY}:\n"
@@ -1321,7 +1349,7 @@ def _devtools_command(
         connection.close()
 
 
-def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+def _worker_runtime_probe(debugger_url: str, port: int) -> tuple[bool, str]:
     result = _devtools_command(
         debugger_url,
         port,
@@ -1333,11 +1361,20 @@ def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
         },
     )
     evaluation = result.get("result")
-    return (
-        isinstance(evaluation, dict)
-        and evaluation.get("type") == "boolean"
-        and evaluation.get("value") is True
-    )
+    if not isinstance(evaluation, dict) or evaluation.get("type") != "object":
+        return False, "invalid_devtools_result"
+    value = evaluation.get("value")
+    if not isinstance(value, dict):
+        return False, "invalid_devtools_result"
+    ready = value.get("ready")
+    stage = value.get("stage")
+    if not isinstance(ready, bool) or stage not in WORKER_READY_STAGES:
+        return False, "invalid_devtools_result"
+    return ready, stage
+
+
+def _worker_runtime_ready(debugger_url: str, port: int) -> bool:
+    return _worker_runtime_probe(debugger_url, port)[0]
 
 
 def _wait_for_extension_worker(
@@ -1374,11 +1411,18 @@ def _wait_for_extension_worker(
                     raise QualificationError(
                         "Slipstream service worker has no debugger endpoint"
                     )
-                if _worker_runtime_ready(debugger_url, port):
+                ready, stage = _worker_runtime_probe(debugger_url, port)
+                if ready:
                     return port
-            last_error = QualificationError(
-                "exact Slipstream service worker is not runtime-ready"
-            )
+                last_error = QualificationError(
+                    "exact Slipstream service worker is not runtime-ready: "
+                    f"{stage}"
+                )
+            else:
+                last_error = QualificationError(
+                    "exact Slipstream service worker is not runtime-ready: "
+                    "worker_target_missing"
+                )
         except (OSError, QualificationError) as exc:
             last_error = exc
         time.sleep(0.1)

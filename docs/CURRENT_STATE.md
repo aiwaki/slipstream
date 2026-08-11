@@ -10,38 +10,37 @@ file.
 
 ## Current Checkpoint
 
-PR #314 is merged as live main
-`39241dc4708c9f6cf46e68a1bc34f70e4d450fd2`. Exact-main dependency audit
-`31486581787`, Windows qualification `31486581809`, and CI `31486581823`
-passed. Its single protected owned-Geph qualification `31487143181` failed, so
-it produced no installable artifact and no workstation transaction was
-attempted. Cleanup passed: the root daemon was absent and disabled, the owned
-Geph initial/trayless/KeepAlive-recovered payloads all returned HTTP 200, the
-external listener was preserved, and system network state was not mutated.
+PR #315 is merged as live main
+`6f95f2a28c19fd47eb311e76d3ead37b89b7a767`. Exact-main dependency audit
+`31490022235` passed on its second attempt after the first attempt received an
+external OSV API `403`; Windows qualification `31490022237` and CI
+`31490022306` passed. Its single protected owned-Geph qualification
+`31490845964` failed, so it produced no installable artifact and no workstation
+transaction was attempted. Cleanup passed: the root daemon was absent and
+disabled, the owned Geph initial/trayless/KeepAlive-recovered payloads all
+returned HTTP 200, the external listener was preserved, and system network
+state was not mutated.
 
-The failure is isolated to the new deterministic Chromium
-`navigation_pending` scenario before navigation began. Regional denial and
-incomplete-response scenarios completed, but the qualification tap did not
-complete the existing `qualification_worker_ready` native roundtrip. A local
-reproduction against the real debug Rust binary proves framing, forwarded
-origin arguments, response bytes, and child exit work outside Chrome. Branch
-`codex/pending-native-host-transport` replaces the hard-coded system-Python
-shebang with the exact qualification interpreter and records only bounded,
-owner-private stage metadata. Failed CI can now distinguish host launch,
-message read, child start, child exit, and acknowledgement before exact profile
-cleanup. A response is authoritative only after the exact child succeeds and
-its bounded native response is flushed back to Chrome; empty or failed child
-responses cannot publish the navigation acknowledgement. No signal payload,
-URL, hostname, secret, or user identifier enters the stage diagnostic.
+The failure remains isolated to the deterministic Chromium
+`navigation_pending` scenario before navigation began. The exact service-worker
+target appeared, but the bounded native roundtrip never became runtime-ready.
+The owner-private tap status file was absent from failure diagnostics, which
+proves that the previous stages did not distinguish an unlaunched host from a
+host launched without a complete native message. This is a qualification
+observability gap, not evidence that routing, Geph, or the packaged native host
+failed; the account-backed Geph lifecycle and cleanup evidence passed.
 
-Focused verification passes `53` tests plus `9` subtests for the packaged
-Chromium harness, Python compilation, `git diff --check`, and a direct roundtrip
-through the generated tap into the real Rust native host. The next verified
-action is a small PR for this transport fix. After merge, exact-main gates and
-exactly one fresh protected qualification are required. Installation remains
-forbidden until that run proves all three Chromium scenarios and cleanup; only
-its exact artifact may enter a controlled workstation transaction with
-immediate rollback on the first failed smoke.
+Branch `codex/chromium-native-launch-evidence` writes `host_started` before the
+tap reads stdin and changes the worker-ready probe from an opaque boolean to a
+strict finite stage: missing worker marker, host not found/forbidden/exited,
+communication failure, invalid response, or received response. It never emits
+the native error text, path, payload, URL, hostname, secret, or user identifier.
+Focused verification passes `55` tests plus `9` subtests for the packaged
+Chromium harness. The next verified action is a small PR, exact-main gates, and
+exactly one fresh protected qualification for the new main SHA. Installation
+remains forbidden until that run proves all three Chromium scenarios and
+cleanup; only its exact artifact may enter a controlled workstation transaction
+with immediate rollback on the first failed smoke.
 
 ## Previous Checkpoint
 
