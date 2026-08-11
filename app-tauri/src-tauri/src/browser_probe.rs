@@ -26,7 +26,7 @@ const CHROME_LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CHROME_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_DEVTOOLS_FILE_BYTES: u64 = 4_096;
-const MAX_LAUNCH_DIAGNOSTIC_BYTES: u64 = 4_096;
+const MAX_LAUNCH_DIAGNOSTIC_BYTES: u64 = 64 * 1_024;
 const MAX_HTTP_BYTES: u64 = 256 * 1024;
 const MAX_WEBSOCKET_BYTES: usize = 1024 * 1024;
 const WEBSOCKET_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
@@ -692,7 +692,7 @@ impl ChromeSession {
                 self.uid,
             )))
         } else {
-            Err(error("chrome_launch_timeout"))
+            Err(error(chrome_start_failure_class(&stderr_path, self.uid)))
         }
     }
 
@@ -982,9 +982,9 @@ fn classify_launch_diagnostic(diagnostic: &str) -> &'static str {
     }
 }
 
-fn chrome_launch_failure_class(path: &Path, uid: u32) -> &'static str {
+fn read_private_diagnostic(path: &Path, uid: u32) -> Option<Vec<u8>> {
     let Ok(path_metadata) = fs::symlink_metadata(path) else {
-        return "chrome_launch_failed";
+        return None;
     };
     if !path_metadata.is_file()
         || path_metadata.file_type().is_symlink()
@@ -992,13 +992,13 @@ fn chrome_launch_failure_class(path: &Path, uid: u32) -> &'static str {
         || path_metadata.mode() & 0o777 != 0o600
         || path_metadata.len() > MAX_LAUNCH_DIAGNOSTIC_BYTES
     {
-        return "chrome_launch_failed";
+        return None;
     }
     let Ok(mut source) = File::open(path) else {
-        return "chrome_launch_failed";
+        return None;
     };
     let Ok(open_metadata) = source.metadata() else {
-        return "chrome_launch_failed";
+        return None;
     };
     if open_metadata.dev() != path_metadata.dev()
         || open_metadata.ino() != path_metadata.ino()
@@ -1006,18 +1006,54 @@ fn chrome_launch_failure_class(path: &Path, uid: u32) -> &'static str {
         || open_metadata.mode() & 0o777 != 0o600
         || open_metadata.len() != path_metadata.len()
     {
-        return "chrome_launch_failed";
+        return None;
     }
     let mut payload = Vec::with_capacity(path_metadata.len() as usize);
     if source.read_to_end(&mut payload).is_err()
         || payload.len() as u64 != path_metadata.len()
         || payload.len() as u64 > MAX_LAUNCH_DIAGNOSTIC_BYTES
     {
-        return "chrome_launch_failed";
+        return None;
     }
-    std::str::from_utf8(&payload)
-        .map(classify_launch_diagnostic)
+    Some(payload)
+}
+
+fn chrome_launch_failure_class(path: &Path, uid: u32) -> &'static str {
+    read_private_diagnostic(path, uid)
+        .and_then(|payload| {
+            std::str::from_utf8(&payload)
+                .ok()
+                .map(classify_launch_diagnostic)
+        })
         .unwrap_or("chrome_launch_failed")
+}
+
+fn classify_chrome_start_diagnostic(diagnostic: &str) -> &'static str {
+    if (diagnostic.contains("bootstrap_look_up") || diagnostic.contains("MachPortRendezvous"))
+        && diagnostic.contains("Permission denied")
+    {
+        "chrome_bootstrap_denied"
+    } else if diagnostic.contains("ProcessSingleton") {
+        "chrome_process_singleton_failed"
+    } else if diagnostic.contains("DevToolsActivePort") {
+        "chrome_devtools_start_failed"
+    } else if diagnostic.contains("sandbox") || diagnostic.contains("Sandbox") {
+        "chrome_sandbox_start_failed"
+    } else if diagnostic.is_empty() {
+        "chrome_launch_timeout"
+    } else {
+        "chrome_start_failed"
+    }
+}
+
+fn chrome_start_failure_class(path: &Path, uid: u32) -> &'static str {
+    read_private_diagnostic(path, uid)
+        .and_then(|payload| {
+            std::str::from_utf8(&payload)
+                .ok()
+                .map(classify_chrome_start_diagnostic)
+        })
+        .unwrap_or("chrome_launch_timeout")
 }
 
 fn random_hex(bytes: usize) -> ProbeResult<String> {
@@ -1570,6 +1606,20 @@ mod tests {
             "chrome_launchservices_rejected"
         );
         assert_eq!(classify_launch_diagnostic(""), "chrome_launch_failed");
+        assert_eq!(
+            classify_chrome_start_diagnostic(
+                "bootstrap_look_up com.google.chrome MachPortRendezvous Permission denied"
+            ),
+            "chrome_bootstrap_denied"
+        );
+        assert_eq!(
+            classify_chrome_start_diagnostic("Failed to create a ProcessSingleton"),
+            "chrome_process_singleton_failed"
+        );
+        assert_eq!(
+            classify_chrome_start_diagnostic(""),
+            "chrome_launch_timeout"
+        );
     }
 
     #[test]
