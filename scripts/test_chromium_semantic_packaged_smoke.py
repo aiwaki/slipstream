@@ -787,7 +787,10 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         ), mock.patch.object(
             smoke,
             "_devtools_command",
-            return_value={"frameId": "frame-1", "loaderId": "loader-1"},
+            return_value={
+                "frameId": "frame-1",
+                "errorText": "net::ERR_EMPTY_RESPONSE",
+            },
         ) as command:
             smoke._open_fixture_with_devtools(49152, fixture)
         command.assert_called_once_with(
@@ -802,6 +805,38 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             },
             response_timeout=smoke.PENDING_NAVIGATION_DEVTOOLS_TIMEOUT,
         )
+
+    def test_non_pending_navigation_rejects_empty_response(self) -> None:
+        fixture = mock.Mock(
+            host="example.net",
+            port=18443,
+            scenario=smoke.INCOMPLETE_RESPONSE_SCENARIO,
+        )
+        with mock.patch.object(
+            smoke,
+            "_devtools_json",
+            return_value=[
+                {
+                    "type": "page",
+                    "url": "about:blank",
+                    "webSocketDebuggerUrl": (
+                        "ws://127.0.0.1:49152/devtools/page/owned"
+                    ),
+                }
+            ],
+        ), mock.patch.object(
+            smoke,
+            "_devtools_command",
+            return_value={
+                "frameId": "frame-1",
+                "errorText": "net::ERR_EMPTY_RESPONSE",
+            },
+        ):
+            with self.assertRaisesRegex(
+                smoke.QualificationError,
+                "ERR_EMPTY_RESPONSE",
+            ):
+                smoke._open_fixture_with_devtools(49152, fixture)
 
     def test_launch_agent_payload_uses_launchservices_in_the_aqua_domain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

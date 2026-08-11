@@ -1548,6 +1548,11 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
         raise QualificationError("DevTools did not navigate the owned page")
     error_text = result.get("errorText")
     if error_text not in (None, ""):
+        if (
+            fixture.scenario == PENDING_NAVIGATION_SCENARIO
+            and error_text == "net::ERR_EMPTY_RESPONSE"
+        ):
+            return
         raise QualificationError(
             f"DevTools rejected the semantic fixture navigation: {error_text!r}"
         )
