@@ -548,6 +548,38 @@ def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
             launcher.launch()
 
 
+def test_console_worker_error_diagnostic_accepts_only_one_safe_class():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-worker-error-",
+        dir="/tmp",
+    ) as directory:
+        path = Path(directory) / "worker.stderr.log"
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=pwd.getpwuid(os.getuid()).pw_name,
+            home=directory,
+        )
+        path.write_bytes(
+            b"slipstream browser probe failed: devtools_file_invalid\n"
+        )
+        path.chmod(0o600)
+        read_error = (
+            probe_runtime.PendingNavigationBrowserWorkerLauncher
+            ._read_worker_error
+        )
+        assert read_error(path, identity) == "devtools_file_invalid"
+
+        path.write_bytes(
+            b"slipstream browser probe failed: devtools_file_invalid\n"
+            b"https://private.example/path\n"
+        )
+        assert read_error(path, identity) == "unknown"
+
+        path.write_bytes(b"x" * 257)
+        assert read_error(path, identity) == "unknown"
+
+
 def test_lazy_worker_retries_after_a_lost_claim_lease():
     clock = {"wall": 1_010_000, "mono": 100.0}
     runtime = _runtime(clock)

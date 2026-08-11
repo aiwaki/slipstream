@@ -63,6 +63,10 @@ _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT = frozenset((
     "SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES",
     "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS",
 ))
+_BROWSER_WORKER_ERROR_RE = re.compile(
+    r"\Aslipstream browser probe failed: ([a-z0-9_]{1,64})\n?\Z"
+)
+_BROWSER_WORKER_ERROR_MAX_BYTES = 256
 
 _CAPABILITY_RE = re.compile(
     rf"^[0-9a-f]{{{CAPABILITY_HEX_CHARS}}}$"
@@ -924,6 +928,42 @@ class PendingNavigationBrowserWorkerLauncher:
             path.unlink()
         paths.directory.rmdir()
 
+    @staticmethod
+    def _read_worker_error(path, identity):
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(path, flags)
+            try:
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != identity.uid
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_size <= 0
+                    or metadata.st_size > _BROWSER_WORKER_ERROR_MAX_BYTES
+                ):
+                    return "unknown"
+                payload = os.read(
+                    descriptor,
+                    _BROWSER_WORKER_ERROR_MAX_BYTES + 1,
+                )
+                if len(payload) != metadata.st_size:
+                    return "unknown"
+            finally:
+                os.close(descriptor)
+        except OSError:
+            return "unknown"
+        try:
+            message = payload.decode("ascii")
+        except UnicodeDecodeError:
+            return "unknown"
+        match = _BROWSER_WORKER_ERROR_RE.fullmatch(message)
+        return match.group(1) if match is not None else "unknown"
+
     def launch(self):
         identity = self._identity()
         self._validate_executable(identity)
@@ -936,6 +976,7 @@ class PendingNavigationBrowserWorkerLauncher:
         pid = None
         failure = None
         exit_code = None
+        worker_error = "unknown"
         try:
             if not _launchd_job_absent(self._print(target)):
                 raise PendingNavigationProbeRuntimeError(
@@ -953,6 +994,11 @@ class PendingNavigationBrowserWorkerLauncher:
                 )
             pid = self._wait_for_pid(target, identity)
             exit_code = self._wait_for_exit(target, pid, identity)
+            if exit_code != 0:
+                worker_error = self._read_worker_error(
+                    paths.stderr,
+                    identity,
+                )
             if self._identity() != identity:
                 raise PendingNavigationProbeRuntimeError(
                     "console_user_changed"
@@ -972,7 +1018,7 @@ class PendingNavigationBrowserWorkerLauncher:
             raise failure
         if exit_code != 0:
             raise PendingNavigationProbeRuntimeError(
-                "browser_worker_failed"
+                f"browser_worker_failed:{worker_error}"
             )
         return True
 
