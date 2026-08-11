@@ -70,11 +70,10 @@ owner-private profile, loads the frozen-origin companion, exercises native
 messaging and styled-page completion, and fails if worker readiness exceeds 15
 seconds, semantic completion exceeds 25 seconds, or de-duplicated physical
 footprint exceeds 768 MiB. Aggregate RSS remains a diagnostic because macOS
-counts shared mappings once per process. Local evidence is green: 276 script
+counts shared mappings once per process. Local evidence is green: 278 script
 tests, 850 daemon tests, 66 focused
 traffic contracts, project-state validation, Python compilation, and
-`git diff --check`. Real Chrome for Testing evidence for this draft commit is
-still pending CI. The first two real-browser attempts, run `31532156159` job
+`git diff --check`. The first two real-browser attempts, run `31532156159` job
 `93914552229` and run `31532531700` job `93915774541`, rejected direct binary
 launch both outside and nominally inside the Aqua session: sandboxed Chrome
 helpers could not look up the parent Mach rendezvous service and reported
@@ -87,13 +86,21 @@ incomplete-response observation, reload, and styled-page completion. It failed
 only because the first memory gate summed per-process RSS to 1,142,496 KiB,
 which double-counts shared mappings. The corrected gate uses Apple's
 multi-process `footprint` total, which de-duplicates shared objects, while
-retaining aggregate RSS as a diagnostic; a rerun is required.
+retaining aggregate RSS as a diagnostic.
 
-The next verified action is to obtain green CI evidence for PR #324 and record
-its measured latency/physical-footprint values. Then add a closed correlation
-fixture proving that one bounded worker observation maps to one original
-pending relay and that the original user-visible navigation completes.
-Package-size, installed update,
+Run `31533358388`, job `93918488548`, passed the corrected real-browser gate
+on head `9926f4976d6de92f273e195a6e4c246a80733c72`. Chrome for Testing 151
+started through LaunchServices in unified-headless mode with its sandbox and a
+fresh owner-only profile. The frozen extension reached worker readiness in
+5,476 ms, emitted the real incomplete-frame signal through native messaging,
+reloaded exactly once, and reached the CSS/JavaScript/image-ready callback in
+6,495 ms. De-duplicated physical footprint was 374,369 KiB against the
+786,432 KiB budget; aggregate RSS was 1,234,672 KiB across four samples and is
+diagnostic only. The job did not mutate system network state.
+
+The next verified action is to add a closed correlation fixture proving that
+one bounded worker observation maps to one original pending relay and that the
+original user-visible navigation completes. Package-size, installed update,
 uninstall, idle-cost, and clean-profile evidence remain required before runtime
 composition. Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is

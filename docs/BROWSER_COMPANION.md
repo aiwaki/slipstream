@@ -155,6 +155,7 @@ The disposable CI gate proves browser behavior but not that delivery boundary.
 
 The ordinary macOS Chromium CI gate has a unified-headless mode for the
 first worker qualification slice. It runs the reviewed extension without an
+first worker qualification slice. It runs the reviewed extension without a
 visible browser window or `--no-sandbox`; on macOS LaunchServices supplies the
 application bootstrap context required for sandboxed helpers to reach Chrome's
 Mach rendezvous service. Direct binary LaunchAgent attempts failed even with an
@@ -166,6 +167,14 @@ are 15 seconds, 25 seconds, and 768 MiB of physical footprint respectively.
 Aggregate RSS is diagnostic only because it counts shared mappings once per
 Chrome process. This is qualification infrastructure, not yet an installed
 runtime component and not authority over an unrelated user tab.
+
+Ordinary CI run `31533358388`, job `93918488548`, passed on Chrome for Testing
+151: worker readiness was 5,476 ms, semantic-ready was 6,495 ms, physical
+footprint was 374,369 KiB, and aggregate RSS was 1,234,672 KiB across four
+samples. The real incomplete-frame event crossed native messaging, triggered
+one reload, and reached the CSS, JavaScript, and image callback. The result
+qualifies the worker mechanism and measurement boundary only; it does not yet
+prove installed delivery or correlation to another browser's original relay.
 
 ## Chrome Web Store Package
 
@@ -340,9 +349,8 @@ uninstall, and an unsigned Safari app-extension build.
   update, privacy, ownership, uninstall, and clean-profile evidence.
 - The unified-headless extension/native-message path and conservative
   launch/physical-footprint budgets are implemented in the ordinary Chrome for
-  Testing gate;
-  real-browser CI evidence and an original-navigation correlation fixture are
-  still required before any runtime composition.
+  Testing gate and passed real-browser CI. An original-navigation correlation
+  fixture is still required before any runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
   incomplete-response v2. Protected unpacked-extension success does not prove
