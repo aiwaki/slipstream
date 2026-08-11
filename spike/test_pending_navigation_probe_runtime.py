@@ -474,7 +474,9 @@ def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
                         stderr="Could not find service",
                     )
                 state["loaded_prints"] += 1
-                if state["loaded_prints"] == 1:
+                if state["loaded_prints"] <= 2:
+                    if state["loaded_prints"] == 2:
+                        state["running"] = False
                     return completed(command, stdout="pid = 4242\n")
                 state["running"] = False
                 return completed(command, stdout="last exit code = 0\n")

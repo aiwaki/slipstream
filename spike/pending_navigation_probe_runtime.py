@@ -846,14 +846,33 @@ class PendingNavigationBrowserWorkerLauncher:
         while self._monotonic_clock() < deadline:
             state = self._print(target)
             if _launchd_job_absent(state):
-                return 0
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_disappeared"
+                )
             observed_pid = _launchd_job_pid(state)
             if observed_pid is not None:
                 if observed_pid != pid:
                     raise PendingNavigationProbeRuntimeError(
                         "browser_worker_pid_replaced"
                     )
-                self._validate_process(observed_pid, identity)
+                try:
+                    self._validate_process(observed_pid, identity)
+                except PendingNavigationProbeRuntimeError:
+                    refreshed = self._print(target)
+                    if _launchd_job_absent(refreshed):
+                        raise PendingNavigationProbeRuntimeError(
+                            "browser_worker_disappeared"
+                        )
+                    refreshed_pid = _launchd_job_pid(refreshed)
+                    if refreshed_pid is not None:
+                        if refreshed_pid != pid:
+                            raise PendingNavigationProbeRuntimeError(
+                                "browser_worker_pid_replaced"
+                            )
+                        raise
+                    exit_code = _launchd_last_exit_code(refreshed)
+                    if exit_code is not None:
+                        return exit_code
             else:
                 exit_code = _launchd_last_exit_code(state)
                 if exit_code is not None:
