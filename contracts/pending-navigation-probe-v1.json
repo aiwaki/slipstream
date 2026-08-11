@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.pending-navigation-probe",
+  "contract_version": 1,
+  "scope": "closed_daemon_correlation_seam",
+  "bounds": {
+    "capability_bits": 128,
+    "capability_ttl_ms": 30000,
+    "max_live_capabilities": 32,
+    "min_pending_observation_ms": 8000
+  },
+  "privacy": {
+    "job_fields": [
+      "schema_version",
+      "capability",
+      "host",
+      "request_started_at_unix_ms",
+      "issued_at_unix_ms",
+      "expires_at_unix_ms"
+    ],
+    "result_fields": [
+      "schema_version",
+      "capability",
+      "host",
+      "request_started_at_unix_ms",
+      "observed_at_unix_ms",
+      "outcome"
+    ],
+    "forbidden_fields": [
+      "url",
+      "path",
+      "query",
+      "title",
+      "text",
+      "body",
+      "cookies",
+      "form_data",
+      "browser_error",
+      "request_id",
+      "tab_id",
+      "ip"
+    ],
+    "remote_transport": false
+  },
+  "job_defaults": {
+    "schema_version": 1,
+    "capability": "0123456789abcdef0123456789abcdef",
+    "host": "example.net",
+    "request_started_at_unix_ms": 1000000,
+    "issued_at_unix_ms": 1010000,
+    "expires_at_unix_ms": 1040000
+  },
+  "result_defaults": {
+    "schema_version": 1,
+    "capability": "0123456789abcdef0123456789abcdef",
+    "host": "example.net",
+    "request_started_at_unix_ms": 1000000,
+    "observed_at_unix_ms": 1018001,
+    "outcome": "navigation_pending"
+  },
+  "invariants": {
+    "one_shot": true,
+    "bound_to_exact_live_relay_object": true,
+    "bound_to_host_request_start_and_stage": true,
+    "relay_teardown_revokes_capability": true,
+    "valid_capability_is_consumed_on_rejected_result": true,
+    "same_host_reselection_after_result": false,
+    "semantic_signal_v3_modified": false,
+    "production_runtime_composition": false,
+    "system_network_mutation": false,
+    "external_geph_allowed": false,
+    "discord_youtube_googlevideo_allowed": false
+  },
+  "remaining_gates": {
+    "owner_only_job_result_ipc": "required",
+    "lazy_worker_lifecycle": "required",
+    "self_probe_loop_suppression": "required",
+    "installed_package_and_update": "required",
+    "exact_uninstall": "required",
+    "idle_cost": "required",
+    "clean_profile": "required",
+    "original_navigation_end_to_end": "required"
+  }
+}

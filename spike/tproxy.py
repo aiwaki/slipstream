@@ -37,6 +37,7 @@ import os
 import pwd
 import re
 import resource
+import secrets
 import shlex
 import signal
 import socket
@@ -2033,6 +2034,9 @@ AUTO_GEPH_FAIL_BYTES = 8192   # a local reply under this = "no real content"
 LOCAL_STREAM_IDLE = 15.0      # client-visible downstream silence after payload
 UNKNOWN_PRE_RESPONSE_IDLE = 8.0  # bounded retry before a first real response
 PENDING_NAVIGATION_RELAY_START_SKEW_MS = 5_000
+PENDING_NAVIGATION_PROBE_TTL = 30.0
+PENDING_NAVIGATION_PROBE_STATE_MAX = 32
+PENDING_NAVIGATION_PROBE_OUTCOME_PENDING = "navigation_pending"
 TRANSPORT_IDLE_EVIDENCE_REJECTED = "rejected"
 TRANSPORT_IDLE_EVIDENCE_ADVANCE = "advance"
 TRANSPORT_IDLE_EVIDENCE_CONFIRMING = "confirming"
@@ -2146,6 +2150,7 @@ _local_zero_payload_failures = {}  # host -> {stage: monotonic empty result}
 _auto_geph_one_shot_consumed_at = {}  # host -> latest stage timestamp spent
 _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
 _active_pending_navigation_relays = {}  # host -> {activity id: activity}
+_pending_navigation_probe_capabilities = OrderedDict()  # token -> bound relay
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -9221,6 +9226,18 @@ class _RelayActivity:
     pending_navigation_scheduler: object = None
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingNavigationProbeCapability:
+    activity: object
+    host: str
+    request_started_at_unix_ms: int
+    stage: str
+    issued_at_unix_ms: int
+    expires_at_unix_ms: int
+    issued_at_monotonic: float
+    expires_at_monotonic: float
+
+
 def _track_tls_records(activity, data):
     """Track complete TLSCiphertext frames using only their public headers."""
     if not data or not activity.tls_framing_valid:
@@ -9775,7 +9792,120 @@ def _register_pending_navigation_relay(
     return True
 
 
+def _prune_pending_navigation_probe_capabilities(now):
+    for token, capability in tuple(
+        _pending_navigation_probe_capabilities.items()
+    ):
+        if (
+            capability.expires_at_monotonic <= now
+            or capability.activity.retry_closed
+        ):
+            _pending_navigation_probe_capabilities.pop(token, None)
+    while (
+        len(_pending_navigation_probe_capabilities)
+        > PENDING_NAVIGATION_PROBE_STATE_MAX
+    ):
+        _pending_navigation_probe_capabilities.popitem(last=False)
+
+
+def _revoke_pending_navigation_probe_capability(activity):
+    with _auto_geph_lock:
+        for token, capability in tuple(
+            _pending_navigation_probe_capabilities.items()
+        ):
+            if capability.activity is activity:
+                _pending_navigation_probe_capabilities.pop(token, None)
+
+
+def _pending_navigation_activity_eligible_locked(activity, now):
+    h = normalize_host(activity.pending_navigation_host)
+    return bool(
+        h
+        and route_policy(h)["route_class"] == ROUTE_UNKNOWN
+        and _auto_geph_base_host_allowed(h)
+        and _active_pending_navigation_relays.get(h, {}).get(id(activity))
+        is activity
+        and activity.pending_navigation_eligible
+        and not activity.retry_closed
+        and activity.pending_navigation_started_at_unix_ms > 0
+        and now - activity.last_downstream_at >= UNKNOWN_PRE_RESPONSE_IDLE
+        and 0 < activity.downstream_bytes < AUTO_GEPH_FAIL_BYTES
+        and activity.track_tls_records
+        and activity.tls_framing_valid
+        and activity.tls_complete_records > 0
+        and not _incomplete_tls_record_visible(activity)
+    )
+
+
+def _issue_pending_navigation_probe(
+    activity,
+    *,
+    now=None,
+    now_unix_ms=None,
+    token_factory=None,
+):
+    """Mint one bounded worker job tied to one exact live relay object."""
+    now = time.monotonic() if now is None else now
+    now_unix_ms = (
+        int(time.time() * 1000) if now_unix_ms is None else now_unix_ms
+    )
+    if type(now_unix_ms) is not int or now_unix_ms <= 0:
+        return None
+    with _auto_geph_lock:
+        _prune_pending_navigation_probe_capabilities(now)
+        if not _pending_navigation_activity_eligible_locked(activity, now):
+            return None
+        for token, capability in tuple(
+            _pending_navigation_probe_capabilities.items()
+        ):
+            if capability.activity is activity:
+                _pending_navigation_probe_capabilities.pop(token, None)
+        factory = token_factory or (lambda: secrets.token_hex(16))
+        token = ""
+        for _ in range(16):
+            candidate = factory()
+            if (
+                isinstance(candidate, str)
+                and len(candidate) == 32
+                and all(char in "0123456789abcdef" for char in candidate)
+                and candidate not in _pending_navigation_probe_capabilities
+            ):
+                token = candidate
+                break
+        if not token:
+            return None
+        host = normalize_host(activity.pending_navigation_host)
+        expiry_unix_ms = now_unix_ms + int(
+            PENDING_NAVIGATION_PROBE_TTL * 1000
+        )
+        capability = _PendingNavigationProbeCapability(
+            activity=activity,
+            host=host,
+            request_started_at_unix_ms=(
+                activity.pending_navigation_started_at_unix_ms
+            ),
+            stage=activity.pending_navigation_stage,
+            issued_at_unix_ms=now_unix_ms,
+            expires_at_unix_ms=expiry_unix_ms,
+            issued_at_monotonic=now,
+            expires_at_monotonic=now + PENDING_NAVIGATION_PROBE_TTL,
+        )
+        _pending_navigation_probe_capabilities[token] = capability
+        _prune_pending_navigation_probe_capabilities(now)
+    return {
+        "schema_version": 1,
+        "capability": token,
+        "host": capability.host,
+        "request_started_at_unix_ms": (
+            capability.request_started_at_unix_ms
+        ),
+        "issued_at_unix_ms": capability.issued_at_unix_ms,
+        "expires_at_unix_ms": capability.expires_at_unix_ms,
+    }
+
+
 def _unregister_pending_navigation_relay(activity):
+    _revoke_pending_navigation_probe_capability(activity)
     h = normalize_host(activity.pending_navigation_host)
     if not h:
         return
@@ -9786,6 +9916,93 @@ def _unregister_pending_navigation_relay(activity):
         relays.pop(id(activity), None)
         if not relays:
             _active_pending_navigation_relays.pop(h, None)
+
+
+def _request_pending_navigation_retry_for_activity(activity, *, now=None):
+    """Advance only the exact still-live relay already bound by the caller."""
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        if not _pending_navigation_activity_eligible_locked(activity, now):
+            return False
+        h = normalize_host(activity.pending_navigation_host)
+
+    def confirmation_completed(_host, succeeded):
+        if succeeded:
+            _request_transport_idle_retry(activity)
+
+    evidence = _record_transport_incomplete_idle_evidence(
+        h,
+        activity.pending_navigation_ip,
+        activity.pending_navigation_stage,
+        now=now,
+        scheduler=activity.pending_navigation_scheduler,
+        on_complete=confirmation_completed,
+    )
+    if evidence == TRANSPORT_IDLE_EVIDENCE_ADVANCE:
+        if not _advance_transport_idle_retry(
+            h,
+            activity.pending_navigation_stage,
+            now=now,
+        ):
+            return False
+        return _request_transport_idle_retry(activity)
+    return evidence == TRANSPORT_IDLE_EVIDENCE_CONFIRMING
+
+
+def _submit_pending_navigation_probe_result(payload, *, now=None):
+    """Consume one worker capability and act only on its bound relay."""
+    now = time.monotonic() if now is None else now
+    if not isinstance(payload, dict):
+        return False
+    token = payload.get("capability")
+    if (
+        not isinstance(token, str)
+        or len(token) != 32
+        or any(char not in "0123456789abcdef" for char in token)
+    ):
+        return False
+    with _auto_geph_lock:
+        _prune_pending_navigation_probe_capabilities(now)
+        capability = _pending_navigation_probe_capabilities.pop(token, None)
+    if capability is None:
+        return False
+    if (
+        set(payload) != {
+            "schema_version",
+            "capability",
+            "host",
+            "request_started_at_unix_ms",
+            "observed_at_unix_ms",
+            "outcome",
+        }
+        or type(payload.get("schema_version")) is not int
+        or payload["schema_version"] != 1
+    ):
+        return False
+    observed_at = payload.get("observed_at_unix_ms")
+    if (
+        payload.get("host") != capability.host
+        or type(payload.get("request_started_at_unix_ms")) is not int
+        or payload["request_started_at_unix_ms"]
+        != capability.request_started_at_unix_ms
+        or payload.get("outcome")
+        != PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
+        or type(observed_at) is not int
+        or now
+        < capability.issued_at_monotonic + UNKNOWN_PRE_RESPONSE_IDLE
+        or observed_at
+        < capability.issued_at_unix_ms + int(UNKNOWN_PRE_RESPONSE_IDLE * 1000)
+        or observed_at > capability.expires_at_unix_ms
+        or capability.activity.pending_navigation_host != capability.host
+        or capability.activity.pending_navigation_started_at_unix_ms
+        != capability.request_started_at_unix_ms
+        or capability.activity.pending_navigation_stage != capability.stage
+    ):
+        return False
+    return _request_pending_navigation_retry_for_activity(
+        capability.activity,
+        now=now,
+    )
 
 
 def _request_pending_navigation_retry(
@@ -9810,20 +10027,12 @@ def _request_pending_navigation_retry(
             activity
             for activity in _active_pending_navigation_relays.get(h, {}).values()
             if (
-                activity.pending_navigation_eligible
-                and not activity.retry_closed
+                _pending_navigation_activity_eligible_locked(activity, now)
                 and activity.pending_navigation_started_at_unix_ms > 0
                 and abs(
                     activity.pending_navigation_started_at_unix_ms
                     - request_started_at_unix_ms
                 ) <= PENDING_NAVIGATION_RELAY_START_SKEW_MS
-                and now - activity.last_downstream_at
-                >= UNKNOWN_PRE_RESPONSE_IDLE
-                and 0 < activity.downstream_bytes < AUTO_GEPH_FAIL_BYTES
-                and activity.track_tls_records
-                and activity.tls_framing_valid
-                and activity.tls_complete_records > 0
-                and not _incomplete_tls_record_visible(activity)
             )
         )
     if not candidates:
@@ -9836,27 +10045,7 @@ def _request_pending_navigation_retry(
         ),
     )
 
-    def confirmation_completed(_host, succeeded):
-        if succeeded:
-            _request_transport_idle_retry(activity)
-
-    evidence = _record_transport_incomplete_idle_evidence(
-        h,
-        activity.pending_navigation_ip,
-        activity.pending_navigation_stage,
-        now=now,
-        scheduler=activity.pending_navigation_scheduler,
-        on_complete=confirmation_completed,
-    )
-    if evidence == TRANSPORT_IDLE_EVIDENCE_ADVANCE:
-        if not _advance_transport_idle_retry(
-            h,
-            activity.pending_navigation_stage,
-            now=now,
-        ):
-            return False
-        return _request_transport_idle_retry(activity)
-    return evidence == TRANSPORT_IDLE_EVIDENCE_CONFIRMING
+    return _request_pending_navigation_retry_for_activity(activity, now=now)
 
 
 def _valid_server_first_framed_close(activity):

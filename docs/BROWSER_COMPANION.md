@@ -349,8 +349,11 @@ uninstall, and an unsigned Safari app-extension build.
   update, privacy, ownership, uninstall, and clean-profile evidence.
 - The unified-headless extension/native-message path and conservative
   launch/physical-footprint budgets are implemented in the ordinary Chrome for
-  Testing gate and passed real-browser CI. An original-navigation correlation
-  fixture is still required before any runtime composition.
+  Testing gate and passed real-browser CI. The closed daemon-side correlation
+  fixture now binds a one-shot capability to one original relay and proves that
+  only that relay completes among two same-host candidates. Owner-only
+  job/result IPC, lazy worker lifecycle, and self-probe loop suppression remain
+  required before runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
   incomplete-response v2. Protected unpacked-extension success does not prove

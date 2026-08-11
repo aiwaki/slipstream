@@ -10,13 +10,11 @@ file.
 
 ## Current Checkpoint
 
-PR #323 is merged as live main
-`a0ffe73f007fc1b970cd2826a0eeb761f2e70389`. Its test-only correction brackets
-the unchanged eight-second browser-pending runtime gate at one millisecond
-before and after the threshold; no product timing or routing changed. Exact-main
-CI `31524737394`, dependency audit `31524737364`, and Windows qualification
-`31524737350` all passed for that exact SHA, including required jobs `checks`
-and `packaged-app-lifecycle`.
+PR #324 is merged as live main
+`e037fbf5050205c575d4303d287ffd0f0404ae51`. Exact-main CI `31534286516`,
+dependency audit `31534286451`, and Windows qualification `31534286450` all
+passed for that exact SHA, including required jobs `checks`,
+`chromium-webrequest-contract`, and `packaged-app-lifecycle`.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
@@ -62,7 +60,7 @@ worker must be lazy, bounded, performance-qualified, and capable of completing
 the original user-visible navigation without separate extension setup or other
 manual browser work. A successful synthetic page load alone is not completion.
 
-Draft PR #324 records the official macOS integration boundary and implements
+PR #324 records the official macOS integration boundary and implements
 the first local-worker qualification slice. The ordinary Chromium
 `webRequest` CI gate now starts Chrome for Testing through LaunchServices in
 unified-headless mode without a browser window, retains the sandbox and exact
@@ -98,10 +96,28 @@ reloaded exactly once, and reached the CSS/JavaScript/image-ready callback in
 786,432 KiB budget; aggregate RSS was 1,234,672 KiB across four samples and is
 diagnostic only. The job did not mutate system network state.
 
-The next verified action is to add a closed correlation fixture proving that
-one bounded worker observation maps to one original pending relay and that the
-original user-visible navigation completes. Package-size, installed update,
-uninstall, idle-cost, and clean-profile evidence remain required before runtime
+Branch `codex/owned-browser-probe-correlation` implements the next closed seam
+and freezes its cross-process shape in
+`contracts/pending-navigation-probe-v1.json`. A daemon-minted random 128-bit
+capability is bound directly to one already-live
+eligible relay object plus its host, browser-request start, and local recovery
+stage. It expires after 30 seconds, is capped at 32 process-local entries, is
+revoked with relay teardown, and is consumed once. The worker result is
+accepted only for the same host/start/stage after its own eight-second pending
+observation; wrong-host, early, expired, malformed, rebound, and replayed
+results are inert. The result invokes the existing local-stage reducer on that
+bound relay without another hostname lookup. A closed async fixture starts two
+equally timed same-host relays and proves that only the capability owner exits
+while the other remains open. Verification passes 854 daemon tests, 278 script
+tests, 24 Chromium companion tests, the 556-test focused relay/traffic set,
+Python compilation, project continuity, and `git diff --check`. The seam is
+deliberately not runtime-wired yet.
+
+The next verified action is to finish full validation and review of this closed
+seam, then add the owner-only job/result IPC and lazy worker lifecycle with
+self-probe loop suppression. That composed gate must still prove completion of
+the original user-visible navigation. Package size, installed update, uninstall,
+idle cost, and clean-profile evidence remain required before production runtime
 composition. Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the
