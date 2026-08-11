@@ -142,12 +142,16 @@ contains one exact `allowed_origins` entry. Confirmed uninstall removes only a
 manifest whose name, type, and origin identify it as Slipstream-owned; a
 foreign file or symlink is refused without blocking removal of the application.
 
-The extension is not yet published to the Chrome Web Store. For development,
-load `browser-companion/chromium/` with Chrome's **Load unpacked** action after
+The extension is not published to the Chrome Web Store. For development, load
+`browser-companion/chromium/` with Chrome's **Load unpacked** action after
 starting a packaged Slipstream app. The public key in `manifest.json` keeps the
-preview extension ID stable. Production distribution in branded Chrome requires
-a reviewed Chrome Web Store package installed and enabled in the actual browser
-profile; the disposable CI gate does not replace that distribution path.
+preview extension ID stable. This manual development step is not an acceptable
+installed-product workflow. Production must provide an owned automatic local
+integration that arrives with Slipstream and needs no separate browser setup.
+A local browser worker is equivalent only if it preserves the same bounded
+signal authority and automatically completes the original user-visible
+navigation; successfully loading a separate synthetic page is not sufficient.
+The disposable CI gate proves browser behavior but not that delivery boundary.
 
 ## Chrome Web Store Package
 
@@ -316,14 +320,14 @@ uninstall, and an unsigned Safari app-extension build.
 ## Remaining Gates
 
 - Deterministic Chrome Web Store packaging, local privacy disclosure, and
-  source/update provenance are implemented and CI-checked. Publisher upload,
-  listing assets, a public privacy-policy URL, store review, publication, and a
-  clean branded-Chrome profile with the exact extension installed and enabled
-  remain external gates.
+  source/update provenance are implemented and CI-checked, but publisher
+  registration and publication are deferred. The replacement gate is an
+  automatic local integration delivered by Slipstream, with exact identity,
+  update, privacy, ownership, uninstall, and clean-profile evidence.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
-  incomplete-response v2. Protected unpacked-extension success does not replace
-  reviewed Chrome Web Store distribution.
+  incomplete-response v2. Protected unpacked-extension success does not prove
+  automatic installed-product delivery or recovery of the original navigation.
 - Safari requires a signed container, browser enablement, and a disposable
   runtime proof that the sandboxed app extension can reach the owner-only
   daemon socket. The unsigned source and package build exist, but are not

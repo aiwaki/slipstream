@@ -49,20 +49,28 @@ SHA-256
 `6b2ea8a616095e26377feb77002aacc10b999e74ef1b78b8265132752956fa69`
 and passes `unzip -t`.
 
-On 2026-08-12 the publisher-console gate was attempted in the only available
-Codex browser. Chrome Web Store redirected to Google sign-in, and that browser
-had no authenticated publisher session. No ZIP was uploaded, no store item was
-created, and no review or publication action was taken. Manual publisher
-authentication is therefore the immediate external prerequisite.
+On 2026-08-12 the publisher console was reached after manual Google sign-in,
+but its one-time registration payment was declined with `OR_MIVEM_04`. No fee
+was paid, ZIP uploaded, store item created, review requested, or publication
+performed. Chrome Web Store publication is deferred and is not the current
+implementation path.
 
-After authentication, upload the deterministic ZIP and stop before review.
-Prove that the dashboard Item ID and public key match exact extension ID
-`cecdingohhpfggapnlbghppcegbaciam`. Any identity mismatch returns to reviewed
-code; never add a second allowed origin. Then supply listing assets and a public
-privacy URL, complete Web Store review/publication, and prove the exact
-extension installed and enabled in a clean branded-Chrome profile. Only after
-that distribution gate passes should the then-current exact main receive one
-fresh protected qualification and a controlled workstation transaction. Do not
+The product invariant is `install Slipstream -> sites work`, including rare
+browser-visible failures. Runtime observation and decisions must remain local;
+the normal transport path remains browser-free, while any semantic/browser
+worker must be lazy, bounded, performance-qualified, and capable of completing
+the original user-visible navigation without separate extension setup or other
+manual browser work. A successful synthetic page load alone is not completion.
+
+The next verified action is to compare the official macOS local Chromium
+integration surfaces against the existing privacy and ownership contracts,
+select the smallest automatic path that can supply the frozen semantic signal
+and recover the original navigation, then implement one end-to-end slice with
+latency, memory, package-size, update, uninstall, and clean-profile evidence.
+Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains frozen unless a
+reviewed local-delivery design proves that an identity migration is required.
+Only after that gate passes should the then-current exact main receive one fresh
+protected qualification and a controlled workstation transaction. Do not
 install any existing artifact meanwhile.
 
 ## Previous Checkpoint
