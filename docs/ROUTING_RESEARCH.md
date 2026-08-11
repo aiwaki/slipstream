@@ -336,8 +336,30 @@ daemon suite passes 861 tests. The module is present in the script install
 payload for reproducibility, but no socket supervisor, poller, browser process,
 or routing effect is composed. Script tests pass 278 and the unchanged
 Chromium companion passes 24. Python compilation, JSON parsing, project
-continuity, and `git diff --check` also pass. Lazy lifecycle and a proof that
-worker traffic cannot recursively create probe jobs remain the next gate.
+continuity, and `git diff --check` also pass. PR #326 merged as
+`2f37488d3c55f3ca29a622f6cc00455267ce1028`; exact-main CI `31538670468`,
+dependency audit `31538670392`, and Windows qualification `31538670429`
+passed for that SHA. Lazy lifecycle and a proof that worker traffic cannot
+recursively create probe jobs remain the next gate.
+
+Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds that
+closed lifecycle seam without pretending that a browser is already composed.
+A one-shot client checks the exact owner UID and mode `0600` before connecting,
+applies the same 2 KiB frame limit in both directions, rejects duplicate or
+expanded responses,
+and exposes only claim and submit. The lazy controller creates no thread until
+the broker has a live job, admits only one blocking worker, stops as soon as the
+queue is empty, and retries a vanished worker only after the existing
+five-second lease. Host-level exclusion in the daemon now refuses a second
+capability while any capability for that normalized host is live. A worker's
+synthetic same-host relay therefore cannot recursively create another job; the
+host becomes eligible again only after the original capability is revoked or
+consumed and the worker relay has closed. Focused coverage passes 16 tests and
+the complete daemon suite passes 866. No production socket, browser, process
+launcher, PF rule, DNS setting, proxy, PAC, VPN, or route effect is added by
+this seam. The next gate is the real sandboxed observer plus exact console-user
+launch/cleanup, followed by proof that its result completes the original
+navigation.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

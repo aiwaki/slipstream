@@ -9859,6 +9859,12 @@ def _issue_pending_navigation_probe(
         _prune_pending_navigation_probe_capabilities(now)
         if not _pending_navigation_activity_eligible_locked(activity, now):
             return None
+        host = normalize_host(activity.pending_navigation_host)
+        if any(
+            capability.host == host
+            for capability in _pending_navigation_probe_capabilities.values()
+        ):
+            return None
         for token, capability in tuple(
             _pending_navigation_probe_capabilities.items()
         ):
@@ -9878,7 +9884,6 @@ def _issue_pending_navigation_probe(
                 break
         if not token:
             return None
-        host = normalize_host(activity.pending_navigation_host)
         expiry_unix_ms = now_unix_ms + int(
             PENDING_NAVIGATION_PROBE_TTL * 1000
         )
