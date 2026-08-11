@@ -342,7 +342,7 @@ dependency audit `31538670392`, and Windows qualification `31538670429`
 passed for that SHA. Lazy lifecycle and a proof that worker traffic cannot
 recursively create probe jobs remain the next gate.
 
-Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds that
+PR #327 from branch `codex/lazy-pending-navigation-worker` adds that
 closed lifecycle seam without pretending that a browser is already composed.
 A one-shot client checks the exact owner UID and mode `0600` before connecting,
 applies the same 2 KiB frame limit in both directions, rejects duplicate or
@@ -360,6 +360,47 @@ launcher, PF rule, DNS setting, proxy, PAC, VPN, or route effect is added by
 this seam. The next gate is the real sandboxed observer plus exact console-user
 launch/cleanup, followed by proof that its result completes the original
 navigation.
+
+All six PR checks passed. PR #327 merged as
+`86966e9e93b6344c13c5704f311e5468be17a35c`; exact-main CI `31541339436`,
+dependency audit `31541339377`, and Windows qualification `31541339387`
+passed for that exact SHA.
+
+Branch `codex/sandboxed-browser-probe-worker` implements the next closed slice
+without creating the production socket or wiring the daemon lifecycle. The
+existing packaged Slipstream executable has one exact hidden worker argument,
+so no second executable, embedded browser engine, Chrome extension, publisher
+account, or user-profile setup is needed. The root-side launcher prepares one
+random owner-private plist and log directory, bootstraps the packaged worker in
+the active console user's Aqua domain, verifies its exact UID and command, and
+removes only that verified job and runtime after exit. The worker itself asks
+LaunchServices to open installed Chrome in sandboxed unified-headless mode with
+extensions disabled and a fresh mode-`0700` profile. It retains no ordinary
+idle process or thread. The production Chrome bundle is admitted only from the
+fixed system or user Applications path, under the current user or root, without
+world-write permission, after code-signature verification and exact Google
+bundle/team identity. The installed workstation copy uses ordinary `0775`
+owner/admin permissions, so rejecting every group-writable bit would reject a
+valid signed Chrome; signature identity plus the world-write prohibition is the
+compatible boundary.
+
+The worker uses the local Chrome DevTools Protocol only for the exact synthetic
+`https://host/` main document. `Network.requestWillBeSent` starts the separate
+eight-second observation; response headers, redirect, load failure, or
+navigation error are terminal, while an exact document request that remains
+outstanding for the full interval is `navigation_pending`. A terminal
+observation consumes its one-shot capability through the broker but is rejected
+by the route reducer and therefore has no route effect. The worker closes the
+browser, revalidates and removes only the exact profile-owned Chrome family and
+LaunchServices waiter, waits for stable absence, and removes the profile before
+submitting either outcome. Production paths are fixed. Executable, socket,
+origin, resolver, and certificate overrides require the complete disposable
+GitHub Actions gate and exist only for the packaged deterministic HTTPS
+qualification. That gate requires one hanging main-document request, one
+privacy-bounded pending result, no `--no-sandbox`, no visible window, no profile
+residue, and at most 25 seconds end to end. The remaining product gate is still
+to compose this with the daemon and prove that the original user-visible
+navigation, rather than only the synthetic probe, completes.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

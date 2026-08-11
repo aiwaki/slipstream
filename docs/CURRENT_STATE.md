@@ -10,9 +10,9 @@ file.
 
 ## Current Checkpoint
 
-PR #326 is merged as live main
-`2f37488d3c55f3ca29a622f6cc00455267ce1028`. Exact-main CI `31538670468`,
-dependency audit `31538670392`, and Windows qualification `31538670429` all
+PR #327 is merged as live main
+`86966e9e93b6344c13c5704f311e5468be17a35c`. Exact-main CI `31541339436`,
+dependency audit `31541339377`, and Windows qualification `31541339387` all
 passed for that exact SHA, including required jobs `checks`,
 `chromium-webrequest-contract`, and `packaged-app-lifecycle`.
 
@@ -132,7 +132,7 @@ and `git diff --check`. Its six PR checks passed, it merged as
 `31538670468`, dependency audit `31538670392`, and Windows qualification
 `31538670429` passed for that exact SHA.
 
-Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds a closed
+PR #327 from branch `codex/lazy-pending-navigation-worker` adds a closed
 one-shot worker client and lazy lifecycle controller. The client accepts only
 the exact owner-owned mode-`0600` Unix socket and exact bounded claim/submit
 responses.
@@ -144,12 +144,43 @@ that host eligible again. The full daemon suite passes 866 tests. The real
 browser observer and platform process launcher are deliberately not composed
 by this closed lifecycle slice.
 
-The next verified action is to complete review and exact-main qualification of
-PR #327, then connect the seam to the real sandboxed headless observer and
-exact console-user process launcher.
-That composed gate must still prove completion of the original user-visible
-navigation. Package size, installed update, uninstall, idle cost, and
-clean-profile evidence remain required before production runtime composition.
+All six PR checks passed; it merged as
+`86966e9e93b6344c13c5704f311e5468be17a35c`, and exact-main CI
+`31541339436`, dependency audit `31541339377`, and Windows qualification
+`31541339387` passed for that exact SHA. The current branch
+`codex/sandboxed-browser-probe-worker` starts from that exact merge.
+
+The current branch implements that next closed slice. One exact hidden mode of
+the packaged Slipstream executable claims the owner-only job, and an exact Aqua
+LaunchAgent runs it as the active console user. It uses LaunchServices to open
+signed Google Chrome in sandboxed unified-headless mode with extensions
+disabled and a fresh owner-private profile. CDP observes only the exact
+synthetic HTTPS root main document: eight seconds outstanding is
+`navigation_pending`; response, redirect, load failure, or navigation failure
+is `navigation_terminal` and consumes the capability without a route effect.
+Chrome, its profile-owned helper family, the LaunchServices waiter, LaunchAgent,
+and profile are removed before submit. Production paths are fixed; browser,
+socket, origin, resolver, and certificate overrides exist only behind the full
+disposable-GitHub-Actions gate. The ordinary path still creates no worker,
+browser, thread, socket, or routing effect.
+
+Local verification passes 868 daemon tests, 278 script tests plus 54 subtests,
+90 Rust tray tests, focused Python compilation, Rust Clippy with warnings denied,
+contract JSON parsing, and `git diff --check`. Required graph discovery was
+attempted first and again returned `Transport closed`; fallback inspection was
+limited to the existing browser launch, ownership, IPC, and cleanup seams. A
+large-module context-mode review found and corrected an early cleanup exit so
+the LaunchServices waiter is now stopped even when process enumeration fails;
+the profile is retained rather than deleted whenever exact Chrome absence
+cannot be proven.
+
+The next verified action is to commit and push this branch, run its packaged
+real-Chrome CI gate, resolve review, and merge only after all required checks
+pass. The slice remains closed from the production daemon until that evidence
+is green. The later composed gate must still prove completion of the original
+user-visible navigation. Package size, installed update, uninstall, idle cost,
+and clean-profile evidence remain required before production runtime
+composition.
 Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the

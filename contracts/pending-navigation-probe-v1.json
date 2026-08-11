@@ -91,12 +91,17 @@
     "observed_at_unix_ms": 1018001,
     "outcome": "navigation_pending"
   },
+  "outcomes": {
+    "route_effect": "navigation_pending",
+    "consume_without_route_effect": "navigation_terminal"
+  },
   "invariants": {
     "one_shot": true,
     "bound_to_exact_live_relay_object": true,
     "bound_to_host_request_start_and_stage": true,
     "relay_teardown_revokes_capability": true,
     "valid_capability_is_consumed_on_rejected_result": true,
+    "terminal_observation_has_no_route_effect": true,
     "same_host_reselection_after_result": false,
     "semantic_signal_v3_modified": false,
     "production_runtime_composition": false,
