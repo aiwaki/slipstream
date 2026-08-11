@@ -36,6 +36,21 @@
 - Use context-mode for large logs, status dumps, or broad file summaries so raw
   output stays out of the chat context.
 
+## Context Budget
+
+- Keep exploratory command output narrow and bounded. Prefer graph snippets,
+  exact symbols, and small line ranges; do not print complete logs, workflows,
+  broad diffs, or repository-wide search results into the conversation.
+- Route large logs and generated evidence through context-mode or summarize
+  them locally before returning only the decisive lines.
+- Refresh the compact top checkpoint in `docs/CURRENT_STATE.md` before a long
+  CI wait, protected qualification, workstation transaction, or handoff. A
+  resumed agent should need the checkpoint plus live git/PR/CI verification,
+  not a reconstruction from conversation history.
+- After compaction, reconcile once and continue the next verified action. Do
+  not repeat broad discovery that the checkpoint and current source already
+  settle.
+
 ## Routing Invariants
 
 - Discord and YouTube/googlevideo stay on local bypass. Never route them through

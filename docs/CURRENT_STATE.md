@@ -10,6 +10,39 @@ file.
 
 ## Current Checkpoint
 
+PR #313 is merged as live main
+`8535b7bcf1c8007c4636a2b6a638890c1177773a`. Exact-main dependency audit
+`31481725501`, Windows qualification `31481725524`, and CI `31481725573`
+passed. Protected owned-Geph qualification `31482370335` also passed and
+produced artifact `9097835929` with outer digest
+`sha256:01d4ce7d985bf543e603dca8157b6774dad5273e18fe45105b8f205bef99b541`.
+That artifact is deliberately non-installable: its Chromium semantic gate
+covered regional denial and incomplete response, but not the newly introduced
+v3 `navigation_pending` source path that addresses the observed uncommitted
+`about:blank` navigation.
+
+Branch `codex/qualify-pending-navigation-v3` adds the missing deterministic
+real-Chromium scenario to the protected harness. A local HTTPS request with no
+first document must cause the exact packaged companion to emit one strict,
+privacy-bounded v3 native message after eight seconds. An owner-private
+qualification tap records and forwards that message byte-for-byte to the exact
+packaged native host, then the fixture emulates closing only the correlated
+relay. Chrome must retry exactly once and commit a styled page with CSS,
+JavaScript, image, and ready callback. Daemon relay correlation and the
+four-stage local recovery reducer remain covered by their production unit and
+golden tests; the qualification tap introduces no production routing hook.
+
+Focused verification currently passes `51` tests plus `9` subtests for the
+packaged Chromium harness, Python compilation, and `git diff --check`. The next
+verified action is to finish regression checks, update this branch through a
+small PR, merge only when green, then run exact-main gates and exactly one fresh
+protected qualification for that new main SHA. Installation remains forbidden
+until that fresh run proves all three Chromium scenarios and cleanup. Only its
+exact artifact may enter a controlled workstation transaction with immediate
+rollback on the first failed smoke.
+
+## Previous Checkpoint
+
 Current user-facing priority: Slipstream remains exactly rolled back and must
 not be installed from the current development branch. PR #312 is merged as
 live main `58a67d0262fc8331dae05e615aaa61ce032a41a6`. Exact-main CI
@@ -83,7 +116,7 @@ may enter another controlled workstation transaction, with `xpersonatoy.com`
 early in the real browser smoke and immediate exact rollback on the first
 failure.
 
-## Previous Checkpoint
+## Earlier Checkpoint
 
 Controlled transaction `C17E2DFE-CC33-4FBE-8C61-8F76418D98C5` installed only
 that exact artifact and reached coherent active StatusV2. Google, Spotify,
