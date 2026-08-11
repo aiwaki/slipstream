@@ -410,7 +410,7 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             "result": "pass",
             "restricted_to": "disposable GitHub Actions macOS runner",
             "browser": "Chrome for Testing with a fresh owner-only profile",
-            "browser_launch": "direct unified headless Chrome LaunchAgent",
+            "browser_launch": "unified headless Chrome via LaunchServices",
             "observer": "real read-only webRequest incomplete-response event",
             "native_boundary": "owner-only fixed-response stub",
             "signal_schema_version": signal["schema_version"],

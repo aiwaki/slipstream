@@ -1041,6 +1041,8 @@ def _chrome_open_command(
     stderr_path: Path,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
+    *,
+    headless: bool = False,
 ) -> tuple[str, ...]:
     chrome = _chrome_command(
         executable,
@@ -1048,6 +1050,7 @@ def _chrome_open_command(
         extension,
         fixture_port,
         fixture_host,
+        headless=headless,
     )
     return (
         "/usr/bin/open",
@@ -1082,30 +1085,19 @@ def _chrome_launch_agent_payload(
     *,
     headless: bool = False,
 ) -> dict[str, object]:
-    if headless:
-        program_arguments = list(
-            _chrome_command(
-                executable,
-                profile,
-                extension,
-                fixture_port,
-                fixture_host,
-                headless=True,
-            )
+    program_arguments = list(
+        _chrome_open_command(
+            executable,
+            profile,
+            extension,
+            fixture_port,
+            chrome_stdout_path,
+            chrome_stderr_path,
+            application_bundle,
+            fixture_host,
+            headless=headless,
         )
-    else:
-        program_arguments = list(
-            _chrome_open_command(
-                executable,
-                profile,
-                extension,
-                fixture_port,
-                chrome_stdout_path,
-                chrome_stderr_path,
-                application_bundle,
-                fixture_host,
-            )
-        )
+    )
     payload: dict[str, object] = {
         "Label": label,
         "ProgramArguments": program_arguments,
@@ -2270,18 +2262,16 @@ def _run_chrome(
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
-        application_bundle: Path | None = None
-        if not headless:
-            application_bundle = _launchservices_app_bundle(
-                executable,
-                profile,
-                uid,
-                gid,
-            )
-            executable = _launchservices_executable(
-                executable,
-                application_bundle,
-            )
+        application_bundle = _launchservices_app_bundle(
+            executable,
+            profile,
+            uid,
+            gid,
+        )
+        executable = _launchservices_executable(
+            executable,
+            application_bundle,
+        )
         if fixture.scenario == PENDING_NAVIGATION_SCENARIO:
             tap = _create_pending_navigation_tap(
                 home,

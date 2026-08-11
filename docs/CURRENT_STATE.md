@@ -64,21 +64,23 @@ manual browser work. A successful synthetic page load alone is not completion.
 
 Draft PR #324 records the official macOS integration boundary and implements
 the first local-worker qualification slice. The ordinary Chromium
-`webRequest` CI gate now starts Chrome for Testing directly in unified-headless
-mode in the console user's Aqua namespace but without a browser window, retains
-the sandbox and exact owner-private profile,
-loads the frozen-origin companion, exercises native messaging and styled-page
+`webRequest` CI gate now starts Chrome for Testing through LaunchServices in
+unified-headless mode without a browser window, retains the sandbox and exact
+owner-private profile, loads the frozen-origin companion, exercises native
+messaging and styled-page
 completion, and fails if worker readiness exceeds 15 seconds, semantic
 completion exceeds 25 seconds, or sampled aggregate Chrome RSS exceeds 768
 MiB. Local evidence is green: 276 script tests, 850 daemon tests, 66 focused
 traffic contracts, project-state validation, Python compilation, and
 `git diff --check`. Real Chrome for Testing evidence for this draft commit is
-still pending CI. The first real-browser attempt, run `31532156159` job
-`93914552229`, rejected a background-session launch: sandboxed Chrome helpers
-could not look up the parent Mach rendezvous service and reported bootstrap
-`Permission denied`, so the extension worker never appeared. The correction
-keeps direct unified-headless launch and the sandbox but places the LaunchAgent
-in the console user's Aqua bootstrap namespace; a rerun is required.
+still pending CI. The first two real-browser attempts, run `31532156159` job
+`93914552229` and run `31532531700` job `93915774541`, rejected direct binary
+launch both outside and nominally inside the Aqua session: sandboxed Chrome
+helpers could not look up the parent Mach rendezvous service and reported
+bootstrap `Permission denied`, so the extension worker never appeared. The
+correction keeps unified-headless mode and the sandbox but launches the app
+through LaunchServices, the same macOS application boundary already proven by
+the headed protected gate; a rerun is required.
 
 The next verified action is to obtain green CI evidence for PR #324 and record
 its measured latency/RSS. Then add a closed correlation fixture proving that

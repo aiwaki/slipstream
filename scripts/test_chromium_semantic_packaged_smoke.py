@@ -891,7 +891,7 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertNotIn("/usr/bin/sudo", command)
         self.assertNotIn("/bin/launchctl", command)
 
-    def test_headless_launch_agent_runs_directly_in_the_aqua_namespace(self) -> None:
+    def test_headless_launch_agent_uses_launchservices_without_a_window(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             executable = _fake_chrome_for_testing(Path(tmp))
             payload = smoke._chrome_launch_agent_payload(
@@ -912,10 +912,11 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         command = payload["ProgramArguments"]
         self.assertEqual(payload["ProcessType"], "Interactive")
         self.assertEqual(payload["LimitLoadToSessionType"], "Aqua")
-        self.assertEqual(command[0], str(executable))
+        self.assertEqual(command[0], "/usr/bin/open")
+        self.assertIn("-W", command)
+        self.assertIn("-j", command)
         self.assertIn("--headless", command)
         self.assertNotIn("--new-window", command)
-        self.assertNotIn("/usr/bin/open", command)
         self.assertNotIn("--no-sandbox", command)
 
     def test_owned_chrome_rss_sums_only_enumerated_processes(self) -> None:
