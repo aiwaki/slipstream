@@ -62,16 +62,29 @@ worker must be lazy, bounded, performance-qualified, and capable of completing
 the original user-visible navigation without separate extension setup or other
 manual browser work. A successful synthetic page load alone is not completion.
 
-The next verified action is to compare the official macOS local Chromium
-integration surfaces against the existing privacy and ownership contracts,
-select the smallest automatic path that can supply the frozen semantic signal
-and recover the original navigation, then implement one end-to-end slice with
-latency, memory, package-size, update, uninstall, and clean-profile evidence.
-Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains frozen unless a
-reviewed local-delivery design proves that an identity migration is required.
-Only after that gate passes should the then-current exact main receive one fresh
-protected qualification and a controlled workstation transaction. Do not
-install any existing artifact meanwhile.
+Draft PR #324 records the official macOS integration boundary and implements
+the first local-worker qualification slice. The ordinary Chromium
+`webRequest` CI gate now starts Chrome for Testing directly in unified-headless
+mode with no Aqua window, retains the sandbox and exact owner-private profile,
+loads the frozen-origin companion, exercises native messaging and styled-page
+completion, and fails if worker readiness exceeds 15 seconds, semantic
+completion exceeds 25 seconds, or sampled aggregate Chrome RSS exceeds 768
+MiB. Local evidence is green: 276 script tests, 850 daemon tests, 66 focused
+traffic contracts, project-state validation, Python compilation, and
+`git diff --check`. Real Chrome for Testing evidence for this draft commit is
+still pending CI.
+
+The next verified action is to obtain green CI evidence for PR #324 and record
+its measured latency/RSS. Then add a closed correlation fixture proving that
+one bounded worker observation maps to one original pending relay and that the
+original user-visible navigation completes. Package-size, installed update,
+uninstall, idle-cost, and clean-profile evidence remain required before runtime
+composition. Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
+frozen unless a reviewed local-delivery design proves an identity migration is
+required. Only after the complete automatic-delivery gate passes should the
+then-current exact main receive one fresh protected qualification and a
+controlled workstation transaction. Do not install any existing artifact
+meanwhile.
 
 ## Previous Checkpoint
 

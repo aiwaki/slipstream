@@ -241,13 +241,21 @@ it no longer receives updates
 (<https://github.com/ZFC-Digital/puppeteer-real-browser>). None observes or
 reloads an already-running user tab merely by being launched locally.
 
-The immediate safe experiment is therefore narrower than runtime composition:
-add a unified-headless mode to the existing exact-origin Chrome for Testing
-harness, require the same native messaging and styled-resource callbacks, and
-record launch latency and peak resident memory. A following closed fixture must
-prove that the worker's evidence can be correlated to one original pending
-relay and that the original navigation completes. A synthetic worker page by
-itself cannot authorize production routing.
+PR #324 implements the immediate experiment without runtime composition. The
+ordinary macOS Chrome for Testing gate now launches the exact-origin companion
+directly as a unified-headless background LaunchAgent, keeps the Chrome sandbox,
+uses an owner-private fresh profile, and requires the existing native-message
+and styled-resource callbacks. It records launch-to-worker latency,
+launch-to-semantic latency, and sampled aggregate RSS for the exact owned Chrome
+process family, with conservative fail-closed budgets of 15 seconds, 25
+seconds, and 768 MiB. Local unit and daemon suites pass; real-browser CI evidence
+for the draft commit remains pending.
+
+The following closed fixture must prove that the worker's evidence can be
+correlated to one original pending relay and that the original navigation
+completes. A synthetic worker page by itself cannot authorize production
+routing. Installed package size, update/uninstall behavior, idle cost, and
+clean-profile behavior remain separate product gates.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

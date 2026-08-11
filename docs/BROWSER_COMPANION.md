@@ -153,6 +153,15 @@ signal authority and automatically completes the original user-visible
 navigation; successfully loading a separate synthetic page is not sufficient.
 The disposable CI gate proves browser behavior but not that delivery boundary.
 
+The ordinary macOS Chromium CI gate has a direct unified-headless mode for the
+first worker qualification slice. It runs the reviewed extension without an
+Aqua window or `--no-sandbox`, requires the exact native-message boundary and
+styled resource callback, and reports launch-to-worker, launch-to-semantic, and
+aggregate owned-process RSS measurements. Its conservative regression budgets
+are 15 seconds, 25 seconds, and 768 MiB respectively. This is qualification
+infrastructure, not yet an installed runtime component and not authority over
+an unrelated user tab.
+
 ## Chrome Web Store Package
 
 Build the deterministic source-only upload archive and provenance record with:
@@ -324,6 +333,10 @@ uninstall, and an unsigned Safari app-extension build.
   registration and publication are deferred. The replacement gate is an
   automatic local integration delivered by Slipstream, with exact identity,
   update, privacy, ownership, uninstall, and clean-profile evidence.
+- The unified-headless extension/native-message path and conservative
+  launch/RSS budgets are implemented in the ordinary Chrome for Testing gate;
+  real-browser CI evidence and an original-navigation correlation fixture are
+  still required before any runtime composition.
 - Both Chrome for Testing scenarios must pass on an exact merged main commit
   before v2 is runtime-qualified: frozen regional-denial v1 and additive
   incomplete-response v2. Protected unpacked-extension success does not prove
