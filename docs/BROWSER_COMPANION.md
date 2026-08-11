@@ -155,12 +155,14 @@ The disposable CI gate proves browser behavior but not that delivery boundary.
 
 The ordinary macOS Chromium CI gate has a direct unified-headless mode for the
 first worker qualification slice. It runs the reviewed extension without an
-Aqua window or `--no-sandbox`, requires the exact native-message boundary and
-styled resource callback, and reports launch-to-worker, launch-to-semantic, and
-aggregate owned-process RSS measurements. Its conservative regression budgets
-are 15 seconds, 25 seconds, and 768 MiB respectively. This is qualification
-infrastructure, not yet an installed runtime component and not authority over
-an unrelated user tab.
+visible browser window or `--no-sandbox`; on macOS the direct Chrome LaunchAgent
+still belongs to the console user's Aqua bootstrap namespace so sandboxed
+helpers can reach Chrome's Mach rendezvous service. The gate requires the exact
+native-message boundary and styled resource callback, and reports
+launch-to-worker, launch-to-semantic, and aggregate owned-process RSS
+measurements. Its conservative regression budgets are 15 seconds, 25 seconds,
+and 768 MiB respectively. This is qualification infrastructure, not yet an
+installed runtime component and not authority over an unrelated user tab.
 
 ## Chrome Web Store Package
 

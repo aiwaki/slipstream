@@ -1110,15 +1110,14 @@ def _chrome_launch_agent_payload(
         "Label": label,
         "ProgramArguments": program_arguments,
         "RunAtLoad": True,
-        "ProcessType": "Background" if headless else "Interactive",
+        "ProcessType": "Interactive",
+        "LimitLoadToSessionType": "Aqua",
         "AbandonProcessGroup": False,
         "WorkingDirectory": str(home),
         "EnvironmentVariables": dict(environment),
         "StandardOutPath": str(launcher_stdout_path),
         "StandardErrorPath": str(launcher_stderr_path),
     }
-    if not headless:
-        payload["LimitLoadToSessionType"] = "Aqua"
     return payload
 
 

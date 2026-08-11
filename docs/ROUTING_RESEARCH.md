@@ -243,13 +243,23 @@ reloads an already-running user tab merely by being launched locally.
 
 PR #324 implements the immediate experiment without runtime composition. The
 ordinary macOS Chrome for Testing gate now launches the exact-origin companion
-directly as a unified-headless background LaunchAgent, keeps the Chrome sandbox,
-uses an owner-private fresh profile, and requires the existing native-message
-and styled-resource callbacks. It records launch-to-worker latency,
+directly as a unified-headless LaunchAgent in the console user's Aqua bootstrap
+namespace, keeps the Chrome sandbox and avoids a visible browser window, uses
+an owner-private fresh profile, and requires the existing native-message and
+styled-resource callbacks. It records launch-to-worker latency,
 launch-to-semantic latency, and sampled aggregate RSS for the exact owned Chrome
 process family, with conservative fail-closed budgets of 15 seconds, 25
 seconds, and 768 MiB. Local unit and daemon suites pass; real-browser CI evidence
 for the draft commit remains pending.
+
+The first CI attempt (`31532156159`, job `93914552229`) also established a
+macOS constraint: a direct Chrome LaunchAgent outside the Aqua session starts
+the parent process, but sandboxed helpers cannot look up Chrome's per-process
+Mach rendezvous service (`bootstrap_look_up ... Permission denied`). The worker
+therefore remains absent. The harness now keeps direct headless launch and the
+sandbox while binding the job to the console user's Aqua bootstrap namespace;
+this does not create a visible browser window and must pass on the rerun before
+the mechanism is accepted.
 
 The following closed fixture must prove that the worker's evidence can be
 correlated to one original pending relay and that the original navigation
