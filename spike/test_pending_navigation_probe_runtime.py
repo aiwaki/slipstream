@@ -1035,6 +1035,63 @@ def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
         assert list(runtime_root.iterdir()) == []
 
 
+def test_console_worker_launcher_waits_for_final_aqua_identity():
+    executable = Path(
+        "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+    )
+    identity = probe_runtime.ConsoleUserIdentity(
+        uid=502,
+        gid=20,
+        username="console-user",
+        home="/Users/console-user",
+    )
+    states = iter((
+        "state = xpcproxy\npid = 4242\n",
+        "state = running\npid = 4242\n",
+        "state = running\npid = 4242\n",
+    ))
+    process_uids = iter((0, identity.uid))
+    commands = []
+
+    def completed(command, returncode=0, stdout="", stderr=""):
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            stdout,
+            stderr,
+        )
+
+    def runner(command):
+        commands.append(command)
+        if command[:2] == ("/bin/launchctl", "print"):
+            return completed(command, stdout=next(states))
+        if command[:2] == ("/bin/ps", "-p"):
+            uid = next(process_uids)
+            return completed(
+                command,
+                stdout=(
+                    f"{uid} {executable} "
+                    f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT}\n"
+                ),
+            )
+        raise AssertionError(command)
+
+    launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+        executable=executable,
+        identity_probe=lambda: identity,
+        command_runner=runner,
+        sleep=lambda _seconds: None,
+    )
+
+    assert launcher._wait_for_pid("gui/502/exact-worker", identity) == 4242
+    process_commands = [
+        command for command in commands
+        if command[:2] == ("/bin/ps", "-p")
+    ]
+    assert len(process_commands) == 2
+    assert all("-ww" in command for command in process_commands)
+
+
 def test_console_worker_launcher_reports_cleanup_certainty():
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-cleanup-certainty-",

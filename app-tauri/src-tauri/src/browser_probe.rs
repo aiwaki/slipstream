@@ -486,7 +486,6 @@ impl ChromeConfig {
 
     fn chrome_arguments(&self, profile: &Path) -> Vec<OsString> {
         let mut arguments = vec![
-            OsString::from("--headless"),
             OsString::from("--disable-background-networking"),
             OsString::from("--disable-component-update"),
             OsString::from("--disable-default-apps"),
@@ -1745,7 +1744,7 @@ mod tests {
             .iter()
             .map(|argument| argument.to_string_lossy().to_string())
             .collect();
-        assert!(arguments.contains(&"--headless".to_string()));
+        assert!(!arguments.contains(&"--headless".to_string()));
         assert!(arguments.contains(&"--disable-extensions".to_string()));
         assert!(arguments.contains(&"--disable-quic".to_string()));
         assert!(arguments.contains(&"--user-data-dir=/private/tmp/probe".to_string()));

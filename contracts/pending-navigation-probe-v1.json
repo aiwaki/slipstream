@@ -56,6 +56,15 @@
     "cleanup_before_worker_exit": true,
     "browser_observer_composed": true
   },
+  "browser_surface": {
+    "launchservices_hidden": true,
+    "visible_window": false,
+    "unified_headless": false,
+    "sandbox_enabled": true,
+    "private_profile": true,
+    "extensions_disabled": true,
+    "quic_disabled": true
+  },
   "privacy": {
     "job_fields": [
       "schema_version",

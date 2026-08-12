@@ -12061,6 +12061,15 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
     ] is True
     assert contract["worker_lifecycle"]["submit_before_cleanup"] is True
     assert contract["worker_lifecycle"]["cleanup_before_worker_exit"] is True
+    assert contract["browser_surface"] == {
+        "launchservices_hidden": True,
+        "visible_window": False,
+        "unified_headless": False,
+        "sandbox_enabled": True,
+        "private_profile": True,
+        "extensions_disabled": True,
+        "quic_disabled": True,
+    }
     assert contract["invariants"]["production_runtime_composition"] is True
     assert contract["invariants"][
         "disposable_fixture_jobs_exact_endpoint_only"
