@@ -51,7 +51,7 @@ launch with `launchd attestation mismatch`. The install attestation correctly
 recorded the initial daemon PID; the qualification harness intentionally
 restarted that daemon with disposable browser overrides and then incorrectly
 compared the immutable install record with the replacement PID. No artifact
-was packaged or installed. The narrow follow-up validates the complete install
+was packaged or installed. PR #335 validates the complete install
 attestation before restart and, after restart, separately proves the new PID's
 exact installed command. Production code and attestation semantics are
 unchanged. Local verification passes 1,198 tests plus 54 subtests, the focused
@@ -1784,7 +1784,7 @@ and dependency audit in
 
 ## Next Verified Action
 
-Review and merge the narrow protected-attestation follow-up only after all six
+Review and merge PR #335 only after all six
 PR checks pass. Then require fresh exact-main CI, audit, and native Windows
 gates and dispatch one new protected owned-Geph workflow for that live main
 SHA. The protected result must contain `original -> worker -> original`, one
