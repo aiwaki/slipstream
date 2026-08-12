@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import tempfile
 
 import pytest
@@ -92,3 +93,35 @@ def test_report_requires_original_worker_original_timing_and_resources() -> None
 )
 def test_cpu_time_parser(value: str, expected: float) -> None:
     assert smoke._cpu_seconds(value) == expected
+
+
+def test_worker_diagnostics_is_bounded_to_owned_metadata(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    launch = runtime / "dev.slipstream.browser-probe.0123456789abcdef"
+    launch.mkdir(mode=0o700)
+    for name in ("worker.plist", "worker.stdout.log", "worker.stderr.log"):
+        (launch / name).write_bytes(b"private")
+    profile = tmp_path / ("slipstream-browser-probe-" + "a" * 32)
+    profile.mkdir()
+    monkeypatch.setattr(smoke, "PRODUCTION_WORKER_RUNTIME", runtime)
+    monkeypatch.setattr(smoke, "_worker_processes", lambda _uid: (123,))
+    monkeypatch.setattr(smoke, "_worker_profiles", lambda: (profile,))
+
+    diagnostic = smoke.worker_diagnostics(os.getuid())
+
+    assert diagnostic["processes"] == (123,)
+    assert diagnostic["profiles"] == (profile.name,)
+    assert diagnostic["runtime"] == ({
+        "name": launch.name,
+        "owner": os.getuid(),
+        "mode": "0700",
+        "entries": (
+            "worker.plist",
+            "worker.stderr.log",
+            "worker.stdout.log",
+        ),
+    },)

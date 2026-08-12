@@ -2289,7 +2289,8 @@ def _run_composed_navigation(
         )[-2000:]
         raise LifecycleError(
             "composed original Chrome navigation timed out: "
-            f"records={fixture.records!r}; chrome={detail}"
+            f"records={fixture.records!r}; "
+            f"worker={composed.worker_diagnostics(uid)!r}; chrome={detail}"
         )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace")[-2000:]

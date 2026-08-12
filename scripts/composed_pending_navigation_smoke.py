@@ -26,6 +26,9 @@ WORKER_ARGUMENT = "--pending-navigation-browser-probe"
 WORKER_PROFILE_RE = re.compile(
     r"\Aslipstream-browser-probe-[0-9a-f]{32}\Z"
 )
+WORKER_RUNTIME_RE = re.compile(
+    r"\Adev\.slipstream\.browser-probe\.[0-9a-f]{16}\Z"
+)
 COMPOSED_READY_MARKER = b"User-agent: slipstream-composed-ready"
 MAX_COMPOSED_NAVIGATION_SECONDS = 35.0
 IDLE_OBSERVATION_SECONDS = 3.0
@@ -569,3 +572,44 @@ def assert_worker_clean(uid: int, *, timeout: float = 10.0) -> None:
     raise ComposedQualificationError(
         "packaged browser worker left process, profile, or runtime residue"
     )
+
+
+def worker_diagnostics(uid: int) -> dict[str, object]:
+    """Return bounded ownership metadata for a timed-out disposable worker."""
+    processes = _worker_processes(uid)
+    profiles = tuple(path.name for path in _worker_profiles())
+    runtime = []
+    try:
+        directories = tuple(PRODUCTION_WORKER_RUNTIME.iterdir())
+    except FileNotFoundError:
+        directories = ()
+    except OSError as error:
+        return {
+            "processes": processes,
+            "profiles": profiles,
+            "runtime_error": type(error).__name__,
+        }
+    for directory in directories[:8]:
+        if WORKER_RUNTIME_RE.fullmatch(directory.name) is None:
+            runtime.append({"name": "unexpected"})
+            continue
+        try:
+            metadata = os.lstat(directory)
+            entries = tuple(sorted(path.name for path in directory.iterdir()))
+        except OSError as error:
+            runtime.append({
+                "name": directory.name,
+                "error": type(error).__name__,
+            })
+            continue
+        runtime.append({
+            "name": directory.name,
+            "owner": metadata.st_uid,
+            "mode": f"{stat.S_IMODE(metadata.st_mode):04o}",
+            "entries": entries[:8],
+        })
+    return {
+        "processes": processes,
+        "profiles": profiles,
+        "runtime": tuple(runtime),
+    }
