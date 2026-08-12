@@ -324,6 +324,18 @@ has an exact 32-character lowercase-hex nonce. The residue gate now matches
 only that shape, with focused exclusions for the smoke root, non-hex suffixes,
 and wrong lengths; no cleanup behavior or product path changed.
 
+The correction passed on exact head
+`c9720bb58482ce37ded2dc37f3d8fea0cc39bb10`. Run `31549452164`, packaged job
+`93968755542`, produced exactly one hanging main-document request and one
+`navigation_pending` result in 13,009 ms. The sandbox remained enabled, no
+window was visible, the worker profile and exact Chrome family were absent
+after cleanup, and later packaged lifecycle stages passed. The same run passed
+common job `93968755462`, Windows-adapter job `93968755558`, and pinned legacy
+Chromium job `93968755604`; audit run `31549452162` passed dependency job
+`93968755330` and vendored-Geph job `93968755382`. This closes the isolated
+observer qualification, not the remaining daemon composition and original
+navigation-completion gate.
+
 Code discovery for the following correlation slice attempted the repository's
 required knowledge-graph search first, but the MCP transport returned
 `Transport closed`. The fallback was therefore limited to exact v3 signal,

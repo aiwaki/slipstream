@@ -11,10 +11,10 @@ file.
 ## Current Checkpoint
 
 PR #327 is merged as live main
-`86966e9e93b6344c13c5704f311e5468be17a35c`. Exact-main CI `31541339436`,
-dependency audit `31541339377`, and Windows qualification `31541339387` all
-passed for that exact SHA, including required jobs `checks`,
-`chromium-webrequest-contract`, and `packaged-app-lifecycle`.
+`86966e9e93b6344c13c5704f311e5468be17a35c`. PR #328 is open and mergeable on
+head `c9720bb58482ce37ded2dc37f3d8fea0cc39bb10`; all six required checks passed
+on that exact head in CI run `31549452164` and dependency-audit run
+`31549452162`.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
@@ -200,10 +200,17 @@ broader than the worker's exact 32-hex profile name. The residue gate now
 matches only that exact worker shape; a focused test excludes the harness root,
 non-hex suffixes, and wrong-length names.
 
-The next verified action is to pass the packaged pinned-Chrome CI gate,
-resolve review, and merge only after all required checks pass. The slice remains
-closed from the production daemon until that evidence is green. The later
-composed gate must still prove completion of the original
+The corrected exact head passed all six required checks. Run `31549452164`,
+job `93968755542`, observed exactly one hanging main-document request and one
+`navigation_pending` result in 13,009 ms, with the sandbox retained, no visible
+window, and no browser-profile residue; the later packaged lifecycle stages
+also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
+common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
+passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
+
+The next verified action is to resolve review and merge PR #328, then repeat
+the exact-main evidence check. The slice remains closed from the production
+daemon. The later composed gate must still prove completion of the original
 user-visible navigation. Package size, installed update, uninstall, idle cost,
 and clean-profile evidence remain required before production runtime
 composition.
