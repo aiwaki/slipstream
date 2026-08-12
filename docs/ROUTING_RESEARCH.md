@@ -281,6 +281,61 @@ event crossed the native boundary, one reload completed the styled page in
 confirming why it remains diagnostic rather than the physical-memory gate.
 System network state was not mutated.
 
+Two PR #328 jobs later resolved `stable` to Chrome for Testing
+`151.0.7922.138` rather than the proven `151.0.7922.77`. Both unchanged legacy
+extension runs failed because the exact MV3 service-worker target never became
+available; setup and LaunchServices completed, and the final DevTools retry
+reported connection refusal. This is upstream browser drift, not evidence
+against the new worker: the legacy job does not build or invoke the new Rust
+observer. The extension/webRequest contract is therefore pinned to the exact
+proven `.77` version for reproducibility.
+
+The new observer then exposed a separate `.138` macOS packaging failure. PR
+runs `31545667200` and `31546818641` both copied the setup action's complete
+extensionless bundle into a real private `.app`, but LaunchServices exited
+without creating any exact profile-owned Chrome process. Downloading the same
+official arm64 archive locally reproduced the failure: both the source and
+private copy lack `_CodeSignature/CodeResources`, and
+`codesign --verify --deep --strict` reports `code has no resources but signature
+indicates they must be present`. Ad-hoc deep signing made LaunchServices create
+a process but the DevTools listener disappeared before the bounded client could
+use it. That workaround would also replace the production signing authority,
+so it is rejected. The official
+[GitHub macOS image manifest](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#browsers)
+already lists installed Google Chrome. Run `31547878092` temporarily omitted
+the executable override and let the worker discover and verify that installed
+browser through the exact production bundle/team boundary. The run
+created the exact profile-owned main process through that boundary, but the
+browser remained silent and did not publish `DevToolsActivePort` within the
+fixed ten-second startup budget. The same path passed twice locally on signed
+Google Chrome 151 in 10,797 and 15,785 ms end to end, including the eight-second
+observation and cleanup. Hosted CI therefore pins the packaged observer to the
+already-proven `.77` Chrome-for-Testing bundle as well; production
+current-Chrome compatibility is evidenced by the exact local signed-browser
+runs rather than by relaxing the hosted startup or accepting an ad-hoc
+signature.
+
+Pinned packaged run `31549041776` then completed the hidden worker, exact
+hanging request, result submission, and launcher cleanup. The only failure was
+the harness's final residue query: its broad
+`slipstream-browser-probe-*` glob also selected the harness's own live
+`slipstream-browser-probe-smoke-*` temporary root. The production worker profile
+has an exact 32-character lowercase-hex nonce. The residue gate now matches
+only that shape, with focused exclusions for the smoke root, non-hex suffixes,
+and wrong lengths; no cleanup behavior or product path changed.
+
+The correction passed on exact head
+`c9720bb58482ce37ded2dc37f3d8fea0cc39bb10`. Run `31549452164`, packaged job
+`93968755542`, produced exactly one hanging main-document request and one
+`navigation_pending` result in 13,009 ms. The sandbox remained enabled, no
+window was visible, the worker profile and exact Chrome family were absent
+after cleanup, and later packaged lifecycle stages passed. The same run passed
+common job `93968755462`, Windows-adapter job `93968755558`, and pinned legacy
+Chromium job `93968755604`; audit run `31549452162` passed dependency job
+`93968755330` and vendored-Geph job `93968755382`. This closes the isolated
+observer qualification, not the remaining daemon composition and original
+navigation-completion gate.
+
 Code discovery for the following correlation slice attempted the repository's
 required knowledge-graph search first, but the MCP transport returned
 `Transport closed`. The fallback was therefore limited to exact v3 signal,
@@ -342,7 +397,7 @@ dependency audit `31538670392`, and Windows qualification `31538670429`
 passed for that SHA. Lazy lifecycle and a proof that worker traffic cannot
 recursively create probe jobs remain the next gate.
 
-Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds that
+PR #327 from branch `codex/lazy-pending-navigation-worker` adds that
 closed lifecycle seam without pretending that a browser is already composed.
 A one-shot client checks the exact owner UID and mode `0600` before connecting,
 applies the same 2 KiB frame limit in both directions, rejects duplicate or
@@ -360,6 +415,52 @@ launcher, PF rule, DNS setting, proxy, PAC, VPN, or route effect is added by
 this seam. The next gate is the real sandboxed observer plus exact console-user
 launch/cleanup, followed by proof that its result completes the original
 navigation.
+
+All six PR checks passed. PR #327 merged as
+`86966e9e93b6344c13c5704f311e5468be17a35c`; exact-main CI `31541339436`,
+dependency audit `31541339377`, and Windows qualification `31541339387`
+passed for that exact SHA.
+
+Branch `codex/sandboxed-browser-probe-worker` implements the next closed slice
+without creating the production socket or wiring the daemon lifecycle. The
+existing packaged Slipstream executable has one exact hidden worker argument,
+so no second executable, embedded browser engine, Chrome extension, publisher
+account, or user-profile setup is needed. The root-side launcher prepares one
+random owner-private plist and log directory, bootstraps the packaged worker in
+the active console user's Aqua domain, verifies its exact UID and command, and
+removes only that verified job and runtime after exit. The worker itself asks
+LaunchServices to open installed Chrome in sandboxed unified-headless mode with
+extensions disabled and a fresh mode-`0700` profile. It retains no ordinary
+idle process or thread. The production Chrome bundle is admitted only from the
+fixed system or user Applications path, under the current user or root, without
+world-write permission, after code-signature verification and exact Google
+bundle/team identity. The installed workstation copy uses ordinary `0775`
+owner/admin permissions, so rejecting every group-writable bit would reject a
+valid signed Chrome; signature identity plus the world-write prohibition is the
+compatible boundary.
+
+The worker uses the local Chrome DevTools Protocol only for the exact synthetic
+`https://host/` main document. `Network.requestWillBeSent` starts the separate
+eight-second observation; response headers, redirect, load failure, or
+navigation error are terminal, while an exact document request that remains
+outstanding for the full interval is `navigation_pending`. A terminal
+observation consumes its one-shot capability through the broker but is rejected
+by the route reducer and therefore has no route effect. The worker closes the
+browser, revalidates and removes only the exact profile-owned Chrome family and
+LaunchServices waiter, waits for stable absence, and removes the profile before
+submitting either outcome. Production paths are fixed. Executable, socket,
+origin, resolver, and certificate overrides require the complete disposable
+GitHub Actions gate. The packaged hosted gate materializes only the pinned
+complete `.77` Chrome-for-Testing root into its private `.app`; production never
+adapts an extensionless bundle and retains exact installed-Google signature,
+bundle-ID, and Team-ID admission. The deterministic local HTTPS origin, socket,
+resolver, and certificate remain disposable overrides. That gate requires one
+hanging
+main-document request, one
+privacy-bounded pending result, no `--no-sandbox`, no visible window, no profile
+residue, and at most 25 seconds end to end. The remaining product gate is still
+to compose this with the daemon and prove that the original user-visible
+navigation, rather than only the synthetic probe, completes.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

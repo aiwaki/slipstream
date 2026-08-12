@@ -5,10 +5,15 @@ from dataclasses import dataclass
 import ipaddress
 import json
 import os
+from pathlib import Path
+import plistlib
+import pwd
 import re
+import secrets
 import socket
 import stat
 import struct
+import subprocess
 import threading
 import time
 
@@ -26,6 +31,7 @@ REASON_EFFECT_UNAVAILABLE = "effect_unavailable"
 
 CAPABILITY_HEX_CHARS = 32
 CAPABILITY_TTL_MS = 30_000
+CONTRACT_PENDING_OBSERVATION_MS = 8_000
 CLAIM_LEASE_SECONDS = 5.0
 MAX_LIVE_JOBS = 32
 MAX_ENQUEUE_AGE_MS = 5_000
@@ -34,6 +40,33 @@ IPC_TIMEOUT_SECONDS = 2.0
 PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
     "/var/run/slipstream-browser-probe.sock"
 )
+PENDING_NAVIGATION_BROWSER_WORKER = (
+    "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+)
+PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT = (
+    "--pending-navigation-browser-probe"
+)
+PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
+    "/var/run/slipstream-browser-probe-workers"
+)
+PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 27.0
+PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX = (
+    "dev.slipstream.browser-probe"
+)
+_BROWSER_WORKER_DISPOSABLE_ENVIRONMENT = frozenset((
+    "CI",
+    "GITHUB_ACTIONS",
+    "SLIPSTREAM_DISPOSABLE_CI",
+    "SLIPSTREAM_BROWSER_PROBE_CHROME",
+    "SLIPSTREAM_BROWSER_PROBE_SOCKET",
+    "SLIPSTREAM_BROWSER_PROBE_ORIGIN",
+    "SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES",
+    "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS",
+))
+_BROWSER_WORKER_ERROR_RE = re.compile(
+    r"\Aslipstream browser probe failed: ([a-z0-9_]{1,64})\n?\Z"
+)
+_BROWSER_WORKER_ERROR_MAX_BYTES = 256
 
 _CAPABILITY_RE = re.compile(
     rf"^[0-9a-f]{{{CAPABILITY_HEX_CHARS}}}$"
@@ -51,6 +84,22 @@ _JOB_FIELDS = frozenset((
 
 class PendingNavigationProbeRuntimeError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class ConsoleUserIdentity:
+    uid: int
+    gid: int
+    username: str
+    home: str
+
+
+@dataclass(frozen=True, slots=True)
+class _BrowserWorkerLaunchPaths:
+    directory: Path
+    plist: Path
+    stdout: Path
+    stderr: Path
 
 
 @dataclass(slots=True)
@@ -426,6 +475,571 @@ class PendingNavigationProbeWorkerClient:
         if response["job"] is not None or not valid_reason:
             raise PendingNavigationProbeRuntimeError("invalid_submit_response")
         return response
+
+
+def _active_console_user():
+    try:
+        uid = os.stat("/dev/console").st_uid
+        account = pwd.getpwuid(uid)
+    except (KeyError, OSError):
+        return None
+    if (
+        uid <= 0
+        or account.pw_gid < 0
+        or account.pw_name in {"loginwindow", "_mbsetupuser"}
+        or not os.path.isabs(account.pw_dir)
+    ):
+        return None
+    return ConsoleUserIdentity(
+        uid=uid,
+        gid=account.pw_gid,
+        username=account.pw_name,
+        home=account.pw_dir,
+    )
+
+
+def _run_browser_worker_command(command):
+    try:
+        return subprocess.run(
+            tuple(command),
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PendingNavigationProbeRuntimeError(
+            "browser_worker_command_failed"
+        ) from error
+
+
+def _launchd_job_absent(result):
+    if result.returncode == 0:
+        return False
+    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return (
+        "could not find service" in combined
+        or "service not found" in combined
+        or "no such process" in combined
+    )
+
+
+def _launchd_job_pid(result):
+    if result.returncode != 0:
+        return None
+    for raw_line in (result.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("pid = "):
+            continue
+        try:
+            pid = int(line.removeprefix("pid = "))
+        except ValueError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_pid_invalid"
+            ) from error
+        return pid if pid > 0 else None
+    return None
+
+
+def _launchd_last_exit_code(result):
+    if result.returncode != 0:
+        return None
+    for raw_line in (result.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("last exit code = "):
+            continue
+        try:
+            return int(line.removeprefix("last exit code = "))
+        except ValueError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_exit_invalid"
+            ) from error
+    return None
+
+
+def _browser_worker_process_identity(result):
+    if result.returncode != 0:
+        return None
+    fields = (result.stdout or "").strip().split(None, 1)
+    if len(fields) != 2:
+        return None
+    try:
+        uid = int(fields[0])
+    except ValueError:
+        return None
+    return uid, fields[1]
+
+
+class PendingNavigationBrowserWorkerLauncher:
+    """Launch one packaged browser observer in the exact Aqua console session."""
+
+    def __init__(
+        self,
+        *,
+        executable=PENDING_NAVIGATION_BROWSER_WORKER,
+        runtime_root=PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME,
+        identity_probe=None,
+        command_runner=None,
+        monotonic_clock=None,
+        sleep=None,
+        timeout=PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS,
+        disposable_environment=None,
+    ):
+        if (
+            not isinstance(executable, (str, os.PathLike))
+            or not os.fspath(executable)
+            or not isinstance(runtime_root, (str, os.PathLike))
+            or not os.fspath(runtime_root)
+            or not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
+            raise ValueError("pending-navigation browser launcher is invalid")
+        self._executable = Path(executable)
+        self._runtime_root = Path(runtime_root)
+        self._identity_probe = identity_probe or _active_console_user
+        self._command_runner = command_runner or _run_browser_worker_command
+        self._monotonic_clock = monotonic_clock or time.monotonic
+        self._sleep = sleep or time.sleep
+        self._timeout = float(timeout)
+        self._disposable_environment = dict(disposable_environment or {})
+        if self._disposable_environment:
+            disposable = (
+                os.environ.get("CI") == "true"
+                and os.environ.get("GITHUB_ACTIONS") == "true"
+                and os.environ.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+            )
+            if (
+                not disposable
+                or not set(self._disposable_environment).issubset(
+                    _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT
+                )
+                or any(
+                    not isinstance(value, str)
+                    or not value
+                    or len(value) > 1024
+                    or "\x00" in value
+                    for value in self._disposable_environment.values()
+                )
+            ):
+                raise ValueError(
+                    "pending-navigation disposable environment is invalid"
+                )
+
+    def _identity(self):
+        identity = self._identity_probe()
+        if not isinstance(identity, ConsoleUserIdentity):
+            raise PendingNavigationProbeRuntimeError(
+                "console_user_unavailable"
+            )
+        if (
+            identity.uid <= 0
+            or identity.gid < 0
+            or not identity.username
+            or identity.username in {"root", "loginwindow", "_mbsetupuser"}
+            or not os.path.isabs(identity.home)
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "console_user_invalid"
+            )
+        return identity
+
+    def _validate_executable(self, identity):
+        try:
+            metadata = os.lstat(self._executable)
+        except OSError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_unavailable"
+            ) from error
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or not os.path.isabs(self._executable)
+            or metadata.st_uid not in {0, identity.uid}
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or not metadata.st_mode & 0o111
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_unowned"
+            )
+
+    def _prepare_runtime_root(self):
+        try:
+            self._runtime_root.mkdir(mode=0o755, parents=True, exist_ok=True)
+            metadata = os.lstat(self._runtime_root)
+        except OSError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unavailable"
+            ) from error
+        allowed_owners = {0} if os.geteuid() == 0 else {os.getuid()}
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid not in allowed_owners
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+
+    @staticmethod
+    def _write_private(path, payload, identity):
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(path, flags, 0o600)
+            try:
+                remaining = memoryview(payload)
+                while remaining:
+                    written = os.write(descriptor, remaining)
+                    if written <= 0:
+                        raise OSError("private write made no progress")
+                    remaining = remaining[written:]
+                os.fchown(descriptor, identity.uid, identity.gid)
+                os.fchmod(descriptor, 0o600)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        except OSError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unavailable"
+            ) from error
+
+    def _prepare_launch(self, identity, label):
+        self._prepare_runtime_root()
+        directory = self._runtime_root / label
+        try:
+            directory.mkdir(mode=0o700)
+            os.chown(directory, identity.uid, identity.gid)
+            directory.chmod(0o700)
+        except OSError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unavailable"
+            ) from error
+        paths = _BrowserWorkerLaunchPaths(
+            directory=directory,
+            plist=directory / "worker.plist",
+            stdout=directory / "worker.stdout.log",
+            stderr=directory / "worker.stderr.log",
+        )
+        try:
+            self._write_private(paths.stdout, b"", identity)
+            self._write_private(paths.stderr, b"", identity)
+            environment = {
+                "HOME": identity.home,
+                "LOGNAME": identity.username,
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "USER": identity.username,
+            }
+            environment.update(self._disposable_environment)
+            payload = {
+                "Label": label,
+                "ProgramArguments": [
+                    str(self._executable),
+                    PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+                ],
+                "RunAtLoad": True,
+                "ProcessType": "Interactive",
+                "LimitLoadToSessionType": "Aqua",
+                "AbandonProcessGroup": False,
+                "WorkingDirectory": identity.home,
+                "EnvironmentVariables": environment,
+                "StandardOutPath": str(paths.stdout),
+                "StandardErrorPath": str(paths.stderr),
+            }
+            self._write_private(
+                paths.plist,
+                plistlib.dumps(
+                    payload,
+                    fmt=plistlib.FMT_XML,
+                    sort_keys=True,
+                ),
+                identity,
+            )
+        except BaseException:
+            for path in (paths.plist, paths.stdout, paths.stderr):
+                try:
+                    metadata = os.lstat(path)
+                except FileNotFoundError:
+                    continue
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_ISLNK(metadata.st_mode)
+                    or metadata.st_uid != identity.uid
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                ):
+                    raise PendingNavigationProbeRuntimeError(
+                        "browser_worker_runtime_unowned"
+                    )
+                path.unlink()
+            metadata = os.lstat(directory)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_uid != identity.uid
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+            ):
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_runtime_unowned"
+                )
+            directory.rmdir()
+            raise
+        return paths
+
+    def _run(self, command):
+        result = self._command_runner(tuple(command))
+        if (
+            not hasattr(result, "returncode")
+            or not hasattr(result, "stdout")
+            or not hasattr(result, "stderr")
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_command_invalid"
+            )
+        return result
+
+    def _print(self, target):
+        return self._run(("/bin/launchctl", "print", target))
+
+    def _validate_process(self, pid, identity):
+        result = self._run((
+            "/bin/ps",
+            "-p",
+            str(pid),
+            "-o",
+            "uid=,command=",
+        ))
+        observed = _browser_worker_process_identity(result)
+        expected_command = (
+            f"{self._executable} "
+            f"{PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT}"
+        )
+        if observed != (identity.uid, expected_command):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_identity_mismatch"
+            )
+
+    def _wait_for_pid(self, target, identity):
+        deadline = self._monotonic_clock() + 5.0
+        while self._monotonic_clock() < deadline:
+            state = self._print(target)
+            if _launchd_job_absent(state):
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_disappeared"
+                )
+            pid = _launchd_job_pid(state)
+            if pid is not None:
+                self._validate_process(pid, identity)
+                return pid
+            self._sleep(0.05)
+        raise PendingNavigationProbeRuntimeError(
+            "browser_worker_start_timeout"
+        )
+
+    def _wait_for_exit(self, target, pid, identity):
+        deadline = self._monotonic_clock() + self._timeout
+        while self._monotonic_clock() < deadline:
+            state = self._print(target)
+            if _launchd_job_absent(state):
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_disappeared"
+                )
+            observed_pid = _launchd_job_pid(state)
+            if observed_pid is not None:
+                if observed_pid != pid:
+                    raise PendingNavigationProbeRuntimeError(
+                        "browser_worker_pid_replaced"
+                    )
+                try:
+                    self._validate_process(observed_pid, identity)
+                except PendingNavigationProbeRuntimeError:
+                    refreshed = self._print(target)
+                    if _launchd_job_absent(refreshed):
+                        raise PendingNavigationProbeRuntimeError(
+                            "browser_worker_disappeared"
+                        )
+                    refreshed_pid = _launchd_job_pid(refreshed)
+                    if refreshed_pid is not None:
+                        if refreshed_pid != pid:
+                            raise PendingNavigationProbeRuntimeError(
+                                "browser_worker_pid_replaced"
+                            )
+                        raise
+                    exit_code = _launchd_last_exit_code(refreshed)
+                    if exit_code is not None:
+                        return exit_code
+            else:
+                exit_code = _launchd_last_exit_code(state)
+                if exit_code is not None:
+                    return exit_code
+            self._sleep(0.1)
+        raise PendingNavigationProbeRuntimeError(
+            "browser_worker_exit_timeout"
+        )
+
+    def _wait_absent(self, target):
+        deadline = self._monotonic_clock() + 5.0
+        while self._monotonic_clock() < deadline:
+            if _launchd_job_absent(self._print(target)):
+                return
+            self._sleep(0.05)
+        raise PendingNavigationProbeRuntimeError(
+            "browser_worker_cleanup_failed"
+        )
+
+    def _cleanup_launch(self, target, paths, pid, identity):
+        if pid is not None:
+            try:
+                self._validate_process(pid, identity)
+            except PendingNavigationProbeRuntimeError:
+                pass
+            else:
+                self._run((
+                    "/bin/launchctl",
+                    "kill",
+                    "SIGTERM",
+                    target,
+                ))
+        self._run(("/bin/launchctl", "bootout", target))
+        try:
+            self._wait_absent(target)
+        except PendingNavigationProbeRuntimeError:
+            if pid is not None:
+                try:
+                    self._validate_process(pid, identity)
+                except PendingNavigationProbeRuntimeError:
+                    pass
+                else:
+                    self._run((
+                        "/bin/launchctl",
+                        "kill",
+                        "SIGKILL",
+                        target,
+                    ))
+            self._run(("/bin/launchctl", "bootout", target))
+            self._wait_absent(target)
+        metadata = os.lstat(paths.directory)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != identity.uid
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+        for path in (paths.plist, paths.stdout, paths.stderr):
+            metadata = os.lstat(path)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_uid != identity.uid
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_runtime_unowned"
+                )
+            path.unlink()
+        paths.directory.rmdir()
+
+    @staticmethod
+    def _read_worker_error(path, identity):
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(path, flags)
+            try:
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != identity.uid
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_size <= 0
+                    or metadata.st_size > _BROWSER_WORKER_ERROR_MAX_BYTES
+                ):
+                    return "unknown"
+                payload = os.read(
+                    descriptor,
+                    _BROWSER_WORKER_ERROR_MAX_BYTES + 1,
+                )
+                if len(payload) != metadata.st_size:
+                    return "unknown"
+            finally:
+                os.close(descriptor)
+        except OSError:
+            return "unknown"
+        try:
+            message = payload.decode("ascii")
+        except UnicodeDecodeError:
+            return "unknown"
+        match = _BROWSER_WORKER_ERROR_RE.fullmatch(message)
+        return match.group(1) if match is not None else "unknown"
+
+    def launch(self):
+        identity = self._identity()
+        self._validate_executable(identity)
+        label = (
+            f"{PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX}."
+            f"{secrets.token_hex(8)}"
+        )
+        target = f"gui/{identity.uid}/{label}"
+        paths = self._prepare_launch(identity, label)
+        pid = None
+        failure = None
+        exit_code = None
+        worker_error = "unknown"
+        try:
+            if not _launchd_job_absent(self._print(target)):
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_already_loaded"
+                )
+            result = self._run((
+                "/bin/launchctl",
+                "bootstrap",
+                f"gui/{identity.uid}",
+                str(paths.plist),
+            ))
+            if result.returncode != 0:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_bootstrap_failed"
+                )
+            pid = self._wait_for_pid(target, identity)
+            exit_code = self._wait_for_exit(target, pid, identity)
+            if exit_code != 0:
+                worker_error = self._read_worker_error(
+                    paths.stderr,
+                    identity,
+                )
+            if self._identity() != identity:
+                raise PendingNavigationProbeRuntimeError(
+                    "console_user_changed"
+                )
+        except BaseException as error:
+            failure = error
+        cleanup_failure = None
+        try:
+            self._cleanup_launch(target, paths, pid, identity)
+        except BaseException as error:
+            cleanup_failure = error
+        if cleanup_failure is not None:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_cleanup_failed"
+            ) from cleanup_failure
+        if failure is not None:
+            raise failure
+        if exit_code != 0:
+            raise PendingNavigationProbeRuntimeError(
+                f"browser_worker_failed:{worker_error}"
+            )
+        return True
 
 
 class LazyPendingNavigationProbeWorker:

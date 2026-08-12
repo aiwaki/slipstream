@@ -10,11 +10,11 @@ file.
 
 ## Current Checkpoint
 
-PR #326 is merged as live main
-`2f37488d3c55f3ca29a622f6cc00455267ce1028`. Exact-main CI `31538670468`,
-dependency audit `31538670392`, and Windows qualification `31538670429` all
-passed for that exact SHA, including required jobs `checks`,
-`chromium-webrequest-contract`, and `packaged-app-lifecycle`.
+PR #327 is merged as live main
+`86966e9e93b6344c13c5704f311e5468be17a35c`. PR #328 is open and mergeable on
+head `c9720bb58482ce37ded2dc37f3d8fea0cc39bb10`; all six required checks passed
+on that exact head in CI run `31549452164` and dependency-audit run
+`31549452162`.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
@@ -132,7 +132,7 @@ and `git diff --check`. Its six PR checks passed, it merged as
 `31538670468`, dependency audit `31538670392`, and Windows qualification
 `31538670429` passed for that exact SHA.
 
-Draft PR #327 from branch `codex/lazy-pending-navigation-worker` adds a closed
+PR #327 from branch `codex/lazy-pending-navigation-worker` adds a closed
 one-shot worker client and lazy lifecycle controller. The client accepts only
 the exact owner-owned mode-`0600` Unix socket and exact bounded claim/submit
 responses.
@@ -144,12 +144,76 @@ that host eligible again. The full daemon suite passes 866 tests. The real
 browser observer and platform process launcher are deliberately not composed
 by this closed lifecycle slice.
 
-The next verified action is to complete review and exact-main qualification of
-PR #327, then connect the seam to the real sandboxed headless observer and
-exact console-user process launcher.
-That composed gate must still prove completion of the original user-visible
-navigation. Package size, installed update, uninstall, idle cost, and
-clean-profile evidence remain required before production runtime composition.
+All six PR checks passed; it merged as
+`86966e9e93b6344c13c5704f311e5468be17a35c`, and exact-main CI
+`31541339436`, dependency audit `31541339377`, and Windows qualification
+`31541339387` passed for that exact SHA. The current branch
+`codex/sandboxed-browser-probe-worker` starts from that exact merge.
+
+The current branch implements that next closed slice. One exact hidden mode of
+the packaged Slipstream executable claims the owner-only job, and an exact Aqua
+LaunchAgent runs it as the active console user. It uses LaunchServices to open
+signed Google Chrome in sandboxed unified-headless mode with extensions
+disabled and a fresh owner-private profile. CDP observes only the exact
+synthetic HTTPS root main document: eight seconds outstanding is
+`navigation_pending`; response, redirect, load failure, or navigation failure
+is `navigation_terminal` and consumes the capability without a route effect.
+Chrome, its profile-owned helper family, the LaunchServices waiter, LaunchAgent,
+and profile are removed before submit. Production paths are fixed; browser,
+socket, origin, resolver, and certificate overrides exist only behind the full
+disposable-GitHub-Actions gate. The ordinary path still creates no worker,
+browser, thread, socket, or routing effect.
+
+Local verification passes 869 daemon tests, 279 script tests plus 54 subtests,
+93 Rust tray tests, focused Python compilation, Rust Clippy with warnings denied,
+contract JSON parsing, and `git diff --check`. Required graph discovery was
+attempted first and again returned `Transport closed`; fallback inspection was
+limited to the existing browser launch, ownership, IPC, and cleanup seams. A
+large-module context-mode review found and corrected an early cleanup exit so
+the LaunchServices waiter is now stopped even when process enumeration fails;
+the profile is retained rather than deleted whenever exact Chrome absence
+cannot be proven.
+
+The packaged gate exposed two current-Chrome compatibility boundaries before
+route composition. Chrome for Testing `151.0.7922.138` no longer publishes the
+legacy MV3 worker target, so only that superseded extension contract is pinned
+to the proven `.77`. The `.138` macOS archive also has no outer bundle
+`CodeResources`; a complete private copy therefore fails strict code-signature
+verification and LaunchServices creates no process. Local reproduction reached
+the same result. Ad-hoc signing was rejected because it no longer proves the
+production identity and its DevTools endpoint died before use. Run
+`31547878092` then exercised the runner's signed installed Google Chrome: the
+exact profile-owned main process remained live, but silently failed to publish
+DevTools within the fixed ten-second startup budget. The hosted packaged gate
+therefore uses the same proven `.77` as the legacy gate, while a local run on
+signed production Google Chrome 151 provides current-browser compatibility
+evidence: two exact runs each produced one hanging HTTPS request, one
+`navigation_pending` result after eight seconds, and complete cleanup in 10,797
+and 15,785 ms. CDP HTTP reads now stop at one bounded `Content-Length` instead
+of waiting for Chrome to close its persistent response connection.
+
+Pinned packaged run `31549041776` completed the browser worker, exact fixture
+request, one-shot submission, and launcher cleanup. Its final residue assertion
+then matched the smoke harness's own still-live
+`slipstream-browser-probe-smoke-*` temporary directory because the glob was
+broader than the worker's exact 32-hex profile name. The residue gate now
+matches only that exact worker shape; a focused test excludes the harness root,
+non-hex suffixes, and wrong-length names.
+
+The corrected exact head passed all six required checks. Run `31549452164`,
+job `93968755542`, observed exactly one hanging main-document request and one
+`navigation_pending` result in 13,009 ms, with the sandbox retained, no visible
+window, and no browser-profile residue; the later packaged lifecycle stages
+also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
+common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
+passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
+
+The next verified action is to resolve review and merge PR #328, then repeat
+the exact-main evidence check. The slice remains closed from the production
+daemon. The later composed gate must still prove completion of the original
+user-visible navigation. Package size, installed update, uninstall, idle cost,
+and clean-profile evidence remain required before production runtime
+composition.
 Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the

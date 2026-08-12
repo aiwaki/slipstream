@@ -9,5 +9,8 @@ fn main() {
     if slipstream_lib::run_native_messaging_if_requested() {
         return;
     }
+    if let Some(status) = slipstream_lib::run_browser_probe_if_requested() {
+        std::process::exit(status);
+    }
     slipstream_lib::run()
 }

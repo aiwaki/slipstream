@@ -2,8 +2,11 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import plistlib
+import pwd
 import stat
 import struct
+import subprocess
 import tempfile
 import threading
 import time
@@ -86,6 +89,16 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         "max_live_capabilities": probe_runtime.MAX_LIVE_JOBS,
         "min_pending_observation_ms": 8000,
     }
+    assert probe_runtime.CONTRACT_PENDING_OBSERVATION_MS == (
+        CONTRACT["bounds"]["min_pending_observation_ms"]
+    )
+    assert CONTRACT["outcomes"] == {
+        "route_effect": "navigation_pending",
+        "consume_without_route_effect": "navigation_terminal",
+    }
+    assert CONTRACT["invariants"][
+        "terminal_observation_has_no_route_effect"
+    ] is True
     assert CONTRACT["ipc"] == {
         "socket_path": probe_runtime.PENDING_NAVIGATION_PROBE_SOCKET_PATH,
         "claim_lease_ms": int(probe_runtime.CLAIM_LEASE_SECONDS * 1000),
@@ -418,6 +431,155 @@ def test_lazy_worker_starts_once_only_for_a_live_job():
     assert runtime.state_size() == 0
     assert not worker.active()
     assert worker.close()
+
+
+def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-launcher-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
+        runtime_root = root / "runtime"
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=pwd.getpwuid(os.getuid()).pw_name,
+            home=str(root),
+        )
+        state = {
+            "loaded": False,
+            "loaded_prints": 0,
+            "running": False,
+            "payload": None,
+        }
+
+        def completed(command, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout,
+                stderr,
+            )
+
+        def runner(command):
+            if command[:2] == ("/bin/launchctl", "print"):
+                if not state["loaded"]:
+                    return completed(
+                        command,
+                        113,
+                        stderr="Could not find service",
+                    )
+                state["loaded_prints"] += 1
+                if state["loaded_prints"] <= 2:
+                    if state["loaded_prints"] == 2:
+                        state["running"] = False
+                    return completed(command, stdout="pid = 4242\n")
+                state["running"] = False
+                return completed(command, stdout="last exit code = 0\n")
+            if command[:2] == ("/bin/launchctl", "bootstrap"):
+                state["loaded"] = True
+                state["running"] = True
+                state["payload"] = plistlib.loads(Path(command[3]).read_bytes())
+                return completed(command)
+            if command[:2] == ("/bin/launchctl", "bootout"):
+                state["loaded"] = False
+                return completed(command)
+            if command[:2] == ("/bin/launchctl", "kill"):
+                state["running"] = False
+                return completed(command)
+            if command[:2] == ("/bin/ps", "-p"):
+                if not state["running"]:
+                    return completed(command, 1)
+                return completed(
+                    command,
+                    stdout=(
+                        f"{identity.uid} {executable} "
+                        f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT}\n"
+                    ),
+                )
+            raise AssertionError(command)
+
+        launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=runtime_root,
+            identity_probe=lambda: identity,
+            command_runner=runner,
+            sleep=lambda _seconds: None,
+        )
+        assert launcher.launch()
+        payload = state["payload"]
+        assert payload["ProgramArguments"] == [
+            str(executable),
+            probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+        ]
+        assert payload["RunAtLoad"] is True
+        assert payload["ProcessType"] == "Interactive"
+        assert payload["LimitLoadToSessionType"] == "Aqua"
+        assert payload["WorkingDirectory"] == str(root)
+        assert list(runtime_root.iterdir()) == []
+
+
+def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-launcher-invalid-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "slipstream"
+        executable.write_text("#!/bin/sh\n")
+        executable.chmod(0o775)
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=pwd.getpwuid(os.getuid()).pw_name,
+            home=str(root),
+        )
+        launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=root / "runtime",
+            identity_probe=lambda: identity,
+        )
+        with pytest.raises(
+            probe_runtime.PendingNavigationProbeRuntimeError,
+            match="browser_worker_unowned",
+        ):
+            launcher.launch()
+
+
+def test_console_worker_error_diagnostic_accepts_only_one_safe_class():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-worker-error-",
+        dir="/tmp",
+    ) as directory:
+        path = Path(directory) / "worker.stderr.log"
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=pwd.getpwuid(os.getuid()).pw_name,
+            home=directory,
+        )
+        path.write_bytes(
+            b"slipstream browser probe failed: devtools_file_invalid\n"
+        )
+        path.chmod(0o600)
+        read_error = (
+            probe_runtime.PendingNavigationBrowserWorkerLauncher
+            ._read_worker_error
+        )
+        assert read_error(path, identity) == "devtools_file_invalid"
+
+        path.write_bytes(
+            b"slipstream browser probe failed: devtools_file_invalid\n"
+            b"https://private.example/path\n"
+        )
+        assert read_error(path, identity) == "unknown"
+
+        path.write_bytes(b"x" * 257)
+        assert read_error(path, identity) == "unknown"
 
 
 def test_lazy_worker_retries_after_a_lost_claim_lease():

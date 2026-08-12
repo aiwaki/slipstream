@@ -146,6 +146,7 @@ jobs:
             scripts/make_release_sbom.py \
             scripts/make_route_policy_bundle.py \
             scripts/package_chromium_companion.py \
+            scripts/pending_navigation_browser_probe_smoke.py \
             scripts/check_project_state.py \
             scripts/verify_release_artifacts.py \
             scripts/test_pf_anchor_smoke.py \
@@ -224,11 +225,13 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install stable Chrome for Testing
+      - name: Install proven Chrome for Testing extension contract
         id: chrome-for-testing
         uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         with:
-          chrome-version: stable
+          # Reproducible legacy extension contract. The extensionless packaged
+          # observer below remains on latest stable Chrome.
+          chrome-version: 151.0.7922.77
           install-chromedriver: false
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -399,6 +402,13 @@ jobs:
           cache: pip
           cache-dependency-path: spike/requirements-build.txt
 
+      - name: Install proven Chrome for Testing for the packaged browser probe
+        id: packaged-browser-probe-chrome
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        with:
+          chrome-version: 151.0.7922.77
+          install-chromedriver: false
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -490,6 +500,18 @@ jobs:
             '{"host": "rr1---sn-test.googlevideo.com", "route_class": "direct_first", "service_group": "youtube_video", "strategy_set": "direct_first"}'
           test "$("$daemon" --classify-host www.youtube.com)" = \
             '{"host": "www.youtube.com", "route_class": "local_bypass", "service_group": "youtube_video", "strategy_set": "fake_only"}'
+
+      - name: Qualify packaged lazy sandboxed browser observation
+        env:
+          CI: "true"
+          GITHUB_ACTIONS: "true"
+          SLIPSTREAM_DISPOSABLE_CI: "1"
+        run: |
+          python3 scripts/pending_navigation_browser_probe_smoke.py \
+            --app-bundle \
+              "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app" \
+            --chrome-executable \
+              "${{ steps.packaged-browser-probe-chrome.outputs.chrome-path }}"
 
       - name: Packaged lifecycle, tray-crash, Chrome, and Safari sentinel smoke
         env:
