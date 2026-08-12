@@ -9,6 +9,10 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt,
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const BROWSER_PROBE_ARGUMENT: &str = "--pending-navigation-browser-probe";
@@ -142,6 +146,12 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
 }
 
 fn run_one_probe() -> ProbeResult<()> {
+    let termination_requested = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(
+        signal_hook::consts::SIGTERM,
+        Arc::clone(&termination_requested),
+    )
+    .map_err(|_| error("termination_handler_failed"))?;
     let uid = current_uid()?;
     let socket_path = configured_socket_path();
     let job = match claim_job(&socket_path, uid)? {
@@ -155,10 +165,10 @@ fn run_one_probe() -> ProbeResult<()> {
 
     let config = ChromeConfig::discover(&job, uid)?;
     let mut chrome = ChromeSession::launch(uid, config)?;
-    let observation = match chrome.observe_navigation() {
+    let observation = match chrome.observe_navigation(&termination_requested) {
         Ok(observation) => observation,
         Err(failure) => {
-            let _ = chrome.cleanup();
+            chrome.cleanup()?;
             return Err(failure);
         }
     };
@@ -191,6 +201,14 @@ fn run_one_probe() -> ProbeResult<()> {
             Ok(())
         }
         _ => Err(error("submit_rejected")),
+    }
+}
+
+fn require_not_terminated(termination_requested: &AtomicBool) -> ProbeResult<()> {
+    if termination_requested.load(Ordering::Relaxed) {
+        Err(error("worker_terminated"))
+    } else {
+        Ok(())
     }
 }
 
@@ -706,7 +724,10 @@ impl ChromeSession {
         }
     }
 
-    fn observe_navigation(&mut self) -> ProbeResult<NavigationObservation> {
+    fn observe_navigation(
+        &mut self,
+        termination_requested: &AtomicBool,
+    ) -> ProbeResult<NavigationObservation> {
         let port = read_devtools_port(&self.profile, self.uid)?
             .ok_or_else(|| error("devtools_unavailable"))?;
         let target = wait_for_page_target(port)?;
@@ -731,9 +752,11 @@ impl ChromeSession {
         let mut request_id = None;
         let mut request_started = None;
         while Instant::now() < overall_deadline {
+            require_not_terminated(termination_requested)?;
             let event = match websocket_read_json(&mut websocket, overall_deadline)? {
                 Some(event) => event,
                 None => {
+                    require_not_terminated(termination_requested)?;
                     if request_started.is_some_and(|started: Instant| {
                         Instant::now().duration_since(started) >= MIN_PENDING_OBSERVATION
                     }) {
@@ -1546,6 +1569,17 @@ mod tests {
             OsString::from(BROWSER_PROBE_ARGUMENT),
             OsString::from("unknown.example"),
         ]));
+    }
+
+    #[test]
+    fn termination_request_is_a_bounded_worker_error() {
+        let requested = AtomicBool::new(false);
+        assert!(require_not_terminated(&requested).is_ok());
+        requested.store(true, Ordering::Relaxed);
+        assert_eq!(
+            require_not_terminated(&requested).unwrap_err().0,
+            "worker_terminated"
+        );
     }
 
     #[test]

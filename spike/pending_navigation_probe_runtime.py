@@ -53,6 +53,8 @@ PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
     "/var/run/slipstream-browser-probe-workers"
 )
 PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 27.0
+_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
+_BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
 PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX = (
     "dev.slipstream.browser-probe"
 )
@@ -1408,8 +1410,9 @@ class PendingNavigationBrowserWorkerLauncher:
             "browser_worker_start_timeout"
         )
 
-    def _wait_for_exit(self, target, pid, identity):
-        deadline = self._monotonic_clock() + self._timeout
+    def _wait_for_exit(self, target, pid, identity, *, timeout=None):
+        wait_seconds = self._timeout if timeout is None else float(timeout)
+        deadline = self._monotonic_clock() + wait_seconds
         while self._monotonic_clock() < deadline:
             state = self._print(target)
             if _launchd_job_absent(state):
@@ -1472,6 +1475,23 @@ class PendingNavigationBrowserWorkerLauncher:
                     "SIGTERM",
                     target,
                 ))
+                # The packaged worker catches SIGTERM and removes only its
+                # already-validated Chrome process tree and private profile.
+                # Keep the job loaded until that bounded cleanup has exited;
+                # bootout first would bypass the worker's owned cleanup.
+                self._wait_for_exit(
+                    target,
+                    pid,
+                    identity,
+                    timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
+                )
+                if self._read_worker_error(
+                    paths.stderr,
+                    identity,
+                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                    raise PendingNavigationProbeRuntimeError(
+                        "browser_worker_cleanup_failed"
+                    )
         self._run(("/bin/launchctl", "bootout", target))
         try:
             self._wait_absent(target)

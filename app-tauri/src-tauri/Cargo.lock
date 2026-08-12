@@ -3613,6 +3613,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "signal-hook",
  "slipstream-core",
  "tauri",
  "tauri-build",

@@ -93,6 +93,17 @@ runtime cleanup continues to validate the worker plist, UID, command, label,
 and private files before signalling anything. A missing or mismatched pin
 therefore still fails closed.
 
+The following packaged attempt passed that uninstall boundary and removed the
+LaunchAgent, worker, runtime, daemon, broker, and installed payload, but found
+the worker's exact private Chrome profile still present. `SIGTERM` previously
+terminated the Rust worker before its owned Chrome/profile cleanup could run.
+The hidden worker now installs a termination flag, leaves its 250 ms DevTools
+read loop, performs its existing exact-profile Chrome cleanup, and deletes the
+profile. Stale cleanup waits at most eight seconds for this verified worker to
+exit and requires its bounded `worker_terminated` result before `bootout`; a
+timeout or cleanup error still fails closed rather than scanning or signalling
+unrelated Chrome processes. Corrected packaged evidence remains open.
+
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
 `navigation_pending` scenario emitted one privacy-bounded v3 signal, performed

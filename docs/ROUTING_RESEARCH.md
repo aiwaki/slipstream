@@ -566,6 +566,18 @@ UID, command, random label, plist, and owner-private files before signalling
 the LaunchAgent. An absent, mutable, malformed, or mismatched LaunchDaemon
 remains a fail-closed uninstall instead of broad process cleanup.
 
+That correction let the next packaged transaction remove every installed and
+LaunchAgent/runtime artifact, but the gate still found the exact saved Chrome
+profile. The worker's Rust cleanup was never reached because launchd's
+`SIGTERM` used the default process termination before `ChromeSession::cleanup`.
+The hidden worker now converts only `SIGTERM` into a flag, checks it after each
+bounded 250 ms DevTools read, and then runs the same exact-profile process
+validation, TERM/KILL sequence, settled-absence check, and private profile
+deletion already used on normal completion. Stale cleanup waits no more than
+eight seconds for the validated worker PID to exit, requires its private stderr
+to contain only the bounded `worker_terminated` class, and only then performs
+`bootout`; failure does not authorize a broader Chrome scan or cleanup.
+
 ## Adjacent Routing Projects Audit (2026-08-02)
 
 This audit read implementation code at the commits below rather than treating

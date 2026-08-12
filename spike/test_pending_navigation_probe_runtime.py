@@ -1002,7 +1002,12 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
             f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX}."
             "fedcba9876543210"
         )
-        state = {"loaded": True, "running": True, "commands": []}
+        state = {
+            "loaded": True,
+            "running": True,
+            "commands": [],
+            "paths": None,
+        }
 
         def completed(command, returncode=0, stdout="", stderr=""):
             return subprocess.CompletedProcess(
@@ -1021,7 +1026,9 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                         113,
                         stderr="Could not find service",
                     )
-                return completed(command, stdout="pid = 4242\n")
+                if state["running"]:
+                    return completed(command, stdout="pid = 4242\n")
+                return completed(command, stdout="last exit code = 1\n")
             if command[:2] == ("/bin/ps", "-p"):
                 return completed(
                     command,
@@ -1032,6 +1039,10 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
                 )
             if command[:2] == ("/bin/launchctl", "kill"):
                 state["running"] = False
+                state["paths"].stderr.write_text(
+                    "slipstream browser probe failed: worker_terminated\n"
+                )
+                state["paths"].stderr.chmod(0o600)
                 return completed(command)
             if command[:2] == ("/bin/launchctl", "bootout"):
                 state["loaded"] = False
@@ -1045,7 +1056,7 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
             command_runner=runner,
             sleep=lambda _seconds: None,
         )
-        launcher._prepare_launch(identity, label)
+        state["paths"] = launcher._prepare_launch(identity, label)
         assert launcher.cleanup_stale(remove_root=True)
         assert not runtime_root.exists()
         assert not state["running"]
@@ -1057,6 +1068,20 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
             command[:2] == ("/bin/launchctl", "bootout")
             for command in state["commands"]
         )
+        term_index = next(
+            index for index, command in enumerate(state["commands"])
+            if command[:3] == ("/bin/launchctl", "kill", "SIGTERM")
+        )
+        exit_index = next(
+            index for index, command in enumerate(state["commands"])
+            if index > term_index
+            and command[:2] == ("/bin/launchctl", "print")
+        )
+        bootout_index = next(
+            index for index, command in enumerate(state["commands"])
+            if command[:2] == ("/bin/launchctl", "bootout")
+        )
+        assert term_index < exit_index < bootout_index
 
 
 def test_stale_cleanup_accepts_only_persisted_closed_ci_environment(monkeypatch):
