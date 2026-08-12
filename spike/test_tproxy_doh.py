@@ -15164,3 +15164,52 @@ def test_launchd_delegates_raw_log_creation_to_private_writer():
         "--port",
         "1080",
     ]
+
+
+def test_packaged_install_pins_its_exact_tray_worker_in_launchd(tmp_path):
+    contents = tmp_path / "Slipstream & Test.app" / "Contents"
+    daemon = contents / "Resources" / "slipstreamd" / "slipstreamd"
+    worker = contents / "MacOS" / "slipstream"
+    daemon.parent.mkdir(parents=True)
+    worker.parent.mkdir(parents=True)
+    daemon.write_bytes(b"daemon")
+    worker.write_bytes(b"worker")
+    daemon.chmod(0o755)
+    worker.chmod(0o755)
+
+    resolved = tproxy._packaged_browser_worker_executable(daemon)
+    raw = tproxy.launchd_plist_text(
+        ["/usr/local/slipstream/slipstreamd", "--port", "1080"],
+        "/usr/local/slipstream",
+        browser_worker=resolved,
+    )
+    plist = plistlib.loads(raw.encode())
+
+    assert resolved == str(worker)
+    assert plist["EnvironmentVariables"][
+        "SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER"
+    ] == str(worker)
+
+
+def test_packaged_worker_resolver_rejects_writable_or_wrong_layout(tmp_path):
+    worker = tmp_path / "Contents" / "MacOS" / "slipstream"
+    worker.parent.mkdir(parents=True)
+    worker.write_bytes(b"worker")
+    worker.chmod(0o755)
+
+    assert tproxy._packaged_browser_worker_executable(
+        tmp_path / "Contents" / "Resources" / "wrong" / "slipstreamd"
+    ) is None
+
+    daemon = (
+        tmp_path
+        / "Contents"
+        / "Resources"
+        / "slipstreamd"
+        / "slipstreamd"
+    )
+    daemon.parent.mkdir(parents=True)
+    daemon.write_bytes(b"daemon")
+    daemon.chmod(0o755)
+    worker.chmod(0o777)
+    assert tproxy._packaged_browser_worker_executable(daemon) is None

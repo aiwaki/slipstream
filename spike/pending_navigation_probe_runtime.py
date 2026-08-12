@@ -43,7 +43,8 @@ PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
     "/var/run/slipstream-browser-probe.sock"
 )
 PENDING_NAVIGATION_BROWSER_WORKER = (
-    "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+    os.environ.get("SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER")
+    or "/Applications/Slipstream.app/Contents/MacOS/slipstream"
 )
 PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT = (
     "--pending-navigation-browser-probe"

@@ -52,6 +52,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
+from xml.sax.saxutils import escape as xml_escape
 
 import connection_probe
 import geph_backend
@@ -12922,8 +12923,17 @@ def remove_obsolete_newsyslog_config():
         pass
 
 
-def launchd_plist_text(prog_args, workdir):
-    prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
+def launchd_plist_text(prog_args, workdir, browser_worker=None):
+    prog_xml = "".join(
+        f"<string>{xml_escape(str(argument))}</string>"
+        for argument in prog_args
+    )
+    worker_xml = (
+        "<key>SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER</key>"
+        f"<string>{xml_escape(str(browser_worker))}</string>"
+        if browser_worker
+        else ""
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -12935,12 +12945,14 @@ def launchd_plist_text(prog_args, workdir):
         '  <key>KeepAlive</key><true/>\n'
         '  <key>EnvironmentVariables</key><dict>'
         '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
-        '<key>PYTHONUNBUFFERED</key><string>1</string></dict>\n'
+        '<key>PYTHONUNBUFFERED</key><string>1</string>'
+        f'{worker_xml}</dict>\n'
         '  <key>SoftResourceLimits</key><dict>'
         '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
         '  <key>HardResourceLimits</key><dict>'
         '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
-        f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
+        '  <key>WorkingDirectory</key>'
+        f'<string>{xml_escape(str(workdir))}</string>\n'
         '  <key>StandardOutPath</key><string>/dev/null</string>\n'
         '  <key>StandardErrorPath</key><string>/dev/null</string>\n'
         '</dict></plist>\n'
@@ -13646,6 +13658,33 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     return True
 
 
+def _packaged_browser_worker_executable(source_executable):
+    """Resolve the tray worker beside an exact packaged frozen daemon."""
+    source = os.path.abspath(os.fspath(source_executable))
+    daemon_dir = os.path.dirname(source)
+    resources_dir = os.path.dirname(daemon_dir)
+    contents_dir = os.path.dirname(resources_dir)
+    if (
+        os.path.basename(daemon_dir) != "slipstreamd"
+        or os.path.basename(resources_dir) != "Resources"
+        or os.path.basename(contents_dir) != "Contents"
+    ):
+        return None
+    candidate = os.path.join(contents_dir, "MacOS", "slipstream")
+    try:
+        metadata = os.lstat(candidate)
+    except OSError:
+        return None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+        or not metadata.st_mode & 0o111
+    ):
+        return None
+    return candidate
+
+
 def do_install(port):
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
@@ -13665,6 +13704,11 @@ def do_install(port):
             source_identity = os.path.abspath(sys.executable)
             installed_identity_name = os.path.basename(sys.executable)
             installed_identity_mode = 0o700
+        browser_worker = (
+            _packaged_browser_worker_executable(source_identity)
+            if frozen
+            else None
+        )
         source_sha256 = _sha256_regular_file(source_identity)
     except Exception as error:
         print(f"install preflight failed: {error}", file=sys.stderr)
@@ -13727,7 +13771,11 @@ def do_install(port):
             with open(secret_path, "w") as handle:
                 handle.write(tgws_secret_backup.strip())
             os.chmod(secret_path, 0o600)
-        plist = launchd_plist_text(prog_args, INSTALL_DIR)
+        plist = launchd_plist_text(
+            prog_args,
+            INSTALL_DIR,
+            browser_worker=browser_worker,
+        )
         _write_launchd_plist_atomic(plist)
         remove_obsolete_newsyslog_config()
         _require_command(
