@@ -10,16 +10,20 @@ file.
 
 ## Current Checkpoint
 
-PR #331 is the latest qualified product-code merge at
-`aa10f16409ab8775647749517f79faea7b066926`. Exact-main CI run `31565732030`
-passed common job `94017024727`, packaged lifecycle `94017024721`, pinned
-Chromium `94017024682`, and Windows adapter `94017024679`; dependency-audit run
-`31565731952` passed audit job `94017024386` and Geph vendor job
-`94017024315`; Windows packet qualification run `31565731970` passed AMD64 job
-`94017024585` and ARM64 job `94017024587`. No protected artifact from this SHA
-has been installed on the workstation.
+PR #332 is the latest qualified product-code merge at
+`b5514a693cfa412650d54878c0ccee8d8b664a07`. Its tree exactly matches reviewed
+product head `0d30a3712a5d5ae069ce09076658abc4fa65ea83`. PR CI run `31579340393`
+passed all six required checks; packaged job `94058618509` and its explicit
+same-head repetition `94060386147` both passed. Fresh review of exact head
+`0d30a371` found no major issue and every review thread is resolved. Exact-main
+CI run `31580485874` passed common job `94062155133`, packaged lifecycle
+`94062155231`, pinned Chromium `94062155061`, and Windows adapter
+`94062155080`; dependency-audit run `31580485872` passed audit job
+`94062154947` and Geph vendor job `94062155023`; Windows packet qualification
+run `31580485841` passed AMD64 job `94062155131` and ARM64 job `94062155203`.
+No protected artifact from this SHA has been installed on the workstation.
 
-PR #332 is the active product correction. Its first documentation head passed
+PR #332 is the merged product correction. Its first documentation head passed
 all six required checks, including packaged job `94019999739`. A later
 documentation-only head exposed a real timing race in packaged job
 `94021442646`: the original request reached the fixture, the worker request
@@ -74,7 +78,13 @@ is the precise legacy shape without the new ID; newly created workers and all
 claim/submit traffic still require it. Launcher bootstrap, start, wait,
 disappearance, PID replacement, and console-identity failures also never gain
 cleanup authority merely because later `bootout` succeeds. Final-head packaged
-qualification, fresh review, and exact-main gates remain open. Capability
+qualification, fresh review, and every exact-main gate passed. The exact-main
+packaged job again observed roots `original -> worker -> original`; the worker
+started at 16,739 ms, Chrome retried the original navigation at 28,718 ms, and
+the styled page completed in 24,727 ms with exactly one CSS, JavaScript, image,
+and ready callback, with extensions disabled and no manual reload. Worker and
+original-capture cleanup, uninstall, sentinel connection/state, and global PF
+were clean, preserved, or unchanged. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false
@@ -1738,22 +1748,20 @@ and dependency audit in
 
 ## Next Verified Action
 
-Do not retry the controlled transaction on the primary workstation yet. Open a
-small PR from `codex/partial-tls-content-confirmation` for the exact watchdog and
-HTTP/2 DATA-frame corrections recorded in the current checkpoint. Merge only
-after green review, CI, and audit. Then reconcile live `main`, require all
-exact-main gates, and dispatch exactly one fresh protected owned-Geph
-qualification for that SHA.
-
-Only that fresh run's exact qualified artifact may be used for the next
-controlled workstation transaction. The first smoke must prove that a generic
-unknown partial HTTP/2 response autonomously reaches exact-host confirmation
-and completes on a later retry; Weather's separate regional-denial scenario
-follows only after the transport case passes. The first failure triggers exact
-rollback. Do not reuse artifact `9045740737`, install a branch/local build, or
-repeat a failed workstation attempt in the same session. Discord, YouTube, and
-Googlevideo remain local-only, and external DNS/proxy/PAC/VPN/PF owners remain
-read-only.
+Merge the docs-only successor that records PR #332 and its exact-main evidence.
+Then add one exact-artifact, extensionless automatic local-browser scenario to
+the protected owned-Geph qualification before dispatching that workflow again.
+The existing protected scenarios all launch Chrome with the unpacked extension;
+ordinary Chromium and packaged CI prove the automatic worker path but cannot
+transfer that proof to a protected artifact. The new protected scenario must
+exercise `original -> worker -> original`, complete styled resources, prove
+exact worker cleanup, retain the owned-Geph lifecycle, and preserve all external
+DNS/proxy/PAC/VPN/PF owners. Discord, YouTube, and Googlevideo remain local-only.
+No existing, branch, or merely protected artifact is installation authority.
+Only a fresh exact-main protected run that includes this automatic-path proof
+may later admit a controlled workstation transaction, which must install only
+that exact artifact and roll back on the first failed required smoke. This
+checkpoint itself authorizes no workstation change.
 
 Safari may advance through deterministic source, Swift contract tests, and
 unsigned packaging, but the signed app-extension sandbox/socket path must be
