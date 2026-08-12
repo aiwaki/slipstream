@@ -3639,6 +3639,7 @@ def _get_pending_navigation_probe_worker():
                 .LazyPendingNavigationProbeWorker(
                     pending_jobs=runtime.state_size,
                     launch_worker=launcher.launch,
+                    error_handler=_log_pending_navigation_probe_worker_error,
                 )
             )
         return _pending_navigation_probe_worker
@@ -7537,6 +7538,13 @@ def _log_semantic_signal_server_error(error):
 def _log_pending_navigation_probe_server_error(error):
     print(
         f">> pending-navigation probe socket unavailable: {error}",
+        file=sys.stderr,
+    )
+
+
+def _log_pending_navigation_probe_worker_error(error):
+    print(
+        f">> pending-navigation browser worker failed: {error}",
         file=sys.stderr,
     )
 

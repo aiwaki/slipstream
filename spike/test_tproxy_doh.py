@@ -23,6 +23,7 @@ from collections import OrderedDict, deque
 import pytest
 import tproxy
 from tproxy import _doh_request, _doh_ssl_context
+from scripts import composed_pending_navigation_smoke as composed
 
 
 _REAL_CLAIM_PF_LOOPBACK_SKIP = tproxy._claim_pf_loopback_skip
@@ -12325,6 +12326,110 @@ def test_pending_navigation_idle_callback_queues_one_lazy_worker_job(
         assert runtime.discarded == []
     finally:
         tproxy._unregister_pending_navigation_relay(activity)
+
+
+def test_real_tls_handshake_idle_queues_the_lazy_worker(monkeypatch):
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SLIPSTREAM_DISPOSABLE_CI", "1")
+
+    class Runtime:
+        def __init__(self):
+            self.jobs = []
+            self.ready = None
+
+        def enqueue(self, job):
+            self.jobs.append(job)
+            self.ready.set()
+            return True
+
+        def discard(self, _capability):
+            return True
+
+    class Worker:
+        def notify_job_ready(self):
+            return True
+
+        def active(self):
+            return False
+
+    activities = []
+    original_register = tproxy._register_pending_navigation_relay
+
+    def capture_registration(activity, *args, **kwargs):
+        registered = original_register(activity, *args, **kwargs)
+        activities.append(activity)
+        return registered
+
+    async def scenario(fixture):
+        runtime.ready = asyncio.Event()
+        proxy = await asyncio.start_server(
+            tproxy.handle,
+            "127.0.0.1",
+            0,
+        )
+        port = int(proxy.sockets[0].getsockname()[1])
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        writer = None
+        try:
+            _reader, writer = await asyncio.open_connection(
+                "127.0.0.1",
+                port,
+                ssl=context,
+                server_hostname=composed.FIXTURE_HOST,
+            )
+            writer.write(
+                f"GET / HTTP/1.1\r\nHost: {composed.FIXTURE_HOST}\r\n"
+                "Connection: close\r\n\r\n".encode("ascii")
+            )
+            await writer.drain()
+            try:
+                await asyncio.wait_for(runtime.ready.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pytest.fail(
+                    f"pending job missing: records={fixture.records!r}; "
+                    f"activities={activities!r}"
+                )
+        finally:
+            fixture._release.set()
+            if writer is not None:
+                writer.close()
+            proxy.close()
+            await proxy.wait_closed()
+
+    runtime = Runtime()
+    worker = Worker()
+    with composed.ComposedHttpsFixture() as fixture:
+        environment = fixture.qualification_environment(Path(sys.executable))
+        monkeypatch.setattr(
+            tproxy,
+            "_PENDING_NAVIGATION_FIXTURE_ENVIRONMENT",
+            {
+                name: environment[name]
+                for name in tproxy._PENDING_NAVIGATION_FIXTURE_ENV_KEYS
+            },
+        )
+        monkeypatch.setattr(tproxy, "UNKNOWN_PRE_RESPONSE_IDLE", 0.05)
+        monkeypatch.setattr(
+            tproxy,
+            "_register_pending_navigation_relay",
+            capture_registration,
+        )
+        monkeypatch.setattr(
+            tproxy,
+            "orig_dst",
+            lambda _socket: (composed.FIXTURE_PUBLIC_IP, 443),
+        )
+        monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", runtime)
+        monkeypatch.setattr(tproxy, "_pending_navigation_probe_worker", worker)
+        monkeypatch.setattr(tproxy, "_pending_navigation_probe_available", True)
+        tproxy._shutdown_started.clear()
+        asyncio.run(scenario(fixture))
+
+    assert len(runtime.jobs) == 1
+    assert runtime.jobs[0]["host"] == composed.FIXTURE_HOST
 
 
 def test_pending_navigation_idle_callback_revokes_unstarted_job(monkeypatch):

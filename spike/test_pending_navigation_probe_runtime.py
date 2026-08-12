@@ -757,6 +757,36 @@ def test_lazy_worker_starts_once_only_for_a_live_job():
     assert worker.close()
 
 
+def test_lazy_worker_reports_launch_failure_through_bounded_handler():
+    pending = {"count": 1}
+    failures = []
+    attempted = threading.Event()
+
+    def launch_worker():
+        attempted.set()
+        pending["count"] = 0
+        raise probe_runtime.PendingNavigationProbeRuntimeError(
+            "browser_worker_start_timeout"
+        )
+
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=lambda: pending["count"],
+        launch_worker=launch_worker,
+        retry_seconds=0.01,
+        error_handler=failures.append,
+    )
+    assert worker.notify_job_ready()
+    assert attempted.wait(1.0)
+    deadline = time.monotonic() + 1.0
+    while worker.active() and time.monotonic() < deadline:
+        time.sleep(0.001)
+
+    assert [str(error) for error in failures] == [
+        "browser_worker_start_timeout"
+    ]
+    assert worker.close()
+
+
 def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-launcher-",
