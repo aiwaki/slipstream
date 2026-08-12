@@ -56,8 +56,16 @@ job `94042532588` and an explicit repetition as `94044217785` both passed the
 complete original-to-worker-to-original lifecycle and cleanup. Fresh review
 then found that the lifecycle callback was still unconditional when launcher
 cleanup raised. The current correction exposes cleanup certainty on the
-launcher error and releases the guard only after positive cleanup proof; its
-full local suite passes. Final-head packaged qualification, fresh review, and
+launcher error and releases the guard only after positive cleanup proof; head
+`0512a0bb26f559e722bd16079e95e1773d34d470` passed all six checks, including
+packaged job `94047866907`. Review of that correction found a second boundary:
+a later successfully cleaned launch could still invoke the global callback and
+release a guard retained for an earlier ambiguously cleaned launch. Each Aqua
+launch now receives one random local 64-bit ID in its exact LaunchAgent
+environment. The owner-only claim and submit envelopes carry that ID, and the
+daemon binds both claimed and accepted guards to the exact capability/launch
+pair. Cleanup releases only that launch's entries; another launch cannot clear
+an ambiguous predecessor. Final-head packaged qualification, fresh review, and
 exact-main gates remain open. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
@@ -113,7 +121,7 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,194 Python tests plus 54 subtests, focused
+Current local verification passes 1,195 Python tests plus 54 subtests, focused
 Python compilation, 96 tray, 35 core, 241 Windows-adapter, 40 userspace-stack,
 and 40 selected-stack/effect Rust tests, all five Rust clippy gates, contract
 JSON parsing, and `git diff --check`. The required

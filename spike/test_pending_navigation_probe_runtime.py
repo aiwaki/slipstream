@@ -17,6 +17,8 @@ import pytest
 import pending_navigation_probe_runtime as probe_runtime
 import tproxy
 
+_TEST_LAUNCH_ID = "0123456789abcdef"
+
 
 def test_browser_worker_disposable_environment_is_closed_and_ci_only():
     fixture = {
@@ -254,6 +256,7 @@ def _request(operation, **payload):
     return json.dumps({
         "schema_version": 1,
         "operation": operation,
+        "launch_id": _TEST_LAUNCH_ID,
         **payload,
     }).encode()
 
@@ -261,7 +264,9 @@ def _request(operation, **payload):
 def _runtime(clock, submitted=None, max_live_jobs=32):
     submitted = [] if submitted is None else submitted
     return probe_runtime.PendingNavigationProbeRuntime(
-        submit_result=lambda result: submitted.append(result) is None,
+        submit_result=lambda result, _launch_id: (
+            submitted.append(result) is None
+        ),
         wall_clock_ms=lambda: clock["wall"],
         monotonic_clock=lambda: clock["mono"],
         max_live_jobs=max_live_jobs,
@@ -310,8 +315,13 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         "max_request_bytes": probe_runtime.MAX_IPC_BYTES,
         "owner_only_mode": "0600",
         "request_fields": {
-            "claim": ["schema_version", "operation"],
-            "submit": ["schema_version", "operation", "result"],
+            "claim": ["schema_version", "operation", "launch_id"],
+            "submit": [
+                "schema_version",
+                "operation",
+                "launch_id",
+                "result",
+            ],
         },
         "response_fields": [
             "schema_version",
@@ -332,6 +342,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         "accepted_result_guard_until_worker_cleanup": True,
         "claimed_job_guard_until_worker_cleanup": True,
         "ambiguous_cleanup_failure_retains_guard": True,
+        "cleanup_releases_exact_launch_only": True,
         "unclaimed_rejected_result_guard_until_expiry": True,
         "unclaimed_live_capability_guard_until_expiry": True,
         "unstarted_job_guard_ms": 0,
@@ -389,19 +400,21 @@ def test_claim_observer_runs_before_delivery_and_can_drop_stale_authority():
     clock = {"wall": 1_010_000, "mono": 100.0}
     observed = []
     runtime = probe_runtime.PendingNavigationProbeRuntime(
-        submit_result=lambda _result: True,
-        claim_job=lambda job: observed.append(job) is None,
+        submit_result=lambda _result, _launch_id: True,
+        claim_job=lambda job, launch_id: (
+            observed.append((job, launch_id)) is None
+        ),
         wall_clock_ms=lambda: clock["wall"],
         monotonic_clock=lambda: clock["mono"],
     )
     job = _job()
     assert runtime.enqueue(job)
     assert runtime.handle(_request("claim"))["job"] == job
-    assert observed == [job]
+    assert observed == [(job, _TEST_LAUNCH_ID)]
 
     rejected = probe_runtime.PendingNavigationProbeRuntime(
-        submit_result=lambda _result: True,
-        claim_job=lambda _job: False,
+        submit_result=lambda _result, _launch_id: True,
+        claim_job=lambda _job, _launch_id: False,
         wall_clock_ms=lambda: clock["wall"],
         monotonic_clock=lambda: clock["mono"],
     )
@@ -430,7 +443,7 @@ def test_submit_removes_the_job_and_reports_effect_outcome():
     assert runtime.state_size() == 0
 
     rejecting = probe_runtime.PendingNavigationProbeRuntime(
-        submit_result=lambda _result: False,
+        submit_result=lambda _result, _launch_id: False,
         wall_clock_ms=lambda: clock["wall"],
         monotonic_clock=lambda: clock["mono"],
     )
@@ -438,7 +451,7 @@ def test_submit_removes_the_job_and_reports_effect_outcome():
         "result_rejected"
     )
 
-    def fail(_result):
+    def fail(_result, _launch_id):
         raise RuntimeError("effect failed")
 
     failing = probe_runtime.PendingNavigationProbeRuntime(
@@ -458,6 +471,8 @@ def test_request_parser_rejects_duplicates_extra_fields_and_wrong_shapes():
     runtime = _runtime(clock)
     invalid = (
         b'{"schema_version":1,"schema_version":1,"operation":"claim"}',
+        b'{"schema_version":1,"operation":"claim"}',
+        _request("claim", launch_id="invalid"),
         _request("claim", unexpected=True),
         _request("other"),
         b"[]",
@@ -547,15 +562,17 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
             token_factory=lambda: "f" * 32,
         )
         runtime = probe_runtime.PendingNavigationProbeRuntime(
-            submit_result=lambda result: (
+            submit_result=lambda result, launch_id: (
                 tproxy._submit_pending_navigation_probe_result(
                     result,
+                    launch_id,
                     now=clock["mono"],
                 )
             ),
-            claim_job=lambda claimed: (
+            claim_job=lambda claimed, launch_id: (
                 tproxy._pending_navigation_probe_worker_claimed(
                     claimed,
+                    launch_id,
                     now=clock["mono"],
                 )
             ),
@@ -588,6 +605,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
             assert not second.downstream_idle_retry
             assert tproxy._pending_navigation_probe_claimed_guards
             tproxy._pending_navigation_probe_worker_completed(
+                _TEST_LAUNCH_ID,
                 now=clock["mono"],
             )
             assert not tproxy._pending_navigation_probe_claimed_guards
@@ -627,7 +645,8 @@ def test_worker_client_requires_owner_socket_and_exact_responses():
                 runtime,
             )
             client = probe_runtime.PendingNavigationProbeWorkerClient(
-                str(socket_path)
+                str(socket_path),
+                launch_id=_TEST_LAUNCH_ID,
             )
             assert await asyncio.to_thread(client.claim) == job
             response = await asyncio.to_thread(client.submit, result)
@@ -860,7 +879,7 @@ def test_lazy_worker_releases_guard_only_after_confirmed_cleanup():
             launch_worker=launch_worker,
             retry_seconds=0.01,
             error_handler=failures.append,
-            worker_completed=lambda: completed.append("clean"),
+            worker_completed=lambda launch_id: completed.append(launch_id),
         )
         assert worker.notify_job_ready()
         deadline = time.monotonic() + 1.0
@@ -870,14 +889,16 @@ def test_lazy_worker_releases_guard_only_after_confirmed_cleanup():
         assert worker.close()
 
     run(probe_runtime.PendingNavigationProbeRuntimeError(
-        "browser_worker_cleanup_failed"
+        "browser_worker_cleanup_failed",
+        worker_launch_id="1111111111111111",
     ))
     assert completed == []
     run(probe_runtime.PendingNavigationProbeRuntimeError(
         "browser_worker_failed:claimed_job_invalid",
         worker_cleanup_confirmed=True,
+        worker_launch_id="2222222222222222",
     ))
-    assert completed == ["clean"]
+    assert completed == ["2222222222222222"]
     assert [str(error) for error in failures] == [
         "browser_worker_cleanup_failed",
         "browser_worker_failed:claimed_job_invalid",
@@ -894,12 +915,13 @@ def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
         entered.set()
         assert release.wait(1.0)
         pending["count"] = 0
+        return _TEST_LAUNCH_ID
 
     worker = probe_runtime.LazyPendingNavigationProbeWorker(
         pending_jobs=lambda: pending["count"],
         launch_worker=launch_worker,
         retry_seconds=0.01,
-        worker_completed=lambda: completed.append("clean"),
+        worker_completed=lambda launch_id: completed.append(launch_id),
     )
     discarded = []
     assert worker.discard_unstarted(
@@ -915,7 +937,7 @@ def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
     assert discarded == ["idle"]
     release.set()
     assert worker.close(timeout=1.0)
-    assert completed == ["clean"]
+    assert completed == [_TEST_LAUNCH_ID]
 
 
 def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
@@ -995,7 +1017,8 @@ def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
             command_runner=runner,
             sleep=lambda _seconds: None,
         )
-        assert launcher.launch()
+        launch_id = launcher.launch()
+        assert probe_runtime._valid_worker_launch_id(launch_id)
         payload = state["payload"]
         assert payload["ProgramArguments"] == [
             str(executable),
@@ -1005,6 +1028,9 @@ def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
         assert payload["ProcessType"] == "Interactive"
         assert payload["LimitLoadToSessionType"] == "Aqua"
         assert payload["WorkingDirectory"] == str(root)
+        assert payload["EnvironmentVariables"][
+            probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV
+        ] == launch_id
         assert list(runtime_root.iterdir()) == []
 
 
@@ -1051,6 +1077,9 @@ def test_console_worker_launcher_reports_cleanup_certainty():
         ) as confirmed:
             launcher.launch()
         assert confirmed.value.worker_cleanup_confirmed is True
+        assert probe_runtime._valid_worker_launch_id(
+            confirmed.value.worker_launch_id
+        )
 
         def fail_cleanup(*_args):
             raise OSError("ambiguous cleanup")
@@ -1062,6 +1091,9 @@ def test_console_worker_launcher_reports_cleanup_certainty():
         ) as ambiguous:
             launcher.launch()
         assert ambiguous.value.worker_cleanup_confirmed is False
+        assert probe_runtime._valid_worker_launch_id(
+            ambiguous.value.worker_launch_id
+        )
 
 
 def test_console_worker_launcher_rejects_mutable_or_replaced_executables():

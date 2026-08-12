@@ -2188,8 +2188,8 @@ _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
 _active_pending_navigation_relays = {}  # host -> {activity id: activity}
 _pending_navigation_probe_capabilities = OrderedDict()  # token -> bound relay
 _pending_navigation_probe_host_guards = OrderedDict()  # host -> monotonic expiry
-_pending_navigation_probe_accepted_guards = OrderedDict()  # host -> capability expiry
-_pending_navigation_probe_claimed_guards = OrderedDict()  # token -> (host, expiry)
+_pending_navigation_probe_accepted_guards = OrderedDict()  # (token, launch) -> (host, expiry)
+_pending_navigation_probe_claimed_guards = OrderedDict()  # (token, launch) -> (host, expiry)
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -9929,10 +9929,15 @@ def _guard_pending_navigation_probe_host(
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
 
 
-def _pending_navigation_probe_worker_claimed(job, now=None):
+def _pending_navigation_probe_worker_claimed(job, launch_id, now=None):
     """Bind one broker claim to its exact daemon capability lifecycle."""
     now = time.monotonic() if now is None else now
-    if not isinstance(job, dict):
+    if (
+        not isinstance(job, dict)
+        or not pending_navigation_probe_runtime._valid_worker_launch_id(
+            launch_id
+        )
+    ):
         return False
     token = job.get("capability")
     with _auto_geph_lock:
@@ -9948,35 +9953,52 @@ def _pending_navigation_probe_worker_claimed(job, now=None):
             != capability.expires_at_unix_ms
         ):
             return False
-        _pending_navigation_probe_claimed_guards[token] = (
+        claim_key = (token, launch_id)
+        _pending_navigation_probe_claimed_guards[claim_key] = (
             capability.host,
             capability.expires_at_monotonic,
         )
-        _pending_navigation_probe_claimed_guards.move_to_end(token)
+        _pending_navigation_probe_claimed_guards.move_to_end(claim_key)
     return True
 
 
-def _pending_navigation_probe_worker_completed(now=None):
-    """Release only exact claimed/result guards after worker cleanup."""
+def _pending_navigation_probe_worker_completed(launch_id, now=None):
+    """Release only guards owned by one positively cleaned worker launch."""
+    if not pending_navigation_probe_runtime._valid_worker_launch_id(
+        launch_id
+    ):
+        return False
     now = time.monotonic() if now is None else now
     with _auto_geph_lock:
-        for token, (host, _expected_expiry) in tuple(
+        released_hosts = set()
+        for claim_key, (host, _expected_expiry) in tuple(
             _pending_navigation_probe_claimed_guards.items()
         ):
-            if math.isinf(
-                _pending_navigation_probe_host_guards.get(host, 0.0)
-            ):
-                _pending_navigation_probe_host_guards.pop(host, None)
-            _pending_navigation_probe_claimed_guards.pop(token, None)
-        for host, _expected_expiry in tuple(
+            if claim_key[1] != launch_id:
+                continue
+            released_hosts.add(host)
+            _pending_navigation_probe_claimed_guards.pop(claim_key, None)
+        for claim_key, (host, _expected_expiry) in tuple(
             _pending_navigation_probe_accepted_guards.items()
         ):
+            if claim_key[1] != launch_id:
+                continue
+            released_hosts.add(host)
+            _pending_navigation_probe_accepted_guards.pop(claim_key, None)
+        guarded_hosts = {
+            host
+            for host, _expiry in (
+                tuple(_pending_navigation_probe_claimed_guards.values())
+                + tuple(_pending_navigation_probe_accepted_guards.values())
+            )
+        }
+        for host in released_hosts.difference(guarded_hosts):
             if math.isinf(
                 _pending_navigation_probe_host_guards.get(host, 0.0)
             ):
                 _pending_navigation_probe_host_guards.pop(host, None)
-            _pending_navigation_probe_accepted_guards.pop(host, None)
         _prune_pending_navigation_probe_capabilities(now)
+    return True
 
 
 def _reject_pending_navigation_probe_result(reason):
@@ -9993,13 +10015,15 @@ def _prune_pending_navigation_probe_capabilities(now):
     ):
         if expires_at <= now:
             _pending_navigation_probe_host_guards.pop(host, None)
-            _pending_navigation_probe_accepted_guards.pop(host, None)
     for token, capability in tuple(
         _pending_navigation_probe_capabilities.items()
     ):
         if capability.expires_at_monotonic <= now:
             _pending_navigation_probe_capabilities.pop(token, None)
-            if token in _pending_navigation_probe_claimed_guards:
+            if any(
+                claim_key[0] == token
+                for claim_key in _pending_navigation_probe_claimed_guards
+            ):
                 _guard_pending_navigation_probe_host(
                     capability,
                     now,
@@ -10011,7 +10035,12 @@ def _prune_pending_navigation_probe_capabilities(now):
                 capability,
                 now,
                 until_worker_cleanup=(
-                    token in _pending_navigation_probe_claimed_guards
+                    any(
+                        claim_key[0] == token
+                        for claim_key in (
+                            _pending_navigation_probe_claimed_guards
+                        )
+                    )
                 ),
             )
 
@@ -10034,7 +10063,12 @@ def _revoke_pending_navigation_probe_capability(
                         capability,
                         now,
                         until_worker_cleanup=(
-                            token in _pending_navigation_probe_claimed_guards
+                            any(
+                                claim_key[0] == token
+                                for claim_key in (
+                                    _pending_navigation_probe_claimed_guards
+                                )
+                            )
                         ),
                     )
 
@@ -10237,7 +10271,12 @@ def _request_pending_navigation_retry_for_activity(activity, *, now=None):
     return evidence == TRANSPORT_IDLE_EVIDENCE_CONFIRMING
 
 
-def _submit_pending_navigation_probe_result(payload, *, now=None):
+def _submit_pending_navigation_probe_result(
+    payload,
+    launch_id=None,
+    *,
+    now=None,
+):
     """Consume one worker capability and act only on its bound relay."""
     now = time.monotonic() if now is None else now
     if not isinstance(payload, dict):
@@ -10249,15 +10288,33 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
         or any(char not in "0123456789abcdef" for char in token)
     ):
         return _reject_pending_navigation_probe_result("capability_invalid")
+    if (
+        launch_id is not None
+        and not pending_navigation_probe_runtime._valid_worker_launch_id(
+            launch_id
+        )
+    ):
+        return _reject_pending_navigation_probe_result("launch_id_invalid")
+    claim_key = (token, launch_id)
     with _auto_geph_lock:
         _prune_pending_navigation_probe_capabilities(now)
+        if (
+            launch_id is not None
+            and claim_key not in _pending_navigation_probe_claimed_guards
+        ):
+            return _reject_pending_navigation_probe_result(
+                "worker_unclaimed"
+            )
         capability = _pending_navigation_probe_capabilities.pop(token, None)
         if capability is not None:
             _guard_pending_navigation_probe_host(
                 capability,
                 now,
                 until_worker_cleanup=(
-                    token in _pending_navigation_probe_claimed_guards
+                    any(
+                        key[0] == token
+                        for key in _pending_navigation_probe_claimed_guards
+                    )
                 ),
             )
     if capability is None:
@@ -10306,11 +10363,12 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
     with _auto_geph_lock:
         _pending_navigation_probe_host_guards[capability.host] = math.inf
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
-        _pending_navigation_probe_accepted_guards[capability.host] = (
-            capability.expires_at_monotonic
+        _pending_navigation_probe_accepted_guards[claim_key] = (
+            capability.host,
+            capability.expires_at_monotonic,
         )
         _pending_navigation_probe_accepted_guards.move_to_end(
-            capability.host
+            claim_key
         )
     return True
 

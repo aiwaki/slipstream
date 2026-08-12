@@ -31,6 +31,7 @@ REASON_RESULT_REJECTED = "result_rejected"
 REASON_EFFECT_UNAVAILABLE = "effect_unavailable"
 
 CAPABILITY_HEX_CHARS = 32
+WORKER_LAUNCH_ID_HEX_CHARS = 16
 CAPABILITY_TTL_MS = 30_000
 CONTRACT_PENDING_OBSERVATION_MS = 8_000
 CLAIM_LEASE_SECONDS = 5.0
@@ -57,6 +58,9 @@ _BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
 _BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
 PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX = (
     "dev.slipstream.browser-probe"
+)
+PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV = (
+    "SLIPSTREAM_BROWSER_PROBE_LAUNCH_ID"
 )
 _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT = frozenset((
     "CI",
@@ -98,9 +102,24 @@ _JOB_FIELDS = frozenset((
 
 
 class PendingNavigationProbeRuntimeError(ValueError):
-    def __init__(self, message, *, worker_cleanup_confirmed=False):
+    def __init__(
+        self,
+        message,
+        *,
+        worker_cleanup_confirmed=False,
+        worker_launch_id=None,
+    ):
         super().__init__(message)
         self.worker_cleanup_confirmed = bool(worker_cleanup_confirmed)
+        self.worker_launch_id = worker_launch_id
+
+
+def _valid_worker_launch_id(value):
+    return bool(
+        isinstance(value, str)
+        and len(value) == WORKER_LAUNCH_ID_HEX_CHARS
+        and all(char in "0123456789abcdef" for char in value)
+    )
 
 
 def browser_worker_disposable_environment(environment=None):
@@ -325,7 +344,7 @@ class PendingNavigationProbeRuntime:
             self._prune_locked(now_monotonic)
             return capability in self._jobs
 
-    def _claim(self):
+    def _claim(self, launch_id):
         now_monotonic = self._monotonic_clock()
         claimed_job = None
         with self._lock:
@@ -343,7 +362,9 @@ class PendingNavigationProbeRuntime:
             return _response(True, OPERATION_CLAIM, REASON_NO_JOB)
         if self._claim_job is not None:
             try:
-                observed = self._claim_job(dict(claimed_job)) is True
+                observed = (
+                    self._claim_job(dict(claimed_job), launch_id) is True
+                )
             except Exception:
                 observed = False
             if not observed:
@@ -357,7 +378,7 @@ class PendingNavigationProbeRuntime:
             claimed_job,
         )
 
-    def _submit(self, result):
+    def _submit(self, result, launch_id):
         if not isinstance(result, dict):
             return _response(
                 False,
@@ -369,7 +390,7 @@ class PendingNavigationProbeRuntime:
             with self._lock:
                 self._jobs.pop(capability, None)
         try:
-            accepted = self._submit_result(result) is True
+            accepted = self._submit_result(result, launch_id) is True
         except Exception:
             return _response(
                 False,
@@ -392,17 +413,22 @@ class PendingNavigationProbeRuntime:
         if request["schema_version"] != SCHEMA_VERSION:
             return _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
         operation = request.get("operation")
+        launch_id = request.get("launch_id")
+        if not _valid_worker_launch_id(launch_id):
+            return _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
         if operation == OPERATION_CLAIM and set(request) == {
             "schema_version",
             "operation",
+            "launch_id",
         }:
-            return self._claim()
+            return self._claim(launch_id)
         if operation == OPERATION_SUBMIT and set(request) == {
             "schema_version",
             "operation",
+            "launch_id",
             "result",
         }:
-            return self._submit(request["result"])
+            return self._submit(request["result"], launch_id)
         return _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
 
     def state_size(self):
@@ -738,12 +764,14 @@ class PendingNavigationProbeWorkerClient:
         self,
         path=PENDING_NAVIGATION_PROBE_SOCKET_PATH,
         *,
+        launch_id,
         expected_uid=None,
         timeout=IPC_TIMEOUT_SECONDS,
     ):
         if (
             not isinstance(path, str)
             or not path
+            or not _valid_worker_launch_id(launch_id)
             or type(expected_uid) is bool
             or (
                 expected_uid is not None
@@ -755,6 +783,7 @@ class PendingNavigationProbeWorkerClient:
         ):
             raise ValueError("pending-navigation worker client is invalid")
         self._path = path
+        self._launch_id = launch_id
         self._expected_uid = (
             os.getuid() if expected_uid is None else expected_uid
         )
@@ -805,6 +834,7 @@ class PendingNavigationProbeWorkerClient:
             {
                 "schema_version": SCHEMA_VERSION,
                 "operation": OPERATION_CLAIM,
+                "launch_id": self._launch_id,
             },
         )
         if not response["accepted"]:
@@ -829,6 +859,7 @@ class PendingNavigationProbeWorkerClient:
             {
                 "schema_version": SCHEMA_VERSION,
                 "operation": OPERATION_SUBMIT,
+                "launch_id": self._launch_id,
                 "result": result,
             },
         )
@@ -1103,6 +1134,9 @@ class PendingNavigationBrowserWorkerLauncher:
                 "HOME": identity.home,
                 "LOGNAME": identity.username,
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV: (
+                    label.rsplit(".", 1)[-1]
+                ),
                 "USER": identity.username,
             }
             environment.update(self._disposable_environment)
@@ -1231,6 +1265,9 @@ class PendingNavigationBrowserWorkerLauncher:
             "HOME": identity.home,
             "LOGNAME": identity.username,
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV: (
+                label.rsplit(".", 1)[-1]
+            ),
             "USER": identity.username,
         }
         expected_environment.update(self._disposable_environment)
@@ -1248,6 +1285,7 @@ class PendingNavigationBrowserWorkerLauncher:
                 "HOME",
                 "LOGNAME",
                 "PATH",
+                PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV,
                 "USER",
             }).issubset(_BROWSER_WORKER_DISPOSABLE_ENVIRONMENT)
             and all(
@@ -1595,6 +1633,7 @@ class PendingNavigationBrowserWorkerLauncher:
             f"{PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX}."
             f"{secrets.token_hex(8)}"
         )
+        launch_id = label.rsplit(".", 1)[-1]
         target = f"gui/{identity.uid}/{label}"
         paths = self._prepare_launch(identity, label)
         pid = None
@@ -1636,11 +1675,13 @@ class PendingNavigationBrowserWorkerLauncher:
             cleanup_failure = error
         if cleanup_failure is not None:
             raise PendingNavigationProbeRuntimeError(
-                "browser_worker_cleanup_failed"
+                "browser_worker_cleanup_failed",
+                worker_launch_id=launch_id,
             ) from cleanup_failure
         if failure is not None:
             try:
                 failure.worker_cleanup_confirmed = True
+                failure.worker_launch_id = launch_id
             except (AttributeError, TypeError):
                 pass
             raise failure
@@ -1648,8 +1689,9 @@ class PendingNavigationBrowserWorkerLauncher:
             raise PendingNavigationProbeRuntimeError(
                 f"browser_worker_failed:{worker_error}",
                 worker_cleanup_confirmed=True,
+                worker_launch_id=launch_id,
             )
-        return True
+        return launch_id
 
 
 def cleanup_stale_browser_worker_runtime(*, remove_root=False, executable=None):
@@ -1708,13 +1750,15 @@ class LazyPendingNavigationProbeWorker:
         try:
             while not self._stop.is_set() and self._job_count():
                 cleanup_confirmed = False
+                launch_id = None
                 try:
-                    self._launch_worker()
+                    launch_id = self._launch_worker()
                     cleanup_confirmed = True
                 except Exception as error:
                     cleanup_confirmed = bool(
                         getattr(error, "worker_cleanup_confirmed", False)
                     )
+                    launch_id = getattr(error, "worker_launch_id", None)
                     if self._error_handler is not None:
                         try:
                             self._error_handler(error)
@@ -1723,7 +1767,7 @@ class LazyPendingNavigationProbeWorker:
                 finally:
                     if cleanup_confirmed and self._worker_completed is not None:
                         try:
-                            self._worker_completed()
+                            self._worker_completed(launch_id)
                         except Exception:
                             pass
                 if not self._job_count():

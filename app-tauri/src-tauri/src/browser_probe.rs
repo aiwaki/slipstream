@@ -22,6 +22,8 @@ const PRODUCTION_SOCKET_PATH: &str = "/var/run/slipstream-browser-probe.sock";
 const MAX_IPC_BYTES: usize = 2_048;
 const IPC_TIMEOUT: Duration = Duration::from_secs(2);
 const CAPABILITY_HEX_CHARS: usize = 32;
+const WORKER_LAUNCH_ID_HEX_CHARS: usize = 16;
+const WORKER_LAUNCH_ID_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_LAUNCH_ID";
 const CAPABILITY_TTL_MS: u64 = 30_000;
 const MAX_CLAIM_AGE_MS: u64 = 5_000;
 const MIN_PENDING_OBSERVATION: Duration = Duration::from_secs(8);
@@ -154,7 +156,8 @@ fn run_one_probe() -> ProbeResult<()> {
     .map_err(|_| error("termination_handler_failed"))?;
     let uid = current_uid()?;
     let socket_path = configured_socket_path();
-    let job = match claim_job(&socket_path, uid)? {
+    let launch_id = configured_launch_id()?;
+    let job = match claim_job(&socket_path, uid, &launch_id)? {
         Some(job) => job,
         None => return Ok(()),
     };
@@ -182,6 +185,7 @@ fn run_one_probe() -> ProbeResult<()> {
             submit_result(
                 &socket_path,
                 uid,
+                &launch_id,
                 &ProbeResultPayload {
                     schema_version: SCHEMA_VERSION,
                     capability: &job.capability,
@@ -238,6 +242,18 @@ fn configured_socket_path() -> PathBuf {
         }
     }
     PathBuf::from(PRODUCTION_SOCKET_PATH)
+}
+
+fn configured_launch_id() -> ProbeResult<String> {
+    let launch_id = std::env::var(WORKER_LAUNCH_ID_ENV).map_err(|_| error("launch_id_invalid"))?;
+    if launch_id.len() != WORKER_LAUNCH_ID_HEX_CHARS
+        || !launch_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(error("launch_id_invalid"));
+    }
+    Ok(launch_id)
 }
 
 fn current_uid() -> ProbeResult<u32> {
@@ -368,12 +384,16 @@ fn ipc_request(
     Ok(response)
 }
 
-fn claim_job(path: &Path, uid: u32) -> ProbeResult<Option<ProbeJob>> {
+fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<ProbeJob>> {
     let response = ipc_request(
         path,
         uid,
         "claim",
-        &json!({"schema_version": SCHEMA_VERSION, "operation": "claim"}),
+        &json!({
+            "schema_version": SCHEMA_VERSION,
+            "operation": "claim",
+            "launch_id": launch_id,
+        }),
     )?;
     if !response.accepted {
         return Err(error("claim_rejected"));
@@ -391,6 +411,7 @@ fn claim_job(path: &Path, uid: u32) -> ProbeResult<Option<ProbeJob>> {
 fn submit_result(
     path: &Path,
     uid: u32,
+    launch_id: &str,
     result: &ProbeResultPayload<'_>,
 ) -> ProbeResult<IpcResponse> {
     ipc_request(
@@ -400,6 +421,7 @@ fn submit_result(
         &json!({
             "schema_version": SCHEMA_VERSION,
             "operation": "submit",
+            "launch_id": launch_id,
             "result": result,
         }),
     )
