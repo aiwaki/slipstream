@@ -66,7 +66,7 @@ LaunchDaemon, broker, worker LaunchAgent/process/profile/runtime, installed
 payload, and original qualification capture all to be absent or stopped. The
 sentinel connection/state and global PF snapshot must remain unchanged.
 
-Current local verification passes 1,184 Python tests plus 54 subtests, focused
+Current local verification passes 1,185 Python tests plus 54 subtests, focused
 Python compilation, shell syntax, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
 bounded source inspection used the documented fallback. The real packaged
@@ -82,6 +82,16 @@ cleanup now accepts that persisted environment only when all markers are exact,
 every additional key is in the frozen browser-worker allowlist, and every value
 passes the original nonempty, bounded-string, and NUL rejection rules. Normal
 production cleanup still requires the exact base environment.
+
+The next packaged attempt confirmed a second separate-process boundary: the
+CLI uninstaller also does not inherit the LaunchDaemon's pinned worker
+executable. Uninstall cleanup now recovers that string only from the still
+present root-owned mode-`0644`, nonsymlinked, size-bounded LaunchDaemon plist
+after validating its label, exact installed-daemon command/port, installed
+working directory, and canonical `Contents/MacOS/slipstream` layout. The
+runtime cleanup continues to validate the worker plist, UID, command, label,
+and private files before signalling anything. A missing or mismatched pin
+therefore still fails closed.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its

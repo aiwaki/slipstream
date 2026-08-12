@@ -542,7 +542,7 @@ installed uninstall and requires the LaunchDaemon, broker, installed payload,
 worker LaunchAgent/process/profile/runtime, and the fixture-owned original
 Chrome capture all to be absent or stopped. Sentinel connection/state and the
 global PF snapshot remain mandatory invariants. This adds no production code
-path or normal idle work. Local verification passes 1,184 Python tests plus 54
+path or normal idle work. Local verification passes 1,185 Python tests plus 54
 subtests; the real packaged active-worker transaction remains open.
 
 The next packaged attempt reached the exact active worker and invoked the
@@ -555,6 +555,16 @@ accept persisted additional values, and then only for the frozen worker
 allowlist with the original nonempty, 1024-byte, and NUL constraints. This is
 needed to remove the already-owned CI LaunchAgent; it cannot admit a new key,
 expand production cleanup ownership, or affect routing.
+
+The following packaged attempt confirmed that the separate CLI uninstaller
+also lacks the LaunchDaemon-only worker executable pin. Cleanup now recovers
+that exact string only from the still-present root-owned, nonsymlinked,
+mode-`0644`, size-bounded LaunchDaemon plist after validating its label,
+installed daemon command and port, installed working directory, and canonical
+`Contents/MacOS/slipstream` shape. It still validates the active worker's exact
+UID, command, random label, plist, and owner-private files before signalling
+the LaunchAgent. An absent, mutable, malformed, or mismatched LaunchDaemon
+remains a fail-closed uninstall instead of broad process cleanup.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

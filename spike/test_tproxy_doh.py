@@ -15213,3 +15213,58 @@ def test_packaged_worker_resolver_rejects_writable_or_wrong_layout(tmp_path):
     daemon.chmod(0o755)
     worker.chmod(0o777)
     assert tproxy._packaged_browser_worker_executable(daemon) is None
+
+
+def test_uninstaller_recovers_only_root_owned_launchd_worker_pin(
+    monkeypatch,
+    tmp_path,
+):
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    installed_daemon = install_dir / os.path.basename(sys.executable)
+    worker = tmp_path / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+    worker.parent.mkdir(parents=True)
+    launchd = tmp_path / "dev.slipstream.tproxy.plist"
+    launchd.write_text(tproxy.launchd_plist_text(
+        [str(installed_daemon), "--port", str(tproxy.PROXY_PORT)],
+        install_dir,
+        browser_worker=worker,
+    ))
+    launchd.chmod(0o644)
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install_dir))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(launchd))
+
+    assert tproxy._installed_browser_worker_from_launchd(
+        expected_uid=os.getuid()
+    ) == str(worker)
+
+    malformed = plistlib.loads(launchd.read_bytes())
+    malformed["ProgramArguments"].insert(1, "--unexpected")
+    launchd.write_bytes(plistlib.dumps(malformed))
+    assert tproxy._installed_browser_worker_from_launchd(
+        expected_uid=os.getuid()
+    ) is None
+
+    malformed["ProgramArguments"].remove("--unexpected")
+    malformed["WorkingDirectory"] = 7
+    launchd.write_bytes(plistlib.dumps(malformed))
+    assert tproxy._installed_browser_worker_from_launchd(
+        expected_uid=os.getuid()
+    ) is None
+
+    launchd.write_text(tproxy.launchd_plist_text(
+        [str(installed_daemon), "--port", str(tproxy.PROXY_PORT)],
+        install_dir,
+        browser_worker=worker,
+    ))
+
+    launchd.chmod(0o666)
+    assert tproxy._installed_browser_worker_from_launchd(
+        expected_uid=os.getuid()
+    ) is None
+
+    launchd.unlink()
+    launchd.symlink_to(tmp_path / "missing")
+    assert tproxy._installed_browser_worker_from_launchd(
+        expected_uid=os.getuid()
+    ) is None

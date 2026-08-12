@@ -34,6 +34,7 @@ import math
 from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import os
+import plistlib
 import pwd
 import re
 import resource
@@ -13467,6 +13468,7 @@ def _remove_install_runtime_artifacts():
     )
     pending_navigation_probe_runtime.cleanup_stale_browser_worker_runtime(
         remove_root=True,
+        executable=_installed_browser_worker_from_launchd(),
     )
 
 
@@ -13496,7 +13498,10 @@ def _remove_daemon_status_artifacts():
     )
     pending_worker_clean = (
         pending_navigation_probe_runtime
-        .cleanup_stale_browser_worker_runtime(remove_root=True)
+        .cleanup_stale_browser_worker_runtime(
+            remove_root=True,
+            executable=_installed_browser_worker_from_launchd(),
+        )
     )
     return all((
         attestation_clean,
@@ -13600,6 +13605,89 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     if not clean:
         return _cleanup_install_incomplete("installed runtime artifacts remain")
     return True
+
+
+def _installed_browser_worker_from_launchd(*, expected_uid=0):
+    """Recover only the exact root-owned worker pin for uninstall cleanup."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(LAUNCHD_PLIST, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or stat.S_IMODE(metadata.st_mode) != 0o644
+                or metadata.st_size <= 0
+                or metadata.st_size > 64 * 1024
+            ):
+                return None
+            payload = os.read(descriptor, metadata.st_size + 1)
+            if len(payload) != metadata.st_size:
+                return None
+        finally:
+            os.close(descriptor)
+        plist = plistlib.loads(payload)
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return None
+    if not isinstance(plist, dict) or plist.get("Label") != LAUNCHD_LABEL:
+        return None
+    arguments = plist.get("ProgramArguments")
+    if (
+        not isinstance(arguments, list)
+        or not all(isinstance(argument, str) for argument in arguments)
+        or any("\x00" in argument for argument in arguments)
+    ):
+        return None
+    installed_executable = os.path.join(
+        os.path.realpath(INSTALL_DIR),
+        os.path.basename(sys.executable),
+    )
+    if (
+        not arguments
+        or not os.path.isabs(arguments[0])
+        or os.path.normpath(arguments[0]) != arguments[0]
+        or os.path.realpath(arguments[0]) != installed_executable
+        or tuple(arguments[1:]) not in {
+            ("--port", str(PROXY_PORT)),
+            ("--port", str(PROXY_PORT), "--no-voice"),
+        }
+        or not _installed_daemon_command_owned(shlex.join(arguments))
+    ):
+        return None
+    working_directory = plist.get("WorkingDirectory")
+    if (
+        not isinstance(working_directory, str)
+        or not working_directory
+        or "\x00" in working_directory
+        or not os.path.isabs(working_directory)
+        or os.path.normpath(working_directory) != working_directory
+        or os.path.realpath(working_directory) != os.path.realpath(INSTALL_DIR)
+    ):
+        return None
+    environment = plist.get("EnvironmentVariables")
+    if not isinstance(environment, dict):
+        return None
+    candidate = environment.get("SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER")
+    if (
+        not isinstance(candidate, str)
+        or not candidate
+        or len(candidate) > 4096
+        or "\x00" in candidate
+    ):
+        return None
+    if (
+        not os.path.isabs(candidate)
+        or os.path.normpath(candidate) != candidate
+        or os.path.basename(candidate) != "slipstream"
+        or os.path.basename(os.path.dirname(candidate)) != "MacOS"
+        or os.path.basename(os.path.dirname(os.path.dirname(candidate)))
+        != "Contents"
+    ):
+        return None
+    return candidate
 
 
 def _packaged_browser_worker_executable(source_executable):

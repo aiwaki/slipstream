@@ -1609,9 +1609,13 @@ class PendingNavigationBrowserWorkerLauncher:
         return True
 
 
-def cleanup_stale_browser_worker_runtime(*, remove_root=False):
+def cleanup_stale_browser_worker_runtime(*, remove_root=False, executable=None):
+    launcher_options = {}
+    if executable is not None:
+        launcher_options["executable"] = executable
     return PendingNavigationBrowserWorkerLauncher(
         disposable_environment=browser_worker_disposable_environment(),
+        **launcher_options,
     ).cleanup_stale(
         remove_root=remove_root,
     )
