@@ -104,7 +104,13 @@ locked build.
 - Once that gate exists, a pushed tag exactly matching `v$(cat VERSION)` may
   create a stable release.
 - The exact packaged app must pass disposable-CI lifecycle qualification before
-  either channel is published.
+  either channel is published. That gate uses the same checksum-pinned complete
+  Chrome for Testing application bundle as packaged CI and protected
+  qualification, including the real LaunchServices, sandbox, fresh-profile,
+  and hidden-worker path. The final downloaded release artifact is separately
+  installed and checked with ordinary branded Google Chrome on the target Mac;
+  the runner's preinstalled branded Chrome is not a reproducible substitute
+  because another runner-owned instance may already control LaunchServices.
 - Stable publication also requires the reviewed signing and route-policy
   secrets. Developer ID notarization and stapling remain a stable-channel gate.
 - Release notes contain a short artifact/channel preface followed by GitHub's

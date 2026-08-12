@@ -10,6 +10,20 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-12: release run `31626189079` built and signed exact main
+`7ed02cf2cccd56cbc3580a5ba8b53e48f6e6f160`, but two independent attempts
+failed closed before packaging or publication at the same release-only browser
+boundary. The runner's preinstalled branded Google Chrome never created the
+isolated hidden-worker process or DevTools port through LaunchServices and
+reported `chrome_launch_timeout`; the protected exact-main run had already
+passed the same installed packaged path with the pinned complete Chrome for
+Testing bundle. Branch `codex/release-pinned-chrome` makes `build-app` install
+and pass that exact `151.0.7922.77` bundle, matching packaged CI and protected
+qualification. It does not change production browser selection. Next: pass
+local and PR checks, merge, repeat exact-main and protected gates, publish a new
+preview from that exact SHA, then install and verify only its downloaded
+artifact with ordinary branded Chrome on this Mac.
+
 Update 2026-08-12: PR #338 merged the corrected macOS geo-exit/QUIC path and
 bilingual README refresh as exact main
 `6f3309c82d514b529216bcfa2735f1ef11e0f2cb`. All eight final PR checks passed.
