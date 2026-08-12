@@ -9945,7 +9945,12 @@ def _prune_pending_navigation_probe_capabilities(now):
             )
 
 
-def _revoke_pending_navigation_probe_capability(activity, *, now=None):
+def _revoke_pending_navigation_probe_capability(
+    activity,
+    *,
+    now=None,
+    guard_possible_worker=True,
+):
     now = time.monotonic() if now is None else now
     with _auto_geph_lock:
         for token, capability in tuple(
@@ -9953,11 +9958,12 @@ def _revoke_pending_navigation_probe_capability(activity, *, now=None):
         ):
             if capability.activity is activity:
                 _pending_navigation_probe_capabilities.pop(token, None)
-                _guard_pending_navigation_probe_host(
-                    capability,
-                    now,
-                    through_capability_expiry=True,
-                )
+                if guard_possible_worker:
+                    _guard_pending_navigation_probe_host(
+                        capability,
+                        now,
+                        through_capability_expiry=True,
+                    )
 
 
 def _pending_navigation_activity_eligible_locked(activity, now):
@@ -10075,10 +10081,16 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
     try:
         enqueued = runtime.enqueue(job)
     except Exception:
-        _revoke_pending_navigation_probe_capability(activity)
+        _revoke_pending_navigation_probe_capability(
+            activity,
+            guard_possible_worker=False,
+        )
         return False
     if not enqueued:
-        _revoke_pending_navigation_probe_capability(activity)
+        _revoke_pending_navigation_probe_capability(
+            activity,
+            guard_possible_worker=False,
+        )
         return False
     try:
         worker = _get_pending_navigation_probe_worker()
@@ -10090,7 +10102,10 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
     if notified or worker.active():
         return True
     runtime.discard(capability)
-    _revoke_pending_navigation_probe_capability(activity)
+    _revoke_pending_navigation_probe_capability(
+        activity,
+        guard_possible_worker=False,
+    )
     return False
 
 

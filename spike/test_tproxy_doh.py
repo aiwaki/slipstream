@@ -12022,6 +12022,7 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
     assert contract["worker_lifecycle"][
         "live_capability_guard_until_expiry"
     ] is True
+    assert contract["worker_lifecycle"]["unstarted_job_guard_ms"] == 0
     assert contract["worker_lifecycle"]["submit_before_cleanup"] is True
     assert contract["worker_lifecycle"]["cleanup_before_worker_exit"] is True
     assert contract["invariants"]["production_runtime_composition"] is True
@@ -12575,6 +12576,34 @@ def test_pending_navigation_idle_callback_revokes_unstarted_job(monkeypatch):
         assert activity.on_downstream_idle() is False
         assert runtime.discarded == [runtime.job["capability"]]
         assert not tproxy._pending_navigation_probe_capabilities
+        assert not tproxy._pending_navigation_probe_host_guards
+    finally:
+        tproxy._unregister_pending_navigation_relay(activity)
+
+
+def test_pending_navigation_rejected_enqueue_has_no_guard(monkeypatch):
+    class Runtime:
+        def enqueue(self, _job):
+            return False
+
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", Runtime())
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_available", True)
+    tproxy._shutdown_started.clear()
+    activity = _eligible_pending_navigation_activity(
+        int(tproxy.time.time() * 1000) - 9_000
+    )
+    activity.last_downstream_at = tproxy.time.monotonic() - 9.0
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    try:
+        assert activity.on_downstream_idle() is False
+        assert not tproxy._pending_navigation_probe_capabilities
+        assert not tproxy._pending_navigation_probe_host_guards
     finally:
         tproxy._unregister_pending_navigation_relay(activity)
 

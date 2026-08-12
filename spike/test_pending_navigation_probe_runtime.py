@@ -330,6 +330,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000
         ),
         "live_capability_guard_until_expiry": True,
+        "unstarted_job_guard_ms": 0,
         "submit_before_cleanup": True,
         "cleanup_before_worker_exit": True,
         "browser_observer_composed": True,
