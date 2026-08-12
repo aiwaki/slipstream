@@ -326,9 +326,10 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             probe_runtime.CLAIM_LEASE_SECONDS * 1000
         ),
         "same_host_recursive_jobs": False,
-        "same_host_post_result_guard_ms": int(
+        "same_host_post_accepted_result_guard_ms": int(
             tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000
         ),
+        "rejected_result_guard_until_expiry": True,
         "live_capability_guard_until_expiry": True,
         "unstarted_job_guard_ms": 0,
         "unstarted_discard_uses_worker_lock": True,

@@ -28,10 +28,12 @@ original relay closed in that interval, so submission was rejected; removal of
 that capability then let the worker relay mint stale same-host jobs, recorded
 as `claimed_job_invalid`. The correction submits the bounded observation
 immediately and then always performs exact Chrome/profile cleanup before the
-worker exits. A consumed result installs a two-second same-host guard, closing
+worker exits. An accepted result installs a two-second same-host guard, closing
 only the simultaneous worker-relay callback window so a legitimate next
-eight-second stage stays fast. A live capability invalidated before its worker
-finishes is instead guarded through its original 30-second expiry. Capability
+eight-second stage stays fast. A rejected result or live capability invalidated
+before its worker finishes is instead guarded through its original 30-second
+expiry. Static rejection classes are logged for qualification without host,
+URL, content, or browser identifiers. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false

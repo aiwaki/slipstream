@@ -12017,8 +12017,11 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
     )
     assert contract["worker_lifecycle"][
-        "same_host_post_result_guard_ms"
+        "same_host_post_accepted_result_guard_ms"
     ] == int(tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000)
+    assert contract["worker_lifecycle"][
+        "rejected_result_guard_until_expiry"
+    ] is True
     assert contract["worker_lifecycle"][
         "live_capability_guard_until_expiry"
     ] is True
@@ -12070,6 +12073,10 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
     )
     assert not tproxy._pending_navigation_probe_capabilities
     assert not activity.downstream_idle_retry
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == 130.0
+    tproxy._pending_navigation_probe_host_guards.clear()
 
     malformed_job = tproxy._issue_pending_navigation_probe(
         activity,
@@ -12084,6 +12091,10 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
         now=119.001,
     )
     assert not tproxy._pending_navigation_probe_capabilities
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == 141.0
+    tproxy._pending_navigation_probe_host_guards.clear()
 
     early_job = tproxy._issue_pending_navigation_probe(
         activity,
@@ -12099,6 +12110,10 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
         now=129.999,
     )
     assert not activity.downstream_idle_retry
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == 152.0
+    tproxy._pending_navigation_probe_host_guards.clear()
 
     rebound_job = tproxy._issue_pending_navigation_probe(
         activity,
@@ -12113,6 +12128,10 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
     )
     activity.pending_navigation_stage = tproxy.AUTO_GEPH_STAGE_SYSTEM
     assert not activity.downstream_idle_retry
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == 163.0
+    tproxy._pending_navigation_probe_host_guards.clear()
 
     accepted_job = tproxy._issue_pending_navigation_probe(
         activity,
@@ -12130,6 +12149,9 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
         accepted,
         now=152.002,
     )
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == 154.001
 
     expired_job = tproxy._issue_pending_navigation_probe(
         activity,

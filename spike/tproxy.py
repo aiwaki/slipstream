@@ -9925,6 +9925,31 @@ def _guard_pending_navigation_probe_host(
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
 
 
+def _shorten_pending_navigation_probe_host_guard(capability, now):
+    short_expiry = min(
+        capability.expires_at_monotonic,
+        now + PENDING_NAVIGATION_PROBE_RECURSION_GUARD,
+    )
+    if (
+        _pending_navigation_probe_host_guards.get(capability.host)
+        == capability.expires_at_monotonic
+    ):
+        if short_expiry <= now:
+            _pending_navigation_probe_host_guards.pop(capability.host, None)
+        else:
+            _pending_navigation_probe_host_guards[capability.host] = (
+                short_expiry
+            )
+
+
+def _reject_pending_navigation_probe_result(reason):
+    print(
+        f">> pending-navigation probe result rejected: {reason}",
+        file=sys.stderr,
+    )
+    return False
+
+
 def _prune_pending_navigation_probe_capabilities(now):
     for host, expires_at in tuple(
         _pending_navigation_probe_host_guards.items()
@@ -10159,21 +10184,25 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
     """Consume one worker capability and act only on its bound relay."""
     now = time.monotonic() if now is None else now
     if not isinstance(payload, dict):
-        return False
+        return _reject_pending_navigation_probe_result("payload_invalid")
     token = payload.get("capability")
     if (
         not isinstance(token, str)
         or len(token) != 32
         or any(char not in "0123456789abcdef" for char in token)
     ):
-        return False
+        return _reject_pending_navigation_probe_result("capability_invalid")
     with _auto_geph_lock:
         _prune_pending_navigation_probe_capabilities(now)
         capability = _pending_navigation_probe_capabilities.pop(token, None)
         if capability is not None:
-            _guard_pending_navigation_probe_host(capability, now)
+            _guard_pending_navigation_probe_host(
+                capability,
+                now,
+                through_capability_expiry=True,
+            )
     if capability is None:
-        return False
+        return _reject_pending_navigation_probe_result("capability_unavailable")
     if (
         set(payload) != {
             "schema_version",
@@ -10206,11 +10235,18 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
         != capability.request_started_at_unix_ms
         or capability.activity.pending_navigation_stage != capability.stage
     ):
-        return False
-    return _request_pending_navigation_retry_for_activity(
+        return _reject_pending_navigation_probe_result("binding_invalid")
+    accepted = _request_pending_navigation_retry_for_activity(
         capability.activity,
         now=now,
     )
+    if not accepted:
+        return _reject_pending_navigation_probe_result(
+            "relay_retry_unavailable"
+        )
+    with _auto_geph_lock:
+        _shorten_pending_navigation_probe_host_guard(capability, now)
+    return True
 
 
 def _request_pending_navigation_retry(
