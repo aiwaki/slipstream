@@ -7,6 +7,7 @@
     "capability_bits": 128,
     "capability_ttl_ms": 30000,
     "max_live_capabilities": 32,
+    "max_capabilities_and_guards": 32,
     "min_pending_observation_ms": 8000
   },
   "ipc": {
@@ -40,7 +41,8 @@
     "max_concurrent_workers": 1,
     "retry_after_worker_loss_ms": 5000,
     "same_host_recursive_jobs": false,
-    "same_host_post_capability_guard_ms": 2000,
+    "same_host_post_result_guard_ms": 2000,
+    "live_capability_guard_until_expiry": true,
     "submit_before_cleanup": true,
     "cleanup_before_worker_exit": true,
     "browser_observer_composed": true

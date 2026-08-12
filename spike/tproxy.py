@@ -9905,22 +9905,24 @@ def _register_pending_navigation_relay(
     return True
 
 
-def _guard_pending_navigation_probe_host(capability, now):
-    expires_at = min(
-        capability.expires_at_monotonic,
-        now + PENDING_NAVIGATION_PROBE_RECURSION_GUARD,
-    )
+def _guard_pending_navigation_probe_host(
+    capability,
+    now,
+    *,
+    through_capability_expiry=False,
+):
+    expires_at = capability.expires_at_monotonic
+    if not through_capability_expiry:
+        expires_at = min(
+            expires_at,
+            now + PENDING_NAVIGATION_PROBE_RECURSION_GUARD,
+        )
     if expires_at <= now:
         return
     current = _pending_navigation_probe_host_guards.get(capability.host, 0.0)
     if expires_at > current:
         _pending_navigation_probe_host_guards[capability.host] = expires_at
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
-    while (
-        len(_pending_navigation_probe_host_guards)
-        > PENDING_NAVIGATION_PROBE_STATE_MAX
-    ):
-        _pending_navigation_probe_host_guards.popitem(last=False)
 
 
 def _prune_pending_navigation_probe_capabilities(now):
@@ -9936,15 +9938,11 @@ def _prune_pending_navigation_probe_capabilities(now):
             _pending_navigation_probe_capabilities.pop(token, None)
         elif capability.activity.retry_closed:
             _pending_navigation_probe_capabilities.pop(token, None)
-            _guard_pending_navigation_probe_host(capability, now)
-    while (
-        len(_pending_navigation_probe_capabilities)
-        > PENDING_NAVIGATION_PROBE_STATE_MAX
-    ):
-        _, capability = _pending_navigation_probe_capabilities.popitem(
-            last=False
-        )
-        _guard_pending_navigation_probe_host(capability, now)
+            _guard_pending_navigation_probe_host(
+                capability,
+                now,
+                through_capability_expiry=True,
+            )
 
 
 def _revoke_pending_navigation_probe_capability(activity, *, now=None):
@@ -9955,7 +9953,11 @@ def _revoke_pending_navigation_probe_capability(activity, *, now=None):
         ):
             if capability.activity is activity:
                 _pending_navigation_probe_capabilities.pop(token, None)
-                _guard_pending_navigation_probe_host(capability, now)
+                _guard_pending_navigation_probe_host(
+                    capability,
+                    now,
+                    through_capability_expiry=True,
+                )
 
 
 def _pending_navigation_activity_eligible_locked(activity, now):
@@ -10004,6 +10006,12 @@ def _issue_pending_navigation_probe(
             for capability in _pending_navigation_probe_capabilities.values()
         ):
             return None
+        if (
+            len(_pending_navigation_probe_capabilities)
+            + len(_pending_navigation_probe_host_guards)
+            >= PENDING_NAVIGATION_PROBE_STATE_MAX
+        ):
+            return None
         for token, capability in tuple(
             _pending_navigation_probe_capabilities.items()
         ):
@@ -10039,7 +10047,6 @@ def _issue_pending_navigation_probe(
             expires_at_monotonic=now + PENDING_NAVIGATION_PROBE_TTL,
         )
         _pending_navigation_probe_capabilities[token] = capability
-        _prune_pending_navigation_probe_capabilities(now)
     return {
         "schema_version": 1,
         "capability": token,

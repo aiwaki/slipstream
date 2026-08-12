@@ -285,6 +285,9 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         "capability_bits": 128,
         "capability_ttl_ms": probe_runtime.CAPABILITY_TTL_MS,
         "max_live_capabilities": probe_runtime.MAX_LIVE_JOBS,
+        "max_capabilities_and_guards": (
+            tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX
+        ),
         "min_pending_observation_ms": 8000,
     }
     assert probe_runtime.CONTRACT_PENDING_OBSERVATION_MS == (
@@ -323,9 +326,10 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             probe_runtime.CLAIM_LEASE_SECONDS * 1000
         ),
         "same_host_recursive_jobs": False,
-        "same_host_post_capability_guard_ms": int(
+        "same_host_post_result_guard_ms": int(
             tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000
         ),
+        "live_capability_guard_until_expiry": True,
         "submit_before_cleanup": True,
         "cleanup_before_worker_exit": True,
         "browser_observer_composed": True,

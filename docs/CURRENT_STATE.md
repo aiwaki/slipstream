@@ -28,10 +28,12 @@ original relay closed in that interval, so submission was rejected; removal of
 that capability then let the worker relay mint stale same-host jobs, recorded
 as `claimed_job_invalid`. The correction submits the bounded observation
 immediately and then always performs exact Chrome/profile cleanup before the
-worker exits. Consuming, revoking, pruning, or capacity-evicting a live
-capability also installs a
-bounded two-second same-host guard, closing only the simultaneous worker-relay
-callback window; it expires well before another eight-second recovery stage.
+worker exits. A consumed result installs a two-second same-host guard, closing
+only the simultaneous worker-relay callback window so a legitimate next
+eight-second stage stays fast. A live capability invalidated before its worker
+finishes is instead guarded through its original 30-second expiry. Capability
+and guard state share one 32-entry bound; new jobs are rejected at capacity,
+so a live worker's authority and guard are never evicted by host churn.
 No normal-path browser, broad host cooldown, route-policy change, or network
 setting mutation is added. Full PR and exact-main qualification remain open.
 
@@ -80,7 +82,7 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,185 Python tests plus 54 subtests, focused
+Current local verification passes 1,186 Python tests plus 54 subtests, focused
 Python compilation, 96 Rust tests, Rust clippy, contract JSON parsing, and
 `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;

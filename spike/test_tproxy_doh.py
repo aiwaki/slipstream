@@ -12000,6 +12000,9 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         "capability_bits": 128,
         "capability_ttl_ms": int(tproxy.PENDING_NAVIGATION_PROBE_TTL * 1000),
         "max_live_capabilities": tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX,
+        "max_capabilities_and_guards": (
+            tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX
+        ),
         "min_pending_observation_ms": int(
             tproxy.UNKNOWN_PRE_RESPONSE_IDLE * 1000
         ),
@@ -12014,8 +12017,11 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
     )
     assert contract["worker_lifecycle"][
-        "same_host_post_capability_guard_ms"
+        "same_host_post_result_guard_ms"
     ] == int(tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000)
+    assert contract["worker_lifecycle"][
+        "live_capability_guard_until_expiry"
+    ] is True
     assert contract["worker_lifecycle"]["submit_before_cleanup"] is True
     assert contract["worker_lifecycle"]["cleanup_before_worker_exit"] is True
     assert contract["invariants"]["production_runtime_composition"] is True
@@ -12212,7 +12218,7 @@ def test_pending_navigation_probe_completes_only_its_bound_original_relay():
 def test_pending_navigation_probe_capability_state_is_bounded_and_revoked():
     activities = []
     jobs = []
-    for index in range(tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX + 1):
+    for index in range(tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX):
         activity = _eligible_pending_navigation_activity(1_000_000 + index)
         host = f"unknown-{index}.example"
         assert tproxy._register_pending_navigation_relay(
@@ -12236,20 +12242,48 @@ def test_pending_navigation_probe_capability_state_is_bounded_and_revoked():
         len(tproxy._pending_navigation_probe_capabilities)
         == tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX
     )
-    assert jobs[0]["capability"] not in (
+    overflow = _eligible_pending_navigation_activity(2_000_000)
+    assert tproxy._register_pending_navigation_relay(
+        overflow,
+        "overflow.example",
+        "8.8.4.4",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    assert tproxy._issue_pending_navigation_probe(
+        overflow,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "f" * 32,
+    ) is None
+    assert jobs[0]["capability"] in (
         tproxy._pending_navigation_probe_capabilities
     )
-    assert tproxy._pending_navigation_probe_host_guards[
-        "unknown-0.example"
-    ] == 102.0
     assert jobs[-1]["capability"] in (
         tproxy._pending_navigation_probe_capabilities
     )
 
-    tproxy._unregister_pending_navigation_relay(activities[-1])
+    tproxy._revoke_pending_navigation_probe_capability(
+        activities[-1],
+        now=100.0,
+    )
     assert jobs[-1]["capability"] not in (
         tproxy._pending_navigation_probe_capabilities
     )
+    assert tproxy._pending_navigation_probe_host_guards[
+        f"unknown-{tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX - 1}.example"
+    ] == 130.0
+    assert (
+        len(tproxy._pending_navigation_probe_capabilities)
+        + len(tproxy._pending_navigation_probe_host_guards)
+        == tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX
+    )
+    assert tproxy._issue_pending_navigation_probe(
+        overflow,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "f" * 32,
+    ) is None
 
 
 def test_pending_navigation_probe_suppresses_same_host_worker_recursion():
@@ -12278,7 +12312,10 @@ def test_pending_navigation_probe_suppresses_same_host_worker_recursion():
         token_factory=lambda: "2" * 32,
     ) is None
 
-    first.retry_closed = True
+    assert tproxy._submit_pending_navigation_probe_result(
+        _pending_navigation_probe_result(first_job),
+        now=108.001,
+    )
     assert tproxy._issue_pending_navigation_probe(
         second,
         now=108.001,
@@ -12294,6 +12331,48 @@ def test_pending_navigation_probe_suppresses_same_host_worker_recursion():
     )
     assert second_job is not None
     assert second_job["capability"] == "2" * 32
+
+
+def test_pending_navigation_probe_live_revoke_guards_until_expiry():
+    first = _eligible_pending_navigation_activity(1_000_000)
+    second = _eligible_pending_navigation_activity(1_000_001)
+    for activity, address in ((first, "1.1.1.1"), (second, "8.8.8.8")):
+        assert tproxy._register_pending_navigation_relay(
+            activity,
+            "unknown.example",
+            address,
+            tproxy.ROUTE_UNKNOWN,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        )
+
+    assert tproxy._issue_pending_navigation_probe(
+        first,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "1" * 32,
+    ) is not None
+    first.retry_closed = True
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=108.001,
+        now_unix_ms=1_018_001,
+        token_factory=lambda: "2" * 32,
+    ) is None
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == 130.0
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=129.999,
+        now_unix_ms=1_039_999,
+        token_factory=lambda: "2" * 32,
+    ) is None
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=130.001,
+        now_unix_ms=1_040_001,
+        token_factory=lambda: "2" * 32,
+    ) is not None
 
 
 def test_pending_navigation_idle_callback_queues_one_lazy_worker_job(
