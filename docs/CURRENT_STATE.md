@@ -46,12 +46,14 @@ profile and no QUIC-disabling flag. `https://xpersonatoy.com/` returned HTTP
 scoped `geo-exit QUIC flow moved to TCP fallback`, and owned Geph showed active
 sessions. Installed classification remains `geo_exit/geph` for
 `xpersonatoy.com`, local-only for Discord and YouTube, `direct_first` for
-Googlevideo, and bounded `unknown/general` for an unreviewed host. Nine of ten
-route canaries are healthy. The remaining `direct_passthrough` diagnostic is
-the intentional coexistence state from the separately running user-managed
-`TG WS Proxy` holding `127.0.0.1:1443`; Slipstream does not terminate or steal
-that listener, and its web routes, PF, DNS resolution, and owned Geph remain
-healthy. No release gate is open. Continue from live failures observed with
+Googlevideo, and bounded `unknown/general` for an unreviewed host. The first
+post-install canary pass reported nine of ten healthy because a separately
+running user-managed `TG WS Proxy` held `127.0.0.1:1443`; Slipstream correctly
+did not terminate or steal that listener. After that external process exited,
+the embedded Telegram proxy took over automatically and the final status is ten
+of ten canaries healthy with `local_bypass`, `geo_exit`, and
+`direct_passthrough` all `ok`. PF and owned Geph remain healthy, and the
+user-managed system DNS remains untouched. No release gate is open. Continue from live failures observed with
 this installed release; do not repeat the xpersonatoy/QUIC investigation or
 install a protected artifact over it.
 
