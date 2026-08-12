@@ -1749,15 +1749,19 @@ and dependency audit in
 ## Next Verified Action
 
 Merge the docs-only successor that records PR #332 and its exact-main evidence.
-Then reconcile that documentation merge against live `main` and dispatch one
-fresh protected owned-Geph qualification for the exact SHA before any controlled
-workstation transaction. No existing or branch artifact is installation
-authority. The protected run must preserve the automatic local browser path,
-complete styled resources, exact worker cleanup, owned-Geph lifecycle, and all
-external DNS/proxy/PAC/VPN/PF owners. Discord, YouTube, and Googlevideo remain
-local-only. A later workstation transaction, if separately admitted by that
-fresh evidence, must install only its exact artifact and roll back on the first
-failed required smoke; this checkpoint itself authorizes no workstation change.
+Then add one exact-artifact, extensionless automatic local-browser scenario to
+the protected owned-Geph qualification before dispatching that workflow again.
+The existing protected scenarios all launch Chrome with the unpacked extension;
+ordinary Chromium and packaged CI prove the automatic worker path but cannot
+transfer that proof to a protected artifact. The new protected scenario must
+exercise `original -> worker -> original`, complete styled resources, prove
+exact worker cleanup, retain the owned-Geph lifecycle, and preserve all external
+DNS/proxy/PAC/VPN/PF owners. Discord, YouTube, and Googlevideo remain local-only.
+No existing, branch, or merely protected artifact is installation authority.
+Only a fresh exact-main protected run that includes this automatic-path proof
+may later admit a controlled workstation transaction, which must install only
+that exact artifact and roll back on the first failed required smoke. This
+checkpoint itself authorizes no workstation change.
 
 Safari may advance through deterministic source, Swift contract tests, and
 unsigned packaging, but the signed app-extension sandbox/socket path must be
