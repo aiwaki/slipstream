@@ -1812,7 +1812,7 @@ and dependency audit in
 
 ## Next Verified Action
 
-Merge the documentation successor that records PR #335 and protected run
+Merge PR #336, which records PR #335 and protected run
 `31587594114` only after all six checks and exact-head review pass. The complete
 automatic local-browser implementation and protected exact-artifact gate are
 then qualified. Do not repeat the protected run or install its artifact during
