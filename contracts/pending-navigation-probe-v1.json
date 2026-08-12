@@ -41,7 +41,7 @@
     "max_concurrent_workers": 1,
     "retry_after_worker_loss_ms": 5000,
     "same_host_recursive_jobs": false,
-    "same_host_post_accepted_result_guard_ms": 2000,
+    "accepted_result_guard_until_worker_cleanup": true,
     "rejected_result_guard_until_expiry": true,
     "live_capability_guard_until_expiry": true,
     "unstarted_job_guard_ms": 0,

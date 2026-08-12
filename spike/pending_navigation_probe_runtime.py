@@ -1652,6 +1652,7 @@ class LazyPendingNavigationProbeWorker:
         retry_seconds=CLAIM_LEASE_SECONDS,
         thread_factory=None,
         error_handler=None,
+        worker_completed=None,
     ):
         if (
             not callable(pending_jobs)
@@ -1660,6 +1661,7 @@ class LazyPendingNavigationProbeWorker:
             or isinstance(retry_seconds, bool)
             or retry_seconds <= 0
             or (error_handler is not None and not callable(error_handler))
+            or (worker_completed is not None and not callable(worker_completed))
         ):
             raise ValueError("pending-navigation worker lifecycle is invalid")
         self._pending_jobs = pending_jobs
@@ -1667,6 +1669,7 @@ class LazyPendingNavigationProbeWorker:
         self._retry_seconds = float(retry_seconds)
         self._thread_factory = thread_factory or threading.Thread
         self._error_handler = error_handler
+        self._worker_completed = worker_completed
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -1687,6 +1690,12 @@ class LazyPendingNavigationProbeWorker:
                     if self._error_handler is not None:
                         try:
                             self._error_handler(error)
+                        except Exception:
+                            pass
+                finally:
+                    if self._worker_completed is not None:
+                        try:
+                            self._worker_completed()
                         except Exception:
                             pass
                 if not self._job_count():

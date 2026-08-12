@@ -326,9 +326,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             probe_runtime.CLAIM_LEASE_SECONDS * 1000
         ),
         "same_host_recursive_jobs": False,
-        "same_host_post_accepted_result_guard_ms": int(
-            tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000
-        ),
+        "accepted_result_guard_until_worker_cleanup": True,
         "rejected_result_guard_until_expiry": True,
         "live_capability_guard_until_expiry": True,
         "unstarted_job_guard_ms": 0,
@@ -481,6 +479,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
     async def scenario():
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
+        tproxy._pending_navigation_probe_accepted_guards.clear()
         tproxy._active_pending_navigation_relays.clear()
         clock = {"wall": 1_010_000, "mono": 100.0}
         first = tproxy._RelayActivity(
@@ -563,6 +562,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         tproxy._xbox_dns_candidates.pop("unknown.example", None)
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
+        tproxy._pending_navigation_probe_accepted_guards.clear()
         tproxy._active_pending_navigation_relays.clear()
 
 
@@ -805,6 +805,7 @@ def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
     pending = {"count": 1}
     entered = threading.Event()
     release = threading.Event()
+    completed = []
 
     def launch_worker():
         entered.set()
@@ -815,6 +816,7 @@ def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
         pending_jobs=lambda: pending["count"],
         launch_worker=launch_worker,
         retry_seconds=0.01,
+        worker_completed=lambda: completed.append("clean"),
     )
     discarded = []
     assert worker.discard_unstarted(
@@ -830,6 +832,7 @@ def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
     assert discarded == ["idle"]
     release.set()
     assert worker.close(timeout=1.0)
+    assert completed == ["clean"]
 
 
 def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():

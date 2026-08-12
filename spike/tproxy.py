@@ -2068,7 +2068,6 @@ UNKNOWN_PRE_RESPONSE_IDLE = 8.0  # bounded retry before a first real response
 PENDING_NAVIGATION_RELAY_START_SKEW_MS = 5_000
 PENDING_NAVIGATION_PROBE_TTL = 30.0
 PENDING_NAVIGATION_PROBE_STATE_MAX = 32
-PENDING_NAVIGATION_PROBE_RECURSION_GUARD = 2.0
 PENDING_NAVIGATION_PROBE_OUTCOME_PENDING = "navigation_pending"
 TRANSPORT_IDLE_EVIDENCE_REJECTED = "rejected"
 TRANSPORT_IDLE_EVIDENCE_ADVANCE = "advance"
@@ -2189,6 +2188,7 @@ _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
 _active_pending_navigation_relays = {}  # host -> {activity id: activity}
 _pending_navigation_probe_capabilities = OrderedDict()  # token -> bound relay
 _pending_navigation_probe_host_guards = OrderedDict()  # host -> monotonic expiry
+_pending_navigation_probe_accepted_guards = OrderedDict()  # host -> capability expiry
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -3644,6 +3644,9 @@ def _get_pending_navigation_probe_worker():
                     pending_jobs=runtime.state_size,
                     launch_worker=launcher.launch,
                     error_handler=_log_pending_navigation_probe_worker_error,
+                    worker_completed=(
+                        _pending_navigation_probe_worker_completed
+                    ),
                 )
             )
         return _pending_navigation_probe_worker
@@ -9905,18 +9908,8 @@ def _register_pending_navigation_relay(
     return True
 
 
-def _guard_pending_navigation_probe_host(
-    capability,
-    now,
-    *,
-    through_capability_expiry=False,
-):
+def _guard_pending_navigation_probe_host(capability, now):
     expires_at = capability.expires_at_monotonic
-    if not through_capability_expiry:
-        expires_at = min(
-            expires_at,
-            now + PENDING_NAVIGATION_PROBE_RECURSION_GUARD,
-        )
     if expires_at <= now:
         return
     current = _pending_navigation_probe_host_guards.get(capability.host, 0.0)
@@ -9925,21 +9918,19 @@ def _guard_pending_navigation_probe_host(
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
 
 
-def _shorten_pending_navigation_probe_host_guard(capability, now):
-    short_expiry = min(
-        capability.expires_at_monotonic,
-        now + PENDING_NAVIGATION_PROBE_RECURSION_GUARD,
-    )
-    if (
-        _pending_navigation_probe_host_guards.get(capability.host)
-        == capability.expires_at_monotonic
-    ):
-        if short_expiry <= now:
-            _pending_navigation_probe_host_guards.pop(capability.host, None)
-        else:
-            _pending_navigation_probe_host_guards[capability.host] = (
-                short_expiry
-            )
+def _pending_navigation_probe_worker_completed(now=None):
+    """Release only accepted-result guards after exact worker cleanup."""
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        for host, expected_expiry in tuple(
+            _pending_navigation_probe_accepted_guards.items()
+        ):
+            if math.isinf(
+                _pending_navigation_probe_host_guards.get(host, 0.0)
+            ):
+                _pending_navigation_probe_host_guards.pop(host, None)
+            _pending_navigation_probe_accepted_guards.pop(host, None)
+        _prune_pending_navigation_probe_capabilities(now)
 
 
 def _reject_pending_navigation_probe_result(reason):
@@ -9956,6 +9947,7 @@ def _prune_pending_navigation_probe_capabilities(now):
     ):
         if expires_at <= now:
             _pending_navigation_probe_host_guards.pop(host, None)
+            _pending_navigation_probe_accepted_guards.pop(host, None)
     for token, capability in tuple(
         _pending_navigation_probe_capabilities.items()
     ):
@@ -9963,11 +9955,7 @@ def _prune_pending_navigation_probe_capabilities(now):
             _pending_navigation_probe_capabilities.pop(token, None)
         elif capability.activity.retry_closed:
             _pending_navigation_probe_capabilities.pop(token, None)
-            _guard_pending_navigation_probe_host(
-                capability,
-                now,
-                through_capability_expiry=True,
-            )
+            _guard_pending_navigation_probe_host(capability, now)
 
 
 def _revoke_pending_navigation_probe_capability(
@@ -9984,11 +9972,7 @@ def _revoke_pending_navigation_probe_capability(
             if capability.activity is activity:
                 _pending_navigation_probe_capabilities.pop(token, None)
                 if guard_possible_worker:
-                    _guard_pending_navigation_probe_host(
-                        capability,
-                        now,
-                        through_capability_expiry=True,
-                    )
+                    _guard_pending_navigation_probe_host(capability, now)
 
 
 def _pending_navigation_activity_eligible_locked(activity, now):
@@ -10196,11 +10180,7 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
         _prune_pending_navigation_probe_capabilities(now)
         capability = _pending_navigation_probe_capabilities.pop(token, None)
         if capability is not None:
-            _guard_pending_navigation_probe_host(
-                capability,
-                now,
-                through_capability_expiry=True,
-            )
+            _guard_pending_navigation_probe_host(capability, now)
     if capability is None:
         return _reject_pending_navigation_probe_result("capability_unavailable")
     if (
@@ -10245,7 +10225,14 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
             "relay_retry_unavailable"
         )
     with _auto_geph_lock:
-        _shorten_pending_navigation_probe_host_guard(capability, now)
+        _pending_navigation_probe_host_guards[capability.host] = math.inf
+        _pending_navigation_probe_host_guards.move_to_end(capability.host)
+        _pending_navigation_probe_accepted_guards[capability.host] = (
+            capability.expires_at_monotonic
+        )
+        _pending_navigation_probe_accepted_guards.move_to_end(
+            capability.host
+        )
     return True
 
 

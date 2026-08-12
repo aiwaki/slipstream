@@ -28,12 +28,16 @@ original relay closed in that interval, so submission was rejected; removal of
 that capability then let the worker relay mint stale same-host jobs, recorded
 as `claimed_job_invalid`. The correction submits the bounded observation
 immediately and then always performs exact Chrome/profile cleanup before the
-worker exits. An accepted result installs a two-second same-host guard, closing
-only the simultaneous worker-relay callback window so a legitimate next
-eight-second stage stays fast. A rejected result or live capability invalidated
+worker exits. An accepted result keeps its exact-host guard until the one-shot
+launcher reports that exact worker and Chrome/profile cleanup complete; the
+callback then releases only that accepted guard so a legitimate next
+eight-second stage stays fast. This remains true even if cleanup crosses the
+original capability expiry. A rejected result or live capability invalidated
 before its worker finishes is instead guarded through its original 30-second
 expiry. Static rejection classes are logged for qualification without host,
-URL, content, or browser identifiers. Capability
+URL, content, or browser identifiers. The preceding head `349e00e` passed all
+six PR checks, including packaged job `94034409872`; exact cleanup-bound guard
+qualification, review resolution, and exact-main gates remain open. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false
@@ -41,7 +45,7 @@ notification, queue discard and the no-worker proof occur under the worker's
 lifecycle lock; a claimed or restarting worker therefore keeps both job
 authority and the expiry guard. Proven-unstarted retries remain fast.
 No normal-path browser, broad host cooldown, route-policy change, or network
-setting mutation is added. Full PR and exact-main qualification remain open.
+setting mutation is added.
 
 That merge completes the active-worker uninstall ownership transaction. The
 exact-main packaged job first proved one correlated worker process, exact live
