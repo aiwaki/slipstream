@@ -588,7 +588,7 @@ sentinel connection/state preserved, global PF unchanged, and final uninstall
 clean. The same run retained the normal idle boundary: zero worker processes or
 profiles, a mode-`0600` broker, and 590 ms daemon CPU during three seconds.
 
-PR #331 merged as exact live main
+PR #331 merged as exact qualified product-code main
 `aa10f16409ab8775647749517f79faea7b066926`. Exact-main packaged job
 `94017024721` repeated the complete active-worker uninstall: one worker,
 profile, runtime, and loaded LaunchAgent before uninstall; clean worker and

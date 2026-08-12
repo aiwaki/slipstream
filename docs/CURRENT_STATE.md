@@ -10,7 +10,7 @@ file.
 
 ## Current Checkpoint
 
-PR #331 is merged as live main
+PR #331 is the latest qualified product-code merge at
 `aa10f16409ab8775647749517f79faea7b066926`. Exact-main CI run `31565732030`
 passed common job `94017024727`, packaged lifecycle `94017024721`, pinned
 Chromium `94017024682`, and Windows adapter `94017024679`; dependency-audit run
