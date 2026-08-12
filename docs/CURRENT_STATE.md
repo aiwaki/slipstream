@@ -33,17 +33,31 @@ the packaged extensionless automatic worker. That path needs its own
 exact-artifact `original -> worker -> original` scenario before another
 protected qualification or any workstation transaction.
 
-PR #334 implements that missing
-qualification slice without changing production routing. The protected
-harness starts the composed fixture, installs the exact built app, restarts its
-LaunchDaemon with only the frozen disposable-browser override set, and requires
-the extensionless original navigation, packaged lazy worker, exact original
-retry, complete styled resources, and worker cleanup before the existing
-unpacked-extension semantic scenarios continue. Both hosted browser gates now
-pin the already qualified complete Chrome for Testing `151.0.7922.77` bundle.
-Local verification passes 1,197 Python tests plus 54 subtests, focused script
-tests and compilation, project-state validation, and `git diff --check`. This
-is branch evidence only; no protected run or artifact exists for the change.
+PR #334 merged the missing qualification slice as exact main
+`a49e0fc82018569daf7cbccff0972d8408415bb7`; its tree matches reviewed head
+`f4575e312629c287f7b3439e5ffbf05635fad780`. Codex Review found no major issue,
+all six PR checks passed, and exact-main CI `31584859058`, audit `31584858959`,
+and native Windows run `31584859039` passed. The protected harness now starts
+the composed fixture, installs the exact built app, restarts its LaunchDaemon
+with only the frozen disposable-browser override set, and requires the
+extensionless original navigation before the existing unpacked-extension
+semantic scenarios continue. Both hosted browser gates pin the qualified
+complete Chrome for Testing `151.0.7922.77` bundle.
+
+The first and only protected run for that SHA, `31585408666`, passed build,
+signature, daemon-free preflight, account-backed owned-Geph payload, external
+listener preservation, and final system cleanup, but failed before browser
+launch with `launchd attestation mismatch`. The install attestation correctly
+recorded the initial daemon PID; the qualification harness intentionally
+restarted that daemon with disposable browser overrides and then incorrectly
+compared the immutable install record with the replacement PID. No artifact
+was packaged or installed. PR #335 validates the complete install
+attestation before restart and, after restart, separately proves the new PID's
+exact installed command. Production code and attestation semantics are
+unchanged. Local verification passes 1,198 tests plus 54 subtests, the focused
+66-test file, Python compilation, project-state validation, and
+`git diff --check`. Codebase graph discovery was retried and returned
+`Transport closed`, so inspection used the documented narrow source fallback.
 
 PR #332 is the merged product correction. Its first documentation head passed
 all six required checks, including packaged job `94019999739`. A later
@@ -1770,9 +1784,9 @@ and dependency audit in
 
 ## Next Verified Action
 
-Review and merge PR #334 only after all six PR
-checks pass. Then require fresh exact-main CI, audit, and native Windows gates
-and dispatch the protected owned-Geph workflow exactly once for that live main
+Review and merge PR #335 only after all six
+PR checks pass. Then require fresh exact-main CI, audit, and native Windows
+gates and dispatch one new protected owned-Geph workflow for that live main
 SHA. The protected result must contain `original -> worker -> original`, one
 complete CSS, JavaScript, image, and ready callback, exact worker cleanup,
 continued account-backed owned-Geph payload, complete product/user cleanup, and

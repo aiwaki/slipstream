@@ -2542,6 +2542,8 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self,
     ) -> None:
         system = mock.Mock()
+        target = mock.Mock()
+        installed_active = {"pid": 41}
         browser_environment = {
             key: f"value-{index}"
             for index, key in enumerate(
@@ -2556,17 +2558,22 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         ) as require_ci, mock.patch.object(
             smoke.lifecycle,
             "_wait_for_status",
-            side_effect=({"pid": 41}, {"pid": 42}),
+            return_value={"pid": 42},
         ) as wait_status, mock.patch.object(
             smoke.lifecycle,
             "_wait_for_path",
         ) as wait_path, mock.patch.object(
             smoke.lifecycle,
             "_patch_launchd_for_qualification",
-        ) as patch_launchd:
+        ) as patch_launchd, mock.patch.object(
+            smoke.lifecycle,
+            "_assert_owned_daemon_pid",
+        ) as assert_owned_daemon:
             active = smoke._restart_daemon_for_automatic_navigation(
                 system,
+                target,
                 browser_environment,
+                installed_active,
             )
 
         self.assertEqual(active, {"pid": 42})
@@ -2600,11 +2607,53 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             smoke.lifecycle.LAUNCHD_PLIST,
             browser_environment,
         )
+        wait_status.assert_called_once_with(
+            "active",
+            previous_pid=41,
+            timeout=60,
+        )
+        assert_owned_daemon.assert_called_once_with(target, 42)
+
+    def test_automatic_navigation_validates_install_before_restart(self) -> None:
+        system = mock.Mock()
+        target = mock.Mock()
+        browser_environment = {"CI": "true"}
+        installed_active = {"pid": 41}
+        restarted = {"pid": 42}
+        calls = mock.Mock()
+        with mock.patch.object(
+            smoke.lifecycle,
+            "_wait_for_status",
+            return_value=installed_active,
+        ) as wait_status, mock.patch.object(
+            smoke.lifecycle,
+            "_assert_installed_payload",
+        ) as assert_payload, mock.patch.object(
+            smoke,
+            "_restart_daemon_for_automatic_navigation",
+            return_value=restarted,
+        ) as restart:
+            calls.attach_mock(wait_status, "wait")
+            calls.attach_mock(assert_payload, "assert_payload")
+            calls.attach_mock(restart, "restart")
+            result = smoke._prepare_automatic_navigation_runtime(
+                system,
+                target,
+                browser_environment,
+            )
+
+        self.assertEqual(result, restarted)
         self.assertEqual(
-            wait_status.call_args_list,
+            calls.mock_calls,
             [
-                mock.call("active"),
-                mock.call("active", previous_pid=41, timeout=60),
+                mock.call.wait("active"),
+                mock.call.assert_payload(target),
+                mock.call.restart(
+                    system,
+                    target,
+                    browser_environment,
+                    installed_active,
+                ),
             ],
         )
 
