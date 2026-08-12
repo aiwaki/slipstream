@@ -29,6 +29,17 @@ capability if startup cannot begin. Shutdown, reinstall, and uninstall close
 the exact socket and validate an exact owned LaunchAgent/process/plist/runtime
 shape before stopping or removing stale worker state; ambiguity fails closed.
 
+All six required checks passed on checkpoint head
+`9a3e45d74624609924e12ad9977b03d0ba94311c`. CI run `31552921126` passed
+common job `93979264219`, packaged lifecycle `93979264195`, pinned Chromium
+`93979264186`, and Windows adapter `93979264214`; dependency-audit run
+`31552921177` passed audit job `93979264272` and Geph vendor job `93979264305`.
+The extension-free Chromium scenario made exactly two root requests, fetched
+one CSS, JavaScript, and image resource, emitted one ready callback, and
+finished in 11,068 ms. The packaged hidden worker independently emitted one
+`navigation_pending` result in 13,170 ms with its sandbox retained and no
+visible window; the later packaged install/uninstall lifecycle passed.
+
 Local branded-Chrome evidence on 2026-08-12 showed the required browser
 handoff without an extension or manual reload: the first exact top-level HTTPS
 request remained open for 8.2 seconds and ended with
@@ -236,10 +247,10 @@ also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
 common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
 passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
 
-The next verified action is to require all six PR #329 checks, including the
-real pinned-Chromium retry gate, resolve review, and merge only the exact green
-head. Installed update, exact packaged uninstall, measured idle cost, and
-complete original-navigation behavior remain explicit release gates.
+The next verified action is to require the same six checks on the docs-only
+successor, mark PR #329 ready, and merge only that exact green head. Installed
+update, active-worker uninstall, measured idle cost, and the complete composed
+original-navigation transaction remain explicit release gates.
 Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the
