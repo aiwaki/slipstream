@@ -331,6 +331,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         "same_host_recursive_jobs": False,
         "accepted_result_guard_until_worker_cleanup": True,
         "claimed_job_guard_until_worker_cleanup": True,
+        "ambiguous_cleanup_failure_retains_guard": True,
         "unclaimed_rejected_result_guard_until_expiry": True,
         "unclaimed_live_capability_guard_until_expiry": True,
         "unstarted_job_guard_ms": 0,
@@ -843,6 +844,46 @@ def test_lazy_worker_reports_launch_failure_through_bounded_handler():
     assert worker.close()
 
 
+def test_lazy_worker_releases_guard_only_after_confirmed_cleanup():
+    completed = []
+    failures = []
+
+    def run(error):
+        pending = {"count": 1}
+
+        def launch_worker():
+            pending["count"] = 0
+            raise error
+
+        worker = probe_runtime.LazyPendingNavigationProbeWorker(
+            pending_jobs=lambda: pending["count"],
+            launch_worker=launch_worker,
+            retry_seconds=0.01,
+            error_handler=failures.append,
+            worker_completed=lambda: completed.append("clean"),
+        )
+        assert worker.notify_job_ready()
+        deadline = time.monotonic() + 1.0
+        while worker.active() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert not worker.active()
+        assert worker.close()
+
+    run(probe_runtime.PendingNavigationProbeRuntimeError(
+        "browser_worker_cleanup_failed"
+    ))
+    assert completed == []
+    run(probe_runtime.PendingNavigationProbeRuntimeError(
+        "browser_worker_failed:claimed_job_invalid",
+        worker_cleanup_confirmed=True,
+    ))
+    assert completed == ["clean"]
+    assert [str(error) for error in failures] == [
+        "browser_worker_cleanup_failed",
+        "browser_worker_failed:claimed_job_invalid",
+    ]
+
+
 def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
     pending = {"count": 1}
     entered = threading.Event()
@@ -965,6 +1006,62 @@ def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
         assert payload["LimitLoadToSessionType"] == "Aqua"
         assert payload["WorkingDirectory"] == str(root)
         assert list(runtime_root.iterdir()) == []
+
+
+def test_console_worker_launcher_reports_cleanup_certainty():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-cleanup-certainty-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "slipstream"
+        executable.write_text("#!/bin/sh\n")
+        executable.chmod(0o755)
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=pwd.getpwuid(os.getuid()).pw_name,
+            home=str(root),
+        )
+
+        def completed(command, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout,
+                stderr,
+            )
+
+        launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=root / "runtime",
+            identity_probe=lambda: identity,
+        )
+        launcher._print = lambda target: completed(
+            ("print", target),
+            113,
+            stderr="Could not find service",
+        )
+        launcher._run = lambda command: completed(command, 1)
+        launcher._cleanup_launch = lambda *args: None
+
+        with pytest.raises(
+            probe_runtime.PendingNavigationProbeRuntimeError,
+            match="browser_worker_bootstrap_failed",
+        ) as confirmed:
+            launcher.launch()
+        assert confirmed.value.worker_cleanup_confirmed is True
+
+        def fail_cleanup(*_args):
+            raise OSError("ambiguous cleanup")
+
+        launcher._cleanup_launch = fail_cleanup
+        with pytest.raises(
+            probe_runtime.PendingNavigationProbeRuntimeError,
+            match="browser_worker_cleanup_failed",
+        ) as ambiguous:
+            launcher.launch()
+        assert ambiguous.value.worker_cleanup_confirmed is False
 
 
 def test_console_worker_launcher_rejects_mutable_or_replaced_executables():

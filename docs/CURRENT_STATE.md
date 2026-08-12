@@ -29,10 +29,12 @@ that capability then let the worker relay mint stale same-host jobs, recorded
 as `claimed_job_invalid`. The correction submits the bounded observation
 immediately and then always performs exact Chrome/profile cleanup before the
 worker exits. An accepted result keeps its exact-host guard until the one-shot
-launcher reports that exact worker and Chrome/profile cleanup complete; the
-callback then releases only that accepted guard so a legitimate next
-eight-second stage stays fast. This remains true even if cleanup crosses the
-original capability expiry. The owner-only broker also records the exact job
+launcher positively confirms that exact worker and Chrome/profile cleanup;
+only then does the callback release that accepted guard so a legitimate next
+eight-second stage stays fast. An ambiguous cleanup failure remains a worker
+failure and deliberately retains the guard rather than admitting recursive
+same-host work. This remains true even if cleanup crosses the original
+capability expiry. The owner-only broker also records the exact job
 claim before delivering it. If that claimed capability expires, is rejected,
 or its relay closes while the worker remains active, its same-host guard is
 promoted through the same exact cleanup callback; an unclaimed rejected or
@@ -48,8 +50,15 @@ lease retries then became `claimed_job_invalid`, and the original fixture never
 received a worker request. Under the already required exact disposable GitHub
 Actions markers, pending-navigation admission now requires the same exact
 host, public IP, and port-443 tuple accepted by the loopback fixture mapping.
-Production admission is unchanged. Final-head packaged qualification, fresh
-review, and exact-main gates remain open. Capability
+Production admission is unchanged. Head
+`3a87c022c65a41ee7d65f979dc0ee50b50e4694e` passed all six checks; packaged
+job `94042532588` and an explicit repetition as `94044217785` both passed the
+complete original-to-worker-to-original lifecycle and cleanup. Fresh review
+then found that the lifecycle callback was still unconditional when launcher
+cleanup raised. The current correction exposes cleanup certainty on the
+launcher error and releases the guard only after positive cleanup proof; its
+full local suite passes. Final-head packaged qualification, fresh review, and
+exact-main gates remain open. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false
@@ -104,9 +113,10 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,192 Python tests plus 54 subtests, focused
-Python compilation, 96 Rust tests, Rust clippy, contract JSON parsing, and
-`git diff --check`. The required
+Current local verification passes 1,194 Python tests plus 54 subtests, focused
+Python compilation, 96 tray, 35 core, 241 Windows-adapter, 40 userspace-stack,
+and 40 selected-stack/effect Rust tests, all five Rust clippy gates, contract
+JSON parsing, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
 bounded source inspection used the documented fallback. Active-worker uninstall
 has no remaining PR or exact-main gate.

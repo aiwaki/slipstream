@@ -98,7 +98,9 @@ _JOB_FIELDS = frozenset((
 
 
 class PendingNavigationProbeRuntimeError(ValueError):
-    pass
+    def __init__(self, message, *, worker_cleanup_confirmed=False):
+        super().__init__(message)
+        self.worker_cleanup_confirmed = bool(worker_cleanup_confirmed)
 
 
 def browser_worker_disposable_environment(environment=None):
@@ -1637,10 +1639,15 @@ class PendingNavigationBrowserWorkerLauncher:
                 "browser_worker_cleanup_failed"
             ) from cleanup_failure
         if failure is not None:
+            try:
+                failure.worker_cleanup_confirmed = True
+            except (AttributeError, TypeError):
+                pass
             raise failure
         if exit_code != 0:
             raise PendingNavigationProbeRuntimeError(
-                f"browser_worker_failed:{worker_error}"
+                f"browser_worker_failed:{worker_error}",
+                worker_cleanup_confirmed=True,
             )
         return True
 
@@ -1700,16 +1707,21 @@ class LazyPendingNavigationProbeWorker:
     def _run(self):
         try:
             while not self._stop.is_set() and self._job_count():
+                cleanup_confirmed = False
                 try:
                     self._launch_worker()
+                    cleanup_confirmed = True
                 except Exception as error:
+                    cleanup_confirmed = bool(
+                        getattr(error, "worker_cleanup_confirmed", False)
+                    )
                     if self._error_handler is not None:
                         try:
                             self._error_handler(error)
                         except Exception:
                             pass
                 finally:
-                    if self._worker_completed is not None:
+                    if cleanup_confirmed and self._worker_completed is not None:
                         try:
                             self._worker_completed()
                         except Exception:

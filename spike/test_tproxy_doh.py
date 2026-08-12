@@ -12039,6 +12039,9 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         "claimed_job_guard_until_worker_cleanup"
     ] is True
     assert contract["worker_lifecycle"][
+        "ambiguous_cleanup_failure_retains_guard"
+    ] is True
+    assert contract["worker_lifecycle"][
         "unclaimed_rejected_result_guard_until_expiry"
     ] is True
     assert contract["worker_lifecycle"][

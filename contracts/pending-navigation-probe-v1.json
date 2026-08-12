@@ -43,6 +43,7 @@
     "same_host_recursive_jobs": false,
     "accepted_result_guard_until_worker_cleanup": true,
     "claimed_job_guard_until_worker_cleanup": true,
+    "ambiguous_cleanup_failure_retains_guard": true,
     "unclaimed_rejected_result_guard_until_expiry": true,
     "unclaimed_live_capability_guard_until_expiry": true,
     "unstarted_job_guard_ms": 0,
