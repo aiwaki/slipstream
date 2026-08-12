@@ -71,8 +71,10 @@ reports a bounded error after its own Chrome/profile cleanup succeeded;
 retain the guard even if LaunchAgent cleanup succeeds. Stale cleanup accepts
 the previous release's otherwise exact owned plist only when its environment
 is the precise legacy shape without the new ID; newly created workers and all
-claim/submit traffic still require it. Final-head packaged qualification,
-fresh review, and exact-main gates remain open. Capability
+claim/submit traffic still require it. Launcher bootstrap, start, wait,
+disappearance, PID replacement, and console-identity failures also never gain
+cleanup authority merely because later `bootout` succeeds. Final-head packaged
+qualification, fresh review, and exact-main gates remain open. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false

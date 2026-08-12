@@ -1075,11 +1075,30 @@ def test_console_worker_launcher_reports_cleanup_certainty():
         with pytest.raises(
             probe_runtime.PendingNavigationProbeRuntimeError,
             match="browser_worker_bootstrap_failed",
-        ) as confirmed:
+        ) as prestart:
             launcher.launch()
-        assert confirmed.value.worker_cleanup_confirmed is True
+        assert prestart.value.worker_cleanup_confirmed is False
         assert probe_runtime._valid_worker_launch_id(
-            confirmed.value.worker_launch_id
+            prestart.value.worker_launch_id
+        )
+
+        launcher._run = lambda command: completed(command)
+        launcher._wait_for_pid = lambda *_args: 42
+
+        def disappear(*_args):
+            raise probe_runtime.PendingNavigationProbeRuntimeError(
+                "browser_worker_disappeared"
+            )
+
+        launcher._wait_for_exit = disappear
+        with pytest.raises(
+            probe_runtime.PendingNavigationProbeRuntimeError,
+            match="browser_worker_disappeared",
+        ) as disappeared:
+            launcher.launch()
+        assert disappeared.value.worker_cleanup_confirmed is False
+        assert probe_runtime._valid_worker_launch_id(
+            disappeared.value.worker_launch_id
         )
 
         def fail_cleanup(*_args):

@@ -1694,7 +1694,6 @@ class PendingNavigationBrowserWorkerLauncher:
             ) from cleanup_failure
         if failure is not None:
             try:
-                failure.worker_cleanup_confirmed = True
                 failure.worker_launch_id = launch_id
             except (AttributeError, TypeError):
                 pass
