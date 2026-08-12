@@ -1139,6 +1139,7 @@ def _capture_chrome_output(
     gid: int | None,
     supplementary_groups: tuple[int, ...],
     timeout: float = CHROME_PROBE_TIMEOUT,
+    completion_probe=None,
 ) -> ChromeCapture:
     with _chrome_operation("capture-files-create"):
         stdout_capture = tempfile.TemporaryFile()
@@ -1184,8 +1185,9 @@ def _capture_chrome_output(
         deadline = time.monotonic() + timeout
         while True:
             stdout = _read_capture(stdout_capture)
-            loaded = (
-                len(stdout) >= CHROME_PROBE_MIN_BYTES
+            loaded = bool(completion_probe and completion_probe()) or (
+                completion_probe is None
+                and len(stdout) >= CHROME_PROBE_MIN_BYTES
                 and CHROME_PROBE_MARKER in stdout
             )
             if loaded:
@@ -1216,8 +1218,9 @@ def _capture_chrome_output(
 
     if process is None:
         raise LifecycleError("Chrome process did not start")
-    loaded = (
-        len(stdout) >= CHROME_PROBE_MIN_BYTES
+    loaded = loaded or bool(completion_probe and completion_probe()) or (
+        completion_probe is None
+        and len(stdout) >= CHROME_PROBE_MIN_BYTES
         and CHROME_PROBE_MARKER in stdout
     )
     return ChromeCapture(
@@ -2279,6 +2282,7 @@ def _run_composed_navigation(
             uid=uid,
             gid=gid,
             supplementary_groups=supplementary_groups,
+            completion_probe=fixture.ready,
         )
     finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
@@ -2293,15 +2297,15 @@ def _run_composed_navigation(
             f"records={fixture.records!r}; "
             f"worker={composed.worker_diagnostics(uid)!r}; chrome={detail}"
         )
-    if result.returncode != 0:
+    if not result.loaded and result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace")[-2000:]
         raise LifecycleError(
             f"composed original Chrome navigation failed: {detail}"
         )
-    if composed.COMPOSED_READY_MARKER not in result.stdout:
-        detail = result.stdout.decode("utf-8", errors="replace")[-2000:]
+    if not result.loaded:
         raise LifecycleError(
-            f"composed original navigation missed the ready marker: {detail}"
+            "composed original navigation missed its styled ready callback: "
+            f"records={fixture.records!r}"
         )
     evidence = fixture.report()
     composed.assert_worker_clean(uid)

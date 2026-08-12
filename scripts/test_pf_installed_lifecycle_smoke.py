@@ -1029,6 +1029,28 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertIn(lifecycle.CHROME_PROBE_MARKER, result.stdout)
         self.assertLess(time.monotonic() - started, 3)
 
+    def test_chrome_capture_stops_after_external_ready_callback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            started = time.monotonic()
+            result = lifecycle._capture_chrome_output(
+                (
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ),
+                cwd=Path(tmp),
+                environment=os.environ.copy(),
+                uid=None,
+                gid=None,
+                supplementary_groups=(),
+                timeout=3,
+                completion_probe=lambda: True,
+            )
+
+        self.assertTrue(result.loaded)
+        self.assertFalse(result.timed_out)
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_chrome_capture_timeout_keeps_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             result = lifecycle._capture_chrome_output(

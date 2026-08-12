@@ -105,6 +105,9 @@ class ComposedHttpsFixture:
         with self._lock:
             return tuple(dict(record) for record in self._records)
 
+    def ready(self) -> bool:
+        return self._ready.is_set()
+
     def _record(self, channel: str, path: str) -> int:
         with self._lock:
             key = {
@@ -112,7 +115,7 @@ class ComposedHttpsFixture:
                 "/style.css": "css",
                 "/app.js": "js",
                 "/pixel.svg": "image",
-                "/ready.svg": "ready",
+                "/ready": "ready",
             }.get(path)
             if key is not None:
                 self._counts[key] += 1
@@ -210,8 +213,7 @@ class ComposedHttpsFixture:
                         b"<!doctype html><html><head>"
                         b"<link rel='stylesheet' href='/style.css'>"
                         b"</head><body><div id='state'>waiting</div>"
-                        b"<img src='/pixel.svg' alt='fixture'>"
-                        b"<img src='/ready.svg' alt='' hidden>"
+                        b"<img id='proof' src='/pixel.svg' alt='fixture'>"
                         b"<script src='/app.js'></script>"
                         b"</body></html>",
                     )
@@ -223,16 +225,24 @@ class ComposedHttpsFixture:
                 elif path == "/app.js":
                     self._send(
                         "application/javascript; charset=utf-8",
-                        b"document.getElementById('state').textContent="
-                        b"'User-agent: slipstream-composed-ready';",
+                        b"addEventListener('load',()=>{const image="
+                        b"document.getElementById('proof');const styled="
+                        b"getComputedStyle(document.body).backgroundColor==="
+                        b"'rgb(237, 247, 255)';if(image.complete&&"
+                        b"image.naturalWidth>0&&styled){document.getElementById("
+                        b"'state').textContent='User-agent: "
+                        b"slipstream-composed-ready';fetch('/ready',"
+                        b"{cache:'no-store'}).catch(()=>{});}});",
                     )
-                elif path in {"/pixel.svg", "/ready.svg"}:
+                elif path == "/pixel.svg":
                     self._send(
                         "image/svg+xml",
                         b"<svg xmlns='http://www.w3.org/2000/svg' width='2' "
                         b"height='2'><rect width='2' height='2' fill='#1b84d6'/>"
                         b"</svg>",
                     )
+                elif path == "/ready":
+                    self._send("text/plain; charset=utf-8", b"")
                 else:
                     self.send_error(404)
 
