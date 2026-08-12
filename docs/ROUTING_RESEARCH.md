@@ -449,9 +449,12 @@ compatible boundary.
 
 The worker uses the local Chrome DevTools Protocol only for the exact synthetic
 `https://host/` main document. `Network.requestWillBeSent` starts the separate
-eight-second observation; response headers, redirect, load failure, or
-navigation error are terminal, while an exact document request that remains
-outstanding for the full interval is `navigation_pending`. A terminal
+eight-second observation. Response headers are not completion; only the exact
+document's `Network.loadingFinished` is. A correlated redirect is detected by
+the reused document request ID before the redirect event's destination URL is
+compared with the synthetic target. Redirect, load failure, or navigation error
+are terminal, while an exact document request that remains outstanding for the
+full interval is `navigation_pending`. A terminal
 observation consumes its one-shot capability through the broker but is rejected
 by the route reducer and therefore has no route effect. The worker closes the
 browser, revalidates and removes only the exact profile-owned Chrome family and

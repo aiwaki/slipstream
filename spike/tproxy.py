@@ -536,6 +536,7 @@ QUIC_V1_INITIAL_SALT = bytes.fromhex(
 QUIC_INITIAL_FLOW_MAX = 4096
 QUIC_INITIAL_FLOW_IDLE = 5.0
 QUIC_INITIAL_CRYPTO_MAX = 64 * 1024
+QUIC_INITIAL_FRAGMENT_MAX = 128
 QUIC_TCP_FALLBACK_REPEAT = 3
 QUIC_TCP_FALLBACK_FLOW_IDLE = 10.0
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
@@ -6162,7 +6163,7 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
     key = (*flow_key, metadata["dcid"])
     state = flows.get(key)
     if state is None:
-        state = {"fragments": {}, "updated_at": now}
+        state = {"fragments": {}, "retained_bytes": 0, "updated_at": now}
         flows[key] = state
     state["updated_at"] = now
     flows.move_to_end(key)
@@ -6175,7 +6176,16 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
         if previous is not None and previous != fragment:
             flows.pop(key, None)
             return None
-        stored[crypto_offset] = fragment
+        if previous is None:
+            retained_bytes = state["retained_bytes"] + len(fragment)
+            if (
+                retained_bytes > QUIC_INITIAL_CRYPTO_MAX
+                or len(stored) >= QUIC_INITIAL_FRAGMENT_MAX
+            ):
+                flows.pop(key, None)
+                return None
+            stored[crypto_offset] = fragment
+            state["retained_bytes"] = retained_bytes
     assembled = bytearray()
     expected = 0
     for crypto_offset, fragment in sorted(stored.items()):

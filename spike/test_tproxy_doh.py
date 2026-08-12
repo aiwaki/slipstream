@@ -5820,6 +5820,60 @@ def test_quic_initial_sni_reassembles_publicly_decryptable_crypto_frames():
     assert tproxy._quic_initial_crypto_fragments(bytes(tampered)) is None
 
 
+def test_quic_initial_sni_caps_aggregate_retained_crypto_fragments(monkeypatch):
+    metadata = {"dcid": bytes.fromhex("8394c8f03e515708")}
+    parsed_packets = iter(
+        (
+            (metadata, ((1, b"a" * 40_000),)),
+            (metadata, ((2, b"a" * 40_000),)),
+        )
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_quic_initial_crypto_fragments",
+        lambda _packet: next(parsed_packets),
+    )
+    flows = OrderedDict()
+    flow_key = ("192.0.2.10", 51000, "198.51.100.10", 443)
+
+    assert tproxy._observe_quic_initial_sni(
+        flows,
+        flow_key,
+        b"first",
+        now=100.0,
+    ) is None
+    state = next(iter(flows.values()))
+    assert state["retained_bytes"] == 40_000
+    assert tproxy._observe_quic_initial_sni(
+        flows,
+        flow_key,
+        b"second",
+        now=100.1,
+    ) is None
+    assert not flows
+
+
+def test_quic_initial_sni_caps_retained_fragment_object_count(monkeypatch):
+    metadata = {"dcid": bytes.fromhex("8394c8f03e515708")}
+    fragments = tuple(
+        (offset, b"") for offset in range(tproxy.QUIC_INITIAL_FRAGMENT_MAX + 1)
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_quic_initial_crypto_fragments",
+        lambda _packet: (metadata, fragments),
+    )
+    flows = OrderedDict()
+
+    assert tproxy._observe_quic_initial_sni(
+        flows,
+        ("192.0.2.10", 51000, "198.51.100.10", 443),
+        b"packet",
+        now=100.0,
+    ) is None
+    assert not flows
+
+
 def test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped(
     monkeypatch,
 ):

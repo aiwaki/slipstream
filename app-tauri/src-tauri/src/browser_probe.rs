@@ -162,6 +162,16 @@ fn document_event_observation(
     }
 }
 
+fn is_correlated_document_redirect(event: &Value, expected_request_id: Option<&str>) -> bool {
+    let Some(expected_request_id) = expected_request_id else {
+        return false;
+    };
+    event.get("method").and_then(Value::as_str) == Some("Network.requestWillBeSent")
+        && event.pointer("/params/type").and_then(Value::as_str) == Some("Document")
+        && event.pointer("/params/requestId").and_then(Value::as_str) == Some(expected_request_id)
+        && event.pointer("/params/redirectResponse").is_some()
+}
+
 fn observation_outcome(observation: NavigationObservation) -> &'static str {
     match observation {
         NavigationObservation::Pending => OUTCOME_PENDING,
@@ -923,18 +933,18 @@ impl ChromeSession {
                 }
                 continue;
             };
+            if is_correlated_document_redirect(&event, request_id.as_deref()) {
+                let _ = websocket_send_json(
+                    &mut websocket,
+                    &json!({"id": 99, "method": "Browser.close"}),
+                );
+                return Ok(NavigationObservation::Failed);
+            }
             if method == "Network.requestWillBeSent"
                 && event.pointer("/params/type").and_then(Value::as_str) == Some("Document")
                 && event.pointer("/params/request/url").and_then(Value::as_str)
                     == Some(self.config.target_url.as_str())
             {
-                if event.pointer("/params/redirectResponse").is_some() {
-                    let _ = websocket_send_json(
-                        &mut websocket,
-                        &json!({"id": 99, "method": "Browser.close"}),
-                    );
-                    return Ok(NavigationObservation::Failed);
-                }
                 if let Some(observed_id) =
                     event.pointer("/params/requestId").and_then(Value::as_str)
                 {
@@ -1804,6 +1814,28 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn correlated_document_redirect_is_detected_before_destination_url_filtering() {
+        let redirect = json!({
+            "method": "Network.requestWillBeSent",
+            "params": {
+                "requestId": "document-1",
+                "type": "Document",
+                "request": {"url": "https://redirected.example/"},
+                "redirectResponse": {"status": 302}
+            }
+        });
+        assert!(is_correlated_document_redirect(
+            &redirect,
+            Some("document-1")
+        ));
+        assert!(!is_correlated_document_redirect(
+            &redirect,
+            Some("other-document")
+        ));
+        assert!(!is_correlated_document_redirect(&redirect, None));
     }
 
     #[test]

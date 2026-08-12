@@ -12,11 +12,10 @@ file.
 
 Update 2026-08-12: the macOS blocker is reproduced, corrected, and proven in a
 real installed-tray transaction. Exact main remains
-`684ba0767b407a87e8a449f0999b799cee410c4d`; product commit
-`7ddd2ba92b3b48b853894f6373f6a14964f04e72` and its bilingual user-facing
-README successor are in PR #338 on `codex/macos-probe-binding-diagnostics`.
-They have no merge, exact-main, protected-artifact, installation, or release
-authority yet.
+`684ba0767b407a87e8a449f0999b799cee410c4d`; the product correction and its
+bilingual user-facing README refresh are in PR #338 on
+`codex/macos-probe-binding-diagnostics`. They have no merge, exact-main,
+protected-artifact, installation, or release authority yet.
 
 PR CI run `31619433057` on product commit `7ddd2ba` passed every unit, Rust,
 lint, and project-state step before its script-mode installed lifecycle sentinel
@@ -29,7 +28,7 @@ timestamp into the thread. No wake timeout or test bound is relaxed; focused
 tests now cover the pre-thread suspension boundary. PR checks must restart on
 the final head.
 
-Codex review on PR #338 found two actionable boundaries. A completed independent
+The first Codex review on PR #338 found two actionable boundaries. A completed independent
 navigation previously reset the exact client stream without rechecking whether
 the original relay had resumed receiving bytes; the same-route path now repeats
 the full live/idle/TLS eligibility check under the existing lock immediately
@@ -37,8 +36,19 @@ before signaling reset. The QUIC callback also now requires private PF applied,
 startup baseline ready, and verified owned Geph on `:9954` before Version
 Negotiation; a VPN, competing filter, dormant backend, or unowned listener stays
 untouched. Focused regression covers a recovered relay plus inactive/unowned
-geo-exit routing. Both review threads must be resolved only after the final head
-passes checks.
+geo-exit routing. Both threads were resolved, and all eight required PR checks
+passed on published head `fcdad632d844e2c95d6bee92694dc9a725bf4d1e` in CI
+runs `31620653344`, `31620653353`, and `31620653365`.
+
+Fresh review of that exact head found two further bounded-state defects before
+merge. CDP reports a redirecting `Network.requestWillBeSent` with the destination
+URL while reusing the original document request ID; redirect correlation now
+runs before the synthetic target-URL filter, so the later destination finish
+cannot be mislabeled same-route completion. QUIC CRYPTO state also now accounts
+the sum of every uniquely retained fragment, including overlapping offsets,
+and drops the exact flow before the aggregate can exceed 64 KiB. Regressions for
+both cases pass locally; the corrected final head still requires fresh review
+and all required PR checks.
 
 Transactions `AD279B68-AE05-46D1-8BF2-E4919D7727D1`,
 `76910DF2-B1D4-4DF6-AC4A-89D185ABEB50`, and
@@ -56,8 +66,9 @@ QUIC v1 Initial packets, derives their standardized public Initial keys,
 reassembles bounded CRYPTO frames, extracts TLS ClientHello SNI, and reuses the
 active route-policy classifier. Only `geo_exit` receives a valid Version
 Negotiation response that moves the flow to TCP; unknown, direct, Discord,
-YouTube, and Googlevideo QUIC is untouched. State is capped at 4,096 flows,
-64 KiB of CRYPTO, five seconds, and one response per exact flow. There is no
+YouTube, and Googlevideo QUIC is untouched. State is capped at 4,096 flows, an
+aggregate 64 KiB and 128 retained CRYPTO fragments per flow, five seconds, and
+one response per exact flow. There is no
 global UDP/443 block, content inspection, host in the log, or DNS/proxy/PAC/VPN
 mutation. A local 1,000-packet benchmark took about 219 ms total.
 
@@ -72,14 +83,15 @@ live. One earlier sample was discarded after startup baseline intentionally
 paused PF on transient `probe_process_unavailable`; a normal network rearm
 restored active state before the successful proof.
 
-Full local verification passes `1,208` Python tests plus `54` subtests, `101`
+Full local verification passes `1,210` Python tests plus `54` subtests, `102`
 Rust tray tests, `35` Rust core contract tests, Python compilation, Rust format,
 both affected Clippy targets with warnings denied, project-state validation, and
 `git diff --check`. The focused QUIC set includes public-Initial decryption,
-fragmented CRYPTO/SNI reassembly, tamper rejection, exact policy scope, and
-Version Negotiation CID reversal. Next: review and merge the PR only with all
-required checks, then require exact-main CI/audit/native Windows and protected
-qualification, install only that exact artifact, and repeat the real tray plus
+fragmented CRYPTO/SNI reassembly, aggregate retained-byte rejection, tamper
+rejection, exact policy scope, and Version Negotiation CID reversal. Next:
+obtain fresh review and all required PR checks on the final correction head,
+then merge and require exact-main CI/audit/native Windows plus protected
+qualification. Install only that exact artifact and repeat the real tray plus
 ordinary-Chrome smoke before release.
 
 macOS is the active priority. PR #337 merged the hidden ordinary-Chrome worker
