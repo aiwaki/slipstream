@@ -40,6 +40,9 @@
     "max_concurrent_workers": 1,
     "retry_after_worker_loss_ms": 5000,
     "same_host_recursive_jobs": false,
+    "same_host_post_capability_guard_ms": 2000,
+    "submit_before_cleanup": true,
+    "cleanup_before_worker_exit": true,
     "browser_observer_composed": true
   },
   "privacy": {

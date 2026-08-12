@@ -76,6 +76,9 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     pending_navigation_probe_capabilities = OrderedDict(
         tproxy._pending_navigation_probe_capabilities
     )
+    pending_navigation_probe_host_guards = OrderedDict(
+        tproxy._pending_navigation_probe_host_guards
+    )
     xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
     xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
     clean_eof_stalls = {
@@ -189,6 +192,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._local_payload_idle_failures.clear()
         tproxy._active_pending_navigation_relays.clear()
         tproxy._pending_navigation_probe_capabilities.clear()
+        tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
@@ -294,6 +298,10 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_capabilities.update(
             pending_navigation_probe_capabilities
+        )
+        tproxy._pending_navigation_probe_host_guards.clear()
+        tproxy._pending_navigation_probe_host_guards.update(
+            pending_navigation_probe_host_guards
         )
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
@@ -11979,7 +11987,7 @@ def _pending_navigation_probe_result(job, **overrides):
         "request_started_at_unix_ms": job[
             "request_started_at_unix_ms"
         ],
-        "observed_at_unix_ms": 1_018_001,
+        "observed_at_unix_ms": job["issued_at_unix_ms"] + 8_001,
         "outcome": tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING,
         **overrides,
     }
@@ -12005,6 +12013,11 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
     assert contract["result_defaults"]["outcome"] == (
         tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
     )
+    assert contract["worker_lifecycle"][
+        "same_host_post_capability_guard_ms"
+    ] == int(tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000)
+    assert contract["worker_lifecycle"]["submit_before_cleanup"] is True
+    assert contract["worker_lifecycle"]["cleanup_before_worker_exit"] is True
     assert contract["invariants"]["production_runtime_composition"] is True
 
 
@@ -12050,62 +12063,62 @@ def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
 
     malformed_job = tproxy._issue_pending_navigation_probe(
         activity,
-        now=100.0,
-        now_unix_ms=1_010_000,
+        now=111.0,
+        now_unix_ms=1_021_000,
         token_factory=lambda: "a" * 32,
     )
     malformed = _pending_navigation_probe_result(malformed_job)
     malformed["unexpected"] = True
     assert not tproxy._submit_pending_navigation_probe_result(
         malformed,
-        now=108.001,
+        now=119.001,
     )
     assert not tproxy._pending_navigation_probe_capabilities
 
     early_job = tproxy._issue_pending_navigation_probe(
         activity,
-        now=100.0,
-        now_unix_ms=1_010_000,
+        now=122.0,
+        now_unix_ms=1_032_000,
         token_factory=lambda: "3" * 32,
     )
     assert not tproxy._submit_pending_navigation_probe_result(
         _pending_navigation_probe_result(
             early_job,
-            observed_at_unix_ms=1_018_001,
+            observed_at_unix_ms=1_039_999,
         ),
-        now=107.999,
+        now=129.999,
     )
     assert not activity.downstream_idle_retry
 
     rebound_job = tproxy._issue_pending_navigation_probe(
         activity,
-        now=100.0,
-        now_unix_ms=1_010_000,
+        now=133.0,
+        now_unix_ms=1_043_000,
         token_factory=lambda: "b" * 32,
     )
     activity.pending_navigation_stage = tproxy.AUTO_GEPH_STAGE_XBOX_DNS
     assert not tproxy._submit_pending_navigation_probe_result(
         _pending_navigation_probe_result(rebound_job),
-        now=108.001,
+        now=141.001,
     )
     activity.pending_navigation_stage = tproxy.AUTO_GEPH_STAGE_SYSTEM
     assert not activity.downstream_idle_retry
 
     accepted_job = tproxy._issue_pending_navigation_probe(
         activity,
-        now=100.0,
-        now_unix_ms=1_010_000,
+        now=144.0,
+        now_unix_ms=1_054_000,
         token_factory=lambda: "4" * 32,
     )
     accepted = _pending_navigation_probe_result(accepted_job)
     assert tproxy._submit_pending_navigation_probe_result(
         accepted,
-        now=108.001,
+        now=152.001,
     )
     assert activity.downstream_idle_retry
     assert not tproxy._submit_pending_navigation_probe_result(
         accepted,
-        now=108.002,
+        now=152.002,
     )
 
     expired_job = tproxy._issue_pending_navigation_probe(
@@ -12262,11 +12275,18 @@ def test_pending_navigation_probe_suppresses_same_host_worker_recursion():
         token_factory=lambda: "2" * 32,
     ) is None
 
-    tproxy._unregister_pending_navigation_relay(first)
+    first.retry_closed = True
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=108.001,
+        now_unix_ms=1_018_001,
+        token_factory=lambda: "2" * 32,
+    ) is None
+
     second_job = tproxy._issue_pending_navigation_probe(
         second,
-        now=100.0,
-        now_unix_ms=1_010_000,
+        now=110.002,
+        now_unix_ms=1_020_002,
         token_factory=lambda: "2" * 32,
     )
     assert second_job is not None

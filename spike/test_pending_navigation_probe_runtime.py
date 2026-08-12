@@ -323,6 +323,11 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             probe_runtime.CLAIM_LEASE_SECONDS * 1000
         ),
         "same_host_recursive_jobs": False,
+        "same_host_post_capability_guard_ms": int(
+            tproxy.PENDING_NAVIGATION_PROBE_RECURSION_GUARD * 1000
+        ),
+        "submit_before_cleanup": True,
+        "cleanup_before_worker_exit": True,
         "browser_observer_composed": True,
     }
 
@@ -468,6 +473,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
 
     async def scenario():
         tproxy._pending_navigation_probe_capabilities.clear()
+        tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._active_pending_navigation_relays.clear()
         clock = {"wall": 1_010_000, "mono": 100.0}
         first = tproxy._RelayActivity(
@@ -549,6 +555,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         tproxy._local_payload_idle_failures.pop("unknown.example", None)
         tproxy._xbox_dns_candidates.pop("unknown.example", None)
         tproxy._pending_navigation_probe_capabilities.clear()
+        tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._active_pending_navigation_relays.clear()
 
 

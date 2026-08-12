@@ -2068,6 +2068,7 @@ UNKNOWN_PRE_RESPONSE_IDLE = 8.0  # bounded retry before a first real response
 PENDING_NAVIGATION_RELAY_START_SKEW_MS = 5_000
 PENDING_NAVIGATION_PROBE_TTL = 30.0
 PENDING_NAVIGATION_PROBE_STATE_MAX = 32
+PENDING_NAVIGATION_PROBE_RECURSION_GUARD = 2.0
 PENDING_NAVIGATION_PROBE_OUTCOME_PENDING = "navigation_pending"
 TRANSPORT_IDLE_EVIDENCE_REJECTED = "rejected"
 TRANSPORT_IDLE_EVIDENCE_ADVANCE = "advance"
@@ -2187,6 +2188,7 @@ _auto_geph_one_shot_consumed_at = {}  # host -> latest stage timestamp spent
 _local_payload_idle_failures = {}  # host -> {stage: monotonic idle proof}
 _active_pending_navigation_relays = {}  # host -> {activity id: activity}
 _pending_navigation_probe_capabilities = OrderedDict()  # token -> bound relay
+_pending_navigation_probe_host_guards = OrderedDict()  # host -> monotonic expiry
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -9903,15 +9905,38 @@ def _register_pending_navigation_relay(
     return True
 
 
+def _guard_pending_navigation_probe_host(capability, now):
+    expires_at = min(
+        capability.expires_at_monotonic,
+        now + PENDING_NAVIGATION_PROBE_RECURSION_GUARD,
+    )
+    if expires_at <= now:
+        return
+    current = _pending_navigation_probe_host_guards.get(capability.host, 0.0)
+    if expires_at > current:
+        _pending_navigation_probe_host_guards[capability.host] = expires_at
+        _pending_navigation_probe_host_guards.move_to_end(capability.host)
+    while (
+        len(_pending_navigation_probe_host_guards)
+        > PENDING_NAVIGATION_PROBE_STATE_MAX
+    ):
+        _pending_navigation_probe_host_guards.popitem(last=False)
+
+
 def _prune_pending_navigation_probe_capabilities(now):
+    for host, expires_at in tuple(
+        _pending_navigation_probe_host_guards.items()
+    ):
+        if expires_at <= now:
+            _pending_navigation_probe_host_guards.pop(host, None)
     for token, capability in tuple(
         _pending_navigation_probe_capabilities.items()
     ):
-        if (
-            capability.expires_at_monotonic <= now
-            or capability.activity.retry_closed
-        ):
+        if capability.expires_at_monotonic <= now:
             _pending_navigation_probe_capabilities.pop(token, None)
+        elif capability.activity.retry_closed:
+            _pending_navigation_probe_capabilities.pop(token, None)
+            _guard_pending_navigation_probe_host(capability, now)
     while (
         len(_pending_navigation_probe_capabilities)
         > PENDING_NAVIGATION_PROBE_STATE_MAX
@@ -9919,13 +9944,15 @@ def _prune_pending_navigation_probe_capabilities(now):
         _pending_navigation_probe_capabilities.popitem(last=False)
 
 
-def _revoke_pending_navigation_probe_capability(activity):
+def _revoke_pending_navigation_probe_capability(activity, *, now=None):
+    now = time.monotonic() if now is None else now
     with _auto_geph_lock:
         for token, capability in tuple(
             _pending_navigation_probe_capabilities.items()
         ):
             if capability.activity is activity:
                 _pending_navigation_probe_capabilities.pop(token, None)
+                _guard_pending_navigation_probe_host(capability, now)
 
 
 def _pending_navigation_activity_eligible_locked(activity, now):
@@ -9967,6 +9994,8 @@ def _issue_pending_navigation_probe(
         if not _pending_navigation_activity_eligible_locked(activity, now):
             return None
         host = normalize_host(activity.pending_navigation_host)
+        if _pending_navigation_probe_host_guards.get(host, 0.0) > now:
+            return None
         if any(
             capability.host == host
             for capability in _pending_navigation_probe_capabilities.values()
@@ -10115,6 +10144,8 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
     with _auto_geph_lock:
         _prune_pending_navigation_probe_capabilities(now)
         capability = _pending_navigation_probe_capabilities.pop(token, None)
+        if capability is not None:
+            _guard_pending_navigation_probe_host(capability, now)
     if capability is None:
         return False
     if (

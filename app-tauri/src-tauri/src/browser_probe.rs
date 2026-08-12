@@ -172,24 +172,27 @@ fn run_one_probe() -> ProbeResult<()> {
             return Err(failure);
         }
     };
-    chrome.cleanup()?;
-    let observed_at_unix_ms = unix_now_ms()?;
-
     let outcome = match observation {
         NavigationObservation::Pending => OUTCOME_PENDING,
         NavigationObservation::Terminal => OUTCOME_TERMINAL,
     };
-    let response = submit_result(
-        &socket_path,
-        uid,
-        &ProbeResultPayload {
-            schema_version: SCHEMA_VERSION,
-            capability: &job.capability,
-            host: &job.host,
-            request_started_at_unix_ms: job.request_started_at_unix_ms,
-            observed_at_unix_ms,
-            outcome,
+    let response = submit_before_cleanup(
+        || {
+            let observed_at_unix_ms = unix_now_ms()?;
+            submit_result(
+                &socket_path,
+                uid,
+                &ProbeResultPayload {
+                    schema_version: SCHEMA_VERSION,
+                    capability: &job.capability,
+                    host: &job.host,
+                    request_started_at_unix_ms: job.request_started_at_unix_ms,
+                    observed_at_unix_ms,
+                    outcome,
+                },
+            )
         },
+        || chrome.cleanup(),
     )?;
     match observation {
         NavigationObservation::Pending if response.accepted && response.reason == "accepted" => {
@@ -202,6 +205,16 @@ fn run_one_probe() -> ProbeResult<()> {
         }
         _ => Err(error("submit_rejected")),
     }
+}
+
+fn submit_before_cleanup<T, Submit, Cleanup>(submit: Submit, cleanup: Cleanup) -> ProbeResult<T>
+where
+    Submit: FnOnce() -> ProbeResult<T>,
+    Cleanup: FnOnce() -> ProbeResult<()>,
+{
+    let submission = submit();
+    cleanup()?;
+    submission
 }
 
 fn require_not_terminated(termination_requested: &AtomicBool) -> ProbeResult<()> {
@@ -1543,6 +1556,7 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     fn job(now: u64) -> ProbeJob {
         ProbeJob {
@@ -1580,6 +1594,30 @@ mod tests {
             require_not_terminated(&requested).unwrap_err().0,
             "worker_terminated"
         );
+    }
+
+    #[test]
+    fn result_is_submitted_before_cleanup_and_cleanup_always_runs() {
+        let events = RefCell::new(Vec::new());
+        let result = submit_before_cleanup(
+            || {
+                events.borrow_mut().push("submit");
+                Err::<(), _>(error("submit_failed"))
+            },
+            || {
+                events.borrow_mut().push("cleanup");
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err().0, "submit_failed");
+        assert_eq!(*events.borrow(), ["submit", "cleanup"]);
+    }
+
+    #[test]
+    fn cleanup_failure_overrides_a_successful_submission() {
+        let result = submit_before_cleanup(|| Ok("accepted"), || Err(error("cleanup_failed")));
+        assert_eq!(result.unwrap_err().0, "cleanup_failed");
     }
 
     #[test]

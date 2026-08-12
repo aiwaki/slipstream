@@ -19,6 +19,21 @@ Chromium `94017024682`, and Windows adapter `94017024679`; dependency-audit run
 `94017024585` and ARM64 job `94017024587`. No protected artifact from this SHA
 has been installed on the workstation.
 
+PR #332 is the active product correction. Its first documentation head passed
+all six required checks, including packaged job `94019999739`. A later
+documentation-only head exposed a real timing race in packaged job
+`94021442646`: the original request reached the fixture, the worker request
+arrived, but the worker delayed its result until after Chrome cleanup. The
+original relay closed in that interval, so submission was rejected; removal of
+that capability then let the worker relay mint stale same-host jobs, recorded
+as `claimed_job_invalid`. The correction submits the bounded observation
+immediately and then always performs exact Chrome/profile cleanup before the
+worker exits. Consuming, revoking, or pruning a live capability also installs a
+bounded two-second same-host guard, closing only the simultaneous worker-relay
+callback window; it expires well before another eight-second recovery stage.
+No normal-path browser, broad host cooldown, route-policy change, or network
+setting mutation is added. Full PR and exact-main qualification remain open.
+
 That merge completes the active-worker uninstall ownership transaction. The
 exact-main packaged job first proved one correlated worker process, exact live
 Chrome profile, private runtime, and matching loaded LaunchAgent with root
@@ -65,7 +80,7 @@ extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
 Current local verification passes 1,185 Python tests plus 54 subtests, focused
-Python compilation, shell syntax, 94 Rust library tests, Rust clippy, and
+Python compilation, 96 Rust tests, Rust clippy, contract JSON parsing, and
 `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
 bounded source inspection used the documented fallback. Active-worker uninstall
@@ -238,7 +253,7 @@ All six PR checks passed; it merged as
 `31541339387` passed for that exact SHA. The current branch
 `codex/sandboxed-browser-probe-worker` starts from that exact merge.
 
-The current branch implements that next closed slice. One exact hidden mode of
+The historical PR #328 branch implemented that next closed slice. One exact hidden mode of
 the packaged Slipstream executable claims the owner-only job, and an exact Aqua
 LaunchAgent runs it as the active console user. It uses LaunchServices to open
 signed Google Chrome in sandboxed unified-headless mode with extensions
@@ -246,8 +261,10 @@ disabled and a fresh owner-private profile. CDP observes only the exact
 synthetic HTTPS root main document: eight seconds outstanding is
 `navigation_pending`; response, redirect, load failure, or navigation failure
 is `navigation_terminal` and consumes the capability without a route effect.
-Chrome, its profile-owned helper family, the LaunchServices waiter, LaunchAgent,
-and profile are removed before submit. Production paths are fixed; browser,
+The result is submitted immediately after observation so bounded cleanup cannot
+expire the live relay capability. Chrome, its profile-owned helper family, the
+LaunchServices waiter, LaunchAgent, and profile are still removed before the
+worker exits. Production paths are fixed; browser,
 socket, origin, resolver, and certificate overrides exist only behind the full
 disposable-GitHub-Actions gate. The ordinary path still creates no worker,
 browser, thread, socket, or routing effect.
