@@ -668,8 +668,10 @@ impl ChromeSession {
             rooted_process_groups: BTreeSet::new(),
         };
         if let Err(failure) = session.start() {
-            let _ = session.cleanup();
-            return Err(failure);
+            return match session.cleanup() {
+                Ok(()) => Err(failure),
+                Err(cleanup_failure) => Err(cleanup_failure),
+            };
         }
         Ok(session)
     }

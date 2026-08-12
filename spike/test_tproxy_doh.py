@@ -12044,6 +12044,9 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         "ambiguous_cleanup_failure_retains_guard"
     ] is True
     assert contract["worker_lifecycle"][
+        "worker_cleanup_failure_retains_guard"
+    ] is True
+    assert contract["worker_lifecycle"][
         "cleanup_releases_exact_launch_only"
     ] is True
     assert contract["worker_lifecycle"][

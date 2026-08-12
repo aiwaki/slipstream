@@ -56,6 +56,11 @@ PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
 PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 27.0
 _BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
 _BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
+_BROWSER_WORKER_UNCONFIRMED_CLEANUP_ERRORS = frozenset((
+    "chrome_cleanup_failed",
+    "profile_cleanup_failed",
+    "unknown",
+))
 PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX = (
     "dev.slipstream.browser-probe"
 )
@@ -1261,16 +1266,20 @@ class PendingNavigationBrowserWorkerLauncher:
                 "browser_worker_runtime_unowned"
             )
         environment = payload.get("EnvironmentVariables")
-        expected_environment = {
+        legacy_environment = {
             "HOME": identity.home,
             "LOGNAME": identity.username,
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "USER": identity.username,
+        }
+        expected_environment = {
+            **legacy_environment,
             PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV: (
                 label.rsplit(".", 1)[-1]
             ),
-            "USER": identity.username,
         }
         expected_environment.update(self._disposable_environment)
+        legacy_environment.update(self._disposable_environment)
         if not isinstance(environment, dict):
             raise PendingNavigationProbeRuntimeError(
                 "browser_worker_runtime_unowned"
@@ -1279,8 +1288,12 @@ class PendingNavigationBrowserWorkerLauncher:
             self._disposable_environment == _DISPOSABLE_CI_MARKERS
             and all(
                 environment.get(name) == value
-                for name, value in expected_environment.items()
+                for name, value in legacy_environment.items()
             )
+            and environment.get(
+                PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV,
+                label.rsplit(".", 1)[-1],
+            ) == label.rsplit(".", 1)[-1]
             and set(environment).difference({
                 "HOME",
                 "LOGNAME",
@@ -1323,6 +1336,7 @@ class PendingNavigationBrowserWorkerLauncher:
             or payload.get("StandardErrorPath") != str(paths.stderr)
             or (
                 environment != expected_environment
+                and environment != legacy_environment
                 and not persisted_disposable_environment
             )
         ):
@@ -1686,9 +1700,12 @@ class PendingNavigationBrowserWorkerLauncher:
                 pass
             raise failure
         if exit_code != 0:
+            cleanup_confirmed = (
+                worker_error not in _BROWSER_WORKER_UNCONFIRMED_CLEANUP_ERRORS
+            )
             raise PendingNavigationProbeRuntimeError(
                 f"browser_worker_failed:{worker_error}",
-                worker_cleanup_confirmed=True,
+                worker_cleanup_confirmed=cleanup_confirmed,
                 worker_launch_id=launch_id,
             )
         return launch_id

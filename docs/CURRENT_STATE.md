@@ -65,8 +65,14 @@ launch now receives one random local 64-bit ID in its exact LaunchAgent
 environment. The owner-only claim and submit envelopes carry that ID, and the
 daemon binds both claimed and accepted guards to the exact capability/launch
 pair. Cleanup releases only that launch's entries; another launch cannot clear
-an ambiguous predecessor. Final-head packaged qualification, fresh review, and
-exact-main gates remain open. Capability
+an ambiguous predecessor. A nonzero worker exit releases its pair only when it
+reports a bounded error after its own Chrome/profile cleanup succeeded;
+`chrome_cleanup_failed`, `profile_cleanup_failed`, and an unknown/crashed exit
+retain the guard even if LaunchAgent cleanup succeeds. Stale cleanup accepts
+the previous release's otherwise exact owned plist only when its environment
+is the precise legacy shape without the new ID; newly created workers and all
+claim/submit traffic still require it. Final-head packaged qualification,
+fresh review, and exact-main gates remain open. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false
@@ -121,7 +127,7 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,195 Python tests plus 54 subtests, focused
+Current local verification passes 1,196 Python tests plus 54 subtests, focused
 Python compilation, 96 tray, 35 core, 241 Windows-adapter, 40 userspace-stack,
 and 40 selected-stack/effect Rust tests, all five Rust clippy gates, contract
 JSON parsing, and `git diff --check`. The required

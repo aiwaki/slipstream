@@ -342,6 +342,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         "accepted_result_guard_until_worker_cleanup": True,
         "claimed_job_guard_until_worker_cleanup": True,
         "ambiguous_cleanup_failure_retains_guard": True,
+        "worker_cleanup_failure_retains_guard": True,
         "cleanup_releases_exact_launch_only": True,
         "unclaimed_rejected_result_guard_until_expiry": True,
         "unclaimed_live_capability_guard_until_expiry": True,
@@ -1096,6 +1097,68 @@ def test_console_worker_launcher_reports_cleanup_certainty():
         )
 
 
+def test_console_worker_launcher_requires_worker_owned_browser_cleanup():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-worker-cleanup-certainty-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "slipstream"
+        executable.write_text("#!/bin/sh\n")
+        executable.chmod(0o755)
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=pwd.getpwuid(os.getuid()).pw_name,
+            home=str(root),
+        )
+
+        def completed(command, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout,
+                stderr,
+            )
+
+        launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=root / "runtime",
+            identity_probe=lambda: identity,
+        )
+        launcher._print = lambda target: completed(
+            ("print", target),
+            113,
+            stderr="Could not find service",
+        )
+        launcher._run = lambda command: completed(command)
+        launcher._wait_for_pid = lambda *_args: 42
+        launcher._wait_for_exit = lambda *_args: 1
+        launcher._cleanup_launch = lambda *_args: None
+
+        for worker_error, cleanup_confirmed in (
+            ("claimed_job_invalid", True),
+            ("chrome_cleanup_failed", False),
+            ("profile_cleanup_failed", False),
+            ("unknown", False),
+        ):
+            launcher._read_worker_error = (
+                lambda *_args, worker_error=worker_error: worker_error
+            )
+            with pytest.raises(
+                probe_runtime.PendingNavigationProbeRuntimeError,
+                match=f"browser_worker_failed:{worker_error}",
+            ) as failure:
+                launcher.launch()
+            assert (
+                failure.value.worker_cleanup_confirmed
+                is cleanup_confirmed
+            )
+            assert probe_runtime._valid_worker_launch_id(
+                failure.value.worker_launch_id
+            )
+
+
 def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
     with tempfile.TemporaryDirectory(
         prefix="ss-browser-launcher-invalid-",
@@ -1173,6 +1236,16 @@ def test_console_worker_launcher_cleans_only_exact_stale_runtime():
         )
         paths = launcher._prepare_launch(identity, label)
         assert paths.directory.exists()
+        assert launcher.cleanup_stale(remove_root=True)
+        assert not runtime_root.exists()
+
+        paths = launcher._prepare_launch(identity, label)
+        payload = plistlib.loads(paths.plist.read_bytes())
+        payload["EnvironmentVariables"].pop(
+            probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV
+        )
+        paths.plist.write_bytes(plistlib.dumps(payload))
+        paths.plist.chmod(0o600)
         assert launcher.cleanup_stale(remove_root=True)
         assert not runtime_root.exists()
 
