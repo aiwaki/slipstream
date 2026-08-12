@@ -164,7 +164,7 @@ socket, origin, resolver, and certificate overrides exist only behind the full
 disposable-GitHub-Actions gate. The ordinary path still creates no worker,
 browser, thread, socket, or routing effect.
 
-Local verification passes 869 daemon tests, 278 script tests plus 54 subtests,
+Local verification passes 869 daemon tests, 279 script tests plus 54 subtests,
 93 Rust tray tests, focused Python compilation, Rust Clippy with warnings denied,
 contract JSON parsing, and `git diff --check`. Required graph discovery was
 attempted first and again returned `Transport closed`; fallback inspection was
@@ -191,6 +191,14 @@ evidence: two exact runs each produced one hanging HTTPS request, one
 `navigation_pending` result after eight seconds, and complete cleanup in 10,797
 and 15,785 ms. CDP HTTP reads now stop at one bounded `Content-Length` instead
 of waiting for Chrome to close its persistent response connection.
+
+Pinned packaged run `31549041776` completed the browser worker, exact fixture
+request, one-shot submission, and launcher cleanup. Its final residue assertion
+then matched the smoke harness's own still-live
+`slipstream-browser-probe-smoke-*` temporary directory because the glob was
+broader than the worker's exact 32-hex profile name. The residue gate now
+matches only that exact worker shape; a focused test excludes the harness root,
+non-hex suffixes, and wrong-length names.
 
 The next verified action is to pass the packaged pinned-Chrome CI gate,
 resolve review, and merge only after all required checks pass. The slice remains

@@ -28,6 +28,7 @@ import pending_navigation_probe_runtime as probe_runtime  # noqa: E402
 FIXTURE_HOST = "pending.slipstream.invalid"
 MAX_FRAME_BYTES = probe_runtime.MAX_IPC_BYTES
 MAX_END_TO_END_MS = 25_000
+WORKER_PROFILE_GLOB = "slipstream-browser-probe-" + "[0-9a-f]" * 32
 
 
 class QualificationError(RuntimeError):
@@ -272,8 +273,8 @@ class HangingHttpsFixture:
         self.thread = None
 
 
-def _profile_residue() -> set[Path]:
-    return set(Path("/tmp").glob("slipstream-browser-probe-*"))
+def _profile_residue(root: Path = Path("/tmp")) -> set[Path]:
+    return set(root.glob(WORKER_PROFILE_GLOB))
 
 
 def _job(now_ms: int) -> dict[str, object]:

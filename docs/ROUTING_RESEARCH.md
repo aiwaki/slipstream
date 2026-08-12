@@ -315,6 +315,15 @@ current-Chrome compatibility is evidenced by the exact local signed-browser
 runs rather than by relaxing the hosted startup or accepting an ad-hoc
 signature.
 
+Pinned packaged run `31549041776` then completed the hidden worker, exact
+hanging request, result submission, and launcher cleanup. The only failure was
+the harness's final residue query: its broad
+`slipstream-browser-probe-*` glob also selected the harness's own live
+`slipstream-browser-probe-smoke-*` temporary root. The production worker profile
+has an exact 32-character lowercase-hex nonce. The residue gate now matches
+only that shape, with focused exclusions for the smoke root, non-hex suffixes,
+and wrong lengths; no cleanup behavior or product path changed.
+
 Code discovery for the following correlation slice attempted the repository's
 required knowledge-graph search first, but the MCP transport returned
 `Transport closed`. The fallback was therefore limited to exact v3 signal,
