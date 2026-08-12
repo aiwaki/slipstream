@@ -3,8 +3,10 @@
 
 The harness composes the real unpacked extension, packaged native host,
 owner-only daemon socket, packaged root daemon, and an already-qualified
-account-backed owned Geph. Local HTTPS pages provide deterministic semantic
-denial, incomplete-response, pending-navigation, and styled-success states.
+account-backed owned Geph. It also exercises the packaged extensionless lazy
+browser worker against the same installed daemon and exact app artifact. Local
+HTTPS pages provide deterministic semantic denial, incomplete-response,
+pending-navigation, automatic-retry, and styled-success states.
 The pending-navigation fixture observes and forwards the exact privacy-bounded
 v3 native message before emulating the correlated relay close; route-learning
 scenarios independently confirm the same hostname through real Geph.
@@ -37,6 +39,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import composed_pending_navigation_smoke as composed
 import geph_owned_lifecycle_smoke as geph_smoke
 import pf_anchor_smoke as pf
 import pf_installed_lifecycle_smoke as lifecycle
@@ -2648,6 +2651,40 @@ def _assert_daemon_absent_and_disabled() -> None:
         raise QualificationError("root daemon label is not durably disabled")
 
 
+def _restart_daemon_for_automatic_navigation(
+    system: lifecycle.SystemRunner,
+    browser_environment: dict[str, str],
+) -> dict[str, object]:
+    composed.require_disposable_ci()
+    active = lifecycle._wait_for_status("active")
+    system.run(
+        (
+            "/bin/launchctl",
+            "bootout",
+            "system",
+            str(lifecycle.LAUNCHD_PLIST),
+        )
+    )
+    lifecycle._wait_for_path(lifecycle.STATUS_PATH, present=False)
+    lifecycle._patch_launchd_for_qualification(
+        lifecycle.LAUNCHD_PLIST,
+        browser_environment,
+    )
+    system.run(
+        (
+            "/bin/launchctl",
+            "bootstrap",
+            "system",
+            str(lifecycle.LAUNCHD_PLIST),
+        )
+    )
+    return lifecycle._wait_for_status(
+        "active",
+        previous_pid=int(active["pid"]),
+        timeout=60,
+    )
+
+
 def run_qualification(
     app_bundle: Path,
     chrome_executable: Path,
@@ -2675,6 +2712,7 @@ def run_qualification(
     )
 
     system = lifecycle.SystemRunner(target)
+    automatic_fixture = composed.ComposedHttpsFixture()
     fixtures = (
         (
             REGIONAL_DENIAL_SCENARIO,
@@ -2703,13 +2741,29 @@ def run_qualification(
     cleanup_errors: list[str] = []
     result: dict[str, object] = {}
     try:
+        automatic_fixture.start()
         system.run(target.install_command)
         installed = True
-        lifecycle._wait_for_status("active")
+        _restart_daemon_for_automatic_navigation(
+            system,
+            automatic_fixture.qualification_environment(chrome_executable),
+        )
         lifecycle._assert_installed_payload(target)
         lifecycle._assert_anchor_active(runner)
         _wait_for_semantic_socket(uid)
         _wait_for_owned_geph_backend()
+
+        try:
+            automatic_navigation = lifecycle._run_composed_navigation(
+                automatic_fixture,
+                uid,
+                gid,
+                chrome_executable,
+            )
+        except BaseException as exc:
+            raise QualificationError(
+                f"automatic local browser qualification failed: {exc}"
+            ) from exc
 
         scenario_results: dict[str, dict[str, object]] = {}
         for scenario, fixture in fixtures:
@@ -2760,6 +2814,7 @@ def run_qualification(
             "chrome_sandbox": "enabled",
             "browser_launch": "LaunchServices in the console user's Aqua session",
             "extension": "unpacked frozen-origin Chromium companion",
+            "automatic_local_browser": automatic_navigation,
             "native_host": "packaged exact-origin Rust host",
             "daemon_ipc": "owner-only semantic socket",
             "confirmation": "real account-backed owned Geph",
@@ -2771,6 +2826,10 @@ def run_qualification(
     except BaseException as exc:
         failure = exc
     finally:
+        try:
+            automatic_fixture.close()
+        except Exception as exc:
+            cleanup_errors.append(f"automatic fixture cleanup: {exc}")
         for scenario, fixture in fixtures:
             try:
                 fixture.close()
@@ -2817,7 +2876,9 @@ def dry_run() -> dict[str, object]:
         "path": (
             "regional denial and incomplete top-level response -> Chromium "
             "extension -> packaged native host -> owner-only daemon IPC -> "
-            "distinct real owned Geph confirmation -> one reload per scenario"
+            "distinct real owned Geph confirmation -> one reload per scenario; "
+            "extensionless original navigation -> packaged lazy worker -> exact "
+            "original retry -> styled page"
         ),
         "browser": (
             "Chrome for Testing; branded Chrome 137+ ignores unpacked "
@@ -2827,8 +2888,8 @@ def dry_run() -> dict[str, object]:
             "exact packaged manifest copied into the disposable browser profile"
         ),
         "success": (
-            "each scenario yields one reload and styled DOM plus CSS, "
-            "JavaScript, and image"
+            "each semantic scenario and the automatic local-browser path yield "
+            "one retry and styled DOM plus CSS, JavaScript, and image"
         ),
         "browser_launch": "LaunchServices in the console user's Aqua session",
         "chrome_sandbox": "enabled",

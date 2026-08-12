@@ -31,11 +31,13 @@ jobs:
           cache: npm
           cache-dependency-path: app-tauri/package-lock.json
 
-      - name: Install stable Chrome for Testing
+      - name: Install qualified Chrome for Testing
         id: chrome-for-testing
         uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         with:
-          chrome-version: stable
+          # The protected gate needs the same complete, LaunchServices-valid
+          # bundle that qualifies the packaged extensionless worker path.
+          chrome-version: 151.0.7922.77
           install-chromedriver: false
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
