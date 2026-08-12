@@ -16,17 +16,18 @@ dependency-audit run `31550472875`, and Windows qualification run
 `31550472815` passed all six required jobs for that exact SHA. No protected
 artifact from this SHA has been installed on the workstation.
 
-The active branch is `codex/compose-pending-navigation-runtime`, based exactly
-on that merge. It composes the previously closed pending-navigation pieces into
-the production daemon without changing PF, DNS, proxy/PAC, VPN, external Geph,
-Discord, YouTube, or Googlevideo policy. An eligible public unknown-host relay
-now creates one privacy-bounded broker job only after the existing complete-TLS
-record and eight-second idle gate. The daemon maintains one console-user-owned
-mode-`0600` Unix socket, starts at most one lazy Aqua worker while a live job
-exists, and revokes both queue and relay capability if startup cannot begin.
-Shutdown, reinstall, and uninstall close the exact socket and validate an exact
-owned LaunchAgent/process/plist/runtime shape before stopping or removing stale
-worker state; ambiguity fails closed.
+Draft PR #329 on `codex/compose-pending-navigation-runtime` starts from that
+exact merge; its first implementation head is
+`eb52d8da8634582f341c0d86ce769d34adab3691`. It composes the previously closed
+pending-navigation pieces into the production daemon without changing PF, DNS,
+proxy/PAC, VPN, external Geph, Discord, YouTube, or Googlevideo policy. An
+eligible public unknown-host relay now creates one privacy-bounded broker job
+only after the existing complete-TLS record and eight-second idle gate. The
+daemon maintains one console-user-owned mode-`0600` Unix socket, starts at most
+one lazy Aqua worker while a live job exists, and revokes both queue and relay
+capability if startup cannot begin. Shutdown, reinstall, and uninstall close
+the exact socket and validate an exact owned LaunchAgent/process/plist/runtime
+shape before stopping or removing stale worker state; ambiguity fails closed.
 
 Local branded-Chrome evidence on 2026-08-12 showed the required browser
 handoff without an extension or manual reload: the first exact top-level HTTPS
@@ -235,11 +236,10 @@ also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
 common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
 passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
 
-The next verified action is to finish full local validation, update the
-composition evidence, open the PR, and require all six PR checks including the
-real pinned-Chromium retry gate. Installed update, exact packaged uninstall,
-measured idle cost, and complete original-navigation behavior remain explicit
-release gates.
+The next verified action is to require all six PR #329 checks, including the
+real pinned-Chromium retry gate, resolve review, and merge only the exact green
+head. Installed update, exact packaged uninstall, measured idle cost, and
+complete original-navigation behavior remain explicit release gates.
 Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the
