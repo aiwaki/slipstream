@@ -13,9 +13,209 @@ import threading
 import time
 from types import SimpleNamespace
 
-import pending_navigation_probe_runtime as probe_runtime
 import pytest
+import pending_navigation_probe_runtime as probe_runtime
 import tproxy
+
+
+def test_browser_worker_disposable_environment_is_closed_and_ci_only():
+    fixture = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+        "SLIPSTREAM_BROWSER_PROBE_CHROME": "/tmp/Chrome",
+        "SLIPSTREAM_BROWSER_PROBE_ORIGIN": "https://pending.invalid:8443/",
+        "SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES": (
+            "MAP pending.invalid 127.0.0.1"
+        ),
+        "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS": "1",
+        "SLIPSTREAM_BROWSER_PROBE_SOCKET": "/tmp/probe.sock",
+        "UNRELATED_SECRET": "must-not-cross",
+    }
+
+    forwarded = probe_runtime.browser_worker_disposable_environment(fixture)
+
+    assert set(forwarded) == probe_runtime._BROWSER_WORKER_DISPOSABLE_ENVIRONMENT
+    assert "UNRELATED_SECRET" not in forwarded
+    fixture.pop("GITHUB_ACTIONS")
+    assert probe_runtime.browser_worker_disposable_environment(fixture) == {}
+
+
+def test_tproxy_lazy_worker_receives_only_the_closed_disposable_environment(
+    monkeypatch,
+):
+    forwarded = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+        "SLIPSTREAM_BROWSER_PROBE_ORIGIN": "https://pending.invalid:8443/",
+    }
+    observed = {}
+
+    class Launcher:
+        def __init__(self, **kwargs):
+            observed["launcher"] = kwargs
+
+        def launch(self):
+            return True
+
+    class Worker:
+        def __init__(self, **kwargs):
+            observed["worker"] = kwargs
+
+    runtime = SimpleNamespace(state_size=lambda: 0)
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_worker", None)
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", runtime)
+    monkeypatch.setattr(
+        probe_runtime,
+        "browser_worker_disposable_environment",
+        lambda: forwarded,
+    )
+    monkeypatch.setattr(
+        probe_runtime,
+        "PendingNavigationBrowserWorkerLauncher",
+        Launcher,
+    )
+    monkeypatch.setattr(
+        probe_runtime,
+        "LazyPendingNavigationProbeWorker",
+        Worker,
+    )
+
+    worker = tproxy._get_pending_navigation_probe_worker()
+
+    assert isinstance(worker, Worker)
+    assert observed["launcher"] == {"disposable_environment": forwarded}
+    assert observed["worker"]["pending_jobs"] is runtime.state_size
+
+
+def test_disposable_upstream_mapping_is_exact_ci_only_and_unknown_host_only():
+    environment = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+        "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST": "pending.invalid",
+        "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP": "93.184.216.34",
+        "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT": "18443",
+    }
+
+    assert tproxy._disposable_pending_navigation_fixture_endpoint(
+        "pending.invalid",
+        "93.184.216.34",
+        443,
+        environment=environment,
+    ) == ("127.0.0.1", 18443)
+    assert tproxy._disposable_pending_navigation_fixture_endpoint(
+        None,
+        "93.184.216.34",
+        443,
+        environment=environment,
+    ) is None
+    assert tproxy._disposable_pending_navigation_fixture_endpoint(
+        "discord.com",
+        "93.184.216.34",
+        443,
+        environment=environment,
+    ) is None
+    assert tproxy._disposable_pending_navigation_fixture_endpoint(
+        "pending.invalid",
+        "93.184.216.35",
+        443,
+        environment=environment,
+    ) is None
+    environment.pop("GITHUB_ACTIONS")
+    assert tproxy._disposable_pending_navigation_fixture_endpoint(
+        "pending.invalid",
+        "93.184.216.34",
+        443,
+        environment=environment,
+    ) is None
+
+
+def test_disposable_strategy_mapping_skips_real_fake_packet_injection(monkeypatch):
+    environment = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+        "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST": "pending.invalid",
+        "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP": "93.184.216.34",
+        "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT": "18443",
+    }
+    calls = []
+
+    async def plain(ip, port, blob):
+        calls.append((ip, port, blob))
+        return "fixture"
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("fake packet injection reached the fixture")
+
+    monkeypatch.setattr(
+        tproxy,
+        "_PENDING_NAVIGATION_FIXTURE_ENVIRONMENT",
+        environment,
+    )
+    monkeypatch.setattr(tproxy, "dial_and_probe", plain)
+    monkeypatch.setattr(tproxy, "dial_and_probe_fake", forbidden)
+    strategy = {"cap": 0, "fake": True}
+
+    result = asyncio.run(tproxy.dial_strategy(
+        "93.184.216.34",
+        443,
+        b"head",
+        b"body",
+        "pending.invalid",
+        strategy,
+    ))
+
+    assert result == "fixture"
+    assert calls[0][0:2] == ("127.0.0.1", 18443)
+
+
+def test_exact_system_probe_uses_the_disposable_loopback_upstream(monkeypatch):
+    async def scenario():
+        received = []
+
+        async def handle(reader, writer):
+            received.append(await reader.readexactly(5))
+            writer.write(b"server-first")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = int(server.sockets[0].getsockname()[1])
+        environment = {
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "SLIPSTREAM_DISPOSABLE_CI": "1",
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST": "pending.invalid",
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP": "93.184.216.34",
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT": str(port),
+        }
+        monkeypatch.setattr(
+            tproxy,
+            "_PENDING_NAVIGATION_FIXTURE_ENVIRONMENT",
+            environment,
+        )
+        fixture_host = tproxy._PENDING_NAVIGATION_FIXTURE_HOST.set(
+            "pending.invalid"
+        )
+        try:
+            state, connection = await tproxy._try_exact_system_probe(
+                "93.184.216.34",
+                443,
+                b"hello",
+            )
+            assert state == tproxy.SYSTEM_PROBE_PAYLOAD
+            assert connection[2] == b"server-first"
+            await tproxy._close_stream_writer(connection[1])
+        finally:
+            tproxy._PENDING_NAVIGATION_FIXTURE_HOST.reset(fixture_host)
+            server.close()
+            await server.wait_closed()
+        assert received == [b"hello"]
+
+    asyncio.run(scenario())
 
 
 ROOT = Path(__file__).resolve().parents[1]

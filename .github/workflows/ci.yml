@@ -139,6 +139,7 @@ jobs:
             spike/test_xbox_dns.py \
             scripts/pf_anchor_smoke.py \
             scripts/pf_installed_lifecycle_smoke.py \
+            scripts/composed_pending_navigation_smoke.py \
             scripts/sync_version.py \
             scripts/make_appcast.py \
             scripts/dependency_audit.py \
@@ -518,7 +519,8 @@ jobs:
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
           bash scripts/run_packaged_lifecycle_smoke.sh \
-            "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
+            "app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app" \
+            "${{ steps.packaged-browser-probe-chrome.outputs.chrome-path }}"
 
       - name: Package the qualified app
         run: |

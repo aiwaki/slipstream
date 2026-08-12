@@ -93,6 +93,27 @@ class PendingNavigationProbeRuntimeError(ValueError):
     pass
 
 
+def browser_worker_disposable_environment(environment=None):
+    """Forward only the closed browser fixture surface in disposable CI."""
+    source = os.environ if environment is None else environment
+    if not isinstance(source, dict) and source is not os.environ:
+        try:
+            source = dict(source)
+        except (TypeError, ValueError):
+            return {}
+    if not (
+        source.get("CI") == "true"
+        and source.get("GITHUB_ACTIONS") == "true"
+        and source.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+    ):
+        return {}
+    return {
+        name: source[name]
+        for name in _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT
+        if isinstance(source.get(name), str) and source[name]
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ConsoleUserIdentity:
     uid: int
@@ -1564,7 +1585,9 @@ class PendingNavigationBrowserWorkerLauncher:
 
 
 def cleanup_stale_browser_worker_runtime(*, remove_root=False):
-    return PendingNavigationBrowserWorkerLauncher().cleanup_stale(
+    return PendingNavigationBrowserWorkerLauncher(
+        disposable_environment=browser_worker_disposable_environment(),
+    ).cleanup_stale(
         remove_root=remove_root,
     )
 

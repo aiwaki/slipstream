@@ -438,6 +438,79 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             self.assertIn("--no-voice", updated["ProgramArguments"])
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
 
+    def test_plist_patch_forwards_only_the_exact_disposable_browser_fixture(
+        self,
+    ) -> None:
+        browser_environment = {
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "SLIPSTREAM_DISPOSABLE_CI": "1",
+            "SLIPSTREAM_BROWSER_PROBE_CHROME": "/tmp/Chrome",
+            "SLIPSTREAM_BROWSER_PROBE_ORIGIN": (
+                "https://pending.slipstream.invalid:18443/"
+            ),
+            "SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES": (
+                "MAP pending.slipstream.invalid 127.0.0.1"
+            ),
+            "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS": "1",
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST": (
+                "pending.slipstream.invalid"
+            ),
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP": "93.184.216.34",
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT": "19443",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daemon.plist"
+            with path.open("wb") as handle:
+                plistlib.dump({"ProgramArguments": ["daemon"]}, handle)
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CI": "true",
+                    "GITHUB_ACTIONS": "true",
+                    "SLIPSTREAM_DISPOSABLE_CI": "1",
+                },
+                clear=True,
+            ):
+                lifecycle._patch_launchd_for_qualification(
+                    path,
+                    browser_environment,
+                )
+
+            with path.open("rb") as handle:
+                updated = plistlib.load(handle)
+
+        for name, value in browser_environment.items():
+            self.assertEqual(updated["EnvironmentVariables"][name], value)
+        self.assertNotIn(
+            "SLIPSTREAM_BROWSER_PROBE_SOCKET",
+            updated["EnvironmentVariables"],
+        )
+
+    def test_plist_patch_rejects_a_partial_browser_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daemon.plist"
+            with path.open("wb") as handle:
+                plistlib.dump({"ProgramArguments": ["daemon"]}, handle)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CI": "true",
+                    "GITHUB_ACTIONS": "true",
+                    "SLIPSTREAM_DISPOSABLE_CI": "1",
+                },
+                clear=True,
+            ):
+                with self.assertRaisesRegex(
+                    lifecycle.LifecycleError,
+                    "environment is incomplete",
+                ):
+                    lifecycle._patch_launchd_for_qualification(
+                        path,
+                        {"CI": "true"},
+                    )
+
     def test_clean_install_contract_requires_local_engine_without_geph(self) -> None:
         status = {
             "schema_version": 2,
@@ -859,6 +932,57 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                         "error-page",
                         executable,
                     )
+
+    def test_composed_navigation_requires_styled_original_completion_and_cleanup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Chrome"
+            executable.write_bytes(b"chrome")
+            executable.chmod(0o755)
+            fixture = mock.Mock()
+            fixture.report.return_value = {
+                "root_requests": 3,
+                "ready_callbacks": 1,
+            }
+            capture = lifecycle.ChromeCapture(
+                loaded=True,
+                timed_out=False,
+                returncode=0,
+                stdout=lifecycle.composed.COMPOSED_READY_MARKER,
+                stderr=b"",
+            )
+            with mock.patch.object(
+                lifecycle,
+                "_user_environment",
+                return_value=(os.environ.copy(), Path(tmp)),
+            ), mock.patch.object(
+                lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            ), mock.patch.object(
+                lifecycle.os,
+                "chown",
+            ), mock.patch.object(
+                lifecycle,
+                "_capture_chrome_output",
+                return_value=capture,
+            ) as run, mock.patch.object(
+                lifecycle.composed,
+                "assert_worker_clean",
+            ) as clean:
+                report = lifecycle._run_composed_navigation(
+                    fixture,
+                    501,
+                    20,
+                    executable,
+                )
+
+        self.assertEqual(report["root_requests"], 3)
+        self.assertEqual(report["extension"], "disabled")
+        self.assertFalse(report["manual_reload"])
+        self.assertIn("--disable-extensions", run.call_args.args[0])
+        clean.assert_called_once_with(501)
 
     def test_chrome_capture_stops_after_expected_dom_without_waiting_for_exit(
         self,

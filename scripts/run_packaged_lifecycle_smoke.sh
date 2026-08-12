@@ -7,12 +7,17 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" || "${SLIPSTREAM_DISPOSABLE_CI:-}" != "1" 
   exit 2
 fi
 
-if [[ $# -ne 1 || ! -d "$1" ]]; then
-  echo "usage: $0 /path/to/Slipstream.app" >&2
+if [[ $# -lt 1 || $# -gt 2 || ! -d "$1" ]]; then
+  echo "usage: $0 /path/to/Slipstream.app [/path/to/Chrome]" >&2
   exit 2
 fi
 
 app_bundle="$1"
+chrome_executable="${2:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+if [[ ! -x "$chrome_executable" ]]; then
+  echo "Chrome executable is unavailable: $chrome_executable" >&2
+  exit 2
+fi
 driver_port=""
 driver_url=""
 driver_log="$(mktemp -t slipstream-safaridriver)"
@@ -109,4 +114,5 @@ start_driver
 
 sudo -E "$(command -v python3)" scripts/pf_installed_lifecycle_smoke.py \
   --app-bundle "$app_bundle" \
+  --chrome-executable "$chrome_executable" \
   --safaridriver-url "$driver_url"
