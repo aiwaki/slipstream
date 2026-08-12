@@ -1019,6 +1019,9 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             target = mock.Mock(uninstall_command=("/test/slipstream", "--uninstall"))
             system = mock.Mock()
             runner = mock.Mock()
+            worker_profile = Path(tmp) / (
+                "slipstream-browser-probe-" + "a" * 32
+            )
 
             def capture(*_args, completion_probe=None, **_kwargs):
                 deadline = time.monotonic() + 1
@@ -1050,12 +1053,15 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             ), mock.patch.object(
                 lifecycle.composed,
                 "assert_worker_active",
-                return_value={
-                    "worker_processes": 1,
-                    "worker_profiles": 1,
-                    "worker_runtime_directories": 1,
-                    "launchagent": "loaded",
-                },
+                return_value=(
+                    {
+                        "worker_processes": 1,
+                        "worker_profiles": 1,
+                        "worker_runtime_directories": 1,
+                        "launchagent": "loaded",
+                    },
+                    (worker_profile,),
+                ),
             ) as active, mock.patch.object(
                 lifecycle.composed,
                 "assert_worker_clean",

@@ -533,12 +533,16 @@ Branch `codex/qualify-active-worker-uninstall` adds the remaining installed
 ownership transaction. A fresh exact fixture keeps the original Chrome request
 and correlated worker request pending. Before uninstall the gate requires one
 matching live Aqua LaunchAgent PID, packaged worker process, private Chrome
-profile, and owner-private runtime directory. It then invokes the normal
+profile, and owner-private runtime directory. The first packaged attempt proved
+that a hosted console user's live profile is not reliably rooted in `/tmp`.
+The corrected gate derives the one exact random `--user-data-dir` only from a
+matching non-root Chrome process, requires its owner and mode `0700`, saves that
+path before uninstall, and requires it to disappear afterward. It then invokes the normal
 installed uninstall and requires the LaunchDaemon, broker, installed payload,
 worker LaunchAgent/process/profile/runtime, and the fixture-owned original
 Chrome capture all to be absent or stopped. Sentinel connection/state and the
 global PF snapshot remain mandatory invariants. This adds no production code
-path or normal idle work. Local verification passes 1,182 Python tests plus 54
+path or normal idle work. Local verification passes 1,183 Python tests plus 54
 subtests; the real packaged active-worker transaction remains open.
 
 ## Adjacent Routing Projects Audit (2026-08-02)

@@ -2367,6 +2367,7 @@ def _run_active_worker_uninstall(
         daemon=True,
     )
     active_evidence = None
+    active_profiles: tuple[Path, ...] = ()
     try:
         os.chown(profile_dir, uid, gid)
         profile_dir.chmod(0o700)
@@ -2379,11 +2380,19 @@ def _run_active_worker_uninstall(
             raise LifecycleError(
                 f"active-worker request composition is wrong: {roots!r}"
             )
-        active_evidence = composed.assert_worker_active(uid)
+        active_evidence, active_profiles = composed.assert_worker_active(uid)
         system.run(target.uninstall_command)
         _wait_for_path(LAUNCHD_PLIST, present=False)
         _assert_clean_install_state(runner)
         composed.assert_worker_clean(uid)
+        surviving_profiles = tuple(
+            profile for profile in active_profiles if os.path.lexists(profile)
+        )
+        if surviving_profiles:
+            raise LifecycleError(
+                "active-worker uninstall left its exact Chrome profile: "
+                f"{tuple(profile.name for profile in surviving_profiles)!r}"
+            )
     finally:
         stop_capture.set()
         if capture_thread.ident is not None:
@@ -2400,6 +2409,10 @@ def _run_active_worker_uninstall(
         ) from capture_failures[0]
     if len(captures) != 1 or active_evidence is None:
         raise LifecycleError("active-worker original Chrome capture was incomplete")
+    if os.path.lexists(profile_dir):
+        raise LifecycleError(
+            "active-worker uninstall left the qualification Chrome profile"
+        )
     return {
         **active_evidence,
         "root_channels_before_uninstall": ["original", "worker"],

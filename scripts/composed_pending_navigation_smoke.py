@@ -7,6 +7,7 @@ import http.server
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import ssl
 import stat
@@ -472,6 +473,52 @@ def _worker_processes(uid: int) -> tuple[int, ...]:
     return tuple(sorted(matches))
 
 
+def _active_worker_chrome_profiles(uid: int) -> tuple[Path, ...]:
+    """Find exact live worker profiles from user-owned Chrome arguments."""
+    result = subprocess.run(
+        ("/bin/ps", "-axo", "uid=,command="),
+        capture_output=True,
+        text=True,
+        timeout=10.0,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ComposedQualificationError("browser worker Chrome scan failed")
+    profiles = set()
+    for raw_line in result.stdout.splitlines():
+        fields = raw_line.strip().split(None, 1)
+        if len(fields) != 2:
+            continue
+        try:
+            observed_uid = int(fields[0])
+            arguments = tuple(shlex.split(fields[1]))
+        except (ValueError, TypeError):
+            continue
+        if observed_uid != uid:
+            continue
+        for argument in arguments:
+            prefix = "--user-data-dir="
+            if not argument.startswith(prefix):
+                continue
+            profile = Path(argument[len(prefix):])
+            if not profile.is_absolute() or WORKER_PROFILE_RE.fullmatch(
+                profile.name
+            ) is None:
+                continue
+            try:
+                metadata = os.lstat(profile)
+            except OSError:
+                continue
+            if (
+                stat.S_ISDIR(metadata.st_mode)
+                and not stat.S_ISLNK(metadata.st_mode)
+                and metadata.st_uid == uid
+                and stat.S_IMODE(metadata.st_mode) == 0o700
+            ):
+                profiles.add(profile)
+    return tuple(sorted(profiles))
+
+
 def _cpu_seconds(value: str) -> float:
     fields = value.strip().split(":")
     if len(fields) not in {2, 3}:
@@ -585,7 +632,11 @@ def assert_worker_clean(uid: int, *, timeout: float = 10.0) -> None:
     )
 
 
-def assert_worker_active(uid: int, *, timeout: float = 5.0) -> dict[str, object]:
+def assert_worker_active(
+    uid: int,
+    *,
+    timeout: float = 5.0,
+) -> tuple[dict[str, object], tuple[Path, ...]]:
     """Prove one exact worker and its browser are live before uninstall."""
     require_disposable_ci()
     deadline = time.monotonic() + timeout
@@ -593,7 +644,7 @@ def assert_worker_active(uid: int, *, timeout: float = 5.0) -> dict[str, object]
     while time.monotonic() < deadline:
         last = worker_diagnostics(uid)
         processes = tuple(last.get("processes") or ())
-        profiles = tuple(last.get("profiles") or ())
+        profiles = _active_worker_chrome_profiles(uid)
         runtime = tuple(last.get("runtime") or ())
         if len(processes) == len(profiles) == len(runtime) == 1:
             launch = runtime[0]
@@ -623,15 +674,19 @@ def assert_worker_active(uid: int, *, timeout: float = 5.0) -> dict[str, object]
                     and match is not None
                     and int(match.group(1)) == processes[0]
                 ):
-                    return {
-                        "worker_processes": 1,
-                        "worker_profiles": 1,
-                        "worker_runtime_directories": 1,
-                        "launchagent": "loaded",
-                    }
+                    return (
+                        {
+                            "worker_processes": 1,
+                            "worker_profiles": 1,
+                            "worker_runtime_directories": 1,
+                            "launchagent": "loaded",
+                        },
+                        profiles,
+                    )
         time.sleep(0.1)
     raise ComposedQualificationError(
-        f"packaged browser worker was not provably active: {last!r}"
+        "packaged browser worker was not provably active: "
+        f"worker={last!r}; live_profiles={len(profiles)}"
     )
 
 

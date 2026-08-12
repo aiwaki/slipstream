@@ -59,13 +59,14 @@ Branch `codex/qualify-active-worker-uninstall` adds the next separate installed
 lifecycle gate. After the existing soak it starts a fresh exact fixture and
 original extension-free Chrome request, waits for the correlated worker root,
 and requires one matching live LaunchAgent PID, packaged worker process,
-browser profile, and owner-private runtime. It then runs the normal installed
+browser profile derived from the live exact `--user-data-dir`, and owner-private
+runtime. It then runs the normal installed
 uninstall while that worker/browser pair is still blocked and requires the
 LaunchDaemon, broker, worker LaunchAgent/process/profile/runtime, installed
 payload, and original qualification capture all to be absent or stopped. The
 sentinel connection/state and global PF snapshot must remain unchanged.
 
-Current local verification passes 1,182 Python tests plus 54 subtests, focused
+Current local verification passes 1,183 Python tests plus 54 subtests, focused
 Python compilation, shell syntax, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
 bounded source inspection used the documented fallback. The real packaged
