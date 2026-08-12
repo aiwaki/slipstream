@@ -300,6 +300,9 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
     assert CONTRACT["invariants"][
         "terminal_observation_has_no_route_effect"
     ] is True
+    assert CONTRACT["invariants"][
+        "disposable_fixture_jobs_exact_endpoint_only"
+    ] is True
     assert CONTRACT["ipc"] == {
         "socket_path": probe_runtime.PENDING_NAVIGATION_PROBE_SOCKET_PATH,
         "claim_lease_ms": int(probe_runtime.CLAIM_LEASE_SECONDS * 1000),
@@ -327,8 +330,9 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         ),
         "same_host_recursive_jobs": False,
         "accepted_result_guard_until_worker_cleanup": True,
-        "rejected_result_guard_until_expiry": True,
-        "live_capability_guard_until_expiry": True,
+        "claimed_job_guard_until_worker_cleanup": True,
+        "unclaimed_rejected_result_guard_until_expiry": True,
+        "unclaimed_live_capability_guard_until_expiry": True,
         "unstarted_job_guard_ms": 0,
         "unstarted_discard_uses_worker_lock": True,
         "submit_before_cleanup": True,
@@ -378,6 +382,31 @@ def test_claim_lease_redelivers_after_worker_loss_but_not_after_expiry():
     assert runtime.handle(_request("claim"))["job"] == job
     clock["mono"] = 130.0
     assert runtime.handle(_request("claim"))["reason"] == "no_job"
+
+
+def test_claim_observer_runs_before_delivery_and_can_drop_stale_authority():
+    clock = {"wall": 1_010_000, "mono": 100.0}
+    observed = []
+    runtime = probe_runtime.PendingNavigationProbeRuntime(
+        submit_result=lambda _result: True,
+        claim_job=lambda job: observed.append(job) is None,
+        wall_clock_ms=lambda: clock["wall"],
+        monotonic_clock=lambda: clock["mono"],
+    )
+    job = _job()
+    assert runtime.enqueue(job)
+    assert runtime.handle(_request("claim"))["job"] == job
+    assert observed == [job]
+
+    rejected = probe_runtime.PendingNavigationProbeRuntime(
+        submit_result=lambda _result: True,
+        claim_job=lambda _job: False,
+        wall_clock_ms=lambda: clock["wall"],
+        monotonic_clock=lambda: clock["mono"],
+    )
+    assert rejected.enqueue(job)
+    assert rejected.handle(_request("claim"))["reason"] == "no_job"
+    assert rejected.state_size() == 0
 
 
 def test_submit_removes_the_job_and_reports_effect_outcome():
@@ -480,6 +509,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.clear()
+        tproxy._pending_navigation_probe_claimed_guards.clear()
         tproxy._active_pending_navigation_relays.clear()
         clock = {"wall": 1_010_000, "mono": 100.0}
         first = tproxy._RelayActivity(
@@ -522,6 +552,12 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
                     now=clock["mono"],
                 )
             ),
+            claim_job=lambda claimed: (
+                tproxy._pending_navigation_probe_worker_claimed(
+                    claimed,
+                    now=clock["mono"],
+                )
+            ),
             wall_clock_ms=lambda: clock["wall"],
             monotonic_clock=lambda: clock["mono"],
         )
@@ -549,6 +585,11 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
             assert submitted["accepted"] is True
             assert first.downstream_idle_retry
             assert not second.downstream_idle_retry
+            assert tproxy._pending_navigation_probe_claimed_guards
+            tproxy._pending_navigation_probe_worker_completed(
+                now=clock["mono"],
+            )
+            assert not tproxy._pending_navigation_probe_claimed_guards
             await owned.close()
             assert not socket_path.exists()
 
@@ -563,6 +604,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.clear()
+        tproxy._pending_navigation_probe_claimed_guards.clear()
         tproxy._active_pending_navigation_relays.clear()
 
 

@@ -268,6 +268,7 @@ class PendingNavigationProbeRuntime:
         self,
         *,
         submit_result,
+        claim_job=None,
         wall_clock_ms=None,
         monotonic_clock=None,
         max_live_jobs=MAX_LIVE_JOBS,
@@ -275,6 +276,7 @@ class PendingNavigationProbeRuntime:
     ):
         if (
             not callable(submit_result)
+            or (claim_job is not None and not callable(claim_job))
             or type(max_live_jobs) is not int
             or max_live_jobs <= 0
             or not isinstance(claim_lease_seconds, (int, float))
@@ -283,6 +285,7 @@ class PendingNavigationProbeRuntime:
         ):
             raise ValueError("pending-navigation probe runtime bounds are invalid")
         self._submit_result = submit_result
+        self._claim_job = claim_job
         self._wall_clock_ms = wall_clock_ms or (lambda: int(time.time() * 1000))
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._max_live_jobs = max_live_jobs
@@ -322,6 +325,7 @@ class PendingNavigationProbeRuntime:
 
     def _claim(self):
         now_monotonic = self._monotonic_clock()
+        claimed_job = None
         with self._lock:
             self._prune_locked(now_monotonic)
             for queued in self._jobs.values():
@@ -331,13 +335,25 @@ class PendingNavigationProbeRuntime:
                     queued.expires_at_monotonic,
                     now_monotonic + self._claim_lease_seconds,
                 )
-                return _response(
-                    True,
-                    OPERATION_CLAIM,
-                    REASON_JOB_READY,
-                    dict(queued.job),
-                )
-        return _response(True, OPERATION_CLAIM, REASON_NO_JOB)
+                claimed_job = dict(queued.job)
+                break
+        if claimed_job is None:
+            return _response(True, OPERATION_CLAIM, REASON_NO_JOB)
+        if self._claim_job is not None:
+            try:
+                observed = self._claim_job(dict(claimed_job)) is True
+            except Exception:
+                observed = False
+            if not observed:
+                with self._lock:
+                    self._jobs.pop(claimed_job["capability"], None)
+                return _response(True, OPERATION_CLAIM, REASON_NO_JOB)
+        return _response(
+            True,
+            OPERATION_CLAIM,
+            REASON_JOB_READY,
+            claimed_job,
+        )
 
     def _submit(self, result):
         if not isinstance(result, dict):

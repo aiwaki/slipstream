@@ -32,12 +32,24 @@ worker exits. An accepted result keeps its exact-host guard until the one-shot
 launcher reports that exact worker and Chrome/profile cleanup complete; the
 callback then releases only that accepted guard so a legitimate next
 eight-second stage stays fast. This remains true even if cleanup crosses the
-original capability expiry. A rejected result or live capability invalidated
-before its worker finishes is instead guarded through its original 30-second
+original capability expiry. The owner-only broker also records the exact job
+claim before delivering it. If that claimed capability expires, is rejected,
+or its relay closes while the worker remains active, its same-host guard is
+promoted through the same exact cleanup callback; an unclaimed rejected or
+live-invalid capability remains guarded only through its original 30-second
 expiry. Static rejection classes are logged for qualification without host,
 URL, content, or browser identifiers. The preceding head `349e00e` passed all
 six PR checks, including packaged job `94034409872`; exact cleanup-bound guard
-qualification, review resolution, and exact-main gates remain open. Capability
+head `1a53d37` then passed common, Chromium, Windows, audit, and Geph checks but
+packaged job `94038042816` exposed a separate disposable-fixture race. A
+background unknown-host relay reached the shared worker queue before the exact
+fixture job, so the closed fixture origin rejected it as `ci_origin_invalid`;
+lease retries then became `claimed_job_invalid`, and the original fixture never
+received a worker request. Under the already required exact disposable GitHub
+Actions markers, pending-navigation admission now requires the same exact
+host, public IP, and port-443 tuple accepted by the loopback fixture mapping.
+Production admission is unchanged. Final-head packaged qualification, fresh
+review, and exact-main gates remain open. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
 An enqueue rejection removes the unstarted job without a guard. After a false
@@ -92,7 +104,7 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,188 Python tests plus 54 subtests, focused
+Current local verification passes 1,192 Python tests plus 54 subtests, focused
 Python compilation, 96 Rust tests, Rust clippy, contract JSON parsing, and
 `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;

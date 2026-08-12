@@ -2189,6 +2189,7 @@ _active_pending_navigation_relays = {}  # host -> {activity id: activity}
 _pending_navigation_probe_capabilities = OrderedDict()  # token -> bound relay
 _pending_navigation_probe_host_guards = OrderedDict()  # host -> monotonic expiry
 _pending_navigation_probe_accepted_guards = OrderedDict()  # host -> capability expiry
+_pending_navigation_probe_claimed_guards = OrderedDict()  # token -> (host, expiry)
 _auto_geph_last_status = {
     "state": "idle",
     "host": "",
@@ -3619,6 +3620,7 @@ def _get_pending_navigation_probe_runtime():
             _pending_navigation_probe_runtime = (
                 pending_navigation_probe_runtime.PendingNavigationProbeRuntime(
                     submit_result=_submit_pending_navigation_probe_result,
+                    claim_job=_pending_navigation_probe_worker_claimed,
                 )
             )
         return _pending_navigation_probe_runtime
@@ -9908,8 +9910,17 @@ def _register_pending_navigation_relay(
     return True
 
 
-def _guard_pending_navigation_probe_host(capability, now):
-    expires_at = capability.expires_at_monotonic
+def _guard_pending_navigation_probe_host(
+    capability,
+    now,
+    *,
+    until_worker_cleanup=False,
+):
+    expires_at = (
+        math.inf
+        if until_worker_cleanup
+        else capability.expires_at_monotonic
+    )
     if expires_at <= now:
         return
     current = _pending_navigation_probe_host_guards.get(capability.host, 0.0)
@@ -9918,11 +9929,46 @@ def _guard_pending_navigation_probe_host(capability, now):
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
 
 
+def _pending_navigation_probe_worker_claimed(job, now=None):
+    """Bind one broker claim to its exact daemon capability lifecycle."""
+    now = time.monotonic() if now is None else now
+    if not isinstance(job, dict):
+        return False
+    token = job.get("capability")
+    with _auto_geph_lock:
+        _prune_pending_navigation_probe_capabilities(now)
+        capability = _pending_navigation_probe_capabilities.get(token)
+        if (
+            capability is None
+            or job.get("host") != capability.host
+            or job.get("request_started_at_unix_ms")
+            != capability.request_started_at_unix_ms
+            or job.get("issued_at_unix_ms") != capability.issued_at_unix_ms
+            or job.get("expires_at_unix_ms")
+            != capability.expires_at_unix_ms
+        ):
+            return False
+        _pending_navigation_probe_claimed_guards[token] = (
+            capability.host,
+            capability.expires_at_monotonic,
+        )
+        _pending_navigation_probe_claimed_guards.move_to_end(token)
+    return True
+
+
 def _pending_navigation_probe_worker_completed(now=None):
-    """Release only accepted-result guards after exact worker cleanup."""
+    """Release only exact claimed/result guards after worker cleanup."""
     now = time.monotonic() if now is None else now
     with _auto_geph_lock:
-        for host, expected_expiry in tuple(
+        for token, (host, _expected_expiry) in tuple(
+            _pending_navigation_probe_claimed_guards.items()
+        ):
+            if math.isinf(
+                _pending_navigation_probe_host_guards.get(host, 0.0)
+            ):
+                _pending_navigation_probe_host_guards.pop(host, None)
+            _pending_navigation_probe_claimed_guards.pop(token, None)
+        for host, _expected_expiry in tuple(
             _pending_navigation_probe_accepted_guards.items()
         ):
             if math.isinf(
@@ -9953,9 +9999,21 @@ def _prune_pending_navigation_probe_capabilities(now):
     ):
         if capability.expires_at_monotonic <= now:
             _pending_navigation_probe_capabilities.pop(token, None)
+            if token in _pending_navigation_probe_claimed_guards:
+                _guard_pending_navigation_probe_host(
+                    capability,
+                    now,
+                    until_worker_cleanup=True,
+                )
         elif capability.activity.retry_closed:
             _pending_navigation_probe_capabilities.pop(token, None)
-            _guard_pending_navigation_probe_host(capability, now)
+            _guard_pending_navigation_probe_host(
+                capability,
+                now,
+                until_worker_cleanup=(
+                    token in _pending_navigation_probe_claimed_guards
+                ),
+            )
 
 
 def _revoke_pending_navigation_probe_capability(
@@ -9972,7 +10030,13 @@ def _revoke_pending_navigation_probe_capability(
             if capability.activity is activity:
                 _pending_navigation_probe_capabilities.pop(token, None)
                 if guard_possible_worker:
-                    _guard_pending_navigation_probe_host(capability, now)
+                    _guard_pending_navigation_probe_host(
+                        capability,
+                        now,
+                        until_worker_cleanup=(
+                            token in _pending_navigation_probe_claimed_guards
+                        ),
+                    )
 
 
 def _pending_navigation_activity_eligible_locked(activity, now):
@@ -9981,6 +10045,15 @@ def _pending_navigation_activity_eligible_locked(activity, now):
         h
         and route_policy(h)["route_class"] == ROUTE_UNKNOWN
         and _auto_geph_base_host_allowed(h)
+        and (
+            not _PENDING_NAVIGATION_FIXTURE_ENVIRONMENT
+            or _disposable_pending_navigation_fixture_endpoint(
+                h,
+                activity.pending_navigation_ip,
+                443,
+            )
+            is not None
+        )
         and _active_pending_navigation_relays.get(h, {}).get(id(activity))
         is activity
         and activity.pending_navigation_eligible
@@ -10180,7 +10253,13 @@ def _submit_pending_navigation_probe_result(payload, *, now=None):
         _prune_pending_navigation_probe_capabilities(now)
         capability = _pending_navigation_probe_capabilities.pop(token, None)
         if capability is not None:
-            _guard_pending_navigation_probe_host(capability, now)
+            _guard_pending_navigation_probe_host(
+                capability,
+                now,
+                until_worker_cleanup=(
+                    token in _pending_navigation_probe_claimed_guards
+                ),
+            )
     if capability is None:
         return _reject_pending_navigation_probe_result("capability_unavailable")
     if (

@@ -82,6 +82,9 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
     pending_navigation_probe_accepted_guards = OrderedDict(
         tproxy._pending_navigation_probe_accepted_guards
     )
+    pending_navigation_probe_claimed_guards = OrderedDict(
+        tproxy._pending_navigation_probe_claimed_guards
+    )
     xbox_dns_candidates = dict(tproxy._xbox_dns_candidates)
     xbox_dns_attempts = dict(tproxy._xbox_dns_attempts)
     clean_eof_stalls = {
@@ -197,6 +200,7 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._pending_navigation_probe_capabilities.clear()
         tproxy._pending_navigation_probe_host_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.clear()
+        tproxy._pending_navigation_probe_claimed_guards.clear()
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_attempts.clear()
         tproxy._clean_eof_stalls.clear()
@@ -310,6 +314,10 @@ def reset_smart_dns_state(monkeypatch, tmp_path):
         tproxy._pending_navigation_probe_accepted_guards.clear()
         tproxy._pending_navigation_probe_accepted_guards.update(
             pending_navigation_probe_accepted_guards
+        )
+        tproxy._pending_navigation_probe_claimed_guards.clear()
+        tproxy._pending_navigation_probe_claimed_guards.update(
+            pending_navigation_probe_claimed_guards
         )
         tproxy._xbox_dns_candidates.clear()
         tproxy._xbox_dns_candidates.update(xbox_dns_candidates)
@@ -12028,10 +12036,13 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         "accepted_result_guard_until_worker_cleanup"
     ] is True
     assert contract["worker_lifecycle"][
-        "rejected_result_guard_until_expiry"
+        "claimed_job_guard_until_worker_cleanup"
     ] is True
     assert contract["worker_lifecycle"][
-        "live_capability_guard_until_expiry"
+        "unclaimed_rejected_result_guard_until_expiry"
+    ] is True
+    assert contract["worker_lifecycle"][
+        "unclaimed_live_capability_guard_until_expiry"
     ] is True
     assert contract["worker_lifecycle"]["unstarted_job_guard_ms"] == 0
     assert contract["worker_lifecycle"][
@@ -12040,6 +12051,65 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
     assert contract["worker_lifecycle"]["submit_before_cleanup"] is True
     assert contract["worker_lifecycle"]["cleanup_before_worker_exit"] is True
     assert contract["invariants"]["production_runtime_composition"] is True
+    assert contract["invariants"][
+        "disposable_fixture_jobs_exact_endpoint_only"
+    ] is True
+
+
+def test_pending_navigation_probe_disposable_fixture_rejects_noise_jobs(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tproxy,
+        "_PENDING_NAVIGATION_FIXTURE_ENVIRONMENT",
+        {
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "SLIPSTREAM_DISPOSABLE_CI": "1",
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST": (
+                composed.FIXTURE_HOST
+            ),
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP": (
+                composed.FIXTURE_PUBLIC_IP
+            ),
+            "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT": "8443",
+        },
+    )
+    exact = _eligible_pending_navigation_activity()
+    assert tproxy._register_pending_navigation_relay(
+        exact,
+        composed.FIXTURE_HOST,
+        composed.FIXTURE_PUBLIC_IP,
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    exact_job = tproxy._issue_pending_navigation_probe(
+        exact,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "1" * 32,
+    )
+    assert exact_job is not None
+    tproxy._revoke_pending_navigation_probe_capability(
+        exact,
+        now=100.0,
+        guard_possible_worker=False,
+    )
+
+    noise = _eligible_pending_navigation_activity()
+    assert tproxy._register_pending_navigation_relay(
+        noise,
+        "noise.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    assert tproxy._issue_pending_navigation_probe(
+        noise,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "2" * 32,
+    ) is None
 
 
 def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
@@ -12255,6 +12325,35 @@ def test_pending_navigation_probe_completes_only_its_bound_original_relay():
     asyncio.run(scenario())
 
 
+def test_claimed_rejected_probe_stays_guarded_until_worker_cleanup():
+    activity = _eligible_pending_navigation_activity()
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    job = tproxy._issue_pending_navigation_probe(
+        activity,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "1" * 32,
+    )
+    assert job is not None
+    assert tproxy._pending_navigation_probe_worker_claimed(job, now=100.0)
+    assert not tproxy._submit_pending_navigation_probe_result(
+        _pending_navigation_probe_result(job, host="other.example"),
+        now=108.001,
+    )
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == float("inf")
+    tproxy._pending_navigation_probe_worker_completed(now=108.002)
+    assert not tproxy._pending_navigation_probe_host_guards
+    assert not tproxy._pending_navigation_probe_claimed_guards
+
+
 def test_pending_navigation_probe_capability_state_is_bounded_and_revoked():
     activities = []
     jobs = []
@@ -12414,6 +12513,54 @@ def test_pending_navigation_probe_live_revoke_guards_until_expiry():
         now_unix_ms=1_039_999,
         token_factory=lambda: "2" * 32,
     ) is None
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=130.001,
+        now_unix_ms=1_040_001,
+        token_factory=lambda: "2" * 32,
+    ) is not None
+
+
+def test_claimed_probe_expiry_stays_guarded_until_worker_cleanup():
+    first = _eligible_pending_navigation_activity(1_000_000)
+    second = _eligible_pending_navigation_activity(1_000_001)
+    for activity, address in ((first, "1.1.1.1"), (second, "8.8.8.8")):
+        assert tproxy._register_pending_navigation_relay(
+            activity,
+            "unknown.example",
+            address,
+            tproxy.ROUTE_UNKNOWN,
+            tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        )
+
+    job = tproxy._issue_pending_navigation_probe(
+        first,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "1" * 32,
+    )
+    assert job is not None
+    assert tproxy._pending_navigation_probe_worker_claimed(job, now=100.0)
+    assert job["capability"] in (
+        tproxy._pending_navigation_probe_claimed_guards
+    )
+
+    assert tproxy._issue_pending_navigation_probe(
+        second,
+        now=130.001,
+        now_unix_ms=1_040_001,
+        token_factory=lambda: "2" * 32,
+    ) is None
+    assert job["capability"] not in (
+        tproxy._pending_navigation_probe_capabilities
+    )
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown.example"
+    ] == float("inf")
+
+    tproxy._pending_navigation_probe_worker_completed(now=130.001)
+    assert not tproxy._pending_navigation_probe_claimed_guards
+    assert not tproxy._pending_navigation_probe_host_guards
     assert tproxy._issue_pending_navigation_probe(
         second,
         now=130.001,
