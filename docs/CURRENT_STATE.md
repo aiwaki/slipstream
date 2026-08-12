@@ -23,6 +23,28 @@ CI run `31580485874` passed common job `94062155133`, packaged lifecycle
 run `31580485841` passed AMD64 job `94062155131` and ARM64 job `94062155203`.
 No protected artifact from this SHA has been installed on the workstation.
 
+PR #333 is the merged documentation successor at
+`ec34d7aa573b8781f06be092574316f9e1b6ae76`. Its exact reviewed head
+`6b0af22604f58947ee177d2023a81b07d418966a` passed all six PR checks in run
+`31582161644`; exact-main CI `31582732767`, audit `31582732781`, and native
+Windows run `31582732798` also passed. Review correctly rejected the earlier
+idea that the existing protected unpacked-extension scenarios could qualify
+the packaged extensionless automatic worker. That path needs its own
+exact-artifact `original -> worker -> original` scenario before another
+protected qualification or any workstation transaction.
+
+PR #334 implements that missing
+qualification slice without changing production routing. The protected
+harness starts the composed fixture, installs the exact built app, restarts its
+LaunchDaemon with only the frozen disposable-browser override set, and requires
+the extensionless original navigation, packaged lazy worker, exact original
+retry, complete styled resources, and worker cleanup before the existing
+unpacked-extension semantic scenarios continue. Both hosted browser gates now
+pin the already qualified complete Chrome for Testing `151.0.7922.77` bundle.
+Local verification passes 1,197 Python tests plus 54 subtests, focused script
+tests and compilation, project-state validation, and `git diff --check`. This
+is branch evidence only; no protected run or artifact exists for the change.
+
 PR #332 is the merged product correction. Its first documentation head passed
 all six required checks, including packaged job `94019999739`. A later
 documentation-only head exposed a real timing race in packaged job
@@ -374,10 +396,10 @@ also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
 common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
 passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
 
-The next verified action is to require the same six checks on the docs-only
-successor, mark PR #329 ready, and merge only that exact green head. Installed
-update, active-worker uninstall, measured idle cost, and the complete composed
-original-navigation transaction remain explicit release gates.
+PRs #329 through #333 completed the automatic original-navigation composition,
+installed-update, active-worker uninstall, measured idle-cost, cleanup, and
+exact-main evidence gates. The remaining browser gate is the protected
+exact-artifact repetition of that extensionless transaction.
 Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the
@@ -1748,20 +1770,17 @@ and dependency audit in
 
 ## Next Verified Action
 
-Merge the docs-only successor that records PR #332 and its exact-main evidence.
-Then add one exact-artifact, extensionless automatic local-browser scenario to
-the protected owned-Geph qualification before dispatching that workflow again.
-The existing protected scenarios all launch Chrome with the unpacked extension;
-ordinary Chromium and packaged CI prove the automatic worker path but cannot
-transfer that proof to a protected artifact. The new protected scenario must
-exercise `original -> worker -> original`, complete styled resources, prove
-exact worker cleanup, retain the owned-Geph lifecycle, and preserve all external
-DNS/proxy/PAC/VPN/PF owners. Discord, YouTube, and Googlevideo remain local-only.
-No existing, branch, or merely protected artifact is installation authority.
-Only a fresh exact-main protected run that includes this automatic-path proof
-may later admit a controlled workstation transaction, which must install only
-that exact artifact and roll back on the first failed required smoke. This
-checkpoint itself authorizes no workstation change.
+Review and merge PR #334 only after all six PR
+checks pass. Then require fresh exact-main CI, audit, and native Windows gates
+and dispatch the protected owned-Geph workflow exactly once for that live main
+SHA. The protected result must contain `original -> worker -> original`, one
+complete CSS, JavaScript, image, and ready callback, exact worker cleanup,
+continued account-backed owned-Geph payload, complete product/user cleanup, and
+unchanged external DNS/proxy/PAC/VPN/PF ownership. Discord, YouTube, and
+Googlevideo remain local-only. No existing, branch, or merely protected
+artifact is installation authority. A successful protected run creates later
+workstation-transaction authority for only its exact artifact; it does not
+itself authorize or perform a workstation change.
 
 Safari may advance through deterministic source, Swift contract tests, and
 unsigned packaging, but the signed app-extension sandbox/socket path must be

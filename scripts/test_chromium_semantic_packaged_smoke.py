@@ -2538,6 +2538,76 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             self.assertGreater(expiry, smoke.time.time())
             read.assert_called_once_with(state, 0)
 
+    def test_automatic_navigation_runtime_restarts_with_exact_environment(
+        self,
+    ) -> None:
+        system = mock.Mock()
+        browser_environment = {
+            key: f"value-{index}"
+            for index, key in enumerate(
+                sorted(
+                    smoke.composed.DISPOSABLE_QUALIFICATION_ENVIRONMENT_KEYS
+                )
+            )
+        }
+        with mock.patch.object(
+            smoke.composed,
+            "require_disposable_ci",
+        ) as require_ci, mock.patch.object(
+            smoke.lifecycle,
+            "_wait_for_status",
+            side_effect=({"pid": 41}, {"pid": 42}),
+        ) as wait_status, mock.patch.object(
+            smoke.lifecycle,
+            "_wait_for_path",
+        ) as wait_path, mock.patch.object(
+            smoke.lifecycle,
+            "_patch_launchd_for_qualification",
+        ) as patch_launchd:
+            active = smoke._restart_daemon_for_automatic_navigation(
+                system,
+                browser_environment,
+            )
+
+        self.assertEqual(active, {"pid": 42})
+        require_ci.assert_called_once_with()
+        self.assertEqual(
+            system.run.call_args_list,
+            [
+                mock.call(
+                    (
+                        "/bin/launchctl",
+                        "bootout",
+                        "system",
+                        str(smoke.lifecycle.LAUNCHD_PLIST),
+                    )
+                ),
+                mock.call(
+                    (
+                        "/bin/launchctl",
+                        "bootstrap",
+                        "system",
+                        str(smoke.lifecycle.LAUNCHD_PLIST),
+                    )
+                ),
+            ],
+        )
+        wait_path.assert_called_once_with(
+            smoke.lifecycle.STATUS_PATH,
+            present=False,
+        )
+        patch_launchd.assert_called_once_with(
+            smoke.lifecycle.LAUNCHD_PLIST,
+            browser_environment,
+        )
+        self.assertEqual(
+            wait_status.call_args_list,
+            [
+                mock.call("active"),
+                mock.call("active", previous_pid=41, timeout=60),
+            ],
+        )
+
     def test_fresh_chrome_profile_cleanup_is_mandatory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile = Path(tmp) / "profile"
@@ -2613,7 +2683,14 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
             "browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd",
             workflow,
         )
-        self.assertIn("chrome-version: stable", workflow)
+        self.assertIn("chrome-version: 151.0.7922.77", workflow)
+        source = (
+            ROOT / "scripts/chromium_semantic_packaged_smoke.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "automatic_fixture = composed.ComposedHttpsFixture()",
+            source,
+        )
         self.assertIn(
             '--chrome-executable "${{ steps.chrome-for-testing.outputs.chrome-path }}"',
             workflow,
