@@ -63,6 +63,7 @@ class OwnerOnlyProbeBroker:
         self.path = path
         self.job = job
         self.submitted: list[dict[str, object]] = []
+        self.launch_ids: list[str] = []
         self.stop = threading.Event()
         self.ready = threading.Event()
         self.failure: BaseException | None = None
@@ -77,8 +78,9 @@ class OwnerOnlyProbeBroker:
             daemon=True,
         )
 
-    def _submit(self, result: dict[str, object]) -> bool:
+    def _submit(self, result: dict[str, object], launch_id: str) -> bool:
         self.submitted.append(result)
+        self.launch_ids.append(launch_id)
         expected_fields = {
             "schema_version",
             "capability",
@@ -347,7 +349,8 @@ def main() -> int:
                 runtime_root=directory / "launchers",
                 disposable_environment=environment,
             )
-            if launcher.launch() is not True:
+            launch_id = launcher.launch()
+            if not probe_runtime._valid_worker_launch_id(launch_id):
                 raise QualificationError("browser worker did not complete")
         except BaseException as error:
             failure = error
@@ -371,6 +374,8 @@ def main() -> int:
             raise QualificationError("fixture did not receive one exact navigation")
         if broker.runtime.state_size() != 0 or len(broker.submitted) != 1:
             raise QualificationError("probe capability was not consumed exactly once")
+        if broker.launch_ids != [launch_id]:
+            raise QualificationError("browser worker launch identity changed")
         after_profiles = _profile_residue()
         residue = after_profiles - before_profiles
         if residue:

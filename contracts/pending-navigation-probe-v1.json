@@ -7,6 +7,7 @@
     "capability_bits": 128,
     "capability_ttl_ms": 30000,
     "max_live_capabilities": 32,
+    "max_capabilities_and_guards": 32,
     "min_pending_observation_ms": 8000
   },
   "ipc": {
@@ -18,11 +19,13 @@
     "request_fields": {
       "claim": [
         "schema_version",
-        "operation"
+        "operation",
+        "launch_id"
       ],
       "submit": [
         "schema_version",
         "operation",
+        "launch_id",
         "result"
       ]
     },
@@ -40,6 +43,17 @@
     "max_concurrent_workers": 1,
     "retry_after_worker_loss_ms": 5000,
     "same_host_recursive_jobs": false,
+    "accepted_result_guard_until_worker_cleanup": true,
+    "claimed_job_guard_until_worker_cleanup": true,
+    "ambiguous_cleanup_failure_retains_guard": true,
+    "worker_cleanup_failure_retains_guard": true,
+    "cleanup_releases_exact_launch_only": true,
+    "unclaimed_rejected_result_guard_until_expiry": true,
+    "unclaimed_live_capability_guard_until_expiry": true,
+    "unstarted_job_guard_ms": 0,
+    "unstarted_discard_uses_worker_lock": true,
+    "submit_before_cleanup": true,
+    "cleanup_before_worker_exit": true,
     "browser_observer_composed": true
   },
   "privacy": {
@@ -103,6 +117,7 @@
     "valid_capability_is_consumed_on_rejected_result": true,
     "terminal_observation_has_no_route_effect": true,
     "same_host_reselection_after_result": false,
+    "disposable_fixture_jobs_exact_endpoint_only": true,
     "semantic_signal_v3_modified": false,
     "production_runtime_composition": true,
     "system_network_mutation": false,

@@ -10,16 +10,90 @@ file.
 
 ## Current Checkpoint
 
-PR #330 is merged as live main
-`9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main CI run `31560635905`
-passed common job `94001999764`, packaged lifecycle `94001999674`, pinned
-Chromium `94001999763`, and Windows adapter `94001999750`; dependency-audit run
-`31560636006` passed audit job `94002000083` and Geph vendor job
-`94002000109`; Windows packet qualification run `31560635908` passed AMD64 job
-`94002000053` and ARM64 job `94002000035`. No protected artifact from this SHA
+PR #331 is the latest qualified product-code merge at
+`aa10f16409ab8775647749517f79faea7b066926`. Exact-main CI run `31565732030`
+passed common job `94017024727`, packaged lifecycle `94017024721`, pinned
+Chromium `94017024682`, and Windows adapter `94017024679`; dependency-audit run
+`31565731952` passed audit job `94017024386` and Geph vendor job
+`94017024315`; Windows packet qualification run `31565731970` passed AMD64 job
+`94017024585` and ARM64 job `94017024587`. No protected artifact from this SHA
 has been installed on the workstation.
 
-That merge production-composes and qualifies the complete pending-navigation
+PR #332 is the active product correction. Its first documentation head passed
+all six required checks, including packaged job `94019999739`. A later
+documentation-only head exposed a real timing race in packaged job
+`94021442646`: the original request reached the fixture, the worker request
+arrived, but the worker delayed its result until after Chrome cleanup. The
+original relay closed in that interval, so submission was rejected; removal of
+that capability then let the worker relay mint stale same-host jobs, recorded
+as `claimed_job_invalid`. The correction submits the bounded observation
+immediately and then always performs exact Chrome/profile cleanup before the
+worker exits. An accepted result keeps its exact-host guard until the one-shot
+launcher positively confirms that exact worker and Chrome/profile cleanup;
+only then does the callback release that accepted guard so a legitimate next
+eight-second stage stays fast. An ambiguous cleanup failure remains a worker
+failure and deliberately retains the guard rather than admitting recursive
+same-host work. This remains true even if cleanup crosses the original
+capability expiry. The owner-only broker also records the exact job
+claim before delivering it. If that claimed capability expires, is rejected,
+or its relay closes while the worker remains active, its same-host guard is
+promoted through the same exact cleanup callback; an unclaimed rejected or
+live-invalid capability remains guarded only through its original 30-second
+expiry. Static rejection classes are logged for qualification without host,
+URL, content, or browser identifiers. The preceding head `349e00e` passed all
+six PR checks, including packaged job `94034409872`; exact cleanup-bound guard
+head `1a53d37` then passed common, Chromium, Windows, audit, and Geph checks but
+packaged job `94038042816` exposed a separate disposable-fixture race. A
+background unknown-host relay reached the shared worker queue before the exact
+fixture job, so the closed fixture origin rejected it as `ci_origin_invalid`;
+lease retries then became `claimed_job_invalid`, and the original fixture never
+received a worker request. Under the already required exact disposable GitHub
+Actions markers, pending-navigation admission now requires the same exact
+host, public IP, and port-443 tuple accepted by the loopback fixture mapping.
+Production admission is unchanged. Head
+`3a87c022c65a41ee7d65f979dc0ee50b50e4694e` passed all six checks; packaged
+job `94042532588` and an explicit repetition as `94044217785` both passed the
+complete original-to-worker-to-original lifecycle and cleanup. Fresh review
+then found that the lifecycle callback was still unconditional when launcher
+cleanup raised. The current correction exposes cleanup certainty on the
+launcher error and releases the guard only after positive cleanup proof; head
+`0512a0bb26f559e722bd16079e95e1773d34d470` passed all six checks, including
+packaged job `94047866907`. Review of that correction found a second boundary:
+a later successfully cleaned launch could still invoke the global callback and
+release a guard retained for an earlier ambiguously cleaned launch. Each Aqua
+launch now receives one random local 64-bit ID in its exact LaunchAgent
+environment. The owner-only claim and submit envelopes carry that ID, and the
+daemon binds both claimed and accepted guards to the exact capability/launch
+pair. Cleanup releases only that launch's entries; another launch cannot clear
+an ambiguous predecessor. A nonzero worker exit releases its pair only when it
+reports a bounded error after its own Chrome/profile cleanup succeeded;
+`chrome_cleanup_failed`, `profile_cleanup_failed`, and an unknown/crashed exit
+retain the guard even if LaunchAgent cleanup succeeds. Stale cleanup accepts
+the previous release's otherwise exact owned plist only when its environment
+is the precise legacy shape without the new ID; newly created workers and all
+claim/submit traffic still require it. Launcher bootstrap, start, wait,
+disappearance, PID replacement, and console-identity failures also never gain
+cleanup authority merely because later `bootout` succeeds. Final-head packaged
+qualification, fresh review, and exact-main gates remain open. Capability
+and guard state share one 32-entry bound; new jobs are rejected at capacity,
+so a live worker's authority and guard are never evicted by host churn.
+An enqueue rejection removes the unstarted job without a guard. After a false
+notification, queue discard and the no-worker proof occur under the worker's
+lifecycle lock; a claimed or restarting worker therefore keeps both job
+authority and the expiry guard. Proven-unstarted retries remain fast.
+No normal-path browser, broad host cooldown, route-policy change, or network
+setting mutation is added.
+
+That merge completes the active-worker uninstall ownership transaction. The
+exact-main packaged job first proved one correlated worker process, exact live
+Chrome profile, private runtime, and matching loaded LaunchAgent with root
+channels `original -> worker`. The normal installed uninstaller then completed
+the worker and original-capture cleanup, removed the installed state, preserved
+the sentinel connection/state, left global PF unchanged, and reported clean
+uninstall. Its three-second idle sample observed zero worker processes or
+profiles, a mode-`0600` broker, and 400 ms daemon CPU.
+
+PR #330 production-composes and qualifies the complete pending-navigation
 transaction without changing PF, DNS, proxy/PAC, VPN, external Geph, Discord,
 YouTube, or Googlevideo policy. One eligible public unknown-host request stays
 on the installed PF/daemon path through the existing complete-TLS-record and
@@ -55,23 +129,13 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Branch `codex/qualify-active-worker-uninstall` adds the next separate installed
-lifecycle gate. After the existing soak it starts a fresh exact fixture and
-original extension-free Chrome request, waits for the correlated worker root,
-and requires one matching live LaunchAgent PID, packaged worker process,
-browser profile derived from the live exact `--user-data-dir`, and owner-private
-runtime. It then runs the normal installed
-uninstall while that worker/browser pair is still blocked and requires the
-LaunchDaemon, broker, worker LaunchAgent/process/profile/runtime, installed
-payload, and original qualification capture all to be absent or stopped. The
-sentinel connection/state and global PF snapshot must remain unchanged.
-
-Current local verification passes 1,185 Python tests plus 54 subtests, focused
-Python compilation, shell syntax, and `git diff --check`. The required
+Current local verification passes 1,196 Python tests plus 54 subtests, focused
+Python compilation, 96 tray, 35 core, 241 Windows-adapter, 40 userspace-stack,
+and 40 selected-stack/effect Rust tests, all five Rust clippy gates, contract
+JSON parsing, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
-bounded source inspection used the documented fallback. The real packaged
-active-worker uninstall transaction, review, merge, and exact-main checks
-remain open.
+bounded source inspection used the documented fallback. Active-worker uninstall
+has no remaining PR or exact-main gate.
 
 The first two packaged attempts found two real qualification boundaries. A
 hosted console-user Chrome profile is not reliably under `/tmp`, so the gate
@@ -93,7 +157,7 @@ runtime cleanup continues to validate the worker plist, UID, command, label,
 and private files before signalling anything. A missing or mismatched pin
 therefore still fails closed.
 
-The following packaged attempt passed that uninstall boundary and removed the
+The final failed packaged attempt passed that uninstall boundary and removed the
 LaunchAgent, worker, runtime, daemon, broker, and installed payload, but found
 the worker's exact private Chrome profile still present. `SIGTERM` previously
 terminated the Rust worker before its owned Chrome/profile cleanup could run.
@@ -102,15 +166,9 @@ read loop, performs its existing exact-profile Chrome cleanup, and deletes the
 profile. Stale cleanup waits at most eight seconds for this verified worker to
 exit and requires its bounded `worker_terminated` result before `bootout`; a
 timeout or cleanup error still fails closed rather than scanning or signalling
-unrelated Chrome processes. PR-head packaged job `94013960155` on
-`ef1d465a97e176f208179336c8e6249cdedbc3fd` passed the complete transaction:
-one worker process, profile, runtime, and loaded LaunchAgent existed with root
-channels `original -> worker`; normal uninstall then reported worker and
-original-capture cleanup clean and installed state absent. The same job kept
-the sentinel connection/state preserved, global PF unchanged, and ordinary
-uninstall clean. Its three-second idle sample observed zero workers/profiles,
-a mode-`0600` broker, and 590 ms daemon CPU. Evidence-commit requalification,
-review, merge, and exact-main qualification remain open.
+unrelated Chrome processes. Exact-main packaged job `94017024721` confirms the
+corrected transaction and ownership invariants described at the top of this
+checkpoint.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
@@ -246,7 +304,7 @@ All six PR checks passed; it merged as
 `31541339387` passed for that exact SHA. The current branch
 `codex/sandboxed-browser-probe-worker` starts from that exact merge.
 
-The current branch implements that next closed slice. One exact hidden mode of
+The historical PR #328 branch implemented that next closed slice. One exact hidden mode of
 the packaged Slipstream executable claims the owner-only job, and an exact Aqua
 LaunchAgent runs it as the active console user. It uses LaunchServices to open
 signed Google Chrome in sandboxed unified-headless mode with extensions
@@ -254,8 +312,10 @@ disabled and a fresh owner-private profile. CDP observes only the exact
 synthetic HTTPS root main document: eight seconds outstanding is
 `navigation_pending`; response, redirect, load failure, or navigation failure
 is `navigation_terminal` and consumes the capability without a route effect.
-Chrome, its profile-owned helper family, the LaunchServices waiter, LaunchAgent,
-and profile are removed before submit. Production paths are fixed; browser,
+The result is submitted immediately after observation so bounded cleanup cannot
+expire the live relay capability. Chrome, its profile-owned helper family, the
+LaunchServices waiter, LaunchAgent, and profile are still removed before the
+worker exits. Production paths are fixed; browser,
 socket, origin, resolver, and certificate overrides exist only behind the full
 disposable-GitHub-Actions gate. The ordinary path still creates no worker,
 browser, thread, socket, or routing effect.

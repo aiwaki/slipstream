@@ -22,6 +22,8 @@ const PRODUCTION_SOCKET_PATH: &str = "/var/run/slipstream-browser-probe.sock";
 const MAX_IPC_BYTES: usize = 2_048;
 const IPC_TIMEOUT: Duration = Duration::from_secs(2);
 const CAPABILITY_HEX_CHARS: usize = 32;
+const WORKER_LAUNCH_ID_HEX_CHARS: usize = 16;
+const WORKER_LAUNCH_ID_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_LAUNCH_ID";
 const CAPABILITY_TTL_MS: u64 = 30_000;
 const MAX_CLAIM_AGE_MS: u64 = 5_000;
 const MIN_PENDING_OBSERVATION: Duration = Duration::from_secs(8);
@@ -154,7 +156,8 @@ fn run_one_probe() -> ProbeResult<()> {
     .map_err(|_| error("termination_handler_failed"))?;
     let uid = current_uid()?;
     let socket_path = configured_socket_path();
-    let job = match claim_job(&socket_path, uid)? {
+    let launch_id = configured_launch_id()?;
+    let job = match claim_job(&socket_path, uid, &launch_id)? {
         Some(job) => job,
         None => return Ok(()),
     };
@@ -172,24 +175,28 @@ fn run_one_probe() -> ProbeResult<()> {
             return Err(failure);
         }
     };
-    chrome.cleanup()?;
-    let observed_at_unix_ms = unix_now_ms()?;
-
     let outcome = match observation {
         NavigationObservation::Pending => OUTCOME_PENDING,
         NavigationObservation::Terminal => OUTCOME_TERMINAL,
     };
-    let response = submit_result(
-        &socket_path,
-        uid,
-        &ProbeResultPayload {
-            schema_version: SCHEMA_VERSION,
-            capability: &job.capability,
-            host: &job.host,
-            request_started_at_unix_ms: job.request_started_at_unix_ms,
-            observed_at_unix_ms,
-            outcome,
+    let response = submit_before_cleanup(
+        || {
+            let observed_at_unix_ms = unix_now_ms()?;
+            submit_result(
+                &socket_path,
+                uid,
+                &launch_id,
+                &ProbeResultPayload {
+                    schema_version: SCHEMA_VERSION,
+                    capability: &job.capability,
+                    host: &job.host,
+                    request_started_at_unix_ms: job.request_started_at_unix_ms,
+                    observed_at_unix_ms,
+                    outcome,
+                },
+            )
         },
+        || chrome.cleanup(),
     )?;
     match observation {
         NavigationObservation::Pending if response.accepted && response.reason == "accepted" => {
@@ -202,6 +209,16 @@ fn run_one_probe() -> ProbeResult<()> {
         }
         _ => Err(error("submit_rejected")),
     }
+}
+
+fn submit_before_cleanup<T, Submit, Cleanup>(submit: Submit, cleanup: Cleanup) -> ProbeResult<T>
+where
+    Submit: FnOnce() -> ProbeResult<T>,
+    Cleanup: FnOnce() -> ProbeResult<()>,
+{
+    let submission = submit();
+    cleanup()?;
+    submission
 }
 
 fn require_not_terminated(termination_requested: &AtomicBool) -> ProbeResult<()> {
@@ -225,6 +242,18 @@ fn configured_socket_path() -> PathBuf {
         }
     }
     PathBuf::from(PRODUCTION_SOCKET_PATH)
+}
+
+fn configured_launch_id() -> ProbeResult<String> {
+    let launch_id = std::env::var(WORKER_LAUNCH_ID_ENV).map_err(|_| error("launch_id_invalid"))?;
+    if launch_id.len() != WORKER_LAUNCH_ID_HEX_CHARS
+        || !launch_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(error("launch_id_invalid"));
+    }
+    Ok(launch_id)
 }
 
 fn current_uid() -> ProbeResult<u32> {
@@ -355,12 +384,16 @@ fn ipc_request(
     Ok(response)
 }
 
-fn claim_job(path: &Path, uid: u32) -> ProbeResult<Option<ProbeJob>> {
+fn claim_job(path: &Path, uid: u32, launch_id: &str) -> ProbeResult<Option<ProbeJob>> {
     let response = ipc_request(
         path,
         uid,
         "claim",
-        &json!({"schema_version": SCHEMA_VERSION, "operation": "claim"}),
+        &json!({
+            "schema_version": SCHEMA_VERSION,
+            "operation": "claim",
+            "launch_id": launch_id,
+        }),
     )?;
     if !response.accepted {
         return Err(error("claim_rejected"));
@@ -378,6 +411,7 @@ fn claim_job(path: &Path, uid: u32) -> ProbeResult<Option<ProbeJob>> {
 fn submit_result(
     path: &Path,
     uid: u32,
+    launch_id: &str,
     result: &ProbeResultPayload<'_>,
 ) -> ProbeResult<IpcResponse> {
     ipc_request(
@@ -387,6 +421,7 @@ fn submit_result(
         &json!({
             "schema_version": SCHEMA_VERSION,
             "operation": "submit",
+            "launch_id": launch_id,
             "result": result,
         }),
     )
@@ -633,8 +668,10 @@ impl ChromeSession {
             rooted_process_groups: BTreeSet::new(),
         };
         if let Err(failure) = session.start() {
-            let _ = session.cleanup();
-            return Err(failure);
+            return match session.cleanup() {
+                Ok(()) => Err(failure),
+                Err(cleanup_failure) => Err(cleanup_failure),
+            };
         }
         Ok(session)
     }
@@ -1543,6 +1580,7 @@ fn websocket_read_json(stream: &mut TcpStream, deadline: Instant) -> ProbeResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     fn job(now: u64) -> ProbeJob {
         ProbeJob {
@@ -1580,6 +1618,30 @@ mod tests {
             require_not_terminated(&requested).unwrap_err().0,
             "worker_terminated"
         );
+    }
+
+    #[test]
+    fn result_is_submitted_before_cleanup_and_cleanup_always_runs() {
+        let events = RefCell::new(Vec::new());
+        let result = submit_before_cleanup(
+            || {
+                events.borrow_mut().push("submit");
+                Err::<(), _>(error("submit_failed"))
+            },
+            || {
+                events.borrow_mut().push("cleanup");
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err().0, "submit_failed");
+        assert_eq!(*events.borrow(), ["submit", "cleanup"]);
+    }
+
+    #[test]
+    fn cleanup_failure_overrides_a_successful_submission() {
+        let result = submit_before_cleanup(|| Ok("accepted"), || Err(error("cleanup_failed")));
+        assert_eq!(result.unwrap_err().0, "cleanup_failed");
     }
 
     #[test]
