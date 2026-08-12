@@ -102,7 +102,15 @@ read loop, performs its existing exact-profile Chrome cleanup, and deletes the
 profile. Stale cleanup waits at most eight seconds for this verified worker to
 exit and requires its bounded `worker_terminated` result before `bootout`; a
 timeout or cleanup error still fails closed rather than scanning or signalling
-unrelated Chrome processes. Corrected packaged evidence remains open.
+unrelated Chrome processes. PR-head packaged job `94013960155` on
+`ef1d465a97e176f208179336c8e6249cdedbc3fd` passed the complete transaction:
+one worker process, profile, runtime, and loaded LaunchAgent existed with root
+channels `original -> worker`; normal uninstall then reported worker and
+original-capture cleanup clean and installed state absent. The same job kept
+the sentinel connection/state preserved, global PF unchanged, and ordinary
+uninstall clean. Its three-second idle sample observed zero workers/profiles,
+a mode-`0600` broker, and 590 ms daemon CPU. Evidence-commit requalification,
+review, merge, and exact-main qualification remain open.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its

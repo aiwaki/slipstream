@@ -578,6 +578,16 @@ eight seconds for the validated worker PID to exit, requires its private stderr
 to contain only the bounded `worker_terminated` class, and only then performs
 `bootout`; failure does not authorize a broader Chrome scan or cleanup.
 
+PR-head packaged job `94013960155` on
+`ef1d465a97e176f208179336c8e6249cdedbc3fd` passed this boundary. Before
+uninstall it proved exactly one worker process, exact live profile, private
+runtime directory, and loaded matching LaunchAgent with root channels
+`original -> worker`. The normal installed uninstaller then left worker cleanup
+and the original Chrome capture clean, installed state absent, the lifecycle
+sentinel connection/state preserved, global PF unchanged, and final uninstall
+clean. The same run retained the normal idle boundary: zero worker processes or
+profiles, a mode-`0600` broker, and 590 ms daemon CPU during three seconds.
+
 ## Adjacent Routing Projects Audit (2026-08-02)
 
 This audit read implementation code at the commits below rather than treating
