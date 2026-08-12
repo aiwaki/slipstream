@@ -463,11 +463,13 @@ residue, and at most 25 seconds end to end.
 
 PR #328 merged the isolated observer as
 `aa6288da945a2551be4203fbda2965907b285ad2`; exact-main CI, audit, and Windows
-qualification passed. Branch `codex/compose-pending-navigation-runtime` now
-starts the owner-only socket supervisor from the daemon, queues a job directly
-from the existing complete-record idle observer, wakes the single lazy worker,
-and performs exact stale worker cleanup during startup and uninstall. The
-ordinary path retains no browser or worker thread. A deterministic
+qualification passed. PR #329 then merged production composition as
+`a2312a54949102be5a5fc2abb4a341078f591b55`; its exact-main CI
+`31553860792`, audit `31553860796`, and Windows qualification `31553860798`
+passed. The daemon starts the owner-only socket supervisor, queues a job
+directly from the existing complete-record idle observer, wakes the single lazy
+worker, and performs exact stale worker cleanup during startup and uninstall.
+The ordinary path retains no browser or worker thread. A deterministic
 relay-to-job-to-result fixture proves only the bound live relay advances.
 
 A separate local signed branded-Chrome HTTPS diagnostic provided the missing
@@ -479,6 +481,53 @@ Chromium job now freezes that behavior with an extension-free scenario. This
 does not by itself qualify installation, update, exact packaged uninstall,
 idle cost, or the complete composed original-navigation transaction; those
 remain release gates until their matching evidence passes.
+
+Branch `codex/qualify-composed-original-navigation` adds the first complete
+installed-package transaction to the ordinary packaged lifecycle job. A fresh
+extension-free Chrome process resolves one `.invalid` fixture hostname to a
+globally routable numeric identity so the real PF and public unknown-host relay
+gates remain active. Only under exact `CI=true`, `GITHUB_ACTIONS=true`, and
+`SLIPSTREAM_DISPOSABLE_CI=1` markers may the connector map that one configured
+hostname/IP/443 tuple to a loopback TLS server. Missing markers, a noncanonical
+port, a non-global or mismatched IP, a protected/static host, or any other
+destination uses the unchanged production endpoint. The daemon-only mapping
+is not included in the worker LaunchAgent environment; the launcher continues
+to forward only its frozen browser override allowlist.
+
+The shared fixture requires the request order `original -> worker -> original`.
+The first original TLS navigation remains live for the daemon's eight-second
+complete-record idle gate. The packaged hidden worker then keeps its own main
+document pending for another eight seconds and submits the existing bounded
+capability. Only then may the daemon advance and close the original relay;
+Chrome itself must repeat the unchanged original URL and fetch exactly one CSS,
+JavaScript, image, and ready resource. No extension or reload command exists in
+the scenario. Before the first request, a three-second installed idle sample
+requires the production broker to be owned by the console user with mode
+`0600`, the worker runtime to be empty, worker processes and profiles to be
+absent, and daemon CPU growth to remain at most one second.
+
+PR #330 implementation head `fc47bef2fb4e2dee9f9cf754113b52620ffd1b86`
+passed all six checks. On the fixture clock, packaged job `93998266928`
+observed the worker root at 15,758 ms and the automatic original retry at
+27,994 ms, followed by exactly one CSS, JavaScript, image, and ready callback;
+the separately measured captured Chrome transaction completed in 23,963 ms
+without an extension or manual reload and left no worker residue. The prior
+three-second idle sample had zero worker processes/profiles,
+an empty worker runtime, a mode-`0600` broker, and 160 ms daemon CPU growth.
+The lifecycle preserved its sentinel connection and PF state, left global PF
+unchanged, and uninstalled cleanly.
+
+The failed attempts exposed a real packaging defect rather than a browser or
+relay failure: the daemon's default worker path assumed
+`/Applications/Slipstream.app`, while the lifecycle correctly installed the
+frozen daemon from the exact built app bundle. The frozen installer now derives
+only the sibling `Contents/MacOS/slipstream`, rejects an absent, symlinked,
+non-executable, or group/world-writable worker, XML-escapes the path, and pins
+it into the root-owned LaunchDaemon environment. Normal routing remains usable
+if that optional worker later disappears; the private log records only the
+bounded worker failure class. Local verification passes 1,180 Python tests
+plus 54 subtests. The final docs/cleanup head and separate active-worker
+uninstall case remain open.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

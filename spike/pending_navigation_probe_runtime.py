@@ -43,7 +43,8 @@ PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
     "/var/run/slipstream-browser-probe.sock"
 )
 PENDING_NAVIGATION_BROWSER_WORKER = (
-    "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+    os.environ.get("SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER")
+    or "/Applications/Slipstream.app/Contents/MacOS/slipstream"
 )
 PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT = (
     "--pending-navigation-browser-probe"
@@ -91,6 +92,27 @@ _JOB_FIELDS = frozenset((
 
 class PendingNavigationProbeRuntimeError(ValueError):
     pass
+
+
+def browser_worker_disposable_environment(environment=None):
+    """Forward only the closed browser fixture surface in disposable CI."""
+    source = os.environ if environment is None else environment
+    if not isinstance(source, dict) and source is not os.environ:
+        try:
+            source = dict(source)
+        except (TypeError, ValueError):
+            return {}
+    if not (
+        source.get("CI") == "true"
+        and source.get("GITHUB_ACTIONS") == "true"
+        and source.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+    ):
+        return {}
+    return {
+        name: source[name]
+        for name in _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT
+        if isinstance(source.get(name), str) and source[name]
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1564,7 +1586,9 @@ class PendingNavigationBrowserWorkerLauncher:
 
 
 def cleanup_stale_browser_worker_runtime(*, remove_root=False):
-    return PendingNavigationBrowserWorkerLauncher().cleanup_stale(
+    return PendingNavigationBrowserWorkerLauncher(
+        disposable_environment=browser_worker_disposable_environment(),
+    ).cleanup_stale(
         remove_root=remove_root,
     )
 
@@ -1579,6 +1603,7 @@ class LazyPendingNavigationProbeWorker:
         launch_worker,
         retry_seconds=CLAIM_LEASE_SECONDS,
         thread_factory=None,
+        error_handler=None,
     ):
         if (
             not callable(pending_jobs)
@@ -1586,12 +1611,14 @@ class LazyPendingNavigationProbeWorker:
             or not isinstance(retry_seconds, (int, float))
             or isinstance(retry_seconds, bool)
             or retry_seconds <= 0
+            or (error_handler is not None and not callable(error_handler))
         ):
             raise ValueError("pending-navigation worker lifecycle is invalid")
         self._pending_jobs = pending_jobs
         self._launch_worker = launch_worker
         self._retry_seconds = float(retry_seconds)
         self._thread_factory = thread_factory or threading.Thread
+        self._error_handler = error_handler
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -1608,8 +1635,12 @@ class LazyPendingNavigationProbeWorker:
             while not self._stop.is_set() and self._job_count():
                 try:
                     self._launch_worker()
-                except Exception:
-                    pass
+                except Exception as error:
+                    if self._error_handler is not None:
+                        try:
+                            self._error_handler(error)
+                        except Exception:
+                            pass
                 if not self._job_count():
                     break
                 self._stop.wait(self._retry_seconds)

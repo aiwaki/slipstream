@@ -52,6 +52,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import urlencode, urlparse
 import urllib.request
+from xml.sax.saxutils import escape as xml_escape
 
 import connection_probe
 import geph_backend
@@ -195,6 +196,23 @@ PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
 PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
     pending_navigation_probe_runtime
     .PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME
+)
+_PENDING_NAVIGATION_FIXTURE_ENV_KEYS = (
+    "CI",
+    "GITHUB_ACTIONS",
+    "SLIPSTREAM_DISPOSABLE_CI",
+    "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST",
+    "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP",
+    "SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT",
+)
+_PENDING_NAVIGATION_FIXTURE_ENVIRONMENT = (
+    {name: os.environ.get(name, "") for name in _PENDING_NAVIGATION_FIXTURE_ENV_KEYS}
+    if (
+        os.environ.get("CI") == "true"
+        and os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+    )
+    else {}
 )
 STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
@@ -2104,6 +2122,10 @@ _ROUTE_PROBE_OUTCOME_SINK = contextvars.ContextVar(
     "slipstream_route_probe_outcome_sink",
     default=None,
 )
+_PENDING_NAVIGATION_FIXTURE_HOST = contextvars.ContextVar(
+    "slipstream_pending_navigation_fixture_host",
+    default="",
+)
 AUTO_GEPH_STATE_MAX = 4096
 AUTO_GEPH_CONFIRM_COOLDOWN = 120.0
 AUTO_GEPH_CONFIRM_TIMEOUT = 6.0
@@ -3606,13 +3628,19 @@ def _get_pending_navigation_probe_worker():
             runtime = _get_pending_navigation_probe_runtime()
             launcher = (
                 pending_navigation_probe_runtime
-                .PendingNavigationBrowserWorkerLauncher()
+                .PendingNavigationBrowserWorkerLauncher(
+                    disposable_environment=(
+                        pending_navigation_probe_runtime
+                        .browser_worker_disposable_environment()
+                    ),
+                )
             )
             _pending_navigation_probe_worker = (
                 pending_navigation_probe_runtime
                 .LazyPendingNavigationProbeWorker(
                     pending_jobs=runtime.state_size,
                     launch_worker=launcher.launch,
+                    error_handler=_log_pending_navigation_probe_worker_error,
                 )
             )
         return _pending_navigation_probe_worker
@@ -7515,6 +7543,14 @@ def _log_pending_navigation_probe_server_error(error):
     )
 
 
+def _log_pending_navigation_probe_worker_error(error):
+    print(
+        f">> pending-navigation browser worker failed: {error}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _baseline_probe_command(candidate):
     return [
         BASELINE_PROBE_BINARY,
@@ -11286,6 +11322,64 @@ async def _dial_via_geph_first_payload(
         raise
 
 
+def _disposable_pending_navigation_fixture_endpoint(
+    host,
+    ip,
+    port,
+    *,
+    environment=None,
+):
+    """Map one exact public fixture upstream to loopback only in disposable CI."""
+    source = (
+        _PENDING_NAVIGATION_FIXTURE_ENVIRONMENT
+        if environment is None
+        else environment
+    )
+    if not (
+        source
+        and source.get("CI") == "true"
+        and source.get("GITHUB_ACTIONS") == "true"
+        and source.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+        and port == 443
+    ):
+        return None
+    h = normalize_host(host)
+    raw_host = source.get("SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST", "")
+    expected_ip = source.get("SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_IP", "")
+    raw_port = source.get("SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_PORT", "")
+    if (
+        not isinstance(raw_host, str)
+        or not isinstance(expected_ip, str)
+        or not isinstance(raw_port, str)
+        or any(len(value) > 255 or "\x00" in value for value in (
+            raw_host,
+            expected_ip,
+            raw_port,
+        ))
+    ):
+        return None
+    expected_host = normalize_host(raw_host)
+    try:
+        address = ipaddress.ip_address(expected_ip)
+        fixture_port = int(raw_port)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not h
+        or h != expected_host
+        or route_policy(h)["route_class"] != ROUTE_UNKNOWN
+        or not isinstance(address, ipaddress.IPv4Address)
+        or not address.is_global
+        or str(address) != str(ip)
+        or not raw_port.isascii()
+        or not raw_port.isdigit()
+        or str(fixture_port) != raw_port
+        or not 1 <= fixture_port <= 65535
+    ):
+        return None
+    return "127.0.0.1", fixture_port
+
+
 async def dial_plain(ip, port, first_flight):
     """Open an exact direct stream with no DNS rewrite, desync, or tunnel.
 
@@ -11296,7 +11390,20 @@ async def dial_plain(ip, port, first_flight):
     w = None
     connected = False
     try:
-        r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=6)
+        endpoint = (
+            _disposable_pending_navigation_fixture_endpoint(
+                _PENDING_NAVIGATION_FIXTURE_HOST.get(),
+                ip,
+                port,
+            )
+            if _PENDING_NAVIGATION_FIXTURE_ENVIRONMENT
+            else None
+        )
+        connect_ip, connect_port = endpoint or (ip, port)
+        r, w = await asyncio.wait_for(
+            asyncio.open_connection(connect_ip, connect_port),
+            timeout=6,
+        )
         w.write(first_flight)
         await w.drain()
         connected = True
@@ -11406,6 +11513,13 @@ async def dial_and_probe_fake(real_ip, port, first_blob, host=None, probe_timeou
 
 async def dial_strategy(ip, port, head, body, host, strat):
     blob = make_blob(head, body, host, strat["cap"])
+    endpoint = (
+        _disposable_pending_navigation_fixture_endpoint(host, ip, port)
+        if _PENDING_NAVIGATION_FIXTURE_ENVIRONMENT
+        else None
+    )
+    if endpoint is not None:
+        return await dial_and_probe(endpoint[0], endpoint[1], blob)
     if strat["fake"]:
         return await dial_and_probe_fake(ip, port, blob, host=host)
     return await dial_and_probe(ip, port, blob)
@@ -12174,11 +12288,15 @@ async def _handle_impl(reader, writer):
         and route_class == ROUTE_UNKNOWN
         and unknown_stage == UNKNOWN_RECOVERY_SYSTEM
     ):
-        system_probe, exact = await _try_exact_system_probe(
-            dst_ip,
-            dst_port,
-            head + body,
-        )
+        fixture_host_token = _PENDING_NAVIGATION_FIXTURE_HOST.set(host)
+        try:
+            system_probe, exact = await _try_exact_system_probe(
+                dst_ip,
+                dst_port,
+                head + body,
+            )
+        finally:
+            _PENDING_NAVIGATION_FIXTURE_HOST.reset(fixture_host_token)
         if exact:
             result = exact
             chosen_name = "plain"
@@ -12749,8 +12867,17 @@ def remove_obsolete_newsyslog_config():
         pass
 
 
-def launchd_plist_text(prog_args, workdir):
-    prog_xml = "".join(f"<string>{a}</string>" for a in prog_args)
+def launchd_plist_text(prog_args, workdir, browser_worker=None):
+    prog_xml = "".join(
+        f"<string>{xml_escape(str(argument))}</string>"
+        for argument in prog_args
+    )
+    worker_xml = (
+        "<key>SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER</key>"
+        f"<string>{xml_escape(str(browser_worker))}</string>"
+        if browser_worker
+        else ""
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -12762,12 +12889,14 @@ def launchd_plist_text(prog_args, workdir):
         '  <key>KeepAlive</key><true/>\n'
         '  <key>EnvironmentVariables</key><dict>'
         '<key>PATH</key><string>/sbin:/usr/sbin:/bin:/usr/bin</string>'
-        '<key>PYTHONUNBUFFERED</key><string>1</string></dict>\n'
+        '<key>PYTHONUNBUFFERED</key><string>1</string>'
+        f'{worker_xml}</dict>\n'
         '  <key>SoftResourceLimits</key><dict>'
         '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
         '  <key>HardResourceLimits</key><dict>'
         '<key>NumberOfFiles</key><integer>16384</integer></dict>\n'
-        f'  <key>WorkingDirectory</key><string>{workdir}</string>\n'
+        '  <key>WorkingDirectory</key>'
+        f'<string>{xml_escape(str(workdir))}</string>\n'
         '  <key>StandardOutPath</key><string>/dev/null</string>\n'
         '  <key>StandardErrorPath</key><string>/dev/null</string>\n'
         '</dict></plist>\n'
@@ -13473,6 +13602,33 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
     return True
 
 
+def _packaged_browser_worker_executable(source_executable):
+    """Resolve the tray worker beside an exact packaged frozen daemon."""
+    source = os.path.abspath(os.fspath(source_executable))
+    daemon_dir = os.path.dirname(source)
+    resources_dir = os.path.dirname(daemon_dir)
+    contents_dir = os.path.dirname(resources_dir)
+    if (
+        os.path.basename(daemon_dir) != "slipstreamd"
+        or os.path.basename(resources_dir) != "Resources"
+        or os.path.basename(contents_dir) != "Contents"
+    ):
+        return None
+    candidate = os.path.join(contents_dir, "MacOS", "slipstream")
+    try:
+        metadata = os.lstat(candidate)
+    except OSError:
+        return None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+        or not metadata.st_mode & 0o111
+    ):
+        return None
+    return candidate
+
+
 def do_install(port):
     # Install a self-contained copy under /usr/local (a root LaunchDaemon has NO
     # TCC access to ~/Documents). Two modes:
@@ -13492,6 +13648,11 @@ def do_install(port):
             source_identity = os.path.abspath(sys.executable)
             installed_identity_name = os.path.basename(sys.executable)
             installed_identity_mode = 0o700
+        browser_worker = (
+            _packaged_browser_worker_executable(source_identity)
+            if frozen
+            else None
+        )
         source_sha256 = _sha256_regular_file(source_identity)
     except Exception as error:
         print(f"install preflight failed: {error}", file=sys.stderr)
@@ -13554,7 +13715,11 @@ def do_install(port):
             with open(secret_path, "w") as handle:
                 handle.write(tgws_secret_backup.strip())
             os.chmod(secret_path, 0o600)
-        plist = launchd_plist_text(prog_args, INSTALL_DIR)
+        plist = launchd_plist_text(
+            prog_args,
+            INSTALL_DIR,
+            browser_worker=browser_worker,
+        )
         _write_launchd_plist_atomic(plist)
         remove_obsolete_newsyslog_config()
         _require_command(

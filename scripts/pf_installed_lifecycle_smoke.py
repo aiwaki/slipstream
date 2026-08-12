@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Sequence
 
+import composed_pending_navigation_smoke as composed
 import pf_anchor_smoke as pf
 
 
@@ -1138,6 +1139,7 @@ def _capture_chrome_output(
     gid: int | None,
     supplementary_groups: tuple[int, ...],
     timeout: float = CHROME_PROBE_TIMEOUT,
+    completion_probe=None,
 ) -> ChromeCapture:
     with _chrome_operation("capture-files-create"):
         stdout_capture = tempfile.TemporaryFile()
@@ -1183,8 +1185,9 @@ def _capture_chrome_output(
         deadline = time.monotonic() + timeout
         while True:
             stdout = _read_capture(stdout_capture)
-            loaded = (
-                len(stdout) >= CHROME_PROBE_MIN_BYTES
+            loaded = bool(completion_probe and completion_probe()) or (
+                completion_probe is None
+                and len(stdout) >= CHROME_PROBE_MIN_BYTES
                 and CHROME_PROBE_MARKER in stdout
             )
             if loaded:
@@ -1215,8 +1218,9 @@ def _capture_chrome_output(
 
     if process is None:
         raise LifecycleError("Chrome process did not start")
-    loaded = (
-        len(stdout) >= CHROME_PROBE_MIN_BYTES
+    loaded = loaded or bool(completion_probe and completion_probe()) or (
+        completion_probe is None
+        and len(stdout) >= CHROME_PROBE_MIN_BYTES
         and CHROME_PROBE_MARKER in stdout
     )
     return ChromeCapture(
@@ -1751,13 +1755,26 @@ def _wait_for_path(path: Path, *, present: bool, timeout: float = 20) -> None:
     raise LifecycleError(f"{path} did not {state}")
 
 
-def _patch_launchd_for_qualification(plist_path: Path) -> None:
+def _patch_launchd_for_qualification(
+    plist_path: Path,
+    browser_environment: dict[str, str] | None = None,
+) -> None:
     with plist_path.open("rb") as handle:
         data = plistlib.load(handle)
     environment = dict(data.get("EnvironmentVariables") or {})
     environment["SLIP_RUNTIME_WAKE_GAP_SECONDS"] = str(
         int(QUALIFICATION_WAKE_GAP_SECONDS)
     )
+    browser_environment = dict(browser_environment or {})
+    if browser_environment:
+        composed.require_disposable_ci()
+        if set(browser_environment) != (
+            composed.DISPOSABLE_QUALIFICATION_ENVIRONMENT_KEYS
+        ):
+            raise LifecycleError(
+                "composed browser qualification environment is incomplete"
+            )
+        environment.update(browser_environment)
     data["EnvironmentVariables"] = environment
     arguments = list(data.get("ProgramArguments") or [])
     if "--no-voice" not in arguments:
@@ -1835,6 +1852,7 @@ def _daemon_pf_log_tail() -> tuple[str, ...]:
                 "baseline",
                 "resolver",
                 "probe",
+                "worker",
                 " pf ",
                 "anchor",
                 "legacy",
@@ -2068,6 +2086,7 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
         PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
         INSTALL_ATTESTATION_PATH,
+        composed.PRODUCTION_BROKER_SOCKET,
         INSTALLED_DAEMON,
         INSTALLED_PRIMES,
         INSTALLED_FROZEN_DAEMON,
@@ -2076,6 +2095,16 @@ def _assert_clean_install_state(runner: pf.PfctlRunner) -> None:
             raise LifecycleError(f"installed lifecycle residue remains: {path}")
     if INSTALL_DIR.exists() and any(INSTALL_DIR.iterdir()):
         raise LifecycleError(f"installed lifecycle residue remains: {INSTALL_DIR}")
+    if composed.PRODUCTION_WORKER_RUNTIME.exists():
+        if any(composed.PRODUCTION_WORKER_RUNTIME.iterdir()):
+            raise LifecycleError(
+                "installed lifecycle browser-worker residue remains: "
+                f"{composed.PRODUCTION_WORKER_RUNTIME}"
+            )
+        raise LifecycleError(
+            "installed lifecycle browser-worker runtime root remains: "
+            f"{composed.PRODUCTION_WORKER_RUNTIME}"
+        )
     artifacts = _install_attestation_artifacts()
     if artifacts:
         raise LifecycleError(
@@ -2099,6 +2128,8 @@ def _preflight(runner: pf.PfctlRunner) -> tuple[pf.PfSnapshot, int, int]:
         PF_SKIP_LEASE_PATH,
         TGWS_LINK_PATH,
         INSTALL_ATTESTATION_PATH,
+        composed.PRODUCTION_BROKER_SOCKET,
+        composed.PRODUCTION_WORKER_RUNTIME,
     ):
         if path.exists():
             raise LifecycleError(f"refusing existing Slipstream state: {path}")
@@ -2219,9 +2250,78 @@ def _fallback_uninstall(
     return errors
 
 
+def _run_composed_navigation(
+    fixture: composed.ComposedHttpsFixture,
+    uid: int,
+    gid: int,
+    chrome_executable: Path,
+) -> dict[str, object]:
+    try:
+        executable = chrome_executable.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise LifecycleError(
+            f"composed Chrome executable is unavailable: {chrome_executable}"
+        ) from exc
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise LifecycleError(
+            f"composed Chrome executable is not runnable: {executable}"
+        )
+
+    environment, home = _user_environment(uid)
+    supplementary_groups = _user_supplementary_groups(uid, gid)
+    profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-composed-chrome-"))
+    started_at = time.monotonic()
+    try:
+        os.chown(profile_dir, uid, gid)
+        profile_dir.chmod(0o700)
+        result = _capture_chrome_output(
+            composed.original_navigation_command(executable, profile_dir),
+            cwd=home,
+            environment=environment,
+            timeout=composed.MAX_COMPOSED_NAVIGATION_SECONDS,
+            uid=uid,
+            gid=gid,
+            supplementary_groups=supplementary_groups,
+            completion_probe=fixture.ready,
+        )
+    finally:
+        shutil.rmtree(profile_dir, ignore_errors=True)
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+
+    if result.timed_out:
+        detail = (result.stdout + b"\n" + result.stderr).decode(
+            "utf-8", errors="replace"
+        )[-2000:]
+        raise LifecycleError(
+            "composed original Chrome navigation timed out: "
+            f"records={fixture.records!r}; "
+            f"worker={composed.worker_diagnostics(uid)!r}; chrome={detail}"
+        )
+    if not result.loaded and result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace")[-2000:]
+        raise LifecycleError(
+            f"composed original Chrome navigation failed: {detail}"
+        )
+    if not result.loaded:
+        raise LifecycleError(
+            "composed original navigation missed its styled ready callback: "
+            f"records={fixture.records!r}"
+        )
+    evidence = fixture.report()
+    composed.assert_worker_clean(uid)
+    return {
+        **evidence,
+        "elapsed_ms": elapsed_ms,
+        "extension": "disabled",
+        "manual_reload": False,
+        "worker_cleanup": "clean",
+    }
+
+
 def run_lifecycle(
     target: LifecycleTarget | None = None,
     safaridriver_url: str | None = None,
+    chrome_executable: Path = CHROME_EXECUTABLE,
 ) -> dict:
     target = target or script_target()
     safaridriver_url = _validated_safaridriver_url(safaridriver_url)
@@ -2246,6 +2346,8 @@ def run_lifecycle(
     chrome_probes: list[str] = []
     safari_probes: list[str] = []
     stalled_resolver_result = "not_applicable"
+    composed_navigation: dict[str, object] | str = "not_applicable"
+    browser_worker_idle: dict[str, object] | str = "not_applicable"
     stage = "acquire-pf-reference"
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -2337,19 +2439,47 @@ def run_lifecycle(
         _assert_sentinel_state(runner, sentinel_states)
 
         stage = "qualification-runtime-options"
-        system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)))
-        _wait_for_path(STATUS_PATH, present=False)
-        _patch_launchd_for_qualification(LAUNCHD_PLIST)
-        system.run(("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)))
-        active = _wait_for_status(
-            "active",
-            previous_pid=int(reinstalled["pid"]),
-            timeout=60,
-        )
-        _assert_anchor_active(runner)
-        _assert_local_routing_without_geph()
-        sentinel.check("active-start")
-        _assert_sentinel_state(runner, sentinel_states)
+        fixture = None
+        try:
+            browser_environment = None
+            if target.name == "packaged-app":
+                fixture = composed.ComposedHttpsFixture()
+                fixture.start()
+                browser_environment = fixture.qualification_environment(
+                    chrome_executable
+                )
+            system.run(("/bin/launchctl", "bootout", "system", str(LAUNCHD_PLIST)))
+            _wait_for_path(STATUS_PATH, present=False)
+            _patch_launchd_for_qualification(
+                LAUNCHD_PLIST,
+                browser_environment,
+            )
+            system.run(("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)))
+            active = _wait_for_status(
+                "active",
+                previous_pid=int(reinstalled["pid"]),
+                timeout=60,
+            )
+            _assert_anchor_active(runner)
+            _assert_local_routing_without_geph()
+            sentinel.check("active-start")
+            _assert_sentinel_state(runner, sentinel_states)
+            if fixture is not None:
+                stage = "pending-navigation:idle"
+                browser_worker_idle = composed.assert_worker_idle(
+                    uid,
+                    int(active["pid"]),
+                )
+                stage = "pending-navigation:composed-original"
+                composed_navigation = _run_composed_navigation(
+                    fixture,
+                    uid,
+                    gid,
+                    chrome_executable,
+                )
+        finally:
+            if fixture is not None:
+                fixture.close()
 
         stage = "daemon-restart"
         system.run(("/bin/launchctl", "kickstart", "-k", LAUNCHD_LABEL))
@@ -2530,6 +2660,8 @@ def run_lifecycle(
         "chrome_probes": chrome_probes or ["not_applicable"],
         "safari_probes": safari_probes or ["not_applicable"],
         "stalled_system_resolver": stalled_resolver_result,
+        "browser_worker_idle": browser_worker_idle,
+        "composed_original_navigation": composed_navigation,
         "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
@@ -2578,6 +2710,16 @@ def dry_run(target_name: str = "script") -> dict:
             if target_name == "packaged-app"
             else "not applicable"
         ),
+        "browser_worker_idle": (
+            "owner-only broker with no worker process/profile and bounded CPU"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
+        "composed_original_navigation": (
+            "original Chrome -> daemon -> lazy worker -> exact retry -> styled page"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
         "lifecycle_rearms": (
             f"{LIFECYCLE_SOAK_CYCLES} suspend/wake and network-change cycles"
         ),
@@ -2599,13 +2741,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--safaridriver-url",
         help="localhost SafariDriver endpoint prepared by disposable CI",
     )
+    parser.add_argument(
+        "--chrome-executable",
+        type=Path,
+        default=CHROME_EXECUTABLE,
+        help="Chrome executable used only by the disposable packaged gate",
+    )
     args = parser.parse_args(argv)
     try:
         target = packaged_app_target(args.app_bundle) if args.app_bundle else script_target()
         report = (
             dry_run(target.name)
             if args.dry_run
-            else run_lifecycle(target, args.safaridriver_url)
+            else run_lifecycle(
+                target,
+                args.safaridriver_url,
+                args.chrome_executable,
+            )
         )
     except (LifecycleError, pf.SmokeError, KeyboardInterrupt) as exc:
         print(json.dumps({"result": "fail", "error": str(exc)}, indent=2))
