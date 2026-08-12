@@ -10,14 +10,23 @@ file.
 
 ## Current Checkpoint
 
-PR #330 is merged as live main
-`9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main CI run `31560635905`
-passed common job `94001999764`, packaged lifecycle `94001999674`, pinned
-Chromium `94001999763`, and Windows adapter `94001999750`; dependency-audit run
-`31560636006` passed audit job `94002000083` and Geph vendor job
-`94002000109`; Windows packet qualification run `31560635908` passed AMD64 job
-`94002000053` and ARM64 job `94002000035`. No protected artifact from this SHA
+PR #331 is merged as live main
+`aa10f16409ab8775647749517f79faea7b066926`. Exact-main CI run `31565732030`
+passed common job `94017024727`, packaged lifecycle `94017024721`, pinned
+Chromium `94017024682`, and Windows adapter `94017024679`; dependency-audit run
+`31565731952` passed audit job `94017024386` and Geph vendor job
+`94017024315`; Windows packet qualification run `31565731970` passed AMD64 job
+`94017024585` and ARM64 job `94017024587`. No protected artifact from this SHA
 has been installed on the workstation.
+
+That merge completes the active-worker uninstall ownership transaction. The
+exact-main packaged job first proved one correlated worker process, exact live
+Chrome profile, private runtime, and matching loaded LaunchAgent with root
+channels `original -> worker`. The normal installed uninstaller then completed
+the worker and original-capture cleanup, removed the installed state, preserved
+the sentinel connection/state, left global PF unchanged, and reported clean
+uninstall. Its three-second idle sample observed zero worker processes or
+profiles, a mode-`0600` broker, and 400 ms daemon CPU.
 
 That merge production-composes and qualifies the complete pending-navigation
 transaction without changing PF, DNS, proxy/PAC, VPN, external Geph, Discord,
@@ -55,23 +64,12 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Branch `codex/qualify-active-worker-uninstall` adds the next separate installed
-lifecycle gate. After the existing soak it starts a fresh exact fixture and
-original extension-free Chrome request, waits for the correlated worker root,
-and requires one matching live LaunchAgent PID, packaged worker process,
-browser profile derived from the live exact `--user-data-dir`, and owner-private
-runtime. It then runs the normal installed
-uninstall while that worker/browser pair is still blocked and requires the
-LaunchDaemon, broker, worker LaunchAgent/process/profile/runtime, installed
-payload, and original qualification capture all to be absent or stopped. The
-sentinel connection/state and global PF snapshot must remain unchanged.
-
 Current local verification passes 1,185 Python tests plus 54 subtests, focused
-Python compilation, shell syntax, and `git diff --check`. The required
+Python compilation, shell syntax, 94 Rust library tests, Rust clippy, and
+`git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
-bounded source inspection used the documented fallback. The real packaged
-active-worker uninstall transaction, review, merge, and exact-main checks
-remain open.
+bounded source inspection used the documented fallback. Active-worker uninstall
+has no remaining PR or exact-main gate.
 
 The first two packaged attempts found two real qualification boundaries. A
 hosted console-user Chrome profile is not reliably under `/tmp`, so the gate
@@ -93,7 +91,7 @@ runtime cleanup continues to validate the worker plist, UID, command, label,
 and private files before signalling anything. A missing or mismatched pin
 therefore still fails closed.
 
-The following packaged attempt passed that uninstall boundary and removed the
+The final failed packaged attempt passed that uninstall boundary and removed the
 LaunchAgent, worker, runtime, daemon, broker, and installed payload, but found
 the worker's exact private Chrome profile still present. `SIGTERM` previously
 terminated the Rust worker before its owned Chrome/profile cleanup could run.
@@ -102,15 +100,9 @@ read loop, performs its existing exact-profile Chrome cleanup, and deletes the
 profile. Stale cleanup waits at most eight seconds for this verified worker to
 exit and requires its bounded `worker_terminated` result before `bootout`; a
 timeout or cleanup error still fails closed rather than scanning or signalling
-unrelated Chrome processes. PR-head packaged job `94013960155` on
-`ef1d465a97e176f208179336c8e6249cdedbc3fd` passed the complete transaction:
-one worker process, profile, runtime, and loaded LaunchAgent existed with root
-channels `original -> worker`; normal uninstall then reported worker and
-original-capture cleanup clean and installed state absent. The same job kept
-the sentinel connection/state preserved, global PF unchanged, and ordinary
-uninstall clean. Its three-second idle sample observed zero workers/profiles,
-a mode-`0600` broker, and 590 ms daemon CPU. Evidence-commit requalification,
-review, merge, and exact-main qualification remain open.
+unrelated Chrome processes. Exact-main packaged job `94017024721` confirms the
+corrected transaction and ownership invariants described at the top of this
+checkpoint.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
