@@ -946,6 +946,16 @@ def _launchd_job_pid(result):
     return None
 
 
+def _launchd_job_state(result):
+    if result.returncode != 0:
+        return None
+    for raw_line in (result.stdout or "").splitlines():
+        line = raw_line.strip()
+        if line.startswith("state = "):
+            return line.removeprefix("state = ")
+    return None
+
+
 def _launchd_last_exit_code(result):
     if result.returncode != 0:
         return None
@@ -1450,6 +1460,7 @@ class PendingNavigationBrowserWorkerLauncher:
             "/bin/ps",
             "-p",
             str(pid),
+            "-ww",
             "-o",
             "uid=,command=",
         ))
@@ -1465,16 +1476,44 @@ class PendingNavigationBrowserWorkerLauncher:
 
     def _wait_for_pid(self, target, identity):
         deadline = self._monotonic_clock() + 5.0
+        expected_command = (
+            f"{self._executable} "
+            f"{PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT}"
+        )
         while self._monotonic_clock() < deadline:
             state = self._print(target)
             if _launchd_job_absent(state):
                 raise PendingNavigationProbeRuntimeError(
                     "browser_worker_disappeared"
                 )
+            # macOS can publish the exact newly bootstrapped Aqua job while
+            # launchd is still replacing its xpcproxy trampoline.  On real
+            # hardware the same PID may also be briefly reported as root before
+            # the console-user credentials become observable.  Neither state
+            # is accepted as the worker identity; wait within the existing
+            # five-second start bound for the exact final UID and command.
+            if _launchd_job_state(state) == "xpcproxy":
+                self._sleep(0.05)
+                continue
             pid = _launchd_job_pid(state)
             if pid is not None:
-                self._validate_process(pid, identity)
-                return pid
+                result = self._run((
+                    "/bin/ps",
+                    "-p",
+                    str(pid),
+                    "-ww",
+                    "-o",
+                    "uid=,command=",
+                ))
+                observed = _browser_worker_process_identity(result)
+                if observed == (identity.uid, expected_command):
+                    return pid
+                if observed == (0, expected_command):
+                    self._sleep(0.05)
+                    continue
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_identity_mismatch"
+                )
             self._sleep(0.05)
         raise PendingNavigationProbeRuntimeError(
             "browser_worker_start_timeout"

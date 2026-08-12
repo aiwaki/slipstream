@@ -10,6 +10,35 @@ file.
 
 ## Current Checkpoint
 
+macOS is the active priority. Controlled workstation transaction
+`B1D007CB-B8FA-4F6A-9C2A-622F18D122BC` installed only protected artifact
+`9137909918`, reached a coherent active daemon, and then failed its first
+required isolated headed-Chrome smoke because `xpersonatoy.com` remained
+uncommitted for 75 seconds. Exact rollback restored prior app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
+removed the root daemon, private listener, and product PF ownership, preserved
+owned-Geph PID `76069`, and left DNS, proxy/PAC, and default route byte-identical.
+
+Passive tracing during an exact repeated transaction showed the packaged Aqua
+worker briefly transition through launchd `xpcproxy` and a root-observed UID
+before the exact console UID became visible. More importantly, production
+unified-headless Chrome returned terminal observations or stale claims while
+the original ordinary headed Chrome navigation remained uncommitted. Branch
+`codex/macos-hidden-browser-worker` removes only the worker's `--headless`
+argument: LaunchServices still uses `open -j`, so the branded browser remains
+hidden, sandboxed, extension-free, TCP-only, isolated in a private profile, and
+exactly cleaned. The launcher now waits within its existing five-second bound
+for `xpcproxy/root -> exact console UID and command` instead of classifying the
+transient identity as final. It never accepts another UID or command. Local
+verification passes 1,199 Python tests plus 54 subtests, 96 Rust tests, an
+arm64 app build and strict code-signature check. The exact built app's packaged
+observer completed one hidden, windowless, sandboxed `navigation_pending`
+request and cleanup in 12,712 ms. Codebase graph discovery was attempted first
+and again returned `Transport closed`; inspection used the documented narrow
+fallback. No new artifact from this correction is installed. The next verified
+action is PR review/CI, exact-main gates, protected qualification, and only then
+a new controlled macOS install with `xpersonatoy.com` first.
+
 PR #332 is the latest qualified product-code merge at
 `b5514a693cfa412650d54878c0ccee8d8b664a07`. Its tree exactly matches reviewed
 product head `0d30a3712a5d5ae069ce09076658abc4fa65ea83`. PR CI run `31579340393`
@@ -84,8 +113,9 @@ its GitHub container digest is
 `sha256:9348c6a2d36e718edc4bc905bbb94b622b7c547d7605decebee6136ede7d00df`.
 The contained `Slipstream-owned-geph-qualified.zip` has SHA-256
 `1fbd3ff7da2143396cc45292217c5692c18783910c4897308d9e4f767103a9ab`;
-the recorded checksum and `unzip -t` both pass. This artifact has not been
-installed on the workstation.
+the recorded checksum and `unzip -t` both pass. It was installed only in the
+rolled-back transaction recorded above and no longer has installation
+authority.
 
 PR #332 is the merged product correction. Its first documentation head passed
 all six required checks, including packaged job `94019999739`. A later
