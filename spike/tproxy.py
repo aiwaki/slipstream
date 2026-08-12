@@ -64,6 +64,7 @@ from http_response_completion import (
     http_response_incomplete,
 )
 import install_guard
+import pending_navigation_probe_runtime
 import pf_adapter
 import route_circuit
 import route_circuit_registry
@@ -188,6 +189,13 @@ _dead = {}                     # host -> expiry_monotonic
 # health contract; raw host-level evidence stays in the owner-only log.
 STATUS_PATH = "/var/run/slipstream.status"
 SEMANTIC_SIGNAL_SOCKET_PATH = "/var/run/slipstream-semantic.sock"
+PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
+    pending_navigation_probe_runtime.PENDING_NAVIGATION_PROBE_SOCKET_PATH
+)
+PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
+    pending_navigation_probe_runtime
+    .PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME
+)
 STATUS_SCHEMA_VERSION = 2
 STATUS_PUBLIC_MODE = 0o644
 DAEMON_VERSION = "0.1.9"
@@ -198,6 +206,11 @@ _shutdown_started = threading.Event()
 _pf_teardown_complete = threading.Event()
 _semantic_route_signal_runtime = None
 _semantic_route_signal_runtime_lock = threading.Lock()
+_pending_navigation_probe_runtime = None
+_pending_navigation_probe_runtime_lock = threading.Lock()
+_pending_navigation_probe_worker = None
+_pending_navigation_probe_worker_lock = threading.Lock()
+_pending_navigation_probe_available = False
 SHUTDOWN_DRAIN_SECONDS = 10.0
 SHUTDOWN_DRAIN_QUIET_SECONDS = 0.1
 
@@ -3572,6 +3585,53 @@ def _get_semantic_route_signal_runtime():
                 )
             )
         return _semantic_route_signal_runtime
+
+
+def _get_pending_navigation_probe_runtime():
+    global _pending_navigation_probe_runtime
+    with _pending_navigation_probe_runtime_lock:
+        if _pending_navigation_probe_runtime is None:
+            _pending_navigation_probe_runtime = (
+                pending_navigation_probe_runtime.PendingNavigationProbeRuntime(
+                    submit_result=_submit_pending_navigation_probe_result,
+                )
+            )
+        return _pending_navigation_probe_runtime
+
+
+def _get_pending_navigation_probe_worker():
+    global _pending_navigation_probe_worker
+    with _pending_navigation_probe_worker_lock:
+        if _pending_navigation_probe_worker is None:
+            runtime = _get_pending_navigation_probe_runtime()
+            launcher = (
+                pending_navigation_probe_runtime
+                .PendingNavigationBrowserWorkerLauncher()
+            )
+            _pending_navigation_probe_worker = (
+                pending_navigation_probe_runtime
+                .LazyPendingNavigationProbeWorker(
+                    pending_jobs=runtime.state_size,
+                    launch_worker=launcher.launch,
+                )
+            )
+        return _pending_navigation_probe_worker
+
+
+def _close_pending_navigation_probe_worker():
+    global _pending_navigation_probe_worker
+    with _pending_navigation_probe_worker_lock:
+        worker = _pending_navigation_probe_worker
+        _pending_navigation_probe_worker = None
+    if worker is None:
+        return True
+    return worker.close(
+        timeout=(
+            pending_navigation_probe_runtime
+            .PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS
+            + 5.0
+        )
+    )
 
 
 def _unknown_local_recovery_candidate_allowed(host):
@@ -7448,6 +7508,13 @@ def _log_semantic_signal_server_error(error):
     )
 
 
+def _log_pending_navigation_probe_server_error(error):
+    print(
+        f">> pending-navigation probe socket unavailable: {error}",
+        file=sys.stderr,
+    )
+
+
 def _baseline_probe_command(candidate):
     return [
         BASELINE_PROBE_BINARY,
@@ -9770,7 +9837,7 @@ def _register_pending_navigation_relay(
     *,
     scheduler=None,
 ):
-    """Register one generic relay for an explicit browser pending signal."""
+    """Register one generic relay for an automatic local browser probe."""
     h = normalize_host(host)
     try:
         address = ipaddress.ip_address(ip)
@@ -9790,6 +9857,9 @@ def _register_pending_navigation_relay(
     activity.pending_navigation_ip = str(address)
     activity.pending_navigation_stage = stage
     activity.pending_navigation_scheduler = scheduler
+    activity.on_downstream_idle = lambda: (
+        _enqueue_pending_navigation_probe_for_activity(activity)
+    )
     with _auto_geph_lock:
         relays = _active_pending_navigation_relays.setdefault(h, {})
         relays[id(activity)] = activity
@@ -9911,6 +9981,41 @@ def _issue_pending_navigation_probe(
         "issued_at_unix_ms": capability.issued_at_unix_ms,
         "expires_at_unix_ms": capability.expires_at_unix_ms,
     }
+
+
+def _enqueue_pending_navigation_probe_for_activity(activity):
+    """Queue one exact idle relay and wake the shared lazy browser worker."""
+    if (
+        not _pending_navigation_probe_available
+        or _shutdown_started.is_set()
+        or activity.retry_closed
+    ):
+        return False
+    job = _issue_pending_navigation_probe(activity)
+    if job is None:
+        return False
+    runtime = _get_pending_navigation_probe_runtime()
+    capability = job["capability"]
+    try:
+        enqueued = runtime.enqueue(job)
+    except Exception:
+        _revoke_pending_navigation_probe_capability(activity)
+        return False
+    if not enqueued:
+        _revoke_pending_navigation_probe_capability(activity)
+        return False
+    try:
+        worker = _get_pending_navigation_probe_worker()
+        notified = worker.notify_job_ready()
+    except Exception:
+        runtime.discard(capability)
+        _revoke_pending_navigation_probe_capability(activity)
+        return False
+    if notified or worker.active():
+        return True
+    runtime.discard(capability)
+    _revoke_pending_navigation_probe_capability(activity)
+    return False
 
 
 def _unregister_pending_navigation_relay(activity):
@@ -13228,6 +13333,12 @@ def _remove_install_runtime_artifacts():
     semantic_route_signal_runtime.remove_stale_owned_socket(
         SEMANTIC_SIGNAL_SOCKET_PATH
     )
+    pending_navigation_probe_runtime.remove_stale_owned_socket(
+        PENDING_NAVIGATION_PROBE_SOCKET_PATH
+    )
+    pending_navigation_probe_runtime.cleanup_stale_browser_worker_runtime(
+        remove_root=True,
+    )
 
 
 def _cleanup_install_incomplete(reason):
@@ -13243,12 +13354,27 @@ def _remove_daemon_status_artifacts():
             pass
         except OSError:
             return False
-    return (
-        _remove_install_attestation_artifacts()
-        and semantic_route_signal_runtime.remove_stale_owned_socket(
+    attestation_clean = _remove_install_attestation_artifacts()
+    semantic_socket_clean = (
+        semantic_route_signal_runtime.remove_stale_owned_socket(
             SEMANTIC_SIGNAL_SOCKET_PATH
         )
     )
+    pending_socket_clean = (
+        pending_navigation_probe_runtime.remove_stale_owned_socket(
+            PENDING_NAVIGATION_PROBE_SOCKET_PATH
+        )
+    )
+    pending_worker_clean = (
+        pending_navigation_probe_runtime
+        .cleanup_stale_browser_worker_runtime(remove_root=True)
+    )
+    return all((
+        attestation_clean,
+        semantic_socket_clean,
+        pending_socket_clean,
+        pending_worker_clean,
+    ))
 
 
 def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
@@ -13333,6 +13459,8 @@ def _disable_and_cleanup_install(port=PROXY_PORT, remove_runtime=True):
         STATUS_PATH,
         TGWS_LINK_PATH,
         SEMANTIC_SIGNAL_SOCKET_PATH,
+        PENDING_NAVIGATION_PROBE_SOCKET_PATH,
+        PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME,
         PF_SKIP_LEASE_PATH,
     )) and not _install_attestation_artifacts()
     clean = all((
@@ -13499,7 +13627,7 @@ def _start_network_monitor(port, voice):
 
 
 async def amain(port, voice=True):
-    global _geph_up
+    global _geph_up, _pending_navigation_probe_available
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(asyncio_exception_handler)
     shutdown = asyncio.Event()
@@ -13555,6 +13683,7 @@ async def amain(port, voice=True):
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
     _start_network_monitor(port, voice)
     semantic_server = None
+    pending_navigation_server = None
     try:
         semantic_server = (
             await semantic_route_signal_runtime.start_semantic_signal_server_supervisor(
@@ -13566,6 +13695,31 @@ async def amain(port, voice=True):
         )
     except Exception as error:
         _log_semantic_signal_server_error(error)
+    pending_navigation_cleanup_ok = await asyncio.to_thread(
+        pending_navigation_probe_runtime
+        .cleanup_stale_browser_worker_runtime
+    )
+    if not pending_navigation_cleanup_ok:
+        _log_pending_navigation_probe_server_error(
+            "stale browser worker ownership is unclear"
+        )
+    else:
+        try:
+            pending_navigation_server = (
+                await pending_navigation_probe_runtime
+                .start_pending_navigation_probe_server_supervisor(
+                    PENDING_NAVIGATION_PROBE_SOCKET_PATH,
+                    _console_probe_identity,
+                    _get_pending_navigation_probe_runtime(),
+                    error_handler=(
+                        _log_pending_navigation_probe_server_error
+                    ),
+                )
+            )
+            _pending_navigation_probe_available = True
+        except Exception as error:
+            _pending_navigation_probe_available = False
+            _log_pending_navigation_probe_server_error(error)
     print(f">> transparent tlsrec+DoH proxy on 127.0.0.1:{port}  (root)")
     print(">> quit + reopen Discord normally; its updater is captured too")
     print(">> Ctrl-C (or close terminal) to stop and restore pf")
@@ -13573,7 +13727,10 @@ async def amain(port, voice=True):
         drained = await serve_until_shutdown(
             server,
             shutdown,
-            auxiliary_servers=(semantic_server,),
+            auxiliary_servers=(
+                semantic_server,
+                pending_navigation_server,
+            ),
         )
         if not drained:
             print(
@@ -13581,6 +13738,10 @@ async def amain(port, voice=True):
                 file=sys.stderr,
             )
     finally:
+        _pending_navigation_probe_available = False
+        await asyncio.to_thread(_close_pending_navigation_probe_worker)
+        if pending_navigation_server is not None:
+            await pending_navigation_server.close()
         if semantic_server is not None:
             await semantic_server.close()
         for shutdown_signal in shutdown_signals:

@@ -1903,14 +1903,38 @@ def test_unknown_slow_system_route_is_committed_without_replay(monkeypatch):
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
-def test_unknown_handshake_only_idle_waits_for_browser_pending_signal(monkeypatch):
-    """A quiet TLS relay advances only after a correlated browser signal."""
+def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
+    """A quiet TLS relay advances only after its local browser probe result."""
     isolate_runtime_state(monkeypatch)
     host = "idle-system-route.example"
     response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
     signal_times = []
+
+    class Runtime:
+        def __init__(self):
+            self.jobs = []
+
+        def enqueue(self, job):
+            self.jobs.append(job)
+            return True
+
+        def discard(self, _capability):
+            return False
+
+    class Worker:
+        def notify_job_ready(self):
+            return True
+
+        def active(self):
+            return True
+
+    runtime = Runtime()
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", runtime)
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_worker", Worker())
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_available", True)
+    tproxy._shutdown_started.clear()
 
     async def pending_system(_ip, _port, _first_flight):
         return (
@@ -1926,7 +1950,7 @@ def test_unknown_handshake_only_idle_waits_for_browser_pending_signal(monkeypatc
         activity,
         **_kwargs,
     ):
-        assert activity.on_downstream_idle is None
+        assert callable(activity.on_downstream_idle)
         assert activity.pending_navigation_eligible
         assert not activity.downstream_idle_retry
         assert not tproxy._xbox_dns_candidate_active(
@@ -1942,19 +1966,33 @@ def test_unknown_handshake_only_idle_waits_for_browser_pending_signal(monkeypatc
                 - 0.001
             ),
         )
-        # Bracket the duration gate instead of relying on floating-point
-        # cancellation to reproduce the exact inclusive boundary.
-        signal_now = (
-            activity.last_downstream_at
-            + tproxy.UNKNOWN_PRE_RESPONSE_IDLE
-            + 0.001
+        activity.last_downstream_at -= (
+            tproxy.UNKNOWN_PRE_RESPONSE_IDLE + 0.001
         )
-        assert tproxy._request_pending_navigation_retry(
-            host,
-            activity.pending_navigation_started_at_unix_ms,
-            now=signal_now,
+        assert activity.on_downstream_idle()
+        assert len(runtime.jobs) == 1
+        job = runtime.jobs[0]
+        completion_now = (
+            time.monotonic() + tproxy.UNKNOWN_PRE_RESPONSE_IDLE + 0.001
         )
-        signal_times.append(signal_now)
+        assert tproxy._submit_pending_navigation_probe_result(
+            {
+                "schema_version": 1,
+                "capability": job["capability"],
+                "host": job["host"],
+                "request_started_at_unix_ms": job[
+                    "request_started_at_unix_ms"
+                ],
+                "observed_at_unix_ms": (
+                    job["issued_at_unix_ms"]
+                    + int(tproxy.UNKNOWN_PRE_RESPONSE_IDLE * 1000)
+                    + 1
+                ),
+                "outcome": tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING,
+            },
+            now=completion_now,
+        )
+        signal_times.append(completion_now)
         assert activity.downstream_idle_retry
         return 0, 0
 

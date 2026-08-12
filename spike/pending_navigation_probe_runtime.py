@@ -1,5 +1,6 @@
 """Bounded owner-only job/result broker for pending-navigation probes."""
 
+import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass
 import ipaddress
@@ -37,6 +38,7 @@ MAX_LIVE_JOBS = 32
 MAX_ENQUEUE_AGE_MS = 5_000
 MAX_IPC_BYTES = 2_048
 IPC_TIMEOUT_SECONDS = 2.0
+CONSOLE_IDENTITY_POLL_SECONDS = 2.0
 PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
     "/var/run/slipstream-browser-probe.sock"
 )
@@ -66,7 +68,12 @@ _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT = frozenset((
 _BROWSER_WORKER_ERROR_RE = re.compile(
     r"\Aslipstream browser probe failed: ([a-z0-9_]{1,64})\n?\Z"
 )
+_BROWSER_WORKER_LABEL_RE = re.compile(
+    rf"\A{re.escape(PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX)}\."
+    r"[0-9a-f]{16}\Z"
+)
 _BROWSER_WORKER_ERROR_MAX_BYTES = 256
+_BROWSER_WORKER_PLIST_MAX_BYTES = 16 * 1024
 
 _CAPABILITY_RE = re.compile(
     rf"^[0-9a-f]{{{CAPABILITY_HEX_CHARS}}}$"
@@ -360,6 +367,325 @@ class PendingNavigationProbeRuntime:
         with self._lock:
             self._prune_locked(now_monotonic)
             return len(self._jobs)
+
+    def discard(self, capability):
+        if not isinstance(capability, str):
+            return False
+        with self._lock:
+            return self._jobs.pop(capability, None) is not None
+
+
+def encode_frame(payload):
+    if not isinstance(payload, bytes):
+        raise TypeError("pending-navigation frame payload must be bytes")
+    return struct.pack("<I", len(payload)) + payload
+
+
+async def _read_frame(reader):
+    header = await asyncio.wait_for(
+        reader.readexactly(4),
+        timeout=IPC_TIMEOUT_SECONDS,
+    )
+    length = struct.unpack("<I", header)[0]
+    if length <= 0 or length > MAX_IPC_BYTES:
+        raise PendingNavigationProbeRuntimeError("invalid_frame")
+    return await asyncio.wait_for(
+        reader.readexactly(length),
+        timeout=IPC_TIMEOUT_SECONDS,
+    )
+
+
+async def handle_pending_navigation_probe_client(reader, writer, runtime):
+    try:
+        payload = await _read_frame(reader)
+        response = await asyncio.to_thread(runtime.handle, payload)
+    except (
+        asyncio.IncompleteReadError,
+        asyncio.TimeoutError,
+        PendingNavigationProbeRuntimeError,
+        struct.error,
+    ):
+        response = _response(False, OPERATION_NONE, REASON_INVALID_REQUEST)
+    except Exception:
+        response = _response(False, OPERATION_NONE, REASON_EFFECT_UNAVAILABLE)
+    encoded = json.dumps(
+        response,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    try:
+        writer.write(encode_frame(encoded))
+        await asyncio.wait_for(
+            writer.drain(),
+            timeout=IPC_TIMEOUT_SECONDS,
+        )
+    except (asyncio.TimeoutError, ConnectionError, OSError):
+        pass
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (ConnectionError, OSError):
+            pass
+
+
+@dataclass(frozen=True, slots=True)
+class UnixSocketIdentity:
+    device: int
+    inode: int
+
+
+def _socket_identity(path):
+    record = os.lstat(path)
+    if not stat.S_ISSOCK(record.st_mode):
+        raise OSError("pending-navigation path is not a Unix socket")
+    return UnixSocketIdentity(record.st_dev, record.st_ino)
+
+
+def remove_owned_socket(path, identity):
+    try:
+        current = _socket_identity(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if current != identity:
+        return False
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    return True
+
+
+def remove_stale_owned_socket(path=PENDING_NAVIGATION_PROBE_SOCKET_PATH):
+    try:
+        record = os.lstat(path)
+    except FileNotFoundError:
+        return True
+    if (
+        not stat.S_ISSOCK(record.st_mode)
+        or stat.S_IMODE(record.st_mode) != 0o600
+    ):
+        return False
+    return remove_owned_socket(
+        path,
+        UnixSocketIdentity(record.st_dev, record.st_ino),
+    )
+
+
+async def _refuse_active_socket(path):
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(path),
+            timeout=0.2,
+        )
+    except (ConnectionRefusedError, FileNotFoundError):
+        return
+    except (asyncio.TimeoutError, OSError) as error:
+        raise OSError(
+            "pending-navigation socket ownership is unclear"
+        ) from error
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except (ConnectionError, OSError):
+        pass
+    raise OSError("pending-navigation socket is already active")
+
+
+@dataclass
+class OwnedPendingNavigationProbeServer:
+    server: asyncio.AbstractServer
+    path: str
+    identity: UnixSocketIdentity
+    _closed: bool = False
+
+    async def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self.server.close()
+        await self.server.wait_closed()
+        remove_owned_socket(self.path, self.identity)
+
+
+@dataclass
+class OwnedPendingNavigationProbeServerSupervisor:
+    path: str
+    runtime: PendingNavigationProbeRuntime
+    identity_provider: object
+    poll_interval: float = CONSOLE_IDENTITY_POLL_SECONDS
+    error_handler: object = None
+    _server: OwnedPendingNavigationProbeServer = None
+    _session_identity: tuple = None
+    _task: asyncio.Task = None
+    _closing: asyncio.Event = None
+
+    def __post_init__(self):
+        if self.poll_interval <= 0:
+            raise ValueError(
+                "pending-navigation identity poll interval must be positive"
+            )
+        self._closing = asyncio.Event()
+
+    @staticmethod
+    def _normalize_identity(identity):
+        if identity is None:
+            return None
+        try:
+            uid, gid, session = identity
+        except (TypeError, ValueError):
+            return None
+        if (
+            type(uid) is not int
+            or uid <= 0
+            or type(gid) is not int
+            or gid < 0
+            or not isinstance(session, str)
+            or not session
+        ):
+            return None
+        return uid, gid, session
+
+    async def _close_server(self):
+        server = self._server
+        self._server = None
+        self._session_identity = None
+        if server is not None:
+            await server.close()
+
+    async def _reconcile(self):
+        desired = self._normalize_identity(self.identity_provider())
+        if desired == self._session_identity:
+            return
+        await self._close_server()
+        if desired is None:
+            return
+        uid, gid, _ = desired
+        self._server = await start_owned_pending_navigation_probe_server(
+            self.path,
+            uid,
+            gid,
+            self.runtime,
+        )
+        self._session_identity = desired
+
+    async def _run(self):
+        try:
+            while not self._closing.is_set():
+                try:
+                    await self._reconcile()
+                except Exception as error:
+                    await self._close_server()
+                    if self.error_handler is not None:
+                        self.error_handler(error)
+                try:
+                    await asyncio.wait_for(
+                        self._closing.wait(),
+                        timeout=self.poll_interval,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            await self._close_server()
+
+    async def start(self):
+        if self._task is not None:
+            return self
+        await self._reconcile()
+        self._task = asyncio.create_task(self._run())
+        return self
+
+    async def close(self):
+        if self._closing.is_set():
+            if self._task is not None:
+                await asyncio.gather(self._task, return_exceptions=True)
+            return
+        self._closing.set()
+        if self._task is not None:
+            await asyncio.gather(self._task, return_exceptions=True)
+        else:
+            await self._close_server()
+
+
+async def start_pending_navigation_probe_server_supervisor(
+    path,
+    identity_provider,
+    runtime,
+    *,
+    poll_interval=CONSOLE_IDENTITY_POLL_SECONDS,
+    error_handler=None,
+):
+    supervisor = OwnedPendingNavigationProbeServerSupervisor(
+        path=path,
+        runtime=runtime,
+        identity_provider=identity_provider,
+        poll_interval=poll_interval,
+        error_handler=error_handler,
+    )
+    return await supervisor.start()
+
+
+async def start_owned_pending_navigation_probe_server(path, uid, gid, runtime):
+    if uid <= 0 or gid < 0:
+        raise ValueError(
+            "pending-navigation socket requires a non-root owner"
+        )
+    try:
+        existing = os.lstat(path)
+    except FileNotFoundError:
+        existing = None
+    if existing is not None:
+        if (
+            not stat.S_ISSOCK(existing.st_mode)
+            or existing.st_uid not in {0, uid}
+        ):
+            raise OSError(
+                "refusing to replace an unowned pending-navigation path"
+            )
+        identity = UnixSocketIdentity(existing.st_dev, existing.st_ino)
+        await _refuse_active_socket(path)
+        if not remove_owned_socket(path, identity):
+            raise OSError(
+                "unable to remove stale pending-navigation socket"
+            )
+
+    server = await asyncio.start_unix_server(
+        lambda reader, writer: handle_pending_navigation_probe_client(
+            reader,
+            writer,
+            runtime,
+        ),
+        path=path,
+        limit=MAX_IPC_BYTES + 4,
+        start_serving=False,
+    )
+    try:
+        identity = _socket_identity(path)
+        os.chown(path, uid, gid)
+        os.chmod(path, 0o600)
+        record = os.lstat(path)
+        if (
+            record.st_uid != uid
+            or record.st_gid != gid
+            or stat.S_IMODE(record.st_mode) != 0o600
+        ):
+            raise OSError(
+                "pending-navigation socket ownership verification failed"
+            )
+        await server.start_serving()
+    except Exception:
+        server.close()
+        await server.wait_closed()
+        try:
+            remove_owned_socket(path, identity)
+        except UnboundLocalError:
+            pass
+        raise
+    return OwnedPendingNavigationProbeServer(server, path, identity)
 
 
 class PendingNavigationProbeWorkerClient:
@@ -791,6 +1117,201 @@ class PendingNavigationBrowserWorkerLauncher:
             raise
         return paths
 
+    @staticmethod
+    def _validate_private_runtime_file(path, identity):
+        metadata = os.lstat(path)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != identity.uid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+        return metadata
+
+    @classmethod
+    def _read_private_runtime_file(cls, path, identity, limit):
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(path, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != identity.uid
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size > limit
+            ):
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_runtime_unowned"
+                )
+            payload = os.read(descriptor, limit + 1)
+            if len(payload) != metadata.st_size:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_runtime_unowned"
+                )
+            return payload
+        finally:
+            os.close(descriptor)
+
+    def _validate_stale_launch(self, paths, identity, label):
+        directory = os.lstat(paths.directory)
+        if (
+            not stat.S_ISDIR(directory.st_mode)
+            or stat.S_ISLNK(directory.st_mode)
+            or directory.st_uid != identity.uid
+            or stat.S_IMODE(directory.st_mode) != 0o700
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+        self._validate_private_runtime_file(paths.stdout, identity)
+        self._validate_private_runtime_file(paths.stderr, identity)
+        payload = plistlib.loads(
+            self._read_private_runtime_file(
+                paths.plist,
+                identity,
+                _BROWSER_WORKER_PLIST_MAX_BYTES,
+            )
+        )
+        if not isinstance(payload, dict):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+        environment = payload.get("EnvironmentVariables")
+        expected_environment = {
+            "HOME": identity.home,
+            "LOGNAME": identity.username,
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "USER": identity.username,
+        }
+        expected_environment.update(self._disposable_environment)
+        if not isinstance(environment, dict):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+        if (
+            set(payload) != {
+                "AbandonProcessGroup",
+                "EnvironmentVariables",
+                "Label",
+                "LimitLoadToSessionType",
+                "ProcessType",
+                "ProgramArguments",
+                "RunAtLoad",
+                "StandardErrorPath",
+                "StandardOutPath",
+                "WorkingDirectory",
+            }
+            or payload.get("Label") != label
+            or payload.get("ProgramArguments") != [
+                str(self._executable),
+                PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+            ]
+            or payload.get("RunAtLoad") is not True
+            or payload.get("ProcessType") != "Interactive"
+            or payload.get("LimitLoadToSessionType") != "Aqua"
+            or payload.get("AbandonProcessGroup") is not False
+            or payload.get("WorkingDirectory") != identity.home
+            or payload.get("StandardOutPath") != str(paths.stdout)
+            or payload.get("StandardErrorPath") != str(paths.stderr)
+            or environment != expected_environment
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+
+    @staticmethod
+    def _identity_for_uid(uid):
+        try:
+            account = pwd.getpwuid(uid)
+        except KeyError as error:
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            ) from error
+        if (
+            uid <= 0
+            or account.pw_gid < 0
+            or not account.pw_name
+            or account.pw_name in {"root", "loginwindow", "_mbsetupuser"}
+            or not os.path.isabs(account.pw_dir)
+        ):
+            raise PendingNavigationProbeRuntimeError(
+                "browser_worker_runtime_unowned"
+            )
+        return ConsoleUserIdentity(
+            uid=uid,
+            gid=account.pw_gid,
+            username=account.pw_name,
+            home=account.pw_dir,
+        )
+
+    def cleanup_stale(self, *, remove_root=False):
+        try:
+            root = os.lstat(self._runtime_root)
+        except FileNotFoundError:
+            return True
+        allowed_owners = {0} if os.geteuid() == 0 else {os.getuid()}
+        if (
+            not stat.S_ISDIR(root.st_mode)
+            or stat.S_ISLNK(root.st_mode)
+            or root.st_uid not in allowed_owners
+            or stat.S_IMODE(root.st_mode) & 0o022
+        ):
+            return False
+        try:
+            entries = tuple(self._runtime_root.iterdir())
+        except OSError:
+            return False
+        for directory in entries:
+            label = directory.name
+            if _BROWSER_WORKER_LABEL_RE.fullmatch(label) is None:
+                return False
+            try:
+                metadata = os.lstat(directory)
+                identity = self._identity_for_uid(metadata.st_uid)
+                paths = _BrowserWorkerLaunchPaths(
+                    directory=directory,
+                    plist=directory / "worker.plist",
+                    stdout=directory / "worker.stdout.log",
+                    stderr=directory / "worker.stderr.log",
+                )
+                self._validate_stale_launch(paths, identity, label)
+                target = f"gui/{identity.uid}/{label}"
+                state = self._print(target)
+                if _launchd_job_absent(state):
+                    self._cleanup_launch(
+                        target,
+                        paths,
+                        None,
+                        identity,
+                    )
+                    continue
+                pid = _launchd_job_pid(state)
+                if pid is not None:
+                    self._validate_process(pid, identity)
+                self._cleanup_launch(target, paths, pid, identity)
+            except (
+                OSError,
+                ValueError,
+                plistlib.InvalidFileException,
+                PendingNavigationProbeRuntimeError,
+            ):
+                return False
+        if remove_root:
+            try:
+                self._runtime_root.rmdir()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                return False
+        return True
+
     def _run(self, command):
         result = self._command_runner(tuple(command))
         if (
@@ -1040,6 +1561,12 @@ class PendingNavigationBrowserWorkerLauncher:
                 f"browser_worker_failed:{worker_error}"
             )
         return True
+
+
+def cleanup_stale_browser_worker_runtime(*, remove_root=False):
+    return PendingNavigationBrowserWorkerLauncher().cleanup_stale(
+        remove_root=remove_root,
+    )
 
 
 class LazyPendingNavigationProbeWorker:

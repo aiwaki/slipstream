@@ -2,7 +2,7 @@
   "schema_version": 1,
   "contract": "slipstream.pending-navigation-probe",
   "contract_version": 1,
-  "scope": "closed_daemon_correlation_seam",
+  "scope": "composed_local_daemon_runtime",
   "bounds": {
     "capability_bits": 128,
     "capability_ttl_ms": 30000,
@@ -33,14 +33,14 @@
       "reason",
       "job"
     ],
-    "runtime_composed": false
+    "runtime_composed": true
   },
   "worker_lifecycle": {
     "lazy": true,
     "max_concurrent_workers": 1,
     "retry_after_worker_loss_ms": 5000,
     "same_host_recursive_jobs": false,
-    "browser_observer_composed": false
+    "browser_observer_composed": true
   },
   "privacy": {
     "job_fields": [
@@ -104,7 +104,7 @@
     "terminal_observation_has_no_route_effect": true,
     "same_host_reselection_after_result": false,
     "semantic_signal_v3_modified": false,
-    "production_runtime_composition": false,
+    "production_runtime_composition": true,
     "system_network_mutation": false,
     "external_geph_allowed": false,
     "discord_youtube_googlevideo_allowed": false

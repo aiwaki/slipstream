@@ -67,11 +67,13 @@ PENDING_NAVIGATION_FIXTURE_HOST = "example.edu"
 REGIONAL_DENIAL_SCENARIO = "regional_denial"
 INCOMPLETE_RESPONSE_SCENARIO = "incomplete_response"
 PENDING_NAVIGATION_SCENARIO = "navigation_pending"
+AUTOMATIC_RETRY_SCENARIO = "automatic_navigation_retry"
 FIXTURE_SCENARIOS = frozenset(
     (
         REGIONAL_DENIAL_SCENARIO,
         INCOMPLETE_RESPONSE_SCENARIO,
         PENDING_NAVIGATION_SCENARIO,
+        AUTOMATIC_RETRY_SCENARIO,
     )
 )
 STYLED_MARKER = "SLIPSTREAM_SEMANTIC_STYLED_READY"
@@ -551,6 +553,8 @@ def _fixture_response(
                     "<!doctype html><html><head><title>Loading</title></head>"
                     "<body><main>Incomplete response fixture</main></body></html>"
                 ).encode("utf-8")
+            elif scenario == AUTOMATIC_RETRY_SCENARIO:
+                body = b""
             else:
                 raise QualificationError(f"unknown fixture scenario: {scenario}")
         else:
@@ -731,6 +735,16 @@ class SemanticHttpsFixture:
                     else:
                         with fixture.lock:
                             fixture.pending_navigation_signals += 1
+                    self.close_connection = True
+                    return
+                if (
+                    fixture.scenario == AUTOMATIC_RETRY_SCENARIO
+                    and path == "/"
+                    and root_visit == 1
+                ):
+                    time.sleep(
+                        PENDING_NAVIGATION_MIN_DELAY_MS / 1000.0 + 0.2
+                    )
                     self.close_connection = True
                     return
                 status, content_type, body = _fixture_response(
@@ -935,12 +949,16 @@ def _wait_for_owned_geph_backend(*, timeout: float = 60.0) -> None:
 def _chrome_command(
     executable: Path,
     profile: Path,
-    extension: Path,
+    extension: Path | None,
     fixture_port: int,
     fixture_host: str = FIXTURE_HOST,
     *,
     headless: bool = False,
 ) -> tuple[str, ...]:
+    resolver_argument = (
+        f"--host-resolver-rules=MAP {fixture_host} 127.0.0.1, "
+        "EXCLUDE localhost"
+    )
     command = [
         str(executable),
         "--disable-background-networking",
@@ -955,13 +973,19 @@ def _chrome_command(
         "--no-proxy-server",
         "--password-store=basic",
         "--ignore-certificate-errors",
-        f"--disable-extensions-except={extension}",
-        f"--load-extension={extension}",
-        f"--host-resolver-rules=MAP {fixture_host} 127.0.0.1, EXCLUDE localhost",
+        resolver_argument,
         "--remote-debugging-port=0",
         f"--user-data-dir={profile}",
         "about:blank",
     ]
+    if extension is not None:
+        resolver_index = command.index(resolver_argument)
+        command[resolver_index:resolver_index] = [
+            f"--disable-extensions-except={extension}",
+            f"--load-extension={extension}",
+        ]
+    else:
+        command.insert(command.index(resolver_argument), "--disable-extensions")
     command.insert(-1, "--headless" if headless else "--new-window")
     return tuple(command)
 
@@ -1036,7 +1060,7 @@ def _launchservices_executable(
 def _chrome_open_command(
     executable: Path,
     profile: Path,
-    extension: Path,
+    extension: Path | None,
     fixture_port: int,
     stdout_path: Path,
     stderr_path: Path,
@@ -1079,7 +1103,7 @@ def _chrome_launch_agent_payload(
     launcher_stderr_path: Path,
     executable: Path,
     profile: Path,
-    extension: Path,
+    extension: Path | None,
     fixture_port: int,
     application_bundle: Path | None = None,
     fixture_host: str = FIXTURE_HOST,
@@ -1547,7 +1571,10 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
     if not isinstance(debugger_url, str):
         raise QualificationError("owned about:blank page has no debugger endpoint")
     command_options: dict[str, float] = {}
-    if fixture.scenario == PENDING_NAVIGATION_SCENARIO:
+    if fixture.scenario in {
+        PENDING_NAVIGATION_SCENARIO,
+        AUTOMATIC_RETRY_SCENARIO,
+    }:
         command_options["response_timeout"] = PENDING_NAVIGATION_DEVTOOLS_TIMEOUT
     result = _devtools_command(
         debugger_url,
@@ -1561,7 +1588,10 @@ def _open_fixture_with_devtools(port: int, fixture: SemanticHttpsFixture) -> Non
     error_text = result.get("errorText")
     if error_text not in (None, ""):
         if (
-            fixture.scenario == PENDING_NAVIGATION_SCENARIO
+            fixture.scenario in {
+                PENDING_NAVIGATION_SCENARIO,
+                AUTOMATIC_RETRY_SCENARIO,
+            }
             and error_text == "net::ERR_EMPTY_RESPONSE"
         ):
             return
@@ -2285,11 +2315,11 @@ def _remove_native_message_tap(tap: NativeMessageTap, uid: int) -> None:
 def _run_chrome(
     uid: int,
     gid: int,
-    extension: Path,
+    extension: Path | None,
     fixture: SemanticHttpsFixture,
     executable: Path,
-    native_host_manifest: Path,
-    native_host_executable: Path,
+    native_host_manifest: Path | None,
+    native_host_executable: Path | None,
     *,
     headless: bool = False,
     metrics: dict[str, int] | None = None,
@@ -2331,6 +2361,10 @@ def _run_chrome(
             application_bundle,
         )
         if fixture.scenario == PENDING_NAVIGATION_SCENARIO:
+            if native_host_executable is None:
+                raise QualificationError(
+                    "pending navigation requires a native host executable"
+                )
             tap = _create_pending_navigation_tap(
                 home,
                 profile,
@@ -2343,20 +2377,30 @@ def _run_chrome(
             registered_native_host_executable = tap.executable
             registered_native_host_manifest = tap.manifest
             native_tap_status = tap.status
-        native_host_registration = _install_chrome_for_testing_native_host(
-            home,
-            registered_native_host_manifest,
-            uid,
-            gid,
-            registered_native_host_executable,
-        )
-        _install_profile_native_host(
-            profile,
-            registered_native_host_manifest,
-            uid,
-            gid,
-            registered_native_host_executable,
-        )
+        if extension is not None:
+            if (
+                registered_native_host_manifest is None
+                or registered_native_host_executable is None
+            ):
+                raise QualificationError(
+                    "browser companion requires its native host"
+                )
+            native_host_registration = (
+                _install_chrome_for_testing_native_host(
+                    home,
+                    registered_native_host_manifest,
+                    uid,
+                    gid,
+                    registered_native_host_executable,
+                )
+            )
+            _install_profile_native_host(
+                profile,
+                registered_native_host_manifest,
+                uid,
+                gid,
+                registered_native_host_executable,
+            )
         _write_owner_private_file(stdout_path, b"", uid, gid)
         _write_owner_private_file(stderr_path, b"", uid, gid)
         _write_owner_private_file(launcher_stdout_path, b"", uid, gid)
@@ -2396,8 +2440,12 @@ def _run_chrome(
             profile,
             ownership,
         )
-        devtools_port = _wait_for_extension_worker(profile, uid)
-        if metrics is not None:
+        devtools_port = (
+            _wait_for_extension_worker(profile, uid)
+            if extension is not None
+            else _wait_for_devtools_port(profile, uid)
+        )
+        if metrics is not None and extension is not None:
             _record_chrome_metrics(
                 metrics,
                 started_at=launch_started_at,
