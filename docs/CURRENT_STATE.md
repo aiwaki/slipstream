@@ -244,15 +244,16 @@ unrelated Chrome processes. Exact-main packaged job `94017024721` confirms the
 corrected transaction and ownership invariants described at the top of this
 checkpoint.
 
-The most recent protected owned-Geph qualification is still run `31511415912`
-for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
+Historical protected run `31511415912` qualified earlier main
+`8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
 `navigation_pending` scenario emitted one privacy-bounded v3 signal, performed
 one reload, and reached the styled CSS/JavaScript/image-ready callback; the
 incomplete-response and regional-denial scenarios passed the same
 styled-resource requirement. Owned Geph returned HTTP 200 payload initially,
 trayless, and after KeepAlive replacement. Cleanup preserved the external
 listener, left the root daemon absent and disabled, and did not mutate system
-network state. No protected artifact is installable for live main.
+network state. That unpacked-extension evidence and its artifact are superseded
+by current run `31587594114` and artifact `9137909918` recorded at the top.
 
 Artifact `9110154812` was the exact input to controlled workstation transaction
 `271C43D9-4906-4AF3-88E8-C2EF146A33ED` and belongs to earlier main
@@ -438,16 +439,13 @@ also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
 common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
 passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
 
-PRs #329 through #333 completed the automatic original-navigation composition,
-installed-update, active-worker uninstall, measured idle-cost, cleanup, and
-exact-main evidence gates. The remaining browser gate is the protected
-exact-artifact repetition of that extensionless transaction.
-Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
-frozen unless a reviewed local-delivery design proves an identity migration is
-required. Only after the complete automatic-delivery gate passes should the
-then-current exact main receive one fresh protected qualification and a
-controlled workstation transaction. Do not install any existing artifact
-meanwhile.
+PRs #329 through #335 completed automatic original-navigation composition,
+installed update, active-worker uninstall, measured idle cost, cleanup,
+exact-main evidence, and protected exact-artifact qualification. Protected run
+`31587594114` is the completed repetition of the extensionless transaction.
+Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains frozen for the
+archival Web Store package, but it is no longer a runtime or workstation gate.
+Only artifact `9137909918` may enter a later controlled workstation transaction.
 
 ## Previous Checkpoint
 
@@ -1343,7 +1341,7 @@ Before continuing existing work, including after context compaction or a bare
 | Milestone | Status | Evidence and remaining gap |
 |---|---|---|
 | M0 - Safe Base | Root daemon, private PF ownership, and exact launchd cleanup qualified on main | PR #220 closed the retained KeepAlive uninstall boundary with exact service-target bootout, plist fallback, bounded absence polling, and the prohibition on signalling any PID while launchd remains loaded. Packaged lifecycle passed on PR and exact main. Physical lid/default-route and broader split/per-app VPN qualification remain external gates. |
-| M1 - Autonomous Routing V1 | Core routing, browser-independent incomplete-response recovery, and protected semantic recovery qualify on main; controlled workstation installation remains | PRs #219-#293 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, browser-origin authentication, bounded reload and replacement, cleanup, persistent privileged artifact attestation, Googlevideo local-only fallback, exact protected-artifact publication, generic semantic-signal v2, read-only Chromium/macOS Safari incomplete-response observation, and serialized protected-gate cleanup. PR #295 added a production-reachable browser-independent trigger for repeated, independently complete server-first failures plus strict framed-response verification; it does not replay the failed stream or relax static policy. PR #296 corrected protected successor ownership. Exact main `1be02bc8a4a410989b59ec601821e2bd6a9f1b19` passed CI `30729020756`, audit `30729020741`, native Windows `30729020745`, and protected run `30729228620`: all three owned-Geph payload phases, both Chromium semantic scenarios, cleanup, and system-network non-mutation passed, and exact artifact `8827417897` was published. The remaining M1 gate is one controlled workstation transaction using only that artifact, with immediate rollback on the first failed smoke. Discord/YouTube remain local-only. |
+| M1 - Autonomous Routing V1 | Core routing and the extensionless automatic original-navigation path qualify on exact main; one controlled workstation transaction remains | PRs #219-#335 cover generic transport recovery, strict semantic qualification, owner-only daemon IPC, exact-host owned-Geph confirmation and re-admission, bounded automatic retry, exact worker/browser/profile cleanup, persistent privileged artifact attestation, and protected exact-artifact publication. Exact main `fcbcedaa4e812e5080a00ce3d7f4bb8e89c6aff5` passed CI `31587057669`, audit `31587057685`, native Windows `31587057755`, and protected run `31587594114`. That run proved the extensionless `original -> worker -> original` path, all styled resources, the semantic matrix, account-backed owned-Geph lifecycle, cleanup, and system-network non-mutation. The sole current transaction candidate is artifact `9137909918`; older artifact `8827417897` is historical and has no installation authority. Chrome Web Store publication is no longer an M1 prerequisite because the qualified local worker requires no extension setup. Any later controlled transaction must use only `9137909918` and roll back on the first failed smoke. Discord, YouTube, and Googlevideo remain local-only. |
 | M2 - Contracts And Code | Partial | `slipstream-core` now owns policy classification, recovery, StatusV2, route-policy manifests and bundles, plus activation and rollback reducers. Python executes signed policy activation through that contract. Python PF/Geph orchestration and Rust tray runtime, installer, summary, and menu orchestration remain coupled. |
 | M3 - Release-Grade macOS | Partial | Pinned dependencies, strict Clippy, explicit target, SBOM, manifest, audit, attestations, and preview releases are implemented. Stable publication is intentionally closed until Developer ID signing, hardened runtime, notarization, stapling, key custody, and rollback qualification exist. |
 | M4 - Cross-Platform Core | Windows packet handoff plus bounded route, capture, generation, production-host crash, and physical ARM64 reboot resilience are exact-main green | Pure policy, recovery, StatusV2, signed-policy, activation, packet-flow, capture, flow-binding, byte-owner, selected-stack, connector, Wintun ownership, exact-route, coexistence, and cleanup contracts are qualified. PRs #267-#279 established packet handoff, route invalidation, capture/service generation, crash recovery, and boot admission. PR #287 merged the exact payload-release correction as `8ef9fb3d3d4643f056793578511b693ef68b3fe5`; exact-main native AMD64/ARM64 run `30554494634`, CI `30554495633`, and audit `30554495985` passed. Its exact ARM64 artifact passed the two-phase physical Parallels reboot and exact uninstall transaction. This is physical ARM64 evidence plus native AMD64/ARM64 binary and lifecycle preflight, not a physical AMD64 reboot claim. The evaluation stack remains development-only and the production SCM host remains no-network. Sleep/wake, full updater/uninstall orchestration, and broader external network-tool coexistence remain required before production service-host networking composition. Android/Linux adapters and the iOS feasibility gate remain later. |
@@ -1667,9 +1665,10 @@ required jobs in
 [CI run 29711400231](https://github.com/aiwaki/slipstream/actions/runs/29711400231)
 and dependency audit in
 [run 29711400215](https://github.com/aiwaki/slipstream/actions/runs/29711400215).
-The protected `geph-qualification` environment now exists and is limited to
-protected branches, but it has no `SLIPSTREAM_GEPH_ACCOUNT_SECRET`; the manual
-account-backed gate must not be triggered until the user supplies that secret.
+The protected `geph-qualification` environment is limited to protected
+branches and now has the account secret required by its manual gate. Exact-main
+run `31587594114` consumed that gate successfully; no missing-secret action or
+repeat qualification remains open.
 
 [PR #185](https://github.com/aiwaki/slipstream/pull/185) added the first native
 Wintun lifecycle subgate. The exact admitted 0.14.1 DLL, unique adapter, minimum
@@ -2033,9 +2032,6 @@ passes.
 
 ## External Gates
 
-- Add `SLIPSTREAM_GEPH_ACCOUNT_SECRET` to the protected
-  `geph-qualification` environment, then run the account-backed owned-Geph
-  qualification successfully from `main`.
 - Qualify a physical default-route change and lid-close/wake cycle on a
   disposable Mac.
 - Add Developer ID signing, hardened runtime, notarization, stapling, policy-key
