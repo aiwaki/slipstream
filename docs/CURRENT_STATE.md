@@ -34,8 +34,10 @@ eight-second stage stays fast. A live capability invalidated before its worker
 finishes is instead guarded through its original 30-second expiry. Capability
 and guard state share one 32-entry bound; new jobs are rejected at capacity,
 so a live worker's authority and guard are never evicted by host churn.
-An enqueue rejection or a false notification with no active worker removes the
-unstarted job without a guard, keeping transient local start failures fast.
+An enqueue rejection removes the unstarted job without a guard. After a false
+notification, queue discard and the no-worker proof occur under the worker's
+lifecycle lock; a claimed or restarting worker therefore keeps both job
+authority and the expiry guard. Proven-unstarted retries remain fast.
 No normal-path browser, broad host cooldown, route-policy change, or network
 setting mutation is added. Full PR and exact-main qualification remain open.
 
@@ -84,7 +86,7 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,187 Python tests plus 54 subtests, focused
+Current local verification passes 1,188 Python tests plus 54 subtests, focused
 Python compilation, 96 Rust tests, Rust clippy, contract JSON parsing, and
 `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;

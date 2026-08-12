@@ -331,6 +331,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         ),
         "live_capability_guard_until_expiry": True,
         "unstarted_job_guard_ms": 0,
+        "unstarted_discard_uses_worker_lock": True,
         "submit_before_cleanup": True,
         "cleanup_before_worker_exit": True,
         "browser_observer_composed": True,
@@ -797,6 +798,37 @@ def test_lazy_worker_reports_launch_failure_through_bounded_handler():
         "browser_worker_start_timeout"
     ]
     assert worker.close()
+
+
+def test_lazy_worker_discards_unstarted_job_under_lifecycle_lock():
+    pending = {"count": 1}
+    entered = threading.Event()
+    release = threading.Event()
+
+    def launch_worker():
+        entered.set()
+        assert release.wait(1.0)
+        pending["count"] = 0
+
+    worker = probe_runtime.LazyPendingNavigationProbeWorker(
+        pending_jobs=lambda: pending["count"],
+        launch_worker=launch_worker,
+        retry_seconds=0.01,
+    )
+    discarded = []
+    assert worker.discard_unstarted(
+        lambda: discarded.append("idle") or True
+    )
+    assert discarded == ["idle"]
+
+    assert worker.notify_job_ready()
+    assert entered.wait(1.0)
+    assert not worker.discard_unstarted(
+        lambda: discarded.append("raced") or True
+    )
+    assert discarded == ["idle"]
+    release.set()
+    assert worker.close(timeout=1.0)
 
 
 def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():

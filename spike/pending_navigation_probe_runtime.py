@@ -1724,6 +1724,18 @@ class LazyPendingNavigationProbeWorker:
         with self._lock:
             return self._thread is not None
 
+    def discard_unstarted(self, discard):
+        """Discard queued work only while no worker can race the callback."""
+        if not callable(discard):
+            return False
+        with self._lock:
+            if self._thread is not None:
+                return False
+            try:
+                return bool(discard())
+            except Exception:
+                return False
+
     def close(self, timeout=IPC_TIMEOUT_SECONDS):
         self._stop.set()
         with self._lock:

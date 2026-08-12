@@ -10099,14 +10099,15 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
         runtime.discard(capability)
         _revoke_pending_navigation_probe_capability(activity)
         return False
-    if notified or worker.active():
+    if notified:
         return True
-    runtime.discard(capability)
-    _revoke_pending_navigation_probe_capability(
-        activity,
-        guard_possible_worker=False,
-    )
-    return False
+    if worker.discard_unstarted(lambda: runtime.discard(capability)):
+        _revoke_pending_navigation_probe_capability(
+            activity,
+            guard_possible_worker=False,
+        )
+        return False
+    return True
 
 
 def _unregister_pending_navigation_relay(activity):

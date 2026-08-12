@@ -12023,6 +12023,9 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         "live_capability_guard_until_expiry"
     ] is True
     assert contract["worker_lifecycle"]["unstarted_job_guard_ms"] == 0
+    assert contract["worker_lifecycle"][
+        "unstarted_discard_uses_worker_lock"
+    ] is True
     assert contract["worker_lifecycle"]["submit_before_cleanup"] is True
     assert contract["worker_lifecycle"]["cleanup_before_worker_exit"] is True
     assert contract["invariants"]["production_runtime_composition"] is True
@@ -12553,8 +12556,8 @@ def test_pending_navigation_idle_callback_revokes_unstarted_job(monkeypatch):
         def notify_job_ready(self):
             return False
 
-        def active(self):
-            return False
+        def discard_unstarted(self, discard):
+            return discard()
 
     runtime = Runtime()
     monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", runtime)

@@ -44,6 +44,7 @@
     "same_host_post_result_guard_ms": 2000,
     "live_capability_guard_until_expiry": true,
     "unstarted_job_guard_ms": 0,
+    "unstarted_discard_uses_worker_lock": true,
     "submit_before_cleanup": true,
     "cleanup_before_worker_exit": true,
     "browser_observer_composed": true
