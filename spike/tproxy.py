@@ -9941,7 +9941,10 @@ def _prune_pending_navigation_probe_capabilities(now):
         len(_pending_navigation_probe_capabilities)
         > PENDING_NAVIGATION_PROBE_STATE_MAX
     ):
-        _pending_navigation_probe_capabilities.popitem(last=False)
+        _, capability = _pending_navigation_probe_capabilities.popitem(
+            last=False
+        )
+        _guard_pending_navigation_probe_host(capability, now)
 
 
 def _revoke_pending_navigation_probe_capability(activity, *, now=None):

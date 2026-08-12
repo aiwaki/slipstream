@@ -12239,6 +12239,9 @@ def test_pending_navigation_probe_capability_state_is_bounded_and_revoked():
     assert jobs[0]["capability"] not in (
         tproxy._pending_navigation_probe_capabilities
     )
+    assert tproxy._pending_navigation_probe_host_guards[
+        "unknown-0.example"
+    ] == 102.0
     assert jobs[-1]["capability"] in (
         tproxy._pending_navigation_probe_capabilities
     )

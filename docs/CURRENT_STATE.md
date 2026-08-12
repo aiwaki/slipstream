@@ -28,7 +28,8 @@ original relay closed in that interval, so submission was rejected; removal of
 that capability then let the worker relay mint stale same-host jobs, recorded
 as `claimed_job_invalid`. The correction submits the bounded observation
 immediately and then always performs exact Chrome/profile cleanup before the
-worker exits. Consuming, revoking, or pruning a live capability also installs a
+worker exits. Consuming, revoking, pruning, or capacity-evicting a live
+capability also installs a
 bounded two-second same-host guard, closing only the simultaneous worker-relay
 callback window; it expires well before another eight-second recovery stage.
 No normal-path browser, broad host cooldown, route-policy change, or network
