@@ -12,8 +12,11 @@ file.
 
 Update 2026-08-12: the macOS blocker is reproduced, corrected, and proven in a
 real installed-tray transaction. Exact main remains
-`684ba0767b407a87e8a449f0999b799cee410c4d`; the work below is still local on
-`codex/macos-probe-binding-diagnostics` and has no PR or release authority yet.
+`684ba0767b407a87e8a449f0999b799cee410c4d`; product commit
+`7ddd2ba92b3b48b853894f6373f6a14964f04e72` and its bilingual user-facing
+README successor are in PR #338 on `codex/macos-probe-binding-diagnostics`.
+They have no merge, exact-main, protected-artifact, installation, or release
+authority yet.
 
 Transactions `AD279B68-AE05-46D1-8BF2-E4919D7727D1`,
 `76910DF2-B1D4-4DF6-AC4A-89D185ABEB50`, and
