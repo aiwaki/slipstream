@@ -1004,6 +1004,88 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertIn("--disable-extensions", run.call_args.args[0])
         clean.assert_called_once_with(501)
 
+    def test_active_worker_uninstall_waits_for_worker_and_cleans_both_chromes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Chrome"
+            executable.write_bytes(b"chrome")
+            executable.chmod(0o755)
+            fixture = mock.Mock()
+            fixture.records = (
+                {"channel": "original", "path": "/"},
+                {"channel": "worker", "path": "/"},
+            )
+            target = mock.Mock(uninstall_command=("/test/slipstream", "--uninstall"))
+            system = mock.Mock()
+            runner = mock.Mock()
+
+            def capture(*_args, completion_probe=None, **_kwargs):
+                deadline = time.monotonic() + 1
+                while not completion_probe() and time.monotonic() < deadline:
+                    time.sleep(0.001)
+                return lifecycle.ChromeCapture(
+                    loaded=True,
+                    timed_out=False,
+                    returncode=0,
+                    stdout=b"",
+                    stderr=b"",
+                )
+
+            with mock.patch.object(
+                lifecycle,
+                "_user_environment",
+                return_value=(os.environ.copy(), Path(tmp)),
+            ), mock.patch.object(
+                lifecycle,
+                "_user_supplementary_groups",
+                return_value=(12, 61),
+            ), mock.patch.object(
+                lifecycle.os,
+                "chown",
+            ), mock.patch.object(
+                lifecycle,
+                "_capture_chrome_output",
+                side_effect=capture,
+            ), mock.patch.object(
+                lifecycle.composed,
+                "assert_worker_active",
+                return_value={
+                    "worker_processes": 1,
+                    "worker_profiles": 1,
+                    "worker_runtime_directories": 1,
+                    "launchagent": "loaded",
+                },
+            ) as active, mock.patch.object(
+                lifecycle.composed,
+                "assert_worker_clean",
+            ) as clean, mock.patch.object(
+                lifecycle,
+                "_wait_for_path",
+            ), mock.patch.object(
+                lifecycle,
+                "_assert_clean_install_state",
+            ):
+                report = lifecycle._run_active_worker_uninstall(
+                    fixture,
+                    501,
+                    20,
+                    executable,
+                    system,
+                    target,
+                    runner,
+                )
+
+        fixture.wait_for_second_root.assert_called_once_with()
+        active.assert_called_once_with(501)
+        system.run.assert_called_once_with(target.uninstall_command)
+        clean.assert_called_once_with(501)
+        self.assertEqual(report["root_channels_before_uninstall"], [
+            "original",
+            "worker",
+        ])
+        self.assertEqual(report["installed_state"], "absent")
+
     def test_chrome_capture_stops_after_expected_dom_without_waiting_for_exit(
         self,
     ) -> None:
@@ -1548,6 +1630,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         self.assertIn("HTTPS client", packaged["https_client_probes"])
         self.assertIn("Chrome", packaged["chrome_probes"])
         self.assertIn("Safari", packaged["safari_probes"])
+        self.assertIn("uninstall", packaged["active_worker_uninstall"])
 
 
 if __name__ == "__main__":

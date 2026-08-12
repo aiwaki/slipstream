@@ -29,6 +29,7 @@ WORKER_PROFILE_RE = re.compile(
 WORKER_RUNTIME_RE = re.compile(
     r"\Adev\.slipstream\.browser-probe\.[0-9a-f]{16}\Z"
 )
+LAUNCHD_PID_RE = re.compile(r"^\s*pid = ([0-9]+)\s*$", re.MULTILINE)
 COMPOSED_READY_MARKER = b"User-agent: slipstream-composed-ready"
 MAX_COMPOSED_NAVIGATION_SECONDS = 35.0
 IDLE_OBSERVATION_SECONDS = 3.0
@@ -581,6 +582,56 @@ def assert_worker_clean(uid: int, *, timeout: float = 10.0) -> None:
         time.sleep(0.1)
     raise ComposedQualificationError(
         "packaged browser worker left process, profile, or runtime residue"
+    )
+
+
+def assert_worker_active(uid: int, *, timeout: float = 5.0) -> dict[str, object]:
+    """Prove one exact worker and its browser are live before uninstall."""
+    require_disposable_ci()
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        last = worker_diagnostics(uid)
+        processes = tuple(last.get("processes") or ())
+        profiles = tuple(last.get("profiles") or ())
+        runtime = tuple(last.get("runtime") or ())
+        if len(processes) == len(profiles) == len(runtime) == 1:
+            launch = runtime[0]
+            label = launch.get("name") if isinstance(launch, dict) else None
+            entries = launch.get("entries") if isinstance(launch, dict) else None
+            if (
+                isinstance(label, str)
+                and WORKER_RUNTIME_RE.fullmatch(label) is not None
+                and launch.get("owner") == uid
+                and launch.get("mode") == "0700"
+                and entries == (
+                    "worker.plist",
+                    "worker.stderr.log",
+                    "worker.stdout.log",
+                )
+            ):
+                result = subprocess.run(
+                    ("/bin/launchctl", "print", f"gui/{uid}/{label}"),
+                    capture_output=True,
+                    text=True,
+                    timeout=10.0,
+                    check=False,
+                )
+                match = LAUNCHD_PID_RE.search(result.stdout)
+                if (
+                    result.returncode == 0
+                    and match is not None
+                    and int(match.group(1)) == processes[0]
+                ):
+                    return {
+                        "worker_processes": 1,
+                        "worker_profiles": 1,
+                        "worker_runtime_directories": 1,
+                        "launchagent": "loaded",
+                    }
+        time.sleep(0.1)
+    raise ComposedQualificationError(
+        f"packaged browser worker was not provably active: {last!r}"
     )
 
 

@@ -506,16 +506,18 @@ requires the production broker to be owned by the console user with mode
 `0600`, the worker runtime to be empty, worker processes and profiles to be
 absent, and daemon CPU growth to remain at most one second.
 
-PR #330 implementation head `fc47bef2fb4e2dee9f9cf754113b52620ffd1b86`
-passed all six checks. On the fixture clock, packaged job `93998266928`
-observed the worker root at 15,758 ms and the automatic original retry at
-27,994 ms, followed by exactly one CSS, JavaScript, image, and ready callback;
-the separately measured captured Chrome transaction completed in 23,963 ms
-without an extension or manual reload and left no worker residue. The prior
-three-second idle sample had zero worker processes/profiles,
-an empty worker runtime, a mode-`0600` broker, and 160 ms daemon CPU growth.
-The lifecycle preserved its sentinel connection and PF state, left global PF
-unchanged, and uninstalled cleanly.
+PR #330 merged as exact live main
+`9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main packaged job
+`94001999674` observed the worker root at 16,637 ms and the automatic original
+retry at 28,933 ms on the fixture clock, followed by exactly one CSS,
+JavaScript, image, and ready callback; the separately measured captured Chrome
+transaction completed in 25,003 ms without an extension or manual reload and
+left no worker residue. The prior three-second idle sample had zero worker
+processes/profiles, an empty worker runtime, a mode-`0600` broker, and 490 ms
+daemon CPU growth. The lifecycle preserved its sentinel connection and PF
+state, left global PF unchanged, and uninstalled cleanly. Exact-main common,
+Chromium, Windows adapter, dependency, Geph-vendor, AMD64 Wintun, and ARM64
+Wintun jobs also passed.
 
 The failed attempts exposed a real packaging defect rather than a browser or
 relay failure: the daemon's default worker path assumed
@@ -525,9 +527,19 @@ only the sibling `Contents/MacOS/slipstream`, rejects an absent, symlinked,
 non-executable, or group/world-writable worker, XML-escapes the path, and pins
 it into the root-owned LaunchDaemon environment. Normal routing remains usable
 if that optional worker later disappears; the private log records only the
-bounded worker failure class. Local verification passes 1,180 Python tests
-plus 54 subtests. The final docs/cleanup head and separate active-worker
-uninstall case remain open.
+bounded worker failure class.
+
+Branch `codex/qualify-active-worker-uninstall` adds the remaining installed
+ownership transaction. A fresh exact fixture keeps the original Chrome request
+and correlated worker request pending. Before uninstall the gate requires one
+matching live Aqua LaunchAgent PID, packaged worker process, private Chrome
+profile, and owner-private runtime directory. It then invokes the normal
+installed uninstall and requires the LaunchDaemon, broker, installed payload,
+worker LaunchAgent/process/profile/runtime, and the fixture-owned original
+Chrome capture all to be absent or stopped. Sentinel connection/state and the
+global PF snapshot remain mandatory invariants. This adds no production code
+path or normal idle work. Local verification passes 1,182 Python tests plus 54
+subtests; the real packaged active-worker transaction remains open.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

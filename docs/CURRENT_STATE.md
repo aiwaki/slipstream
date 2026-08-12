@@ -10,55 +10,33 @@ file.
 
 ## Current Checkpoint
 
-PR #329 is merged as live main
-`a2312a54949102be5a5fc2abb4a341078f591b55`. Exact-main CI run `31553860792`
-passed common job `93982088245`, packaged lifecycle `93982088248`, pinned
-Chromium `93982088275`, and Windows adapter `93982088239`; dependency-audit run
-`31553860796` passed audit job `93982088208` and Geph vendor job
-`93982088237`; Windows packet qualification run `31553860798` passed AMD64 job
-`93982088458` and ARM64 job `93982088499`. No protected artifact from this SHA
+PR #330 is merged as live main
+`9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main CI run `31560635905`
+passed common job `94001999764`, packaged lifecycle `94001999674`, pinned
+Chromium `94001999763`, and Windows adapter `94001999750`; dependency-audit run
+`31560636006` passed audit job `94002000083` and Geph vendor job
+`94002000109`; Windows packet qualification run `31560635908` passed AMD64 job
+`94002000053` and ARM64 job `94002000035`. No protected artifact from this SHA
 has been installed on the workstation.
 
-That merge production-composes the previously closed pending-navigation pieces
-without changing PF, DNS, proxy/PAC, VPN, external Geph, Discord, YouTube, or
-Googlevideo policy. An eligible public unknown-host relay creates one
-privacy-bounded job only after the existing complete-TLS-record and
-eight-second idle gate. The daemon owns one console-user mode-`0600` socket,
-starts at most one lazy Aqua worker while a live job exists, and performs exact
-owned worker cleanup during shutdown, reinstall, and uninstall. The exact PR
-head also passed an extension-free automatic Chrome retry with two root
-requests and one CSS, JavaScript, image, and ready callback in 11,068 ms; its
-independent packaged hidden worker emitted `navigation_pending` in 13,170 ms
-with the sandbox retained, no window, and complete cleanup.
+That merge production-composes and qualifies the complete pending-navigation
+transaction without changing PF, DNS, proxy/PAC, VPN, external Geph, Discord,
+YouTube, or Googlevideo policy. One eligible public unknown-host request stays
+on the installed PF/daemon path through the existing complete-TLS-record and
+eight-second idle gate. The owner-only mode-`0600` broker starts at most one
+lazy Aqua worker; its independently pending same-host navigation can advance
+only the original relay-bound capability. Chrome then automatically repeats
+the unchanged original URL and loads the styled page without an extension or
+manual reload.
 
-Draft PR #330 on `codex/qualify-composed-original-navigation` starts from that
-exact merge and adds the missing disposable installed-package transaction. The
-original extension-free Chrome navigation uses the real PF/daemon path to one
-public unknown-host identity. A complete disposable-GitHub-Actions-only
-connector override maps only that exact fixture IP to an owner-local TLS
-upstream; production has no override. The first original request and the
-worker's correlated request each remain pending through separate eight-second
-windows. A valid result advances and closes only the original relay, after
-which Chrome must automatically repeat the original URL and load one CSS,
-JavaScript, image, and ready resource without a manual reload. The same gate
-samples three idle seconds before the job and requires the owner-only socket,
-zero worker processes/profiles, an empty worker runtime, and no more than one
-second of daemon CPU time.
-
-Implementation head `fc47bef2fb4e2dee9f9cf754113b52620ffd1b86` passed all
-six required checks. CI run `31559340504` passed common job `93998266977`,
-packaged lifecycle `93998266928`, pinned Chromium `93998266899`, and Windows
-adapter `93998266974`; dependency-audit run `31559340496` passed audit job
-`93998266908` and Geph vendor job `93998267082`. The installed packaged gate
-observed roots `original -> worker -> original`: on the fixture clock the
-worker request began at 15,758 ms and Chrome's unchanged-URL retry at
-27,994 ms; the separately measured captured Chrome transaction reached styled
-completion in 23,963 ms, with exactly one CSS, JavaScript, image, and ready
-callback. No extension or reload command was
-present and worker cleanup was exact. The preceding three-second idle sample
-observed zero worker processes/profiles, an empty runtime, mode-`0600` broker,
-and 160 ms of daemon CPU. The transaction preserved its sentinel connection,
-sentinel PF state, and global PF state and finished with clean uninstall.
+The exact-main packaged job observed roots `original -> worker -> original`.
+On the fixture clock the worker began at 16,637 ms and Chrome's original retry
+at 28,933 ms; the separately measured Chrome transaction reached styled
+completion in 25,003 ms with exactly one CSS, JavaScript, image, and ready
+callback. Worker cleanup, uninstall, sentinel connection/state, and global PF
+were clean or unchanged. The preceding three-second idle sample observed zero
+worker processes/profiles, an empty runtime, a mode-`0600` broker, and 490 ms
+of daemon CPU.
 
 That gate also exposed and corrected the packaged composition boundary: the
 frozen installer now derives the exact executable in its own
@@ -77,13 +55,22 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,180 Python tests plus 54 subtests, focused
+Branch `codex/qualify-active-worker-uninstall` adds the next separate installed
+lifecycle gate. After the existing soak it starts a fresh exact fixture and
+original extension-free Chrome request, waits for the correlated worker root,
+and requires one matching live LaunchAgent PID, packaged worker process,
+browser profile, and owner-private runtime. It then runs the normal installed
+uninstall while that worker/browser pair is still blocked and requires the
+LaunchDaemon, broker, worker LaunchAgent/process/profile/runtime, installed
+payload, and original qualification capture all to be absent or stopped. The
+sentinel connection/state and global PF snapshot must remain unchanged.
+
+Current local verification passes 1,182 Python tests plus 54 subtests, focused
 Python compilation, shell syntax, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
-bounded source inspection used the documented fallback. The final
-documentation/diagnostic-cleanup head still needs its six required checks,
-review, and merge. Active-worker uninstall remains the next separate lifecycle
-gate after PR #330.
+bounded source inspection used the documented fallback. The real packaged
+active-worker uninstall transaction, review, merge, and exact-main checks
+remain open.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its

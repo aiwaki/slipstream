@@ -2318,6 +2318,97 @@ def _run_composed_navigation(
     }
 
 
+def _run_active_worker_uninstall(
+    fixture: composed.ComposedHttpsFixture,
+    uid: int,
+    gid: int,
+    chrome_executable: Path,
+    system: SystemRunner,
+    target: LifecycleTarget,
+    runner: pf.PfctlRunner,
+) -> dict[str, object]:
+    """Uninstall while one correlated packaged browser worker is live."""
+    try:
+        executable = chrome_executable.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise LifecycleError(
+            f"active-worker Chrome executable is unavailable: {chrome_executable}"
+        ) from exc
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise LifecycleError(
+            f"active-worker Chrome executable is not runnable: {executable}"
+        )
+
+    environment, home = _user_environment(uid)
+    supplementary_groups = _user_supplementary_groups(uid, gid)
+    profile_dir = Path(tempfile.mkdtemp(prefix="slipstream-uninstall-chrome-"))
+    stop_capture = threading.Event()
+    captures: list[ChromeCapture] = []
+    capture_failures: list[BaseException] = []
+
+    def capture_original_navigation() -> None:
+        try:
+            captures.append(_capture_chrome_output(
+                composed.original_navigation_command(executable, profile_dir),
+                cwd=home,
+                environment=environment,
+                timeout=composed.MAX_COMPOSED_NAVIGATION_SECONDS,
+                uid=uid,
+                gid=gid,
+                supplementary_groups=supplementary_groups,
+                completion_probe=stop_capture.is_set,
+            ))
+        except BaseException as exc:
+            capture_failures.append(exc)
+
+    capture_thread = threading.Thread(
+        target=capture_original_navigation,
+        name="slipstream-active-worker-uninstall",
+        daemon=True,
+    )
+    active_evidence = None
+    try:
+        os.chown(profile_dir, uid, gid)
+        profile_dir.chmod(0o700)
+        capture_thread.start()
+        fixture.wait_for_second_root()
+        roots = tuple(
+            record for record in fixture.records if record["path"] == "/"
+        )
+        if [record["channel"] for record in roots] != ["original", "worker"]:
+            raise LifecycleError(
+                f"active-worker request composition is wrong: {roots!r}"
+            )
+        active_evidence = composed.assert_worker_active(uid)
+        system.run(target.uninstall_command)
+        _wait_for_path(LAUNCHD_PLIST, present=False)
+        _assert_clean_install_state(runner)
+        composed.assert_worker_clean(uid)
+    finally:
+        stop_capture.set()
+        if capture_thread.ident is not None:
+            capture_thread.join(timeout=CHROME_PROCESS_STOP_TIMEOUT * 3 + 2)
+        shutil.rmtree(profile_dir, ignore_errors=True)
+
+    if capture_thread.is_alive():
+        raise LifecycleError(
+            "active-worker uninstall left the original Chrome capture running"
+        )
+    if capture_failures:
+        raise LifecycleError(
+            f"active-worker original Chrome cleanup failed: {capture_failures[0]}"
+        ) from capture_failures[0]
+    if len(captures) != 1 or active_evidence is None:
+        raise LifecycleError("active-worker original Chrome capture was incomplete")
+    return {
+        **active_evidence,
+        "root_channels_before_uninstall": ["original", "worker"],
+        "worker_cleanup": "clean",
+        "original_capture_cleanup": "clean",
+        "installed_state": "absent",
+    }
+
+
 def run_lifecycle(
     target: LifecycleTarget | None = None,
     safaridriver_url: str | None = None,
@@ -2348,6 +2439,7 @@ def run_lifecycle(
     stalled_resolver_result = "not_applicable"
     composed_navigation: dict[str, object] | str = "not_applicable"
     browser_worker_idle: dict[str, object] | str = "not_applicable"
+    active_worker_uninstall: dict[str, object] | str = "not_applicable"
     stage = "acquire-pf-reference"
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -2605,7 +2697,54 @@ def run_lifecycle(
             _assert_sentinel_state(runner, sentinel_states)
 
         stage = "uninstall"
-        system.run(target.uninstall_command)
+        if target.name == "packaged-app":
+            uninstall_fixture = composed.ComposedHttpsFixture()
+            try:
+                uninstall_fixture.start()
+                uninstall_environment = uninstall_fixture.qualification_environment(
+                    chrome_executable
+                )
+                stage = "active-worker-uninstall:restart"
+                system.run((
+                    "/bin/launchctl",
+                    "bootout",
+                    "system",
+                    str(LAUNCHD_PLIST),
+                ))
+                _wait_for_path(STATUS_PATH, present=False)
+                _patch_launchd_for_qualification(
+                    LAUNCHD_PLIST,
+                    uninstall_environment,
+                )
+                system.run((
+                    "/bin/launchctl",
+                    "bootstrap",
+                    "system",
+                    str(LAUNCHD_PLIST),
+                ))
+                uninstall_active = _wait_for_status(
+                    "active",
+                    previous_pid=daemon_pid,
+                    timeout=60,
+                )
+                daemon_pid = int(uninstall_active["pid"])
+                _assert_anchor_active(runner)
+                sentinel.check("active-worker-uninstall-start")
+                _assert_sentinel_state(runner, sentinel_states)
+                stage = "active-worker-uninstall:active"
+                active_worker_uninstall = _run_active_worker_uninstall(
+                    uninstall_fixture,
+                    uid,
+                    gid,
+                    chrome_executable,
+                    system,
+                    target,
+                    runner,
+                )
+            finally:
+                uninstall_fixture.close()
+        else:
+            system.run(target.uninstall_command)
         _wait_for_path(LAUNCHD_PLIST, present=False)
         _assert_clean_install_state(runner)
         if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
@@ -2662,6 +2801,7 @@ def run_lifecycle(
         "stalled_system_resolver": stalled_resolver_result,
         "browser_worker_idle": browser_worker_idle,
         "composed_original_navigation": composed_navigation,
+        "active_worker_uninstall": active_worker_uninstall,
         "lifecycle_rearms": lifecycle_rearms,
         "uninstall": "clean",
         "sentinel_connection": "preserved",
@@ -2717,6 +2857,11 @@ def dry_run(target_name: str = "script") -> dict:
         ),
         "composed_original_navigation": (
             "original Chrome -> daemon -> lazy worker -> exact retry -> styled page"
+            if target_name == "packaged-app"
+            else "not applicable"
+        ),
+        "active_worker_uninstall": (
+            "uninstall while the exact LaunchAgent worker and browser are live"
             if target_name == "packaged-app"
             else "not applicable"
         ),
