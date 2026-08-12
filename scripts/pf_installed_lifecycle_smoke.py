@@ -1849,6 +1849,7 @@ def _daemon_pf_log_tail() -> tuple[str, ...]:
                 "baseline",
                 "resolver",
                 "probe",
+                "worker",
                 " pf ",
                 "anchor",
                 "legacy",

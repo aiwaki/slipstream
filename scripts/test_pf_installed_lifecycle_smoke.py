@@ -575,6 +575,26 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
         )
         self.assertIn("daemon_pf_log=('anchor active',)", str(failure))
 
+    def test_daemon_log_tail_includes_browser_worker_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "slipstream.log"
+            log.write_text(
+                ">> unrelated line\n"
+                ">> pending-navigation browser worker failed: "
+                "browser_worker_failed:claim_rejected\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(lifecycle, "LOG_PATH", log):
+                selected = lifecycle._daemon_pf_log_tail()
+
+        self.assertEqual(
+            selected,
+            (
+                ">> pending-navigation browser worker failed: "
+                "browser_worker_failed:claim_rejected",
+            ),
+        )
+
     def test_status_daemon_view_accepts_v1_and_v2(self) -> None:
         v1 = {"state": "active", "pid": 11, "ts": 100.0}
         v2 = {
