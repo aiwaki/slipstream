@@ -18,6 +18,17 @@ README successor are in PR #338 on `codex/macos-probe-binding-diagnostics`.
 They have no merge, exact-main, protected-artifact, installation, or release
 authority yet.
 
+PR CI run `31619433057` on product commit `7ddd2ba` passed every unit, Rust,
+lint, and project-state step before its script-mode installed lifecycle sentinel
+failed closed at the first wake cycle. The new packet observer made Scapy import
+mandatory even with voice disabled; the harness could observe the already
+published active status and suspend the daemon before the monitor thread set its
+cadence anchor, so the eight-second gap was lost after resume. The correction
+captures the monitor start time before publishing active and passes that exact
+timestamp into the thread. No wake timeout or test bound is relaxed; focused
+tests now cover the pre-thread suspension boundary. PR checks must restart on
+the final head.
+
 Transactions `AD279B68-AE05-46D1-8BF2-E4919D7727D1`,
 `76910DF2-B1D4-4DF6-AC4A-89D185ABEB50`, and
 `AC4ADF6E-A636-4980-A307-9CF0C9512A70` all rolled back. They proved,

@@ -9111,7 +9111,7 @@ def reduce_geph_probe_state(previous_up, strikes, probe_ok, port, conflict=False
     return keep_previous, next_strikes
 
 
-def network_monitor(port, voice=True):
+def network_monitor(port, voice=True, *, started_at=None):
     """Keep PF and the current-interface packet observer healthy.
 
     The observer records TCP sequence numbers, moves only reviewed geo-exit QUIC
@@ -9119,6 +9119,10 @@ def network_monitor(port, voice=True):
     UDP without changing the real flow.
     """
     global _pf_applied, _geph_up, _pf_interceptor_conflicts
+    # The active startup status can be observed before this new thread gets its
+    # first timeslice. Anchor the cadence before that publication so a machine
+    # sleep (or qualification suspension) during Scapy import is not lost.
+    last_tick = time.time() if started_at is None else started_at
     AsyncSniffer = send = IP = UDP = TCP = Raw = get_if_addr = None
     try:
         from scapy.all import (AsyncSniffer, send, IP, UDP, TCP, Raw,
@@ -9198,7 +9202,6 @@ def network_monitor(port, voice=True):
             print(f"  voice: priming {ip.dst}:{udp.dport}", file=sys.stderr)
 
     geph_strikes = 0
-    last_tick = time.time()
     last_iface = None
     first_tick = True
     last_conflict_check = time.time()
@@ -14499,11 +14502,11 @@ def recover_owned_network_state():
     return True
 
 
-def _start_network_monitor(port, voice):
+def _start_network_monitor(port, voice, *, started_at=None):
     threading.Thread(
         target=network_monitor,
         args=(port,),
-        kwargs={"voice": voice},
+        kwargs={"voice": voice, "started_at": started_at},
         daemon=True,
     ).start()
 
@@ -14561,9 +14564,10 @@ async def amain(port, voice=True):
         else "active" if _pf_applied
         else "dormant"
     )
+    monitor_started_at = time.time()
     write_status(startup_state, startup_iface, None)
     # The monitor owns later pause/re-arm decisions after the cold-start gate.
-    _start_network_monitor(port, voice)
+    _start_network_monitor(port, voice, started_at=monitor_started_at)
     semantic_server = None
     pending_navigation_server = None
     try:

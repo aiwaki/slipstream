@@ -3342,7 +3342,9 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     monkeypatch.setattr(
         tproxy,
         "_start_network_monitor",
-        lambda port, voice: calls.append(("monitor", port, voice)),
+        lambda port, voice, *, started_at: calls.append(
+            ("monitor", port, voice, started_at)
+        ),
     )
     monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
     monkeypatch.setattr(tproxy, "_geph_port", None)
@@ -3374,7 +3376,10 @@ def test_amain_uses_backend_gate_before_starting_monitor(monkeypatch):
     assert calls[0] == ("startup_status",)
     assert calls[1] == ("pf_gate", 1080)
     assert calls[2] == ("status", "dormant", "en0", None)
-    assert ("monitor", 1080, False) in calls
+    monitor = next(call for call in calls if call[0] == "monitor")
+    assert monitor[:3] == ("monitor", 1080, False)
+    assert isinstance(monitor[3], float)
+    assert monitor[3] > 0
 
 
 def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
@@ -3417,7 +3422,11 @@ def test_amain_never_arms_pf_while_user_full_tunnel_vpn_is_default(monkeypatch):
         "write_startup_status",
         lambda: calls.append(("startup_status",)),
     )
-    monkeypatch.setattr(tproxy, "_start_network_monitor", lambda *_args: None)
+    monkeypatch.setattr(
+        tproxy,
+        "_start_network_monitor",
+        lambda *_args, **_kwargs: None,
+    )
 
     with pytest.raises(RuntimeError, match="stop test server"):
         asyncio.run(tproxy.amain(1080, voice=False))
@@ -3575,7 +3584,9 @@ def test_geo_exit_backend_hold_requires_fresh_probe_after_cooldown(monkeypatch):
     assert tproxy._geph_backend_hold_reason == ""
 
 
-def test_network_monitor_keeps_local_routing_active_when_geph_is_not_ready(monkeypatch):
+def test_network_monitor_keeps_local_routing_active_and_records_prethread_wake(
+    monkeypatch,
+):
     pauses = []
     arms = []
     states = []
@@ -3625,12 +3636,18 @@ def test_network_monitor_keeps_local_routing_active_when_geph_is_not_ready(monke
     )
     tproxy._queue_runtime_rearm("network_change")
 
-    tproxy.network_monitor(1080, voice=False)
+    tproxy.network_monitor(
+        1080,
+        voice=False,
+        started_at=(
+            tproxy.time.time() - tproxy.RUNTIME_WAKE_GAP_SECONDS - 1.0
+        ),
+    )
 
     assert pauses == [True]
     assert arms == [1080]
     assert states == [("active", "en0", None)]
-    assert rearms == [("network_change", "en0")]
+    assert rearms == [("wake", ""), ("network_change", "en0")]
 
 
 def test_network_monitor_retries_pending_confirmation_on_owned_geph_recovery(
