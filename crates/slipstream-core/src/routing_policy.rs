@@ -224,7 +224,7 @@ const STEAM_STORE_HOSTS: &[&str] = &[
     "steamcommunity-a.akamaihd.net",
 ];
 
-const GEPH_MISC_HOSTS: &[&str] = &["intercomcdn.com"];
+const GEPH_MISC_HOSTS: &[&str] = &["intercomcdn.com", "xpersonatoy.com"];
 
 fn domains(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()

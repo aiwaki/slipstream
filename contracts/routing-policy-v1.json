@@ -114,6 +114,16 @@
       }
     },
     {
+      "name": "qualified-truncating-site-requires-geo-exit",
+      "host": "www.xpersonatoy.com",
+      "expected": {
+        "host": "www.xpersonatoy.com",
+        "route_class": "geo_exit",
+        "service_group": "generic",
+        "strategy_set": "geph"
+      }
+    },
+    {
       "name": "github-is-direct-passthrough",
       "host": "objects.githubusercontent.com",
       "expected": {

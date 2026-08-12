@@ -294,16 +294,25 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             tproxy.PENDING_NAVIGATION_PROBE_STATE_MAX
         ),
         "min_pending_observation_ms": 8000,
+        "max_correlated_downstream_bytes": (
+            tproxy.PENDING_NAVIGATION_PROBE_MAX_BYTES
+        ),
     }
     assert probe_runtime.CONTRACT_PENDING_OBSERVATION_MS == (
         CONTRACT["bounds"]["min_pending_observation_ms"]
     )
     assert CONTRACT["outcomes"] == {
-        "route_effect": "navigation_pending",
-        "consume_without_route_effect": "navigation_terminal",
+        "route_effect": ["navigation_pending", "navigation_failed"],
+        "retry_same_route_without_route_effect": "navigation_complete",
     }
     assert CONTRACT["invariants"][
-        "terminal_observation_has_no_route_effect"
+        "response_headers_are_not_terminal_completion"
+    ] is True
+    assert CONTRACT["invariants"][
+        "complete_observation_retries_same_route"
+    ] is True
+    assert CONTRACT["invariants"][
+        "failed_observation_advances_after_bound_original_idle"
     ] is True
     assert CONTRACT["invariants"][
         "disposable_fixture_jobs_exact_endpoint_only"
@@ -335,6 +344,18 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
     assert CONTRACT["worker_lifecycle"] == {
         "lazy": True,
         "max_concurrent_workers": 1,
+        "one_aqua_launch_skips_stale_claims_before_live_job": True,
+        "accepted_result_ends_launch_after_cleanup": True,
+        "accepted_route_effect_resets_exact_client_stream": True,
+        "bounded_partial_payload_jobs_first": True,
+        "empty_queue_grace_ms": 15_000,
+        "startup_attestation_grace_ms": 200,
+        "worker_runtime_budget_ms": 100_000,
+        "stale_claim_is_skipped_without_worker_failure": True,
+        "launcher_timeout_ms": int(
+            probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS
+            * 1000
+        ),
         "retry_after_worker_loss_ms": int(
             probe_runtime.CLAIM_LEASE_SECONDS * 1000
         ),
@@ -374,6 +395,24 @@ def test_queue_is_bounded_exact_and_uses_a_monotonic_expiry():
     clock["wall"] = 900_000
     clock["mono"] = 130.0
     assert runtime.state_size() == 0
+
+
+def test_bounded_partial_payload_job_can_move_ahead_of_background_jobs():
+    clock = {"wall": 1_010_000, "mono": 100.0}
+    runtime = _runtime(clock)
+    background = _job(1, host="background.example")
+    partial_payload = _job(2, host="partial.example")
+
+    assert runtime.enqueue(background)
+    assert runtime.enqueue(partial_payload, prioritize=True)
+    assert runtime.handle(_request("claim"))["job"] == partial_payload
+    assert not runtime.enqueue(_job(3), prioritize="yes")
+
+    clock["mono"] = 105.001
+    assert runtime.handle(_request("claim"))["job"] == partial_payload
+    assert runtime.prioritize(background["capability"])
+    assert runtime.handle(_request("claim"))["job"] == background
+    assert not runtime.prioritize("missing")
 
 
 def test_claim_lease_redelivers_after_worker_loss_but_not_after_expiry():

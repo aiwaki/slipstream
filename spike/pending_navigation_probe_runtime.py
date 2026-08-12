@@ -36,7 +36,7 @@ CAPABILITY_TTL_MS = 30_000
 CONTRACT_PENDING_OBSERVATION_MS = 8_000
 CLAIM_LEASE_SECONDS = 5.0
 MAX_LIVE_JOBS = 32
-MAX_ENQUEUE_AGE_MS = 5_000
+MAX_ENQUEUE_AGE_MS = 14_000
 MAX_IPC_BYTES = 2_048
 IPC_TIMEOUT_SECONDS = 2.0
 CONSOLE_IDENTITY_POLL_SECONDS = 2.0
@@ -53,7 +53,7 @@ PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT = (
 PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
     "/var/run/slipstream-browser-probe-workers"
 )
-PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 27.0
+PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 120.0
 _BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
 _BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
 _BROWSER_WORKER_UNCONFIRMED_CLEANUP_ERRORS = frozenset((
@@ -326,7 +326,9 @@ class PendingNavigationProbeRuntime:
         while len(self._jobs) > self._max_live_jobs:
             self._jobs.popitem(last=False)
 
-    def enqueue(self, job):
+    def enqueue(self, job, *, prioritize=False):
+        if type(prioritize) is not bool:
+            return False
         now_unix_ms = self._wall_clock_ms()
         now_monotonic = self._monotonic_clock()
         if type(now_unix_ms) is not int or now_unix_ms <= 0:
@@ -346,6 +348,8 @@ class PendingNavigationProbeRuntime:
                 job=validated,
                 expires_at_monotonic=expires_at_monotonic,
             )
+            if prioritize:
+                self._jobs.move_to_end(capability, last=False)
             self._prune_locked(now_monotonic)
             return capability in self._jobs
 
@@ -441,6 +445,17 @@ class PendingNavigationProbeRuntime:
         with self._lock:
             self._prune_locked(now_monotonic)
             return len(self._jobs)
+
+    def prioritize(self, capability):
+        if not isinstance(capability, str):
+            return False
+        with self._lock:
+            queued = self._jobs.get(capability)
+            if queued is None:
+                return False
+            queued.claimed_until_monotonic = 0.0
+            self._jobs.move_to_end(capability, last=False)
+            return True
 
     def discard(self, capability):
         if not isinstance(capability, str):

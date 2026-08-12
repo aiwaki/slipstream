@@ -1916,7 +1916,7 @@ def test_unknown_handshake_only_idle_runs_correlated_browser_probe(monkeypatch):
         def __init__(self):
             self.jobs = []
 
-        def enqueue(self, job):
+        def enqueue(self, job, *, prioritize=False):
             self.jobs.append(job)
             return True
 

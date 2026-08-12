@@ -10,34 +10,147 @@ file.
 
 ## Current Checkpoint
 
-macOS is the active priority. Controlled workstation transaction
-`B1D007CB-B8FA-4F6A-9C2A-622F18D122BC` installed only protected artifact
-`9137909918`, reached a coherent active daemon, and then failed its first
-required isolated headed-Chrome smoke because `xpersonatoy.com` remained
-uncommitted for 75 seconds. Exact rollback restored prior app SHA-256
-`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
-removed the root daemon, private listener, and product PF ownership, preserved
-owned-Geph PID `76069`, and left DNS, proxy/PAC, and default route byte-identical.
+Update 2026-08-12: the macOS blocker is reproduced, corrected, and proven in a
+real installed-tray transaction. Exact main remains
+`684ba0767b407a87e8a449f0999b799cee410c4d`; the product correction and its
+bilingual user-facing README refresh are in PR #338 on
+`codex/macos-probe-binding-diagnostics`. They have no merge, exact-main,
+protected-artifact, installation, or release authority yet.
 
-Passive tracing during an exact repeated transaction showed the packaged Aqua
-worker briefly transition through launchd `xpcproxy` and a root-observed UID
-before the exact console UID became visible. More importantly, production
-unified-headless Chrome returned terminal observations or stale claims while
-the original ordinary headed Chrome navigation remained uncommitted. Branch
-`codex/macos-hidden-browser-worker` removes only the worker's `--headless`
-argument: LaunchServices still uses `open -j`, so the branded browser remains
-hidden, sandboxed, extension-free, TCP-only, isolated in a private profile, and
-exactly cleaned. The launcher now waits within its existing five-second bound
-for `xpcproxy/root -> exact console UID and command` instead of classifying the
-transient identity as final. It never accepts another UID or command. Local
-verification passes 1,199 Python tests plus 54 subtests, 96 Rust tests, an
-arm64 app build and strict code-signature check. The exact built app's packaged
-observer completed one hidden, windowless, sandboxed `navigation_pending`
-request and cleanup in 12,712 ms. Codebase graph discovery was attempted first
-and again returned `Transport closed`; inspection used the documented narrow
-fallback. No new artifact from this correction is installed. The next verified
-action is PR review/CI, exact-main gates, protected qualification, and only then
-a new controlled macOS install with `xpersonatoy.com` first.
+PR CI run `31619433057` on product commit `7ddd2ba` passed every unit, Rust,
+lint, and project-state step before its script-mode installed lifecycle sentinel
+failed closed at the first wake cycle. The new packet observer made Scapy import
+mandatory even with voice disabled; the harness could observe the already
+published active status and suspend the daemon before the monitor thread set its
+cadence anchor, so the eight-second gap was lost after resume. The correction
+captures the monitor start time before publishing active and passes that exact
+timestamp into the thread. No wake timeout or test bound is relaxed; focused
+tests now cover the pre-thread suspension boundary. PR checks must restart on
+the final head.
+
+The first Codex review on PR #338 found two actionable boundaries. A completed independent
+navigation previously reset the exact client stream without rechecking whether
+the original relay had resumed receiving bytes; the same-route path now repeats
+the full live/idle/TLS eligibility check under the existing lock immediately
+before signaling reset. The QUIC callback also now requires private PF applied,
+startup baseline ready, and verified owned Geph on `:9954` before Version
+Negotiation; a VPN, competing filter, dormant backend, or unowned listener stays
+untouched. Focused regression covers a recovered relay plus inactive/unowned
+geo-exit routing. Both threads were resolved, and all eight required PR checks
+passed on published head `fcdad632d844e2c95d6bee92694dc9a725bf4d1e` in CI
+runs `31620653344`, `31620653353`, and `31620653365`.
+
+Fresh review of that exact head found two further bounded-state defects before
+merge. CDP reports a redirecting `Network.requestWillBeSent` with the destination
+URL while reusing the original document request ID; redirect correlation now
+runs before the synthetic target-URL filter, so the later destination finish
+cannot be mislabeled same-route completion. QUIC CRYPTO state also now accounts
+the sum of every uniquely retained fragment, including overlapping offsets,
+and drops the exact flow before the aggregate can exceed 64 KiB. Regressions for
+both cases pass locally; the corrected final head still requires fresh review
+and all required PR checks.
+
+Transactions `AD279B68-AE05-46D1-8BF2-E4919D7727D1`,
+`76910DF2-B1D4-4DF6-AC4A-89D185ABEB50`, and
+`AC4ADF6E-A636-4980-A307-9CF0C9512A70` all rolled back. They proved,
+respectively, that an accepted late TCP route advance cannot replay a Chrome
+navigation after response headers were delivered; installed policy correctly
+classifies `xpersonatoy.com` as `geo_exit/geph`; and ordinary Chrome was instead
+bypassing the TCP route over QUIC. The same owned SOCKS listener returned the
+complete 1,116,446-byte HTTP 200 in 2.4 seconds, and Chrome completed only when
+QUIC was disabled.
+
+The correction adds the repeatedly qualified `xpersonatoy.com` suffix to the
+shared Python/Rust reviewed geo-exit policy. It also observes only outbound
+QUIC v1 Initial packets, derives their standardized public Initial keys,
+reassembles bounded CRYPTO frames, extracts TLS ClientHello SNI, and reuses the
+active route-policy classifier. Only `geo_exit` receives a valid Version
+Negotiation response that moves the flow to TCP; unknown, direct, Discord,
+YouTube, and Googlevideo QUIC is untouched. State is capped at 4,096 flows, an
+aggregate 64 KiB and 128 retained CRYPTO fragments per flow, five seconds, and
+one response per exact flow. There is no
+global UDP/443 block, content inspection, host in the log, or DNS/proxy/PAC/VPN
+mutation. A local 1,000-packet benchmark took about 219 ms total.
+
+Transaction `AC4ADF6E-A636-4980-A307-9CF0C9512A70` launched the real tray and
+a fresh headed Google Chrome without a QUIC-disabling flag. The daemon logged
+`geo-exit QUIC flow moved to TCP fallback`; the same URL completed over `h2`
+with the StarrToy title, `readyState=complete`, and a 1,089,537-byte DOM.
+Status remained active with private PF ready, owned Geph up, and two active
+sessions. Exact rollback restored prior app hashes `3931c16e...`, `8674b761...`,
+and `9e61166e...`; the root daemon/TCP 1080 are absent and owned Geph remains
+live. One earlier sample was discarded after startup baseline intentionally
+paused PF on transient `probe_process_unavailable`; a normal network rearm
+restored active state before the successful proof.
+
+Full local verification passes `1,210` Python tests plus `54` subtests, `102`
+Rust tray tests, `35` Rust core contract tests, Python compilation, Rust format,
+both affected Clippy targets with warnings denied, project-state validation, and
+`git diff --check`. The focused QUIC set includes public-Initial decryption,
+fragmented CRYPTO/SNI reassembly, aggregate retained-byte rejection, tamper
+rejection, exact policy scope, and Version Negotiation CID reversal. Next:
+obtain fresh review and all required PR checks on the final correction head,
+then merge and require exact-main CI/audit/native Windows plus protected
+qualification. Install only that exact artifact and repeat the real tray plus
+ordinary-Chrome smoke before release.
+
+macOS is the active priority. PR #337 merged the hidden ordinary-Chrome worker
+as exact main `684ba0767b407a87e8a449f0999b799cee410c4d` after all six PR
+checks, exact-main CI `31595061506`, audit `31595061432`, native Windows
+`31595061480`, and protected run `31595643843` passed. Protected artifact
+`9141025574` has GitHub digest
+`sha256:25c872971855d7461b07bd8d5c581129f210d2d5b4579e226c8ff7ee386663aa`;
+its inner ZIP SHA-256 is
+`f12be620a9d76dd3c01233e84f983994b2ec7256e34071f9807ba4dfd0fef376`.
+
+Controlled transaction `7CA316C7-B043-49FF-BE20-3C181B50D7CA` installed
+only that artifact and reached an active root daemon, but the first required
+headed-Chrome `xpersonatoy.com` smoke again remained uncommitted for 75 seconds.
+Exact rollback restored prior app SHA-256
+`3931c16e158a223c0cdcb533bf77698e89e5df3f80015ead153dace86ff2a710`,
+removed the root daemon, listener, and private PF state, and preserved external
+DNS, proxy/PAC, route, and Geph ownership. Its log reduced the failure to
+`binding_invalid` rather than a worker launch or headless-rendering mismatch.
+
+Four local source-built transactions then isolated the binding safely and each
+rolled back. `9803CFE4-3FFC-4901-B858-04B101F4399F` proved the worker result
+was a terminal outcome; `9372D344-5999-4214-8AC6-DBCF8AB4A955` proved the
+specific event was `Network.responseReceived`: the hidden Chrome received the
+top-level HTTP response headers while the document body and the original exact
+relay remained unfinished. The observer incorrectly treated response headers
+as completed navigation and consumed its capability, so the existing route
+ladder never received `navigation_pending` and could not reach independently
+confirmed owned Geph. This is the concrete workstation defect; no retry
+cooldown or unchanged-stage refresh is required.
+
+The correction now covers three independently reproduced defects. First,
+`Network.responseReceived` is ignored for completion; only the exact top-level
+`Network.loadingFinished` is terminal success, while the same unfinished
+document reports `navigation_pending` after eight seconds. Second, one Aqua
+worker drains the current job burst and waits fifteen seconds for the next
+route stage instead of bootstrapping one LaunchAgent per host; it remains
+bounded to one concurrent worker and a 100-second runtime. Third, the daemon
+admits a complete-record payload idle through the existing 512-KiB independent
+incomplete-response bound instead of discarding it above 8 KiB. Those bounded
+partial-payload jobs move ahead of background jobs, may be claimed for at most
+14 seconds only while their exact relay object and stage remain live, and still
+require the existing system, app-owned DNS, local-strategy, content-aware, and
+owned-Geph evidence chain. A fast failure, redirect, completed document, stale
+relay, or response above the cap has no route effect. No hostname rule or new
+IPC privacy field was added.
+
+Transactions `36B774FF-F3D5-47D6-997F-7C268B7CD0AF`,
+`1F8B6F1D-C7FC-4409-8270-7E1D5A2AC616`, and
+`26918BAB-0E1C-4069-A75A-B60CF0E5E357` supplied the evidence and were rolled
+back. The last rollback restored the exact prior app, daemon, and Geph binary;
+owned Geph restarted under a new PID during the transaction, so PID preservation
+failed even though its command, binary SHA-256, listener ownership, and app
+state are valid. The root daemon and TCP/1080 are absent. Focused Rust and
+Python contract/runtime verification passes. The next verified action is one
+controlled build and isolated real-Chrome transaction with the final queue and
+payload bounds. Only after `xpersonatoy.com` completes should the full suite,
+small PR, exact-main/protected gates, exact-artifact installation, tray launch,
+and final macOS smoke proceed.
 
 PR #332 is the latest qualified product-code merge at
 `b5514a693cfa412650d54878c0ccee8d8b664a07`. Its tree exactly matches reviewed
