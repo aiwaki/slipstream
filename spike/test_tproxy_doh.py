@@ -12004,7 +12004,7 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
     assert contract["result_defaults"]["outcome"] == (
         tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
     )
-    assert contract["invariants"]["production_runtime_composition"] is False
+    assert contract["invariants"]["production_runtime_composition"] is True
 
 
 def test_pending_navigation_probe_capability_is_exact_one_shot_and_expires():
@@ -12270,6 +12270,106 @@ def test_pending_navigation_probe_suppresses_same_host_worker_recursion():
     )
     assert second_job is not None
     assert second_job["capability"] == "2" * 32
+
+
+def test_pending_navigation_idle_callback_queues_one_lazy_worker_job(
+    monkeypatch,
+):
+    class Runtime:
+        def __init__(self):
+            self.jobs = []
+            self.discarded = []
+
+        def enqueue(self, job):
+            self.jobs.append(job)
+            return True
+
+        def discard(self, capability):
+            self.discarded.append(capability)
+            return True
+
+    class Worker:
+        def __init__(self):
+            self.notifications = 0
+
+        def notify_job_ready(self):
+            self.notifications += 1
+            return True
+
+        def active(self):
+            return False
+
+    runtime = Runtime()
+    worker = Worker()
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", runtime)
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_worker", worker)
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_available", True)
+    tproxy._shutdown_started.clear()
+    activity = _eligible_pending_navigation_activity(
+        int(tproxy.time.time() * 1000) - 9_000
+    )
+    activity.last_downstream_at = tproxy.time.monotonic() - 9.0
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        scheduler=lambda *args, **kwargs: False,
+    )
+    try:
+        assert activity.on_downstream_idle() is True
+        assert len(runtime.jobs) == 1
+        assert runtime.jobs[0]["host"] == "unknown.example"
+        assert worker.notifications == 1
+        assert runtime.discarded == []
+    finally:
+        tproxy._unregister_pending_navigation_relay(activity)
+
+
+def test_pending_navigation_idle_callback_revokes_unstarted_job(monkeypatch):
+    class Runtime:
+        def __init__(self):
+            self.job = None
+            self.discarded = []
+
+        def enqueue(self, job):
+            self.job = job
+            return True
+
+        def discard(self, capability):
+            self.discarded.append(capability)
+            return True
+
+    class Worker:
+        def notify_job_ready(self):
+            return False
+
+        def active(self):
+            return False
+
+    runtime = Runtime()
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", runtime)
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_worker", Worker())
+    monkeypatch.setattr(tproxy, "_pending_navigation_probe_available", True)
+    tproxy._shutdown_started.clear()
+    activity = _eligible_pending_navigation_activity(
+        int(tproxy.time.time() * 1000) - 9_000
+    )
+    activity.last_downstream_at = tproxy.time.monotonic() - 9.0
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    try:
+        assert activity.on_downstream_idle() is False
+        assert runtime.discarded == [runtime.job["capability"]]
+        assert not tproxy._pending_navigation_probe_capabilities
+    finally:
+        tproxy._unregister_pending_navigation_relay(activity)
 
 
 def test_pending_navigation_signal_advances_only_the_exact_unknown_stage():

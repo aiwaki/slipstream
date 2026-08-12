@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import chromium_semantic_packaged_smoke as semantic
 import chromium_webrequest_event_smoke as smoke
@@ -27,6 +28,55 @@ def _signal_payload() -> dict[str, object]:
 
 
 class ChromiumWebRequestEventSmokeTests(unittest.TestCase):
+    def test_automatic_retry_qualification_runs_without_extension(self) -> None:
+        fixture = mock.Mock()
+        snapshot = semantic.FixtureSnapshot(2, 1, 1, 1, 1)
+        with (
+            mock.patch.object(
+                smoke.semantic,
+                "SemanticHttpsFixture",
+                return_value=fixture,
+            ) as fixture_type,
+            mock.patch.object(
+                smoke.semantic,
+                "_run_chrome",
+                return_value=snapshot,
+            ) as run_chrome,
+            mock.patch.object(
+                smoke.semantic,
+                "_assert_fixture_complete",
+            ) as assert_complete,
+        ):
+            result = smoke._qualify_automatic_original_navigation_retry(
+                Path("/Applications/Google Chrome for Testing"),
+                501,
+                20,
+            )
+
+        fixture_type.assert_called_once_with(
+            semantic.PENDING_NAVIGATION_FIXTURE_HOST,
+            semantic.AUTOMATIC_RETRY_SCENARIO,
+        )
+        fixture.start.assert_called_once_with()
+        run_chrome.assert_called_once_with(
+            501,
+            20,
+            None,
+            fixture,
+            Path("/Applications/Google Chrome for Testing"),
+            None,
+            None,
+            headless=True,
+        )
+        assert_complete.assert_called_once_with(
+            snapshot,
+            semantic.AUTOMATIC_RETRY_SCENARIO,
+        )
+        fixture.close.assert_called_once_with()
+        self.assertFalse(result["browser_extension_loaded"])
+        self.assertEqual(result["root_requests"], 2)
+        self.assertEqual(result["ready_callbacks"], 1)
+
     def test_native_stub_manifest_is_complete_and_exact(self) -> None:
         stub_path = Path("/tmp/native-stub")
         self.assertEqual(

@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-12 | Composed local pending-navigation recovery | Source composition implemented; release gates still open | The daemon can compose the closed broker, one-shot capability, lazy Aqua worker, and exact stale cleanup without adding an idle browser or browser extension. A local signed branded-Chrome HTTPS fixture independently showed that after the first top-level request stayed pending for 8.2 seconds and closed with `ERR_EMPTY_RESPONSE`, Chrome automatically repeated the same navigation and committed the second styled response. The pinned ordinary Chromium gate now repeats this without any extension, while deterministic traffic coverage proves that only the exact relay-bound result advances the local stage. Codebase graph discovery was retried first and again returned `Transport closed`, so inspection stayed limited to the existing relay, IPC, launcher, and lifecycle seams. | Complete all local suites and PR CI. Treat installed update/uninstall, idle cost, and original-navigation completion as unresolved until their exact gates pass. |
 | 2026-08-12 | Automatic local browser-signal delivery on unmanaged macOS | Official Chrome surfaces reviewed; no supported silent self-hosted extension install exists for ordinary unmanaged branded Chrome | Chrome's external-extension preference file on macOS must point to the Chrome Web Store and still presents an enable confirmation. A self-hosted extension may be force-installed silently only when Chrome is managed through MDM, MCX/domain membership, or Chrome Enterprise Core. Treating a personal installation as enterprise-managed would add external enrollment or machine policy ownership and is not the local zero-setup product path. Unified Headless Chrome can run extensions and is suitable for a bounded local worker experiment, but a separate synthetic navigation is not route authority unless it safely correlates to and completes the original user-visible navigation. Crawlee and `microlinkhq/browserless` are crawler/Puppeteer orchestration layers, while CloakBrowser and `puppeteer-real-browser` target anti-bot behavior; none supplies ownership of an existing user tab. | Add a headless Chrome for Testing qualification mode to the existing frozen-origin companion harness. Prove extension/native messaging and measure launch/RSS first, then add a closed original-navigation correlation fixture before considering runtime composition. |
 | 2026-08-11 | Exact eight-second pending-navigation fixture crossed a floating-point cancellation boundary | Exact-main `checks` failed; the same source passed local, PR, and previous exact-main runs; runner value reproduces locally | Docs-only main `2635f59f742b63a553f0df20f57e79f625b9a2f9` passed audit `31523112491` and Windows `31523112520`, but CI `31523112515` computed `(last_downstream_at + 8.0) - last_downstream_at` as `7.999999999999986` in `test_unknown_handshake_only_idle_waits_for_browser_pending_signal`, so the production `>= 8.0` guard correctly rejected the nominal boundary. This is fixture arithmetic, not routing evidence. Keep `UNKNOWN_PRE_RESPONSE_IDLE = 8.0` and bracket the contract at one millisecond before and after the threshold. | Land the test-only correction, require its PR checks and fresh exact-main CI/audit/Windows evidence, then resume the Chrome Web Store distribution gate. |
 | 2026-08-11 | Protected unpacked Chromium success did not transfer to a clean branded-Chrome profile | Exact protected artifact passed; controlled workstation transaction rolled back on the first browser smoke | Main `8fe21229994e0ddc643762d0ece2203bc79313cc` passed CI `31509795963`, audit `31511314605`, Windows `31509795798`, and protected owned-Geph run `31511415912`. Its artifact `9110154812` passed semantic v1/v2/v3, styled-resource, owned-Geph lifecycle, signature, manifest, and ZIP-integrity checks. Transaction `271C43D9-4906-4AF3-88E8-C2EF146A33ED` reached coherent active daemon state, but a fresh isolated headed branded Chrome kept `xpersonatoy.com` pending for 75 seconds and exact rollback restored all binary hashes and network/runtime invariants. The registered native-host manifest was present, yet the clean profile had no unpublished companion; the root log consequently contained no semantic or recovery event. The protected gate loads the source as an unpacked extension, so it proves the product path but not production distribution. This does not justify changing routing, byte-only authority, or the evidence ladder. | Land a deterministic store ZIP/provenance gate plus privacy/listing disclosures. Then require publisher review and a clean branded-Chrome profile with the exact published/enabled extension ID before another exact-main workstation transaction. |
@@ -458,9 +459,26 @@ resolver, and certificate remain disposable overrides. That gate requires one
 hanging
 main-document request, one
 privacy-bounded pending result, no `--no-sandbox`, no visible window, no profile
-residue, and at most 25 seconds end to end. The remaining product gate is still
-to compose this with the daemon and prove that the original user-visible
-navigation, rather than only the synthetic probe, completes.
+residue, and at most 25 seconds end to end.
+
+PR #328 merged the isolated observer as
+`aa6288da945a2551be4203fbda2965907b285ad2`; exact-main CI, audit, and Windows
+qualification passed. Branch `codex/compose-pending-navigation-runtime` now
+starts the owner-only socket supervisor from the daemon, queues a job directly
+from the existing complete-record idle observer, wakes the single lazy worker,
+and performs exact stale worker cleanup during startup and uninstall. The
+ordinary path retains no browser or worker thread. A deterministic
+relay-to-job-to-result fixture proves only the bound live relay advances.
+
+A separate local signed branded-Chrome HTTPS diagnostic provided the missing
+retry compatibility observation: the first top-level request remained open for
+8.2 seconds and closed without an HTTP response; the original Chrome page then
+issued a second request to the same URL and loaded its CSS, JavaScript, image,
+and ready callback without an extension or reload command. The ordinary pinned
+Chromium job now freezes that behavior with an extension-free scenario. This
+does not by itself qualify installation, update, exact packaged uninstall,
+idle cost, or the complete composed original-navigation transaction; those
+remain release gates until their matching evidence passes.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

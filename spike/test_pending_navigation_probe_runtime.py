@@ -4,20 +4,18 @@ import os
 from pathlib import Path
 import plistlib
 import pwd
+import socket
 import stat
 import struct
 import subprocess
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 
 import pending_navigation_probe_runtime as probe_runtime
 import pytest
 import tproxy
-from semantic_route_signal_runtime import (
-    encode_frame,
-    start_owned_semantic_signal_server,
-)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,7 +114,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             "reason",
             "job",
         ],
-        "runtime_composed": False,
+        "runtime_composed": True,
     }
     assert CONTRACT["worker_lifecycle"] == {
         "lazy": True,
@@ -125,7 +123,7 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
             probe_runtime.CLAIM_LEASE_SECONDS * 1000
         ),
         "same_host_recursive_jobs": False,
-        "browser_observer_composed": False,
+        "browser_observer_composed": True,
     }
 
 
@@ -260,7 +258,7 @@ def test_worker_response_parser_rejects_duplicate_expanded_and_wrong_operation()
 def test_owner_only_socket_carries_one_job_to_its_exact_relay():
     async def round_trip(path, payload):
         reader, writer = await asyncio.open_unix_connection(path)
-        writer.write(encode_frame(payload))
+        writer.write(probe_runtime.encode_frame(payload))
         await writer.drain()
         length = struct.unpack("<I", await reader.readexactly(4))[0]
         response = json.loads(await reader.readexactly(length))
@@ -319,7 +317,7 @@ def test_owner_only_socket_carries_one_job_to_its_exact_relay():
 
         with tempfile.TemporaryDirectory(prefix="ss-probe-", dir="/tmp") as directory:
             socket_path = Path(directory) / "probe.sock"
-            owned = await start_owned_semantic_signal_server(
+            owned = await probe_runtime.start_owned_pending_navigation_probe_server(
                 str(socket_path),
                 os.getuid(),
                 os.getgid(),
@@ -365,7 +363,7 @@ def test_worker_client_requires_owner_socket_and_exact_responses():
 
         with tempfile.TemporaryDirectory(prefix="ss-worker-", dir="/tmp") as directory:
             socket_path = Path(directory) / "probe.sock"
-            owned = await start_owned_semantic_signal_server(
+            owned = await probe_runtime.start_owned_pending_navigation_probe_server(
                 str(socket_path),
                 os.getuid(),
                 os.getgid(),
@@ -387,6 +385,132 @@ def test_worker_client_requires_owner_socket_and_exact_responses():
                 await asyncio.to_thread(client.claim)
             socket_path.chmod(0o600)
             await owned.close()
+            assert not socket_path.exists()
+
+    asyncio.run(scenario())
+
+
+def test_probe_server_rejects_oversized_frames_and_removes_exact_socket():
+    async def scenario():
+        clock = {"wall": 1_010_000, "mono": 100.0}
+        runtime = _runtime(clock)
+        with tempfile.TemporaryDirectory(
+            prefix="ss-probe-frame-",
+            dir="/tmp",
+        ) as directory:
+            socket_path = Path(directory) / "probe.sock"
+            owned = (
+                await probe_runtime
+                .start_owned_pending_navigation_probe_server(
+                    str(socket_path),
+                    os.getuid(),
+                    os.getgid(),
+                    runtime,
+                )
+            )
+            reader, writer = await asyncio.open_unix_connection(socket_path)
+            writer.write(
+                struct.pack("<I", probe_runtime.MAX_IPC_BYTES + 1)
+            )
+            await writer.drain()
+            length = struct.unpack("<I", await reader.readexactly(4))[0]
+            response = json.loads(await reader.readexactly(length))
+            assert response == {
+                "schema_version": 1,
+                "accepted": False,
+                "operation": "none",
+                "reason": "invalid_request",
+                "job": None,
+            }
+            writer.close()
+            await writer.wait_closed()
+            await owned.close()
+            assert not socket_path.exists()
+
+    asyncio.run(scenario())
+
+
+def test_probe_server_refuses_regular_or_active_socket_paths():
+    async def scenario():
+        with tempfile.TemporaryDirectory(
+            prefix="ss-probe-path-",
+            dir="/tmp",
+        ) as directory:
+            regular_path = Path(directory) / "regular.sock"
+            regular_path.write_text("not a socket")
+            with pytest.raises(OSError, match="unowned"):
+                await probe_runtime.start_owned_pending_navigation_probe_server(
+                    str(regular_path),
+                    os.getuid(),
+                    os.getgid(),
+                    _runtime({"wall": 1_010_000, "mono": 100.0}),
+                )
+
+            active_path = Path(directory) / "active.sock"
+            active = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            active.bind(str(active_path))
+            active.listen(1)
+            try:
+                with pytest.raises(OSError, match="already active"):
+                    await probe_runtime.start_owned_pending_navigation_probe_server(
+                        str(active_path),
+                        os.getuid(),
+                        os.getgid(),
+                        _runtime({"wall": 1_010_000, "mono": 100.0}),
+                    )
+            finally:
+                active.close()
+                active_path.unlink()
+
+    asyncio.run(scenario())
+
+
+def test_probe_supervisor_starts_after_login_and_rebinds_session():
+    async def wait_for(predicate):
+        for _ in range(100):
+            if predicate():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("pending-navigation socket state did not converge")
+
+    async def scenario():
+        with tempfile.TemporaryDirectory(
+            prefix="ss-probe-supervisor-",
+            dir="/tmp",
+        ) as directory:
+            socket_path = Path(directory) / "probe.sock"
+            identity = {"value": None}
+            errors = []
+            supervisor = (
+                await probe_runtime
+                .start_pending_navigation_probe_server_supervisor(
+                    str(socket_path),
+                    lambda: identity["value"],
+                    _runtime({"wall": 1_010_000, "mono": 100.0}),
+                    poll_interval=0.01,
+                    error_handler=errors.append,
+                )
+            )
+            try:
+                assert not socket_path.exists()
+                identity["value"] = (os.getuid(), os.getgid(), "session-a")
+                await wait_for(socket_path.exists)
+                assert supervisor._session_identity[2] == "session-a"
+
+                identity["value"] = (os.getuid(), os.getgid(), "session-b")
+                await wait_for(
+                    lambda: (
+                        socket_path.exists()
+                        and supervisor._session_identity is not None
+                        and supervisor._session_identity[2] == "session-b"
+                    )
+                )
+
+                identity["value"] = None
+                await wait_for(lambda: not socket_path.exists())
+                assert errors == []
+            finally:
+                await supervisor.close()
             assert not socket_path.exists()
 
     asyncio.run(scenario())
@@ -548,6 +672,186 @@ def test_console_worker_launcher_rejects_mutable_or_replaced_executables():
             match="browser_worker_unowned",
         ):
             launcher.launch()
+
+
+def test_console_worker_launcher_cleans_only_exact_stale_runtime():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-stale-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "slipstream"
+        executable.write_text("#!/bin/sh\n")
+        executable.chmod(0o755)
+        account = pwd.getpwuid(os.getuid())
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=account.pw_name,
+            home=account.pw_dir,
+        )
+        runtime_root = root / "runtime"
+        label = (
+            f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX}."
+            "0123456789abcdef"
+        )
+
+        def completed(command, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout,
+                stderr,
+            )
+
+        def runner(command):
+            if command[:2] == ("/bin/launchctl", "print"):
+                return completed(
+                    command,
+                    113,
+                    stderr="Could not find service",
+                )
+            if command[:2] == ("/bin/launchctl", "bootout"):
+                return completed(command, 113)
+            raise AssertionError(command)
+
+        launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=runtime_root,
+            identity_probe=lambda: identity,
+            command_runner=runner,
+            sleep=lambda _seconds: None,
+        )
+        paths = launcher._prepare_launch(identity, label)
+        assert paths.directory.exists()
+        assert launcher.cleanup_stale(remove_root=True)
+        assert not runtime_root.exists()
+
+        paths = launcher._prepare_launch(identity, label)
+        payload = plistlib.loads(paths.plist.read_bytes())
+        payload["ProgramArguments"] = ["/tmp/unowned"]
+        paths.plist.write_bytes(plistlib.dumps(payload))
+        paths.plist.chmod(0o600)
+        assert not launcher.cleanup_stale(remove_root=True)
+        assert paths.directory.exists()
+
+        payload["ProgramArguments"] = [
+            str(executable),
+            probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+        ]
+        payload["EnvironmentVariables"]["CI"] = "true"
+        paths.plist.write_bytes(plistlib.dumps(payload))
+        paths.plist.chmod(0o600)
+        assert not launcher.cleanup_stale(remove_root=True)
+        assert paths.directory.exists()
+
+        paths.plist.write_bytes(plistlib.dumps(["not", "a", "dictionary"]))
+        paths.plist.chmod(0o600)
+        assert not launcher.cleanup_stale(remove_root=True)
+        assert paths.directory.exists()
+
+
+def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-stale-loaded-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "slipstream"
+        executable.write_text("#!/bin/sh\n")
+        executable.chmod(0o755)
+        account = pwd.getpwuid(os.getuid())
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=account.pw_name,
+            home=account.pw_dir,
+        )
+        runtime_root = root / "runtime"
+        label = (
+            f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX}."
+            "fedcba9876543210"
+        )
+        state = {"loaded": True, "running": True, "commands": []}
+
+        def completed(command, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout,
+                stderr,
+            )
+
+        def runner(command):
+            state["commands"].append(command)
+            if command[:2] == ("/bin/launchctl", "print"):
+                if not state["loaded"]:
+                    return completed(
+                        command,
+                        113,
+                        stderr="Could not find service",
+                    )
+                return completed(command, stdout="pid = 4242\n")
+            if command[:2] == ("/bin/ps", "-p"):
+                return completed(
+                    command,
+                    stdout=(
+                        f"{identity.uid} {executable} "
+                        f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT}\n"
+                    ),
+                )
+            if command[:2] == ("/bin/launchctl", "kill"):
+                state["running"] = False
+                return completed(command)
+            if command[:2] == ("/bin/launchctl", "bootout"):
+                state["loaded"] = False
+                return completed(command)
+            raise AssertionError(command)
+
+        launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=runtime_root,
+            identity_probe=lambda: identity,
+            command_runner=runner,
+            sleep=lambda _seconds: None,
+        )
+        launcher._prepare_launch(identity, label)
+        assert launcher.cleanup_stale(remove_root=True)
+        assert not runtime_root.exists()
+        assert not state["running"]
+        assert any(
+            command[:3] == ("/bin/launchctl", "kill", "SIGTERM")
+            for command in state["commands"]
+        )
+        assert any(
+            command[:2] == ("/bin/launchctl", "bootout")
+            for command in state["commands"]
+        )
+
+
+def test_stale_worker_identity_rejects_root_and_invalid_home(monkeypatch):
+    identity_for_uid = (
+        probe_runtime.PendingNavigationBrowserWorkerLauncher._identity_for_uid
+    )
+    monkeypatch.setattr(
+        probe_runtime.pwd,
+        "getpwuid",
+        lambda uid: SimpleNamespace(
+            pw_gid=0 if uid == 0 else 20,
+            pw_name="root" if uid == 0 else "user",
+            pw_dir="/var/root" if uid == 0 else "relative-home",
+        ),
+    )
+    with pytest.raises(
+        probe_runtime.PendingNavigationProbeRuntimeError,
+        match="browser_worker_runtime_unowned",
+    ):
+        identity_for_uid(0)
+    with pytest.raises(
+        probe_runtime.PendingNavigationProbeRuntimeError,
+        match="browser_worker_runtime_unowned",
+    ):
+        identity_for_uid(501)
 
 
 def test_console_worker_error_diagnostic_accepts_only_one_safe_class():

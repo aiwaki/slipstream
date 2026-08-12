@@ -10,6 +10,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import chromium_semantic_packaged_smoke as semantic
@@ -338,6 +339,47 @@ def _validate_headless_performance(
     }
 
 
+def _qualify_automatic_original_navigation_retry(
+    chrome_executable: Path,
+    uid: int,
+    gid: int,
+) -> dict[str, object]:
+    fixture = semantic.SemanticHttpsFixture(
+        semantic.PENDING_NAVIGATION_FIXTURE_HOST,
+        semantic.AUTOMATIC_RETRY_SCENARIO,
+    )
+    started_at = time.monotonic()
+    try:
+        fixture.start()
+        snapshot = semantic._run_chrome(
+            uid,
+            gid,
+            None,
+            fixture,
+            chrome_executable,
+            None,
+            None,
+            headless=True,
+        )
+        semantic._assert_fixture_complete(
+            snapshot,
+            semantic.AUTOMATIC_RETRY_SCENARIO,
+        )
+        return {
+            "browser_extension_loaded": False,
+            "root_requests": snapshot.root_visits,
+            "styled_resources": {
+                "css": snapshot.css_requests,
+                "javascript": snapshot.script_requests,
+                "image": snapshot.image_requests,
+            },
+            "ready_callbacks": snapshot.ready_requests,
+            "elapsed_ms": int((time.monotonic() - started_at) * 1000),
+        }
+    finally:
+        fixture.close()
+
+
 def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
     uid, gid = semantic._require_disposable_ci()
     chrome_executable = semantic._validate_chrome_for_testing(chrome_executable)
@@ -459,6 +501,13 @@ def run(chrome_executable: Path, extension: Path) -> dict[str, object]:
             f"{failure}; sanitized webRequest trace: "
             f"{json.dumps(trace, separators=(',', ':'), sort_keys=True)}"
         ) from failure
+    result["automatic_original_navigation_retry"] = (
+        _qualify_automatic_original_navigation_retry(
+            chrome_executable,
+            uid,
+            gid,
+        )
+    )
     return result
 
 

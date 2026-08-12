@@ -538,6 +538,35 @@ class ChromiumSemanticPackagedSmokeTests(unittest.TestCase):
         self.assertNotIn("--no-sandbox", command)
         self.assertEqual(command[-1], "about:blank")
 
+    def test_chrome_command_can_qualify_retry_without_any_extension(
+        self,
+    ) -> None:
+        command = smoke._chrome_command(
+            Path("/Applications/Google Chrome for Testing"),
+            Path("/tmp/profile"),
+            None,
+            18443,
+            smoke.PENDING_NAVIGATION_FIXTURE_HOST,
+            headless=True,
+        )
+        self.assertIn("--headless", command)
+        self.assertIn("--disable-extensions", command)
+        self.assertFalse(
+            any(argument.startswith("--load-extension=") for argument in command)
+        )
+        self.assertFalse(
+            any(
+                argument.startswith("--disable-extensions-except=")
+                for argument in command
+            )
+        )
+        self.assertIn(
+            "--host-resolver-rules=MAP "
+            f"{smoke.PENDING_NAVIGATION_FIXTURE_HOST} 127.0.0.1, "
+            "EXCLUDE localhost",
+            command,
+        )
+
     def test_chrome_command_maps_the_selected_fixture_host(self) -> None:
         command = smoke._chrome_command(
             Path("/Applications/Google Chrome"),

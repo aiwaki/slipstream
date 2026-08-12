@@ -10,11 +10,38 @@ file.
 
 ## Current Checkpoint
 
-PR #327 is merged as live main
-`86966e9e93b6344c13c5704f311e5468be17a35c`. PR #328 is open and mergeable on
-head `c9720bb58482ce37ded2dc37f3d8fea0cc39bb10`; all six required checks passed
-on that exact head in CI run `31549452164` and dependency-audit run
-`31549452162`.
+PR #328 is merged as live main
+`aa6288da945a2551be4203fbda2965907b285ad2`. Exact-main CI run `31550472847`,
+dependency-audit run `31550472875`, and Windows qualification run
+`31550472815` passed all six required jobs for that exact SHA. No protected
+artifact from this SHA has been installed on the workstation.
+
+The active branch is `codex/compose-pending-navigation-runtime`, based exactly
+on that merge. It composes the previously closed pending-navigation pieces into
+the production daemon without changing PF, DNS, proxy/PAC, VPN, external Geph,
+Discord, YouTube, or Googlevideo policy. An eligible public unknown-host relay
+now creates one privacy-bounded broker job only after the existing complete-TLS
+record and eight-second idle gate. The daemon maintains one console-user-owned
+mode-`0600` Unix socket, starts at most one lazy Aqua worker while a live job
+exists, and revokes both queue and relay capability if startup cannot begin.
+Shutdown, reinstall, and uninstall close the exact socket and validate an exact
+owned LaunchAgent/process/plist/runtime shape before stopping or removing stale
+worker state; ambiguity fails closed.
+
+Local branded-Chrome evidence on 2026-08-12 showed the required browser
+handoff without an extension or manual reload: the first exact top-level HTTPS
+request remained open for 8.2 seconds and ended with
+`net::ERR_EMPTY_RESPONSE`; Chrome then issued a second request to the same URL
+and committed the styled page. This is compatibility evidence, not yet a
+release gate. The ordinary pinned-Chromium CI job now contains the same
+extension-free automatic-retry scenario so upstream retry drift will fail the
+branch before merge.
+
+Current local verification passes 1,158 Python tests plus 54 subtests, focused
+Python compilation, JSON parsing, project-state continuity, and
+`git diff --check`. The required codebase graph transport was retried and again
+returned `Transport closed`; bounded source inspection used the documented
+fallback.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
@@ -208,12 +235,11 @@ also passed. Jobs `93968755462`, `93968755558`, and `93968755604` passed the
 common, Windows-adapter, and legacy Chromium contracts. Audit run `31549452162`
 passed jobs `93968755330` and `93968755382` for dependencies and vendored Geph.
 
-The next verified action is to resolve review and merge PR #328, then repeat
-the exact-main evidence check. The slice remains closed from the production
-daemon. The later composed gate must still prove completion of the original
-user-visible navigation. Package size, installed update, uninstall, idle cost,
-and clean-profile evidence remain required before production runtime
-composition.
+The next verified action is to finish full local validation, update the
+composition evidence, open the PR, and require all six PR checks including the
+real pinned-Chromium retry gate. Installed update, exact packaged uninstall,
+measured idle cost, and complete original-navigation behavior remain explicit
+release gates.
 Exact extension ID `cecdingohhpfggapnlbghppcegbaciam` remains
 frozen unless a reviewed local-delivery design proves an identity migration is
 required. Only after the complete automatic-delivery gate passes should the
