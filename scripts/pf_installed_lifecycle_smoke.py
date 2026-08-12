@@ -2288,7 +2288,8 @@ def _run_composed_navigation(
             "utf-8", errors="replace"
         )[-2000:]
         raise LifecycleError(
-            f"composed original Chrome navigation timed out: {detail}"
+            "composed original Chrome navigation timed out: "
+            f"records={fixture.records!r}; chrome={detail}"
         )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace")[-2000:]
