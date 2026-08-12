@@ -343,6 +343,16 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertIn("Qualify the release app lifecycle", workflow)
         self.assertIn('SLIPSTREAM_DISPOSABLE_CI: "1"', workflow)
+        self.assertIn("id: release-lifecycle-chrome", workflow)
+        self.assertIn(
+            "browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd",
+            workflow,
+        )
+        self.assertIn("chrome-version: 151.0.7922.77", workflow)
+        self.assertIn(
+            '"${{ steps.release-lifecycle-chrome.outputs.chrome-path }}"',
+            workflow,
+        )
         self.assertIn("scripts/run_packaged_lifecycle_smoke.sh", workflow)
         self.assertIn("scripts/pf_installed_lifecycle_smoke.py", wrapper)
         self.assertIn('--app-bundle "$app_bundle"', wrapper)
@@ -355,6 +365,10 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("retrying once on a fresh loopback port", wrapper)
         self.assertIn("stalled_system_resolver", lifecycle)
         self.assertIn("dormant_before_query_then_active", lifecycle)
+        self.assertLess(
+            workflow.index("id: release-lifecycle-chrome"),
+            workflow.index("Qualify the release app lifecycle"),
+        )
 
         syntax = subprocess.run(
             ("/bin/bash", "-n", str(ROOT / "scripts/run_packaged_lifecycle_smoke.sh")),

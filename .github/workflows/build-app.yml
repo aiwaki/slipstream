@@ -115,6 +115,16 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install qualified Chrome for Testing
+        id: release-lifecycle-chrome
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        with:
+          # Match the packaged and protected gates. The runner's branded Chrome
+          # may already own a LaunchServices instance and cannot reproducibly
+          # start the isolated hidden-worker profile used by this qualification.
+          chrome-version: 151.0.7922.77
+          install-chromedriver: false
+
       - name: System build deps
         run: bash scripts/ensure_macos_build_deps.sh
 
@@ -259,7 +269,9 @@ jobs:
           set -euo pipefail
           app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
           test -d "$app"
-          bash scripts/run_packaged_lifecycle_smoke.sh "$app"
+          bash scripts/run_packaged_lifecycle_smoke.sh \
+            "$app" \
+            "${{ steps.release-lifecycle-chrome.outputs.chrome-path }}"
 
       - name: Package + build the update appcast (latest.json)
         id: pkg
