@@ -13,6 +13,7 @@ import shutil
 import signal
 import ssl
 import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -4520,6 +4521,12 @@ def test_route_policy_classifies_service_groups():
     assert tproxy.route_policy("steamcdn-a.akamaihd.net")["service_group"] == (
         tproxy.SERVICE_STEAM_STORE
     )
+    assert tproxy.route_policy("www.xpersonatoy.com") == {
+        "host": "www.xpersonatoy.com",
+        "route_class": tproxy.ROUTE_GEO_EXIT,
+        "service_group": tproxy.SERVICE_GENERIC,
+        "strategy_set": tproxy.STRATEGY_GEPH,
+    }
     assert tproxy.route_policy("cmp1-fra1.steamserver.net")["route_class"] == (
         tproxy.ROUTE_UNKNOWN
     )
@@ -5706,6 +5713,120 @@ def test_quic_version_negotiation_response_detection():
 
     assert not tproxy._is_quic_version_negotiation_response(b"\xc0\x00\x00\x00\x01rest")
     assert not tproxy._is_quic_version_negotiation_response(b"\x40\x00\x00\x00\x00rest")
+
+
+def _encode_quic_varint(value):
+    if value < 64:
+        return bytes([value])
+    if value < 16384:
+        return struct.pack("!H", value | 0x4000)
+    raise ValueError("fixture value is too large")
+
+
+def _build_quic_v1_initial(dcid, scid, packet_number, crypto_offset, crypto):
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    packet_number_bytes = packet_number.to_bytes(2, "big")
+    frame = (
+        b"\x06"
+        + _encode_quic_varint(crypto_offset)
+        + _encode_quic_varint(len(crypto))
+        + crypto
+    )
+    plaintext = frame + (b"\x00" * max(0, 1160 - len(frame)))
+    payload_length = len(packet_number_bytes) + len(plaintext) + 16
+    first = 0xC0 | (len(packet_number_bytes) - 1)
+    prefix = (
+        bytes([first])
+        + struct.pack("!I", tproxy.QUIC_V1)
+        + bytes([len(dcid)])
+        + dcid
+        + bytes([len(scid)])
+        + scid
+        + b"\x00"
+        + _encode_quic_varint(payload_length)
+    )
+    packet_number_offset = len(prefix)
+    header = prefix + packet_number_bytes
+    key, iv, hp = tproxy._quic_v1_client_keys(dcid)
+    nonce = bytes(
+        left ^ right
+        for left, right in zip(
+            iv,
+            packet_number.to_bytes(len(iv), "big"),
+        )
+    )
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext, header)
+    packet = bytearray(header + ciphertext)
+    sample = packet[packet_number_offset + 4:packet_number_offset + 20]
+    encryptor = Cipher(algorithms.AES(hp), modes.ECB()).encryptor()
+    mask = encryptor.update(bytes(sample)) + encryptor.finalize()
+    packet[0] ^= mask[0] & 0x0F
+    for index in range(len(packet_number_bytes)):
+        packet[packet_number_offset + index] ^= mask[index + 1]
+    return bytes(packet)
+
+
+def test_quic_initial_sni_reassembles_publicly_decryptable_crypto_frames():
+    handshake = tproxy.build_fake_clienthello("www.xpersonatoy.com")[5:]
+    split = len(handshake) // 2
+    dcid = bytes.fromhex("8394c8f03e515708")
+    scid = bytes.fromhex("f067a5502a4262b5")
+    first = _build_quic_v1_initial(dcid, scid, 0, 0, handshake[:split])
+    second = _build_quic_v1_initial(
+        dcid,
+        scid,
+        1,
+        split,
+        handshake[split:],
+    )
+    flows = OrderedDict()
+    flow_key = ("192.0.2.10", 51000, "198.51.100.10", 443)
+
+    assert tproxy._observe_quic_initial_sni(
+        flows,
+        flow_key,
+        first,
+        now=100.0,
+    ) is None
+    assert tproxy._observe_quic_initial_sni(
+        flows,
+        flow_key,
+        second,
+        now=100.1,
+    ) == "www.xpersonatoy.com"
+    assert not flows
+
+    tampered = bytearray(first)
+    tampered[-20] ^= 0x01
+    assert tproxy._quic_initial_crypto_fragments(bytes(tampered)) is None
+
+
+def test_quic_tcp_fallback_is_exactly_geo_exit_policy_scoped():
+    assert tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
+    assert tproxy._quic_geo_exit_tcp_fallback("chatgpt.com")
+    assert not tproxy._quic_geo_exit_tcp_fallback("updates.discord.com")
+    assert not tproxy._quic_geo_exit_tcp_fallback("www.youtube.com")
+    assert not tproxy._quic_geo_exit_tcp_fallback("unknown.example")
+
+
+def test_quic_version_negotiation_fallback_swaps_connection_ids():
+    handshake = tproxy.build_fake_clienthello("www.xpersonatoy.com")[5:]
+    dcid = bytes.fromhex("8394c8f03e515708")
+    scid = bytes.fromhex("f067a5502a4262b5")
+    initial = _build_quic_v1_initial(dcid, scid, 0, 0, handshake)
+
+    response = tproxy._quic_version_negotiation_response(initial)
+
+    assert response == (
+        b"\x80\x00\x00\x00\x00"
+        + bytes([len(scid)])
+        + scid
+        + bytes([len(dcid)])
+        + dcid
+        + tproxy.QUIC_UNSUPPORTED_VERSION
+    )
 
 
 def test_discord_cdn_canary_stays_local_bypass_and_fake_only():
@@ -11928,6 +12049,7 @@ def test_relay_closes_handshake_only_idle_when_observer_requests_retry(
     class Writer:
         def __init__(self):
             self.payload = bytearray()
+            self.closed = False
 
         def write(self, data):
             self.payload.extend(data)
@@ -11936,7 +12058,7 @@ def test_relay_closes_handshake_only_idle_when_observer_requests_retry(
             pass
 
         def close(self):
-            pass
+            self.closed = True
 
         async def wait_closed(self):
             pass
@@ -11966,6 +12088,7 @@ def test_relay_closes_handshake_only_idle_when_observer_requests_retry(
     assert bytes(downstream.payload) == record
     assert activity.downstream_idle_observed
     assert activity.downstream_idle_retry
+    assert downstream.closed
     assert not activity.client_ended_first
     assert not activity.server_ended_first
 
@@ -11997,6 +12120,49 @@ def _eligible_pending_navigation_activity(started_at_unix_ms=1_000_000):
     )
 
 
+def test_pending_navigation_probe_covers_bounded_partial_payload_idle():
+    at_limit = _eligible_pending_navigation_activity()
+    at_limit.downstream_bytes = tproxy.PENDING_NAVIGATION_PROBE_MAX_BYTES
+    assert tproxy._register_pending_navigation_relay(
+        at_limit,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    job = tproxy._issue_pending_navigation_probe(
+        at_limit,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "1" * 32,
+    )
+    assert job is not None
+    tproxy._revoke_pending_navigation_probe_capability(
+        at_limit,
+        now=100.0,
+        guard_possible_worker=False,
+    )
+    tproxy._unregister_pending_navigation_relay(at_limit)
+
+    over_limit = _eligible_pending_navigation_activity()
+    over_limit.downstream_bytes = (
+        tproxy.PENDING_NAVIGATION_PROBE_MAX_BYTES + 1
+    )
+    assert tproxy._register_pending_navigation_relay(
+        over_limit,
+        "over-limit.example",
+        "8.8.8.8",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    assert tproxy._issue_pending_navigation_probe(
+        over_limit,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "2" * 32,
+    ) is None
+
+
 def _pending_navigation_probe_result(job, **overrides):
     return {
         "schema_version": 1,
@@ -12024,6 +12190,9 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
         "min_pending_observation_ms": int(
             tproxy.UNKNOWN_PRE_RESPONSE_IDLE * 1000
         ),
+        "max_correlated_downstream_bytes": (
+            tproxy.PENDING_NAVIGATION_PROBE_MAX_BYTES
+        ),
     }
     assert set(contract["privacy"]["job_fields"]) == set(
         contract["job_defaults"]
@@ -12034,6 +12203,13 @@ def test_pending_navigation_probe_contract_matches_runtime_bounds_and_shape():
     assert contract["result_defaults"]["outcome"] == (
         tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
     )
+    assert contract["outcomes"]["route_effect"] == [
+        tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_PENDING,
+        tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_FAILED,
+    ]
+    assert contract["outcomes"][
+        "retry_same_route_without_route_effect"
+    ] == tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE
     assert contract["worker_lifecycle"][
         "accepted_result_guard_until_worker_cleanup"
     ] is True
@@ -12705,7 +12881,7 @@ def test_pending_navigation_idle_callback_queues_one_lazy_worker_job(
             self.jobs = []
             self.discarded = []
 
-        def enqueue(self, job):
+        def enqueue(self, job, *, prioritize=False):
             self.jobs.append(job)
             return True
 
@@ -12762,7 +12938,7 @@ def test_real_tls_handshake_idle_queues_the_lazy_worker(monkeypatch):
             self.jobs = []
             self.ready = None
 
-        def enqueue(self, job):
+        def enqueue(self, job, *, prioritize=False):
             self.jobs.append(job)
             self.ready.set()
             return True
@@ -12862,7 +13038,7 @@ def test_pending_navigation_idle_callback_revokes_unstarted_job(monkeypatch):
             self.job = None
             self.discarded = []
 
-        def enqueue(self, job):
+        def enqueue(self, job, *, prioritize=False):
             self.job = job
             return True
 
@@ -12904,7 +13080,7 @@ def test_pending_navigation_idle_callback_revokes_unstarted_job(monkeypatch):
 
 def test_pending_navigation_rejected_enqueue_has_no_guard(monkeypatch):
     class Runtime:
-        def enqueue(self, _job):
+        def enqueue(self, _job, *, prioritize=False):
             return False
 
     monkeypatch.setattr(tproxy, "_pending_navigation_probe_runtime", Runtime())
@@ -12964,6 +13140,72 @@ def test_pending_navigation_signal_advances_only_the_exact_unknown_stage():
     )
     assert xbox_activity.downstream_idle_retry
     assert tproxy._xbox_dns_attempted_recently("unknown.example", now=100.0)
+
+
+def test_completed_independent_navigation_retries_only_the_stuck_exact_relay():
+    activity = _eligible_pending_navigation_activity()
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+        scheduler=lambda *args, **kwargs: False,
+    )
+    job = tproxy._issue_pending_navigation_probe(
+        activity,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "c" * 32,
+    )
+    assert tproxy._pending_navigation_probe_worker_claimed(
+        job,
+        _PROBE_LAUNCH_ONE,
+        now=100.0,
+    )
+    result = _pending_navigation_probe_result(
+        job,
+        observed_at_unix_ms=1_011_000,
+        outcome=tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE,
+    )
+    assert tproxy._submit_pending_navigation_probe_result(
+        result,
+        _PROBE_LAUNCH_ONE,
+        now=101.0,
+    )
+    assert activity.downstream_idle_retry
+    assert not tproxy._xbox_dns_candidate_active("unknown.example", now=101.0)
+    assert tproxy._pending_navigation_probe_worker_completed(
+        _PROBE_LAUNCH_ONE,
+        now=101.001,
+    )
+
+
+def test_failed_independent_navigation_advances_the_bound_stuck_relay():
+    activity = _eligible_pending_navigation_activity()
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    job = tproxy._issue_pending_navigation_probe(
+        activity,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "d" * 32,
+    )
+    assert tproxy._submit_pending_navigation_probe_result(
+        _pending_navigation_probe_result(
+            job,
+            observed_at_unix_ms=1_011_000,
+            outcome=tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_FAILED,
+        ),
+        now=101.0,
+    )
+    assert activity.downstream_idle_retry
+    assert tproxy._xbox_dns_candidate_active("unknown.example", now=101.0)
 
 
 def test_pending_navigation_strategy_moves_behind_untried_strategies():

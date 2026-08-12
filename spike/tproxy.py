@@ -27,6 +27,7 @@ import errno
 import filecmp
 import fcntl
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -316,6 +317,7 @@ STEAM_STORE_HOSTS = (
 )
 GEPH_MISC_HOSTS = (
     "intercomcdn.com",            # OpenAI/Anthropic support widget assets
+    "xpersonatoy.com",            # repeatedly truncates locally; completes via Geph
 )
 
 # Flowseal/zapret-style hostlists mark services for LOCAL DPI bypass, not for a
@@ -527,6 +529,15 @@ GEPH_RUNTIME_FIRST_PAYLOAD_TIMEOUT = 4.0
 QUIC_CANARY_TIMEOUT = 1.5
 QUIC_UNSUPPORTED_VERSION = b"\x0a\x0a\x0a\x0a"
 QUIC_MIN_INITIAL_SIZE = 1200
+QUIC_V1 = 0x00000001
+QUIC_V1_INITIAL_SALT = bytes.fromhex(
+    "38762cf7f55934b34d179ae6a4c80cadccbb7f0a"
+)
+QUIC_INITIAL_FLOW_MAX = 4096
+QUIC_INITIAL_FLOW_IDLE = 5.0
+QUIC_INITIAL_CRYPTO_MAX = 64 * 1024
+QUIC_TCP_FALLBACK_REPEAT = 3
+QUIC_TCP_FALLBACK_FLOW_IDLE = 10.0
 GEO_EXIT_RUNTIME_DEGRADE_AFTER = 3
 GEPH_RESTART_FAILURE_THRESHOLD = 3
 GEPH_RESTART_MIN_HOSTS = 2
@@ -2069,6 +2080,9 @@ PENDING_NAVIGATION_RELAY_START_SKEW_MS = 5_000
 PENDING_NAVIGATION_PROBE_TTL = 30.0
 PENDING_NAVIGATION_PROBE_STATE_MAX = 32
 PENDING_NAVIGATION_PROBE_OUTCOME_PENDING = "navigation_pending"
+PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE = "navigation_complete"
+PENDING_NAVIGATION_PROBE_OUTCOME_FAILED = "navigation_failed"
+PENDING_NAVIGATION_PROBE_MAX_BYTES = 512 * 1024
 TRANSPORT_IDLE_EVIDENCE_REJECTED = "rejected"
 TRANSPORT_IDLE_EVIDENCE_ADVANCE = "advance"
 TRANSPORT_IDLE_EVIDENCE_CONFIRMING = "confirming"
@@ -2087,7 +2101,7 @@ SERVER_FIRST_CLOSE_MAX_DURATION = 10.0
 SERVER_FIRST_CLOSE_STATE_MAX = 4096
 DIRECT_FIRST_LOCAL_FALLBACK_TTL = 60.0
 TRANSPORT_INCOMPLETE_PROBE_COOLDOWN = 2 * 60.0
-TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = 512 * 1024
+TRANSPORT_INCOMPLETE_PROBE_MAX_BYTES = PENDING_NAVIGATION_PROBE_MAX_BYTES
 TRANSPORT_INCOMPLETE_CONFIRM_MAX = 4
 TRANSPORT_INCOMPLETE_AMBIGUOUS_MAX_DURATION = 30.0
 TRANSPORT_INCOMPLETE_CLIENT_FIRST_MIN_BYTES = 8 * 1024
@@ -5964,6 +5978,236 @@ def _local_payload_min_bytes(spec=None):
     return max(1, min(value, 64 * 1024))
 
 
+def _quic_varint(data, offset):
+    if offset >= len(data):
+        raise ValueError("truncated QUIC varint")
+    width = 1 << (data[offset] >> 6)
+    end = offset + width
+    if end > len(data):
+        raise ValueError("truncated QUIC varint")
+    value = data[offset] & 0x3F
+    for byte in data[offset + 1:end]:
+        value = (value << 8) | byte
+    return value, end
+
+
+def _quic_hkdf_expand(secret, label, length):
+    full_label = b"tls13 " + label
+    info = struct.pack("!H", length) + bytes([len(full_label)]) + full_label + b"\x00"
+    output = bytearray()
+    previous = b""
+    counter = 1
+    while len(output) < length:
+        previous = hmac.new(
+            secret,
+            previous + info + bytes([counter]),
+            hashlib.sha256,
+        ).digest()
+        output.extend(previous)
+        counter += 1
+    return bytes(output[:length])
+
+
+def _quic_v1_client_keys(dcid):
+    initial_secret = hmac.new(
+        QUIC_V1_INITIAL_SALT,
+        dcid,
+        hashlib.sha256,
+    ).digest()
+    client_secret = _quic_hkdf_expand(initial_secret, b"client in", 32)
+    return (
+        _quic_hkdf_expand(client_secret, b"quic key", 16),
+        _quic_hkdf_expand(client_secret, b"quic iv", 12),
+        _quic_hkdf_expand(client_secret, b"quic hp", 16),
+    )
+
+
+def _quic_v1_initial_metadata(packet):
+    if len(packet) < 7 or packet[0] & 0xC0 != 0xC0:
+        return None
+    version = struct.unpack_from("!I", packet, 1)[0]
+    if version != QUIC_V1 or packet[0] & 0x30:
+        return None
+    offset = 5
+    dcid_length = packet[offset]
+    offset += 1
+    if dcid_length > 20 or offset + dcid_length + 1 > len(packet):
+        return None
+    dcid = bytes(packet[offset:offset + dcid_length])
+    offset += dcid_length
+    scid_length = packet[offset]
+    offset += 1
+    if scid_length > 20 or offset + scid_length > len(packet):
+        return None
+    scid = bytes(packet[offset:offset + scid_length])
+    offset += scid_length
+    try:
+        token_length, offset = _quic_varint(packet, offset)
+        offset += token_length
+        payload_length, packet_number_offset = _quic_varint(packet, offset)
+    except ValueError:
+        return None
+    packet_end = packet_number_offset + payload_length
+    if (
+        not dcid
+        or packet_end > len(packet)
+        or packet_number_offset + 4 + 16 > packet_end
+    ):
+        return None
+    return {
+        "version": version,
+        "dcid": dcid,
+        "scid": scid,
+        "packet_number_offset": packet_number_offset,
+        "packet_end": packet_end,
+    }
+
+
+def _quic_v1_initial_plaintext(packet):
+    metadata = _quic_v1_initial_metadata(packet)
+    if metadata is None:
+        return None
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        key, iv, hp = _quic_v1_client_keys(metadata["dcid"])
+        packet_number_offset = metadata["packet_number_offset"]
+        sample = packet[packet_number_offset + 4:packet_number_offset + 20]
+        encryptor = Cipher(algorithms.AES(hp), modes.ECB()).encryptor()
+        mask = encryptor.update(sample) + encryptor.finalize()
+        first = packet[0] ^ (mask[0] & 0x0F)
+        packet_number_length = (first & 0x03) + 1
+        if packet_number_offset + packet_number_length > metadata["packet_end"]:
+            return None
+        packet_number_bytes = bytes(
+            packet[packet_number_offset + index] ^ mask[index + 1]
+            for index in range(packet_number_length)
+        )
+        packet_number = int.from_bytes(packet_number_bytes, "big")
+        header = bytearray(packet[:packet_number_offset + packet_number_length])
+        header[0] = first
+        header[packet_number_offset:] = packet_number_bytes
+        nonce = bytes(
+            left ^ right
+            for left, right in zip(iv, packet_number.to_bytes(len(iv), "big"))
+        )
+        ciphertext = packet[
+            packet_number_offset + packet_number_length:metadata["packet_end"]
+        ]
+        plaintext = AESGCM(key).decrypt(nonce, ciphertext, bytes(header))
+    except Exception:
+        return None
+    return metadata, plaintext
+
+
+def _quic_initial_crypto_fragments(packet):
+    decrypted = _quic_v1_initial_plaintext(packet)
+    if decrypted is None:
+        return None
+    metadata, plaintext = decrypted
+    fragments = []
+    offset = 0
+    try:
+        while offset < len(plaintext):
+            frame_type, offset = _quic_varint(plaintext, offset)
+            if frame_type == 0x00:  # PADDING
+                continue
+            if frame_type == 0x01:  # PING
+                continue
+            if frame_type == 0x06:  # CRYPTO
+                crypto_offset, offset = _quic_varint(plaintext, offset)
+                crypto_length, offset = _quic_varint(plaintext, offset)
+                end = offset + crypto_length
+                if end > len(plaintext) or end > QUIC_INITIAL_CRYPTO_MAX:
+                    return None
+                fragments.append((crypto_offset, bytes(plaintext[offset:end])))
+                offset = end
+                continue
+            if frame_type in (0x02, 0x03):  # ACK / ACK_ECN
+                _largest, offset = _quic_varint(plaintext, offset)
+                _delay, offset = _quic_varint(plaintext, offset)
+                range_count, offset = _quic_varint(plaintext, offset)
+                _first_range, offset = _quic_varint(plaintext, offset)
+                for _ in range(range_count):
+                    _gap, offset = _quic_varint(plaintext, offset)
+                    _range, offset = _quic_varint(plaintext, offset)
+                if frame_type == 0x03:
+                    for _ in range(3):
+                        _ecn, offset = _quic_varint(plaintext, offset)
+                continue
+            break
+    except (ValueError, OverflowError):
+        return None
+    return metadata, tuple(fragments)
+
+
+def _prune_quic_initial_flows(flows, now):
+    cutoff = now - QUIC_INITIAL_FLOW_IDLE
+    for key, state in tuple(flows.items()):
+        if state["updated_at"] >= cutoff:
+            break
+        flows.pop(key, None)
+    while len(flows) > QUIC_INITIAL_FLOW_MAX:
+        flows.popitem(last=False)
+
+
+def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
+    now = time.monotonic() if now is None else now
+    _prune_quic_initial_flows(flows, now)
+    parsed = _quic_initial_crypto_fragments(packet)
+    if parsed is None:
+        return None
+    metadata, fragments = parsed
+    key = (*flow_key, metadata["dcid"])
+    state = flows.get(key)
+    if state is None:
+        state = {"fragments": {}, "updated_at": now}
+        flows[key] = state
+    state["updated_at"] = now
+    flows.move_to_end(key)
+    stored = state["fragments"]
+    for crypto_offset, fragment in fragments:
+        if crypto_offset + len(fragment) > QUIC_INITIAL_CRYPTO_MAX:
+            flows.pop(key, None)
+            return None
+        previous = stored.get(crypto_offset)
+        if previous is not None and previous != fragment:
+            flows.pop(key, None)
+            return None
+        stored[crypto_offset] = fragment
+    assembled = bytearray()
+    expected = 0
+    for crypto_offset, fragment in sorted(stored.items()):
+        if crypto_offset != expected:
+            break
+        assembled.extend(fragment)
+        expected += len(fragment)
+    host = normalize_host(parse_sni(bytes(assembled)) or "")
+    if host:
+        flows.pop(key, None)
+        return host
+    return None
+
+
+def _quic_geo_exit_tcp_fallback(host):
+    return bool(host and route_policy(host)["route_class"] == ROUTE_GEO_EXIT)
+
+
+def _quic_version_negotiation_response(initial):
+    metadata = _quic_v1_initial_metadata(initial)
+    if metadata is None:
+        return None
+    return (
+        b"\x80\x00\x00\x00\x00"
+        + bytes([len(metadata["scid"])])
+        + metadata["scid"]
+        + bytes([len(metadata["dcid"])])
+        + metadata["dcid"]
+        + QUIC_UNSUPPORTED_VERSION
+    )
+
+
 def _quic_version_negotiation_probe_packet(dcid=None, scid=None):
     dcid = os.urandom(8) if dcid is None else dcid
     scid = os.urandom(8) if scid is None else scid
@@ -8843,6 +9087,16 @@ def _syn_bpf(localip):
     return f"tcp and host {localip} and port 443 and (tcp[13] & 2 != 0)"
 
 
+def _quic_initial_bpf(localip):
+    # QUIC Initial packets have the long-header and fixed bits set. Capture only
+    # outbound UDP/443 handshakes; established HTTP/3 payload never reaches the
+    # Python callback.
+    return (
+        f"udp and src host {localip} and dst port 443 "
+        "and (udp[8] & 0xc0 = 0xc0)"
+    )
+
+
 def reduce_geph_probe_state(previous_up, strikes, probe_ok, port, conflict=False):
     """Apply hysteresis without inventing readiness on a cold start."""
     if probe_ok and port is not None:
@@ -8858,23 +9112,24 @@ def reduce_geph_probe_state(previous_up, strikes, probe_ok, port, conflict=False
 
 
 def network_monitor(port, voice=True):
-    """Long-running guard thread. (1) Keeps the voice sniffer bound to the CURRENT
-    default interface so voice survives Wi-Fi/Ethernet/sleep changes. (2) Re-applies
-    pf if it ever gets flushed (sleep/wake or another tool). Voice itself: Discord
-    RTP is UDP to *.discord.media:50000-65535, with some setup paths observed on
-    19294-19344, bypassing the TCP pf-rdr. We BPF-observe it and raw-inject
-    low-TTL decoy STUN primes on the 5-tuple, leaving the real flow untouched."""
+    """Keep PF and the current-interface packet observer healthy.
+
+    The observer records TCP sequence numbers, moves only reviewed geo-exit QUIC
+    Initial flows to the existing TCP route, and optionally primes Discord voice
+    UDP without changing the real flow.
+    """
     global _pf_applied, _geph_up, _pf_interceptor_conflicts
     AsyncSniffer = send = IP = UDP = TCP = Raw = get_if_addr = None
-    if voice:
-        try:
-            from scapy.all import (AsyncSniffer, send, IP, UDP, TCP, Raw,
-                                   get_if_addr, conf)
-            conf.verb = 0
-        except Exception as e:
-            print(f">> voice disabled (scapy: {e})", file=sys.stderr)
+    try:
+        from scapy.all import (AsyncSniffer, send, IP, UDP, TCP, Raw,
+                               get_if_addr, conf)
+        conf.verb = 0
+    except Exception as e:
+        print(f">> packet observer disabled (scapy: {e})", file=sys.stderr)
     fake = _fake_stun()
     flows = OrderedDict()
+    quic_initial_flows = OrderedDict()
+    quic_fallback_flows = OrderedDict()
     sniffer = None
     cur_iface = None
 
@@ -8891,6 +9146,44 @@ def network_monitor(port, voice=True):
         if not (p.haslayer(IP) and p.haslayer(UDP)):
             return
         ip, udp = p[IP], p[UDP]
+        if udp.dport == 443:
+            flow_key = (ip.src, udp.sport, ip.dst, udp.dport)
+            host = _observe_quic_initial_sni(
+                quic_initial_flows,
+                flow_key,
+                bytes(udp.payload),
+            )
+            if not _quic_geo_exit_tcp_fallback(host):
+                return
+            now = time.monotonic()
+            cutoff = now - QUIC_TCP_FALLBACK_FLOW_IDLE
+            for key, observed_at in tuple(quic_fallback_flows.items()):
+                if observed_at >= cutoff:
+                    break
+                quic_fallback_flows.pop(key, None)
+            if flow_key in quic_fallback_flows:
+                return
+            while len(quic_fallback_flows) >= QUIC_INITIAL_FLOW_MAX:
+                quic_fallback_flows.popitem(last=False)
+            response = _quic_version_negotiation_response(bytes(udp.payload))
+            if response is None:
+                return
+            quic_fallback_flows[flow_key] = now
+            packet = (
+                IP(src=ip.dst, dst=ip.src)
+                / UDP(sport=443, dport=udp.sport)
+                / Raw(response)
+            )
+            for _ in range(QUIC_TCP_FALLBACK_REPEAT):
+                _l3send(packet)
+            print(
+                ">> geo-exit QUIC flow moved to TCP fallback",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+        if not voice:
+            return
         if not should_prime_voice_payload(udp.dport, bytes(udp.payload)):
             return
         key = (ip.src, udp.sport, ip.dst, udp.dport)
@@ -9073,22 +9366,37 @@ def network_monitor(port, voice=True):
                     sniffer = None
                 try:
                     localip = get_if_addr(iface)
-                    bpf = f"({_voice_bpf(localip)}) or ({_syn_bpf(localip)})"
+                    filters = [_quic_initial_bpf(localip), _syn_bpf(localip)]
+                    if voice:
+                        filters.insert(0, _voice_bpf(localip))
+                    bpf = " or ".join(f"({item})" for item in filters)
                     sniffer = AsyncSniffer(iface=iface, filter=bpf,
                                            prn=on_pkt, store=0)
                     sniffer.start()
                     cur_iface = iface
-                    print(f">> voice plane: priming UDP {_voice_port_ranges_label()} "
-                          f"+ SYN-seq capture on {iface}")
+                    voice_label = (
+                        f"voice UDP {_voice_port_ranges_label()} + "
+                        if voice
+                        else ""
+                    )
+                    print(
+                        ">> packet observer: "
+                        f"{voice_label}geo-exit QUIC Initial + SYN-seq on {iface}"
+                    )
                 except Exception as e:
-                    print(f">> voice sniffer unavailable on {iface}: {e}", file=sys.stderr)
+                    print(
+                        f">> packet observer unavailable on {iface}: {e}",
+                        file=sys.stderr,
+                    )
                     cur_iface = None
         runtime_state = (
             "conflict" if conflicts
             else "dormant" if vpn or not backend_ready or not _pf_applied
             else "active"
         )
-        write_status(runtime_state, iface, cur_iface)
+        # The third argument is retained as the legacy voice-observer field;
+        # QUIC/TCP observation is deliberately not exposed as voice activity.
+        write_status(runtime_state, iface, cur_iface if voice else None)
         if first_tick:
             if runtime_state == "active":
                 start_canaries_if_due("startup", force=True)
@@ -9945,6 +10253,10 @@ def _pending_navigation_probe_worker_claimed(job, launch_id, now=None):
         capability = _pending_navigation_probe_capabilities.get(token)
         if (
             capability is None
+            or not _pending_navigation_activity_eligible_locked(
+                capability.activity,
+                now,
+            )
             or job.get("host") != capability.host
             or job.get("request_started_at_unix_ms")
             != capability.request_started_at_unix_ms
@@ -10094,12 +10406,24 @@ def _pending_navigation_activity_eligible_locked(activity, now):
         and not activity.retry_closed
         and activity.pending_navigation_started_at_unix_ms > 0
         and now - activity.last_downstream_at >= UNKNOWN_PRE_RESPONSE_IDLE
-        and 0 < activity.downstream_bytes < AUTO_GEPH_FAIL_BYTES
+        and 0
+        < activity.downstream_bytes
+        <= PENDING_NAVIGATION_PROBE_MAX_BYTES
         and activity.track_tls_records
         and activity.tls_framing_valid
         and activity.tls_complete_records > 0
         and not _incomplete_tls_record_visible(activity)
     )
+
+
+def _pending_navigation_probe_static_class(activity):
+    shape = (
+        "bounded_payload"
+        if activity.downstream_bytes >= AUTO_GEPH_FAIL_BYTES
+        else "handshake_only"
+    )
+    stage = activity.pending_navigation_stage
+    return f"{shape}:{stage}" if _valid_auto_geph_stage(stage) else shape
 
 
 def _issue_pending_navigation_probe(
@@ -10194,8 +10518,12 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
         return False
     runtime = _get_pending_navigation_probe_runtime()
     capability = job["capability"]
+    prioritize = activity.downstream_bytes >= AUTO_GEPH_FAIL_BYTES
     try:
-        enqueued = runtime.enqueue(job)
+        enqueued = runtime.enqueue(
+            job,
+            prioritize=prioritize,
+        )
     except Exception:
         _revoke_pending_navigation_probe_capability(
             activity,
@@ -10208,6 +10536,14 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
             guard_possible_worker=False,
         )
         return False
+    if prioritize:
+        runtime.prioritize(capability)
+    print(
+        ">> pending-navigation probe queued: "
+        f"{_pending_navigation_probe_static_class(activity)}",
+        file=sys.stderr,
+        flush=True,
+    )
     try:
         worker = _get_pending_navigation_probe_worker()
         notified = worker.notify_job_ready()
@@ -10333,33 +10669,74 @@ def _submit_pending_navigation_probe_result(
     ):
         return False
     observed_at = payload.get("observed_at_unix_ms")
-    if (
-        payload.get("host") != capability.host
-        or type(payload.get("request_started_at_unix_ms")) is not int
-        or payload["request_started_at_unix_ms"]
+    outcome = payload.get("outcome")
+    binding_rejection = None
+    if payload.get("host") != capability.host:
+        binding_rejection = "host"
+    elif type(payload.get("request_started_at_unix_ms")) is not int:
+        binding_rejection = "request_started_type"
+    elif (
+        payload["request_started_at_unix_ms"]
         != capability.request_started_at_unix_ms
-        or payload.get("outcome")
-        != PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
-        or type(observed_at) is not int
-        or now
-        < capability.issued_at_monotonic + UNKNOWN_PRE_RESPONSE_IDLE
-        or observed_at
-        < capability.issued_at_unix_ms + int(UNKNOWN_PRE_RESPONSE_IDLE * 1000)
-        or observed_at > capability.expires_at_unix_ms
-        or capability.activity.pending_navigation_host != capability.host
-        or capability.activity.pending_navigation_started_at_unix_ms
-        != capability.request_started_at_unix_ms
-        or capability.activity.pending_navigation_stage != capability.stage
     ):
-        return _reject_pending_navigation_probe_result("binding_invalid")
-    accepted = _request_pending_navigation_retry_for_activity(
-        capability.activity,
-        now=now,
+        binding_rejection = "request_started"
+    elif outcome not in {
+        PENDING_NAVIGATION_PROBE_OUTCOME_PENDING,
+        PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE,
+        PENDING_NAVIGATION_PROBE_OUTCOME_FAILED,
+    }:
+        binding_rejection = "outcome"
+    elif type(observed_at) is not int:
+        binding_rejection = "observed_at_type"
+    elif observed_at < capability.issued_at_unix_ms:
+        binding_rejection = "worker_observation_before_issue"
+    elif (
+        outcome == PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
+        and now < capability.issued_at_monotonic + UNKNOWN_PRE_RESPONSE_IDLE
+    ):
+        binding_rejection = "daemon_observation_early"
+    elif (
+        outcome == PENDING_NAVIGATION_PROBE_OUTCOME_PENDING
+        and observed_at < capability.issued_at_unix_ms + int(
+            UNKNOWN_PRE_RESPONSE_IDLE * 1000
+        )
+    ):
+        binding_rejection = "worker_observation_early"
+    elif observed_at > capability.expires_at_unix_ms:
+        binding_rejection = "worker_observation_expired"
+    elif capability.activity.pending_navigation_host != capability.host:
+        binding_rejection = "activity_host"
+    elif (
+        capability.activity.pending_navigation_started_at_unix_ms
+        != capability.request_started_at_unix_ms
+    ):
+        binding_rejection = "activity_request_started"
+    elif capability.activity.pending_navigation_stage != capability.stage:
+        binding_rejection = "activity_stage"
+    if binding_rejection is not None:
+        return _reject_pending_navigation_probe_result(
+            f"binding_invalid:{binding_rejection}"
+        )
+    same_route = outcome == PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE
+    accepted = (
+        _request_transport_idle_retry(capability.activity)
+        if same_route
+        else _request_pending_navigation_retry_for_activity(
+            capability.activity,
+            now=now,
+        )
     )
     if not accepted:
         return _reject_pending_navigation_probe_result(
             "relay_retry_unavailable"
         )
+    print(
+        ">> pending-navigation probe accepted: "
+        f"{_pending_navigation_probe_static_class(capability.activity)}:"
+        f"{'same_route' if same_route else 'advance'}",
+        file=sys.stderr,
+        flush=True,
+    )
     with _auto_geph_lock:
         _pending_navigation_probe_host_guards[capability.host] = math.inf
         _pending_navigation_probe_host_guards.move_to_end(capability.host)
@@ -11006,6 +11383,35 @@ async def _close_stream_writer(writer):
         pass
 
 
+async def _abort_stream_writer(writer):
+    """Reset one confirmed-stalled client stream so a GET can be retried."""
+    get_extra_info = getattr(writer, "get_extra_info", None)
+    if callable(get_extra_info):
+        try:
+            sock = get_extra_info("socket")
+            if sock is not None:
+                sock.setsockopt(
+                    socket.SOL_SOCKET,
+                    socket.SO_LINGER,
+                    struct.pack("ii", 1, 0),
+                )
+        except (AttributeError, OSError, TypeError, struct.error):
+            pass
+    transport = getattr(writer, "transport", None)
+    abort = getattr(transport, "abort", None)
+    if callable(abort):
+        try:
+            abort()
+        except (OSError, RuntimeError):
+            pass
+    else:
+        try:
+            writer.close()
+        except Exception:
+            pass
+    await asyncio.sleep(0)
+
+
 async def _half_close_stream_writer(writer):
     """Propagate an orderly read EOF without discarding the peer response."""
     can_write_eof = getattr(writer, "can_write_eof", None)
@@ -11200,6 +11606,12 @@ async def relay_local_stream(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if retry_task is not None and retry_task in done:
+            # A graceful FIN after response headers can leave Chrome forever in
+            # readyState=loading without an automatic retry. This path is
+            # reachable only after the owner-only worker proved the exact live
+            # relay pending for eight seconds and the daemon accepted the
+            # correlated route effect, so reset only that client stream.
+            await _abort_stream_writer(writer)
             pending = {task for task in tasks if not task.done()}
         if watchdog_task is not None and watchdog_task in done:
             pending = {task for task in tasks if not task.done()}

@@ -25,9 +25,14 @@ const CAPABILITY_HEX_CHARS: usize = 32;
 const WORKER_LAUNCH_ID_HEX_CHARS: usize = 16;
 const WORKER_LAUNCH_ID_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_LAUNCH_ID";
 const CAPABILITY_TTL_MS: u64 = 30_000;
-const MAX_CLAIM_AGE_MS: u64 = 5_000;
+const MAX_CLAIM_AGE_MS: u64 = 14_000;
 const MIN_PENDING_OBSERVATION: Duration = Duration::from_secs(8);
 const MIN_START_BUDGET_MS: u64 = 16_000;
+const WORKER_START_ATTESTATION_GRACE: Duration = Duration::from_millis(200);
+const WORKER_EMPTY_QUEUE_GRACE: Duration = Duration::from_secs(15);
+const WORKER_RUNTIME_BUDGET: Duration = Duration::from_secs(100);
+const MIN_NEXT_JOB_BUDGET: Duration = Duration::from_secs(26);
+const EMPTY_QUEUE_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const CHROME_LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CHROME_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -38,7 +43,8 @@ const MAX_WEBSOCKET_BYTES: usize = 1024 * 1024;
 const WEBSOCKET_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
 const WEBSOCKET_ACCEPT: &str = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
 const OUTCOME_PENDING: &str = "navigation_pending";
-const OUTCOME_TERMINAL: &str = "navigation_terminal";
+const OUTCOME_COMPLETE: &str = "navigation_complete";
+const OUTCOME_FAILED: &str = "navigation_failed";
 
 #[derive(Debug, Clone, Copy)]
 struct ProbeError(&'static str);
@@ -126,7 +132,42 @@ struct ChromeSession {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NavigationObservation {
     Pending,
-    Terminal,
+    Complete,
+    Failed,
+}
+
+fn failed_navigation_observation(request_elapsed: Option<Duration>) -> NavigationObservation {
+    if request_elapsed.is_some_and(|elapsed| elapsed >= MIN_PENDING_OBSERVATION) {
+        NavigationObservation::Pending
+    } else {
+        NavigationObservation::Failed
+    }
+}
+
+fn document_event_observation(
+    method: &str,
+    event_request_id: Option<&str>,
+    expected_request_id: &str,
+    request_elapsed: Duration,
+) -> Option<NavigationObservation> {
+    if event_request_id != Some(expected_request_id) {
+        return None;
+    }
+    match method {
+        // Headers alone do not prove that the document body completed. A
+        // blocked route can deliver them and then leave the body unfinished.
+        "Network.loadingFinished" => Some(NavigationObservation::Complete),
+        "Network.loadingFailed" => Some(failed_navigation_observation(Some(request_elapsed))),
+        _ => None,
+    }
+}
+
+fn observation_outcome(observation: NavigationObservation) -> &'static str {
+    match observation {
+        NavigationObservation::Pending => OUTCOME_PENDING,
+        NavigationObservation::Complete => OUTCOME_COMPLETE,
+        NavigationObservation::Failed => OUTCOME_FAILED,
+    }
 }
 
 pub fn run_browser_probe_if_requested() -> Option<i32> {
@@ -134,7 +175,7 @@ pub fn run_browser_probe_if_requested() -> Option<i32> {
     if !is_browser_probe_invocation(&arguments) {
         return None;
     }
-    Some(match run_one_probe() {
+    Some(match run_probe_worker() {
         Ok(()) => 0,
         Err(failure) => {
             eprintln!("slipstream browser probe failed: {failure}");
@@ -147,7 +188,7 @@ fn is_browser_probe_invocation(arguments: &[OsString]) -> bool {
     arguments.len() == 2 && arguments[1] == OsStr::new(BROWSER_PROBE_ARGUMENT)
 }
 
-fn run_one_probe() -> ProbeResult<()> {
+fn run_probe_worker() -> ProbeResult<()> {
     let termination_requested = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(
         signal_hook::consts::SIGTERM,
@@ -157,35 +198,70 @@ fn run_one_probe() -> ProbeResult<()> {
     let uid = current_uid()?;
     let socket_path = configured_socket_path();
     let launch_id = configured_launch_id()?;
-    let job = match claim_job(&socket_path, uid, &launch_id)? {
-        Some(job) => job,
-        None => return Ok(()),
-    };
+    // Keep the exact worker process observable long enough for the root
+    // launcher to attest its final Aqua UID and command even when the first
+    // queued capability has already become too old to start safely.
+    std::thread::sleep(WORKER_START_ATTESTATION_GRACE);
+    let worker_started = Instant::now();
+    let mut empty_since = None;
+    loop {
+        require_not_terminated(&termination_requested)?;
+        if worker_started.elapsed() + MIN_NEXT_JOB_BUDGET >= WORKER_RUNTIME_BUDGET {
+            return Ok(());
+        }
+        let Some(job) = claim_job(&socket_path, uid, &launch_id)? else {
+            let idle_started = empty_since.get_or_insert_with(Instant::now);
+            if idle_started.elapsed() >= WORKER_EMPTY_QUEUE_GRACE {
+                return Ok(());
+            }
+            std::thread::sleep(EMPTY_QUEUE_POLL_INTERVAL);
+            continue;
+        };
+        empty_since = None;
+        let accepted_result =
+            run_claimed_probe(&socket_path, uid, &launch_id, job, &termination_requested)?;
+        // A stale claim is skipped so the same Aqua process can claim a fresh
+        // job. Every accepted observation ends this launch after exact Chrome
+        // cleanup; the daemon's launch-completion callback then releases the
+        // exact-host guard before the unchanged-URL retry reaches its route.
+        if disposable_ci() || accepted_result {
+            return Ok(());
+        }
+    }
+}
+
+fn run_claimed_probe(
+    socket_path: &Path,
+    uid: u32,
+    launch_id: &str,
+    job: ProbeJob,
+    termination_requested: &AtomicBool,
+) -> ProbeResult<bool> {
     let now = unix_now_ms()?;
-    if job.expires_at_unix_ms.saturating_sub(now) < MIN_START_BUDGET_MS {
-        return Err(error("job_budget_exhausted"));
+    if !job_has_start_budget(&job, now) {
+        // The broker lease keeps this stale job from being reclaimed while the
+        // same process drains fresher work. It expires naturally and is not a
+        // worker-launch failure.
+        return Ok(false);
     }
 
     let config = ChromeConfig::discover(&job, uid)?;
     let mut chrome = ChromeSession::launch(uid, config)?;
-    let observation = match chrome.observe_navigation(&termination_requested) {
+    let observation = match chrome.observe_navigation(termination_requested) {
         Ok(observation) => observation,
         Err(failure) => {
             chrome.cleanup()?;
             return Err(failure);
         }
     };
-    let outcome = match observation {
-        NavigationObservation::Pending => OUTCOME_PENDING,
-        NavigationObservation::Terminal => OUTCOME_TERMINAL,
-    };
+    let outcome = observation_outcome(observation);
     let response = submit_before_cleanup(
         || {
             let observed_at_unix_ms = unix_now_ms()?;
             submit_result(
-                &socket_path,
+                socket_path,
                 uid,
-                &launch_id,
+                launch_id,
                 &ProbeResultPayload {
                     schema_version: SCHEMA_VERSION,
                     capability: &job.capability,
@@ -198,16 +274,30 @@ fn run_one_probe() -> ProbeResult<()> {
         },
         || chrome.cleanup(),
     )?;
+    submission_ends_launch(observation, &response)
+}
+
+fn job_has_start_budget(job: &ProbeJob, now_unix_ms: u64) -> bool {
+    job.expires_at_unix_ms.saturating_sub(now_unix_ms) >= MIN_START_BUDGET_MS
+}
+
+fn submission_ends_launch(
+    observation: NavigationObservation,
+    response: &IpcResponse,
+) -> ProbeResult<bool> {
     match observation {
         NavigationObservation::Pending if response.accepted && response.reason == "accepted" => {
-            Ok(())
+            Ok(true)
         }
-        NavigationObservation::Terminal
-            if !response.accepted && response.reason == "result_rejected" =>
-        {
-            Ok(())
+        NavigationObservation::Pending => Err(error("submit_rejected")),
+        NavigationObservation::Complete if response.accepted && response.reason == "accepted" => {
+            Ok(true)
         }
-        _ => Err(error("submit_rejected")),
+        NavigationObservation::Complete => Err(error("submit_rejected")),
+        NavigationObservation::Failed if response.accepted && response.reason == "accepted" => {
+            Ok(true)
+        }
+        NavigationObservation::Failed => Err(error("submit_rejected")),
     }
 }
 
@@ -775,6 +865,7 @@ impl ChromeSession {
             &json!({"id": 1, "method": "Network.enable"}),
         )?;
         websocket_send_json(&mut websocket, &json!({"id": 2, "method": "Page.enable"}))?;
+        let navigation_started = Instant::now();
         websocket_send_json(
             &mut websocket,
             &json!({
@@ -816,7 +907,9 @@ impl ChromeSession {
                     &mut websocket,
                     &json!({"id": 99, "method": "Browser.close"}),
                 );
-                return Ok(NavigationObservation::Terminal);
+                return Ok(failed_navigation_observation(Some(
+                    Instant::now().duration_since(request_started.unwrap_or(navigation_started)),
+                )));
             }
             let Some(method) = event.get("method").and_then(Value::as_str) else {
                 if request_started.is_some_and(|started: Instant| {
@@ -840,7 +933,7 @@ impl ChromeSession {
                         &mut websocket,
                         &json!({"id": 99, "method": "Browser.close"}),
                     );
-                    return Ok(NavigationObservation::Terminal);
+                    return Ok(NavigationObservation::Failed);
                 }
                 if let Some(observed_id) =
                     event.pointer("/params/requestId").and_then(Value::as_str)
@@ -851,18 +944,19 @@ impl ChromeSession {
             }
             if let Some(expected) = request_id.as_deref() {
                 let event_request_id = event.pointer("/params/requestId").and_then(Value::as_str);
-                if matches!(
+                if let Some(observation) = document_event_observation(
                     method,
-                    "Network.responseReceived"
-                        | "Network.loadingFailed"
-                        | "Network.loadingFinished"
-                ) && event_request_id == Some(expected)
-                {
+                    event_request_id,
+                    expected,
+                    request_started
+                        .map(|started| Instant::now().duration_since(started))
+                        .unwrap_or_default(),
+                ) {
                     let _ = websocket_send_json(
                         &mut websocket,
                         &json!({"id": 99, "method": "Browser.close"}),
                     );
-                    return Ok(NavigationObservation::Terminal);
+                    return Ok(observation);
                 }
             }
             if request_started.is_some_and(|started| {
@@ -1616,6 +1710,99 @@ mod tests {
         assert_eq!(
             require_not_terminated(&requested).unwrap_err().0,
             "worker_terminated"
+        );
+    }
+
+    #[test]
+    fn one_aqua_worker_has_bounded_burst_and_idle_budgets() {
+        assert_eq!(WORKER_EMPTY_QUEUE_GRACE, Duration::from_secs(15));
+        assert_eq!(WORKER_RUNTIME_BUDGET, Duration::from_secs(100));
+        assert_eq!(MIN_NEXT_JOB_BUDGET, Duration::from_secs(26));
+        assert_eq!(EMPTY_QUEUE_POLL_INTERVAL, Duration::from_millis(250));
+        assert_eq!(MAX_CLAIM_AGE_MS, 14_000);
+        assert_eq!(WORKER_START_ATTESTATION_GRACE, Duration::from_millis(200));
+        assert!(MIN_NEXT_JOB_BUDGET < WORKER_RUNTIME_BUDGET);
+        assert!(WORKER_EMPTY_QUEUE_GRACE < MIN_NEXT_JOB_BUDGET);
+    }
+
+    #[test]
+    fn stale_claim_is_skipped_without_starting_chrome() {
+        let now = 1_000_000;
+        let mut claimed = job(now);
+        claimed.expires_at_unix_ms = now + MIN_START_BUDGET_MS - 1;
+        assert!(!job_has_start_budget(&claimed, now));
+        claimed.expires_at_unix_ms = now + MIN_START_BUDGET_MS;
+        assert!(job_has_start_budget(&claimed, now));
+    }
+
+    #[test]
+    fn every_accepted_result_ends_launch_after_cleanup() {
+        let accepted = IpcResponse {
+            schema_version: SCHEMA_VERSION,
+            accepted: true,
+            operation: "submit".to_string(),
+            reason: "accepted".to_string(),
+            job: None,
+        };
+        assert!(submission_ends_launch(NavigationObservation::Pending, &accepted).unwrap());
+        assert!(submission_ends_launch(NavigationObservation::Complete, &accepted).unwrap());
+
+        assert!(submission_ends_launch(NavigationObservation::Failed, &accepted).unwrap());
+    }
+
+    #[test]
+    fn late_document_failure_confirms_pending_navigation() {
+        assert_eq!(
+            failed_navigation_observation(Some(MIN_PENDING_OBSERVATION)),
+            NavigationObservation::Pending
+        );
+        assert_eq!(
+            document_event_observation(
+                "Network.loadingFailed",
+                Some("document-1"),
+                "document-1",
+                MIN_PENDING_OBSERVATION,
+            ),
+            Some(NavigationObservation::Pending)
+        );
+    }
+
+    #[test]
+    fn response_headers_are_not_completion_but_finish_and_fast_failure_are_terminal() {
+        assert_eq!(
+            failed_navigation_observation(Some(MIN_PENDING_OBSERVATION - Duration::from_millis(1))),
+            NavigationObservation::Failed
+        );
+        assert_eq!(
+            failed_navigation_observation(None),
+            NavigationObservation::Failed
+        );
+        assert_eq!(
+            document_event_observation(
+                "Network.responseReceived",
+                Some("document-1"),
+                "document-1",
+                MIN_PENDING_OBSERVATION,
+            ),
+            None
+        );
+        assert_eq!(
+            document_event_observation(
+                "Network.loadingFinished",
+                Some("document-1"),
+                "document-1",
+                MIN_PENDING_OBSERVATION,
+            ),
+            Some(NavigationObservation::Complete)
+        );
+        assert_eq!(
+            document_event_observation(
+                "Network.loadingFailed",
+                Some("other-document"),
+                "document-1",
+                MIN_PENDING_OBSERVATION,
+            ),
+            None
         );
     }
 
