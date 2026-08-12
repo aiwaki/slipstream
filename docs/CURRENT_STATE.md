@@ -59,6 +59,34 @@ unchanged. Local verification passes 1,198 tests plus 54 subtests, the focused
 `git diff --check`. Codebase graph discovery was retried and returned
 `Transport closed`, so inspection used the documented narrow source fallback.
 
+PR #335 merged the qualification-only sequencing correction as exact main
+`fcbcedaa4e812e5080a00ce3d7f4bb8e89c6aff5`; its tree matches reviewed head
+`c785c812d88801e5c02fde31c855f81e4d241c0f`. Codex Review found no major issue,
+all six PR checks passed, and exact-main CI `31587057669`, audit `31587057685`,
+and native Windows run `31587057755` passed.
+
+Protected run `31587594114` then passed the complete exact-artifact gate. The
+extensionless automatic path observed roots `original -> worker -> original`:
+the worker began at 17,087 ms, Chrome retried the unchanged original URL at
+28,899 ms, and styled completion took 25,713 ms with one CSS, JavaScript,
+image, and ready callback. Extensions were disabled, no manual reload occurred,
+and exact worker cleanup passed. Regional-denial, incomplete-response, and
+pending-navigation extension scenarios independently completed one reload and
+all mandatory resources; pending-navigation emitted exactly one v3 signal.
+Owned Geph returned a complete 67,973-byte Steam HTTP 200 payload initially,
+trayless, and after KeepAlive replacement. The external listener was preserved,
+the root daemon ended absent and disabled, system network state was not mutated,
+and the final workflow residue checks passed.
+
+Artifact `9137909918` is named
+`Slipstream-owned-geph-qualified-fcbcedaa4e812e5080a00ce3d7f4bb8e89c6aff5`;
+its GitHub container digest is
+`sha256:9348c6a2d36e718edc4bc905bbb94b622b7c547d7605decebee6136ede7d00df`.
+The contained `Slipstream-owned-geph-qualified.zip` has SHA-256
+`1fbd3ff7da2143396cc45292217c5692c18783910c4897308d9e4f767103a9ab`;
+the recorded checksum and `unzip -t` both pass. This artifact has not been
+installed on the workstation.
+
 PR #332 is the merged product correction. Its first documentation head passed
 all six required checks, including packaged job `94019999739`. A later
 documentation-only head exposed a real timing race in packaged job
@@ -1784,17 +1812,15 @@ and dependency audit in
 
 ## Next Verified Action
 
-Review and merge PR #335 only after all six
-PR checks pass. Then require fresh exact-main CI, audit, and native Windows
-gates and dispatch one new protected owned-Geph workflow for that live main
-SHA. The protected result must contain `original -> worker -> original`, one
-complete CSS, JavaScript, image, and ready callback, exact worker cleanup,
-continued account-backed owned-Geph payload, complete product/user cleanup, and
-unchanged external DNS/proxy/PAC/VPN/PF ownership. Discord, YouTube, and
-Googlevideo remain local-only. No existing, branch, or merely protected
-artifact is installation authority. A successful protected run creates later
-workstation-transaction authority for only its exact artifact; it does not
-itself authorize or perform a workstation change.
+Merge the documentation successor that records PR #335 and protected run
+`31587594114` only after all six checks and exact-head review pass. The complete
+automatic local-browser implementation and protected exact-artifact gate are
+then qualified. Do not repeat the protected run or install its artifact during
+this documentation transaction. Any later workstation transaction must use
+only artifact `9137909918`, preserve external DNS/proxy/PAC/VPN/PF owners,
+retain Discord, YouTube, and Googlevideo on local bypass, and roll back on the
+first failed required smoke. Continue the next independent product milestone
+from live `main` only after this evidence checkpoint merges.
 
 Safari may advance through deterministic source, Swift contract tests, and
 unsigned packaging, but the signed app-extension sandbox/socket path must be
