@@ -10,14 +10,28 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-12: the macOS blocker is reproduced, corrected, and proven in a
-real installed-tray transaction. Exact main remains
-`684ba0767b407a87e8a449f0999b799cee410c4d`; the product correction and its
-bilingual user-facing README refresh are in PR #338 on
-`codex/macos-probe-binding-diagnostics`. They have no merge, exact-main,
-protected-artifact, installation, or release authority yet.
+Update 2026-08-12: PR #338 merged the corrected macOS geo-exit/QUIC path and
+bilingual README refresh as exact main
+`6f3309c82d514b529216bcfa2735f1ef11e0f2cb`. All eight final PR checks passed.
+Exact-main CI `31622844180`, native Windows `31622844165`, and dependency audit
+`31622844157` passed; the audit needed one same-SHA retry after the scanner host
+closed the first download without a response. Protected owned-Geph run
+`31623465736` then passed the installed account-backed browser recovery and
+cleanup gate. Its exact artifact `9152313333` has GitHub digest
+`sha256:a4ac2330e75ca651678ffb80b3536bbc2c110c1ad495f2f4e5303455f9fd616a`.
 
-PR CI run `31619433057` on product commit `7ddd2ba` passed every unit, Rust,
+Manual release run `31623938691` stopped before building or publishing because
+the minimal release build environment runs `unittest discover` without pytest,
+while the newly added `test_composed_pending_navigation_smoke.py` imported
+pytest and exposed only pytest functions. Branch
+`codex/release-metadata-unittest` converts that module to eight standard-library
+`unittest.TestCase` methods. The exact release command now executes 296 tests in
+the minimal build venv, and pytest also executes the eight methods plus three
+subtests. Next: merge this small release-gate correction after required checks,
+repeat exact-main and protected gates on the new SHA, publish the 0.1.9 preview,
+then install and verify only the downloaded release artifact on this Mac.
+
+The first PR CI run `31619433057` on product commit `7ddd2ba` passed every unit, Rust,
 lint, and project-state step before its script-mode installed lifecycle sentinel
 failed closed at the first wake cycle. The new packet observer made Scapy import
 mandatory even with voice disabled; the harness could observe the already
@@ -25,8 +39,8 @@ published active status and suspend the daemon before the monitor thread set its
 cadence anchor, so the eight-second gap was lost after resume. The correction
 captures the monitor start time before publishing active and passes that exact
 timestamp into the thread. No wake timeout or test bound is relaxed; focused
-tests now cover the pre-thread suspension boundary. PR checks must restart on
-the final head.
+tests cover the pre-thread suspension boundary and later final-head checks
+passed it.
 
 The first Codex review on PR #338 found two actionable boundaries. A completed independent
 navigation previously reset the exact client stream without rechecking whether
@@ -47,8 +61,9 @@ runs before the synthetic target-URL filter, so the later destination finish
 cannot be mislabeled same-route completion. QUIC CRYPTO state also now accounts
 the sum of every uniquely retained fragment, including overlapping offsets,
 and drops the exact flow before the aggregate can exceed 64 KiB. Regressions for
-both cases pass locally; the corrected final head still requires fresh review
-and all required PR checks.
+both cases pass locally; final head
+`6c1abacde32f3b9c43c52bc4db90a8507c8d2a3d` passed all eight required checks
+and merged in PR #338.
 
 Transactions `AD279B68-AE05-46D1-8BF2-E4919D7727D1`,
 `76910DF2-B1D4-4DF6-AC4A-89D185ABEB50`, and
@@ -83,16 +98,14 @@ live. One earlier sample was discarded after startup baseline intentionally
 paused PF on transient `probe_process_unavailable`; a normal network rearm
 restored active state before the successful proof.
 
-Full local verification passes `1,210` Python tests plus `54` subtests, `102`
+Full local verification passes `1,208` Python tests plus `57` subtests, `102`
 Rust tray tests, `35` Rust core contract tests, Python compilation, Rust format,
 both affected Clippy targets with warnings denied, project-state validation, and
 `git diff --check`. The focused QUIC set includes public-Initial decryption,
 fragmented CRYPTO/SNI reassembly, aggregate retained-byte rejection, tamper
-rejection, exact policy scope, and Version Negotiation CID reversal. Next:
-obtain fresh review and all required PR checks on the final correction head,
-then merge and require exact-main CI/audit/native Windows plus protected
-qualification. Install only that exact artifact and repeat the real tray plus
-ordinary-Chrome smoke before release.
+rejection, exact policy scope, and Version Negotiation CID reversal. The merged
+tree passed exact-main and protected qualification; the current open gate is the
+release-metadata test-runner correction recorded at the top of this checkpoint.
 
 macOS is the active priority. PR #337 merged the hidden ordinary-Chrome worker
 as exact main `684ba0767b407a87e8a449f0999b799cee410c4d` after all six PR

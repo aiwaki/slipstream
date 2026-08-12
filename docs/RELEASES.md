@@ -91,6 +91,11 @@ locked build.
 
 ## Publication
 
+- `build-app` runs release metadata tests inside the hash-locked minimal build
+  environment with `python -m unittest discover`. Every `scripts/test_*.py`
+  module must therefore import and execute using the standard library plus
+  `requirements-build.txt`; pytest-only fixtures, decorators, or imports make
+  the release gate invalid even when the broader CI environment has pytest.
 - A manual `build-app` run creates a uniquely numbered preview only from
   `main`; dispatches from tags or other branches stop before building.
 - The current workflow is preview-only. A pushed `v*` tag stops before checkout
