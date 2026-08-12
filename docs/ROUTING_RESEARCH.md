@@ -506,16 +506,18 @@ requires the production broker to be owned by the console user with mode
 `0600`, the worker runtime to be empty, worker processes and profiles to be
 absent, and daemon CPU growth to remain at most one second.
 
-PR #330 implementation head `fc47bef2fb4e2dee9f9cf754113b52620ffd1b86`
-passed all six checks. On the fixture clock, packaged job `93998266928`
-observed the worker root at 15,758 ms and the automatic original retry at
-27,994 ms, followed by exactly one CSS, JavaScript, image, and ready callback;
-the separately measured captured Chrome transaction completed in 23,963 ms
-without an extension or manual reload and left no worker residue. The prior
-three-second idle sample had zero worker processes/profiles,
-an empty worker runtime, a mode-`0600` broker, and 160 ms daemon CPU growth.
-The lifecycle preserved its sentinel connection and PF state, left global PF
-unchanged, and uninstalled cleanly.
+PR #330 merged as exact live main
+`9b500a40af3f8ddbc8dff7301b88aca82a7b3484`. Exact-main packaged job
+`94001999674` observed the worker root at 16,637 ms and the automatic original
+retry at 28,933 ms on the fixture clock, followed by exactly one CSS,
+JavaScript, image, and ready callback; the separately measured captured Chrome
+transaction completed in 25,003 ms without an extension or manual reload and
+left no worker residue. The prior three-second idle sample had zero worker
+processes/profiles, an empty worker runtime, a mode-`0600` broker, and 490 ms
+daemon CPU growth. The lifecycle preserved its sentinel connection and PF
+state, left global PF unchanged, and uninstalled cleanly. Exact-main common,
+Chromium, Windows adapter, dependency, Geph-vendor, AMD64 Wintun, and ARM64
+Wintun jobs also passed.
 
 The failed attempts exposed a real packaging defect rather than a browser or
 relay failure: the daemon's default worker path assumed
@@ -525,9 +527,66 @@ only the sibling `Contents/MacOS/slipstream`, rejects an absent, symlinked,
 non-executable, or group/world-writable worker, XML-escapes the path, and pins
 it into the root-owned LaunchDaemon environment. Normal routing remains usable
 if that optional worker later disappears; the private log records only the
-bounded worker failure class. Local verification passes 1,180 Python tests
-plus 54 subtests. The final docs/cleanup head and separate active-worker
-uninstall case remain open.
+bounded worker failure class.
+
+Branch `codex/qualify-active-worker-uninstall` adds the remaining installed
+ownership transaction. A fresh exact fixture keeps the original Chrome request
+and correlated worker request pending. Before uninstall the gate requires one
+matching live Aqua LaunchAgent PID, packaged worker process, private Chrome
+profile, and owner-private runtime directory. The first packaged attempt proved
+that a hosted console user's live profile is not reliably rooted in `/tmp`.
+The corrected gate derives the one exact random `--user-data-dir` only from a
+matching non-root Chrome process, requires its owner and mode `0700`, saves that
+path before uninstall, and requires it to disappear afterward. It then invokes the normal
+installed uninstall and requires the LaunchDaemon, broker, installed payload,
+worker LaunchAgent/process/profile/runtime, and the fixture-owned original
+Chrome capture all to be absent or stopped. Sentinel connection/state and the
+global PF snapshot remain mandatory invariants. This adds no production code
+path or normal idle work. Local verification passes 1,185 Python tests plus 54
+subtests; the real packaged active-worker transaction remains open.
+
+The next packaged attempt reached the exact active worker and invoked the
+normal installed uninstaller, which failed closed before removing the owned
+worker. The separate uninstaller inherited the three disposable markers but
+not the daemon's complete fixture override set, while stale cleanup correctly
+required an exact plist environment. The correction preserves exact matching
+in production. Only under all three exact disposable markers may stale cleanup
+accept persisted additional values, and then only for the frozen worker
+allowlist with the original nonempty, 1024-byte, and NUL constraints. This is
+needed to remove the already-owned CI LaunchAgent; it cannot admit a new key,
+expand production cleanup ownership, or affect routing.
+
+The following packaged attempt confirmed that the separate CLI uninstaller
+also lacks the LaunchDaemon-only worker executable pin. Cleanup now recovers
+that exact string only from the still-present root-owned, nonsymlinked,
+mode-`0644`, size-bounded LaunchDaemon plist after validating its label,
+installed daemon command and port, installed working directory, and canonical
+`Contents/MacOS/slipstream` shape. It still validates the active worker's exact
+UID, command, random label, plist, and owner-private files before signalling
+the LaunchAgent. An absent, mutable, malformed, or mismatched LaunchDaemon
+remains a fail-closed uninstall instead of broad process cleanup.
+
+That correction let the next packaged transaction remove every installed and
+LaunchAgent/runtime artifact, but the gate still found the exact saved Chrome
+profile. The worker's Rust cleanup was never reached because launchd's
+`SIGTERM` used the default process termination before `ChromeSession::cleanup`.
+The hidden worker now converts only `SIGTERM` into a flag, checks it after each
+bounded 250 ms DevTools read, and then runs the same exact-profile process
+validation, TERM/KILL sequence, settled-absence check, and private profile
+deletion already used on normal completion. Stale cleanup waits no more than
+eight seconds for the validated worker PID to exit, requires its private stderr
+to contain only the bounded `worker_terminated` class, and only then performs
+`bootout`; failure does not authorize a broader Chrome scan or cleanup.
+
+PR-head packaged job `94013960155` on
+`ef1d465a97e176f208179336c8e6249cdedbc3fd` passed this boundary. Before
+uninstall it proved exactly one worker process, exact live profile, private
+runtime directory, and loaded matching LaunchAgent with root channels
+`original -> worker`. The normal installed uninstaller then left worker cleanup
+and the original Chrome capture clean, installed state absent, the lifecycle
+sentinel connection/state preserved, global PF unchanged, and final uninstall
+clean. The same run retained the normal idle boundary: zero worker processes or
+profiles, a mode-`0600` broker, and 590 ms daemon CPU during three seconds.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

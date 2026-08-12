@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import subprocess
 import tempfile
 
 import pytest
@@ -125,3 +126,74 @@ def test_worker_diagnostics_is_bounded_to_owned_metadata(
             "worker.stdout.log",
         ),
     },)
+
+
+def test_active_worker_requires_one_matching_loaded_launchagent(
+    monkeypatch,
+) -> None:
+    uid = os.getuid()
+    label = "dev.slipstream.browser-probe.0123456789abcdef"
+    diagnostic = {
+        "processes": (4242,),
+        "profiles": ("slipstream-browser-probe-" + "a" * 32,),
+        "runtime": ({
+            "name": label,
+            "owner": uid,
+            "mode": "0700",
+            "entries": (
+                "worker.plist",
+                "worker.stderr.log",
+                "worker.stdout.log",
+            ),
+        },),
+    }
+    monkeypatch.setattr(smoke.os, "environ", _ci_environment())
+    profile = Path("/var/folders/test/slipstream-browser-probe-" + "a" * 32)
+    monkeypatch.setattr(smoke, "worker_diagnostics", lambda _uid: diagnostic)
+    monkeypatch.setattr(
+        smoke,
+        "_active_worker_chrome_profiles",
+        lambda _uid: (profile,),
+    )
+    monkeypatch.setattr(
+        smoke.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            "pid = 4242\n",
+            "",
+        ),
+    )
+
+    assert smoke.assert_worker_active(uid, timeout=0.1) == (
+        {
+            "worker_processes": 1,
+            "worker_profiles": 1,
+            "worker_runtime_directories": 1,
+            "launchagent": "loaded",
+        },
+        (profile,),
+    )
+
+    diagnostic["processes"] = (4243,)
+    with pytest.raises(smoke.ComposedQualificationError, match="not provably active"):
+        smoke.assert_worker_active(uid, timeout=0.01)
+
+
+def test_live_worker_profile_comes_from_exact_owned_chrome_argument(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    profile = tmp_path / ("slipstream-browser-probe-" + "b" * 32)
+    profile.mkdir(mode=0o700)
+    completed = subprocess.CompletedProcess(
+        (),
+        0,
+        f"{os.getuid()} /tmp/Chrome --user-data-dir={profile} --headless\n"
+        f"{os.getuid()} /tmp/Chrome --user-data-dir=/tmp/unowned --headless\n",
+        "",
+    )
+    monkeypatch.setattr(smoke.subprocess, "run", lambda *_args, **_kwargs: completed)
+
+    assert smoke._active_worker_chrome_profiles(os.getuid()) == (profile,)

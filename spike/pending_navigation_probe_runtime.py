@@ -53,6 +53,8 @@ PENDING_NAVIGATION_BROWSER_WORKER_RUNTIME = (
     "/var/run/slipstream-browser-probe-workers"
 )
 PENDING_NAVIGATION_BROWSER_WORKER_TIMEOUT_SECONDS = 27.0
+_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS = 8.0
+_BROWSER_WORKER_TERMINATION_ERROR = "worker_terminated"
 PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX = (
     "dev.slipstream.browser-probe"
 )
@@ -66,6 +68,11 @@ _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT = frozenset((
     "SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES",
     "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS",
 ))
+_DISPOSABLE_CI_MARKERS = {
+    "CI": "true",
+    "GITHUB_ACTIONS": "true",
+    "SLIPSTREAM_DISPOSABLE_CI": "1",
+}
 _BROWSER_WORKER_ERROR_RE = re.compile(
     r"\Aslipstream browser probe failed: ([a-z0-9_]{1,64})\n?\Z"
 )
@@ -102,11 +109,7 @@ def browser_worker_disposable_environment(environment=None):
             source = dict(source)
         except (TypeError, ValueError):
             return {}
-    if not (
-        source.get("CI") == "true"
-        and source.get("GITHUB_ACTIONS") == "true"
-        and source.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
-    ):
+    if any(source.get(name) != value for name, value in _DISPOSABLE_CI_MARKERS.items()):
         return {}
     return {
         name: source[name]
@@ -1217,6 +1220,26 @@ class PendingNavigationBrowserWorkerLauncher:
             raise PendingNavigationProbeRuntimeError(
                 "browser_worker_runtime_unowned"
             )
+        persisted_disposable_environment = (
+            self._disposable_environment == _DISPOSABLE_CI_MARKERS
+            and all(
+                environment.get(name) == value
+                for name, value in expected_environment.items()
+            )
+            and set(environment).difference({
+                "HOME",
+                "LOGNAME",
+                "PATH",
+                "USER",
+            }).issubset(_BROWSER_WORKER_DISPOSABLE_ENVIRONMENT)
+            and all(
+                isinstance(value, str)
+                and value
+                and len(value) <= 1024
+                and "\x00" not in value
+                for value in environment.values()
+            )
+        )
         if (
             set(payload) != {
                 "AbandonProcessGroup",
@@ -1242,7 +1265,10 @@ class PendingNavigationBrowserWorkerLauncher:
             or payload.get("WorkingDirectory") != identity.home
             or payload.get("StandardOutPath") != str(paths.stdout)
             or payload.get("StandardErrorPath") != str(paths.stderr)
-            or environment != expected_environment
+            or (
+                environment != expected_environment
+                and not persisted_disposable_environment
+            )
         ):
             raise PendingNavigationProbeRuntimeError(
                 "browser_worker_runtime_unowned"
@@ -1384,8 +1410,9 @@ class PendingNavigationBrowserWorkerLauncher:
             "browser_worker_start_timeout"
         )
 
-    def _wait_for_exit(self, target, pid, identity):
-        deadline = self._monotonic_clock() + self._timeout
+    def _wait_for_exit(self, target, pid, identity, *, timeout=None):
+        wait_seconds = self._timeout if timeout is None else float(timeout)
+        deadline = self._monotonic_clock() + wait_seconds
         while self._monotonic_clock() < deadline:
             state = self._print(target)
             if _launchd_job_absent(state):
@@ -1448,6 +1475,23 @@ class PendingNavigationBrowserWorkerLauncher:
                     "SIGTERM",
                     target,
                 ))
+                # The packaged worker catches SIGTERM and removes only its
+                # already-validated Chrome process tree and private profile.
+                # Keep the job loaded until that bounded cleanup has exited;
+                # bootout first would bypass the worker's owned cleanup.
+                self._wait_for_exit(
+                    target,
+                    pid,
+                    identity,
+                    timeout=_BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
+                )
+                if self._read_worker_error(
+                    paths.stderr,
+                    identity,
+                ) != _BROWSER_WORKER_TERMINATION_ERROR:
+                    raise PendingNavigationProbeRuntimeError(
+                        "browser_worker_cleanup_failed"
+                    )
         self._run(("/bin/launchctl", "bootout", target))
         try:
             self._wait_absent(target)
@@ -1585,9 +1629,13 @@ class PendingNavigationBrowserWorkerLauncher:
         return True
 
 
-def cleanup_stale_browser_worker_runtime(*, remove_root=False):
+def cleanup_stale_browser_worker_runtime(*, remove_root=False, executable=None):
+    launcher_options = {}
+    if executable is not None:
+        launcher_options["executable"] = executable
     return PendingNavigationBrowserWorkerLauncher(
         disposable_environment=browser_worker_disposable_environment(),
+        **launcher_options,
     ).cleanup_stale(
         remove_root=remove_root,
     )
