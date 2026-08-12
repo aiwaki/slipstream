@@ -29,6 +29,17 @@ timestamp into the thread. No wake timeout or test bound is relaxed; focused
 tests now cover the pre-thread suspension boundary. PR checks must restart on
 the final head.
 
+Codex review on PR #338 found two actionable boundaries. A completed independent
+navigation previously reset the exact client stream without rechecking whether
+the original relay had resumed receiving bytes; the same-route path now repeats
+the full live/idle/TLS eligibility check under the existing lock immediately
+before signaling reset. The QUIC callback also now requires private PF applied,
+startup baseline ready, and verified owned Geph on `:9954` before Version
+Negotiation; a VPN, competing filter, dormant backend, or unowned listener stays
+untouched. Focused regression covers a recovered relay plus inactive/unowned
+geo-exit routing. Both review threads must be resolved only after the final head
+passes checks.
+
 Transactions `AD279B68-AE05-46D1-8BF2-E4919D7727D1`,
 `76910DF2-B1D4-4DF6-AC4A-89D185ABEB50`, and
 `AC4ADF6E-A636-4980-A307-9CF0C9512A70` all rolled back. They proved,
@@ -61,7 +72,7 @@ live. One earlier sample was discarded after startup baseline intentionally
 paused PF on transient `probe_process_unavailable`; a normal network rearm
 restored active state before the successful proof.
 
-Full local verification passes `1,207` Python tests plus `54` subtests, `101`
+Full local verification passes `1,208` Python tests plus `54` subtests, `101`
 Rust tray tests, `35` Rust core contract tests, Python compilation, Rust format,
 both affected Clippy targets with warnings denied, project-state validation, and
 `git diff --check`. The focused QUIC set includes public-Initial decryption,

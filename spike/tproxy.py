@@ -6191,7 +6191,16 @@ def _observe_quic_initial_sni(flows, flow_key, packet, now=None):
 
 
 def _quic_geo_exit_tcp_fallback(host):
-    return bool(host and route_policy(host)["route_class"] == ROUTE_GEO_EXIT)
+    return bool(
+        host
+        and _pf_applied
+        and transparent_routing_ready()
+        and GEPH_ENABLED
+        and _geph_up
+        and _geph_owned
+        and _geph_port == GEPH_OWNED_PORT
+        and route_policy(host)["route_class"] == ROUTE_GEO_EXIT
+    )
 
 
 def _quic_version_negotiation_response(initial):
@@ -10610,6 +10619,15 @@ def _request_pending_navigation_retry_for_activity(activity, *, now=None):
     return evidence == TRANSPORT_IDLE_EVIDENCE_CONFIRMING
 
 
+def _request_same_route_pending_navigation_retry(activity, *, now=None):
+    """Reset only an exact relay that is still idle when its probe completes."""
+    now = time.monotonic() if now is None else now
+    with _auto_geph_lock:
+        if not _pending_navigation_activity_eligible_locked(activity, now):
+            return False
+        return _request_transport_idle_retry(activity)
+
+
 def _submit_pending_navigation_probe_result(
     payload,
     launch_id=None,
@@ -10722,7 +10740,10 @@ def _submit_pending_navigation_probe_result(
         )
     same_route = outcome == PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE
     accepted = (
-        _request_transport_idle_retry(capability.activity)
+        _request_same_route_pending_navigation_retry(
+            capability.activity,
+            now=now,
+        )
         if same_route
         else _request_pending_navigation_retry_for_activity(
             capability.activity,

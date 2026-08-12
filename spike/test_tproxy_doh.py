@@ -5820,12 +5820,27 @@ def test_quic_initial_sni_reassembles_publicly_decryptable_crypto_frames():
     assert tproxy._quic_initial_crypto_fragments(bytes(tampered)) is None
 
 
-def test_quic_tcp_fallback_is_exactly_geo_exit_policy_scoped():
+def test_quic_tcp_fallback_is_exactly_active_owned_geo_exit_policy_scoped(
+    monkeypatch,
+):
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "transparent_routing_ready", lambda: True)
+    monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
+    monkeypatch.setattr(tproxy, "_geph_up", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", True)
+    monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
+
     assert tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
     assert tproxy._quic_geo_exit_tcp_fallback("chatgpt.com")
     assert not tproxy._quic_geo_exit_tcp_fallback("updates.discord.com")
     assert not tproxy._quic_geo_exit_tcp_fallback("www.youtube.com")
     assert not tproxy._quic_geo_exit_tcp_fallback("unknown.example")
+
+    monkeypatch.setattr(tproxy, "_pf_applied", False)
+    assert not tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_geph_owned", False)
+    assert not tproxy._quic_geo_exit_tcp_fallback("www.xpersonatoy.com")
 
 
 def test_quic_version_negotiation_fallback_swaps_connection_ids():
@@ -13196,6 +13211,35 @@ def test_completed_independent_navigation_retries_only_the_stuck_exact_relay():
         _PROBE_LAUNCH_ONE,
         now=101.001,
     )
+
+
+def test_completed_navigation_does_not_reset_a_recovered_exact_relay():
+    activity = _eligible_pending_navigation_activity()
+    assert tproxy._register_pending_navigation_relay(
+        activity,
+        "unknown.example",
+        "1.1.1.1",
+        tproxy.ROUTE_UNKNOWN,
+        tproxy.AUTO_GEPH_STAGE_SYSTEM,
+    )
+    job = tproxy._issue_pending_navigation_probe(
+        activity,
+        now=100.0,
+        now_unix_ms=1_010_000,
+        token_factory=lambda: "e" * 32,
+    )
+    assert job is not None
+    activity.last_downstream_at = 100.5
+
+    assert not tproxy._submit_pending_navigation_probe_result(
+        _pending_navigation_probe_result(
+            job,
+            observed_at_unix_ms=1_011_000,
+            outcome=tproxy.PENDING_NAVIGATION_PROBE_OUTCOME_COMPLETE,
+        ),
+        now=101.0,
+    )
+    assert not activity.downstream_idle_retry
 
 
 def test_failed_independent_navigation_advances_the_bound_stuck_relay():
