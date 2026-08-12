@@ -68,11 +68,11 @@ hard-link witness detects removal or replacement of the installed path without
 letting the tray read daemon bytes. Frozen installs remain root-only mode
 `0700`; the console-user baseline uses fixed macOS resolver and HTTPS tools
 instead of executing the installed PyInstaller daemon. The packaged disposable
-gate must prove both
-successful commit and injected post-verification rollback to a daemon-free
-baseline. After merge, exact-main CI/audit and the protected account-backed
-Geph/Chromium gate must pass on the new exact artifact before one short
-user-present workstation smoke with immediate rollback on the first failure.
+gate must prove both successful commit and injected post-verification rollback
+to a daemon-free baseline. Exact-main CI/audit and the protected account-backed
+Geph/Chromium gate now pass for artifact `9137909918`; it is the sole candidate
+for one later short user-present workstation smoke with immediate rollback on
+the first failure.
 
 ## M1 - Autonomous Routing V1
 
@@ -115,10 +115,11 @@ LaunchAgent `KeepAlive` PID replacement while preserving an unrelated `:9909`
 listener. Semantic signals v1, v2, and v3 now require browser-owned evidence,
 independent exact-host confirmation, and one bounded reload without replaying
 the failed transparent request. Live main
-`8fe21229994e0ddc643762d0ece2203bc79313cc` passed exact-main CI, audit,
-Windows, and protected owned-Geph qualification. Protected artifact
-`9110154812` passed all three semantic scenarios, styled resources, owned-Geph
-lifecycle, packaging, signing, and cleanup checks.
+`fcbcedaa4e812e5080a00ce3d7f4bb8e89c6aff5` passed exact-main CI, audit,
+Windows, and protected owned-Geph qualification. Protected run `31587594114`
+and artifact `9137909918` passed the extensionless automatic
+`original -> worker -> original` path, all three extension semantic scenarios,
+styled resources, owned-Geph lifecycle, packaging, signing, and cleanup.
 
 Controlled workstation transaction
 `271C43D9-4906-4AF3-88E8-C2EF146A33ED` then exposed the remaining Chromium
@@ -126,13 +127,16 @@ distribution boundary: the exact native-host manifest was registered, but a
 fresh isolated branded-Chrome profile did not contain the unpublished
 extension, so the first semantic smoke stayed pending and emitted no daemon
 event. Exact rollback restored application hashes and every network/runtime
-invariant. The in-repository deterministic Web Store ZIP, provenance,
-privacy disclosure, and listing inputs are now the next M1 delivery gate.
-Publisher upload, review, publication, and proof that the exact extension is
-installed and enabled in a clean branded-Chrome profile remain external gates.
-No further workstation install is authorized until that proof and a newly
-qualified exact-main artifact both exist. A physical default-route/lid-close
-transition on a disposable Mac remains a separate M1 gate.
+invariant. PRs #324-#335 superseded that distribution dependency with a local,
+lazy, packaged browser worker that requires no extension, Developer Mode,
+publisher account, or browser setup and automatically completes the original
+navigation. The deterministic Web Store package and disclosures remain valid
+archival deliverables, but publisher upload and clean-profile extension
+enablement are no longer M1 prerequisites. Any later controlled workstation
+transaction must use only exact protected artifact `9137909918`, preserve every
+external owner, and roll back on its first failed required smoke. A physical
+default-route/lid-close transition on a disposable Mac remains a separate M1
+gate.
 
 Gate: routing and Geph recover after tray crash, browser restart, network
 change, and sleep/wake without manual buttons.
