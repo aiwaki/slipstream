@@ -10,6 +10,51 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-13: the macOS release gate is complete. Preview
+[`v0.1.9-preview.22`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.22)
+was published by successful `build-app` run `31630147863` from exact main and
+tag target `d034e99a7b97d5b0bf286f896793bc079fba5f21`. The workflow passed release
+tests, signed-app lifecycle, packaging, SBOM and dependency audit, manifest
+verification, stored provenance/SBOM attestations, publication, and archival
+of the prior preview. The downloaded release assets were verified again off-CI:
+the manifest contract passed, every GitHub SHA-256 matched, `unzip -t` passed
+for the arm64 ZIP, `hdiutil verify` passed for the DMG, and provenance plus SPDX
+attestations for both packages resolved to the exact source SHA and release
+workflow. The arm64 ZIP digest is
+`acaa409e8868e4a36c3b79a07267bbe585e3b03d8e81ad93ea353040172978e8`;
+the DMG digest is
+`593286ab6d7bbee1c34784a2d6ff61c1d1f871dd70a775714f0640a32ff750ba`.
+
+Workstation transaction `71E98AF3-49AC-45BC-94D1-7F4BADE333D1` installed
+that exact downloaded arm64 ZIP as `/Applications/Slipstream.app` and remains
+active rather than rolled back. The installed bundle is version `0.1.9`; its
+tray executable SHA-256 is
+`11e1f51dc8905741a1e8346f19d5f94d1f2d4bf4a22e9707fe5aecf0cc8ed3f1`
+and bundled daemon SHA-256 is
+`535429539625eff97b6c3c5934a29f3c2044b182d07802dc31319e2d1ccf0a2a`.
+The tray process, root LaunchDaemon, TCP listener on `127.0.0.1:1080`, private
+PF rules, and app-owned Geph on `127.0.0.1:9954` are live. A prior controlled
+uninstall had left the launchd label explicitly disabled, so the final
+workstation install used the documented direct `Restart Proxy`/install path to
+honor and then reverse that durable stop intent; this is not a clean-install
+product defect.
+
+The final headed test used ordinary installed Google Chrome 151 with a fresh
+profile and no QUIC-disabling flag. `https://xpersonatoy.com/` returned HTTP
+200, title `Starrtoy is where passion meets creation. – StarrToy`,
+`readyState=complete`, a 1,088,420-byte DOM, and `h2`; the daemon logged the
+scoped `geo-exit QUIC flow moved to TCP fallback`, and owned Geph showed active
+sessions. Installed classification remains `geo_exit/geph` for
+`xpersonatoy.com`, local-only for Discord and YouTube, `direct_first` for
+Googlevideo, and bounded `unknown/general` for an unreviewed host. Nine of ten
+route canaries are healthy. The remaining `direct_passthrough` diagnostic is
+the intentional coexistence state from the separately running user-managed
+`TG WS Proxy` holding `127.0.0.1:1443`; Slipstream does not terminate or steal
+that listener, and its web routes, PF, DNS resolution, and owned Geph remain
+healthy. No release gate is open. Continue from live failures observed with
+this installed release; do not repeat the xpersonatoy/QUIC investigation or
+install a protected artifact over it.
+
 Update 2026-08-12: release run `31626189079` built and signed exact main
 `7ed02cf2cccd56cbc3580a5ba8b53e48f6e6f160`, but two independent attempts
 failed closed before packaging or publication at the same release-only browser
