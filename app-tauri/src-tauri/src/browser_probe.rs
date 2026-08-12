@@ -649,7 +649,9 @@ impl ChromeSession {
 
         let deadline = Instant::now() + CHROME_LAUNCH_TIMEOUT;
         let mut launcher_exited = false;
-        let mut observed_owned_chrome = false;
+        let mut observed_owned_main = false;
+        let mut owned_main_alive = false;
+        let mut devtools_file_failure = None;
         while Instant::now() < deadline {
             // Some Chrome builds let `open -W` return after LaunchServices has
             // delegated the app. Readiness belongs to the exact owned Chrome
@@ -666,33 +668,41 @@ impl ChromeSession {
                 &self.profile,
                 &mut self.rooted_process_groups,
             )?;
-            if processes
+            let owned_main_count = processes
                 .iter()
                 .filter(|process| {
                     process
                         .command
                         .starts_with(&self.config.executable.to_string_lossy().to_string())
                 })
-                .count()
-                > 1
-            {
+                .count();
+            if owned_main_count > 1 {
                 return Err(error("chrome_ownership_ambiguous"));
             }
-            observed_owned_chrome |= !processes.is_empty();
-            if !processes.is_empty()
-                && matches!(read_devtools_port(&self.profile, self.uid), Ok(Some(_)))
-            {
-                return Ok(());
+            owned_main_alive = owned_main_count == 1;
+            observed_owned_main |= owned_main_alive;
+            match read_devtools_port(&self.profile, self.uid) {
+                Ok(Some(_)) if owned_main_alive => return Ok(()),
+                Ok(_) => devtools_file_failure = None,
+                Err(failure) => devtools_file_failure = Some(failure),
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        if launcher_exited && !observed_owned_chrome {
+        if let Some(failure) = devtools_file_failure {
+            Err(failure)
+        } else if launcher_exited && !observed_owned_main {
             Err(error(chrome_launch_failure_class(
                 &launcher_stderr_path,
                 self.uid,
             )))
+        } else if observed_owned_main && !owned_main_alive {
+            Err(error("chrome_main_exited_before_devtools"))
         } else {
-            Err(error(chrome_start_failure_class(&stderr_path, self.uid)))
+            Err(error(chrome_start_failure_class(
+                &stderr_path,
+                self.uid,
+                "chrome_devtools_start_timeout",
+            )))
         }
     }
 
@@ -1046,14 +1056,14 @@ fn classify_chrome_start_diagnostic(diagnostic: &str) -> &'static str {
     }
 }
 
-fn chrome_start_failure_class(path: &Path, uid: u32) -> &'static str {
+fn chrome_start_failure_class(path: &Path, uid: u32, fallback: &'static str) -> &'static str {
     read_private_diagnostic(path, uid)
         .and_then(|payload| {
             std::str::from_utf8(&payload)
                 .ok()
                 .map(classify_chrome_start_diagnostic)
         })
-        .unwrap_or("chrome_launch_timeout")
+        .unwrap_or(fallback)
 }
 
 fn random_hex(bytes: usize) -> ProbeResult<String> {

@@ -181,15 +181,18 @@ to the proven `.77`. The `.138` macOS archive also has no outer bundle
 `CodeResources`; a complete private copy therefore fails strict code-signature
 verification and LaunchServices creates no process. Local reproduction reached
 the same result. Ad-hoc signing was rejected because it no longer proves the
-production identity and its DevTools endpoint died before use. The packaged
-observer gate now omits the browser override and uses the runner's signed
-installed Google Chrome, which exercises the exact production discovery and
-signature boundary. A local run through that path produced one exact hanging
-HTTPS request, one `navigation_pending` result after eight seconds, and complete
-cleanup in 10,797 ms. CDP HTTP reads now stop at one bounded `Content-Length`
-instead of waiting for Chrome to close its persistent response connection.
+production identity and its DevTools endpoint died before use. Run
+`31547878092` then exercised the runner's signed installed Google Chrome: the
+exact profile-owned main process remained live, but silently failed to publish
+DevTools within the fixed ten-second startup budget. The hosted packaged gate
+therefore uses the same proven `.77` as the legacy gate, while a local run on
+signed production Google Chrome 151 provides current-browser compatibility
+evidence: two exact runs each produced one hanging HTTPS request, one
+`navigation_pending` result after eight seconds, and complete cleanup in 10,797
+and 15,785 ms. CDP HTTP reads now stop at one bounded `Content-Length` instead
+of waiting for Chrome to close its persistent response connection.
 
-The next verified action is to pass the packaged installed-Chrome CI gate,
+The next verified action is to pass the packaged pinned-Chrome CI gate,
 resolve review, and merge only after all required checks pass. The slice remains
 closed from the production daemon until that evidence is green. The later
 composed gate must still prove completion of the original

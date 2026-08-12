@@ -302,12 +302,18 @@ a process but the DevTools listener disappeared before the bounded client could
 use it. That workaround would also replace the production signing authority,
 so it is rejected. The official
 [GitHub macOS image manifest](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#browsers)
-already lists installed Google Chrome. The packaged observer gate now omits its
-executable override and lets
-the worker discover and verify that installed browser through the exact
-production bundle/team boundary. This also removes the setup download and
-private bundle-copy cost from the required gate while the pinned legacy job
-continues to qualify the old extension independently.
+already lists installed Google Chrome. Run `31547878092` temporarily omitted
+the executable override and let the worker discover and verify that installed
+browser through the exact production bundle/team boundary. The run
+created the exact profile-owned main process through that boundary, but the
+browser remained silent and did not publish `DevToolsActivePort` within the
+fixed ten-second startup budget. The same path passed twice locally on signed
+Google Chrome 151 in 10,797 and 15,785 ms end to end, including the eight-second
+observation and cleanup. Hosted CI therefore pins the packaged observer to the
+already-proven `.77` Chrome-for-Testing bundle as well; production
+current-Chrome compatibility is evidenced by the exact local signed-browser
+runs rather than by relaxing the hosted startup or accepting an ad-hoc
+signature.
 
 Code discovery for the following correlation slice attempted the repository's
 required knowledge-graph search first, but the MCP transport returned
@@ -423,12 +429,12 @@ browser, revalidates and removes only the exact profile-owned Chrome family and
 LaunchServices waiter, waits for stable absence, and removes the profile before
 submitting either outcome. Production paths are fixed. Executable, socket,
 origin, resolver, and certificate overrides require the complete disposable
-GitHub Actions gate. Extensionless Chrome-for-Testing materialization remains a
-disposable diagnostic path, not qualification authority. The packaged gate
-deliberately omits the executable override so Chrome discovery, signature,
-bundle ID, and Team ID are the production path; only its deterministic local
-HTTPS origin, socket, resolver, and certificate are overridden. That gate
-requires one hanging
+GitHub Actions gate. The packaged hosted gate materializes only the pinned
+complete `.77` Chrome-for-Testing root into its private `.app`; production never
+adapts an extensionless bundle and retains exact installed-Google signature,
+bundle-ID, and Team-ID admission. The deterministic local HTTPS origin, socket,
+resolver, and certificate remain disposable overrides. That gate requires one
+hanging
 main-document request, one
 privacy-bounded pending result, no `--no-sandbox`, no visible window, no profile
 residue, and at most 25 seconds end to end. The remaining product gate is still
