@@ -31,8 +31,8 @@ requests and one CSS, JavaScript, image, and ready callback in 11,068 ms; its
 independent packaged hidden worker emitted `navigation_pending` in 13,170 ms
 with the sandbox retained, no window, and complete cleanup.
 
-Branch `codex/qualify-composed-original-navigation` starts from that exact
-merge and adds the missing disposable installed-package transaction. The
+Draft PR #330 on `codex/qualify-composed-original-navigation` starts from that
+exact merge and adds the missing disposable installed-package transaction. The
 original extension-free Chrome navigation uses the real PF/daemon path to one
 public unknown-host identity. A complete disposable-GitHub-Actions-only
 connector override maps only that exact fixture IP to an owner-local TLS
@@ -43,7 +43,30 @@ which Chrome must automatically repeat the original URL and load one CSS,
 JavaScript, image, and ready resource without a manual reload. The same gate
 samples three idle seconds before the job and requires the owner-only socket,
 zero worker processes/profiles, an empty worker runtime, and no more than one
-second of daemon CPU time. Matching packaged CI evidence is still open.
+second of daemon CPU time.
+
+Implementation head `fc47bef2fb4e2dee9f9cf754113b52620ffd1b86` passed all
+six required checks. CI run `31559340504` passed common job `93998266977`,
+packaged lifecycle `93998266928`, pinned Chromium `93998266899`, and Windows
+adapter `93998266974`; dependency-audit run `31559340496` passed audit job
+`93998266908` and Geph vendor job `93998267082`. The installed packaged gate
+observed roots `original -> worker -> original`: on the fixture clock the
+worker request began at 15,758 ms and Chrome's unchanged-URL retry at
+27,994 ms; the separately measured captured Chrome transaction reached styled
+completion in 23,963 ms, with exactly one CSS, JavaScript, image, and ready
+callback. No extension or reload command was
+present and worker cleanup was exact. The preceding three-second idle sample
+observed zero worker processes/profiles, an empty runtime, mode-`0600` broker,
+and 160 ms of daemon CPU. The transaction preserved its sentinel connection,
+sentinel PF state, and global PF state and finished with clean uninstall.
+
+That gate also exposed and corrected the packaged composition boundary: the
+frozen installer now derives the exact executable in its own
+`Contents/MacOS/slipstream`, rejects an absent, symlinked, non-executable, or
+group/world-writable worker, and pins the XML-escaped absolute path in the
+root-owned LaunchDaemon environment. The normal installed app therefore does
+not depend on an assumed `/Applications` location, while the source-mode
+fallback remains unchanged.
 
 Local branded-Chrome evidence on 2026-08-12 showed the required browser
 handoff without an extension or manual reload: the first exact top-level HTTPS
@@ -54,12 +77,13 @@ release gate. The ordinary pinned-Chromium CI job now contains the same
 extension-free automatic-retry scenario so upstream retry drift will fail the
 branch before merge.
 
-Current local verification passes 1,173 Python tests plus 54 subtests, focused
+Current local verification passes 1,180 Python tests plus 54 subtests, focused
 Python compilation, shell syntax, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
-bounded source inspection used the documented fallback. Active-worker
-uninstall remains the next separate lifecycle gate after this composed
-original-navigation transaction passes.
+bounded source inspection used the documented fallback. The final
+documentation/diagnostic-cleanup head still needs its six required checks,
+review, and merge. Active-worker uninstall remains the next separate lifecycle
+gate after PR #330.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its

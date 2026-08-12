@@ -9387,34 +9387,6 @@ def _incomplete_tls_record_visible(activity):
     )
 
 
-def _trace_disposable_pending_navigation(activity, event, **details):
-    """Emit bounded fixture-only phase evidence to the private daemon log."""
-    source = _PENDING_NAVIGATION_FIXTURE_ENVIRONMENT
-    expected_host = normalize_host(
-        source.get("SLIPSTREAM_PENDING_NAVIGATION_FIXTURE_HOST", "")
-    ) if source else ""
-    if (
-        not expected_host
-        or normalize_host(activity.pending_navigation_host) != expected_host
-    ):
-        return
-    fields = {
-        "event": event,
-        "bytes": activity.downstream_bytes,
-        "records": activity.tls_complete_records,
-        "framing": "valid" if activity.tls_framing_valid else "invalid",
-        **details,
-    }
-    rendered = " ".join(
-        f"{name}={value}" for name, value in sorted(fields.items())
-    )
-    print(
-        f">> pending-navigation fixture probe: {rendered}",
-        file=sys.stderr,
-        flush=True,
-    )
-
-
 def _local_stream_stalled(activity, now=None):
     """Return true when a client gives up after a real downstream silence.
 
@@ -9927,7 +9899,6 @@ def _register_pending_navigation_relay(
     with _auto_geph_lock:
         relays = _active_pending_navigation_relays.setdefault(h, {})
         relays[id(activity)] = activity
-    _trace_disposable_pending_navigation(activity, "registered")
     return True
 
 
@@ -10055,16 +10026,9 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
         or _shutdown_started.is_set()
         or activity.retry_closed
     ):
-        _trace_disposable_pending_navigation(
-            activity,
-            "enqueue-unavailable",
-            available=_pending_navigation_probe_available,
-            closing=activity.retry_closed,
-        )
         return False
     job = _issue_pending_navigation_probe(activity)
     if job is None:
-        _trace_disposable_pending_navigation(activity, "issue-rejected")
         return False
     runtime = _get_pending_navigation_probe_runtime()
     capability = job["capability"]
@@ -10072,11 +10036,9 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
         enqueued = runtime.enqueue(job)
     except Exception:
         _revoke_pending_navigation_probe_capability(activity)
-        _trace_disposable_pending_navigation(activity, "enqueue-error")
         return False
     if not enqueued:
         _revoke_pending_navigation_probe_capability(activity)
-        _trace_disposable_pending_navigation(activity, "enqueue-rejected")
         return False
     try:
         worker = _get_pending_navigation_probe_worker()
@@ -10084,14 +10046,8 @@ def _enqueue_pending_navigation_probe_for_activity(activity):
     except Exception:
         runtime.discard(capability)
         _revoke_pending_navigation_probe_capability(activity)
-        _trace_disposable_pending_navigation(activity, "notify-error")
         return False
     if notified or worker.active():
-        _trace_disposable_pending_navigation(
-            activity,
-            "worker-notified",
-            notified=notified,
-        )
         return True
     runtime.discard(capability)
     _revoke_pending_navigation_probe_capability(activity)
@@ -10949,26 +10905,14 @@ async def _watch_downstream_idle(activity, idle_timeout):
             or not activity.tls_framing_valid
             or activity.tls_complete_records < 1
         ):
-            _trace_disposable_pending_navigation(
-                activity,
-                "idle-ineligible",
-            )
             return
         activity.downstream_idle_observed = True
         callback = activity.on_downstream_idle
         if callback is not None:
             try:
-                accepted = callback()
-                _trace_disposable_pending_navigation(
-                    activity,
-                    "idle-callback",
-                    accepted=accepted is True,
-                )
+                callback()
             except Exception:
-                _trace_disposable_pending_navigation(
-                    activity,
-                    "idle-callback-error",
-                )
+                pass
         return
 
 

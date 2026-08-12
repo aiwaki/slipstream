@@ -504,9 +504,30 @@ JavaScript, image, and ready resource. No extension or reload command exists in
 the scenario. Before the first request, a three-second installed idle sample
 requires the production broker to be owned by the console user with mode
 `0600`, the worker runtime to be empty, worker processes and profiles to be
-absent, and daemon CPU growth to remain at most one second. Local verification
-passes 1,173 Python tests plus 54 subtests; real packaged evidence and the
-separate active-worker uninstall case remain open.
+absent, and daemon CPU growth to remain at most one second.
+
+PR #330 implementation head `fc47bef2fb4e2dee9f9cf754113b52620ffd1b86`
+passed all six checks. On the fixture clock, packaged job `93998266928`
+observed the worker root at 15,758 ms and the automatic original retry at
+27,994 ms, followed by exactly one CSS, JavaScript, image, and ready callback;
+the separately measured captured Chrome transaction completed in 23,963 ms
+without an extension or manual reload and left no worker residue. The prior
+three-second idle sample had zero worker processes/profiles,
+an empty worker runtime, a mode-`0600` broker, and 160 ms daemon CPU growth.
+The lifecycle preserved its sentinel connection and PF state, left global PF
+unchanged, and uninstalled cleanly.
+
+The failed attempts exposed a real packaging defect rather than a browser or
+relay failure: the daemon's default worker path assumed
+`/Applications/Slipstream.app`, while the lifecycle correctly installed the
+frozen daemon from the exact built app bundle. The frozen installer now derives
+only the sibling `Contents/MacOS/slipstream`, rejects an absent, symlinked,
+non-executable, or group/world-writable worker, XML-escapes the path, and pins
+it into the root-owned LaunchDaemon environment. Normal routing remains usable
+if that optional worker later disappears; the private log records only the
+bounded worker failure class. Local verification passes 1,180 Python tests
+plus 54 subtests. The final docs/cleanup head and separate active-worker
+uninstall case remain open.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 
