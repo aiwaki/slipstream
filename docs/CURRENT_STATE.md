@@ -33,7 +33,7 @@ the packaged extensionless automatic worker. That path needs its own
 exact-artifact `original -> worker -> original` scenario before another
 protected qualification or any workstation transaction.
 
-Branch `codex/protected-automatic-browser-gate` implements that missing
+PR #334 implements that missing
 qualification slice without changing production routing. The protected
 harness starts the composed fixture, installs the exact built app, restarts its
 LaunchDaemon with only the frozen disposable-browser override set, and requires
@@ -1770,7 +1770,7 @@ and dependency audit in
 
 ## Next Verified Action
 
-Review and merge `codex/protected-automatic-browser-gate` only after all six PR
+Review and merge PR #334 only after all six PR
 checks pass. Then require fresh exact-main CI, audit, and native Windows gates
 and dispatch the protected owned-Geph workflow exactly once for that live main
 SHA. The protected result must contain `original -> worker -> original`, one
