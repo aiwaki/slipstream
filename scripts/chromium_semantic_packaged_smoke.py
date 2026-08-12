@@ -2653,10 +2653,11 @@ def _assert_daemon_absent_and_disabled() -> None:
 
 def _restart_daemon_for_automatic_navigation(
     system: lifecycle.SystemRunner,
+    target: lifecycle.LifecycleTarget,
     browser_environment: dict[str, str],
+    installed_active: dict[str, object],
 ) -> dict[str, object]:
     composed.require_disposable_ci()
-    active = lifecycle._wait_for_status("active")
     system.run(
         (
             "/bin/launchctl",
@@ -2678,10 +2679,27 @@ def _restart_daemon_for_automatic_navigation(
             str(lifecycle.LAUNCHD_PLIST),
         )
     )
-    return lifecycle._wait_for_status(
+    restarted = lifecycle._wait_for_status(
         "active",
-        previous_pid=int(active["pid"]),
+        previous_pid=int(installed_active["pid"]),
         timeout=60,
+    )
+    lifecycle._assert_owned_daemon_pid(target, int(restarted["pid"]))
+    return restarted
+
+
+def _prepare_automatic_navigation_runtime(
+    system: lifecycle.SystemRunner,
+    target: lifecycle.LifecycleTarget,
+    browser_environment: dict[str, str],
+) -> dict[str, object]:
+    installed_active = lifecycle._wait_for_status("active")
+    lifecycle._assert_installed_payload(target)
+    return _restart_daemon_for_automatic_navigation(
+        system,
+        target,
+        browser_environment,
+        installed_active,
     )
 
 
@@ -2744,11 +2762,11 @@ def run_qualification(
         automatic_fixture.start()
         system.run(target.install_command)
         installed = True
-        _restart_daemon_for_automatic_navigation(
+        _prepare_automatic_navigation_runtime(
             system,
+            target,
             automatic_fixture.qualification_environment(chrome_executable),
         )
-        lifecycle._assert_installed_payload(target)
         lifecycle._assert_anchor_active(runner)
         _wait_for_semantic_socket(uid)
         _wait_for_owned_geph_backend()
