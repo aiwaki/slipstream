@@ -542,8 +542,19 @@ installed uninstall and requires the LaunchDaemon, broker, installed payload,
 worker LaunchAgent/process/profile/runtime, and the fixture-owned original
 Chrome capture all to be absent or stopped. Sentinel connection/state and the
 global PF snapshot remain mandatory invariants. This adds no production code
-path or normal idle work. Local verification passes 1,183 Python tests plus 54
+path or normal idle work. Local verification passes 1,184 Python tests plus 54
 subtests; the real packaged active-worker transaction remains open.
+
+The next packaged attempt reached the exact active worker and invoked the
+normal installed uninstaller, which failed closed before removing the owned
+worker. The separate uninstaller inherited the three disposable markers but
+not the daemon's complete fixture override set, while stale cleanup correctly
+required an exact plist environment. The correction preserves exact matching
+in production. Only under all three exact disposable markers may stale cleanup
+accept persisted additional values, and then only for the frozen worker
+allowlist with the original nonempty, 1024-byte, and NUL constraints. This is
+needed to remove the already-owned CI LaunchAgent; it cannot admit a new key,
+expand production cleanup ownership, or affect routing.
 
 ## Adjacent Routing Projects Audit (2026-08-02)
 

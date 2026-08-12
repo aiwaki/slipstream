@@ -1059,6 +1059,71 @@ def test_console_worker_launcher_stops_one_exact_stale_loaded_job():
         )
 
 
+def test_stale_cleanup_accepts_only_persisted_closed_ci_environment(monkeypatch):
+    with tempfile.TemporaryDirectory(
+        prefix="ss-browser-stale-ci-",
+        dir="/tmp",
+    ) as directory:
+        root = Path(directory)
+        executable = root / "slipstream"
+        executable.write_text("#!/bin/sh\n")
+        executable.chmod(0o755)
+        account = pwd.getpwuid(os.getuid())
+        identity = probe_runtime.ConsoleUserIdentity(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            username=account.pw_name,
+            home=account.pw_dir,
+        )
+        runtime_root = root / "runtime"
+        label = (
+            f"{probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LABEL_PREFIX}."
+            "0123456789abcdef"
+        )
+        markers = {
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "SLIPSTREAM_DISPOSABLE_CI": "1",
+        }
+        full_environment = {
+            **markers,
+            "SLIPSTREAM_BROWSER_PROBE_CHROME": "/tmp/Chrome",
+            "SLIPSTREAM_BROWSER_PROBE_ORIGIN": "https://fixture.invalid/",
+        }
+        for name, value in markers.items():
+            monkeypatch.setenv(name, value)
+
+        def completed(command, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+
+        def runner(command):
+            if command[:2] == ("/bin/launchctl", "print"):
+                return completed(command, 113, stderr="Could not find service")
+            if command[:2] == ("/bin/launchctl", "bootout"):
+                return completed(command, 113)
+            raise AssertionError(command)
+
+        writer = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=runtime_root,
+            identity_probe=lambda: identity,
+            command_runner=runner,
+            disposable_environment=full_environment,
+        )
+        writer._prepare_launch(identity, label)
+        cleaner = probe_runtime.PendingNavigationBrowserWorkerLauncher(
+            executable=executable,
+            runtime_root=runtime_root,
+            identity_probe=lambda: identity,
+            command_runner=runner,
+            sleep=lambda _seconds: None,
+            disposable_environment=markers,
+        )
+
+        assert cleaner.cleanup_stale(remove_root=True)
+        assert not runtime_root.exists()
+
+
 def test_stale_worker_identity_rejects_root_and_invalid_home(monkeypatch):
     identity_for_uid = (
         probe_runtime.PendingNavigationBrowserWorkerLauncher._identity_for_uid

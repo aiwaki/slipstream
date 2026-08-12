@@ -66,6 +66,11 @@ _BROWSER_WORKER_DISPOSABLE_ENVIRONMENT = frozenset((
     "SLIPSTREAM_BROWSER_PROBE_HOST_RESOLVER_RULES",
     "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS",
 ))
+_DISPOSABLE_CI_MARKERS = {
+    "CI": "true",
+    "GITHUB_ACTIONS": "true",
+    "SLIPSTREAM_DISPOSABLE_CI": "1",
+}
 _BROWSER_WORKER_ERROR_RE = re.compile(
     r"\Aslipstream browser probe failed: ([a-z0-9_]{1,64})\n?\Z"
 )
@@ -102,11 +107,7 @@ def browser_worker_disposable_environment(environment=None):
             source = dict(source)
         except (TypeError, ValueError):
             return {}
-    if not (
-        source.get("CI") == "true"
-        and source.get("GITHUB_ACTIONS") == "true"
-        and source.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
-    ):
+    if any(source.get(name) != value for name, value in _DISPOSABLE_CI_MARKERS.items()):
         return {}
     return {
         name: source[name]
@@ -1217,6 +1218,26 @@ class PendingNavigationBrowserWorkerLauncher:
             raise PendingNavigationProbeRuntimeError(
                 "browser_worker_runtime_unowned"
             )
+        persisted_disposable_environment = (
+            self._disposable_environment == _DISPOSABLE_CI_MARKERS
+            and all(
+                environment.get(name) == value
+                for name, value in expected_environment.items()
+            )
+            and set(environment).difference({
+                "HOME",
+                "LOGNAME",
+                "PATH",
+                "USER",
+            }).issubset(_BROWSER_WORKER_DISPOSABLE_ENVIRONMENT)
+            and all(
+                isinstance(value, str)
+                and value
+                and len(value) <= 1024
+                and "\x00" not in value
+                for value in environment.values()
+            )
+        )
         if (
             set(payload) != {
                 "AbandonProcessGroup",
@@ -1242,7 +1263,10 @@ class PendingNavigationBrowserWorkerLauncher:
             or payload.get("WorkingDirectory") != identity.home
             or payload.get("StandardOutPath") != str(paths.stdout)
             or payload.get("StandardErrorPath") != str(paths.stderr)
-            or environment != expected_environment
+            or (
+                environment != expected_environment
+                and not persisted_disposable_environment
+            )
         ):
             raise PendingNavigationProbeRuntimeError(
                 "browser_worker_runtime_unowned"

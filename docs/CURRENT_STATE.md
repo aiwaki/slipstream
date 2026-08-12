@@ -66,12 +66,22 @@ LaunchDaemon, broker, worker LaunchAgent/process/profile/runtime, installed
 payload, and original qualification capture all to be absent or stopped. The
 sentinel connection/state and global PF snapshot must remain unchanged.
 
-Current local verification passes 1,183 Python tests plus 54 subtests, focused
+Current local verification passes 1,184 Python tests plus 54 subtests, focused
 Python compilation, shell syntax, and `git diff --check`. The required
 codebase graph transport was retried and again returned `Transport closed`;
 bounded source inspection used the documented fallback. The real packaged
 active-worker uninstall transaction, review, merge, and exact-main checks
 remain open.
+
+The first two packaged attempts found two real qualification boundaries. A
+hosted console-user Chrome profile is not reliably under `/tmp`, so the gate
+now derives and saves the exact live worker `--user-data-dir`. Separately, an
+uninstaller process retains only the three disposable CI markers while the
+owned worker plist retains the complete closed fixture environment. Stale
+cleanup now accepts that persisted environment only when all markers are exact,
+every additional key is in the frozen browser-worker allowlist, and every value
+passes the original nonempty, bounded-string, and NUL rejection rules. Normal
+production cleanup still requires the exact base environment.
 
 The most recent protected owned-Geph qualification is still run `31511415912`
 for earlier main `8fe21229994e0ddc643762d0ece2203bc79313cc`. Its
