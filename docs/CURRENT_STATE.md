@@ -28,7 +28,7 @@ the sentinel connection/state, left global PF unchanged, and reported clean
 uninstall. Its three-second idle sample observed zero worker processes or
 profiles, a mode-`0600` broker, and 400 ms daemon CPU.
 
-That merge production-composes and qualifies the complete pending-navigation
+PR #330 production-composes and qualifies the complete pending-navigation
 transaction without changing PF, DNS, proxy/PAC, VPN, external Geph, Discord,
 YouTube, or Googlevideo policy. One eligible public unknown-host request stays
 on the installed PF/daemon path through the existing complete-TLS-record and
