@@ -198,6 +198,71 @@ def test_visibility_monitor_allows_only_complete_owned_hidden_ls_lifecycle() -> 
     assert monitor.assert_invisible(_snapshot()) == 3
 
 
+def test_hidden_launch_services_contract_accepts_quoted_lsasn_value() -> None:
+    events = [
+        _launch_event("kLSNotifyApplicationCreation"),
+        _launch_event("kLSNotifyApplicationTypeChanged", include_path=False),
+        _launch_event("kLSNotifyApplicationDeath"),
+    ]
+    events = [
+        event.replace(
+            '"LSASN"=ASN:0x0-0x731731:',
+            '"LSASN" = "ASN:0x0-0x731731:"',
+        )
+        for event in events
+    ]
+
+    assert smoke._assert_hidden_launch_services_events(
+        events,
+        expected_shell=EXPECTED_SHELL,
+        observed_root_pids=frozenset({731}),
+    ) == 3
+
+
+def test_hidden_launch_services_contract_accepts_only_unique_asn_fallback() -> None:
+    events = [
+        _launch_event("kLSNotifyApplicationCreation").replace('"LSASN"=', ""),
+        _launch_event(
+            "kLSNotifyApplicationTypeChanged", include_path=False
+        ).replace('"LSASN"=', ""),
+        _launch_event("kLSNotifyApplicationDeath").replace('"LSASN"=', ""),
+    ]
+
+    assert smoke._assert_hidden_launch_services_events(
+        events,
+        expected_shell=EXPECTED_SHELL,
+        observed_root_pids=frozenset({731}),
+    ) == 3
+
+
+def test_hidden_launch_services_contract_rejects_ambiguous_asn_fallback() -> None:
+    event = _launch_event("kLSNotifyApplicationCreation").replace(
+        '"LSASN"=ASN:0x0-0x731731:',
+        'sourceASN=ASN:0x0-0x999999:',
+    )
+
+    with pytest.raises(smoke.QualificationError, match="omitted the owned"):
+        smoke._assert_hidden_launch_services_events(
+            [event],
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+
+
+def test_hidden_launch_services_contract_rejects_malformed_explicit_lsasn() -> None:
+    event = _launch_event("kLSNotifyApplicationCreation").replace(
+        '"LSASN"=ASN:0x0-0x731731:',
+        '"LSASN"="ASN:0x0-0x731731:',
+    )
+
+    with pytest.raises(smoke.QualificationError, match="omitted the owned"):
+        smoke._assert_hidden_launch_services_events(
+            [event],
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+
+
 @pytest.mark.parametrize(
     ("events", "message"),
     (

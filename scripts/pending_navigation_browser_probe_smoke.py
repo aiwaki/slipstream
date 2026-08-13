@@ -91,7 +91,13 @@ LAUNCH_SERVICES_MARKERS = (
 )
 LAUNCH_SERVICES_ASN_RE = re.compile(r"ASN:0x[0-9a-f]+-0x[0-9a-f]+:", re.I)
 LAUNCH_SERVICES_LSASN_RE = re.compile(
-    r'"LSASN"=(ASN:0x[0-9a-f]+-0x[0-9a-f]+:)', re.I
+    r'(?<![A-Za-z0-9_])(?:"LSASN"|LSASN)\s*=\s*'
+    r'(?:(?:"(?P<quoted>ASN:0x[0-9a-f]+-0x[0-9a-f]+:)")|'
+    r'(?P<plain>ASN:0x[0-9a-f]+-0x[0-9a-f]+:))',
+    re.I,
+)
+LAUNCH_SERVICES_LSASN_TOKEN_RE = re.compile(
+    r'(?<![A-Za-z0-9_])(?:"LSASN"|LSASN)(?![A-Za-z0-9_])', re.I
 )
 LAUNCH_SERVICES_EVENT_RE = re.compile(r"\ANotification: (\S+)")
 LAUNCH_SERVICES_PID_RE = re.compile(r'\bpid"?\s*=\s*(\d+)', re.I)
@@ -396,7 +402,9 @@ def _assert_hidden_launch_services_events(
                 )
             continue
         event_name = event_match.group(1)
-        asns = set(LAUNCH_SERVICES_ASN_RE.findall(line))
+        asns = {
+            asn.lower() for asn in LAUNCH_SERVICES_ASN_RE.findall(line)
+        }
         executable_match = re.search(
             r'CFBundleExecutablePath"="([^"]+)"', line
         )
@@ -411,9 +419,22 @@ def _assert_hidden_launch_services_events(
             if pid_match is None or int(pid_match.group(1)) not in observed_root_pids:
                 raise QualificationError("LaunchServices registered an unowned process")
             owned_asn_match = LAUNCH_SERVICES_LSASN_RE.search(line)
-            if owned_asn_match is None:
+            if owned_asn_match is not None:
+                owned_asn = (
+                    owned_asn_match.group("quoted")
+                    or owned_asn_match.group("plain")
+                ).lower()
+            elif (
+                LAUNCH_SERVICES_LSASN_TOKEN_RE.search(line) is None
+                and len(asns) == 1
+            ):
+                # Some macOS versions omit or quote LSASN differently. The
+                # sole ASN is still attributable here because the same event
+                # already proved both the exact pinned path and owned root PID.
+                owned_asn = next(iter(asns))
+            else:
                 raise QualificationError("LaunchServices omitted the owned process identity")
-            allowed_asns.add(owned_asn_match.group(1))
+            allowed_asns.add(owned_asn)
         parsed_events.append(
             (event_name, line, asns, has_marker, has_expected_path)
         )
