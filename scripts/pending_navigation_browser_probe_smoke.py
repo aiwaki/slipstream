@@ -386,9 +386,13 @@ def _assert_hidden_launch_services_events(
 ) -> int:
     expected_path = str(expected_shell)
     allowed_asns: set[str] = set()
+    anchored_pids: set[int] = set()
+    asn_owner_pids: dict[str, int] = {}
     started_asns: set[str] = set()
     exited_asns: set[str] = set()
-    parsed_events: list[tuple[str, str, set[str], bool, bool]] = []
+    parsed_events: list[
+        tuple[str, str, set[str], bool, bool, int | None]
+    ] = []
 
     for line in events:
         lowered = line.lower()
@@ -409,6 +413,7 @@ def _assert_hidden_launch_services_events(
             r'CFBundleExecutablePath"="([^"]+)"', line
         )
         pid_match = LAUNCH_SERVICES_PID_RE.search(line)
+        event_pid = int(pid_match.group(1)) if pid_match is not None else None
         has_expected_path = bool(
             executable_match and executable_match.group(1) == expected_path
         )
@@ -416,8 +421,9 @@ def _assert_hidden_launch_services_events(
             if has_marker and not has_expected_path:
                 raise QualificationError("LaunchServices registered a non-pinned executable")
         if has_expected_path:
-            if pid_match is None or int(pid_match.group(1)) not in observed_root_pids:
+            if event_pid is None or event_pid not in observed_root_pids:
                 raise QualificationError("LaunchServices registered an unowned process")
+            anchored_pids.add(event_pid)
             owned_asn_match = LAUNCH_SERVICES_LSASN_RE.search(line)
             if owned_asn_match is not None:
                 owned_asn = (
@@ -433,7 +439,7 @@ def _assert_hidden_launch_services_events(
                 # sole canonical ASN is the only unambiguous identity.  Zero
                 # or multiple distinct ASNs still fail closed below.
                 owned_asn = next(iter(asns))
-            else:
+            elif len(asns) > 1:
                 raise QualificationError(
                     "LaunchServices omitted or ambiguously encoded the owned "
                     "process identity "
@@ -441,18 +447,45 @@ def _assert_hidden_launch_services_events(
                     "explicit_lsasn_token="
                     f"{LAUNCH_SERVICES_LSASN_TOKEN_RE.search(line) is not None})"
                 )
-            allowed_asns.add(owned_asn)
+            else:
+                # Sonoma runners can emit an opaque LSASN value on the exact
+                # executable event.  The public `lsappinfo listen` output is
+                # not a versioned serialization contract, so do not invent a
+                # parser for that private value.  Exact executable path plus
+                # a root PID observed in the worker process group is already
+                # the stronger ownership anchor.  Later events may therefore
+                # correlate by that PID; events without either the anchored
+                # PID or a canonical ASN remain rejected below.
+                owned_asn = None
+            if owned_asn is not None:
+                allowed_asns.add(owned_asn)
+                asn_owner_pids[owned_asn] = event_pid
         parsed_events.append(
-            (event_name, line, asns, has_marker, has_expected_path)
+            (
+                event_name,
+                line,
+                asns,
+                has_marker,
+                has_expected_path,
+                event_pid,
+            )
         )
 
     relevant_count = 0
-    for event_name, line, asns, has_marker, has_expected_path in parsed_events:
+    for (
+        event_name,
+        line,
+        asns,
+        has_marker,
+        has_expected_path,
+        event_pid,
+    ) in parsed_events:
         owned_asns = asns.intersection(allowed_asns)
-        if not (owned_asns or has_marker or has_expected_path):
+        owned_pid = event_pid if event_pid in anchored_pids else None
+        if not (owned_asns or owned_pid is not None or has_marker or has_expected_path):
             continue
         relevant_count += 1
-        if not owned_asns:
+        if not owned_asns and owned_pid is None:
             raise QualificationError("LaunchServices event escaped the owned shell identity")
         if any(
             marker.lower() in line.lower()
@@ -461,10 +494,15 @@ def _assert_hidden_launch_services_events(
             raise QualificationError("browser worker emitted a visible LaunchServices event")
         if event_name not in ALLOWED_HIDDEN_LAUNCH_SERVICES_EVENTS:
             raise QualificationError("browser worker emitted an unexpected LaunchServices event")
+        owned_identities = {
+            f"pid:{asn_owner_pids[asn]}" for asn in owned_asns
+        }
+        if owned_pid is not None:
+            owned_identities.add(f"pid:{owned_pid}")
         if event_name in LAUNCH_SERVICES_START_EVENTS:
-            started_asns.update(owned_asns)
+            started_asns.update(owned_identities)
         if event_name in LAUNCH_SERVICES_EXIT_EVENTS:
-            exited_asns.update(owned_asns)
+            exited_asns.update(owned_identities)
         if (
             '"ApplicationType"="Foreground"' in line
             or 'type="Foreground"' in line

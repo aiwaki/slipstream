@@ -273,19 +273,67 @@ def test_hidden_launch_services_contract_accepts_unknown_single_asn_wrapper() ->
     ) == 3
 
 
-def test_hidden_launch_services_contract_rejects_missing_anchor_asn() -> None:
+def test_hidden_launch_services_contract_accepts_owned_pid_when_lsasn_is_opaque() -> None:
+    events = [
+        _launch_event("kLSNotifyApplicationCreation"),
+        _launch_event("kLSNotifyApplicationTypeChanged", include_path=False),
+        _launch_event("kLSNotifyApplicationDeath"),
+    ]
+    events = [
+        event.replace(
+            '"LSASN"=ASN:0x0-0x731731:',
+            '"LSASN"=<opaque>',
+        ).replace(" ASN:0x0-0x731731:", "")
+        for event in events
+    ]
+
+    assert smoke._assert_hidden_launch_services_events(
+        events,
+        expected_shell=EXPECTED_SHELL,
+        observed_root_pids=frozenset({731}),
+    ) == 3
+
+
+def test_hidden_launch_services_contract_rejects_unowned_pid_with_opaque_lsasn() -> None:
+    events = [
+        _launch_event("kLSNotifyApplicationCreation"),
+        _launch_event(
+            "kLSNotifyApplicationTypeChanged", pid=999, include_path=False
+        ),
+        _launch_event("kLSNotifyApplicationDeath"),
+    ]
+    events = [
+        event.replace(
+            '"LSASN"=ASN:0x0-0x731731:',
+            '"LSASN"=<opaque>',
+        ).replace(" ASN:0x0-0x731731:", "")
+        for event in events
+    ]
+
+    with pytest.raises(
+        smoke.QualificationError,
+        match="escaped the owned shell identity",
+    ):
+        smoke._assert_hidden_launch_services_events(
+            events,
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+
+
+def test_hidden_launch_services_contract_requires_opaque_pid_lifecycle_exit() -> None:
     event = (
         _launch_event("kLSNotifyApplicationCreation")
         .replace(
             '"LSASN"=ASN:0x0-0x731731:',
-            '"LSASN"=<missing>',
+            '"LSASN"=<opaque>',
         )
         .replace(" ASN:0x0-0x731731:", "")
     )
 
     with pytest.raises(
         smoke.QualificationError,
-        match=r"canonical_asn_count=0, explicit_lsasn_token=True",
+        match="lifecycle did not fully exit",
     ):
         smoke._assert_hidden_launch_services_events(
             [event],
