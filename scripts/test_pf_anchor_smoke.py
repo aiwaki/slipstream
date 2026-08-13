@@ -4,11 +4,43 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from types import SimpleNamespace
+from unittest import mock
 
 import pf_anchor_smoke
 
 
 class PfAnchorSmokeTests(unittest.TestCase):
+    def test_natlook_descriptor_is_an_integer_and_closed_exactly_once(self) -> None:
+        tproxy = SimpleNamespace(_pf_fd=None)
+        with mock.patch.object(
+            pf_anchor_smoke.os,
+            "open",
+            return_value=71,
+        ) as open_descriptor, mock.patch.object(
+            pf_anchor_smoke.os,
+            "close",
+        ) as close_descriptor:
+            descriptor = pf_anchor_smoke._open_tproxy_pf_natlook(tproxy)
+            self.assertEqual(descriptor, 71)
+            self.assertEqual(tproxy._pf_fd, 71)
+            pf_anchor_smoke._close_tproxy_pf_natlook(tproxy, descriptor)
+
+        open_descriptor.assert_called_once_with("/dev/pf", pf_anchor_smoke.os.O_RDWR)
+        close_descriptor.assert_called_once_with(71)
+        self.assertIsNone(tproxy._pf_fd)
+
+    def test_natlook_descriptor_refuses_to_replace_an_existing_handle(self) -> None:
+        tproxy = SimpleNamespace(_pf_fd=70)
+        with mock.patch.object(pf_anchor_smoke.os, "open") as open_descriptor:
+            with self.assertRaisesRegex(
+                pf_anchor_smoke.SmokeError,
+                "already open",
+            ):
+                pf_anchor_smoke._open_tproxy_pf_natlook(tproxy)
+
+        open_descriptor.assert_not_called()
+
     def test_redirect_rules_never_target_https(self) -> None:
         rules = pf_anchor_smoke.build_redirect_rules(
             target_port=18443,

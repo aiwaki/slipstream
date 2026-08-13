@@ -1,10 +1,39 @@
 import tempfile
 from pathlib import Path
+import subprocess
 from unittest import mock
 
 import pytest
 
 from scripts import pending_navigation_browser_probe_smoke as smoke
+
+
+def test_worker_failure_diagnostic_reports_only_static_worker_category() -> None:
+    worker = subprocess.CompletedProcess(
+        ("slipstream",),
+        17,
+        stdout="ignored",
+        stderr="slipstream browser probe failed: claimed_job_invalid\n",
+    )
+
+    assert smoke._worker_failure_diagnostic(worker) == (
+        "exit=17; detail=slipstream browser probe failed: claimed_job_invalid"
+    )
+
+
+def test_worker_failure_diagnostic_redacts_unstructured_output() -> None:
+    worker = subprocess.CompletedProcess(
+        ("slipstream",),
+        17,
+        stdout="ignored",
+        stderr="first line\n" + "x" * 800,
+    )
+
+    diagnostic = smoke._worker_failure_diagnostic(worker)
+
+    assert diagnostic == "exit=17; detail=<redacted>"
+    assert "\n" not in diagnostic
+    assert len(diagnostic) <= smoke.WORKER_DIAGNOSTIC_MAX_CHARS + 32
 
 
 def test_profile_residue_matches_only_exact_worker_nonce() -> None:

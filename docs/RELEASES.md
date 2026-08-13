@@ -66,6 +66,15 @@ records informational advisories, blocks every unreviewed vulnerability, and
 allows only exact package/version/advisory exceptions with an expiry date.
 Scanner failures and empty inventories fail closed.
 
+OSV Scanner 2.3.8 does not emit an ecosystem for SPDX `pkg:generic` packages.
+The application policy therefore has a separate optional integrity-only list:
+an incomplete scanner row is accepted only without vulnerabilities and only
+when its exact name/version matches one unexpired policy entry and the SBOM has
+the same exact generic purl and SHA-256. Reports count scanner-covered and
+integrity-only packages separately; their sum must equal the full SBOM. Every
+other incomplete row still fails closed. Geph schema-v1 reports contain no
+integrity-only section and remain valid.
+
 The published report is part of `artifact-manifest.json`, and release
 verification recomputes its SBOM and policy hashes. The application inventory
 lists Geph and `tg-ws-proxy` as top-level vendored applications. Geph

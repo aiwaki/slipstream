@@ -325,6 +325,21 @@ def _configure_tproxy_for_smoke(tproxy, runner: PfctlRunner, rules: str) -> None
     tproxy._geph_backend_hold_reason = ""
 
 
+def _open_tproxy_pf_natlook(tproxy) -> int:
+    if tproxy._pf_fd is not None:
+        raise SmokeError("tproxy PF descriptor was already open")
+    descriptor = os.open("/dev/pf", os.O_RDWR)
+    tproxy._pf_fd = descriptor
+    return descriptor
+
+
+def _close_tproxy_pf_natlook(tproxy, descriptor: int) -> None:
+    if tproxy._pf_fd != descriptor:
+        raise SmokeError("tproxy PF descriptor identity changed")
+    os.close(descriptor)
+    tproxy._pf_fd = None
+
+
 def _preflight(runner: PfctlRunner) -> tuple[PfSnapshot, int, int]:
     if platform.system() != "Darwin":
         raise SmokeError("PF smoke requires macOS")
@@ -376,6 +391,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     failure: BaseException | None = None
     listener_v4: socket.socket | None = None
     listener_v6: socket.socket | None = None
+    natlook_descriptor: int | None = None
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
@@ -393,6 +409,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
 
         tproxy = _import_tproxy()
         _configure_tproxy_for_smoke(tproxy, runner, rules)
+        natlook_descriptor = _open_tproxy_pf_natlook(tproxy)
         if not tproxy.arm_private_pf_if_ready(proxy_port):
             raise SmokeError("local routing did not arm without Geph")
         if tproxy.geo_exit_backend_ready():
@@ -489,6 +506,11 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
                 raise SmokeError("PF loopback skip restoration failed")
         except Exception as exc:
             cleanup_errors.append(f"restore PF loopback before token release: {exc}")
+        if tproxy is not None and natlook_descriptor is not None:
+            try:
+                _close_tproxy_pf_natlook(tproxy, natlook_descriptor)
+            except Exception as exc:
+                cleanup_errors.append(f"close PF NATLOOK descriptor: {exc}")
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 

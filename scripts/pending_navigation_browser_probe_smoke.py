@@ -33,6 +33,10 @@ import pending_navigation_probe_runtime as probe_runtime  # noqa: E402
 FIXTURE_HOST = "pending.slipstream.invalid"
 MAX_FRAME_BYTES = probe_runtime.MAX_IPC_BYTES
 MAX_END_TO_END_MS = 25_000
+WORKER_DIAGNOSTIC_MAX_CHARS = 512
+WORKER_FAILURE_RE = re.compile(
+    r"\Aslipstream browser probe failed: [a-z0-9_]{1,80}\Z"
+)
 WORKER_PROFILE_GLOB = "slipstream-browser-probe-" + "[0-9a-f]" * 32
 LSAPPINFO = "/usr/bin/lsappinfo"
 FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
@@ -49,6 +53,15 @@ FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
 
 class QualificationError(RuntimeError):
     pass
+
+
+def _worker_failure_diagnostic(worker: subprocess.CompletedProcess[str]) -> str:
+    output = (worker.stderr or worker.stdout or "").strip()
+    output = re.sub(r"\s+", " ", output)
+    if len(output) > WORKER_DIAGNOSTIC_MAX_CHARS:
+        output = output[: WORKER_DIAGNOSTIC_MAX_CHARS - 3] + "..."
+    detail = output if WORKER_FAILURE_RE.fullmatch(output) else "<redacted>"
+    return f"exit={worker.returncode}; detail={detail}"
 
 
 @dataclass(frozen=True)
@@ -662,7 +675,10 @@ def main() -> int:
                 check=False,
             )
             if worker.returncode != 0:
-                raise QualificationError("direct packaged browser worker failed")
+                raise QualificationError(
+                    "direct packaged browser worker failed: "
+                    + _worker_failure_diagnostic(worker)
+                )
             if not probe_runtime._valid_worker_launch_id(launch_id):
                 raise QualificationError("browser worker did not complete")
         except BaseException as error:

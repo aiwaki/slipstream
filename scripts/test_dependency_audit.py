@@ -59,6 +59,32 @@ def osv_result(*packages: tuple[dict, list[dict]]) -> dict:
     }
 
 
+def sbom_package(
+    *,
+    ecosystem: str,
+    name: str,
+    version: str,
+    sha256: str | None = None,
+) -> dict:
+    package = {
+        "SPDXID": f"SPDXRef-Package-{name}",
+        "name": name,
+        "versionInfo": version,
+        "externalRefs": [
+            {
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl",
+                "referenceLocator": f"pkg:{ecosystem}/{name}@{version}",
+            }
+        ],
+    }
+    if sha256 is not None:
+        package["checksums"] = [
+            {"algorithm": "SHA256", "checksumValue": sha256}
+        ]
+    return package
+
+
 class DependencyAuditTests(unittest.TestCase):
     def test_geph_policy_uses_the_same_pinned_scanner_and_fail_closed_rules(self) -> None:
         application = dependency_audit.load_policy(POLICY_PATH)
@@ -68,6 +94,35 @@ class DependencyAuditTests(unittest.TestCase):
         self.assertEqual(geph["rules"], application["rules"])
         self.assertGreaterEqual(len(geph["exceptions"]), 1)
 
+    def test_geph_schema_v1_report_remains_without_integrity_only_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report, sbom = self._build_report(
+                root,
+                osv_result(
+                    (
+                        {
+                            "ecosystem": "crates.io",
+                            "name": "serde",
+                            "version": "1.0.228",
+                        },
+                        [],
+                    )
+                ),
+                policy_path=GEPH_POLICY_PATH,
+            )
+            self.assertNotIn("integrity_only", report)
+            self.assertNotIn("packages_integrity_only", report["summary"])
+            summary = dependency_audit.validate_audit_report(
+                report,
+                policy_path=GEPH_POLICY_PATH,
+                sbom_path=sbom,
+                source_commit=SOURCE_COMMIT,
+                target=TARGET,
+            )
+            self.assertEqual(summary["packages_scanned"], 1)
+            self.assertEqual(summary["packages_integrity_only"], 0)
+
     def _build_report(
         self,
         root: Path,
@@ -75,26 +130,36 @@ class DependencyAuditTests(unittest.TestCase):
         *,
         evaluated_on: date = date(2026, 7, 16),
         vendored_transitive_dependencies: str = "top-level-only",
+        policy_path: Path = POLICY_PATH,
+        sbom_packages: list[dict] | None = None,
     ) -> tuple[dict, Path]:
-        policy = dependency_audit.load_policy(POLICY_PATH)
+        policy = dependency_audit.load_policy(policy_path)
         sbom = root / "Slipstream.spdx.json"
-        packages = {
-            (
-                entry["package"]["ecosystem"],
-                entry["package"]["name"],
-                entry["package"]["version"],
-            )
-            for source in result["results"]
-            for entry in source["packages"]
-        }
+        if sbom_packages is None:
+            packages = {
+                (
+                    entry["package"]["ecosystem"],
+                    entry["package"]["name"],
+                    entry["package"]["version"],
+                )
+                for source in result["results"]
+                for entry in source["packages"]
+            }
+            sbom_packages = [
+                {
+                    "SPDXID": f"SPDXRef-Package-{index}",
+                    "name": name,
+                    "versionInfo": version,
+                }
+                for index, (_, name, version) in enumerate(
+                    sorted(packages), start=1
+                )
+            ]
         sbom.write_text(
             json.dumps(
                 {
                     "spdxVersion": "SPDX-2.3",
-                    "packages": [
-                        {"SPDXID": f"SPDXRef-Package-{index}"}
-                        for index, _ in enumerate(sorted(packages), start=1)
-                    ],
+                    "packages": sbom_packages,
                 }
             )
             + "\n",
@@ -103,7 +168,7 @@ class DependencyAuditTests(unittest.TestCase):
         report = dependency_audit.build_audit_report(
             osv_result=result,
             policy=policy,
-            policy_path=POLICY_PATH,
+            policy_path=policy_path,
             sbom_path=sbom,
             scanner=scanner_metadata(policy),
             source_commit=SOURCE_COMMIT,
@@ -112,6 +177,40 @@ class DependencyAuditTests(unittest.TestCase):
             vendored_transitive_dependencies=vendored_transitive_dependencies,
         )
         return report, sbom
+
+    def _application_policy_path(self, root: Path, **overrides: object) -> Path:
+        policy = dependency_audit.load_policy(POLICY_PATH)
+        integrity = copy.deepcopy(policy["integrity_only"][0])
+        integrity.update(overrides)
+        policy["integrity_only"] = [integrity]
+        path = root / "policy.json"
+        path.write_text(json.dumps(policy), encoding="utf-8")
+        return path
+
+    def _chromium_result(self, *, vulnerabilities: list[dict] | None = None) -> dict:
+        return osv_result(
+            (
+                {
+                    "ecosystem": "",
+                    "name": "chromium-headless-shell",
+                    "version": "151.0.7922.77",
+                },
+                vulnerabilities or [],
+            )
+        )
+
+    def _chromium_sbom(self, *, sha256: str | None = None) -> list[dict]:
+        return [
+            sbom_package(
+                ecosystem="generic",
+                name="chromium-headless-shell",
+                version="151.0.7922.77",
+                sha256=sha256
+                or dependency_audit.load_policy(POLICY_PATH)["integrity_only"][0][
+                    "sha256"
+                ],
+            )
+        ]
 
     def test_reviewed_exception_and_informational_advisory_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -154,6 +253,141 @@ class DependencyAuditTests(unittest.TestCase):
             tampered = copy.deepcopy(report)
             tampered["findings"][0]["package"]["version"] = "0.39.5"
             with self.assertRaisesRegex(ValueError, "exception package"):
+                dependency_audit.validate_audit_report(
+                    tampered,
+                    policy_path=POLICY_PATH,
+                    sbom_path=sbom,
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
+
+    def test_exact_chromium_incomplete_row_is_integrity_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report, sbom = self._build_report(
+                root,
+                self._chromium_result(),
+                sbom_packages=self._chromium_sbom(),
+            )
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["summary"]["packages_scanned"], 0)
+            self.assertEqual(report["summary"]["packages_integrity_only"], 1)
+            self.assertEqual(
+                report["integrity_only"][0]["purl"],
+                "pkg:generic/chromium-headless-shell@151.0.7922.77",
+            )
+            summary = dependency_audit.validate_audit_report(
+                report,
+                policy_path=POLICY_PATH,
+                sbom_path=sbom,
+                source_commit=SOURCE_COMMIT,
+                target=TARGET,
+            )
+            self.assertEqual(summary["packages_scanned"], 0)
+            self.assertEqual(summary["packages_integrity_only"], 1)
+
+    def test_unknown_or_vulnerable_incomplete_row_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            unknown = osv_result(
+                (
+                    {"ecosystem": "", "name": "unknown", "version": "1.0"},
+                    [],
+                )
+            )
+            with self.assertRaisesRegex(ValueError, "not integrity-only allowlisted"):
+                self._build_report(
+                    root,
+                    unknown,
+                    sbom_packages=[
+                        sbom_package(
+                            ecosystem="generic",
+                            name="unknown",
+                            version="1.0",
+                            sha256="11" * 32,
+                        )
+                    ],
+                )
+
+            with self.assertRaisesRegex(ValueError, "contains vulnerabilities"):
+                self._build_report(
+                    root,
+                    self._chromium_result(
+                        vulnerabilities=[vulnerability("GHSA-INCOMPLETE")]
+                    ),
+                    sbom_packages=self._chromium_sbom(),
+                )
+
+            duplicate = self._chromium_result()
+            duplicate["results"][0]["packages"].append(
+                copy.deepcopy(duplicate["results"][0]["packages"][0])
+            )
+            with self.assertRaisesRegex(ValueError, "duplicate integrity-only"):
+                self._build_report(
+                    root,
+                    duplicate,
+                    sbom_packages=self._chromium_sbom(),
+                )
+
+    def test_integrity_only_rejects_hash_purl_expiry_and_report_tamper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            invalid_policy = self._application_policy_path(
+                root,
+                purl="pkg:generic/not-chromium@151.0.7922.77",
+            )
+            with self.assertRaisesRegex(ValueError, "purl is invalid"):
+                dependency_audit.load_policy(invalid_policy)
+
+            with self.assertRaisesRegex(ValueError, "checksum does not match policy"):
+                self._build_report(
+                    root,
+                    self._chromium_result(),
+                    sbom_packages=self._chromium_sbom(sha256="00" * 32),
+                )
+
+            invalid_purl = self._chromium_sbom()
+            invalid_purl[0]["externalRefs"][0]["referenceLocator"] = (
+                "pkg:generic/not-chromium@151.0.7922.77"
+            )
+            with self.assertRaisesRegex(ValueError, "purl does not match policy"):
+                self._build_report(
+                    root,
+                    self._chromium_result(),
+                    sbom_packages=invalid_purl,
+                )
+
+            expired_policy = self._application_policy_path(
+                root, expires="2026-07-15"
+            )
+            with self.assertRaisesRegex(ValueError, "policy is expired"):
+                self._build_report(
+                    root,
+                    self._chromium_result(),
+                    policy_path=expired_policy,
+                    sbom_packages=self._chromium_sbom(),
+                )
+
+            report, sbom = self._build_report(
+                root,
+                self._chromium_result(),
+                sbom_packages=self._chromium_sbom(),
+            )
+            tampered = copy.deepcopy(report)
+            tampered["integrity_only"][0]["sha256"] = "ff" * 32
+            with self.assertRaisesRegex(ValueError, "does not match policy"):
+                dependency_audit.validate_audit_report(
+                    tampered,
+                    policy_path=POLICY_PATH,
+                    sbom_path=sbom,
+                    source_commit=SOURCE_COMMIT,
+                    target=TARGET,
+                )
+
+            tampered = copy.deepcopy(report)
+            tampered["summary"]["packages_integrity_only"] = 0
+            with self.assertRaisesRegex(ValueError, "count is inconsistent"):
                 dependency_audit.validate_audit_report(
                     tampered,
                     policy_path=POLICY_PATH,

@@ -13,6 +13,16 @@
       "version": "0.39.4"
     }
   ],
+  "integrity_only": [
+    {
+      "expires": "2026-09-30",
+      "name": "chromium-headless-shell",
+      "purl": "pkg:generic/chromium-headless-shell@151.0.7922.77",
+      "reason": "OSV Scanner 2.3.8 preserves this SPDX generic package name and version but emits no ecosystem. Accept only the exact source-contract purl and SHA-256 until the scanner provides complete generic coordinates.",
+      "sha256": "44a2ab4206fc5d5d33974adbc3fd2a80966e7a88167914794f524fa29a3d8e8e",
+      "version": "151.0.7922.77"
+    }
+  ],
   "rules": {
     "informational": "record",
     "unreviewed": "block"

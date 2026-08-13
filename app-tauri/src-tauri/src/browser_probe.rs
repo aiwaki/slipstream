@@ -26,7 +26,7 @@ const CAPABILITY_HEX_CHARS: usize = 32;
 const WORKER_LAUNCH_ID_HEX_CHARS: usize = 16;
 const WORKER_LAUNCH_ID_ENV: &str = "SLIPSTREAM_BROWSER_PROBE_LAUNCH_ID";
 const CAPABILITY_TTL_MS: u64 = 30_000;
-const MAX_CLAIM_AGE_MS: u64 = 2_000;
+const MAX_CLAIM_AGE_MS: u64 = 14_000;
 const MIN_START_BUDGET_MS: u64 = 6_000;
 const WORKER_START_ATTESTATION_GRACE: Duration = Duration::from_millis(200);
 const WORKER_EMPTY_QUEUE_GRACE: Duration = Duration::from_millis(500);
@@ -415,11 +415,7 @@ fn run_claimed_probe(
         return Ok(false);
     }
 
-    let claimed_deadline_unix_ms = match &job {
-        ClaimedProbeJob::PendingNavigation(job) => job.expires_at_unix_ms,
-        ClaimedProbeJob::RoutePreflight(job) => job.deadline_unix_ms,
-    };
-    let remaining_ms = claimed_deadline_unix_ms.saturating_sub(now);
+    let remaining_ms = claimed_job_remaining_budget_ms(&job, now);
     let claimed_deadline = Instant::now() + Duration::from_millis(remaining_ms);
     let classification_deadline = classification_deadline.min(claimed_deadline);
 
@@ -474,6 +470,14 @@ fn claimed_job_has_start_budget(job: &ClaimedProbeJob, now_unix_ms: u64) -> bool
             job.deadline_unix_ms.saturating_sub(now_unix_ms) >= ROUTE_PREFLIGHT_MIN_START_BUDGET_MS
         }
     }
+}
+
+fn claimed_job_remaining_budget_ms(job: &ClaimedProbeJob, now_unix_ms: u64) -> u64 {
+    let absolute_deadline_unix_ms = match job {
+        ClaimedProbeJob::PendingNavigation(job) => job.expires_at_unix_ms,
+        ClaimedProbeJob::RoutePreflight(job) => job.deadline_unix_ms,
+    };
+    absolute_deadline_unix_ms.saturating_sub(now_unix_ms)
 }
 
 fn job_has_start_budget(job: &ProbeJob, now_unix_ms: u64) -> bool {
@@ -1242,6 +1246,28 @@ impl ChromeSession {
 
     fn cleanup(&mut self) -> ProbeResult<()> {
         let mut cleanup_failed = false;
+        // Capture the rooted process group before reaping the direct child.
+        // A closed headless shell can otherwise remain as an owned zombie in
+        // `ps` until `Child::try_wait` runs, making the later absence proof
+        // time out even though no executable process survived.
+        match owned_chrome_processes(
+            self.uid,
+            &self.config.executable,
+            &self.profile,
+            &mut self.rooted_process_groups,
+        ) {
+            Ok(processes) => {
+                for process in processes.iter().rev() {
+                    signal_owned_process(process, self.uid, "TERM");
+                }
+            }
+            Err(_) => cleanup_failed = true,
+        }
+        if let Some(mut launcher) = self.launcher.take() {
+            if !terminate_child_bounded(&mut launcher, CHROME_STOP_TIMEOUT) {
+                cleanup_failed = true;
+            }
+        }
         let first_deadline = Instant::now() + CHROME_STOP_TIMEOUT;
         loop {
             let processes = match owned_chrome_processes(
@@ -1295,11 +1321,6 @@ impl ChromeSession {
                 signal_owned_process(process, self.uid, "KILL");
             }
             std::thread::sleep(Duration::from_millis(100));
-        }
-        if let Some(mut launcher) = self.launcher.take() {
-            if !terminate_child_bounded(&mut launcher, CHROME_STOP_TIMEOUT) {
-                cleanup_failed = true;
-            }
         }
         let settle_deadline = Instant::now() + CHROME_STOP_TIMEOUT;
         let mut absent_since = None;
@@ -2037,7 +2058,7 @@ mod tests {
         assert_eq!(WORKER_EMPTY_QUEUE_GRACE, Duration::from_millis(500));
         assert_eq!(CLASSIFICATION_BUDGET, Duration::from_secs(8));
         assert_eq!(EMPTY_QUEUE_POLL_INTERVAL, Duration::from_millis(250));
-        assert_eq!(MAX_CLAIM_AGE_MS, 2_000);
+        assert_eq!(MAX_CLAIM_AGE_MS, 14_000);
         assert_eq!(MIN_START_BUDGET_MS, 6_000);
         assert_eq!(WORKER_START_ATTESTATION_GRACE, Duration::from_millis(200));
         assert!(WORKER_EMPTY_QUEUE_GRACE < CLASSIFICATION_BUDGET);
@@ -2052,6 +2073,13 @@ mod tests {
             &ClaimedProbeJob::RoutePreflight(valid.clone()),
             now,
         ));
+        assert_eq!(
+            claimed_job_remaining_budget_ms(
+                &ClaimedProbeJob::RoutePreflight(valid.clone()),
+                now + 3_000,
+            ),
+            5_000,
+        );
 
         let mut rebound = valid.clone();
         rebound.candidate_routes = vec!["system".to_string()];

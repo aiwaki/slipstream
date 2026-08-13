@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import io
 import json
 import os
@@ -20,6 +21,27 @@ import pf_installed_lifecycle_smoke as lifecycle
 
 
 class PfInstalledLifecycleSmokeTests(unittest.TestCase):
+    def test_install_attestation_schema_matches_daemon_contract(self) -> None:
+        tree = ast.parse(lifecycle.SOURCE_DAEMON.read_text(encoding="utf-8"))
+        daemon_schema_versions = [
+            node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "INSTALL_ATTESTATION_SCHEMA_VERSION"
+                for target in node.targets
+            )
+            and isinstance(node.value, ast.Constant)
+            and type(node.value.value) is int
+        ]
+
+        self.assertEqual(daemon_schema_versions, [3])
+        self.assertEqual(
+            lifecycle.INSTALL_ATTESTATION_SCHEMA_VERSION,
+            daemon_schema_versions[0],
+        )
+
     def test_stalled_resolver_restores_existing_config_and_captures_status(
         self,
     ) -> None:

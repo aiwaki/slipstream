@@ -10,8 +10,24 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-13 P0 implementation is in progress on
-`codex/p0-macos-reliability`. Workstation evidence invalidated the preceding
+Update 2026-08-13 P0 implementation is in draft PR
+[#343](https://github.com/aiwaki/slipstream/pull/343) on
+`codex/p0-macos-reliability`. Its first exact PR run built the immutable
+candidate successfully and exposed four integration-contract failures rather
+than a product pass: OSV's incomplete `pkg:generic` coordinate for pinned
+Chromium, a missing PF NATLOOK descriptor in the disposable smoke, stale
+install-attestation v2 expectations, and mismatched browser-worker/Windows
+workflow test bounds. The branch now fixes each cause without bypassing a gate:
+the current combined local freeze has 1,382 Python tests plus 60 subtests, 114
+app Rust tests, 40 userspace-effect and 241 Windows-adapter tests green. Pinned
+OSV Scanner 2.3.8 accounts for all 352 SPDX packages as 351 vulnerability-
+scanned plus one exact SHA-256/PURL/expiry-bound Chromium integrity-only entry,
+with zero blocking findings. A rebuilt copy of the first CI candidate completes
+one bounded headless probe and leaves no matching process; disposable CI must
+still prove the real visibility sensors and all required checks on the new PR
+head.
+
+Workstation evidence invalidated the preceding
 headed-Chrome qualification as a production readiness claim: the installed
 preview launched 271 browser workers and 184 GUI Chrome processes, including
 background activity, while a 51-second status-publication gap made the tray

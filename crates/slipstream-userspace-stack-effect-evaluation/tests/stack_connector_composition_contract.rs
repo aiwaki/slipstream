@@ -20,6 +20,21 @@ const WINDOWS_ADAPTER_MANIFEST: &str = include_str!("../../slipstream-windows-ad
 const WINDOWS_PACKET_QUALIFICATION_WORKFLOW: &str =
     include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml");
 
+fn workflow_event_paths<'a>(workflow: &'a str, start: &str, end: &str) -> Vec<&'a str> {
+    workflow
+        .split_once(start)
+        .and_then(|(_, rest)| rest.split_once(end))
+        .map(|(section, _)| section)
+        .expect("qualification workflow must retain the expected event section")
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("- \"")
+                .and_then(|path| path.strip_suffix('"'))
+        })
+        .collect()
+}
+
 #[derive(Debug, Deserialize)]
 struct ContractFixture {
     schema_version: u32,
@@ -163,6 +178,17 @@ fn composition_contract_is_bounded_and_non_production() {
 
 #[test]
 fn disposable_native_architecture_gate_tracks_every_composed_predecessor() {
+    let pull_request_paths = workflow_event_paths(
+        WINDOWS_PACKET_QUALIFICATION_WORKFLOW,
+        "\n  pull_request:\n",
+        "\n  push:\n",
+    );
+    let push_paths = workflow_event_paths(
+        WINDOWS_PACKET_QUALIFICATION_WORKFLOW,
+        "\n  push:\n",
+        "\n\npermissions:",
+    );
+
     for required_path in [
         "contracts/windows-capture-fragment-effect-v1.json",
         "contracts/windows-packet-flow-v1.json",
@@ -180,9 +206,36 @@ fn disposable_native_architecture_gate_tracks_every_composed_predecessor() {
         "crates/slipstream-windows-adapter/**",
     ] {
         assert_eq!(
-            WINDOWS_PACKET_QUALIFICATION_WORKFLOW.matches(required_path).count(),
+            pull_request_paths
+                .iter()
+                .filter(|path| **path == required_path)
+                .count(),
             1,
-            "qualification workflow must track {required_path} in the pull-request filter; main pushes are intentionally unfiltered"
+            "qualification workflow must track {required_path} exactly once in the pull-request filter"
+        );
+    }
+
+    assert_eq!(
+        push_paths
+            .iter()
+            .filter(|path| **path == "contracts/windows-*")
+            .count(),
+        1,
+        "main pushes must track all Windows contracts through one bounded wildcard"
+    );
+    for required_path in [
+        "crates/slipstream-core/**",
+        "crates/slipstream-userspace-stack-evaluation/**",
+        "crates/slipstream-userspace-stack-effect-evaluation/**",
+        "crates/slipstream-windows-adapter/**",
+    ] {
+        assert_eq!(
+            push_paths
+                .iter()
+                .filter(|path| **path == required_path)
+                .count(),
+            1,
+            "main push qualification must track {required_path} exactly once"
         );
     }
 

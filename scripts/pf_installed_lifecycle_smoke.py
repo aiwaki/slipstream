@@ -56,6 +56,7 @@ INSTALL_ATTESTATION_DIR = Path(
     "/Library/Application Support/dev.slipstream.tray"
 )
 INSTALL_ATTESTATION_PATH = INSTALL_ATTESTATION_DIR / "install-attestation.json"
+INSTALL_ATTESTATION_SCHEMA_VERSION = 3
 LAUNCHD_PLIST = Path("/Library/LaunchDaemons/dev.slipstream.tproxy.plist")
 LAUNCHD_LABEL = "system/dev.slipstream.tproxy"
 STATUS_PATH = Path("/var/run/slipstream.status")
@@ -1997,7 +1998,7 @@ def _assert_install_attestation(target: LifecycleTarget) -> None:
         raise LifecycleError("install attestation omitted required records")
     source_sha256 = _sha256_file(source)
     expected_path = str(installed.resolve(strict=True))
-    if evidence.get("schema_version") != 2:
+    if evidence.get("schema_version") != INSTALL_ATTESTATION_SCHEMA_VERSION:
         raise LifecycleError("install attestation schema mismatch")
     if evidence.get("source_sha256") != source_sha256:
         raise LifecycleError("install attestation source SHA-256 mismatch")
