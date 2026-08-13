@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 REPORT_NAME = "transport-mechanics.json"
 WORKFLOW = ".github/workflows/release-readiness.yml"
 SOURCE_PATTERN = re.compile(r"[0-9a-f]{40,64}")
@@ -28,8 +28,10 @@ SCENARIOS = (
 LIMITATIONS = (
     "The installed-candidate transaction proves both loopback listeners, "
     "dual-family production PF rules, and Darwin DIOCNATLOOK for incomplete "
-    "TLS records sent to documentation-prefix destinations. A separate "
-    "private-anchor transaction proves scoped rollback on non-production ports.",
+    "TLS records sent to owned documentation-prefix destinations. The IPv6 "
+    "runtime proof is loopback rdr plus NATLOOK; the loaded non-loopback "
+    "route-to rule is asserted statically. A separate private-anchor "
+    "transaction proves scoped rollback on non-production ports.",
     "The installed candidate's capability-gated self-test uses deterministic "
     "encrypted QUIC Initial datagrams without network mutation. The "
     "Safari/Chrome live-site gate separately proves xpersonatoy.com usability "
@@ -78,6 +80,8 @@ def _validate_measured_inputs(
         "listener_hosts": ["127.0.0.1", "::1"],
         "listener_port": 1080,
         "natlook_families": ["inet", "inet6"],
+        "ipv6_runtime_proof": "lo0_rdr_and_natlook",
+        "ipv6_non_lo0_route_to": "loaded_rule_static_only",
         "pf_rule_families": ["inet", "inet6"],
         "startup_health_probe": "passed",
         "state": "active",
@@ -89,6 +93,9 @@ def _validate_measured_inputs(
         "global_pf": "unchanged",
         "loopback_skip": "restored",
         "natlook_families": ["inet", "inet6"],
+        "ipv6_fixture": "owned_lo0_alias_restored",
+        "ipv6_runtime_proof": "lo0_rdr_and_natlook",
+        "ipv6_non_lo0_route_to": "loaded_rule_static_only",
     }
     if any(pf_report.get(key) != value for key, value in required_pf.items()):
         raise ValueError("Darwin PF/NATLOOK transport evidence is invalid")
@@ -203,9 +210,11 @@ def _expected_report(
                 "listener_hosts": ["127.0.0.1", "::1"],
                 "listener_port": 1080,
                 "natlook_families": ["inet", "inet6"],
+                "ipv6_runtime_proof": "lo0_rdr_and_natlook",
+                "ipv6_non_lo0_route_to": "loaded_rule_static_only",
                 "pf_rule_families": ["inet", "inet6"],
                 "startup_health_probe": "passed",
-                "test_destinations": "documentation_prefixes",
+                "test_destinations": "owned_documentation_prefixes",
             },
             {
                 "name": SCENARIOS[1],
@@ -213,6 +222,9 @@ def _expected_report(
                 "evidence": "darwin_kernel_private_anchor_test_ports",
                 "families": ["inet", "inet6"],
                 "natlook": "passed",
+                "ipv6_fixture": "owned_lo0_alias_restored",
+                "ipv6_runtime_proof": "lo0_rdr_and_natlook",
+                "ipv6_non_lo0_route_to": "loaded_rule_static_only",
                 "global_pf": "unchanged",
                 "loopback_skip": "restored",
                 "production_tcp_443_exercised": False,

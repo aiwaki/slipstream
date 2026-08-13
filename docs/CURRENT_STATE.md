@@ -19,24 +19,27 @@ documentation-prefix IPv6 destination, lifecycle still expected an artificial
 scheduler stall to mean wake, the browser smoke launched the Tauri GUI
 executable and therefore registered it with LaunchServices, and a Windows
 checkout fed CRLF into an LF-only workflow parser. The branch fixes each cause
-without weakening its gate: PF uses an active scoped link-local route and
-closes the inherited `/dev/pf` descriptor before dropping privileges; lifecycle
+without weakening its gate: PF uses a transaction-owned RFC3849 `lo0` `/128`
+and closes the inherited `/dev/pf` descriptor before dropping privileges; lifecycle
 injects one exact root-owned `0600` disposable system marker while production
 continues to use `kern.waketime`; the browser observer is a separate non-AppKit
 Cargo binary signed inside the same bundle; and the Windows parser normalizes
 line endings.
 
 The next exact-head run confirmed the dependency, Chromium, Windows contract,
-and complete Python suites, but also proved that merely changing the IPv6 smoke
-to `fe80::1%interface` was insufficient: the interface route existed while that
-hypothetical neighbor did not, so the client failed before reaching PF. The
-follow-up now parses the active interface's actually assigned link-local
-address, connects to that scoped local identity, and compares DIOCNATLOOK with
-its unscoped form. The protected installed-candidate transport gate uses the
-same discovered address rather than retaining the latent static `fe80::1`
-failure.
+and complete Python suites, but also proved both attempted IPv6 targets were
+invalid fixtures: `fe80::1%interface` depended on a nonexistent neighbor, while
+the Mac's actually assigned scoped link-local address was a local identity and
+did not traverse the inbound `rdr on lo0` path. The follow-up now owns one fixed
+RFC3849 `/128` alias on `lo0`, after proving the address absent, the existing
+route not `lo0`, and recording the exact pre-test `lo0` IPv6 set. Both the
+high-port PF smoke and installed-candidate transport gate remove that alias in
+`finally` and require the address, derived route, and IPv6 set to be restored.
+This live proof covers the production-family `inet6` loopback `rdr` and
+DIOCNATLOOK path. The non-`lo0` IPv6 `route-to` branch remains an exact
+loaded-rule/static assertion rather than a claim based on external IPv6.
 
-The current local freeze has 1,397 Python tests plus 60 subtests, 355 script
+The current local freeze has 1,404 Python tests plus 60 subtests, 374 script
 unittests, 89 tray-library tests, 29 browser-helper tests, 41 core tests, 40
 userspace-stack tests, 40 userspace-effect tests, and 241 Windows-adapter tests
 green. All Rust lints, Python compilation, project-state validation, workflow

@@ -53,73 +53,224 @@ class PfAnchorSmokeTests(unittest.TestCase):
         )
         listener.close.assert_called_once_with()
 
-    def test_ipv6_test_destination_uses_active_link_local_route(self) -> None:
-        inactive = SimpleNamespace(
-            returncode=0,
-            stdout="inet6 fe80::7%en7 prefixlen 64\nstatus: inactive\n",
-        )
-        active = SimpleNamespace(
-            returncode=0,
-            stdout="inet6 fe80::8%en8 prefixlen 64\nstatus: active\n",
-        )
-        with mock.patch.object(
-            pf_anchor_smoke.socket,
-            "if_nameindex",
-            return_value=((1, "lo0"), (7, "en7"), (8, "en8")),
-        ), mock.patch.object(
-            pf_anchor_smoke.subprocess,
-            "run",
-            side_effect=(inactive, active),
-        ) as run:
-            destination = pf_anchor_smoke._scoped_ipv6_test_destination()
+    def test_ipv6_loopback_fixture_installs_and_restores_exact_alias(self) -> None:
+        state = {"installed": False}
+        calls: list[tuple[str, ...]] = []
 
-        self.assertEqual(destination, "fe80::8%en8")
-        self.assertEqual(
-            [call.args[0] for call in run.call_args_list],
-            [
-                (str(pf_anchor_smoke.IFCONFIG), "en7"),
-                (str(pf_anchor_smoke.IFCONFIG), "en8"),
-            ],
+        def run(*command: str):
+            calls.append(command)
+            if command in {
+                (str(pf_anchor_smoke.IFCONFIG), "-a"),
+                (str(pf_anchor_smoke.IFCONFIG), "lo0"),
+            }:
+                alias = (
+                    "inet6 2001:db8:5354:5354::1 prefixlen 128\n"
+                    if state["installed"]
+                    else ""
+                )
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="inet6 ::1 prefixlen 128\n" + alias,
+                    stderr="",
+                )
+            if command == (
+                str(pf_anchor_smoke.ROUTE),
+                "-n",
+                "get",
+                "-inet6",
+                pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION,
+            ):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="interface: lo0\n" if state["installed"] else "",
+                    stderr="" if state["installed"] else "not in table",
+                )
+            if command[-1] == "alias":
+                state["installed"] = True
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if command[-1] == "-alias":
+                state["installed"] = False
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(command)
+
+        fixture = pf_anchor_smoke.IPv6LoopbackAliasFixture()
+        with mock.patch.object(fixture, "_run", side_effect=run):
+            self.assertEqual(
+                fixture.install(),
+                pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION,
+            )
+            fixture.cleanup()
+
+        self.assertFalse(state["installed"])
+        self.assertIn(
+            (
+                str(pf_anchor_smoke.IFCONFIG),
+                "lo0",
+                "inet6",
+                pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION,
+                "prefixlen",
+                "128",
+                "alias",
+            ),
+            calls,
+        )
+        self.assertIn(
+            (
+                str(pf_anchor_smoke.IFCONFIG),
+                "lo0",
+                "inet6",
+                pf_anchor_smoke.IPV6_LOOPBACK_TEST_DESTINATION,
+                "-alias",
+            ),
+            calls,
         )
 
-    def test_ipv6_test_destination_fails_closed_without_active_route(self) -> None:
-        unavailable = SimpleNamespace(returncode=1, stdout="")
-        with mock.patch.object(
-            pf_anchor_smoke.socket,
-            "if_nameindex",
-            return_value=((1, "lo0"), (7, "en7")),
-        ), mock.patch.object(
-            pf_anchor_smoke.subprocess,
-            "run",
-            return_value=unavailable,
-        ), self.assertRaisesRegex(
-            pf_anchor_smoke.SmokeError,
-            "no active non-loopback IPv6 link-local address",
-        ):
-            pf_anchor_smoke._scoped_ipv6_test_destination()
-
-    def test_ipv6_test_destination_ignores_unassigned_or_wrong_scope_addresses(self) -> None:
-        active = SimpleNamespace(
+    def test_ipv6_loopback_fixture_refuses_address_collision(self) -> None:
+        fixture = pf_anchor_smoke.IPv6LoopbackAliasFixture()
+        collision = SimpleNamespace(
             returncode=0,
             stdout=(
-                "inet6 2001:db8::8%en8 prefixlen 64\n"
-                "inet6 fe80::9%en9 prefixlen 64\n"
-                "inet6 fe80::8%en8 prefixlen 64\n"
-                "status: active\n"
+                "inet6 2001:db8:5354:5354::1 prefixlen 128\n"
             ),
+            stderr="",
         )
-        with mock.patch.object(
-            pf_anchor_smoke.socket,
-            "if_nameindex",
-            return_value=((8, "en8"),),
-        ), mock.patch.object(
-            pf_anchor_smoke.subprocess,
-            "run",
-            return_value=active,
-        ):
-            destination = pf_anchor_smoke._scoped_ipv6_test_destination()
+        with mock.patch.object(fixture, "_run", return_value=collision) as run:
+            with self.assertRaisesRegex(
+                pf_anchor_smoke.SmokeError,
+                "pre-existing IPv6 fixture address",
+            ):
+                fixture.install()
 
-        self.assertEqual(destination, "fe80::8%en8")
+        run.assert_called_once_with(str(pf_anchor_smoke.IFCONFIG), "-a")
+
+    def test_ipv6_loopback_fixture_refuses_preexisting_lo0_route(self) -> None:
+        fixture = pf_anchor_smoke.IPv6LoopbackAliasFixture()
+        results = (
+            SimpleNamespace(returncode=0, stdout="inet6 ::1 prefixlen 128\n", stderr=""),
+            SimpleNamespace(returncode=0, stdout="inet6 ::1 prefixlen 128\n", stderr=""),
+            SimpleNamespace(returncode=0, stdout="interface: lo0\n", stderr=""),
+        )
+        with mock.patch.object(fixture, "_run", side_effect=results):
+            with self.assertRaisesRegex(
+                pf_anchor_smoke.SmokeError,
+                "pre-existing lo0 route",
+            ):
+                fixture.install()
+
+    def test_ipv6_loopback_fixture_cleans_partial_failed_add(self) -> None:
+        fixture = pf_anchor_smoke.IPv6LoopbackAliasFixture()
+        state = {"installed": False}
+
+        def run(*command: str):
+            if command[0] == str(pf_anchor_smoke.ROUTE):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="interface: lo0\n" if state["installed"] else "",
+                    stderr="" if state["installed"] else "not in table",
+                )
+            if command[-1] == "alias":
+                state["installed"] = True
+                return SimpleNamespace(returncode=1, stdout="", stderr="partial add")
+            if command[-1] == "-alias":
+                state["installed"] = False
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            alias = (
+                "inet6 2001:db8:5354:5354::1 prefixlen 128\n"
+                if state["installed"]
+                else ""
+            )
+            return SimpleNamespace(
+                returncode=0,
+                stdout="inet6 ::1 prefixlen 128\n" + alias,
+                stderr="",
+            )
+
+        with mock.patch.object(fixture, "_run", side_effect=run):
+            with self.assertRaisesRegex(pf_anchor_smoke.SmokeError, "partial add"):
+                fixture.install()
+            fixture.cleanup()
+
+        self.assertFalse(state["installed"])
+
+    def test_ipv6_loopback_fixture_reconciles_add_verification_exception(self) -> None:
+        fixture = pf_anchor_smoke.IPv6LoopbackAliasFixture()
+        state = {"installed": False, "verification_failed": False}
+
+        def run(*command: str):
+            if command[0] == str(pf_anchor_smoke.ROUTE):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="interface: lo0\n" if state["installed"] else "",
+                    stderr="" if state["installed"] else "not in table",
+                )
+            if command[-1] == "alias":
+                state["installed"] = True
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if command[-1] == "-alias":
+                state["installed"] = False
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if (
+                command == (str(pf_anchor_smoke.IFCONFIG), "lo0")
+                and state["installed"]
+                and not state["verification_failed"]
+            ):
+                state["verification_failed"] = True
+                raise pf_anchor_smoke.SmokeError("verification command failed")
+            alias = (
+                "inet6 2001:db8:5354:5354::1 prefixlen 128\n"
+                if state["installed"]
+                else ""
+            )
+            return SimpleNamespace(
+                returncode=0,
+                stdout="inet6 ::1 prefixlen 128\n" + alias,
+                stderr="",
+            )
+
+        with mock.patch.object(fixture, "_run", side_effect=run):
+            with self.assertRaisesRegex(
+                pf_anchor_smoke.SmokeError,
+                "verification command failed",
+            ):
+                fixture.install()
+            fixture.cleanup()
+
+        self.assertFalse(state["installed"])
+
+    def test_ipv6_loopback_fixture_reports_cleanup_leak(self) -> None:
+        fixture = pf_anchor_smoke.IPv6LoopbackAliasFixture()
+        state = {"installed": False}
+
+        def run(*command: str):
+            if command[0] == str(pf_anchor_smoke.ROUTE):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="interface: lo0\n" if state["installed"] else "",
+                    stderr="" if state["installed"] else "not in table",
+                )
+            if command[-1] == "alias":
+                state["installed"] = True
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if command[-1] == "-alias":
+                return SimpleNamespace(returncode=1, stdout="", stderr="delete failed")
+            alias = (
+                "inet6 2001:db8:5354:5354::1 prefixlen 128\n"
+                if state["installed"]
+                else ""
+            )
+            return SimpleNamespace(
+                returncode=0,
+                stdout="inet6 ::1 prefixlen 128\n" + alias,
+                stderr="",
+            )
+
+        with mock.patch.object(fixture, "_run", side_effect=run):
+            fixture.install()
+            with self.assertRaisesRegex(
+                pf_anchor_smoke.SmokeError,
+                "owned IPv6 fixture address remains assigned",
+            ):
+                fixture.cleanup()
 
     def test_natlook_descriptor_is_an_integer_and_closed_exactly_once(self) -> None:
         tproxy = SimpleNamespace(_pf_fd=None)

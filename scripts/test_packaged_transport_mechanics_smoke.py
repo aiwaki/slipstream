@@ -10,16 +10,57 @@ import packaged_transport_mechanics_smoke as smoke
 
 
 class PackagedTransportMechanicsSmokeTests(unittest.TestCase):
-    def test_installed_natlook_uses_an_assigned_scoped_ipv6_address(self) -> None:
+    def test_installed_natlook_owns_ipv6_alias_only_around_matrix(self) -> None:
+        fixture = mock.Mock()
+        fixture.install.return_value = smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION
         with mock.patch.object(
             smoke.pf,
-            "_scoped_ipv6_test_destination",
-            return_value="fe80::1234%en0",
-        ) as discover:
-            destinations = smoke._installed_natlook_destinations()
+            "IPv6LoopbackAliasFixture",
+            return_value=fixture,
+        ), mock.patch.object(smoke, "_probe_installed_natlook") as probe:
+            smoke._probe_installed_natlook_matrix(501, 20)
 
-        self.assertEqual(destinations, (smoke.pf.TEST_DESTINATION, "fe80::1234%en0"))
-        discover.assert_called_once_with()
+        self.assertEqual(
+            probe.call_args_list,
+            [
+                mock.call(smoke.pf.TEST_DESTINATION, 501, 20),
+                mock.call(smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION, 501, 20),
+            ],
+        )
+        fixture.install.assert_called_once_with()
+        fixture.cleanup.assert_called_once_with()
+
+    def test_installed_natlook_cleans_ipv6_alias_after_probe_exception(self) -> None:
+        fixture = mock.Mock()
+        fixture.install.return_value = smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION
+        with mock.patch.object(
+            smoke.pf,
+            "IPv6LoopbackAliasFixture",
+            return_value=fixture,
+        ), mock.patch.object(
+            smoke,
+            "_probe_installed_natlook",
+            side_effect=(None, RuntimeError("probe failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "probe failed"):
+                smoke._probe_installed_natlook_matrix(501, 20)
+
+        fixture.cleanup.assert_called_once_with()
+
+    def test_installed_natlook_cleanup_failure_fails_the_gate(self) -> None:
+        fixture = mock.Mock()
+        fixture.install.return_value = smoke.pf.IPV6_LOOPBACK_TEST_DESTINATION
+        fixture.cleanup.side_effect = smoke.pf.SmokeError("alias leaked")
+        with mock.patch.object(
+            smoke.pf,
+            "IPv6LoopbackAliasFixture",
+            return_value=fixture,
+        ), mock.patch.object(smoke, "_probe_installed_natlook"):
+            with self.assertRaisesRegex(
+                smoke.TransportMechanicsError,
+                "fixture cleanup failed: alias leaked",
+            ):
+                smoke._probe_installed_natlook_matrix(501, 20)
 
     @mock.patch.dict(
         os.environ,

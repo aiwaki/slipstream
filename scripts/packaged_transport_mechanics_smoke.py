@@ -31,11 +31,6 @@ class TransportMechanicsError(RuntimeError):
     """The protected exact-candidate transport gate did not complete."""
 
 
-def _installed_natlook_destinations() -> tuple[str, str]:
-    """Use a real assigned link-local address, not a hypothetical neighbor."""
-    return pf.TEST_DESTINATION, pf._scoped_ipv6_test_destination()
-
-
 def _probe_installed_natlook(destination: str, uid: int, gid: int) -> None:
     """Hold an incomplete TLS record through the installed PF listener.
 
@@ -68,6 +63,25 @@ def _probe_installed_natlook(destination: str, uid: int, gid: int) -> None:
         raise TransportMechanicsError(
             f"installed candidate NATLOOK failed for family {family}"
         )
+
+
+def _probe_installed_natlook_matrix(uid: int, gid: int) -> None:
+    """Prove both NATLOOK families while owning the disposable IPv6 route."""
+    fixture = pf.IPv6LoopbackAliasFixture()
+    failure: BaseException | None = None
+    try:
+        _probe_installed_natlook(pf.TEST_DESTINATION, uid, gid)
+        _probe_installed_natlook(fixture.install(), uid, gid)
+    except BaseException as exc:
+        failure = exc
+    try:
+        fixture.cleanup()
+    except BaseException as exc:
+        raise TransportMechanicsError(
+            f"installed NATLOOK IPv6 fixture cleanup failed: {exc}"
+        ) from failure
+    if failure is not None:
+        raise failure
 
 
 def _validated_candidate_identity(
@@ -145,8 +159,7 @@ def _qualify_installed_candidate(app_bundle: Path) -> tuple[dict, dict]:
             lifecycle.INSTALL_ATTESTATION_PATH.read_text(encoding="utf-8")
         )
         lifecycle._assert_install_attestation_runtime(attestation, status)
-        for destination in _installed_natlook_destinations():
-            _probe_installed_natlook(destination, uid, gid)
+        _probe_installed_natlook_matrix(uid, gid)
         if target.attested_installed_path is None:
             raise TransportMechanicsError("candidate omitted installed daemon path")
         quic_report = _run_packaged_quic_gate(target.attested_installed_path)
@@ -156,6 +169,8 @@ def _qualify_installed_candidate(app_bundle: Path) -> tuple[dict, dict]:
             "listener_hosts": listener.get("hosts") if isinstance(listener, dict) else None,
             "listener_port": listener.get("port") if isinstance(listener, dict) else None,
             "natlook_families": ["inet", "inet6"],
+            "ipv6_runtime_proof": "lo0_rdr_and_natlook",
+            "ipv6_non_lo0_route_to": "loaded_rule_static_only",
             "pf_rule_families": ["inet", "inet6"],
             "startup_health_probe": "passed",
             "state": status.get("state"),
