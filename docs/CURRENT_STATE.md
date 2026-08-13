@@ -10,6 +10,46 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-13 P0 implementation is in progress on
+`codex/p0-macos-reliability`. Workstation evidence invalidated the preceding
+headed-Chrome qualification as a production readiness claim: the installed
+preview launched 271 browser workers and 184 GUI Chrome processes, including
+background activity, while a 51-second status-publication gap made the tray
+show `Off` although the daemon PID/listener remained alive. Safari/Chrome
+reports added four generic gates: reviewed Geph first-payload recovery
+(`xpersonatoy.com`), original-navigation pending (`app.aikido.dev`), complete
+regional denial (`weather.com`), and independently confirmed edge denial
+(`capacitorjs.com`). These are classes, not hostname exceptions.
+
+The branch replaces production LaunchServices/branded Chrome with a pinned
+app-bundled headless shell, adds the route-preflight v1 contract, separates
+heartbeat from slow health publication, adds dual-stack TCP listener/PF/NATLOOK
+coverage, and removes direct fallback for a reviewed required-exit
+first-payload failure. Required main CI now builds the app exactly once and
+creates one immutable `release-candidate-${SHA}`; packaged lifecycle and browser
+qualification consume parallel copies without rebuilding. Protected
+owned-Geph qualification and protected release readiness independently consume
+that exact candidate. Their manifest-bound attestations cover owned-Geph,
+Safari/Chrome live origins, dual-stack PF/NATLOOK plus QUIC v1/v2 mechanics, and
+the measured 30-minute invisibility soak. The publisher verifies all three
+exact workflow identities, attempts and digests and performs no PyInstaller,
+Cargo, or Tauri rebuild. Those protected gates have not yet passed, so
+`v0.1.9-preview.23` must not be published or installed. Next: finish
+shared-branch integration, pass local suites and required PR checks, merge,
+pass the exact-main candidate and both protected qualifications, then promote
+that unchanged candidate.
+
+The legacy transport-idle browser broker remains disabled permanently. The
+replacement exact-host pre-routing path is implemented on this branch and can
+start only from an installed, sealed app bundle after signed foreground
+Safari/Chrome provenance, within one eight-second deadline, through the pinned
+headless shell and the owned-Geph candidate. It is not evidence that the
+currently published `.22` preview has this behavior: the new path is not
+release-ready until the packaged, live-site, transport, and 30-minute
+invisibility gates pass for the exact candidate.
+
+## Historical Evidence
+
 Update 2026-08-13: the macOS release gate is complete. Preview
 [`v0.1.9-preview.22`](https://github.com/aiwaki/slipstream/releases/tag/v0.1.9-preview.22)
 was published by successful `build-app` run `31630147863` from exact main and

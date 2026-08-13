@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import ctypes.util
 import http.server
 import json
 import os
 from pathlib import Path
+import re
+import secrets
 import socket
 import ssl
 import stat
@@ -17,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,10 +34,305 @@ FIXTURE_HOST = "pending.slipstream.invalid"
 MAX_FRAME_BYTES = probe_runtime.MAX_IPC_BYTES
 MAX_END_TO_END_MS = 25_000
 WORKER_PROFILE_GLOB = "slipstream-browser-probe-" + "[0-9a-f]" * 32
+LSAPPINFO = "/usr/bin/lsappinfo"
+FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
+    "PostShowProcess",
+    "showRequest",
+    "becameFrontmost",
+    "bringForwardRequest",
+    "kLSNotifyApplicationShown",
+    "kLSNotifyShowRequest",
+    "kLSNotifyBecameFrontmost",
+    "kLSNotifyBringForwardRequest",
+)
 
 
 class QualificationError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class VisibilitySnapshot:
+    frontmost_asn: str
+    slipstream_window_ids: frozenset[int]
+    slipstream_launch_services: bool
+    slipstream_dock_visible: bool
+    gui_chrome_pids: frozenset[int]
+    headless_shell_pids: frozenset[int]
+
+
+def _run_text(command: tuple[str, ...], *, timeout: float = 5.0) -> str:
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise QualificationError(f"visibility command failed: {command[0]}")
+    return result.stdout
+
+
+def _frontmost_asn() -> str:
+    value = _run_text((LSAPPINFO, "front")).strip()
+    if not value.startswith("ASN:"):
+        raise QualificationError("frontmost application is unavailable")
+    return value
+
+
+def _launch_services_listing() -> str:
+    return _run_text((LSAPPINFO, "list"))
+
+
+def _slipstream_launch_services_state(listing: str) -> tuple[bool, bool]:
+    blocks = [
+        block
+        for block in re.split(r"(?m)(?=^\s*\d+\) )", listing)
+        if any(
+            marker in block.lower()
+            for marker in (
+                "slipstream",
+                "chrome-headless",
+                "chrome headless",
+                "headlesschrome",
+                "headless chrome",
+                "chromium",
+            )
+        )
+    ]
+    if not blocks:
+        return False, False
+    dock_visible = any(
+        'type="foreground"' in block.lower()
+        and " hidden" not in block.lower()
+        for block in blocks
+    )
+    return True, dock_visible
+
+
+def _slipstream_window_ids() -> frozenset[int]:
+    framework = ctypes.util.find_library("CoreGraphics")
+    foundation = ctypes.util.find_library("CoreFoundation")
+    if not framework or not foundation:
+        raise QualificationError("CoreGraphics visibility API is unavailable")
+    cg = ctypes.CDLL(framework)
+    cf = ctypes.CDLL(foundation)
+    cg.CGWindowListCopyWindowInfo.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    cg.CGWindowListCopyWindowInfo.restype = ctypes.c_void_p
+    cf.CFArrayGetCount.argtypes = [ctypes.c_void_p]
+    cf.CFArrayGetCount.restype = ctypes.c_long
+    cf.CFArrayGetValueAtIndex.argtypes = [ctypes.c_void_p, ctypes.c_long]
+    cf.CFArrayGetValueAtIndex.restype = ctypes.c_void_p
+    cf.CFDictionaryGetValue.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    cf.CFDictionaryGetValue.restype = ctypes.c_void_p
+    cf.CFStringCreateWithCString.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_uint32,
+    ]
+    cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+    cf.CFStringGetCString.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_long,
+        ctypes.c_uint32,
+    ]
+    cf.CFStringGetCString.restype = ctypes.c_bool
+    cf.CFNumberGetValue.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+    cf.CFNumberGetValue.restype = ctypes.c_bool
+    cf.CFRelease.argtypes = [ctypes.c_void_p]
+
+    owner_key = cf.CFStringCreateWithCString(None, b"kCGWindowOwnerName", 0x08000100)
+    number_key = cf.CFStringCreateWithCString(None, b"kCGWindowNumber", 0x08000100)
+    windows = cg.CGWindowListCopyWindowInfo(0, 0)
+    if not owner_key or not number_key or not windows:
+        for value in (owner_key, number_key, windows):
+            if value:
+                cf.CFRelease(value)
+        raise QualificationError("CoreGraphics window snapshot failed")
+    found: set[int] = set()
+    try:
+        for index in range(cf.CFArrayGetCount(windows)):
+            entry = cf.CFArrayGetValueAtIndex(windows, index)
+            owner = cf.CFDictionaryGetValue(entry, owner_key)
+            number = cf.CFDictionaryGetValue(entry, number_key)
+            if not owner or not number:
+                continue
+            buffer = ctypes.create_string_buffer(512)
+            if not cf.CFStringGetCString(owner, buffer, len(buffer), 0x08000100):
+                continue
+            owner_name = buffer.value.decode("utf-8").lower()
+            if not any(
+                marker in owner_name
+                for marker in (
+                    "slipstream",
+                    "chrome-headless",
+                    "chrome headless",
+                    "headlesschrome",
+                    "headless chrome",
+                    "chromium",
+                )
+            ):
+                continue
+            window_id = ctypes.c_int64()
+            if cf.CFNumberGetValue(number, 4, ctypes.byref(window_id)):
+                found.add(int(window_id.value))
+    finally:
+        cf.CFRelease(windows)
+        cf.CFRelease(owner_key)
+        cf.CFRelease(number_key)
+    return frozenset(found)
+
+
+def _browser_processes() -> tuple[frozenset[int], frozenset[int]]:
+    listing = _run_text(("/bin/ps", "-axo", "pid=,command="))
+    gui: set[int] = set()
+    headless: set[int] = set()
+    for line in listing.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2:
+            continue
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            continue
+        command = fields[1]
+        if "chrome-headless-shell" in command:
+            headless.add(pid)
+        if any(
+            marker in command
+            for marker in (
+                "/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+            )
+        ):
+            gui.add(pid)
+    return frozenset(gui), frozenset(headless)
+
+
+def _visibility_snapshot() -> VisibilitySnapshot:
+    listing = _launch_services_listing()
+    registered, dock_visible = _slipstream_launch_services_state(listing)
+    gui_chrome, headless_shell = _browser_processes()
+    return VisibilitySnapshot(
+        frontmost_asn=_frontmost_asn(),
+        slipstream_window_ids=_slipstream_window_ids(),
+        slipstream_launch_services=registered,
+        slipstream_dock_visible=dock_visible,
+        gui_chrome_pids=gui_chrome,
+        headless_shell_pids=headless_shell,
+    )
+
+
+class VisibilityMonitor:
+    def __init__(self) -> None:
+        self.before = _visibility_snapshot()
+        if (
+            self.before.slipstream_window_ids
+            or self.before.slipstream_launch_services
+            or self.before.slipstream_dock_visible
+            or self.before.gui_chrome_pids
+            or self.before.headless_shell_pids
+        ):
+            raise QualificationError("visibility qualification requires a clean GUI baseline")
+        self.samples: list[VisibilitySnapshot] = []
+        self.events: list[str] = []
+        self.failure: BaseException | None = None
+        self.stop = threading.Event()
+        self.ready = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.listener: subprocess.Popen[str] | None = None
+
+    def start(self) -> None:
+        self.listener = subprocess.Popen(
+            (LSAPPINFO, "listen", "+all", "wait", "-duration", "30"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        self.thread = threading.Thread(target=self._sample, daemon=True)
+        self.thread.start()
+        if not self.ready.wait(2.0):
+            self.stop.set()
+            self.thread.join(timeout=2.0)
+            if self.listener is not None:
+                self.listener.terminate()
+                self.listener.communicate(timeout=5.0)
+            raise QualificationError("visibility sampler did not start")
+        if self.failure is not None:
+            self.stop.set()
+            if self.listener is not None:
+                self.listener.terminate()
+                self.listener.communicate(timeout=5.0)
+            raise QualificationError("visibility sampler failed") from self.failure
+
+    def _sample(self) -> None:
+        try:
+            while not self.stop.is_set():
+                sample = _visibility_snapshot()
+                self.samples.append(sample)
+                self.ready.set()
+                if self.stop.wait(0.1):
+                    break
+        except BaseException as error:
+            self.failure = error
+            self.ready.set()
+
+    def close(self) -> VisibilitySnapshot:
+        self.stop.set()
+        if self.thread is not None:
+            self.thread.join(timeout=5.0)
+            if self.thread.is_alive():
+                raise QualificationError("visibility sampler survived cleanup")
+        if self.listener is not None:
+            self.listener.terminate()
+            try:
+                output, _ = self.listener.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self.listener.kill()
+                output, _ = self.listener.communicate(timeout=5.0)
+            self.events = output.splitlines()
+        after = _visibility_snapshot()
+        self.samples.append(after)
+        if self.failure is not None:
+            raise QualificationError("visibility sampler failed") from self.failure
+        return after
+
+    def assert_invisible(self, after: VisibilitySnapshot) -> None:
+        if after.frontmost_asn != self.before.frontmost_asn:
+            raise QualificationError("browser worker changed the frontmost application")
+        if any(sample.frontmost_asn != self.before.frontmost_asn for sample in self.samples):
+            raise QualificationError("browser worker temporarily changed the frontmost application")
+        if any(sample.slipstream_window_ids for sample in self.samples):
+            raise QualificationError("browser worker created a CoreGraphics window")
+        if any(sample.slipstream_launch_services for sample in self.samples):
+            raise QualificationError("browser worker registered with LaunchServices")
+        if any(sample.slipstream_dock_visible for sample in self.samples):
+            raise QualificationError("browser worker exposed a Dock application")
+        if any(sample.gui_chrome_pids for sample in self.samples):
+            raise QualificationError("browser worker launched GUI Chrome")
+        if after.headless_shell_pids:
+            raise QualificationError("browser worker leaked its headless process tree")
+        event_text = "\n".join(self.events).lower()
+        if any(
+            marker in event_text
+            for marker in (
+                "slipstream",
+                "chrome-headless",
+                "chrome headless",
+                "headlesschrome",
+                "headless chrome",
+                "chromium",
+            )
+        ):
+            event_kind = "visible" if any(
+                event.lower() in event_text
+                for event in FORBIDDEN_LAUNCH_SERVICES_EVENTS
+            ) else "unexpected"
+            raise QualificationError(
+                f"browser worker emitted an {event_kind} LaunchServices event"
+            )
 
 
 def _require_disposable_ci() -> None:
@@ -293,7 +593,6 @@ def _job(now_ms: int) -> dict[str, object]:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-bundle", required=True, type=Path)
-    parser.add_argument("--chrome-executable", type=Path)
     return parser.parse_args()
 
 
@@ -301,11 +600,9 @@ def main() -> int:
     _require_disposable_ci()
     arguments = _parse_args()
     app_bundle = arguments.app_bundle.resolve(strict=True)
-    chrome = (
-        arguments.chrome_executable.resolve(strict=True)
-        if arguments.chrome_executable is not None
-        else None
-    )
+    chrome = app_bundle / "Contents" / "Resources" / "chromium-headless-shell" / "chrome-headless-shell"
+    if not chrome.is_file() or not os.access(chrome, os.X_OK):
+        raise QualificationError("packaged pinned headless shell is unavailable")
     executable = app_bundle / "Contents" / "MacOS" / "slipstream"
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise QualificationError("packaged browser worker is unavailable")
@@ -314,6 +611,7 @@ def main() -> int:
         raise QualificationError("qualification is not the active console user")
 
     before_profiles = _profile_residue()
+    visibility = VisibilityMonitor()
     with tempfile.TemporaryDirectory(
         prefix="slipstream-browser-probe-smoke-",
         dir="/tmp",
@@ -322,8 +620,10 @@ def main() -> int:
         fixture = HangingHttpsFixture(directory)
         broker = None
         failure = None
+        after_visibility = None
         started_at = time.monotonic()
         try:
+            visibility.start()
             fixture.start()
             now_ms = int(time.time() * 1000)
             socket_path = directory / "probe.sock"
@@ -342,14 +642,27 @@ def main() -> int:
                 ),
                 "SLIPSTREAM_BROWSER_PROBE_IGNORE_CERTIFICATE_ERRORS": "1",
             }
-            if chrome is not None:
-                environment["SLIPSTREAM_BROWSER_PROBE_CHROME"] = str(chrome)
-            launcher = probe_runtime.PendingNavigationBrowserWorkerLauncher(
-                executable=executable,
-                runtime_root=directory / "launchers",
-                disposable_environment=environment,
+            launch_id = secrets.token_hex(
+                probe_runtime.WORKER_LAUNCH_ID_HEX_CHARS // 2
             )
-            launch_id = launcher.launch()
+            worker_environment = os.environ.copy()
+            worker_environment.update(environment)
+            worker_environment[
+                probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV
+            ] = launch_id
+            worker = subprocess.run(
+                (
+                    str(executable),
+                    probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+                ),
+                env=worker_environment,
+                capture_output=True,
+                text=True,
+                timeout=MAX_END_TO_END_MS / 1000,
+                check=False,
+            )
+            if worker.returncode != 0:
+                raise QualificationError("direct packaged browser worker failed")
             if not probe_runtime._valid_worker_launch_id(launch_id):
                 raise QualificationError("browser worker did not complete")
         except BaseException as error:
@@ -362,8 +675,16 @@ def main() -> int:
                 except BaseException as error:
                     if failure is None:
                         failure = error
+            try:
+                after_visibility = visibility.close()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
         if failure is not None:
             raise failure
+        if after_visibility is None:
+            raise QualificationError("visibility monitor produced no final snapshot")
+        visibility.assert_invisible(after_visibility)
 
         elapsed_ms = round((time.monotonic() - started_at) * 1000)
         if elapsed_ms <= 0 or elapsed_ms > MAX_END_TO_END_MS:
@@ -381,16 +702,16 @@ def main() -> int:
         if residue:
             raise QualificationError("owner-private Chrome profile survived cleanup")
         print(json.dumps({
-            "browser": (
-                "chrome_for_testing"
-                if chrome is not None
-                else "installed_google_chrome"
-            ),
+            "browser": "packaged_chromium_headless_shell",
             "end_to_end_ms": elapsed_ms,
             "navigation_requests": fixture.requests,
             "outcome": broker.submitted[0]["outcome"],
             "sandbox_disabled": False,
-            "visible_window": False,
+            "frontmost_unchanged": True,
+            "launch_services_visible_events": 0,
+            "sampled_coregraphics_windows": 0,
+            "slipstream_dock_visible": False,
+            "visibility_samples": len(visibility.samples),
         }, sort_keys=True))
     return 0
 

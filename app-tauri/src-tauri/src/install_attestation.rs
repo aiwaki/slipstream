@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const INSTALL_ATTESTATION_PATH: &str =
     "/Library/Application Support/dev.slipstream.tray/install-attestation.json";
-const INSTALL_ATTESTATION_SCHEMA_VERSION: u32 = 2;
+const INSTALL_ATTESTATION_SCHEMA_VERSION: u32 = 3;
 const INSTALL_ATTESTATION_MAX_BYTES: u64 = 4096;
 const INSTALLED_DAEMON_MODE: u32 = 0o700;
 const EVIDENCE_MODE: u32 = 0o644;
@@ -30,6 +30,7 @@ pub(crate) struct InstalledLaunchdIdentity {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct InstalledListenerIdentity {
     pub(crate) host: String,
+    pub(crate) hosts: Vec<String>,
     pub(crate) port: u16,
 }
 
@@ -172,6 +173,9 @@ pub(crate) fn install_attestation_at(
         && evidence.launchd.label == launchd_label
         && evidence.launchd.pid > 0
         && evidence.listener.host == "127.0.0.1"
+        && evidence.listener.hosts.len() == 2
+        && evidence.listener.hosts[0] == "127.0.0.1"
+        && evidence.listener.hosts[1] == "::1"
         && evidence.listener.port == listener_port
         && state_and_pf_match;
     valid.then_some(evidence)
@@ -219,7 +223,7 @@ mod tests {
         let evidence_uid = fs::symlink_metadata(&root).unwrap().uid();
         let witness_metadata = fs::symlink_metadata(&witness_path).unwrap();
         let evidence = serde_json::json!({
-            "schema_version": 2,
+            "schema_version": 3,
             "source_sha256": bundled_sha256,
             "daemon": {
                 "path": installed,
@@ -242,6 +246,7 @@ mod tests {
             },
             "listener": {
                 "host": "127.0.0.1",
+                "hosts": ["127.0.0.1", "::1"],
                 "port": 1080
             },
             "state": "active",
@@ -259,6 +264,20 @@ mod tests {
             evidence_uid,
         )
         .is_some());
+
+        let mut ipv4_only = evidence.clone();
+        ipv4_only["listener"]["hosts"] = serde_json::json!(["127.0.0.1"]);
+        fs::write(&evidence_path, serde_json::to_vec(&ipv4_only).unwrap()).unwrap();
+        assert!(install_attestation_at(
+            &evidence_path,
+            &bundled,
+            &installed,
+            "dev.slipstream.tproxy",
+            1080,
+            evidence_uid,
+        )
+        .is_none());
+        fs::write(&evidence_path, serde_json::to_vec(&evidence).unwrap()).unwrap();
 
         fs::remove_file(&installed).unwrap();
         assert!(install_attestation_at(

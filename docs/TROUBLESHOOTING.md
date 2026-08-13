@@ -18,10 +18,60 @@ unknown-host promotion.
 Use Geph only for services that need a foreign exit because the service rejects
 Russian IP addresses. Do not route Discord or YouTube through Geph as a fix.
 
-### A clean Chrome profile stays at `about:blank` after protected qualification
+### Slipstream briefly opens Chrome or takes focus while idle
 
-First verify that the exact Slipstream companion is installed and enabled in
-the affected branded-Chrome profile. The user native-host manifest proves only
+This is a defect in `v0.1.9-preview.22`, not expected background activity. Its
+generic pending-navigation admission could launch ordinary Google Chrome for a
+background TLS idle. Do not install a browser extension or register with Chrome
+Web Store as a workaround. The P0 replacement uses only the bundled pinned
+`Contents/Resources/chromium-headless-shell` runtime and must produce no Chrome
+window, Dock item, LaunchServices process, retained profile, or focus change.
+Its fresh owner-private temporary profile must disappear with the single owned
+process tree and never touches a user's Safari or Chrome profile.
+The legacy transport-idle broker is disabled permanently. Its replacement is
+an exact-host pre-routing path that additionally requires signed foreground
+Safari/Chrome provenance and recent input. That replacement is implemented in
+the `.23` candidate source but is not a claim about the installed `.22`; it
+must still pass packaged visibility, live-site, transport, and idle-soak gates
+before publication.
+
+For a packaged candidate, verify the runtime without starting it:
+
+```bash
+test -x /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell
+python3 -m json.tool \
+  /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/manifest.json
+```
+
+### The menu flips to Off and then recovers by itself
+
+First distinguish a stale health snapshot from an absent service. If the daemon
+PID and owned listener remain alive while the status timestamp pauses, this is
+not `Off`; it is a health-publisher stall. P0 status carries an independent
+heartbeat and the menu retains the last confirmed active state as
+`Restoring/Updating` until repeated ping plus PID/listener checks prove absence.
+Do not restart Geph or reinstall merely because one snapshot is older than the
+former 15-second cutoff.
+
+### A page loads but shows a regional or security denial
+
+A complete denial page is not a successful user navigation. Current generic
+categories distinguish regional denial, edge-access denial, challenge/auth and
+usable content. Edge denial alone never learns a route: a fresh owned-Geph
+connection must independently return a complete non-denial response for the
+same exact host. Ordinary login pages, CAPTCHA, HTTP 403/429, truncated bodies,
+or the same denial on both routes remain non-actionable.
+
+### Historical `.22`: a clean Chrome profile stays at `about:blank`
+
+This section explains an archival preview failure; it is not a current setup
+instruction. The P0 architecture does not require or distribute a companion
+extension, so do not install one or enable Developer Mode to apply this old
+diagnosis.
+
+When reproducing that archival build, the first check was whether its exact
+Slipstream companion was installed and enabled in the affected branded-Chrome
+profile. The user native-host manifest proves only
 that an already installed extension with the allowed origin may start the
 host; it does not install the extension. The protected qualification uses a
 fresh profile with the reviewed source loaded as an unpacked extension, so its
@@ -33,8 +83,8 @@ clean browser profile had no companion, emitted no semantic/recovery event,
 and remained pending for 75 seconds. Exact rollback restored the previous
 application and all network/runtime invariants. Do not compensate by weakening
 the navigation signal, closing a quiet relay from byte count alone, or routing
-the host through Geph without the normal independent evidence. Production
-qualification requires the reviewed extension ID
+the host through Geph without the normal independent evidence. That historical
+qualification required the reviewed extension ID
 `cecdingohhpfggapnlbghppcegbaciam` to be installed and enabled in that actual
 profile.
 

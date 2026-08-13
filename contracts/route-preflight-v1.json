@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "contract": "slipstream.route-preflight",
+  "contract_version": 1,
+  "scope": "local_exact_host_route_qualification",
+  "bounds": {
+    "max_payload_bytes": 2048,
+    "capability_bits": 128,
+    "max_candidate_routes": 4,
+    "max_deadline_ms": 8000
+  },
+  "candidate_routes": [
+    "system",
+    "app_doh",
+    "local_strategy",
+    "owned_geph"
+  ],
+  "outcomes": [
+    "navigation_pending",
+    "regional_access_denied",
+    "edge_access_denied",
+    "challenge_or_auth",
+    "usable",
+    "terminal_error"
+  ],
+  "privacy": {
+    "job_fields": [
+      "schema_version",
+      "capability",
+      "host",
+      "candidate_routes",
+      "issued_at_unix_ms",
+      "deadline_unix_ms"
+    ],
+    "result_fields": [
+      "schema_version",
+      "capability",
+      "host",
+      "candidate_route",
+      "outcome",
+      "observed_at_unix_ms"
+    ],
+    "forbidden_fields": [
+      "url",
+      "path",
+      "query",
+      "title",
+      "text",
+      "body",
+      "cookies",
+      "form_data",
+      "browser_error",
+      "request_id",
+      "tab_id",
+      "ip",
+      "ray_id"
+    ],
+    "remote_transport": false
+  },
+  "job_defaults": {
+    "schema_version": 1,
+    "capability": "0123456789abcdef0123456789abcdef",
+    "host": "example.net",
+    "candidate_routes": [
+      "system",
+      "local_strategy",
+      "owned_geph"
+    ],
+    "issued_at_unix_ms": 1000000,
+    "deadline_unix_ms": 1008000
+  },
+  "result_defaults": {
+    "schema_version": 1,
+    "capability": "0123456789abcdef0123456789abcdef",
+    "host": "example.net",
+    "candidate_route": "system",
+    "outcome": "usable",
+    "observed_at_unix_ms": 1000500
+  },
+  "invariants": {
+    "one_shot": true,
+    "exact_host_bound": true,
+    "candidate_route_bound": true,
+    "deadline_bound": true,
+    "result_is_observation_not_route_authority": true,
+    "alternative_route_confirmation_required": true,
+    "protected_routes_are_not_candidates": true,
+    "background_transport_idle_is_not_admission": true,
+    "system_network_mutation": false
+  }
+}

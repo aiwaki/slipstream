@@ -37,6 +37,7 @@ PRODUCTION_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
 SMOKE_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-smoke-lo0-skip.json")
 STATUS_PATH = Path("/var/run/slipstream.status")
 TEST_DESTINATION = "198.51.100.1"
+TEST_DESTINATION_V6 = "2001:db8::1"
 DEFAULT_TARGET_PORT = 18443
 DEFAULT_PROXY_PORT = 19443
 MARKER = b"slipstream-pf-smoke\n"
@@ -127,12 +128,20 @@ def build_redirect_rules(*, target_port: int, proxy_port: int) -> str:
     return (
         "rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 "
         f"port {target_port} -> 127.0.0.1 port {proxy_port}\n"
+        "rdr on lo0 inet6 proto tcp from any to ! ::1/128 "
+        f"port {target_port} -> ::1 port {proxy_port}\n"
         "pass out quick on ! lo0 route-to (lo0 127.0.0.1) inet proto tcp "
         f"from any to any port {target_port} user != root\n"
         "pass out quick on lo0 inet proto tcp from any to any "
         f"port {target_port} no state\n"
         "pass in quick on lo0 reply-to (lo0 127.0.0.1) inet proto tcp "
         f"from any to 127.0.0.1 port {proxy_port}\n"
+        "pass out quick on ! lo0 route-to (lo0 ::1) inet6 proto tcp "
+        f"from any to any port {target_port} user != root\n"
+        "pass out quick on lo0 inet6 proto tcp from any to any "
+        f"port {target_port} no state\n"
+        "pass in quick on lo0 reply-to (lo0 ::1) inet6 proto tcp "
+        f"from any to ::1 port {proxy_port}\n"
     )
 
 
@@ -228,11 +237,16 @@ def _original_user() -> tuple[int, int]:
     return uid, gid
 
 
-def _open_listener(proxy_port: int) -> socket.socket:
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def _open_listener(proxy_port: int, family: int = socket.AF_INET) -> socket.socket:
+    if family not in {socket.AF_INET, socket.AF_INET6}:
+        raise SmokeError(f"unsupported listener family: {family}")
+    listener = socket.socket(family, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
     listener.settimeout(5)
-    listener.bind(("127.0.0.1", proxy_port))
+    host = "127.0.0.1" if family == socket.AF_INET else "::1"
+    listener.bind((host, proxy_port))
     listener.listen(1)
     return listener
 
@@ -244,6 +258,8 @@ def _probe_redirect(
     uid: int,
     gid: int,
     destination: str = TEST_DESTINATION,
+    original_destination_lookup=None,
+    expected_original_destination: tuple[str, int] | None = None,
 ) -> None:
 
     pid = os.fork()
@@ -263,6 +279,13 @@ def _probe_redirect(
     try:
         connection, _ = listener.accept()
         with connection:
+            if original_destination_lookup is not None:
+                original = original_destination_lookup(connection)
+                if original != expected_original_destination:
+                    raise SmokeError(
+                        "DIOCNATLOOK returned the wrong original destination: "
+                        f"actual={original!r}, expected={expected_original_destination!r}"
+                    )
             connection.sendall(MARKER)
     except (OSError, TimeoutError) as exc:
         raise SmokeError("test-port redirect did not reach the local listener") from exc
@@ -351,7 +374,8 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     sentinel_before: tuple[str, str] | None = None
     cleanup_errors: list[str] = []
     failure: BaseException | None = None
-    listener: socket.socket | None = None
+    listener_v4: socket.socket | None = None
+    listener_v6: socket.socket | None = None
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
@@ -360,7 +384,8 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        listener = _open_listener(proxy_port)
+        listener_v4 = _open_listener(proxy_port, socket.AF_INET)
+        listener_v6 = _open_listener(proxy_port, socket.AF_INET6)
         _load_anchor(runner, SENTINEL_ANCHOR, sentinel_rules())
         sentinel_before = _anchor_snapshot(runner, SENTINEL_ANCHOR)
         if not sentinel_before[1]:
@@ -385,26 +410,57 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             raise SmokeError("PF loopback lease was created without owning the skip flag")
 
         nat, filters = _anchor_snapshot(runner, SLIPSTREAM_ANCHOR)
-        if str(target_port) not in nat or str(proxy_port) not in nat:
+        if (
+            str(target_port) not in nat
+            or str(proxy_port) not in nat
+            or "-> 127.0.0.1" not in nat
+            or "inet6" not in nat
+            or "-> ::1" not in nat
+        ):
             raise SmokeError("private anchor did not load the test redirect")
-        if str(target_port) not in filters or "route-to" not in filters:
+        if (
+            str(target_port) not in filters
+            or "route-to (lo0 127.0.0.1)" not in filters
+            or "route-to (lo0 ::1)" not in filters
+            or "inet6" not in filters
+        ):
             raise SmokeError("private anchor did not load the test route rule")
         if _anchor_snapshot(runner, SENTINEL_ANCHOR) != sentinel_before:
             raise SmokeError("arming Slipstream changed the sentinel anchor")
 
         _probe_redirect(
-            listener=_open_listener(target_port),
+            listener=_open_listener(target_port, socket.AF_INET),
             target_port=target_port,
             uid=uid,
             gid=gid,
             destination="127.0.0.1",
         )
         _probe_redirect(
-            listener=listener,
+            listener=listener_v4,
             target_port=target_port,
             uid=uid,
             gid=gid,
+            original_destination_lookup=tproxy.orig_dst,
+            expected_original_destination=(TEST_DESTINATION, target_port),
         )
+        listener_v4 = None
+        _probe_redirect(
+            listener=_open_listener(target_port, socket.AF_INET6),
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination="::1",
+        )
+        _probe_redirect(
+            listener=listener_v6,
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination=TEST_DESTINATION_V6,
+            original_destination_lookup=tproxy.orig_dst,
+            expected_original_destination=(TEST_DESTINATION_V6, target_port),
+        )
+        listener_v6 = None
         if not tproxy.suspend_geo_exit_backend("pf smoke runtime failure"):
             raise SmokeError("runtime failure did not cool down Geph")
         if _anchor_snapshot(runner, SLIPSTREAM_ANCHOR) != (nat, filters):
@@ -419,8 +475,10 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     finally:
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
-        if listener is not None:
-            listener.close()
+        if listener_v4 is not None:
+            listener_v4.close()
+        if listener_v6 is not None:
+            listener_v6.close()
         for anchor in (SLIPSTREAM_ANCHOR, SENTINEL_ANCHOR):
             try:
                 _flush_anchor(runner, anchor)
@@ -451,6 +509,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
         "sentinel": "unchanged",
         "global_pf": "unchanged",
         "loopback_target": "excluded",
+        "natlook_families": ["inet", "inet6"],
         "loopback_skip": "restored",
         "target_port": target_port,
         "proxy_port": proxy_port,

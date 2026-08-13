@@ -18,8 +18,13 @@ class PfAnchorSmokeTests(unittest.TestCase):
         self.assertIn("port 18443", rules)
         self.assertIn("port 19443", rules)
         self.assertIn("to ! 127.0.0.0/8", rules)
+        self.assertIn("rdr on lo0 inet6 proto tcp", rules)
+        self.assertIn("to ! ::1/128", rules)
+        self.assertIn("route-to (lo0 ::1) inet6", rules)
+        self.assertIn("reply-to (lo0 ::1) inet6", rules)
         self.assertIn("pass out quick on ! lo0 route-to", rules)
         self.assertIn("pass in quick on lo0 reply-to", rules)
+        self.assertNotIn("proto udp", rules)
         self.assertNotIn("port 443 ", rules)
 
     def test_redirect_rules_reject_tcp_443(self) -> None:

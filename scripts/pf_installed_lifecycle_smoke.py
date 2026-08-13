@@ -1876,7 +1876,16 @@ def _rule_has_port(rules: str, port: int) -> bool:
 
 def _assert_anchor_active(runner: pf.PfctlRunner) -> None:
     nat, rules = pf._anchor_snapshot(runner, pf.SLIPSTREAM_ANCHOR)
-    if not _rule_has_port(nat, 443) or not _rule_has_port(nat, 1080) or "route-to" not in rules:
+    if (
+        not _rule_has_port(nat, 443)
+        or not _rule_has_port(nat, 1080)
+        or "-> 127.0.0.1" not in nat
+        or "inet6" not in nat
+        or "-> ::1" not in nat
+        or "route-to (lo0 127.0.0.1)" not in rules
+        or "route-to (lo0 ::1)" not in rules
+        or "inet6" not in rules
+    ):
         raise LifecycleError(
             "installed daemon did not arm the production private anchor: "
             f"nat={nat!r}, rules={rules!r}"
@@ -1946,7 +1955,11 @@ def _assert_install_attestation_runtime(evidence: dict, status: dict) -> None:
         or launchd.get("pid") <= 0
     ):
         raise LifecycleError(f"launchd attestation mismatch: {launchd!r}")
-    if listener != {"host": "127.0.0.1", "port": 1080}:
+    if listener != {
+        "host": "127.0.0.1",
+        "hosts": ["127.0.0.1", "::1"],
+        "port": 1080,
+    }:
         raise LifecycleError(f"listener attestation mismatch: {listener!r}")
     state = evidence.get("state")
     if state not in {"active", "dormant"}:

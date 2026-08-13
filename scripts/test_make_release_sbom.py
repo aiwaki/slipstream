@@ -179,6 +179,23 @@ cryptography==46.0.5 \\
         )
         tg_version = root / "tg-ws-proxy.VERSION"
         tg_version.write_text("1.8.1\n", encoding="utf-8")
+        chromium_source = root / "chromium-headless-shell.SOURCE.json"
+        chromium_source.write_text(
+            json.dumps(
+                {
+                    "archive": {
+                        "length": 98976279,
+                        "sha256": "ff" * 32,
+                        "url": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.77/mac-arm64/chrome-headless-shell-mac-arm64.zip",
+                    },
+                    "component": "Chrome for Testing chrome-headless-shell",
+                    "license_path": "LICENSE.headless_shell",
+                    "platform": "mac-arm64",
+                    "version": "151.0.7922.77",
+                }
+            ),
+            encoding="utf-8",
+        )
         return {
             "cargo_lock": cargo_lock,
             "cargo_metadata": cargo_metadata,
@@ -187,6 +204,7 @@ cryptography==46.0.5 \\
             "geph_version_file": geph_version,
             "geph_source_file": geph_source,
             "tg_ws_proxy_version_file": tg_version,
+            "chromium_headless_shell_source_file": chromium_source,
         }
 
     def _document(self, root: Path) -> dict:
@@ -252,6 +270,16 @@ cryptography==46.0.5 \\
             self.assertEqual(npm.checksum_algorithm, "SHA512")
             self.assertEqual(npm.checksum_value, "ab" * 64)
 
+            chromium = next(
+                item
+                for item in components
+                if item.name == "chromium-headless-shell"
+            )
+            self.assertEqual(chromium.purpose, "APPLICATION")
+            self.assertEqual(chromium.license_declared, "NOASSERTION")
+            self.assertEqual(chromium.checksum_algorithm, "SHA256")
+            self.assertEqual(chromium.checksum_value, "ff" * 32)
+
     def test_document_validates_against_release_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             document = self._document(Path(tmp))
@@ -267,7 +295,7 @@ cryptography==46.0.5 \\
             )
 
             self.assertEqual(summary["format"], "SPDX-2.3")
-            self.assertEqual(summary["dependency_count"], 6)
+            self.assertEqual(summary["dependency_count"], 7)
             self.assertEqual(
                 document["creationInfo"]["created"],
                 make_release_sbom.utc_timestamp(SOURCE_DATE_EPOCH),
@@ -320,6 +348,8 @@ cryptography==46.0.5 \\
                 str(inputs["geph_source_file"]),
                 "--tg-ws-proxy-version-file",
                 str(inputs["tg_ws_proxy_version_file"]),
+                "--chromium-headless-shell-source-file",
+                str(inputs["chromium_headless_shell_source_file"]),
                 "--output",
                 str(output),
             ]
@@ -330,7 +360,7 @@ cryptography==46.0.5 \\
 
             result = json.loads(stdout.getvalue())
             document = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(result["package_count"], 7)
+            self.assertEqual(result["package_count"], 8)
             self.assertEqual(document["name"], f"Slipstream-{VERSION}-{TARGET}")
             first_payload = output.read_bytes()
             with redirect_stdout(io.StringIO()):

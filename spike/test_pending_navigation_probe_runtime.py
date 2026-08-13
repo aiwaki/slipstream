@@ -91,6 +91,141 @@ def test_tproxy_lazy_worker_receives_only_the_closed_disposable_environment(
     assert observed["worker"]["pending_jobs"] is runtime.state_size
 
 
+def test_direct_headless_launcher_drops_uid_gid_without_aqua_or_sudo(tmp_path):
+    bundle = tmp_path / "Slipstream.app"
+    executable = bundle / "Contents" / "MacOS" / "slipstream"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"worker")
+    executable.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    identity = probe_runtime.ConsoleUserIdentity(
+        uid=os.getuid(),
+        gid=os.getgid(),
+        username="browser-user",
+        home=str(home),
+    )
+    observed = {}
+
+    def run(command, timeout, uid, gid, environment, working_directory):
+        observed.update(
+            command=command,
+            timeout=timeout,
+            uid=uid,
+            gid=gid,
+            environment=environment,
+            working_directory=working_directory,
+        )
+        return subprocess.CompletedProcess(command, 0)
+
+    launcher = probe_runtime.DirectHeadlessBrowserWorkerLauncher(
+        executable=executable,
+        geph_port=9954,
+        identity_probe=lambda: identity,
+        command_runner=run,
+        codesign_runner=lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0
+        ),
+        effective_uid=lambda: 0,
+    )
+
+    launch_id = launcher.launch()
+
+    assert probe_runtime._valid_worker_launch_id(launch_id)
+    assert observed["command"] == (
+        str(executable),
+        probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT,
+    )
+    assert observed["uid"] == identity.uid
+    assert observed["gid"] == identity.gid
+    assert observed["working_directory"] == str(home)
+    assert observed["environment"] == {
+        "HOME": str(home),
+        "LOGNAME": "browser-user",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "USER": "browser-user",
+        probe_runtime.PENDING_NAVIGATION_BROWSER_WORKER_LAUNCH_ID_ENV: (
+            launch_id
+        ),
+        "SLIPSTREAM_BROWSER_PROBE_OWNED_GEPH_PORT": "9954",
+    }
+    flattened = " ".join(observed["command"])
+    assert all(
+        token not in flattened
+        for token in ("launchctl", " open ", "sudo", "Aqua")
+    )
+
+
+def test_direct_headless_launcher_requires_root_for_uid_drop(tmp_path):
+    executable = tmp_path / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"worker")
+    executable.chmod(0o755)
+    identity = probe_runtime.ConsoleUserIdentity(501, 20, "user", "/tmp")
+    launcher = probe_runtime.DirectHeadlessBrowserWorkerLauncher(
+        executable=executable,
+        geph_port=9954,
+        identity_probe=lambda: identity,
+        codesign_runner=lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0
+        ),
+        effective_uid=lambda: 501,
+    )
+
+    with pytest.raises(
+        probe_runtime.PendingNavigationProbeRuntimeError,
+        match="browser_worker_unowned",
+    ):
+        launcher.launch()
+
+
+def test_direct_headless_force_reap_is_bounded(monkeypatch, tmp_path):
+    waits = []
+    signals = []
+
+    class HungProcess:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            raise subprocess.TimeoutExpired(("worker",), timeout)
+
+    monkeypatch.setattr(
+        probe_runtime.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: HungProcess(),
+    )
+    monkeypatch.setattr(
+        probe_runtime.os,
+        "killpg",
+        lambda pid, sent_signal: signals.append((pid, sent_signal)),
+    )
+
+    with pytest.raises(
+        probe_runtime.PendingNavigationProbeRuntimeError,
+        match="browser_worker_cleanup_unconfirmed",
+    ) as raised:
+        probe_runtime._run_direct_headless_worker_command(
+            ("/tmp/worker",),
+            0.01,
+            os.getuid(),
+            os.getgid(),
+            {},
+            tmp_path,
+        )
+
+    assert not raised.value.worker_cleanup_confirmed
+    assert waits == [
+        0.01,
+        probe_runtime._BROWSER_WORKER_GRACEFUL_CLEANUP_SECONDS,
+        probe_runtime._BROWSER_WORKER_FORCE_REAP_SECONDS,
+    ]
+    assert signals == [
+        (4242, probe_runtime.signal.SIGTERM),
+        (4242, probe_runtime.signal.SIGKILL),
+    ]
+
+
 def test_disposable_upstream_mapping_is_exact_ci_only_and_unknown_host_only():
     environment = {
         "CI": "true",
@@ -273,6 +408,31 @@ def _runtime(clock, submitted=None, max_live_jobs=32):
     )
 
 
+def test_runtime_claims_route_preflight_job_without_legacy_rebinding():
+    clock = {"wall": 1_010_000, "mono": 100.0}
+    runtime = _runtime(clock)
+    job = {
+        "schema_version": 1,
+        "capability": "a" * 32,
+        "host": "unknown.example",
+        "candidate_routes": ["system", "owned_geph"],
+        "issued_at_unix_ms": 1_010_000,
+        "deadline_unix_ms": 1_018_000,
+    }
+
+    assert runtime.enqueue(job)
+    response = runtime.handle(_request("claim"))
+    assert response["accepted"]
+    assert response["job"] == job
+
+    rebound = {
+        **job,
+        "capability": "d" * 32,
+        "candidate_routes": ["system"],
+    }
+    assert not runtime.enqueue(rebound)
+
+
 def test_contract_matches_runtime_bounds_and_owner_only_path():
     assert probe_runtime.CAPABILITY_TTL_MS == int(
         tproxy.PENDING_NAVIGATION_PROBE_TTL * 1000
@@ -302,8 +462,18 @@ def test_contract_matches_runtime_bounds_and_owner_only_path():
         CONTRACT["bounds"]["min_pending_observation_ms"]
     )
     assert CONTRACT["outcomes"] == {
-        "route_effect": ["navigation_pending", "navigation_failed"],
-        "retry_same_route_without_route_effect": "navigation_complete",
+        "route_effect": [
+            "navigation_pending",
+            "navigation_failed",
+            "regional_access_denied",
+            "edge_access_denied",
+        ],
+        "retry_same_route_without_route_effect": [
+            "navigation_complete",
+            "challenge_or_auth",
+            "usable",
+            "terminal_error",
+        ],
     }
     assert CONTRACT["invariants"][
         "response_headers_are_not_terminal_completion"

@@ -30,6 +30,10 @@ FIXED_ARTIFACT_TYPES = {
     "route-policy-keys.json": ("route-policy-keys", "application/json"),
     SBOM_NAME: ("sbom", "application/spdx+json"),
     DEPENDENCY_AUDIT_NAME: ("dependency-audit", "application/json"),
+    "release-candidate-manifest.json": ("release-candidate-manifest", "application/json"),
+    "release-qualification.json": ("protected-qualification", "application/json"),
+    "release-readiness.json": ("protected-release-readiness", "application/json"),
+    "transport-mechanics.json": ("protected-transport-mechanics", "application/json"),
 }
 APP_REQUIRED_ASSETS = {
     "Slipstream-macos-arm64.zip",
@@ -241,10 +245,16 @@ def validate_artifact_manifest(
         sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"{SBOM_NAME} is not valid JSON") from exc
+    # Candidate SBOMs are deliberately tag-neutral: the same audited binary is
+    # promoted to a preview without rewriting its dependency identity.  Legacy
+    # releases retain their tag-specific namespace.
+    candidate_tag = f"release-candidate-{source_commit}"
+    namespace = sbom.get("documentNamespace", "")
+    sbom_tag = candidate_tag if f"/releases/tag/{candidate_tag}/" in namespace else tag
     sbom_summary = make_release_sbom.validate_spdx_document(
         sbom,
         version=version,
-        tag=tag,
+        tag=sbom_tag,
         repository=repository,
         source_commit=source_commit,
         source_date_epoch=source_date_epoch,

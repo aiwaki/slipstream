@@ -12,7 +12,47 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      product: ${{ steps.scope.outputs.product }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "product=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          product=false
+          changed=false
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            changed=true
+            case "$path" in
+              README.md|README.en.md|docs/*|*.md) ;;
+              *) product=true; break ;;
+            esac
+          done < <(git diff --name-only "$base" "$GITHUB_SHA")
+          if [ "$changed" = false ]; then
+            echo "empty change set cannot bypass audit gates"
+            product=true
+          fi
+          echo "product=$product" >> "$GITHUB_OUTPUT"
+
   audit:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
     runs-on: ubuntu-24.04
     env:
       SLIPSTREAM_TAURI_TARGET: aarch64-apple-darwin
@@ -51,6 +91,7 @@ jobs:
             --geph-version-file vendor/geph/VERSION \
             --geph-source-file vendor/geph/SOURCE.json \
             --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
+            --chromium-headless-shell-source-file vendor/chromium-headless-shell/SOURCE.json \
             --output dist-audit/Slipstream.spdx.json
 
       - name: Enforce dependency audit policy
@@ -84,6 +125,8 @@ jobs:
           retention-days: 14
 
   geph-vendor-audit:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -161,3 +204,25 @@ jobs:
           path: dist-geph-audit/
           if-no-files-found: error
           retention-days: 14
+
+  required:
+    name: Required dependency audit
+    if: always()
+    needs: [changes, audit, geph-vendor-audit]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every applicable audit gate
+        env:
+          PRODUCT: ${{ needs.changes.outputs.product }}
+          APP_AUDIT: ${{ needs.audit.result }}
+          GEPH_AUDIT: ${{ needs.geph-vendor-audit.result }}
+        run: |
+          set -euo pipefail
+          if [ "$PRODUCT" = false ]; then
+            echo "documentation-only change: dependency graph is unchanged"
+            exit 0
+          fi
+          [ "$APP_AUDIT" = success ] && [ "$GEPH_AUDIT" = success ] || {
+            echo "an applicable dependency audit did not succeed"
+            exit 1
+          }

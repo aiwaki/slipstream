@@ -34,6 +34,32 @@
     }
   ];
 
+  const challengeOrAuthPatterns = [
+    /\b(?:captcha|verify\s+(?:that\s+)?you\s+are\s+human|security\s+challenge)\b/i,
+    /\b(?:too\s+many\s+requests|rate\s+limit(?:ed|ing)?)\b/i,
+    /\b(?:sign\s+in|log\s+in|authentication\s+required|unauthori[sz]ed)\b/i
+  ];
+
+  const exactEdgeDenialPatterns = [
+    /\bsorry\s*,?\s+you\s+have\s+been\s+blocked\b/i,
+    /\byou\s+are\s+unable\s+to\s+access\b/i,
+    /\b(?:your\s+)?request\s+(?:was|has\s+been)\s+blocked\b/i
+  ];
+
+  const edgeDenialPatterns = [
+    /\baccess\s+denied\b/i,
+    /\b(?:request|connection)\s+(?:denied|blocked)\b/i,
+    /\b(?:unable|not\s+permitted)\s+to\s+access\b/i
+  ];
+
+  const edgeSecurityPatterns = [
+    /\bsecurity\s+(?:service|solution|policy|rule|system)\b/i,
+    /\b(?:web\s+application\s+)?firewall\b/i,
+    /\bprotect(?:s|ing)?\s+(?:itself|this\s+(?:site|website|service))\b/i,
+    /\bonline\s+attacks?\b/i,
+    /\btriggered\s+(?:the|a)\s+security\b/i
+  ];
+
   function normalizedText(value, limit = MAX_TEXT_CHARS) {
     return String(value || "")
       .slice(0, limit)
@@ -110,8 +136,62 @@
       : null;
   }
 
+  function boundedBody(snapshot) {
+    const bodyText = normalizedText(snapshot.bodyText, MAX_TEXT_CHARS);
+    const bounded =
+      snapshot.bodyTextTruncated !== true &&
+      bodyText.length <= MAX_BODY_TEXT_CHARS &&
+      Number(snapshot.linkCount || 0) <= 40 &&
+      Number(snapshot.formCount || 0) <= 4;
+    return bounded ? bodyText : null;
+  }
+
+  function detectEdgeAccessDenial(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return null;
+    }
+    const bodyText = boundedBody(snapshot);
+    if (!bodyText) {
+      return null;
+    }
+    if (challengeOrAuthPatterns.some((pattern) => pattern.test(bodyText))) {
+      return {
+        category: "challenge_or_auth",
+        confidenceBps: 9800,
+        evidence: "challenge_or_auth"
+      };
+    }
+    const exactCount = exactEdgeDenialPatterns.reduce(
+      (count, pattern) => count + Number(pattern.test(bodyText)),
+      0
+    );
+    const hasDenial = edgeDenialPatterns.some((pattern) => pattern.test(bodyText));
+    const hasSecurity = edgeSecurityPatterns.some((pattern) => pattern.test(bodyText));
+    if (exactCount >= 2 || (exactCount >= 1 && hasSecurity)) {
+      return {
+        category: "edge_access_denied",
+        confidenceBps: 9900,
+        evidence: "exact_edge"
+      };
+    }
+    if (hasDenial && hasSecurity) {
+      return {
+        category: "edge_access_denied",
+        confidenceBps: 9600,
+        evidence: "paired_edge"
+      };
+    }
+    return null;
+  }
+
+  function detectSemanticDenial(snapshot) {
+    return detectRegionalDenial(snapshot) || detectEdgeAccessDenial(snapshot);
+  }
+
   scope.SlipstreamRegionalDenialDetector = Object.freeze({
     detectRegionalDenial,
+    detectEdgeAccessDenial,
+    detectSemanticDenial,
     normalizedText
   });
 })(globalThis);

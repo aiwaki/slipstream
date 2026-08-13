@@ -1830,13 +1830,13 @@ def test_unknown_server_first_close_feeds_exact_route_evidence(monkeypatch):
     assert repeat_probe_ip == "1.1.1.1"
 
 
-def test_system_plain_route_schedules_semantic_probe_without_replaying(monkeypatch):
+def test_system_plain_route_runs_held_preflight_before_committing(monkeypatch):
     isolate_runtime_state(monkeypatch)
     host = "regional-denial-contract.example"
     response = b"\x17\x03\x03\x00\x60" + (b"S" * 96)
     client, _expected_first_flight = tls_client(host, block_after_hello=True)
     writer = CaptureWriter()
-    probes = []
+    preflights = []
 
     async def short_system(_ip, _port, _first_flight):
         return (
@@ -1846,20 +1846,23 @@ def test_system_plain_route_schedules_semantic_probe_without_replaying(monkeypat
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("1.1.1.1", 443))
     monkeypatch.setattr(tproxy, "_try_exact_system_probe", short_system)
+    async def healthy_direct_preflight(actual_host, ip, **_kwargs):
+        preflights.append((actual_host, ip))
+        return None
+
+    monkeypatch.setattr(tproxy, "_run_initial_route_preflight", healthy_direct_preflight)
     monkeypatch.setattr(
         tproxy,
         "_schedule_semantic_plain_denial_probe",
-        lambda actual_host, ip, strategy, **kwargs: (
-            probes.append((actual_host, ip, strategy, kwargs["now"])) or True
+        lambda *_args, **_kwargs: pytest.fail(
+            "held preflight replaced the post-commit semantic probe"
         ),
     )
 
     asyncio.run(run_handler(client, writer))
 
     assert bytes(writer.payload) == response
-    assert len(probes) == 1
-    assert probes[0][:3] == (host, "1.1.1.1", "plain")
-    assert probes[0][3] >= 0
+    assert preflights == [(host, "1.1.1.1")]
     assert not tproxy._auto_geph_learned_exact_host(host)
 
 
@@ -2844,8 +2847,16 @@ def test_learned_unknown_host_without_ready_owned_geph_uses_exact_system_route(
     assert calls[0][:3] == ("system", *destination)
 
 
-def test_geo_exit_zero_payload_falls_back_on_the_same_system_request(monkeypatch):
-    """No server byte was exposed, so the frozen first flight remains replay-safe."""
+@pytest.mark.parametrize(
+    "runtime_learned",
+    [False, True],
+    ids=["reviewed", "learned-exact-host"],
+)
+def test_reviewed_geo_exit_zero_payload_never_falls_back_to_direct(
+    monkeypatch,
+    runtime_learned,
+):
+    """A retained first flight may retry owned Geph, but not a known-bad route."""
     isolate_runtime_state(monkeypatch)
     host = "ws.chatgpt.com"
     client, expected_first_flight = tls_client(host, block_after_hello=False)
@@ -2872,12 +2883,26 @@ def test_geo_exit_zero_payload_falls_back_on_the_same_system_request(monkeypatch
         await forbidden_backend(name, *args, **kwargs)
 
     monkeypatch.setattr(tproxy, "orig_dst", lambda _sock: ("203.0.113.18", 443))
+    original_runtime_policy = tproxy.runtime_route_policy
+    monkeypatch.setattr(
+        tproxy,
+        "runtime_route_policy",
+        lambda actual_host: {
+            **original_runtime_policy(actual_host),
+            "runtime_learned": runtime_learned,
+        },
+    )
     monkeypatch.setattr(tproxy, "GEPH_ENABLED", True)
     monkeypatch.setattr(tproxy, "_geph_up", True)
     monkeypatch.setattr(tproxy, "_geph_owned", True)
     monkeypatch.setattr(tproxy, "_geph_port", tproxy.GEPH_OWNED_PORT)
     monkeypatch.setattr(tproxy, "smart_dns_route_enabled", lambda _host: False)
     monkeypatch.setattr(tproxy, "dial_via_geph", empty_geph)
+    monkeypatch.setattr(
+        tproxy,
+        "_coalesced_owned_geph_recovery_for_replay",
+        lambda _host: asyncio.sleep(0, result=False),
+    )
     monkeypatch.setattr(tproxy, "dial_strategy", lambda *args, **kwargs: no_backend("local desync", *args, **kwargs))
     monkeypatch.setattr(tproxy, "dial_plain", system_route)
     monkeypatch.setattr(tproxy, "resolve_connection_ips", lambda *args, **kwargs: no_backend("generic DNS", *args, **kwargs))
@@ -2887,8 +2912,8 @@ def test_geo_exit_zero_payload_falls_back_on_the_same_system_request(monkeypatch
 
     asyncio.run(run_handler(client, writer))
 
-    assert bytes(writer.payload) == response
-    assert direct_calls == ["203.0.113.18"]
+    assert bytes(writer.payload) == b""
+    assert direct_calls == []
     assert failures == [(host, "remote closed without response")]
     assert suspensions == ["geo-exit first payload unavailable"]
 

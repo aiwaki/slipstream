@@ -1,21 +1,10 @@
-# Build, sign, and publish Slipstream.app + the auto-update appcast.
+# Promote an immutable, already built and qualified release candidate.
 #
-# Produces a complete self-installing bundle: the tray app + the vendored
-# geph5-client (from build-geph.yml's `geph-vendor-*` release) + the frozen
-# `slipstreamd` daemon (built here with PyInstaller). The bundle is signed with the
-# updater key (TAURI_SIGNING_PRIVATE_KEY secret; its public half is in
-# tauri.conf.json) and published as a GitHub Release, along with a `latest.json`
-# appcast at the URL the app's updater polls
-# (releases/latest/download/latest.json). Existing installs then auto-update.
-# It also publishes signed route-policy assets for the opt-in remote-policy
-# channel. The app does not enable that channel by default; this only gives
-# reviewed releases a signed, hash-checked policy bundle to point at later.
-#
-# NOTE: the .app is NOT Apple-notarized (no Developer ID), so a FIRST download
-# still hits Gatekeeper (right-click > Open). The updater signature is minisign,
-# separate from Apple codesigning — it only guarantees update integrity.
-# Manual runs therefore publish previews only. Stable tag runs are blocked below
-# until Developer ID signing, hardened runtime, notarization, and stapling exist.
+# Required main CI is the only workflow that runs PyInstaller/Tauri and creates
+# release-candidate-${SHA}.  The protected owned-Geph workflow consumes that
+# candidate and emits a proof bound to its manifest digest.  This publisher
+# fails closed unless both exact-SHA inputs verify; it creates only tag-specific
+# metadata and never rebuilds or re-qualifies the application.
 name: build-app
 
 on:
@@ -24,14 +13,32 @@ on:
       version:
         description: "Optional version override; must match VERSION. Manual runs produce prereleases."
         required: false
+      preview_sequence:
+        description: "Preview sequence. This P0 release must be 23."
+        required: true
+        default: "23"
+      release_candidate_run_id:
+        description: "Optional successful ci.yml main run ID for this exact SHA."
+        required: false
+      qualification_run_id:
+        description: "Optional successful protected qualification run ID for this exact SHA."
+        required: false
+      readiness_run_id:
+        description: "Optional successful protected release-readiness run ID for this exact SHA."
+        required: false
   push:
     tags: ["v*"]
 
 permissions:
   contents: write
+  actions: read
   id-token: write
   attestations: write
   artifact-metadata: write
+
+concurrency:
+  group: build-app-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -50,36 +57,49 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13.14"
-          cache: pip
-          cache-dependency-path: spike/requirements-build.txt
 
-      - name: Resolve version + tag
+      - name: Resolve version and tag
         id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           repo_v="$(tr -d '[:space:]' < VERSION)"
-          if [ "${{ github.event_name }}" = "push" ]; then
-            v="${GITHUB_REF_NAME#v}"; tag="${GITHUB_REF_NAME}"
-            [ "$v" = "$repo_v" ] || { echo "tag $tag does not match VERSION ($repo_v)"; exit 1; }
-            channel="stable"
-            prerelease="false"
-            make_latest="true"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            v="${GITHUB_REF_NAME#v}"
+            tag="$GITHUB_REF_NAME"
+            [ "$v" = "$repo_v" ] || {
+              echo "tag $tag does not match VERSION ($repo_v)"
+              exit 1
+            }
+            channel=stable
+            prerelease=false
+            make_latest=true
             release_name="Slipstream $v"
           else
-            [ "$GITHUB_REF" = "refs/heads/main" ] || {
+            [ "$GITHUB_REF" = refs/heads/main ] || {
               echo "manual preview releases must run from refs/heads/main"
               exit 1
             }
             input_v="${{ github.event.inputs.version }}"
-            if [ -n "$input_v" ] && [ "$input_v" != "$repo_v" ]; then
+            [ -z "$input_v" ] || [ "$input_v" = "$repo_v" ] || {
               echo "workflow version $input_v does not match VERSION ($repo_v)"
               exit 1
-            fi
+            }
             v="$repo_v"
-            tag="v${v}-preview.${GITHUB_RUN_NUMBER}"
-            channel="preview"
-            prerelease="true"
-            make_latest="false"
-            release_name="Slipstream $v (preview ${GITHUB_RUN_NUMBER})"
+            preview_sequence="${{ github.event.inputs.preview_sequence }}"
+            case "$preview_sequence" in
+              ''|*[!0-9]*) echo "preview_sequence must be a positive integer"; exit 1 ;;
+            esac
+            [ "$preview_sequence" = 23 ] || {
+              echo "the next P0 release must be v${v}-preview.23"
+              exit 1
+            }
+            tag="v${v}-preview.${preview_sequence}"
+            channel=preview
+            prerelease=true
+            make_latest=false
+            release_name="Slipstream $v (preview ${preview_sequence})"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -88,7 +108,13 @@ jobs:
           echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
           echo "source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
-          echo "Releasing $v ($tag, $channel)"
+          existing_tag_count="$(gh api \
+            "repos/${{ github.repository }}/git/matching-refs/tags/$tag" \
+            --jq "[.[] | select(.ref == \"refs/tags/$tag\")] | length")"
+          if [ "$existing_tag_count" != 0 ]; then
+            echo "release or Git tag already exists and will not be overwritten: $tag"
+            exit 1
+          fi
 
       - name: Resolve previous app release tag
         id: previous
@@ -97,297 +123,245 @@ jobs:
         run: |
           set -euo pipefail
           current_tag="${{ steps.ver.outputs.tag }}"
-          if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
-            prerelease=true
-          else
-            prerelease=false
-          fi
+          [ "${{ steps.ver.outputs.channel }}" = preview ] && prerelease=true || prerelease=false
           filter=".[] | select(.draft | not) | select(.tag_name != \"$current_tag\") | select(.tag_name | startswith(\"v\")) | select(.prerelease == $prerelease) | .tag_name"
           previous_tag="$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" --jq "$filter" | sed -n '1p')"
           echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
-          echo "Previous app release: ${previous_tag:-none}"
 
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
-        with:
-          targets: aarch64-apple-darwin
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-
-      - name: Install qualified Chrome for Testing
-        id: release-lifecycle-chrome
-        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
-        with:
-          # Match the packaged and protected gates. The runner's branded Chrome
-          # may already own a LaunchServices instance and cannot reproducibly
-          # start the isolated hidden-worker profile used by this qualification.
-          chrome-version: 151.0.7922.77
-          install-chromedriver: false
-
-      - name: System build deps
-        run: bash scripts/ensure_macos_build_deps.sh
-
-      - name: Prepare route policy trust keys
-        if: steps.ver.outputs.channel == 'stable'
+      - name: Resolve exact candidate and qualification runs
+        id: runs
         env:
-          SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON: ${{ secrets.SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON }}
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_INPUT: ${{ github.event.inputs.release_candidate_run_id }}
+          QUALIFICATION_INPUT: ${{ github.event.inputs.qualification_run_id }}
+          READINESS_INPUT: ${{ github.event.inputs.readiness_run_id }}
         run: |
           set -euo pipefail
-          : "${SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON:?missing SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON}"
-          printf '%s\n' "$SLIP_ROUTE_POLICY_PUBLIC_KEYS_JSON" > spike/route-policy-keys.json
-          python3 -m json.tool spike/route-policy-keys.json >/dev/null
+          candidate_run="$CANDIDATE_INPUT"
+          qualification_run="$QUALIFICATION_INPUT"
+          readiness_run="$READINESS_INPUT"
+          if [ -z "$candidate_run" ]; then
+            candidate_run="$(gh api --paginate \
+              "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              | sed -n '1p')"
+          fi
+          if [ -z "$qualification_run" ]; then
+            qualification_run="$(gh api --paginate \
+              "repos/${{ github.repository }}/actions/workflows/owned-geph-qualification.yml/runs?branch=main&event=workflow_dispatch&status=completed&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              | sed -n '1p')"
+          fi
+          if [ -z "$readiness_run" ]; then
+            readiness_run="$(gh api --paginate \
+              "repos/${{ github.repository }}/actions/workflows/release-readiness.yml/runs?branch=main&event=workflow_dispatch&status=completed&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\") | select(.conclusion == \"success\") | .id" \
+              | sed -n '1p')"
+          fi
+          [ -n "$candidate_run" ] || {
+            echo "missing successful ci.yml run for $GITHUB_SHA"
+            exit 1
+          }
+          [ -n "$qualification_run" ] || {
+            echo "missing successful owned-geph-qualification.yml run for $GITHUB_SHA"
+            exit 1
+          }
+          [ -n "$readiness_run" ] || {
+            echo "missing successful release-readiness.yml run for $GITHUB_SHA"
+            exit 1
+          }
+          candidate_metadata="$(gh api \
+            "repos/${{ github.repository }}/actions/runs/$candidate_run")"
+          qualification_metadata="$(gh api \
+            "repos/${{ github.repository }}/actions/runs/$qualification_run")"
+          readiness_metadata="$(gh api \
+            "repos/${{ github.repository }}/actions/runs/$readiness_run")"
+          python3 -c '
+          import json
+          import sys
+          run = json.load(sys.stdin)
+          expected_sha, repository, event, workflow = sys.argv[1:]
+          expected = {
+              "head_sha": expected_sha,
+              "head_branch": "main",
+              "event": event,
+              "conclusion": "success",
+              "path": f".github/workflows/{workflow}",
+          }
+          for key, value in expected.items():
+              if run.get(key) != value:
+                  raise SystemExit(f"run has invalid {key}: {run.get(key)!r}")
+          if (run.get("head_repository") or {}).get("full_name") != repository:
+              raise SystemExit("run belongs to a different repository")
+          if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
+              raise SystemExit("run attempt is invalid")
+          ' "$GITHUB_SHA" "${{ github.repository }}" push ci.yml \
+            <<< "$candidate_metadata"
+          python3 -c '
+          import json
+          import sys
+          run = json.load(sys.stdin)
+          expected_sha, repository, event, workflow = sys.argv[1:]
+          expected = {
+              "head_sha": expected_sha,
+              "head_branch": "main",
+              "event": event,
+              "conclusion": "success",
+              "path": f".github/workflows/{workflow}",
+          }
+          for key, value in expected.items():
+              if run.get(key) != value:
+                  raise SystemExit(f"run has invalid {key}: {run.get(key)!r}")
+          if (run.get("head_repository") or {}).get("full_name") != repository:
+              raise SystemExit("run belongs to a different repository")
+          if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
+              raise SystemExit("run attempt is invalid")
+          ' "$GITHUB_SHA" "${{ github.repository }}" workflow_dispatch \
+            owned-geph-qualification.yml <<< "$qualification_metadata"
+          python3 -c '
+          import json
+          import sys
+          run = json.load(sys.stdin)
+          expected_sha, repository, event, workflow = sys.argv[1:]
+          expected = {
+              "head_sha": expected_sha,
+              "head_branch": "main",
+              "event": event,
+              "conclusion": "success",
+              "path": f".github/workflows/{workflow}",
+          }
+          for key, value in expected.items():
+              if run.get(key) != value:
+                  raise SystemExit(f"run has invalid {key}: {run.get(key)!r}")
+          if (run.get("head_repository") or {}).get("full_name") != repository:
+              raise SystemExit("run belongs to a different repository")
+          if not isinstance(run.get("run_attempt"), int) or run["run_attempt"] <= 0:
+              raise SystemExit("run attempt is invalid")
+          ' "$GITHUB_SHA" "${{ github.repository }}" workflow_dispatch \
+            release-readiness.yml <<< "$readiness_metadata"
+          candidate_attempt="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
+            <<< "$candidate_metadata")"
+          qualification_attempt="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
+            <<< "$qualification_metadata")"
+          readiness_attempt="$(python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["run_attempt"])' \
+            <<< "$readiness_metadata")"
+          echo "release_candidate_run_id=$candidate_run" >> "$GITHUB_OUTPUT"
+          echo "release_candidate_run_attempt=$candidate_attempt" >> "$GITHUB_OUTPUT"
+          echo "qualification_run_id=$qualification_run" >> "$GITHUB_OUTPUT"
+          echo "qualification_run_attempt=$qualification_attempt" >> "$GITHUB_OUTPUT"
+          echo "readiness_run_id=$readiness_run" >> "$GITHUB_OUTPUT"
+          echo "readiness_run_attempt=$readiness_attempt" >> "$GITHUB_OUTPUT"
 
-      - name: Build the self-contained daemon (slipstreamd, PyInstaller)
-        run: |
-          set -euo pipefail
-          python3 -m venv spike/.buildvenv
-          spike/.buildvenv/bin/python -m pip install \
-            --quiet \
-            --disable-pip-version-check \
-            --only-binary=:all: \
-            --require-hashes \
-            -r spike/requirements-build.txt
-          ( cd spike && .buildvenv/bin/pyinstaller --noconfirm --clean slipstreamd.spec )
-          rm -rf app-tauri/src-tauri/slipstreamd
-          cp -R spike/dist/slipstreamd app-tauri/src-tauri/slipstreamd
-          test -x app-tauri/src-tauri/slipstreamd/slipstreamd
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist-candidate
+          run-id: ${{ steps.runs.outputs.release_candidate_run_id }}
+          github-token: ${{ github.token }}
 
-      - name: Fetch vendored geph5-client (from build-geph.yml)
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Slipstream-release-ready-${{ github.sha }}
+          path: dist-readiness
+          run-id: ${{ steps.runs.outputs.readiness_run_id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Slipstream-owned-geph-qualified-${{ github.sha }}
+          path: dist-qualified
+          run-id: ${{ steps.runs.outputs.qualification_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify exact immutable candidate and qualification proof
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="$(tr -d '[:space:]' < vendor/geph/VERSION)"
-          release_revision="$(python3 -c 'import json; print(json.load(open("vendor/geph/SOURCE.json"))["release_revision"])')"
-          tag="geph-vendor-$version-r$release_revision"
-          echo "using geph vendor tag: $tag"
-          rm -rf /tmp/geph
-          mkdir -p app-tauri/src-tauri/binaries
-          python3 scripts/download_github_release_assets.py \
-            --repo "${{ github.repository }}" \
-            --tag "$tag" \
-            --output /tmp/geph \
-            --pattern 'geph5-client' \
-            --pattern 'geph5-client.VERSION' \
-            --pattern 'geph5-client.LICENSE' \
-            --pattern 'geph5-client.SOURCE.json' \
-            --pattern 'geph5-client.Cargo.lock' \
-            --pattern 'geph5-client.spdx.json' \
-            --pattern 'geph5-client-dependency-audit.json' \
-            --pattern 'SHA256SUMS'
-          asset_version="$(tr -d '[:space:]' < /tmp/geph/geph5-client.VERSION)"
-          [ "$asset_version" = "$version" ] || {
-            echo "vendored Geph version mismatch: expected $version, got $asset_version"
-            exit 1
-          }
-          ( cd /tmp/geph && shasum -a 256 -c SHA256SUMS )
-          cmp /tmp/geph/geph5-client.SOURCE.json vendor/geph/SOURCE.json
-          cmp /tmp/geph/geph5-client.Cargo.lock vendor/geph/Cargo.lock
-          cmp /tmp/geph/geph5-client.LICENSE vendor/geph/LICENSE
-          vendor_commit="$(python3 -c 'import json; print(json.load(open("/tmp/geph/geph5-client-dependency-audit.json"))["source"]["commit"])')"
-          tag_commit="$(gh api "repos/${{ github.repository }}/commits/$tag" --jq .sha)"
-          [ "$vendor_commit" = "$tag_commit" ] || {
-            echo "Geph audit source commit does not match immutable tag $tag"; exit 1;
-          }
-          python3 scripts/make_geph_vendor_sbom.py verify \
-            --source /tmp/geph/geph5-client.SOURCE.json \
-            --version-file /tmp/geph/geph5-client.VERSION \
-            --cargo-lock /tmp/geph/geph5-client.Cargo.lock \
+          source_tree="$(git rev-parse "$GITHUB_SHA^{tree}")"
+          source_archive_sha256="$(git archive --format=tar "$GITHUB_SHA" | shasum -a 256 | awk '{print $1}')"
+          mkdir -p "$RUNNER_TEMP/candidate-app"
+          ditto -x -k dist-candidate/Slipstream-macos-arm64.zip "$RUNNER_TEMP/candidate-app"
+          python3 scripts/release_candidate.py verify \
+            --candidate-dir dist-candidate \
             --repository "${{ github.repository }}" \
-            --source-commit "$vendor_commit" \
-            --target macos-universal \
-            --sbom /tmp/geph/geph5-client.spdx.json
-          python3 scripts/dependency_audit.py verify \
-            --report /tmp/geph/geph5-client-dependency-audit.json \
-            --sbom /tmp/geph/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
-            --source-commit "$vendor_commit" \
-            --target macos-universal \
-            --vendored-transitive-dependencies full
-          signer_workflow="${{ github.repository }}/.github/workflows/build-geph.yml"
-          for artifact in /tmp/geph/*; do
+            --version "${{ steps.ver.outputs.version }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-tree "$source_tree" \
+            --source-archive-sha256 "$source_archive_sha256" \
+            --source-date-epoch "${{ steps.ver.outputs.source_date_epoch }}" \
+            --target "$SLIPSTREAM_TAURI_TARGET" \
+            --expected-workflow-run-id "${{ steps.runs.outputs.release_candidate_run_id }}" \
+            --expected-workflow-run-attempt "${{ steps.runs.outputs.release_candidate_run_attempt }}" \
+            --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app"
+          python3 scripts/release_candidate.py verify-proof \
+            --candidate-dir dist-candidate \
+            --proof dist-qualified/release-qualification.json \
+            --expected-qualification-run-id "${{ steps.runs.outputs.qualification_run_id }}" \
+            --expected-qualification-run-attempt "${{ steps.runs.outputs.qualification_run_attempt }}" \
+            --expected-candidate-run-attempt "${{ steps.runs.outputs.release_candidate_run_attempt }}"
+          python3 scripts/release_readiness.py verify \
+            --candidate-dir dist-candidate \
+            --app-tree "$RUNNER_TEMP/candidate-app/Slipstream.app" \
+            --live-report dist-readiness/live-sites.json \
+            --soak-report dist-readiness/invisibility-soak.json \
+            --transport-report dist-readiness/transport-mechanics.json \
+            --candidate-run-id "${{ steps.runs.outputs.release_candidate_run_id }}" \
+            --candidate-run-attempt "${{ steps.runs.outputs.release_candidate_run_attempt }}" \
+            --readiness-run-id "${{ steps.runs.outputs.readiness_run_id }}" \
+            --readiness-run-attempt "${{ steps.runs.outputs.readiness_run_attempt }}" \
+            --proof dist-readiness/release-readiness.json \
+            --require-passed
+          signer_workflow="${{ github.repository }}/.github/workflows/ci.yml"
+          for artifact in dist-candidate/*; do
             gh attestation verify "$artifact" \
               --repo "${{ github.repository }}" \
               --signer-workflow "$signer_workflow" \
-              --source-digest "$vendor_commit" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref refs/heads/main \
               --deny-self-hosted-runners >/dev/null
           done
-          gh attestation verify /tmp/geph/geph5-client \
+          gh attestation verify dist-qualified/release-qualification.json \
             --repo "${{ github.repository }}" \
-            --signer-workflow "$signer_workflow" \
-            --source-digest "$vendor_commit" \
-            --predicate-type https://spdx.dev/Document/v2.3 \
+            --signer-workflow "${{ github.repository }}/.github/workflows/owned-geph-qualification.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
             --deny-self-hosted-runners >/dev/null
-          python3 scripts/dependency_audit.py fetch-scanner \
-            --policy security/geph-dependency-audit-policy.json \
-            --platform darwin-arm64 \
-            --output /tmp/geph/osv-scanner
-          python3 scripts/dependency_audit.py scan \
-            --scanner /tmp/geph/osv-scanner \
-            --platform darwin-arm64 \
-            --sbom /tmp/geph/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
-            --source-commit "$vendor_commit" \
-            --target macos-universal \
-            --vendored-transitive-dependencies full \
-            --evaluation-date "$(date -u +%F)" \
-            --output /tmp/geph/geph5-client-current-audit.json
-          python3 scripts/dependency_audit.py verify \
-            --report /tmp/geph/geph5-client-current-audit.json \
-            --sbom /tmp/geph/geph5-client.spdx.json \
-            --policy security/geph-dependency-audit-policy.json \
-            --source-commit "$vendor_commit" \
-            --target macos-universal \
-            --vendored-transitive-dependencies full
-          cp /tmp/geph/geph5-client \
-            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-          chmod +x app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin
-          /usr/bin/lipo \
-            app-tauri/src-tauri/binaries/geph5-client-aarch64-apple-darwin \
-            -verify_arch arm64
-
-      - name: Check version metadata
-        run: python3 scripts/sync_version.py --check
-
-      - name: Test release metadata scripts
-        run: spike/.buildvenv/bin/python -m unittest discover -s scripts -p 'test_*.py'
-
-      - name: Build + sign the app
-        working-directory: app-tauri
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          npm ci
-          npm run build
-
-      - name: Qualify the release app lifecycle, tray crash, Chrome, and Safari
-        env:
-          SLIPSTREAM_DISPOSABLE_CI: "1"
-        run: |
-          set -euo pipefail
-          app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
-          test -d "$app"
-          bash scripts/run_packaged_lifecycle_smoke.sh \
-            "$app" \
-            "${{ steps.release-lifecycle-chrome.outputs.chrome-path }}"
-
-      - name: Package + build the update appcast (latest.json)
-        id: pkg
-        run: |
-          set -euo pipefail
-          B="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle"
-          OUT=dist-release; mkdir -p "$OUT"
-          # a plain zip of the .app for first-time downloads (no DMG friction)
-          ditto -c -k --keepParent "$B/macos/Slipstream.app" "$OUT/Slipstream-macos-arm64.zip"
-          for dmg in "$B"/dmg/*.dmg; do
-            [ -e "$dmg" ] || continue
-            cp "$dmg" "$OUT/"
+          for artifact in dist-readiness/*; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "${{ github.repository }}/.github/workflows/release-readiness.yml" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners >/dev/null
           done
-          # updater artifacts (tauri produced these because a signing key was set)
-          cp "$B/macos/Slipstream.app.tar.gz" "$OUT/"
-          cp "$B/macos/Slipstream.app.tar.gz.sig" "$OUT/"
+          for artifact in dist-candidate/Slipstream-macos-arm64.zip dist-candidate/Slipstream.app.tar.gz dist-candidate/Slipstream_*.dmg; do
+            gh attestation verify "$artifact" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref refs/heads/main \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --deny-self-hosted-runners >/dev/null
+          done
+
+      - name: Create tag-specific release metadata without rebuilding
+        run: |
+          set -euo pipefail
+          cp -R dist-candidate dist-release
+          cp dist-qualified/release-qualification.json dist-release/
+          cp dist-readiness/release-readiness.json dist-release/
+          cp dist-readiness/transport-mechanics.json dist-release/
           python3 scripts/make_appcast.py \
             --version "${{ steps.ver.outputs.version }}" \
             --tag "${{ steps.ver.outputs.tag }}" \
             --repository "${{ github.repository }}" \
-            --signature-file "$B/macos/Slipstream.app.tar.gz.sig" \
-            --output "$OUT/latest.json"
-          echo "made appcast:"; cat "$OUT/latest.json"
-
-      - name: Package signed route policy channel
-        if: steps.ver.outputs.channel == 'stable'
-        env:
-          SLIP_ROUTE_POLICY_KEY_ID: ${{ secrets.SLIP_ROUTE_POLICY_KEY_ID }}
-          SLIP_ROUTE_POLICY_PRIVATE_KEY: ${{ secrets.SLIP_ROUTE_POLICY_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          : "${SLIP_ROUTE_POLICY_KEY_ID:?missing SLIP_ROUTE_POLICY_KEY_ID}"
-          : "${SLIP_ROUTE_POLICY_PRIVATE_KEY:?missing SLIP_ROUTE_POLICY_PRIVATE_KEY}"
-          OUT=dist-release
-          key_file="$(mktemp)"
-          trap 'rm -f "$key_file" "$OUT/route-policy-derived-keys.json"' EXIT
-          umask 077
-          printf '%s\n' "$SLIP_ROUTE_POLICY_PRIVATE_KEY" > "$key_file"
-          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
-            --bundled-manifest \
-            --key-id "$SLIP_ROUTE_POLICY_KEY_ID" \
-            --private-key-file "$key_file" \
-            --output "$OUT/route-policy.json" \
-            --public-keys-output "$OUT/route-policy-derived-keys.json"
-          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
-            --verify \
-            --bundle "$OUT/route-policy.json" \
-            --public-keys spike/route-policy-keys.json
-          spike/.buildvenv/bin/python scripts/make_route_policy_bundle.py \
-            --channel-index \
-            --bundle "$OUT/route-policy.json" \
-            --bundle-url "https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/route-policy.json" \
-            --output "$OUT/route-policy-latest.json"
-          cp spike/route-policy-keys.json "$OUT/route-policy-keys.json"
-          python3 -m json.tool "$OUT/route-policy.json" >/dev/null
-          python3 -m json.tool "$OUT/route-policy-latest.json" >/dev/null
-          python3 -m json.tool "$OUT/route-policy-keys.json" >/dev/null
-
-      - name: Resolve target dependency graph
-        run: |
-          set -euo pipefail
-          cargo metadata \
-            --manifest-path app-tauri/src-tauri/Cargo.toml \
-            --locked \
-            --filter-platform "$SLIPSTREAM_TAURI_TARGET" \
-            --format-version 1 \
-            > /tmp/slipstream-cargo-metadata.json
-
-      - name: Build deterministic target SPDX SBOM
-        run: |
-          set -euo pipefail
-          spike/.buildvenv/bin/python scripts/make_release_sbom.py \
-            --version "${{ steps.ver.outputs.version }}" \
-            --tag "${{ steps.ver.outputs.tag }}" \
-            --repository "${{ github.repository }}" \
-            --source-commit "$GITHUB_SHA" \
-            --source-date-epoch "${{ steps.ver.outputs.source_date_epoch }}" \
-            --target "$SLIPSTREAM_TAURI_TARGET" \
-            --cargo-lock app-tauri/src-tauri/Cargo.lock \
-            --cargo-metadata /tmp/slipstream-cargo-metadata.json \
-            --npm-lock app-tauri/package-lock.json \
-            --python-lock spike/requirements-runtime.txt \
-            --geph-version-file vendor/geph/VERSION \
-            --geph-source-file vendor/geph/SOURCE.json \
-            --tg-ws-proxy-version-file vendor/tg-ws-proxy/VERSION \
-            --output dist-release/Slipstream.spdx.json
-
-      - name: Audit release dependencies
-        run: |
-          set -euo pipefail
-          audit_date="$(date -u +%F)"
-          scanner=/tmp/osv-scanner
-          spike/.buildvenv/bin/python scripts/dependency_audit.py fetch-scanner \
-            --policy security/dependency-audit-policy.json \
-            --platform darwin-arm64 \
-            --output "$scanner"
-          spike/.buildvenv/bin/python scripts/dependency_audit.py scan \
-            --scanner "$scanner" \
-            --platform darwin-arm64 \
-            --sbom dist-release/Slipstream.spdx.json \
-            --policy security/dependency-audit-policy.json \
-            --source-commit "$GITHUB_SHA" \
-            --target "$SLIPSTREAM_TAURI_TARGET" \
-            --evaluation-date "$audit_date" \
-            --output dist-release/dependency-audit.json
-          spike/.buildvenv/bin/python scripts/dependency_audit.py verify \
-            --report dist-release/dependency-audit.json \
-            --sbom dist-release/Slipstream.spdx.json \
-            --policy security/dependency-audit-policy.json \
-            --source-commit "$GITHUB_SHA" \
-            --target "$SLIPSTREAM_TAURI_TARGET"
-
-      - name: Build release artifact manifest
-        run: |
-          set -euo pipefail
-          spike/.buildvenv/bin/python scripts/make_release_manifest.py \
+            --signature-file dist-release/Slipstream.app.tar.gz.sig \
+            --output dist-release/latest.json
+          python3 scripts/make_release_manifest.py \
             --release-dir dist-release \
             --repository "${{ github.repository }}" \
             --version "${{ steps.ver.outputs.version }}" \
@@ -396,11 +370,7 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --source-date-epoch "${{ steps.ver.outputs.source_date_epoch }}" \
             --target "$SLIPSTREAM_TAURI_TARGET"
-
-      - name: Verify release artifacts
-        run: |
-          set -euo pipefail
-          spike/.buildvenv/bin/python scripts/verify_release_artifacts.py \
+          python3 scripts/verify_release_artifacts.py \
             --release-dir dist-release \
             --repository "${{ github.repository }}" \
             --tag "${{ steps.ver.outputs.tag }}" \
@@ -409,48 +379,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --target "$SLIPSTREAM_TAURI_TARGET"
 
-      - name: Attest verified release provenance
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
-        with:
-          subject-path: dist-release/*
-
-      - name: Attest application SBOM
+      - name: Attest tag-specific release metadata
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
           subject-path: |
-            dist-release/Slipstream-macos-arm64.zip
-            dist-release/Slipstream.app.tar.gz
-            dist-release/Slipstream_*.dmg
-          sbom-path: dist-release/Slipstream.spdx.json
-
-      - name: Verify stored release attestations
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          signer_workflow="${{ github.repository }}/.github/workflows/build-app.yml"
-          for artifact in dist-release/*; do
-            gh attestation verify "$artifact" \
-              --repo "${{ github.repository }}" \
-              --signer-workflow "$signer_workflow" \
-              --source-digest "$GITHUB_SHA" \
-              --deny-self-hosted-runners >/dev/null
-          done
-          app_artifacts=(
-            dist-release/Slipstream-macos-arm64.zip
-            dist-release/Slipstream.app.tar.gz
-          )
-          for dmg in dist-release/Slipstream_*.dmg; do
-            [ -e "$dmg" ] && app_artifacts+=("$dmg")
-          done
-          for artifact in "${app_artifacts[@]}"; do
-            gh attestation verify "$artifact" \
-              --repo "${{ github.repository }}" \
-              --signer-workflow "$signer_workflow" \
-              --source-digest "$GITHUB_SHA" \
-              --predicate-type https://spdx.dev/Document/v2.3 \
-              --deny-self-hosted-runners >/dev/null
-          done
+            dist-release/latest.json
+            dist-release/artifact-manifest.json
+            dist-release/release-qualification.json
+            dist-release/release-readiness.json
+            dist-release/transport-mechanics.json
 
       - name: Write release notes
         run: |
@@ -459,24 +396,18 @@ jobs:
           [ -n "$dmg_path" ] || { echo "release DMG is missing"; exit 1; }
           dmg_name="$(basename "$dmg_path")"
           download_url="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/$dmg_name"
-          if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
-            headline="Предварительная сборка Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon."
-            channel_note="Preview-сборка устанавливается вручную, не заменяет stable-канал и не содержит remote policy assets. Нотарификация Apple пока отсутствует."
-          else
-            headline="Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon."
-            channel_note="Сборка опубликована в stable-канале вместе с подписанным каналом route policy. Нотарификация Apple пока отсутствует."
-          fi
-          printf '%s\n\n' "$headline" > dist-release/release-notes.md
-          printf '## Установка\n\n' >> dist-release/release-notes.md
-          printf '[DMG для установки — `%s`](%s)\n\n' "$dmg_name" "$download_url" >> dist-release/release-notes.md
+          printf '%s\n\n' "Предварительная сборка Slipstream ${{ steps.ver.outputs.version }} для macOS Apple Silicon." > dist-release/release-notes.md
+          printf '## Установка\n\n[DMG для установки — `%s`](%s)\n\n' "$dmg_name" "$download_url" >> dist-release/release-notes.md
           printf '%s\n\n' "После открытия образа приложение переносится в «Программы». ZIP-архив доступен как альтернативный формат." >> dist-release/release-notes.md
-          printf '> [!NOTE]\n> %s\n\n' "$channel_note" >> dist-release/release-notes.md
+          printf '> [!NOTE]\n> Preview-сборка устанавливается вручную, не заменяет stable-канал и не содержит remote policy assets. Нотарификация Apple пока отсутствует.\n\n' >> dist-release/release-notes.md
           printf '<details>\n<summary>Проверка сборки</summary>\n\n' >> dist-release/release-notes.md
           printf '%s\n' \
-            "- \`artifact-manifest.json\` — SHA-256 и размеры файлов релиза." \
-            "- \`Slipstream.spdx.json\` — состав зависимостей." \
-            "- \`dependency-audit.json\` — результат проверки опубликованного SBOM." \
-            "- \`gh attestation verify $dmg_name --repo ${{ github.repository }}\` — проверка provenance." \
+            '- `release-candidate-manifest.json` — исходный commit, Git tree и SHA-256 каждого immutable candidate-файла.' \
+            '- `release-qualification.json` — protected gate, связанный с exact candidate manifest.' \
+            '- `release-readiness.json` — Safari/Chrome live-site gate и измеренный 30-минутный invisibility soak.' \
+            '- `transport-mechanics.json` — exact-candidate dual-stack PF/NATLOOK и локальная QUIC v1/v2 механика без утверждений о live-протоколе origin.' \
+            '- `artifact-manifest.json` — SHA-256 и размеры опубликованных файлов.' \
+            '- `Slipstream.spdx.json` и `dependency-audit.json` — состав и аудит candidate.' \
             >> dist-release/release-notes.md
           printf '\n</details>\n' >> dist-release/release-notes.md
 
@@ -497,11 +428,12 @@ jobs:
             dist-release/Slipstream.app.tar.gz.sig
             dist-release/latest.json
             dist-release/artifact-manifest.json
+            dist-release/release-candidate-manifest.json
+            dist-release/release-qualification.json
+            dist-release/release-readiness.json
+            dist-release/transport-mechanics.json
             dist-release/Slipstream.spdx.json
             dist-release/dependency-audit.json
-            dist-release/route-policy.json
-            dist-release/route-policy-latest.json
-            dist-release/route-policy-keys.json
             dist-release/*.dmg
 
       - name: Mark previous preview as archival
@@ -511,16 +443,11 @@ jobs:
         run: |
           set -euo pipefail
           previous_tag="${{ steps.previous.outputs.tag }}"
-          case "$previous_tag" in
-            v*-preview.*) ;;
-            *) echo "refusing to relabel non-preview release: $previous_tag"; exit 1 ;;
-          esac
+          case "$previous_tag" in v*-preview.*) ;; *) echo "refusing non-preview: $previous_tag"; exit 1 ;; esac
           previous_name="$(gh release view "$previous_tag" --repo "${{ github.repository }}" --json name --jq .name)"
           case "$previous_name" in
-            *архивная*) echo "$previous_tag is already archival"; exit 0 ;;
+            *архивная*) exit 0 ;;
             *\)) archival_name="${previous_name%?}, архивная)" ;;
             *) archival_name="$previous_name (архивная)" ;;
           esac
-          gh release edit "$previous_tag" \
-            --repo "${{ github.repository }}" \
-            --title "$archival_name"
+          gh release edit "$previous_tag" --repo "${{ github.repository }}" --title "$archival_name"

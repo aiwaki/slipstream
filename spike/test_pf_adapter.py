@@ -166,9 +166,13 @@ def test_state_snapshot_is_compact_and_uses_explicit_runtime_state():
     def runner(*args):
         outputs = {
             ("pfctl", "-s", "info"): "Status: Enabled\n",
-            ("pfctl", "-a", "com.apple/slipstream", "-sn"): "port 1080\n",
+            ("pfctl", "-a", "com.apple/slipstream", "-sn"): (
+                "rdr inet proto tcp -> 127.0.0.1 port 1080\n"
+                "rdr inet6 proto tcp -> ::1 port 1080\n"
+            ),
             ("pfctl", "-a", "com.apple/slipstream", "-sr"): (
-                "route-to (lo0 127.0.0.1)\n"
+                "route-to (lo0 127.0.0.1) inet\n"
+                "route-to (lo0 ::1) inet6\n"
             ),
         }
         return result(stdout=outputs.get(args, ""))
@@ -188,6 +192,27 @@ def test_state_snapshot_is_compact_and_uses_explicit_runtime_state():
         "interceptor_conflicts": ["zapret"],
         "rules_loaded": True,
     }
+
+
+def test_private_rules_loaded_requires_both_loopback_families():
+    outputs = {
+        ("pfctl", "-a", "com.apple/slipstream", "-sn"): (
+            "rdr inet proto tcp -> 127.0.0.1 port 1080\n"
+        ),
+        ("pfctl", "-a", "com.apple/slipstream", "-sr"): (
+            "route-to (lo0 127.0.0.1) inet\n"
+        ),
+    }
+
+    def runner(*args):
+        return result(stdout=outputs.get(args, ""))
+
+    assert not pf_adapter.private_rules_loaded(
+        runner,
+        "com.apple/slipstream",
+        1080,
+        lambda: True,
+    )
 
 
 def test_adapter_does_not_own_process_or_network_policy():

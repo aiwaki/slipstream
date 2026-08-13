@@ -1,5 +1,20 @@
 # Browser Companion
 
+> **P0 macOS update (2026-08-13):** the headed/LaunchServices production worker
+> described in the historical sections below is superseded. Production now
+> launches only the app-bundled, version- and SHA-pinned Chrome for Testing
+> headless shell directly from
+> `Contents/Resources/chromium-headless-shell/chrome-headless-shell`. It creates
+> no Aqua LaunchAgent, installed-Chrome process, Dock/window/focus event, user
+> browser profile, extension, or Web Store dependency. Existing extension and
+> LaunchServices material below remains qualification history, not the current
+> production architecture. The old transport-idle broker is permanently
+> disabled. The replacement exact-host pre-routing path is implemented in the
+> `.23` candidate source, requires signed foreground-browser provenance, and is
+> not release-ready until packaged visibility, live-site, transport, and
+> idle-soak gates pass. Bundling the runtime is not itself a claim about the
+> currently installed `.22`.
+
 Slipstream's transport layer can see connection failure, but it cannot infer
 that a successfully rendered page says the service is unavailable in the
 current region. The browser companion supplies that missing semantic evidence
@@ -17,8 +32,10 @@ replayed or changed. The transport path also has separate bounded framing
 evidence for incomplete bodies.
 
 These fallbacks can prepare a proven route for a later request, but they cannot
-reload a page or see denial that appears only on a non-root path or after
-JavaScript execution. The companion remains necessary for those cases.
+read the actual tab's path, cookies, or encrypted DOM. P0 exact-host preflight
+may classify only its separate bounded service-root navigation. Arbitrary
+account- or path-specific denial therefore remains outside the claimed
+extensionless coverage; Slipstream does not compensate with TLS MITM.
 
 ## Chromium Preview
 
@@ -341,34 +358,21 @@ uninstall, and an unsigned Safari app-extension build.
 
 ## Remaining Gates
 
-- Deterministic Chrome Web Store packaging, local privacy disclosure, and
-  source/update provenance are implemented and CI-checked, but publisher
-  registration and publication are deferred. The replacement gate is an
-  automatic local integration delivered by Slipstream, with exact identity,
-  update, privacy, ownership, uninstall, and clean-profile evidence.
-- The unified-headless extension/native-message path and conservative
-  launch/physical-footprint budgets are implemented in the ordinary Chrome for
-  Testing gate and passed real-browser CI. The closed daemon-side correlation
-  fixture now binds a one-shot capability to one original relay and proves that
-  only that relay completes among two same-host candidates. A separate
-  owner-only job/result IPC seam now also proves bounded claim leases, worker
-  loss redelivery, exact submit delegation, socket mode, and exact cleanup on a
-  disposable path. The production socket is not created. A closed lazy-worker
-  controller now starts no thread before a live job, permits only one blocking
-  worker at a time, retries only after the five-second lost-claim lease, and
-  stops when the queue is empty. Its owner-only client rejects a foreign,
-  non-socket, or mis-mode socket path. While a capability is live, another
-  relay for the same host cannot mint a recursive worker job. The real browser
-  observer and platform
-  process launcher remain required before runtime composition.
-- Both Chrome for Testing scenarios must pass on an exact merged main commit
-  before v2 is runtime-qualified: frozen regional-denial v1 and additive
-  incomplete-response v2. Protected unpacked-extension success does not prove
-  automatic installed-product delivery or recovery of the original navigation.
-- Safari requires a signed container, browser enablement, and a disposable
-  runtime proof that the sandboxed app extension can reach the owner-only
-  daemon socket. The unsigned source and package build exist, but are not
-  bundled into Slipstream or installed on user machines.
+- The extensionless production path, owner-only job/result socket, exact-host
+  cache/coalescing, one-tree headless launcher, bounded cleanup, and pinned
+  runtime are implemented. They become release evidence only when the exact
+  merged-main candidate passes packaged lifecycle and visibility checks.
+- The same immutable candidate must then pass protected account-backed
+  owned-Geph qualification and protected release readiness: clean-profile
+  Safari and Chrome live-origin scenarios for all four failure classes,
+  dual-stack PF/NATLOOK and QUIC v1/v2 mechanics, and a measured 30-minute idle
+  soak with zero window, Dock, focus, GUI Chrome, LaunchAgent, or retained
+  profile event. Inconclusive origins cannot become false passes.
+- Chrome Web Store packaging, the unpacked Chromium extension, and the unsigned
+  Safari extension remain historical/research qualification surfaces. They are
+  not installed-product dependencies or `.23` release gates. Shipping either
+  extension later would require its own signed, sandboxed, clean-install and
+  exact-uninstall qualification.
 - Semantic matching remains deliberately conservative. New languages or phrase
   families require generic positive and negative fixtures, never hostname
   rules.

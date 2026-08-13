@@ -10,6 +10,16 @@
 
 </div>
 
+<div align="center">
+
+## Next preview: install Slipstream — sites work
+
+**Fast. Automatic. Invisible.**
+
+[Download the current macOS Apple Silicon preview](https://github.com/aiwaki/slipstream/releases)
+
+</div>
+
 Slipstream is a split-routing app for networks affected by blocking and DPI
 filtering. It selects a route for each service instead of enabling a system-wide
 VPN for all traffic.
@@ -44,10 +54,13 @@ becomes a general VPN fallback.
 - When a reviewed foreign-exit site attempts HTTP/3, only that flow is moved to
   the same managed TCP route through bundled Geph. Other QUIC/UDP traffic is not
   blocked.
-- A rare stuck navigation can be checked through installed Google Chrome in a
-  hidden local observation with a fresh private profile. It needs no extension,
-  headless service, or Chrome Web Store registration and sends no URL, path,
-  cookies, or page content elsewhere.
+- The next candidate includes a pinned local headless engine that checks rare
+  ambiguous failures only for one exact host and only after a foreground Safari
+  or Chrome navigation is verified. Known and healthy routes never start it;
+  the candidate can be published only after packaged, live-site, and measured
+  30-minute invisibility gates. It needs no installed Chrome, extension, or
+  Chrome Web Store registration, opens no window, and sends no paths, cookies,
+  or page content elsewhere.
 - With a full-tunnel VPN or another transparent filter active, Slipstream safely
   pauses its own interception and returns after the conflict disappears.
   External DNS, proxy, PAC, and VPN settings are detected but never changed.

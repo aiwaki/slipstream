@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slipstream.local/contracts/release-readiness-v1.json",
+  "title": "Slipstream release readiness proof v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "candidate_manifest_sha256",
+    "app_tree_sha256",
+    "source_commit",
+    "source_tree",
+    "candidate_build",
+    "readiness",
+    "live_sites",
+    "invisibility_soak",
+    "transport_mechanics",
+    "verified_candidate_artifacts"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "candidate_id": { "type": "string", "pattern": "^release-candidate-[0-9a-f]{40,64}$" },
+    "candidate_manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "app_tree_sha256": { "$ref": "#/$defs/sha256" },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "source_tree": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "candidate_build": { "$ref": "#/$defs/run" },
+    "readiness": {
+      "allOf": [
+        { "$ref": "#/$defs/run" },
+        {
+          "type": "object",
+          "required": ["workflow", "result"],
+          "properties": {
+            "workflow": { "const": ".github/workflows/release-readiness.yml" },
+            "result": { "enum": ["passed", "inconclusive", "failed"] }
+          }
+        }
+      ]
+    },
+    "live_sites": { "$ref": "#/$defs/gate" },
+    "invisibility_soak": {
+      "allOf": [
+        { "$ref": "#/$defs/gate" },
+        {
+          "type": "object",
+          "required": ["measured_duration_seconds"],
+          "properties": {
+            "measured_duration_seconds": { "type": "number", "minimum": 1800 }
+          }
+        }
+      ]
+    },
+    "transport_mechanics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "report_sha256", "scenario_count"],
+      "properties": {
+        "result": { "const": "passed" },
+        "report_sha256": { "$ref": "#/$defs/sha256" },
+        "scenario_count": { "const": 3 }
+      }
+    },
+    "verified_candidate_artifacts": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "run_attempt"],
+      "properties": {
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "workflow": { "type": "string" },
+        "result": { "type": "string" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "report_sha256", "harness_exit_status"],
+      "properties": {
+        "result": { "enum": ["passed", "inconclusive", "failed"] },
+        "report_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_exit_status": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "measured_duration_seconds": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

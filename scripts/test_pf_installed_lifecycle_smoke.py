@@ -13,6 +13,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pf_installed_lifecycle_smoke as lifecycle
@@ -145,6 +146,10 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             plist.write_text("plist")
             status = root / "status"
             status.write_text("status")
+            attestation_dir = root / "attestation"
+            attestation_dir.mkdir()
+            attestation = attestation_dir / "install-attestation.json"
+            attestation.write_text("{}")
             skip_lease = root / "skip-lease.json"
             skip_lease.write_text("lease")
             tgws_link = root / "tgws.link"
@@ -180,6 +185,8 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 PF_TOKEN_PATH=root / "pf.token",
                 PF_SKIP_LEASE_PATH=skip_lease,
                 TGWS_LINK_PATH=tgws_link,
+                INSTALL_ATTESTATION_DIR=attestation_dir,
+                INSTALL_ATTESTATION_PATH=attestation,
             ), mock.patch.object(
                 lifecycle.pf,
                 "_flush_anchor",
@@ -1599,6 +1606,7 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             },
             "listener": {
                 "host": "127.0.0.1",
+                "hosts": ["127.0.0.1", "::1"],
                 "port": 1080,
             },
             "state": "dormant",
@@ -1610,6 +1618,17 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             {"state": "active", "pid": 4242},
         )
 
+        evidence["listener"]["hosts"] = ["127.0.0.1"]
+        with self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "listener attestation mismatch",
+        ):
+            lifecycle._assert_install_attestation_runtime(
+                evidence,
+                {"state": "active", "pid": 4242},
+            )
+        evidence["listener"]["hosts"] = ["127.0.0.1", "::1"]
+
         evidence["pf_active"] = True
         with self.assertRaisesRegex(
             lifecycle.LifecycleError,
@@ -1619,6 +1638,36 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
                 evidence,
                 {"state": "active", "pid": 4242},
             )
+
+    def test_active_anchor_requires_both_ip_families(self) -> None:
+        class Runner:
+            ipv6 = True
+
+            def run(self, *_args, **_kwargs):
+                if _args[-1] == "-sn":
+                    stdout = (
+                        "rdr inet proto tcp to any port 443 "
+                        "-> 127.0.0.1 port 1080\n"
+                    )
+                    if self.ipv6:
+                        stdout += (
+                            "rdr inet6 proto tcp to any port 443 "
+                            "-> ::1 port 1080\n"
+                        )
+                else:
+                    stdout = "route-to (lo0 127.0.0.1) inet port 443\n"
+                    if self.ipv6:
+                        stdout += "route-to (lo0 ::1) inet6 port 443\n"
+                return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        runner = Runner()
+        lifecycle._assert_anchor_active(runner)
+        runner.ipv6 = False
+        with self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "did not arm the production private anchor",
+        ):
+            lifecycle._assert_anchor_active(runner)
 
     def test_dry_run_never_executes_privileged_work(self) -> None:
         output = io.StringIO()

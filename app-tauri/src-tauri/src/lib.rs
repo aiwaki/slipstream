@@ -46,7 +46,7 @@ use install_attestation::{
     install_attestation, install_attestation_at, InstallAttestation, INSTALL_ATTESTATION_PATH,
 };
 use serde_json::{json, Value};
-use status_client::{read_status, STATUS_PATH};
+use status_client::{read_status, read_status_state, StatusRead, STATUS_PATH};
 use tauri::{
     image::Image,
     menu::{
@@ -868,6 +868,22 @@ fn daemon_listener_owned() -> bool {
     daemon_process_owned(&user, &command, process_executable(pid).as_deref())
 }
 
+fn daemon_pid_owned(pid: i64) -> bool {
+    let Ok(pid) = u32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 1 {
+        return false;
+    }
+    let Some(user) = process_user(pid) else {
+        return false;
+    };
+    let Some(command) = process_command(pid) else {
+        return false;
+    };
+    daemon_process_owned(&user, &command, process_executable(pid).as_deref())
+}
+
 fn should_recover_daemon(
     missing_status_polls: u8,
     has_seen_status: bool,
@@ -1413,12 +1429,72 @@ fn daemon_state_text(state: &str, conns: i64, learned: i64, ru: bool) -> (String
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct TrayLiveness {
+    consecutive_failures: u8,
+    last_known_live: bool,
+}
+
+fn tray_status_with_hysteresis(
+    read: StatusRead,
+    liveness: bool,
+    state: &mut TrayLiveness,
+) -> Option<Value> {
+    match read {
+        StatusRead::Fresh(status) => {
+            state.consecutive_failures = 0;
+            state.last_known_live = true;
+            Some(status)
+        }
+        StatusRead::Stale(mut status) if liveness => {
+            state.consecutive_failures = 0;
+            state.last_known_live = true;
+            status["phase"] = Value::String("recovering".to_string());
+            Some(status)
+        }
+        StatusRead::Stale(mut status) => {
+            state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+            if state.consecutive_failures < DAEMON_WATCHDOG_MISSES {
+                status["phase"] = Value::String("recovering".to_string());
+                Some(status)
+            } else {
+                state.last_known_live = false;
+                None
+            }
+        }
+        StatusRead::Missing => {
+            state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+            if liveness {
+                state.last_known_live = true;
+                Some(json!({"state": "active", "phase": "recovering"}))
+            } else if state.consecutive_failures < DAEMON_WATCHDOG_MISSES {
+                Some(json!({"state": "active", "phase": "recovering"}))
+            } else {
+                state.last_known_live = false;
+                None
+            }
+        }
+    }
+}
+
 /// Refresh the two status info-items from the daemon status.
 /// Update the menu text from the daemon status; returns the state string so the
 /// caller can update the tray icon ONLY when it changes (re-setting the icon every
 /// poll made the menu-bar mark visibly blink).
-fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>) -> String {
-    let st = read_status();
+fn refresh(
+    state_item: &MenuItem<tauri::Wry>,
+    detail_item: &MenuItem<tauri::Wry>,
+    liveness: &mut TrayLiveness,
+) -> String {
+    let read = read_status_state();
+    let needs_probe = !read.is_fresh();
+    let snapshot_pid = read
+        .value()
+        .and_then(|status| status.get("pid"))
+        .and_then(Value::as_i64);
+    let owned_daemon_live =
+        needs_probe && (daemon_listener_owned() || snapshot_pid.is_some_and(daemon_pid_owned));
+    let st = tray_status_with_hysteresis(read, owned_daemon_live, liveness);
     let get_str = |k: &str, d: &'static str| -> String {
         st.as_ref()
             .and_then(|v| v.get(k))
@@ -1433,6 +1509,7 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
             .unwrap_or(0)
     };
     let state = get_str("state", "off");
+    let phase = get_str("phase", "active");
     let conns = get_i64("conns");
     let learned = get_i64("hosts_learned");
     let geph = get_str("geph", "off");
@@ -1444,7 +1521,19 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         .unwrap_or(false);
 
     let ru = ui_ru();
-    let (title, mut detail) = daemon_state_text(&state, conns, learned, ru);
+    let (mut title, mut detail) = daemon_state_text(&state, conns, learned, ru);
+    if matches!(phase.as_str(), "starting" | "recovering" | "stopping") {
+        let (phase_title, phase_detail) = match (phase.as_str(), ru) {
+            ("starting", true) => ("Slipstream — запускается", "Запуск фонового прокси"),
+            ("starting", false) => ("Slipstream — Starting", "Starting background proxy"),
+            ("stopping", true) => ("Slipstream — останавливается", "Остановка фонового прокси"),
+            ("stopping", false) => ("Slipstream — Stopping", "Stopping background proxy"),
+            (_, true) => ("Slipstream — восстанавливается", "Проверка фонового прокси"),
+            (_, false) => ("Slipstream — Restoring", "Checking background proxy"),
+        };
+        title = phase_title.to_string();
+        detail = phase_detail.to_string();
+    }
     let recovery_detail = if matches!(state.as_str(), "active" | "dormant") {
         baseline_recovery_detail(st.as_ref(), ru)
     } else {
@@ -1454,7 +1543,7 @@ fn refresh(state_item: &MenuItem<tauri::Wry>, detail_item: &MenuItem<tauri::Wry>
         detail.clone_from(recovery);
     }
     if matches!(state.as_str(), "active" | "dormant") {
-        if recovery_detail.is_none() {
+        if recovery_detail.is_none() && phase == "active" {
             if let Some(routing) = routing_health_summary(st.as_ref(), &geph, ru) {
                 push_detail_part(&mut detail, &routing);
             }
@@ -2873,8 +2962,9 @@ pub fn run() {
                 let mut has_seen_daemon_status = false;
                 let watchdog_started = Instant::now();
                 let mut next_daemon_recovery = Instant::now();
+                let mut tray_liveness = TrayLiveness::default();
                 loop {
-                    let state = refresh(&s, &d);
+                    let state = refresh(&s, &d, &mut tray_liveness);
                     if state != last_state {
                         set_tray_icon(&app_handle, &state); // only on change -> no blink
                         last_state = state;
@@ -3008,12 +3098,13 @@ mod tests {
         route_class_health, routing_health_summary, shell_quote, should_recover_daemon,
         should_request_daemon_install, signal_uninstall_ready, sync_private_executable,
         system_proxy_active_from_scutil, system_proxy_from_status, telegram_proxy_detail,
-        uninstall_dialog_script_for, uninstall_ready_path, uninstall_shell_for_paths,
-        valid_bundled_daemon, write_atomic_if_changed, write_diagnostic_snapshot_file,
-        write_private_atomic, ExitCatalogAvailability, ExitMenuRefreshState,
-        DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES, GEPH_LAUNCHD_LABEL,
-        GEPH_STDERR_LOG_FILE,
+        tray_status_with_hysteresis, uninstall_dialog_script_for, uninstall_ready_path,
+        uninstall_shell_for_paths, valid_bundled_daemon, write_atomic_if_changed,
+        write_diagnostic_snapshot_file, write_private_atomic, ExitCatalogAvailability,
+        ExitMenuRefreshState, TrayLiveness, DAEMON_RECOVERY_STATUS_PATH, DAEMON_WATCHDOG_MISSES,
+        GEPH_LAUNCHD_LABEL, GEPH_STDERR_LOG_FILE,
     };
+    use crate::status_client::StatusRead;
     use serde_json::json;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
@@ -3025,6 +3116,25 @@ mod tests {
             shell_quote("/Applications/Slipstream.app/slipstreamd"),
             "'/Applications/Slipstream.app/slipstreamd'"
         );
+    }
+
+    #[test]
+    fn macos_bundle_and_runtime_are_both_background_only() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["app"]["windows"], json!([]));
+        assert_eq!(config["bundle"]["macOS"]["infoPlist"], "Info.plist");
+        assert!(config["bundle"]["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|resource| resource == "chromium-headless-shell/**/*"));
+
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("<key>LSUIElement</key>"));
+        assert!(plist.contains("<true/>"));
+        let source = include_str!("lib.rs");
+        assert!(source.contains("ActivationPolicy::Accessory"));
     }
 
     #[test]
@@ -3681,7 +3791,7 @@ mod tests {
         std::fs::write(
             &attestation,
             serde_json::to_vec(&json!({
-                "schema_version": 2,
+                "schema_version": 3,
                 "source_sha256": daemon_sha256,
                 "daemon": {
                     "path": installed,
@@ -3704,6 +3814,7 @@ mod tests {
                 },
                 "listener": {
                     "host": "127.0.0.1",
+                    "hosts": ["127.0.0.1", "::1"],
                     "port": 1080
                 },
                 "state": "active",
@@ -4014,6 +4125,35 @@ tcp4 0 0 127.0.0.1.1080 192.168.31.128.56495 ESTABLISHED 394 0 131264 131376 sli
             true,
             true
         ));
+    }
+
+    #[test]
+    fn tray_does_not_claim_off_for_a_live_daemon_with_stale_health() {
+        let mut state = TrayLiveness {
+            consecutive_failures: 0,
+            last_known_live: true,
+        };
+        let status = tray_status_with_hysteresis(
+            StatusRead::Stale(json!({"state": "active", "phase": "active"})),
+            true,
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(status["state"], "active");
+        assert_eq!(status["phase"], "recovering");
+        assert_eq!(state.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn tray_requires_three_failed_liveness_checks_before_off() {
+        let mut state = TrayLiveness::default();
+        for expected in 1..DAEMON_WATCHDOG_MISSES {
+            let status = tray_status_with_hysteresis(StatusRead::Missing, false, &mut state);
+            assert_eq!(status.unwrap()["phase"], "recovering");
+            assert_eq!(state.consecutive_failures, expected);
+        }
+        assert!(tray_status_with_hysteresis(StatusRead::Missing, false, &mut state).is_none());
+        assert!(!state.last_known_live);
     }
 
     #[test]

@@ -5,6 +5,27 @@ use slipstream_core::status_v2::{status_v2_from_value, StatusV2, STATUS_SCHEMA_V
 
 pub(crate) const STATUS_PATH: &str = "/var/run/slipstream.status";
 const STATUS_STALE_AFTER_SECS: f64 = 15.0;
+const HEARTBEAT_STALE_AFTER_SECS: f64 = 6.0;
+
+#[derive(Debug)]
+pub(crate) enum StatusRead {
+    Fresh(Value),
+    Stale(Value),
+    Missing,
+}
+
+impl StatusRead {
+    pub(crate) fn value(&self) -> Option<&Value> {
+        match self {
+            Self::Fresh(status) | Self::Stale(status) => Some(status),
+            Self::Missing => None,
+        }
+    }
+
+    pub(crate) fn is_fresh(&self) -> bool {
+        matches!(self, Self::Fresh(_))
+    }
+}
 
 enum ParsedStatus {
     V1(Value),
@@ -33,6 +54,19 @@ impl ParsedStatus {
         match self {
             Self::V1(status) => status.get("state").and_then(Value::as_str) == Some("conflict"),
             Self::V2(status) => status.is_terminal_conflict(),
+        }
+    }
+
+    fn has_independent_heartbeat(&self) -> bool {
+        match self {
+            Self::V1(_) => false,
+            Self::V2(status) => status.daemon.as_ref().is_some_and(|daemon| {
+                daemon.heartbeat_seq.is_some()
+                    && daemon
+                        .heartbeat_at
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty())
+            }),
         }
     }
 
@@ -110,6 +144,10 @@ fn v2_status_for_tray(status: &StatusV2) -> Value {
         "version": daemon.and_then(|daemon| daemon.version.as_deref()).unwrap_or("unknown"),
         "pid": daemon.and_then(|daemon| daemon.pid).unwrap_or(0),
         "ts": daemon.and_then(|daemon| daemon.updated_at).unwrap_or(0.0),
+        "heartbeat_at": daemon.and_then(|daemon| daemon.heartbeat_at.as_deref()),
+        "heartbeat_seq": daemon.and_then(|daemon| daemon.heartbeat_seq),
+        "health_updated_at": daemon.and_then(|daemon| daemon.health_updated_at.as_deref()),
+        "phase": daemon.and_then(|daemon| daemon.phase.map(|phase| phase.as_str())).unwrap_or("active"),
         "conns": daemon.and_then(|daemon| daemon.connections).unwrap_or(0),
         "hosts_learned": daemon.and_then(|daemon| daemon.hosts_learned).unwrap_or(0),
         "dead": daemon.and_then(|daemon| daemon.dead_hosts).unwrap_or(0),
@@ -139,6 +177,7 @@ fn status_for_tray(status: Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
+#[cfg(test)]
 fn status_from_raw(raw: &str, now: f64) -> Option<Value> {
     let status = ParsedStatus::from_value(serde_json::from_str(raw).ok()?)?;
     if now - status.updated_at() > STATUS_STALE_AFTER_SECS && !status.is_terminal_conflict() {
@@ -147,19 +186,69 @@ fn status_from_raw(raw: &str, now: f64) -> Option<Value> {
     Some(status.into_tray())
 }
 
+fn status_read_from_raw(raw: &str, now: f64, file_updated_at: f64) -> StatusRead {
+    let Some(status) = serde_json::from_str(raw)
+        .ok()
+        .and_then(ParsedStatus::from_value)
+    else {
+        return StatusRead::Missing;
+    };
+    let age = if status.has_independent_heartbeat() {
+        now - file_updated_at
+    } else {
+        now - status.updated_at()
+    };
+    let stale_after = if status.has_independent_heartbeat() {
+        HEARTBEAT_STALE_AFTER_SECS
+    } else {
+        STATUS_STALE_AFTER_SECS
+    };
+    let fresh = age <= stale_after || status.is_terminal_conflict();
+    let status = status.into_tray();
+    if fresh {
+        StatusRead::Fresh(status)
+    } else {
+        StatusRead::Stale(status)
+    }
+}
+
 /// Daemon status, or `None` if the file is missing or has a stale live state.
 pub(crate) fn read_status() -> Option<Value> {
-    let raw = fs::read_to_string(STATUS_PATH).ok()?;
+    match read_status_state() {
+        StatusRead::Fresh(status) => Some(status),
+        StatusRead::Stale(_) | StatusRead::Missing => None,
+    }
+}
+
+/// Read status while preserving a syntactically valid stale snapshot. The tray
+/// can therefore display `Restoring` while an independent liveness check proves
+/// the daemon is still owned, instead of lying that it is off.
+pub(crate) fn read_status_state() -> StatusRead {
+    let Ok(file) = fs::File::open(STATUS_PATH) else {
+        return StatusRead::Missing;
+    };
+    let file_updated_at = file
+        .metadata()
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or(0.0);
+    let Ok(raw) = std::io::read_to_string(file) else {
+        return StatusRead::Missing;
+    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs_f64())
         .unwrap_or(0.0);
-    status_from_raw(&raw, now)
+    status_read_from_raw(&raw, now, file_updated_at)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{status_for_tray, status_from_raw, status_updated_at};
+    use super::{
+        status_for_tray, status_from_raw, status_read_from_raw, status_updated_at, StatusRead,
+    };
     use crate::{routing_health_summary, system_proxy_from_status};
     use serde_json::json;
 
@@ -184,6 +273,10 @@ mod tests {
                 "version": "0.1.8",
                 "pid": 42,
                 "updated_at": 100.0,
+                "heartbeat_at": "2026-08-13T10:00:00Z",
+                "heartbeat_seq": 17,
+                "health_updated_at": "2026-08-13T09:59:55Z",
+                "phase": "active",
                 "connections": 7,
                 "hosts_learned": 23,
                 "dead_hosts": 1,
@@ -219,6 +312,10 @@ mod tests {
         assert_eq!(status["state"], "active");
         assert_eq!(status["version"], "0.1.8");
         assert_eq!(status["conns"], 7);
+        assert_eq!(status["heartbeat_at"], "2026-08-13T10:00:00Z");
+        assert_eq!(status["heartbeat_seq"], 17);
+        assert_eq!(status["health_updated_at"], "2026-08-13T09:59:55Z");
+        assert_eq!(status["phase"], "active");
         assert_eq!(status["geph"], "up");
         assert_eq!(status["route_health"]["local_bypass"]["state"], "ok");
         assert_eq!(
@@ -271,5 +368,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(v2["state"], "conflict");
+    }
+
+    #[test]
+    fn status_reader_preserves_a_stale_snapshot_for_liveness_hysteresis() {
+        let stale = status_read_from_raw(r#"{"state":"active","ts":1.0}"#, 100.0, 100.0);
+        assert!(matches!(stale, StatusRead::Stale(_)));
+        assert_eq!(stale.value().unwrap()["state"], "active");
+        assert!(!stale.is_fresh());
+    }
+
+    #[test]
+    fn independent_heartbeat_prefers_atomic_file_publication_over_stale_health() {
+        let raw = r#"{
+            "schema_version":2,
+            "daemon":{
+                "state":"active",
+                "updated_at":1.0,
+                "heartbeat_at":"2026-08-13T10:00:00Z",
+                "heartbeat_seq":17,
+                "health_updated_at":"2026-08-13T09:59:00Z",
+                "phase":"active"
+            }
+        }"#;
+        assert!(matches!(
+            status_read_from_raw(raw, 100.0, 95.0),
+            StatusRead::Fresh(_)
+        ));
+        assert!(matches!(
+            status_read_from_raw(raw, 100.0, 93.9),
+            StatusRead::Stale(_)
+        ));
     }
 }

@@ -1,6 +1,6 @@
 # Routing Research Notes
 
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 Purpose: keep a compact record of routing research, graph-tool status, and
 safe follow-ups. This is an engineering note, not user-facing documentation.
@@ -9,6 +9,7 @@ safe follow-ups. This is an engineering note, not user-facing documentation.
 
 | Date | Topic | Status | Decision | Next action |
 |---|---|---|---|---|
+| 2026-08-13 | Four browser-visible failure classes and invisible macOS recovery | P0 implementation locally green; exact candidate gates open | The `.22` workstation exposed separate failures: a reviewed Geph route lost after first-payload timeout (`xpersonatoy.com` in Safari), an original navigation that stayed pending while a synthetic tab was unrelated (`app.aikido.dev`), a complete regional denial (`weather.com`), and a sparse security-edge denial (`capacitorjs.com`). Live logs also proved 271 worker jobs, 184 GUI Chrome PIDs, and a 51-second health-publication gap while the daemon stayed alive. The branch removes the Aqua/installed-Chrome idle path, adds dual-stack PF/NATLOOK and QUIC v2 observation, fail-closed owned-Geph successor recovery, signed foreground browser provenance, exact-host RoutePreflightV1, strict denial/incomplete evidence, transient critical-JS range comparison, an app-bundled pinned headless shell, and an independent heartbeat. The ordinary/known path stays browser-free; one raw timeout never learns. Codebase-memory discovery again returned `Transport closed`, so this pass used the documented narrow `rtk` fallback. | Require the immutable exact-main candidate, real normal-Chrome and Safari live results, protected IPv4/IPv6 TCP plus QUIC v1/v2 mechanics, and a measured 30-minute zero-window/Dock/focus/process soak before publishing or installing `.23`. |
 | 2026-08-12 | Reviewed geo-exit site bypassed TCP routing over QUIC | Local correction passed full regression plus a real tray/browser transaction and rolled back exactly | Pending-navigation transaction `AD279B68-AE05-46D1-8BF2-E4919D7727D1` proved a late TCP route advance cannot rescue Chrome after partial HTTP headers commit the document. After adding the repeatedly qualified `xpersonatoy.com` suffix to shared Python/Rust geo-exit policy, transaction `76910DF2-B1D4-4DF6-AC4A-89D185ABEB50` still stalled in ordinary Chrome even though installed policy selected Geph and direct owned SOCKS returned HTTP 200 with 1,116,446 bytes in 2.4 seconds. The same Chrome completed only when QUIC was disabled, isolating UDP/443 bypass. The bounded correction decrypts only standardized public QUIC v1 Initial CRYPTO, extracts SNI, reuses the active classifier, and sends Version Negotiation only for `geo_exit`. Transaction `AC4ADF6E-A636-4980-A307-9CF0C9512A70` then logged the exact TCP fallback and ordinary Chrome completed over h2 with `readyState=complete`, StarrToy content, and a 1,089,537-byte DOM; tray, private PF, and owned Geph remained healthy. Unknown/protected QUIC is unchanged, and rollback restored the previous app and removed root runtime. Full local verification passes 1,208 Python tests plus 54 subtests, 101 tray tests, 35 core tests, Clippy, format, continuity, and diff checks. | Merge only with green PR checks, require exact-main CI/audit/Windows plus one protected qualification, and install only that exact artifact for final tray/ordinary-Chrome smoke before release. |
 | 2026-08-12 | Hidden ordinary-Chrome observer confused response headers with completed document | Root observer correction focused-green; real-browser proof open | PR #337 merged as exact main `684ba0767b407a87e8a449f0999b799cee410c4d`; all PR, exact-main, audit, native Windows, and protected gates passed, and protected artifact `9141025574` passed checksum and ZIP integrity. Controlled install `7CA316C7-B043-49FF-BE20-3C181B50D7CA` nevertheless timed out on the first real `xpersonatoy.com` smoke and rolled back exactly. Privacy-safe binding diagnostics in local transactions `9803CFE4-3FFC-4901-B858-04B101F4399F` and `9372D344-5999-4214-8AC6-DBCF8AB4A955` proved the worker emitted its terminal result immediately after `Network.responseReceived`: headers existed, but neither the document body nor the original exact relay had completed. Because the daemon correctly consumed terminal evidence without a route effect, the local ladder never advanced to independently confirmed owned Geph. The correction ignores response headers, requires `Network.loadingFinished` for terminal success, and reports the same document as pending after the existing eight-second bound. It adds no refresh loop, cooldown, hostname rule, route shortcut, or privacy field. Diagnostic transaction `41E16A97-5F43-4DED-943A-6D21426E6D9A` was rolled back; the old app hashes are restored and the root daemon/TCP/1080 remain absent. The separate source-install five-second dependency-command timeout remains a dev-only issue and is not mixed into this runtime correction. | Build the corrected app and run one controlled real Chrome transaction. If `xpersonatoy.com` completes, run full validation and land a small PR; then require exact-main/protected gates and perform the final installed-tray macOS qualification using only that exact artifact. |
 | 2026-08-12 | Protected artifact failed the first real macOS headed-browser smoke | Exact rollback complete; narrow product correction locally green | Controlled transaction `B1D007CB-B8FA-4F6A-9C2A-622F18D122BC` installed only artifact `9137909918` and reached an active root daemon, but isolated headed branded Chrome left `xpersonatoy.com` uncommitted for 75 seconds. The automatic rollback restored the previous app hash, removed Slipstream's root listener/daemon/PF state, kept owned-Geph PID `76069`, and preserved DNS, proxy/PAC, and default route. A passive repeat observed the worker's real launchd transition through `xpcproxy` and a briefly root-observed exact command before console UID `502`, plus terminal headless observations and expired `claimed_job_invalid` retries while the ordinary headed navigation stayed pending. Production worker Chrome therefore must match the ordinary browser's rendering surface without showing a window: keep the existing LaunchServices `open -j`, sandbox, clean profile, disabled extensions/QUIC, exact Google signature, bounded observation, and cleanup, but omit `--headless`. The launcher may wait within its existing five-second start deadline for the exact xpcproxy/root-to-console transition, but never accept a wrong UID or command. Local verification passes 1,199 tests plus 54 subtests, 96 Rust tests, an arm64 build/signature check, and a packaged hidden-worker result in 12,712 ms with no visible window or sandbox disablement. The codebase graph again returned `Transport closed`, so source discovery used the documented narrow fallback. | Review and merge `codex/macos-hidden-browser-worker` only after every required check. Then require exact-main CI/audit/native Windows and a fresh protected exact-artifact run before another controlled Mac install; put `xpersonatoy.com` first and roll back on the first failed smoke. |
@@ -1297,6 +1298,40 @@ Fresh external snapshots checked on 2026-07-09:
 - A busy tunnel defers the action. A missing or mismatched claim, unknown
   listener, external Geph, or unexpected label produces no signal and no PF,
   DNS, proxy, PAC, or VPN mutation.
+
+## 2026-08-13 macOS P0 failure-class investigation
+
+The installed `v0.1.9-preview.22` was transport-healthy but did not satisfy the
+user-visible product contract. Four examples exposed reusable failure classes,
+not a need for per-domain exceptions:
+
+- Safari showed an HTTPS downgrade warning for reviewed `xpersonatoy.com` after
+  the required Geph path lost its first payload and direct fallback was allowed.
+- `app.aikido.dev` stayed pending, showing that a synthetic navigation was not
+  equivalent to the user's original relay.
+- `weather.com` returned a complete regional-denial document, which transport
+  completion alone classifies as success.
+- `capacitorjs.com` returned a complete edge-security denial. This may authorize
+  nothing unless an independent owned-Geph comparison returns a complete usable
+  non-denial response; ordinary 403/429/login/CAPTCHA responses remain inert.
+
+The same workstation log contained 271 browser-worker launches and 184 GUI
+Chrome processes. Admission was based on generic TLS idle, so background
+connections could launch ordinary Chrome even while the Mac was idle. The
+production headed-Chrome decision is therefore superseded. The replacement is
+an app-bundled, SHA-pinned local headless-shell runtime with no LaunchServices,
+Chrome profile, extension, Developer Mode, Web Store, or cloud dependency.
+
+Status observations also separated process health from display freshness. One
+status snapshot gap lasted 51 seconds while the daemon PID and listener stayed
+alive; the tray's 15-second stale cutoff mapped that delay directly to `Off`.
+`Off` must be reserved for confirmed service absence, while slow health work is
+reported as restoring/updating and heartbeat publication remains independent.
+
+`contracts/route-preflight-v1.json` now freezes the language-neutral exact-host
+preflight request/outcome boundary used by both Python and Rust. It carries
+bounded route candidates and fixed outcomes, never page text, path, cookies,
+Ray ID, or arbitrary browser failure strings.
 
 ## Transfer Backlog
 

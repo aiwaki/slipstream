@@ -30,6 +30,7 @@ class MakeReleaseManifestTests(unittest.TestCase):
         *,
         tag: str = STABLE_TAG,
         channel: str = "stable",
+        sbom_tag: str | None = None,
     ) -> None:
         files = {
             "Slipstream-macos-arm64.zip": b"zip",
@@ -50,7 +51,7 @@ class MakeReleaseManifestTests(unittest.TestCase):
 
         sbom = make_release_sbom.build_spdx_document(
             version=VERSION,
-            tag=tag,
+            tag=sbom_tag or tag,
             repository=REPOSITORY,
             source_commit=SOURCE_COMMIT,
             source_date_epoch=SOURCE_DATE_EPOCH,
@@ -173,6 +174,43 @@ class MakeReleaseManifestTests(unittest.TestCase):
             self.assertEqual(result["sbom"]["format"], "SPDX-2.3")
             self.assertEqual(result["dependency_audit"]["packages_scanned"], 1)
             self.assertEqual(result["target"], TARGET)
+
+    def test_promoted_preview_accepts_candidate_sbom_and_proof_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            candidate_tag = f"release-candidate-{SOURCE_COMMIT}"
+            self._write_release_dir(
+                root,
+                tag=PREVIEW_TAG,
+                channel="preview",
+                sbom_tag=candidate_tag,
+            )
+            (root / "release-candidate-manifest.json").write_text(
+                '{"schema_version":1}\n', encoding="utf-8"
+            )
+            (root / "release-qualification.json").write_text(
+                '{"schema_version":1}\n', encoding="utf-8"
+            )
+            (root / "release-readiness.json").write_text(
+                '{"schema_version":1}\n', encoding="utf-8"
+            )
+            (root / "transport-mechanics.json").write_text(
+                '{"schema_version":2}\n', encoding="utf-8"
+            )
+            self._write_manifest(root, tag=PREVIEW_TAG, channel="preview")
+
+            result = make_release_manifest.validate_artifact_manifest(
+                release_dir=root,
+                repository=REPOSITORY,
+                version=VERSION,
+                tag=PREVIEW_TAG,
+                channel="preview",
+                source_commit=SOURCE_COMMIT,
+                target=TARGET,
+            )
+
+            self.assertEqual(result["artifact_count"], 10)
+            self.assertEqual(result["sbom"]["format"], "SPDX-2.3")
 
     def test_validation_rejects_artifact_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
