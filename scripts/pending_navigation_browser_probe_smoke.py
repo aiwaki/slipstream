@@ -424,16 +424,23 @@ def _assert_hidden_launch_services_events(
                     owned_asn_match.group("quoted")
                     or owned_asn_match.group("plain")
                 ).lower()
-            elif (
-                LAUNCH_SERVICES_LSASN_TOKEN_RE.search(line) is None
-                and len(asns) == 1
-            ):
-                # Some macOS versions omit or quote LSASN differently. The
-                # sole ASN is still attributable here because the same event
-                # already proved both the exact pinned path and owned root PID.
+            elif len(asns) == 1:
+                # `lsappinfo listen` is not a versioned serialization format.
+                # Some macOS runner images wrap the LSASN value in a form that
+                # the local image does not emit.  Do not guess that wrapper's
+                # grammar: this event is already anchored to both the exact
+                # pinned executable and an observed owned root PID, so its
+                # sole canonical ASN is the only unambiguous identity.  Zero
+                # or multiple distinct ASNs still fail closed below.
                 owned_asn = next(iter(asns))
             else:
-                raise QualificationError("LaunchServices omitted the owned process identity")
+                raise QualificationError(
+                    "LaunchServices omitted or ambiguously encoded the owned "
+                    "process identity "
+                    f"(canonical_asn_count={len(asns)}, "
+                    "explicit_lsasn_token="
+                    f"{LAUNCH_SERVICES_LSASN_TOKEN_RE.search(line) is not None})"
+                )
             allowed_asns.add(owned_asn)
         parsed_events.append(
             (event_name, line, asns, has_marker, has_expected_path)

@@ -241,7 +241,10 @@ def test_hidden_launch_services_contract_rejects_ambiguous_asn_fallback() -> Non
         'sourceASN=ASN:0x0-0x999999:',
     )
 
-    with pytest.raises(smoke.QualificationError, match="omitted the owned"):
+    with pytest.raises(
+        smoke.QualificationError,
+        match="omitted or ambiguously encoded",
+    ):
         smoke._assert_hidden_launch_services_events(
             [event],
             expected_shell=EXPECTED_SHELL,
@@ -249,13 +252,58 @@ def test_hidden_launch_services_contract_rejects_ambiguous_asn_fallback() -> Non
         )
 
 
-def test_hidden_launch_services_contract_rejects_malformed_explicit_lsasn() -> None:
-    event = _launch_event("kLSNotifyApplicationCreation").replace(
-        '"LSASN"=ASN:0x0-0x731731:',
-        '"LSASN"="ASN:0x0-0x731731:',
+def test_hidden_launch_services_contract_accepts_unknown_single_asn_wrapper() -> None:
+    events = [
+        _launch_event("kLSNotifyApplicationCreation"),
+        _launch_event("kLSNotifyApplicationTypeChanged", include_path=False),
+        _launch_event("kLSNotifyApplicationDeath"),
+    ]
+    events = [
+        event.replace(
+            '"LSASN"=ASN:0x0-0x731731:',
+            '"LSASN"=<canonical ASN:0x0-0x731731:>',
+        )
+        for event in events
+    ]
+
+    assert smoke._assert_hidden_launch_services_events(
+        events,
+        expected_shell=EXPECTED_SHELL,
+        observed_root_pids=frozenset({731}),
+    ) == 3
+
+
+def test_hidden_launch_services_contract_rejects_missing_anchor_asn() -> None:
+    event = (
+        _launch_event("kLSNotifyApplicationCreation")
+        .replace(
+            '"LSASN"=ASN:0x0-0x731731:',
+            '"LSASN"=<missing>',
+        )
+        .replace(" ASN:0x0-0x731731:", "")
     )
 
-    with pytest.raises(smoke.QualificationError, match="omitted the owned"):
+    with pytest.raises(
+        smoke.QualificationError,
+        match=r"canonical_asn_count=0, explicit_lsasn_token=True",
+    ):
+        smoke._assert_hidden_launch_services_events(
+            [event],
+            expected_shell=EXPECTED_SHELL,
+            observed_root_pids=frozenset({731}),
+        )
+
+
+def test_hidden_launch_services_contract_rejects_unknown_ambiguous_wrapper() -> None:
+    event = _launch_event("kLSNotifyApplicationCreation").replace(
+        '"LSASN"=ASN:0x0-0x731731:',
+        '"LSASN"=<canonical ASN:0x0-0x731731: source ASN:0x0-0x999999:>',
+    )
+
+    with pytest.raises(
+        smoke.QualificationError,
+        match=r"canonical_asn_count=2, explicit_lsasn_token=True",
+    ):
         smoke._assert_hidden_launch_services_events(
             [event],
             expected_shell=EXPECTED_SHELL,
