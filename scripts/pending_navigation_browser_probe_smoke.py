@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import ctypes.util
+import hashlib
 import http.server
 import json
 import os
@@ -52,6 +53,50 @@ FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
     "kLSNotifyBecameFrontmost",
     "kLSNotifyBringForwardRequest",
 )
+ALLOWED_HIDDEN_LAUNCH_SERVICES_EVENTS = frozenset(
+    {
+        "kLSNotifyApplicationCreation",
+        "kLSNotifyApplicationBirth",
+        "kLSNotifyApplicationStartedFromStoppedState",
+        "kLSNotifyApplicationInformationKeyAdded",
+        "kLSNotifyApplicationRegisteredForCGEvents",
+        "kLSNotifyPerstistenceSupressRelaunchAtLoginChanged",
+        "kLSNotifyApplicationTypeChanged",
+        "kLSNotifyApplicationReady",
+        "kLSNotifyChildApplicationReady",
+        "kLSNotifyApplicationReadyToAcceptAppleEvents",
+        "kLSNotifyLaunchFinished",
+        "kLSNotifyChildDeath",
+        "kLSNotifyApplicationDeath",
+        "kLSNotifyApplicationExitedIncludingSubordinateProcesses",
+    }
+)
+LAUNCH_SERVICES_START_EVENTS = frozenset(
+    {"kLSNotifyApplicationCreation", "kLSNotifyApplicationBirth"}
+)
+LAUNCH_SERVICES_EXIT_EVENTS = frozenset(
+    {
+        "kLSNotifyChildDeath",
+        "kLSNotifyApplicationDeath",
+        "kLSNotifyApplicationExitedIncludingSubordinateProcesses",
+    }
+)
+LAUNCH_SERVICES_MARKERS = (
+    "slipstream",
+    "chrome-headless",
+    "chrome headless",
+    "headlesschrome",
+    "headless chrome",
+    "chromium",
+)
+LAUNCH_SERVICES_ASN_RE = re.compile(r"ASN:0x[0-9a-f]+-0x[0-9a-f]+:", re.I)
+LAUNCH_SERVICES_LSASN_RE = re.compile(
+    r'"LSASN"=(ASN:0x[0-9a-f]+-0x[0-9a-f]+:)', re.I
+)
+LAUNCH_SERVICES_EVENT_RE = re.compile(r"\ANotification: (\S+)")
+LAUNCH_SERVICES_PID_RE = re.compile(r'\bpid"?\s*=\s*(\d+)', re.I)
+LAUNCH_SERVICES_EXECUTABLE_RE = re.compile(r'executable path="([^"]+)"', re.I)
+LAUNCH_SERVICES_TYPE_RE = re.compile(r'type="([^"]+)"', re.I)
 
 
 class QualificationError(RuntimeError):
@@ -75,6 +120,25 @@ class VisibilitySnapshot:
     slipstream_dock_visible: bool
     gui_chrome_pids: frozenset[int]
     headless_shell_pids: frozenset[int]
+    headless_shell_root_pids: frozenset[int]
+    launch_services_entries: tuple["LaunchServicesEntry", ...]
+
+
+@dataclass(frozen=True)
+class LaunchServicesEntry:
+    pid: int | None
+    executable_path: str | None
+    application_type: str | None
+    dock_visible: bool
+
+
+@dataclass(frozen=True)
+class PinnedExecutableIdentity:
+    path: Path
+    device: int
+    inode: int
+    size: int
+    sha256: str
 
 
 def _run_text(command: tuple[str, ...], *, timeout: float = 5.0) -> str:
@@ -101,30 +165,79 @@ def _launch_services_listing() -> str:
     return _run_text((LSAPPINFO, "list"))
 
 
-def _slipstream_launch_services_state(listing: str) -> tuple[bool, bool]:
-    blocks = [
-        block
-        for block in re.split(r"(?m)(?=^\s*\d+\) )", listing)
-        if any(
-            marker in block.lower()
-            for marker in (
-                "slipstream",
-                "chrome-headless",
-                "chrome headless",
-                "headlesschrome",
-                "headless chrome",
-                "chromium",
+def _slipstream_launch_services_entries(
+    listing: str,
+) -> tuple[LaunchServicesEntry, ...]:
+    entries: list[LaunchServicesEntry] = []
+    for block in re.split(r"(?m)(?=^\s*\d+\) )", listing):
+        lowered = block.lower()
+        if not any(marker in lowered for marker in LAUNCH_SERVICES_MARKERS):
+            continue
+        pid_match = LAUNCH_SERVICES_PID_RE.search(block)
+        executable_match = LAUNCH_SERVICES_EXECUTABLE_RE.search(block)
+        type_match = LAUNCH_SERVICES_TYPE_RE.search(block)
+        dock_visible = (
+            'type="foreground"' in lowered and " hidden" not in lowered
+        )
+        entries.append(
+            LaunchServicesEntry(
+                pid=int(pid_match.group(1)) if pid_match else None,
+                executable_path=(
+                    executable_match.group(1) if executable_match else None
+                ),
+                application_type=type_match.group(1) if type_match else None,
+                dock_visible=dock_visible,
             )
         )
-    ]
-    if not blocks:
-        return False, False
-    dock_visible = any(
-        'type="foreground"' in block.lower()
-        and " hidden" not in block.lower()
-        for block in blocks
+    return tuple(entries)
+
+
+def _slipstream_launch_services_state(listing: str) -> tuple[bool, bool]:
+    entries = _slipstream_launch_services_entries(listing)
+    return bool(entries), any(entry.dock_visible for entry in entries)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _pinned_executable_identity(path: Path) -> PinnedExecutableIdentity:
+    resolved = path.resolve(strict=True)
+    manifest_path = resolved.parent / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise QualificationError("pinned headless manifest is unavailable") from error
+    expected_sha256 = manifest.get("executable_sha256")
+    if not isinstance(expected_sha256, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", expected_sha256
+    ):
+        raise QualificationError("pinned headless manifest digest is invalid")
+    stat_result = resolved.stat()
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise QualificationError("pinned headless executable is not regular")
+    observed_sha256 = _sha256(resolved)
+    if observed_sha256 != expected_sha256:
+        raise QualificationError("pinned headless executable digest changed")
+    return PinnedExecutableIdentity(
+        path=resolved,
+        device=stat_result.st_dev,
+        inode=stat_result.st_ino,
+        size=stat_result.st_size,
+        sha256=observed_sha256,
     )
-    return True, dock_visible
+
+
+def _assert_pinned_executable_unchanged(
+    before: PinnedExecutableIdentity,
+) -> None:
+    after = _pinned_executable_identity(before.path)
+    if after != before:
+        raise QualificationError("pinned headless executable identity changed")
 
 
 def _slipstream_window_ids() -> frozenset[int]:
@@ -201,21 +314,26 @@ def _slipstream_window_ids() -> frozenset[int]:
     return frozenset(found)
 
 
-def _browser_processes() -> tuple[frozenset[int], frozenset[int]]:
-    listing = _run_text(("/bin/ps", "-axo", "pid=,command="))
+def _browser_process_snapshot(
+    listing: str,
+) -> tuple[frozenset[int], frozenset[int], frozenset[int]]:
     gui: set[int] = set()
     headless: set[int] = set()
+    headless_roots: set[int] = set()
     for line in listing.splitlines():
-        fields = line.strip().split(None, 1)
-        if len(fields) != 2:
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4:
             continue
         try:
             pid = int(fields[0])
+            pgid = int(fields[2])
         except ValueError:
             continue
-        command = fields[1]
+        command = fields[3]
         if "chrome-headless-shell" in command:
             headless.add(pid)
+            if pgid == pid:
+                headless_roots.add(pid)
         if any(
             marker in command
             for marker in (
@@ -224,25 +342,117 @@ def _browser_processes() -> tuple[frozenset[int], frozenset[int]]:
             )
         ):
             gui.add(pid)
-    return frozenset(gui), frozenset(headless)
+    return frozenset(gui), frozenset(headless), frozenset(headless_roots)
+
+
+def _browser_processes() -> tuple[frozenset[int], frozenset[int]]:
+    listing = _run_text(("/bin/ps", "-axo", "pid=,ppid=,pgid=,command="))
+    gui, headless, _ = _browser_process_snapshot(listing)
+    return gui, headless
 
 
 def _visibility_snapshot() -> VisibilitySnapshot:
     listing = _launch_services_listing()
-    registered, dock_visible = _slipstream_launch_services_state(listing)
-    gui_chrome, headless_shell = _browser_processes()
+    entries = _slipstream_launch_services_entries(listing)
+    process_listing = _run_text(
+        ("/bin/ps", "-axo", "pid=,ppid=,pgid=,command=")
+    )
+    gui_chrome, headless_shell, headless_roots = _browser_process_snapshot(
+        process_listing
+    )
     return VisibilitySnapshot(
         frontmost_asn=_frontmost_asn(),
         slipstream_window_ids=_slipstream_window_ids(),
-        slipstream_launch_services=registered,
-        slipstream_dock_visible=dock_visible,
+        slipstream_launch_services=bool(entries),
+        slipstream_dock_visible=any(entry.dock_visible for entry in entries),
         gui_chrome_pids=gui_chrome,
         headless_shell_pids=headless_shell,
+        headless_shell_root_pids=headless_roots,
+        launch_services_entries=entries,
     )
 
 
+def _assert_hidden_launch_services_events(
+    events: list[str],
+    *,
+    expected_shell: Path,
+    observed_root_pids: frozenset[int],
+) -> int:
+    expected_path = str(expected_shell)
+    allowed_asns: set[str] = set()
+    started_asns: set[str] = set()
+    exited_asns: set[str] = set()
+    parsed_events: list[tuple[str, str, set[str], bool, bool]] = []
+
+    for line in events:
+        lowered = line.lower()
+        has_marker = any(marker in lowered for marker in LAUNCH_SERVICES_MARKERS)
+        has_expected_path_text = expected_path in line
+        event_match = LAUNCH_SERVICES_EVENT_RE.match(line)
+        if not event_match:
+            if has_marker or has_expected_path_text:
+                raise QualificationError(
+                    "browser worker emitted malformed LaunchServices data"
+                )
+            continue
+        event_name = event_match.group(1)
+        asns = set(LAUNCH_SERVICES_ASN_RE.findall(line))
+        executable_match = re.search(
+            r'CFBundleExecutablePath"="([^"]+)"', line
+        )
+        pid_match = LAUNCH_SERVICES_PID_RE.search(line)
+        has_expected_path = bool(
+            executable_match and executable_match.group(1) == expected_path
+        )
+        if executable_match:
+            if has_marker and not has_expected_path:
+                raise QualificationError("LaunchServices registered a non-pinned executable")
+        if has_expected_path:
+            if pid_match is None or int(pid_match.group(1)) not in observed_root_pids:
+                raise QualificationError("LaunchServices registered an unowned process")
+            owned_asn_match = LAUNCH_SERVICES_LSASN_RE.search(line)
+            if owned_asn_match is None:
+                raise QualificationError("LaunchServices omitted the owned process identity")
+            allowed_asns.add(owned_asn_match.group(1))
+        parsed_events.append(
+            (event_name, line, asns, has_marker, has_expected_path)
+        )
+
+    relevant_count = 0
+    for event_name, line, asns, has_marker, has_expected_path in parsed_events:
+        owned_asns = asns.intersection(allowed_asns)
+        if not (owned_asns or has_marker or has_expected_path):
+            continue
+        relevant_count += 1
+        if not owned_asns:
+            raise QualificationError("LaunchServices event escaped the owned shell identity")
+        if any(
+            marker.lower() in line.lower()
+            for marker in FORBIDDEN_LAUNCH_SERVICES_EVENTS
+        ):
+            raise QualificationError("browser worker emitted a visible LaunchServices event")
+        if event_name not in ALLOWED_HIDDEN_LAUNCH_SERVICES_EVENTS:
+            raise QualificationError("browser worker emitted an unexpected LaunchServices event")
+        if event_name in LAUNCH_SERVICES_START_EVENTS:
+            started_asns.update(owned_asns)
+        if event_name in LAUNCH_SERVICES_EXIT_EVENTS:
+            exited_asns.update(owned_asns)
+        if (
+            '"ApplicationType"="Foreground"' in line
+            or 'type="Foreground"' in line
+        ):
+            raise QualificationError("browser worker became a foreground application")
+
+    if relevant_count == 0:
+        raise QualificationError("LaunchServices listener observed no owned lifecycle")
+    if not started_asns or not started_asns.issubset(exited_asns):
+        raise QualificationError("LaunchServices lifecycle did not fully exit")
+    return relevant_count
+
+
 class VisibilityMonitor:
-    def __init__(self) -> None:
+    def __init__(self, expected_shell: Path) -> None:
+        self.expected_shell = expected_shell.resolve(strict=False)
         self.before = _visibility_snapshot()
         if (
             self.before.slipstream_window_ids
@@ -267,6 +477,16 @@ class VisibilityMonitor:
             stderr=subprocess.STDOUT,
             text=True,
         )
+        # `lsappinfo listen` exposes no explicit readiness frame. Give the
+        # process one bounded scheduler interval, then prove it is still alive
+        # before the worker may launch; the required owned birth/death events
+        # below are the fail-closed end-to-end readiness proof.
+        time.sleep(0.1)
+        if self.listener.poll() is not None:
+            self.listener.communicate(timeout=5.0)
+            raise QualificationError(
+                "LaunchServices listener exited before browser launch"
+            )
         self.thread = threading.Thread(target=self._sample, daemon=True)
         self.thread.start()
         if not self.ready.wait(2.0):
@@ -315,40 +535,46 @@ class VisibilityMonitor:
             raise QualificationError("visibility sampler failed") from self.failure
         return after
 
-    def assert_invisible(self, after: VisibilitySnapshot) -> None:
+    def assert_invisible(self, after: VisibilitySnapshot) -> int:
         if after.frontmost_asn != self.before.frontmost_asn:
             raise QualificationError("browser worker changed the frontmost application")
         if any(sample.frontmost_asn != self.before.frontmost_asn for sample in self.samples):
             raise QualificationError("browser worker temporarily changed the frontmost application")
         if any(sample.slipstream_window_ids for sample in self.samples):
             raise QualificationError("browser worker created a CoreGraphics window")
-        if any(sample.slipstream_launch_services for sample in self.samples):
-            raise QualificationError("browser worker registered with LaunchServices")
         if any(sample.slipstream_dock_visible for sample in self.samples):
             raise QualificationError("browser worker exposed a Dock application")
         if any(sample.gui_chrome_pids for sample in self.samples):
             raise QualificationError("browser worker launched GUI Chrome")
         if after.headless_shell_pids:
             raise QualificationError("browser worker leaked its headless process tree")
-        event_text = "\n".join(self.events).lower()
-        if any(
-            marker in event_text
-            for marker in (
-                "slipstream",
-                "chrome-headless",
-                "chrome headless",
-                "headlesschrome",
-                "headless chrome",
-                "chromium",
-            )
-        ):
-            event_kind = "visible" if any(
-                event.lower() in event_text
-                for event in FORBIDDEN_LAUNCH_SERVICES_EVENTS
-            ) else "unexpected"
-            raise QualificationError(
-                f"browser worker emitted an {event_kind} LaunchServices event"
-            )
+        if after.slipstream_launch_services:
+            raise QualificationError("browser worker left a LaunchServices registration")
+
+        expected_path = str(self.expected_shell)
+        observed_root_pids = {
+            pid
+            for sample in self.samples
+            for pid in sample.headless_shell_root_pids
+        }
+        for sample in self.samples:
+            if sample.slipstream_launch_services and not sample.launch_services_entries:
+                raise QualificationError("LaunchServices registration was not attributable")
+            for entry in sample.launch_services_entries:
+                if (
+                    entry.pid is None
+                    or entry.pid not in observed_root_pids
+                    or entry.executable_path != expected_path
+                    or entry.application_type not in {"BackgroundOnly", "UIElement"}
+                ):
+                    raise QualificationError(
+                        "LaunchServices registered a non-pinned browser process"
+                    )
+        return _assert_hidden_launch_services_events(
+            self.events,
+            expected_shell=self.expected_shell,
+            observed_root_pids=frozenset(observed_root_pids),
+        )
 
 
 def _require_disposable_ci() -> None:
@@ -619,6 +845,7 @@ def main() -> int:
     chrome = app_bundle / "Contents" / "Resources" / "chromium-headless-shell" / "chrome-headless-shell"
     if not chrome.is_file() or not os.access(chrome, os.X_OK):
         raise QualificationError("packaged pinned headless shell is unavailable")
+    chrome_identity = _pinned_executable_identity(chrome)
     executable = app_bundle / PACKAGED_BROWSER_WORKER_RELATIVE
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise QualificationError("packaged browser worker is unavailable")
@@ -627,7 +854,7 @@ def main() -> int:
         raise QualificationError("qualification is not the active console user")
 
     before_profiles = _profile_residue()
-    visibility = VisibilityMonitor()
+    visibility = VisibilityMonitor(chrome_identity.path)
     with tempfile.TemporaryDirectory(
         prefix="slipstream-browser-probe-smoke-",
         dir="/tmp",
@@ -703,7 +930,8 @@ def main() -> int:
             raise failure
         if after_visibility is None:
             raise QualificationError("visibility monitor produced no final snapshot")
-        visibility.assert_invisible(after_visibility)
+        hidden_launch_services_events = visibility.assert_invisible(after_visibility)
+        _assert_pinned_executable_unchanged(chrome_identity)
 
         elapsed_ms = round((time.monotonic() - started_at) * 1000)
         if elapsed_ms <= 0 or elapsed_ms > MAX_END_TO_END_MS:
@@ -727,6 +955,7 @@ def main() -> int:
             "outcome": broker.submitted[0]["outcome"],
             "sandbox_disabled": False,
             "frontmost_unchanged": True,
+            "launch_services_hidden_events": hidden_launch_services_events,
             "launch_services_visible_events": 0,
             "sampled_coregraphics_windows": 0,
             "slipstream_dock_visible": False,

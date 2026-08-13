@@ -25,7 +25,13 @@ generic pending-navigation admission could launch ordinary Google Chrome for a
 background TLS idle. Do not install a browser extension or register with Chrome
 Web Store as a workaround. The P0 replacement uses only the bundled pinned
 `Contents/Resources/chromium-headless-shell` runtime and must produce no Chrome
-window, Dock item, LaunchServices process, retained profile, or focus change.
+window, Dock item, visible or activating LaunchServices event, retained profile,
+or focus change. The pinned shell itself uses macOS `NSApplication`, so an exact
+owned `BackgroundOnly`/`UIElement` registration may exist only for its bounded
+lifetime. Qualification binds that registration to the attested executable
+path, SHA-256, process-group root, complete exit, and zero actual frontmost,
+show, activation, Dock, or CoreGraphics-window evidence; any other registration
+fails closed.
 Its fresh owner-private temporary profile must disappear with the single owned
 process tree and never touches a user's Safari or Chrome profile.
 The legacy transport-idle broker is disabled permanently. Its replacement is

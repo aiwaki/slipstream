@@ -39,6 +39,24 @@ This live proof covers the production-family `inet6` loopback `rdr` and
 DIOCNATLOOK path. The non-`lo0` IPv6 `route-to` branch remains an exact
 loaded-rule/static assertion rather than a claim based on external IPv6.
 
+Exact PR run `31711135993` for head `2d27b7aec170829db0cacd1d5e7b359865005968`
+then passed the candidate build, Windows adapter and packaged lifecycle but
+failed browser qualification after the navigation completed: the visibility
+sampler observed the pinned `chrome-headless-shell` in LaunchServices. A local
+`lsappinfo listen` trace of that exact pinned runtime proved this was neither
+the non-AppKit helper nor GUI Chrome. Chromium's macOS headless shell itself
+uses `NSApplication`, registers first as `BackgroundOnly`, changes to
+`UIElement`, and completes a 15-event hidden lifecycle. The corrected gate
+allows that sequence only when every event binds to the exact manifest-digest
+path and one observed process-group root. It still fails closed for every
+unknown, show, activation, frontmost or foreground event, any other path/PID,
+any Dock/CoreGraphics window or GUI Chrome sample, listener blindness, an
+incomplete exit, or a surviving process/registration. Deterministic fixtures
+cover each forbidden class, and the parser accepts the measured real 15-event
+sequence only after complete exit. The source bundle separately has
+`LSUIElement=true` before launch and runtime `Accessory`; its committed
+`icon.icns` is byte-identical to the current installed copy.
+
 The current local freeze has 1,404 Python tests plus 60 subtests, 374 script
 unittests, 89 tray-library tests, 29 browser-helper tests, 41 core tests, 40
 userspace-stack tests, 40 userspace-effect tests, and 241 Windows-adapter tests
