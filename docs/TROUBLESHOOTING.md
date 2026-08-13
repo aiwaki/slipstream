@@ -35,10 +35,22 @@ the `.23` candidate source but is not a claim about the installed `.22`; it
 must still pass packaged visibility, live-site, transport, and idle-soak gates
 before publication.
 
+The installed `.22` also lacks `LSUIElement`, so setting the Tauri runtime to
+`Accessory` can happen after macOS has already classified the process as an
+ordinary application. The `.23` source declares `LSUIElement=true` in the
+bundle before launch and runs browser observation through a separately signed
+non-AppKit helper; `Accessory` remains a second guard rather than the primary
+Dock fix.
+
 For a packaged candidate, verify the runtime without starting it:
 
 ```bash
 test -x /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/chrome-headless-shell
+test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' \
+  /Applications/Slipstream.app/Contents/Info.plist)" = true
+test -x /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
+/usr/bin/codesign --verify --strict \
+  /Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe
 python3 -m json.tool \
   /Applications/Slipstream.app/Contents/Resources/chromium-headless-shell/manifest.json
 ```

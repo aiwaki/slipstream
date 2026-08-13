@@ -20,7 +20,8 @@ const WINDOWS_ADAPTER_MANIFEST: &str = include_str!("../../slipstream-windows-ad
 const WINDOWS_PACKET_QUALIFICATION_WORKFLOW: &str =
     include_str!("../../../.github/workflows/windows-packet-adapter-qualification.yml");
 
-fn workflow_event_paths<'a>(workflow: &'a str, start: &str, end: &str) -> Vec<&'a str> {
+fn workflow_event_paths(workflow: &str, start: &str, end: &str) -> Vec<String> {
+    let workflow = workflow.replace('\r', "");
     workflow
         .split_once(start)
         .and_then(|(_, rest)| rest.split_once(end))
@@ -32,6 +33,7 @@ fn workflow_event_paths<'a>(workflow: &'a str, start: &str, end: &str) -> Vec<&'
                 .strip_prefix("- \"")
                 .and_then(|path| path.strip_suffix('"'))
         })
+        .map(str::to_owned)
         .collect()
 }
 
@@ -187,6 +189,25 @@ fn disposable_native_architecture_gate_tracks_every_composed_predecessor() {
         WINDOWS_PACKET_QUALIFICATION_WORKFLOW,
         "\n  push:\n",
         "\n\npermissions:",
+    );
+    let windows_checkout_workflow = WINDOWS_PACKET_QUALIFICATION_WORKFLOW.replace('\n', "\r\n");
+    assert_eq!(
+        workflow_event_paths(
+            &windows_checkout_workflow,
+            "\n  pull_request:\n",
+            "\n  push:\n",
+        ),
+        pull_request_paths,
+        "pull-request path parsing must be invariant across LF and Windows CRLF checkouts"
+    );
+    assert_eq!(
+        workflow_event_paths(
+            &windows_checkout_workflow,
+            "\n  push:\n",
+            "\n\npermissions:",
+        ),
+        push_paths,
+        "main-push path parsing must be invariant across LF and Windows CRLF checkouts"
     );
 
     for required_path in [

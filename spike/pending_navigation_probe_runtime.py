@@ -48,7 +48,7 @@ PENDING_NAVIGATION_PROBE_SOCKET_PATH = (
 )
 PENDING_NAVIGATION_BROWSER_WORKER = (
     os.environ.get("SLIPSTREAM_PENDING_NAVIGATION_BROWSER_WORKER")
-    or "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+    or "/Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe"
 )
 PENDING_NAVIGATION_BROWSER_WORKER_ARGUMENT = (
     "--pending-navigation-browser-probe"
@@ -1093,7 +1093,7 @@ class DirectHeadlessBrowserWorkerLauncher:
         if (
             self._effective_uid() != 0
             or not self._executable.is_absolute()
-            or self._executable.name != "slipstream"
+            or self._executable.name != "slipstream-browser-probe"
             or macos.name != "MacOS"
             or contents.name != "Contents"
             or bundle.suffix != ".app"
@@ -1106,29 +1106,39 @@ class DirectHeadlessBrowserWorkerLauncher:
             raise PendingNavigationProbeRuntimeError(
                 "browser_worker_unowned"
             )
-        try:
-            result = self._codesign_runner(
-                (
-                    "/usr/bin/codesign",
-                    "--verify",
-                    "--deep",
-                    "--strict",
-                    str(bundle),
-                ),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=3.0,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise PendingNavigationProbeRuntimeError(
-                "browser_worker_signature_unavailable"
-            ) from error
-        if result.returncode != 0:
-            raise PendingNavigationProbeRuntimeError(
-                "browser_worker_signature_invalid"
-            )
+        signature_targets = (
+            (
+                "/usr/bin/codesign",
+                "--verify",
+                "--strict",
+                str(self._executable),
+            ),
+            (
+                "/usr/bin/codesign",
+                "--verify",
+                "--deep",
+                "--strict",
+                str(bundle),
+            ),
+        )
+        for command in signature_targets:
+            try:
+                result = self._codesign_runner(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3.0,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_signature_unavailable"
+                ) from error
+            if result.returncode != 0:
+                raise PendingNavigationProbeRuntimeError(
+                    "browser_worker_signature_invalid"
+                )
 
     def _command(self):
         return (

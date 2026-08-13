@@ -102,3 +102,12 @@ def test_packaged_smoke_does_not_claim_visibility_by_constant() -> None:
     assert "CGWindowListCopyWindowInfo" in source
     assert 'LSAPPINFO, "listen", "+all"' in source
     assert "PendingNavigationBrowserWorkerLauncher" not in source
+
+
+def test_packaged_smoke_launches_only_the_non_gui_auxiliary_helper() -> None:
+    source = Path(smoke.__file__).read_text(encoding="utf-8")
+
+    assert smoke.PACKAGED_BROWSER_WORKER_RELATIVE == Path(
+        "Contents/MacOS/slipstream-browser-probe"
+    )
+    assert '"Contents" / "MacOS" / "slipstream"' not in source

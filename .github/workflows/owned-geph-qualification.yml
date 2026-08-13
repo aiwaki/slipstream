@@ -116,7 +116,18 @@ jobs:
           ditto -x -k dist-candidate/Slipstream-macos-arm64.zip "$RUNNER_TEMP/candidate-app"
           app="$RUNNER_TEMP/candidate-app/Slipstream.app"
           test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
+            = slipstream
           /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
+          helper="$app/Contents/MacOS/slipstream-browser-probe"
+          test -x "$helper"
+          /usr/bin/lipo "$helper" -verify_arch arm64
+          /usr/bin/codesign --verify --strict "$helper"
+          if /usr/bin/otool -L "$helper" | /usr/bin/grep -E \
+            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
+            echo "browser-probe helper links a GUI framework" >&2
+            exit 1
+          fi
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
           version="$(tr -d '[:space:]' < VERSION)"

@@ -167,13 +167,9 @@ PF_TOKEN_PATH = "/var/run/slipstream-pf.token"
 PF_SKIP_LEASE_PATH = "/var/run/slipstream-pf-lo0-skip.json"
 PF_LOOPBACK_INTERFACE = "lo0"
 PF_CONFLICT_CHECK_INTERVAL = 15.0
-try:
-    RUNTIME_WAKE_GAP_SECONDS = max(
-        5.0,
-        float(os.environ.get("SLIP_RUNTIME_WAKE_GAP_SECONDS", "30")),
-    )
-except (TypeError, ValueError):
-    RUNTIME_WAKE_GAP_SECONDS = 30.0
+DISPOSABLE_WAKE_MARKER_ENV = "SLIPSTREAM_DISPOSABLE_WAKE_MARKER_PATH"
+DISPOSABLE_WAKE_MARKER_DIRECTORY = "/var/run"
+DISPOSABLE_WAKE_MARKER_PREFIX = "slipstream-lifecycle-wake-"
 PF_RULES = """\
 rdr on lo0 inet proto tcp from any to ! 127.0.0.0/8 port 443 -> 127.0.0.1 port {port}
 rdr on lo0 inet6 proto tcp from any to ! ::1/128 port 443 -> ::1 port {port}
@@ -10911,10 +10907,70 @@ def _parse_system_wake_marker(value):
 
 
 def _read_system_wake_marker():
+    fixture_path = _disposable_wake_marker_path()
+    if fixture_path is not None:
+        return _read_disposable_wake_marker(fixture_path)
     result = _run("sysctl", "-n", "kern.waketime")
     if result.returncode != 0:
         return None
     return _parse_system_wake_marker(result.stdout)
+
+
+def _disposable_wake_marker_path(environment=None):
+    """Return the protected installed-lifecycle wake fixture, if enabled."""
+    source = os.environ if environment is None else environment
+    if not (
+        source.get("CI") == "true"
+        and source.get("GITHUB_ACTIONS") == "true"
+        and source.get("SLIPSTREAM_DISPOSABLE_CI") == "1"
+    ):
+        return None
+    raw = source.get(DISPOSABLE_WAKE_MARKER_ENV, "")
+    if not isinstance(raw, str) or not raw or len(raw) > 255 or "\x00" in raw:
+        return None
+    normalized = os.path.normpath(raw)
+    if (
+        normalized != raw
+        or os.path.dirname(normalized) != DISPOSABLE_WAKE_MARKER_DIRECTORY
+        or not os.path.basename(normalized).startswith(
+            DISPOSABLE_WAKE_MARKER_PREFIX
+        )
+    ):
+        return None
+    return normalized
+
+
+def _read_disposable_wake_marker(path):
+    """Read one root-owned regular marker without following a replacement link."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size > 256
+        ):
+            return None
+        payload = os.read(descriptor, 257)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    if len(payload) > 256:
+        return None
+    try:
+        value = payload.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    return _parse_system_wake_marker(value)
 
 
 def _system_wake_marker_changed(previous, current):
@@ -16512,10 +16568,13 @@ def _installed_browser_worker_from_launchd(*, expected_uid=0):
     if (
         not os.path.isabs(candidate)
         or os.path.normpath(candidate) != candidate
-        or os.path.basename(candidate) != "slipstream"
+        or os.path.basename(candidate) != "slipstream-browser-probe"
         or os.path.basename(os.path.dirname(candidate)) != "MacOS"
         or os.path.basename(os.path.dirname(os.path.dirname(candidate)))
         != "Contents"
+        or not os.path.basename(
+            os.path.dirname(os.path.dirname(os.path.dirname(candidate)))
+        ).endswith(".app")
     ):
         return None
     return candidate
@@ -16533,7 +16592,7 @@ def _packaged_browser_worker_executable(source_executable):
         or os.path.basename(contents_dir) != "Contents"
     ):
         return None
-    candidate = os.path.join(contents_dir, "MacOS", "slipstream")
+    candidate = os.path.join(contents_dir, "MacOS", "slipstream-browser-probe")
     try:
         metadata = os.lstat(candidate)
     except OSError:

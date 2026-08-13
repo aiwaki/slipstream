@@ -3999,15 +3999,60 @@ def test_network_monitor_does_not_invent_wake_from_awake_loop_stall(
     tproxy.network_monitor(
         1080,
         voice=False,
-        started_at=(
-            tproxy.time.time() - tproxy.RUNTIME_WAKE_GAP_SECONDS - 1.0
-        ),
+        started_at=tproxy.time.time() - 60.0,
+        wake_marker_reader=lambda: (1, 0),
     )
 
     assert pauses == [True]
     assert arms == [1080]
     assert states == [("active", "en0", None)]
     assert rearms == [("network_change", "en0")]
+
+
+def test_network_monitor_rearms_only_after_explicit_system_marker_change(
+    monkeypatch,
+):
+    rearms = []
+    markers = iter(((100, 0), (101, 0)))
+
+    def write_status_and_stop(_state, _iface, _voice_iface):
+        tproxy._shutdown_started.set()
+
+    monkeypatch.setattr(tproxy, "_geph_up", False)
+    monkeypatch.setattr(tproxy, "_geph_port", None)
+    monkeypatch.setattr(tproxy, "_geph_port_conflict", False)
+    monkeypatch.setattr(tproxy, "_pf_applied", True)
+    monkeypatch.setattr(tproxy, "_pf_interceptor_conflicts", [])
+    monkeypatch.setattr(tproxy, "default_iface", lambda: "en0")
+    monkeypatch.setattr(tproxy, "execute_owned_geph_restart", lambda **_kwargs: "idle")
+    monkeypatch.setattr(tproxy, "probe_geph", lambda: False)
+    monkeypatch.setattr(tproxy, "pf_preceding_https_interceptors", lambda: [])
+    monkeypatch.setattr(tproxy, "refresh_fd_pressure", lambda: None)
+    monkeypatch.setattr(tproxy, "transparent_routing_ready", lambda: True)
+    monkeypatch.setattr(tproxy, "_pf_loopback_skip_state", lambda: False)
+    monkeypatch.setattr(tproxy, "pf_has_rules", lambda _port: True)
+    monkeypatch.setattr(tproxy, "write_status", write_status_and_stop)
+    monkeypatch.setattr(
+        tproxy,
+        "_apply_runtime_rearm",
+        lambda reason, **kwargs: rearms.append((reason, kwargs)),
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "start_route_policy_remote_update_if_due",
+        lambda *_args, **_kwargs: None,
+    )
+
+    tproxy.network_monitor(
+        1080,
+        voice=False,
+        wake_marker_reader=lambda: next(markers),
+    )
+
+    assert len(rearms) == 1
+    assert rearms[0][0] == "wake"
+    assert rearms[0][1]["iface"] == ""
+    assert rearms[0][1]["gap"] >= 0.0
 
 
 def test_network_monitor_retries_pending_confirmation_on_owned_geph_recovery(
@@ -6808,6 +6853,87 @@ def test_read_system_wake_marker_does_not_invent_event_on_sysctl_failure(
     )
 
     assert tproxy._read_system_wake_marker() is None
+
+
+def test_disposable_wake_marker_path_requires_exact_ci_and_var_run_scope():
+    exact = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+        tproxy.DISPOSABLE_WAKE_MARKER_ENV: (
+            "/var/run/slipstream-lifecycle-wake-exact"
+        ),
+    }
+
+    assert tproxy._disposable_wake_marker_path(exact) == exact[
+        tproxy.DISPOSABLE_WAKE_MARKER_ENV
+    ]
+    for missing in ("CI", "GITHUB_ACTIONS", "SLIPSTREAM_DISPOSABLE_CI"):
+        partial = dict(exact)
+        partial.pop(missing)
+        assert tproxy._disposable_wake_marker_path(partial) is None
+    escaped = dict(exact)
+    escaped[tproxy.DISPOSABLE_WAKE_MARKER_ENV] = (
+        "/var/run/../tmp/slipstream-lifecycle-wake-exact"
+    )
+    assert tproxy._disposable_wake_marker_path(escaped) is None
+
+
+def test_disposable_wake_marker_reader_requires_root_owned_regular_file(
+    monkeypatch,
+):
+    payload = b"{ sec = 1723456060, usec = 654321 } lifecycle\n"
+    metadata = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o600,
+        st_uid=0,
+        st_gid=0,
+        st_size=len(payload),
+    )
+    closed = []
+    monkeypatch.setattr(tproxy.os, "open", lambda *_args: 73)
+    monkeypatch.setattr(tproxy.os, "fstat", lambda _fd: metadata)
+    monkeypatch.setattr(tproxy.os, "read", lambda _fd, _size: payload)
+    monkeypatch.setattr(tproxy.os, "close", closed.append)
+
+    assert tproxy._read_disposable_wake_marker(
+        "/var/run/slipstream-lifecycle-wake-exact"
+    ) == (1723456060, 654321)
+    assert closed == [73]
+
+    metadata.st_uid = 501
+    assert tproxy._read_disposable_wake_marker(
+        "/var/run/slipstream-lifecycle-wake-exact"
+    ) is None
+
+    metadata.st_uid = 0
+    metadata.st_mode = stat.S_IFREG | 0o644
+    assert tproxy._read_disposable_wake_marker(
+        "/var/run/slipstream-lifecycle-wake-exact"
+    ) is None
+
+
+def test_system_wake_reader_uses_protected_fixture_instead_of_sysctl(monkeypatch):
+    environment = {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "SLIPSTREAM_DISPOSABLE_CI": "1",
+        tproxy.DISPOSABLE_WAKE_MARKER_ENV: (
+            "/var/run/slipstream-lifecycle-wake-exact"
+        ),
+    }
+    monkeypatch.setattr(tproxy.os, "environ", environment)
+    monkeypatch.setattr(
+        tproxy,
+        "_read_disposable_wake_marker",
+        lambda path: (5, 7) if path.endswith("-exact") else None,
+    )
+    monkeypatch.setattr(
+        tproxy,
+        "_run",
+        lambda *_args: pytest.fail("sysctl must not run for the protected fixture"),
+    )
+
+    assert tproxy._read_system_wake_marker() == (5, 7)
 
 
 def test_runtime_rearm_queue_is_bounded_validated_and_deduplicated():
@@ -17641,10 +17767,14 @@ def test_launchd_delegates_raw_log_creation_to_private_writer():
     ]
 
 
-def test_packaged_install_pins_its_exact_tray_worker_in_launchd(tmp_path):
+def test_packaged_install_pins_its_exact_non_gui_worker_in_launchd(tmp_path):
     contents = tmp_path / "Slipstream & Test.app" / "Contents"
     daemon = contents / "Resources" / "slipstreamd" / "slipstreamd"
-    worker = contents / "MacOS" / "slipstream"
+    worker = (
+        contents
+        / "MacOS"
+        / "slipstream-browser-probe"
+    )
     daemon.parent.mkdir(parents=True)
     worker.parent.mkdir(parents=True)
     daemon.write_bytes(b"daemon")
@@ -17667,7 +17797,12 @@ def test_packaged_install_pins_its_exact_tray_worker_in_launchd(tmp_path):
 
 
 def test_packaged_worker_resolver_rejects_writable_or_wrong_layout(tmp_path):
-    worker = tmp_path / "Contents" / "MacOS" / "slipstream"
+    worker = (
+        tmp_path
+        / "Contents"
+        / "MacOS"
+        / "slipstream-browser-probe"
+    )
     worker.parent.mkdir(parents=True)
     worker.write_bytes(b"worker")
     worker.chmod(0o755)
@@ -17689,6 +17824,14 @@ def test_packaged_worker_resolver_rejects_writable_or_wrong_layout(tmp_path):
     worker.chmod(0o777)
     assert tproxy._packaged_browser_worker_executable(daemon) is None
 
+    worker.chmod(0o755)
+    gui = tmp_path / "Contents" / "MacOS" / "slipstream"
+    gui.parent.mkdir(parents=True, exist_ok=True)
+    gui.write_bytes(b"gui")
+    gui.chmod(0o755)
+    worker.unlink()
+    assert tproxy._packaged_browser_worker_executable(daemon) is None
+
 
 def test_uninstaller_recovers_only_root_owned_launchd_worker_pin(
     monkeypatch,
@@ -17697,7 +17840,13 @@ def test_uninstaller_recovers_only_root_owned_launchd_worker_pin(
     install_dir = tmp_path / "install"
     install_dir.mkdir()
     installed_daemon = install_dir / os.path.basename(sys.executable)
-    worker = tmp_path / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+    worker = (
+        tmp_path
+        / "Slipstream.app"
+        / "Contents"
+        / "MacOS"
+        / "slipstream-browser-probe"
+    )
     worker.parent.mkdir(parents=True)
     launchd = tmp_path / "dev.slipstream.tproxy.plist"
     launchd.write_text(tproxy.launchd_plist_text(
@@ -17740,6 +17889,26 @@ def test_uninstaller_recovers_only_root_owned_launchd_worker_pin(
 
     launchd.unlink()
     launchd.symlink_to(tmp_path / "missing")
+    assert tproxy._installed_browser_worker_from_launchd(
+        expected_uid=os.getuid()
+    ) is None
+
+
+def test_uninstaller_rejects_gui_worker_pin(tmp_path, monkeypatch):
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    installed_daemon = install_dir / os.path.basename(sys.executable)
+    gui = tmp_path / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+    launchd = tmp_path / "dev.slipstream.tproxy.plist"
+    launchd.write_text(tproxy.launchd_plist_text(
+        [str(installed_daemon), "--port", str(tproxy.PROXY_PORT)],
+        install_dir,
+        browser_worker=gui,
+    ))
+    launchd.chmod(0o644)
+    monkeypatch.setattr(tproxy, "INSTALL_DIR", str(install_dir))
+    monkeypatch.setattr(tproxy, "LAUNCHD_PLIST", str(launchd))
+
     assert tproxy._installed_browser_worker_from_launchd(
         expected_uid=os.getuid()
     ) is None

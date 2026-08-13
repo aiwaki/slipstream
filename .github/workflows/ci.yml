@@ -251,7 +251,9 @@ jobs:
 
       - name: Rust tray tests
         working-directory: app-tauri/src-tauri
-        run: cargo test
+        run: |
+          cargo test --locked --lib --bin slipstream
+          cargo test --locked --bin slipstream-browser-probe
 
       - name: Rust core tests
         run: cargo test --locked --manifest-path crates/slipstream-core/Cargo.toml
@@ -267,7 +269,7 @@ jobs:
 
       - name: Rust tray lint
         working-directory: app-tauri/src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Rust core lint
         run: cargo clippy --locked --manifest-path crates/slipstream-core/Cargo.toml --all-targets -- -D warnings
@@ -569,12 +571,23 @@ jobs:
           set -euo pipefail
           app="app-tauri/src-tauri/target/${SLIPSTREAM_TAURI_TARGET}/release/bundle/macos/Slipstream.app"
           test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" \
+            = slipstream
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" \
             = "$(tr -d '[:space:]' < VERSION)"
           /usr/bin/lipo "$app/Contents/MacOS/slipstream" -verify_arch arm64
           /usr/bin/lipo "$app/Contents/Resources/slipstreamd/slipstreamd" \
             -verify_arch arm64
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
+          helper="$app/Contents/MacOS/slipstream-browser-probe"
+          test -x "$helper"
+          /usr/bin/lipo "$helper" -verify_arch arm64
+          /usr/bin/codesign --verify --strict "$helper"
+          if /usr/bin/otool -L "$helper" | /usr/bin/grep -E \
+            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
+            echo "browser-probe helper links a GUI framework" >&2
+            exit 1
+          fi
           test -x "$app/Contents/Resources/chromium-headless-shell/chrome-headless-shell"
           test -f "$app/Contents/Resources/chromium-headless-shell/LICENSE.headless_shell"
           test -f "$app/Contents/Resources/chromium-headless-shell/manifest.json"

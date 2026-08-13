@@ -11,6 +11,93 @@ import pf_anchor_smoke
 
 
 class PfAnchorSmokeTests(unittest.TestCase):
+    def test_unprivileged_client_closes_root_pf_descriptor_before_setuid(self) -> None:
+        calls = []
+        listener = mock.Mock()
+        client = mock.MagicMock()
+        client.__enter__.return_value.recv.return_value = pf_anchor_smoke.MARKER
+        with mock.patch.object(
+            pf_anchor_smoke.os,
+            "close",
+            side_effect=lambda descriptor: calls.append(("close", descriptor)),
+        ), mock.patch.object(
+            pf_anchor_smoke.os,
+            "setgroups",
+            side_effect=lambda groups: calls.append(("groups", groups)),
+        ), mock.patch.object(
+            pf_anchor_smoke.os,
+            "setgid",
+            side_effect=lambda gid: calls.append(("gid", gid)),
+        ), mock.patch.object(
+            pf_anchor_smoke.os,
+            "setuid",
+            side_effect=lambda uid: calls.append(("uid", uid)),
+        ), mock.patch.object(
+            pf_anchor_smoke.socket,
+            "create_connection",
+            return_value=client,
+        ):
+            result = pf_anchor_smoke._run_unprivileged_test_client(
+                listener=listener,
+                target_port=18443,
+                uid=501,
+                gid=20,
+                destination=pf_anchor_smoke.TEST_DESTINATION,
+                inherited_descriptors=(71,),
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            calls,
+            [("close", 71), ("groups", []), ("gid", 20), ("uid", 501)],
+        )
+        listener.close.assert_called_once_with()
+
+    def test_ipv6_test_destination_uses_active_link_local_route(self) -> None:
+        inactive = SimpleNamespace(
+            returncode=0,
+            stdout="inet6 fe80::7%en7 prefixlen 64\nstatus: inactive\n",
+        )
+        active = SimpleNamespace(
+            returncode=0,
+            stdout="inet6 fe80::8%en8 prefixlen 64\nstatus: active\n",
+        )
+        with mock.patch.object(
+            pf_anchor_smoke.socket,
+            "if_nameindex",
+            return_value=((1, "lo0"), (7, "en7"), (8, "en8")),
+        ), mock.patch.object(
+            pf_anchor_smoke.subprocess,
+            "run",
+            side_effect=(inactive, active),
+        ) as run:
+            destination = pf_anchor_smoke._scoped_ipv6_test_destination()
+
+        self.assertEqual(destination, f"{pf_anchor_smoke.TEST_DESTINATION_V6}%en8")
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                (str(pf_anchor_smoke.IFCONFIG), "en7"),
+                (str(pf_anchor_smoke.IFCONFIG), "en8"),
+            ],
+        )
+
+    def test_ipv6_test_destination_fails_closed_without_active_route(self) -> None:
+        unavailable = SimpleNamespace(returncode=1, stdout="")
+        with mock.patch.object(
+            pf_anchor_smoke.socket,
+            "if_nameindex",
+            return_value=((1, "lo0"), (7, "en7")),
+        ), mock.patch.object(
+            pf_anchor_smoke.subprocess,
+            "run",
+            return_value=unavailable,
+        ), self.assertRaisesRegex(
+            pf_anchor_smoke.SmokeError,
+            "no active non-loopback IPv6",
+        ):
+            pf_anchor_smoke._scoped_ipv6_test_destination()
+
     def test_natlook_descriptor_is_an_integer_and_closed_exactly_once(self) -> None:
         tproxy = SimpleNamespace(_pf_fd=None)
         with mock.patch.object(

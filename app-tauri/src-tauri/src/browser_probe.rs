@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -34,6 +35,7 @@ const CLASSIFICATION_BUDGET: Duration = Duration::from_secs(8);
 const EMPTY_QUEUE_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CHROME_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+const SIGNATURE_PROCESS_STOP_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_DEVTOOLS_FILE_BYTES: u64 = 4_096;
 const MAX_LAUNCH_DIAGNOSTIC_BYTES: u64 = 64 * 1_024;
 const MAX_HTTP_BYTES: u64 = 256 * 1024;
@@ -860,6 +862,9 @@ fn verify_pinned_headless_runtime(executable: &Path, deadline: Instant) -> Probe
 }
 
 fn verify_pinned_headless_runtime_once(executable: &Path, deadline: Instant) -> ProbeResult<()> {
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
     let executable_metadata =
         fs::symlink_metadata(executable).map_err(|_| error("headless_runtime_untrusted"))?;
     if !executable_metadata.is_file()
@@ -906,6 +911,10 @@ fn verify_pinned_headless_runtime_once(executable: &Path, deadline: Instant) -> 
     {
         return Err(error("headless_runtime_digest_invalid"));
     }
+    let observed_sha = sha256_regular_file_before(executable, &executable_metadata, deadline)?;
+    if observed_sha != executable_sha {
+        return Err(error("headless_runtime_digest_invalid"));
+    }
     let application_bundle = runtime_dir
         .parent()
         .and_then(Path::parent)
@@ -935,7 +944,61 @@ fn verify_pinned_headless_runtime_once(executable: &Path, deadline: Instant) -> 
     Ok(())
 }
 
+fn same_runtime_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    left.is_file()
+        && right.is_file()
+        && left.dev() == right.dev()
+        && left.ino() == right.ino()
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+}
+
+fn sha256_regular_file_before(
+    executable: &Path,
+    path_metadata: &fs::Metadata,
+    deadline: Instant,
+) -> ProbeResult<String> {
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
+    let mut source = File::open(executable).map_err(|_| error("headless_runtime_untrusted"))?;
+    let opened_metadata = source
+        .metadata()
+        .map_err(|_| error("headless_runtime_untrusted"))?;
+    if !same_runtime_identity(path_metadata, &opened_metadata) {
+        return Err(error("headless_runtime_untrusted"));
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        if Instant::now() >= deadline {
+            return Err(error("classification_deadline_exceeded"));
+        }
+        let count = source
+            .read(&mut buffer)
+            .map_err(|_| error("headless_runtime_untrusted"))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let final_metadata = source
+        .metadata()
+        .map_err(|_| error("headless_runtime_untrusted"))?;
+    if !same_runtime_identity(&opened_metadata, &final_metadata) {
+        return Err(error("headless_runtime_untrusted"));
+    }
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 fn command_succeeds_before(command: &mut Command, deadline: Instant) -> ProbeResult<bool> {
+    if Instant::now() >= deadline {
+        return Err(error("classification_deadline_exceeded"));
+    }
     let mut child = command
         .spawn()
         .map_err(|_| error("headless_runtime_signature_invalid"))?;
@@ -947,8 +1010,7 @@ fn command_succeeds_before(command: &mut Command, deadline: Instant) -> ProbeRes
             return Ok(status.success());
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = terminate_child_bounded(&mut child, SIGNATURE_PROCESS_STOP_TIMEOUT);
             return Err(error("classification_deadline_exceeded"));
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -959,13 +1021,27 @@ fn discover_pinned_headless_runtime() -> Option<PathBuf> {
     let current = std::env::current_exe().ok()?.canonicalize().ok()?;
     let macos = current.parent()?;
     let contents = macos.parent()?;
-    if macos.file_name() != Some(OsStr::new("MacOS"))
+    if current.file_name() != Some(OsStr::new("slipstream-browser-probe"))
+        || macos.file_name() != Some(OsStr::new("MacOS"))
         || contents.file_name() != Some(OsStr::new("Contents"))
     {
         return None;
     }
     let runtime = contents.join("Resources/chromium-headless-shell/chrome-headless-shell");
     runtime.is_file().then_some(runtime)
+}
+
+#[cfg(test)]
+fn pinned_headless_runtime_for_helper(current: &Path) -> Option<PathBuf> {
+    let macos = current.parent()?;
+    let contents = macos.parent()?;
+    if current.file_name() != Some(OsStr::new("slipstream-browser-probe"))
+        || macos.file_name() != Some(OsStr::new("MacOS"))
+        || contents.file_name() != Some(OsStr::new("Contents"))
+    {
+        return None;
+    }
+    Some(contents.join("Resources/chromium-headless-shell/chrome-headless-shell"))
 }
 
 #[cfg(test)]
@@ -2445,6 +2521,19 @@ mod tests {
     }
 
     #[test]
+    fn signature_command_timeout_reaps_without_an_unbounded_wait() {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("5");
+        let started = Instant::now();
+        let failure =
+            command_succeeds_before(&mut command, Instant::now() + Duration::from_millis(20))
+                .unwrap_err();
+
+        assert_eq!(failure.0, "classification_deadline_exceeded");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
     fn owned_geph_candidate_uses_only_the_loopback_socks_proxy() {
         let config = ChromeConfig {
             executable: PathBuf::from(
@@ -2477,6 +2566,86 @@ mod tests {
             Some(OsStr::new("chromium-headless-shell"))
         );
         assert_eq!(PINNED_HEADLESS_RUNTIME_VERSION, "151.0.7922.77");
+    }
+
+    #[test]
+    fn production_runtime_accepts_only_the_non_gui_helper_layout() {
+        let helper = Path::new("/Applications/Slipstream.app/Contents/MacOS/")
+            .join("slipstream-browser-probe");
+        assert_eq!(
+            pinned_headless_runtime_for_helper(&helper),
+            Some(
+                PathBuf::from("/Applications/Slipstream.app/Contents/Resources/")
+                    .join("chromium-headless-shell/chrome-headless-shell")
+            ),
+        );
+        assert_eq!(
+            pinned_headless_runtime_for_helper(Path::new(
+                "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+            )),
+            None,
+        );
+        assert_eq!(
+            pinned_headless_runtime_for_helper(
+                Path::new("/Applications/Slipstream.app/Contents/Resources/")
+                    .join("slipstream-browser-probe")
+                    .as_path()
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn production_runtime_rejects_manifest_digest_mismatch_before_codesign() {
+        let root = std::env::temp_dir().join(format!(
+            "slipstream-headless-digest-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let executable = root
+            .join("Slipstream.app/Contents/Resources/chromium-headless-shell/")
+            .join("chrome-headless-shell");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"sealed runtime bytes").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let manifest = json!({
+            "schema_version": 1,
+            "version": PINNED_HEADLESS_RUNTIME_VERSION,
+            "platform": "mac-arm64",
+            "archive_sha256": PINNED_HEADLESS_RUNTIME_ARCHIVE_SHA256,
+            "executable_sha256": "0".repeat(64),
+        });
+        fs::write(
+            executable
+                .parent()
+                .unwrap()
+                .join(PINNED_HEADLESS_RUNTIME_MANIFEST),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let failure = verify_pinned_headless_runtime_once(
+            &executable,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert_eq!(failure.0, "headless_runtime_digest_invalid");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn runtime_digest_stream_obeys_the_absolute_deadline() {
+        let path = std::env::temp_dir().join(format!(
+            "slipstream-headless-digest-deadline-test-{}",
+            std::process::id()
+        ));
+        fs::write(&path, b"runtime").unwrap();
+        let metadata = fs::symlink_metadata(&path).unwrap();
+        let failure =
+            sha256_regular_file_before(&path, &metadata, Instant::now() - Duration::from_millis(1))
+                .unwrap_err();
+        assert_eq!(failure.0, "classification_deadline_exceeded");
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

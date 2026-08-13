@@ -7,6 +7,7 @@ import os
 import plistlib
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -460,12 +461,104 @@ class PfInstalledLifecycleSmokeTests(unittest.TestCase):
             with path.open("rb") as handle:
                 updated = plistlib.load(handle)
             self.assertNotIn("SLIP_GEPH", updated["EnvironmentVariables"])
-            self.assertEqual(
-                updated["EnvironmentVariables"]["SLIP_RUNTIME_WAKE_GAP_SECONDS"],
-                "6",
+            self.assertNotIn(
+                "SLIP_RUNTIME_WAKE_GAP_SECONDS",
+                updated["EnvironmentVariables"],
+            )
+            self.assertNotIn(
+                lifecycle.DISPOSABLE_WAKE_MARKER_ENV,
+                updated["EnvironmentVariables"],
             )
             self.assertIn("--no-voice", updated["ProgramArguments"])
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+    def test_plist_patch_binds_explicit_wake_marker_to_disposable_ci(self) -> None:
+        marker = Path("/var/run/slipstream-lifecycle-wake-exact")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daemon.plist"
+            with path.open("wb") as handle:
+                plistlib.dump({"ProgramArguments": ["daemon"]}, handle)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CI": "true",
+                    "GITHUB_ACTIONS": "true",
+                    "SLIPSTREAM_DISPOSABLE_CI": "1",
+                },
+                clear=True,
+            ), mock.patch("os.geteuid", return_value=0):
+                lifecycle._patch_launchd_for_qualification(
+                    path,
+                    wake_marker_path=marker,
+                )
+            with path.open("rb") as handle:
+                updated = plistlib.load(handle)
+
+        environment = updated["EnvironmentVariables"]
+        self.assertEqual(environment["CI"], "true")
+        self.assertEqual(environment["GITHUB_ACTIONS"], "true")
+        self.assertEqual(environment["SLIPSTREAM_DISPOSABLE_CI"], "1")
+        self.assertEqual(
+            environment[lifecycle.DISPOSABLE_WAKE_MARKER_ENV],
+            str(marker),
+        )
+
+    def test_qualification_wake_marker_advances_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            lifecycle,
+            "DISPOSABLE_WAKE_MARKER_DIRECTORY",
+            Path(tmp),
+        ), mock.patch.object(
+            lifecycle,
+            "_require_disposable_ci",
+        ), mock.patch.object(
+            lifecycle.os,
+            "fchown",
+        ):
+            marker = lifecycle._create_qualification_wake_marker()
+            self.assertEqual(
+                marker.read_bytes(),
+                lifecycle._qualification_wake_marker_payload(0),
+            )
+            root_metadata = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o600,
+                st_uid=0,
+                st_gid=0,
+            )
+            with mock.patch.object(Path, "lstat", return_value=root_metadata):
+                lifecycle._advance_qualification_wake_marker(marker, 1)
+            self.assertEqual(
+                marker.read_bytes(),
+                lifecycle._qualification_wake_marker_payload(1),
+            )
+
+    def test_qualification_wake_marker_rejects_non_private_mode(self) -> None:
+        marker = Path("/var/run/slipstream-lifecycle-wake-exact")
+        metadata = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o644,
+            st_uid=0,
+            st_gid=0,
+        )
+        with mock.patch.object(
+            lifecycle,
+            "_require_disposable_ci",
+        ), mock.patch.object(
+            Path,
+            "lstat",
+            return_value=metadata,
+        ), self.assertRaisesRegex(
+            lifecycle.LifecycleError,
+            "ownership changed",
+        ):
+            lifecycle._advance_qualification_wake_marker(marker, 1)
+
+    def test_lifecycle_injects_a_marker_not_an_awake_loop_stall(self) -> None:
+        daemon_source = lifecycle.SOURCE_DAEMON.read_text(encoding="utf-8")
+        lifecycle_source = Path(lifecycle.__file__).read_text(encoding="utf-8")
+
+        self.assertIn("_read_system_wake_marker", daemon_source)
+        self.assertIn("_advance_qualification_wake_marker", lifecycle_source)
+        self.assertNotIn("signal.SIGSTOP", lifecycle_source)
 
     def test_plist_patch_forwards_only_the_exact_disposable_browser_fixture(
         self,

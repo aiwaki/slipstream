@@ -38,6 +38,9 @@ WORKER_FAILURE_RE = re.compile(
     r"\Aslipstream browser probe failed: [a-z0-9_]{1,80}\Z"
 )
 WORKER_PROFILE_GLOB = "slipstream-browser-probe-" + "[0-9a-f]" * 32
+PACKAGED_BROWSER_WORKER_RELATIVE = Path(
+    "Contents/MacOS/slipstream-browser-probe"
+)
 LSAPPINFO = "/usr/bin/lsappinfo"
 FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
     "PostShowProcess",
@@ -616,7 +619,7 @@ def main() -> int:
     chrome = app_bundle / "Contents" / "Resources" / "chromium-headless-shell" / "chrome-headless-shell"
     if not chrome.is_file() or not os.access(chrome, os.X_OK):
         raise QualificationError("packaged pinned headless shell is unavailable")
-    executable = app_bundle / "Contents" / "MacOS" / "slipstream"
+    executable = app_bundle / PACKAGED_BROWSER_WORKER_RELATIVE
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise QualificationError("packaged browser worker is unavailable")
     identity = probe_runtime._active_console_user()

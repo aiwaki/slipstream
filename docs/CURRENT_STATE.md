@@ -12,20 +12,33 @@ file.
 
 Update 2026-08-13 P0 implementation is in draft PR
 [#343](https://github.com/aiwaki/slipstream/pull/343) on
-`codex/p0-macos-reliability`. Its first exact PR run built the immutable
-candidate successfully and exposed four integration-contract failures rather
-than a product pass: OSV's incomplete `pkg:generic` coordinate for pinned
-Chromium, a missing PF NATLOOK descriptor in the disposable smoke, stale
-install-attestation v2 expectations, and mismatched browser-worker/Windows
-workflow test bounds. The branch now fixes each cause without bypassing a gate:
-the current combined local freeze has 1,382 Python tests plus 60 subtests, 114
-app Rust tests, 40 userspace-effect and 241 Windows-adapter tests green. Pinned
-OSV Scanner 2.3.8 accounts for all 352 SPDX packages as 351 vulnerability-
-scanned plus one exact SHA-256/PURL/expiry-bound Chromium integrity-only entry,
-with zero blocking findings. A rebuilt copy of the first CI candidate completes
-one bounded headless probe and leaves no matching process; disposable CI must
-still prove the real visibility sensors and all required checks on the new PR
-head.
+`codex/p0-macos-reliability`. Its second exact PR run again built the immutable
+candidate and passed the corrected dependency audit, then exposed four new
+packaged boundaries rather than a product pass: the PF smoke used an unroutable
+documentation-prefix IPv6 destination, lifecycle still expected an artificial
+scheduler stall to mean wake, the browser smoke launched the Tauri GUI
+executable and therefore registered it with LaunchServices, and a Windows
+checkout fed CRLF into an LF-only workflow parser. The branch fixes each cause
+without weakening its gate: PF uses an active scoped link-local route and
+closes the inherited `/dev/pf` descriptor before dropping privileges; lifecycle
+injects one exact root-owned `0600` disposable system marker while production
+continues to use `kern.waketime`; the browser observer is a separate non-AppKit
+Cargo binary signed inside the same bundle; and the Windows parser normalizes
+line endings.
+
+The current local freeze has 1,397 Python tests plus 60 subtests, 355 script
+unittests, 89 tray-library tests, 29 browser-helper tests, 41 core tests, 40
+userspace-stack tests, 40 userspace-effect tests, and 241 Windows-adapter tests
+green. All Rust lints, Python compilation, project-state validation, workflow
+syntax, and diff checks pass. A real arm64 Tauri package contains
+`Contents/MacOS/slipstream-browser-probe`, keeps `CFBundleExecutable=slipstream`,
+passes helper and deep-bundle signature checks, and links the helper only to
+`libiconv` and `libSystem`, never AppKit/Cocoa/WebKit. Its bundle metadata has
+`LSUIElement=true`; the installed `.22` does not. Pinned OSV Scanner 2.3.8
+accounts for all 352 SPDX packages as 351 vulnerability-scanned plus one exact
+SHA-256/PURL/expiry-bound Chromium integrity-only entry, with zero blocking
+findings. Disposable CI must still prove the unchanged real visibility sensors
+and every required check on the new PR head.
 
 Workstation evidence invalidated the preceding
 headed-Chrome qualification as a production readiness claim: the installed
@@ -50,10 +63,10 @@ Safari/Chrome live origins, dual-stack PF/NATLOOK plus QUIC v1/v2 mechanics, and
 the measured 30-minute invisibility soak. The publisher verifies all three
 exact workflow identities, attempts and digests and performs no PyInstaller,
 Cargo, or Tauri rebuild. Those protected gates have not yet passed, so
-`v0.1.9-preview.23` must not be published or installed. Next: finish
-shared-branch integration, pass local suites and required PR checks, merge,
-pass the exact-main candidate and both protected qualifications, then promote
-that unchanged candidate.
+`v0.1.9-preview.23` must not be published or installed. Next: push the locally
+green follow-up, pass every required PR check, merge, pass the exact-main
+candidate and both protected qualifications, then promote that unchanged
+candidate.
 
 The legacy transport-idle browser broker remains disabled permanently. The
 replacement exact-host pre-routing path is implemented on this branch and can

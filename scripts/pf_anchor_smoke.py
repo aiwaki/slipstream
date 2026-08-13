@@ -28,6 +28,7 @@ from typing import Sequence
 ROOT = Path(__file__).resolve().parents[1]
 SPIKE = ROOT / "spike"
 PFCTL = Path("/sbin/pfctl")
+IFCONFIG = Path("/sbin/ifconfig")
 SLIPSTREAM_ANCHOR = "com.apple/slipstream"
 SENTINEL_ANCHOR = "com.apple/slipstream-smoke-sentinel"
 OWNED_ANCHORS = frozenset({SLIPSTREAM_ANCHOR, SENTINEL_ANCHOR})
@@ -37,7 +38,7 @@ PRODUCTION_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
 SMOKE_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-smoke-lo0-skip.json")
 STATUS_PATH = Path("/var/run/slipstream.status")
 TEST_DESTINATION = "198.51.100.1"
-TEST_DESTINATION_V6 = "2001:db8::1"
+TEST_DESTINATION_V6 = "fe80::1"
 DEFAULT_TARGET_PORT = 18443
 DEFAULT_PROXY_PORT = 19443
 MARKER = b"slipstream-pf-smoke\n"
@@ -251,29 +252,80 @@ def _open_listener(proxy_port: int, family: int = socket.AF_INET) -> socket.sock
     return listener
 
 
-def _probe_redirect(
+def _scoped_ipv6_test_destination() -> str:
+    """Return an on-link target whose route exists without global IPv6."""
+    for _, interface in socket.if_nameindex():
+        if interface == "lo0":
+            continue
+        try:
+            result = subprocess.run(
+                (str(IFCONFIG), interface),
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        lines = tuple(line.strip() for line in result.stdout.splitlines())
+        if (
+            result.returncode == 0
+            and "status: active" in lines
+            and any(
+                line.startswith("inet6 fe80::") and f"%{interface} " in line
+                for line in lines
+            )
+        ):
+            return f"{TEST_DESTINATION_V6}%{interface}"
+    raise SmokeError("no active non-loopback IPv6 link-local route is available")
+
+
+def _run_unprivileged_test_client(
     *,
     listener: socket.socket,
     target_port: int,
     uid: int,
     gid: int,
+    destination: str,
+    inherited_descriptors: Sequence[int],
+) -> int:
+    try:
+        listener.close()
+        for descriptor in inherited_descriptors:
+            os.close(descriptor)
+        os.setgroups([])
+        os.setgid(gid)
+        os.setuid(uid)
+        with socket.create_connection((destination, target_port), timeout=4) as client:
+            received = client.recv(len(MARKER))
+        return 0 if received == MARKER else 2
+    except BaseException:
+        return 3
+
+
+def _probe_redirect(
+    *,
+    probe: str,
+    listener: socket.socket,
+    target_port: int,
+    uid: int,
+    gid: int,
     destination: str = TEST_DESTINATION,
+    inherited_descriptors: Sequence[int] = (),
     original_destination_lookup=None,
     expected_original_destination: tuple[str, int] | None = None,
 ) -> None:
 
     pid = os.fork()
     if pid == 0:
-        try:
-            listener.close()
-            os.setgroups([])
-            os.setgid(gid)
-            os.setuid(uid)
-            with socket.create_connection((destination, target_port), timeout=4) as client:
-                received = client.recv(len(MARKER))
-            os._exit(0 if received == MARKER else 2)
-        except BaseException:
-            os._exit(3)
+        os._exit(_run_unprivileged_test_client(
+            listener=listener,
+            target_port=target_port,
+            uid=uid,
+            gid=gid,
+            destination=destination,
+            inherited_descriptors=inherited_descriptors,
+        ))
 
     child_status: int | None = None
     try:
@@ -288,12 +340,16 @@ def _probe_redirect(
                     )
             connection.sendall(MARKER)
     except (OSError, TimeoutError) as exc:
-        raise SmokeError("test-port redirect did not reach the local listener") from exc
+        raise SmokeError(
+            f"{probe} redirect did not reach the local listener"
+        ) from exc
     finally:
         listener.close()
         _, child_status = os.waitpid(pid, 0)
     if not os.WIFEXITED(child_status) or os.WEXITSTATUS(child_status) != 0:
-        raise SmokeError("unprivileged test client did not traverse the PF redirect")
+        raise SmokeError(
+            f"{probe} unprivileged client did not traverse the PF redirect"
+        )
 
 
 def _import_tproxy():
@@ -385,6 +441,7 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
     rules = build_redirect_rules(target_port=target_port, proxy_port=proxy_port)
     runner = PfctlRunner()
     before, uid, gid = _preflight(runner)
+    ipv6_test_destination = _scoped_ipv6_test_destination()
     tproxy = None
     sentinel_before: tuple[str, str] | None = None
     cleanup_errors: list[str] = []
@@ -446,34 +503,42 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             raise SmokeError("arming Slipstream changed the sentinel anchor")
 
         _probe_redirect(
+            probe="ipv4_loopback",
             listener=_open_listener(target_port, socket.AF_INET),
             target_port=target_port,
             uid=uid,
             gid=gid,
             destination="127.0.0.1",
+            inherited_descriptors=(natlook_descriptor,),
         )
         _probe_redirect(
+            probe="ipv4_pf_natlook",
             listener=listener_v4,
             target_port=target_port,
             uid=uid,
             gid=gid,
+            inherited_descriptors=(natlook_descriptor,),
             original_destination_lookup=tproxy.orig_dst,
             expected_original_destination=(TEST_DESTINATION, target_port),
         )
         listener_v4 = None
         _probe_redirect(
+            probe="ipv6_loopback",
             listener=_open_listener(target_port, socket.AF_INET6),
             target_port=target_port,
             uid=uid,
             gid=gid,
             destination="::1",
+            inherited_descriptors=(natlook_descriptor,),
         )
         _probe_redirect(
+            probe="ipv6_pf_natlook",
             listener=listener_v6,
             target_port=target_port,
             uid=uid,
             gid=gid,
-            destination=TEST_DESTINATION_V6,
+            destination=ipv6_test_destination,
+            inherited_descriptors=(natlook_descriptor,),
             original_destination_lookup=tproxy.orig_dst,
             expected_original_destination=(TEST_DESTINATION_V6, target_port),
         )

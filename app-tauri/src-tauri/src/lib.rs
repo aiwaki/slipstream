@@ -7,14 +7,12 @@
 // Logic lives here (lib.rs) so the same crate can back a mobile entry point
 // later; main.rs is a thin desktop shim.
 
-mod browser_probe;
 mod diagnostics;
 mod geph_config;
 mod install_attestation;
 mod native_messaging;
 mod status_client;
 
-pub use browser_probe::run_browser_probe_if_requested;
 pub use native_messaging::run_native_messaging_if_requested;
 pub use slipstream_core::{
     address_attempts, connection_race, route_circuit, route_circuit_registry,

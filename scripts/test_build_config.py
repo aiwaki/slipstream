@@ -106,6 +106,59 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn(f"--target {TAURI_RELEASE_TARGET}", scripts["build:release"])
         self.assertEqual(scripts["build"], "npm run build:release")
 
+    def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
+        config = json.loads(
+            (ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text()
+        )
+        cargo = (ROOT / "app-tauri/src-tauri/Cargo.toml").read_text(
+            encoding="utf-8"
+        )
+        app_main = (ROOT / "app-tauri/src-tauri/src/main.rs").read_text(
+            encoding="utf-8"
+        )
+        helper_main = (
+            ROOT
+            / "app-tauri/src-tauri/src/bin/slipstream-browser-probe.rs"
+        ).read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+        owned_geph = (
+            ROOT / ".github/workflows/owned-geph-qualification.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(config["mainBinaryName"], "slipstream")
+        self.assertNotIn(
+            "browser-probe/slipstream-browser-probe",
+            config["bundle"]["resources"],
+        )
+        self.assertIn('name = "slipstream-browser-probe"', cargo)
+        self.assertNotIn("run_browser_probe_if_requested", app_main)
+        self.assertNotIn("use slipstream_lib", helper_main)
+        self.assertIn('#[path = "../browser_probe.rs"]', helper_main)
+        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', workflow)
+        self.assertIn('/usr/bin/otool -L "$helper"', workflow)
+        self.assertIn("Print :CFBundleExecutable", workflow)
+        self.assertIn(
+            'helper="$app/Contents/MacOS/slipstream-browser-probe"',
+            owned_geph,
+        )
+        self.assertIn('/usr/bin/codesign --verify --strict "$helper"', owned_geph)
+        self.assertIn('/usr/bin/otool -L "$helper"', owned_geph)
+        self.assertIn("Print :CFBundleExecutable", owned_geph)
+        self.assertIn(
+            "cargo test --locked --bin slipstream-browser-probe",
+            workflow,
+        )
+        self.assertIn(
+            "cargo clippy --locked --all-targets -- -D warnings",
+            workflow,
+        )
+        self.assertNotIn(
+            "cargo clippy --locked --bin slipstream-browser-probe",
+            workflow,
+        )
+
     def test_packaged_workflows_use_the_explicit_tauri_target(self) -> None:
         workflow_names = ("ci.yml",)
         combined = ""

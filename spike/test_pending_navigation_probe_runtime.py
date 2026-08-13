@@ -93,7 +93,12 @@ def test_tproxy_lazy_worker_receives_only_the_closed_disposable_environment(
 
 def test_direct_headless_launcher_drops_uid_gid_without_aqua_or_sudo(tmp_path):
     bundle = tmp_path / "Slipstream.app"
-    executable = bundle / "Contents" / "MacOS" / "slipstream"
+    executable = (
+        bundle
+        / "Contents"
+        / "MacOS"
+        / "slipstream-browser-probe"
+    )
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b"worker")
     executable.chmod(0o755)
@@ -118,14 +123,18 @@ def test_direct_headless_launcher_drops_uid_gid_without_aqua_or_sudo(tmp_path):
         )
         return subprocess.CompletedProcess(command, 0)
 
+    signature_commands = []
+
+    def verify_signature(command, **_kwargs):
+        signature_commands.append(command)
+        return SimpleNamespace(returncode=0)
+
     launcher = probe_runtime.DirectHeadlessBrowserWorkerLauncher(
         executable=executable,
         geph_port=9954,
         identity_probe=lambda: identity,
         command_runner=run,
-        codesign_runner=lambda *_args, **_kwargs: SimpleNamespace(
-            returncode=0
-        ),
+        codesign_runner=verify_signature,
         effective_uid=lambda: 0,
     )
 
@@ -154,14 +163,37 @@ def test_direct_headless_launcher_drops_uid_gid_without_aqua_or_sudo(tmp_path):
         token not in flattened
         for token in ("launchctl", " open ", "sudo", "Aqua")
     )
+    assert signature_commands == [
+        (
+            "/usr/bin/codesign",
+            "--verify",
+            "--strict",
+            str(executable),
+        ),
+        (
+            "/usr/bin/codesign",
+            "--verify",
+            "--deep",
+            "--strict",
+            str(bundle),
+        ),
+    ]
 
 
 def test_direct_headless_launcher_requires_root_for_uid_drop(tmp_path):
-    executable = tmp_path / "Slipstream.app" / "Contents" / "MacOS" / "slipstream"
+    executable = (
+        tmp_path
+        / "Slipstream.app"
+        / "Contents"
+        / "MacOS"
+        / "slipstream-browser-probe"
+    )
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b"worker")
     executable.chmod(0o755)
-    identity = probe_runtime.ConsoleUserIdentity(501, 20, "user", "/tmp")
+    identity = probe_runtime.ConsoleUserIdentity(
+        os.getuid(), os.getgid(), "user", "/tmp"
+    )
     launcher = probe_runtime.DirectHeadlessBrowserWorkerLauncher(
         executable=executable,
         geph_port=9954,
@@ -177,6 +209,60 @@ def test_direct_headless_launcher_requires_root_for_uid_drop(tmp_path):
         match="browser_worker_unowned",
     ):
         launcher.launch()
+
+
+def test_direct_headless_launcher_rejects_gui_binary_and_helper_tamper(tmp_path):
+    bundle = tmp_path / "Slipstream.app"
+    gui = bundle / "Contents" / "MacOS" / "slipstream"
+    gui.parent.mkdir(parents=True)
+    gui.write_bytes(b"gui")
+    gui.chmod(0o755)
+    helper = (
+        bundle
+        / "Contents"
+        / "MacOS"
+        / "slipstream-browser-probe"
+    )
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_bytes(b"helper")
+    helper.chmod(0o755)
+    identity = probe_runtime.ConsoleUserIdentity(
+        os.getuid(), os.getgid(), "user", "/tmp"
+    )
+
+    gui_launcher = probe_runtime.DirectHeadlessBrowserWorkerLauncher(
+        executable=gui,
+        geph_port=9954,
+        identity_probe=lambda: identity,
+        codesign_runner=lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+        effective_uid=lambda: 0,
+    )
+    with pytest.raises(
+        probe_runtime.PendingNavigationProbeRuntimeError,
+        match="browser_worker_unowned",
+    ):
+        gui_launcher.launch()
+
+    calls = 0
+
+    def reject_helper(_command, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(returncode=1 if calls == 1 else 0)
+
+    helper_launcher = probe_runtime.DirectHeadlessBrowserWorkerLauncher(
+        executable=helper,
+        geph_port=9954,
+        identity_probe=lambda: identity,
+        codesign_runner=reject_helper,
+        effective_uid=lambda: 0,
+    )
+    with pytest.raises(
+        probe_runtime.PendingNavigationProbeRuntimeError,
+        match="browser_worker_signature_invalid",
+    ):
+        helper_launcher.launch()
+    assert calls == 1
 
 
 def test_direct_headless_force_reap_is_bounded(monkeypatch, tmp_path):
@@ -1246,7 +1332,7 @@ def test_console_worker_launcher_uses_one_exact_aqua_job_and_cleans_up():
 
 def test_console_worker_launcher_waits_for_final_aqua_identity():
     executable = Path(
-        "/Applications/Slipstream.app/Contents/MacOS/slipstream"
+        "/Applications/Slipstream.app/Contents/MacOS/slipstream-browser-probe"
     )
     identity = probe_runtime.ConsoleUserIdentity(
         uid=502,

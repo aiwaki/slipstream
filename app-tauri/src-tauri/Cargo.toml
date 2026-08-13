@@ -10,6 +10,14 @@ rust-version = "1.77"
 name = "slipstream_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "slipstream"
+path = "src/main.rs"
+
+[[bin]]
+name = "slipstream-browser-probe"
+path = "src/bin/slipstream-browser-probe.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

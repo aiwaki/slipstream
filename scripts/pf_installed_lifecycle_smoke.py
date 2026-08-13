@@ -70,8 +70,9 @@ SENTINEL_PROXY_PORT = 19444
 STOP_MARKER = b"__stop__"
 TOKEN_RE = re.compile(r"Token\s*:\s*(\d+)", re.IGNORECASE)
 RUNTIME_REARM_SIGNAL = signal.SIGUSR1
-QUALIFICATION_WAKE_GAP_SECONDS = 6.0
-WAKE_SUSPEND_SECONDS = 8.0
+DISPOSABLE_WAKE_MARKER_ENV = "SLIPSTREAM_DISPOSABLE_WAKE_MARKER_PATH"
+DISPOSABLE_WAKE_MARKER_DIRECTORY = Path("/var/run")
+DISPOSABLE_WAKE_MARKER_PREFIX = "slipstream-lifecycle-wake-"
 LIFECYCLE_SOAK_CYCLES = 2
 HTTPS_PROBE_URL = "https://github.com/robots.txt"
 HTTPS_PROBE_MIN_BYTES = 32
@@ -1734,6 +1735,76 @@ def _signal_owned_daemon(
         raise LifecycleError(f"owned daemon pid {pid} disappeared") from exc
 
 
+def _qualification_wake_marker_payload(sequence: int) -> bytes:
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise LifecycleError("qualification wake marker sequence is invalid")
+    return f"{{ sec = {sequence}, usec = 0 }} slipstream lifecycle\n".encode("ascii")
+
+
+def _validate_qualification_wake_marker_path(path: Path) -> Path:
+    candidate = Path(path)
+    if (
+        not candidate.is_absolute()
+        or candidate.parent != DISPOSABLE_WAKE_MARKER_DIRECTORY
+        or not candidate.name.startswith(DISPOSABLE_WAKE_MARKER_PREFIX)
+    ):
+        raise LifecycleError("qualification wake marker path is outside /var/run")
+    return candidate
+
+
+def _create_qualification_wake_marker() -> Path:
+    _require_disposable_ci()
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix=DISPOSABLE_WAKE_MARKER_PREFIX,
+        dir=DISPOSABLE_WAKE_MARKER_DIRECTORY,
+    )
+    path = _validate_qualification_wake_marker_path(Path(raw_path))
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.fchown(descriptor, 0, 0)
+        os.write(descriptor, _qualification_wake_marker_payload(0))
+        os.fsync(descriptor)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        os.close(descriptor)
+    return path
+
+
+def _advance_qualification_wake_marker(path: Path, sequence: int) -> None:
+    _require_disposable_ci()
+    path = _validate_qualification_wake_marker_path(path)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise LifecycleError("qualification wake marker disappeared") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_gid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise LifecycleError("qualification wake marker ownership changed")
+    descriptor, raw_temporary = tempfile.mkstemp(
+        prefix=f".{DISPOSABLE_WAKE_MARKER_PREFIX}",
+        dir=DISPOSABLE_WAKE_MARKER_DIRECTORY,
+    )
+    temporary = Path(raw_temporary)
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.fchown(descriptor, 0, 0)
+        os.write(descriptor, _qualification_wake_marker_payload(sequence))
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
 def _recovery_count(status: dict | None) -> int:
     recovery = _recovery_status(status)
     return int(recovery.get("count") or 0) if recovery else 0
@@ -1759,13 +1830,24 @@ def _wait_for_path(path: Path, *, present: bool, timeout: float = 20) -> None:
 def _patch_launchd_for_qualification(
     plist_path: Path,
     browser_environment: dict[str, str] | None = None,
+    wake_marker_path: Path | None = None,
 ) -> None:
     with plist_path.open("rb") as handle:
         data = plistlib.load(handle)
     environment = dict(data.get("EnvironmentVariables") or {})
-    environment["SLIP_RUNTIME_WAKE_GAP_SECONDS"] = str(
-        int(QUALIFICATION_WAKE_GAP_SECONDS)
-    )
+    if wake_marker_path is not None:
+        _require_disposable_ci()
+        wake_marker_path = _validate_qualification_wake_marker_path(
+            wake_marker_path
+        )
+        environment.update(
+            {
+                "CI": "true",
+                "GITHUB_ACTIONS": "true",
+                "SLIPSTREAM_DISPOSABLE_CI": "1",
+                DISPOSABLE_WAKE_MARKER_ENV: str(wake_marker_path),
+            }
+        )
     browser_environment = dict(browser_environment or {})
     if browser_environment:
         composed.require_disposable_ci()
@@ -2467,6 +2549,7 @@ def run_lifecycle(
     composed_navigation: dict[str, object] | str = "not_applicable"
     browser_worker_idle: dict[str, object] | str = "not_applicable"
     active_worker_uninstall: dict[str, object] | str = "not_applicable"
+    wake_marker_path: Path | None = None
     stage = "acquire-pf-reference"
     failure: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -2557,6 +2640,8 @@ def run_lifecycle(
         sentinel.check("reinstall")
         _assert_sentinel_state(runner, sentinel_states)
 
+        stage = "qualification-wake-marker"
+        wake_marker_path = _create_qualification_wake_marker()
         stage = "qualification-runtime-options"
         fixture = None
         try:
@@ -2572,6 +2657,7 @@ def run_lifecycle(
             _patch_launchd_for_qualification(
                 LAUNCHD_PLIST,
                 browser_environment,
+                wake_marker_path,
             )
             system.run(("/bin/launchctl", "bootstrap", "system", str(LAUNCHD_PLIST)))
             active = _wait_for_status(
@@ -2684,13 +2770,10 @@ def run_lifecycle(
         current_status = _read_status()
         previous_rearm_count = _recovery_count(current_status)
         for cycle in range(1, LIFECYCLE_SOAK_CYCLES + 1):
-            stage = f"wake:{cycle}:suspend"
-            _signal_owned_daemon(target, daemon_pid, signal.SIGSTOP)
-            try:
-                time.sleep(WAKE_SUSPEND_SECONDS)
-            finally:
-                stage = f"wake:{cycle}:resume"
-                _signal_owned_daemon(target, daemon_pid, signal.SIGCONT)
+            if wake_marker_path is None:
+                raise LifecycleError("qualification wake marker is unavailable")
+            stage = f"wake:{cycle}:inject-system-marker"
+            _advance_qualification_wake_marker(wake_marker_path, cycle)
             stage = f"wake:{cycle}:verify"
             current_status = _wait_for_rearm(
                 "wake",
@@ -2699,7 +2782,7 @@ def run_lifecycle(
                 timeout=30,
             )
             previous_rearm_count = _recovery_count(current_status)
-            lifecycle_rearms.append(f"wake:{cycle}")
+            lifecycle_rearms.append(f"system_wake_marker:{cycle}")
             _assert_anchor_active(runner)
             if pf._anchor_snapshot(runner, pf.SENTINEL_ANCHOR) != sentinel_snapshot:
                 raise LifecycleError("wake recovery changed the sentinel anchor")
@@ -2742,6 +2825,7 @@ def run_lifecycle(
                 _patch_launchd_for_qualification(
                     LAUNCHD_PLIST,
                     uninstall_environment,
+                    wake_marker_path,
                 )
                 system.run((
                     "/bin/launchctl",
@@ -2799,6 +2883,13 @@ def run_lifecycle(
             _release_pf_reference(runner, test_token)
         except Exception as exc:
             cleanup_errors.append(f"test PF token cleanup: {exc}")
+        if wake_marker_path is not None:
+            try:
+                _validate_qualification_wake_marker_path(wake_marker_path).unlink(
+                    missing_ok=True
+                )
+            except Exception as exc:
+                cleanup_errors.append(f"wake marker cleanup: {exc}")
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
@@ -2830,6 +2921,7 @@ def run_lifecycle(
         "composed_original_navigation": composed_navigation,
         "active_worker_uninstall": active_worker_uninstall,
         "lifecycle_rearms": lifecycle_rearms,
+        "wake_event_source": "disposable_explicit_system_marker",
         "uninstall": "clean",
         "sentinel_connection": "preserved",
         "sentinel_state": "preserved",
@@ -2850,7 +2942,10 @@ def dry_run(target_name: str = "script") -> dict:
             else "commit"
         ),
         "cold_install": "Geph unavailable; local routing and private PF stay active",
-        "active_phase": "production Geph state with test-only wake/voice options",
+        "active_phase": (
+            "production Geph state with an explicit disposable wake marker "
+            "and voice disabled"
+        ),
         "packaged_tray": (
             "start, crash, restart, and stop exact user-owned process"
             if target_name == "packaged-app"
@@ -2893,8 +2988,10 @@ def dry_run(target_name: str = "script") -> dict:
             else "not applicable"
         ),
         "lifecycle_rearms": (
-            f"{LIFECYCLE_SOAK_CYCLES} suspend/wake and network-change cycles"
+            f"{LIFECYCLE_SOAK_CYCLES} explicit system-marker and "
+            "network-change cycles"
         ),
+        "wake_event_source": "disposable explicit system-marker fixture",
         "sentinel_connection": "must survive install, reinstall, restart, and uninstall",
         "intercepts_tcp_443": "only briefly on the disposable runner",
         "workstation_allowed": False,
