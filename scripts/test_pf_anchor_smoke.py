@@ -73,7 +73,7 @@ class PfAnchorSmokeTests(unittest.TestCase):
         ) as run:
             destination = pf_anchor_smoke._scoped_ipv6_test_destination()
 
-        self.assertEqual(destination, f"{pf_anchor_smoke.TEST_DESTINATION_V6}%en8")
+        self.assertEqual(destination, "fe80::8%en8")
         self.assertEqual(
             [call.args[0] for call in run.call_args_list],
             [
@@ -94,9 +94,32 @@ class PfAnchorSmokeTests(unittest.TestCase):
             return_value=unavailable,
         ), self.assertRaisesRegex(
             pf_anchor_smoke.SmokeError,
-            "no active non-loopback IPv6",
+            "no active non-loopback IPv6 link-local address",
         ):
             pf_anchor_smoke._scoped_ipv6_test_destination()
+
+    def test_ipv6_test_destination_ignores_unassigned_or_wrong_scope_addresses(self) -> None:
+        active = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "inet6 2001:db8::8%en8 prefixlen 64\n"
+                "inet6 fe80::9%en9 prefixlen 64\n"
+                "inet6 fe80::8%en8 prefixlen 64\n"
+                "status: active\n"
+            ),
+        )
+        with mock.patch.object(
+            pf_anchor_smoke.socket,
+            "if_nameindex",
+            return_value=((8, "en8"),),
+        ), mock.patch.object(
+            pf_anchor_smoke.subprocess,
+            "run",
+            return_value=active,
+        ):
+            destination = pf_anchor_smoke._scoped_ipv6_test_destination()
+
+        self.assertEqual(destination, "fe80::8%en8")
 
     def test_natlook_descriptor_is_an_integer_and_closed_exactly_once(self) -> None:
         tproxy = SimpleNamespace(_pf_fd=None)

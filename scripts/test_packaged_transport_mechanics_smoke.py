@@ -10,6 +10,17 @@ import packaged_transport_mechanics_smoke as smoke
 
 
 class PackagedTransportMechanicsSmokeTests(unittest.TestCase):
+    def test_installed_natlook_uses_an_assigned_scoped_ipv6_address(self) -> None:
+        with mock.patch.object(
+            smoke.pf,
+            "_scoped_ipv6_test_destination",
+            return_value="fe80::1234%en0",
+        ) as discover:
+            destinations = smoke._installed_natlook_destinations()
+
+        self.assertEqual(destinations, (smoke.pf.TEST_DESTINATION, "fe80::1234%en0"))
+        discover.assert_called_once_with()
+
     @mock.patch.dict(
         os.environ,
         {

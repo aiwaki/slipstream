@@ -11,6 +11,7 @@ ioctl path and requires the exact original flag state after cleanup.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import platform
@@ -38,7 +39,6 @@ PRODUCTION_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-lo0-skip.json")
 SMOKE_SKIP_LEASE_PATH = Path("/var/run/slipstream-pf-smoke-lo0-skip.json")
 STATUS_PATH = Path("/var/run/slipstream.status")
 TEST_DESTINATION = "198.51.100.1"
-TEST_DESTINATION_V6 = "fe80::1"
 DEFAULT_TARGET_PORT = 18443
 DEFAULT_PROXY_PORT = 19443
 MARKER = b"slipstream-pf-smoke\n"
@@ -253,7 +253,7 @@ def _open_listener(proxy_port: int, family: int = socket.AF_INET) -> socket.sock
 
 
 def _scoped_ipv6_test_destination() -> str:
-    """Return an on-link target whose route exists without global IPv6."""
+    """Return this Mac's active link-local address with its interface scope."""
     for _, interface in socket.if_nameindex():
         if interface == "lo0":
             continue
@@ -268,16 +268,22 @@ def _scoped_ipv6_test_destination() -> str:
         except (OSError, subprocess.TimeoutExpired):
             continue
         lines = tuple(line.strip() for line in result.stdout.splitlines())
-        if (
-            result.returncode == 0
-            and "status: active" in lines
-            and any(
-                line.startswith("inet6 fe80::") and f"%{interface} " in line
-                for line in lines
-            )
-        ):
-            return f"{TEST_DESTINATION_V6}%{interface}"
-    raise SmokeError("no active non-loopback IPv6 link-local route is available")
+        if result.returncode != 0 or "status: active" not in lines:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) < 2 or fields[0] != "inet6":
+                continue
+            host, separator, scope = fields[1].partition("%")
+            if not separator or scope != interface:
+                continue
+            try:
+                address = ipaddress.IPv6Address(host)
+            except ValueError:
+                continue
+            if address.is_link_local:
+                return f"{address.compressed}%{interface}"
+    raise SmokeError("no active non-loopback IPv6 link-local address is available")
 
 
 def _run_unprivileged_test_client(
@@ -540,7 +546,10 @@ def run_smoke(*, target_port: int, proxy_port: int) -> dict:
             destination=ipv6_test_destination,
             inherited_descriptors=(natlook_descriptor,),
             original_destination_lookup=tproxy.orig_dst,
-            expected_original_destination=(TEST_DESTINATION_V6, target_port),
+            expected_original_destination=(
+                ipv6_test_destination.partition("%")[0],
+                target_port,
+            ),
         )
         listener_v6 = None
         if not tproxy.suspend_geo_exit_backend("pf smoke runtime failure"):

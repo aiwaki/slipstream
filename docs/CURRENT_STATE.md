@@ -26,6 +26,16 @@ continues to use `kern.waketime`; the browser observer is a separate non-AppKit
 Cargo binary signed inside the same bundle; and the Windows parser normalizes
 line endings.
 
+The next exact-head run confirmed the dependency, Chromium, Windows contract,
+and complete Python suites, but also proved that merely changing the IPv6 smoke
+to `fe80::1%interface` was insufficient: the interface route existed while that
+hypothetical neighbor did not, so the client failed before reaching PF. The
+follow-up now parses the active interface's actually assigned link-local
+address, connects to that scoped local identity, and compares DIOCNATLOOK with
+its unscoped form. The protected installed-candidate transport gate uses the
+same discovered address rather than retaining the latent static `fe80::1`
+failure.
+
 The current local freeze has 1,397 Python tests plus 60 subtests, 355 script
 unittests, 89 tray-library tests, 29 browser-helper tests, 41 core tests, 40
 userspace-stack tests, 40 userspace-effect tests, and 241 Windows-adapter tests
