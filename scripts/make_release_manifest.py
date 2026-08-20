@@ -62,7 +62,7 @@ def _artifact_type(name: str) -> tuple[str, str]:
     raise ValueError(f"unexpected release artifact: {name}")
 
 
-def hash_regular_file(path: Path) -> tuple[str, int]:
+def hash_regular_file(path: Path, *, allow_empty: bool = False) -> tuple[str, int]:
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -74,7 +74,7 @@ def hash_regular_file(path: Path) -> tuple[str, int]:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError(f"release artifact is not a regular file: {path.name}")
-        if metadata.st_size <= 0:
+        if metadata.st_size <= 0 and not allow_empty:
             raise ValueError(f"empty release artifact: {path.name}")
         digest = hashlib.sha256()
         size = 0

@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_DEPS = ROOT / "scripts/ensure_macos_build_deps.sh"
 PYTHON_LOCKS = {
@@ -88,7 +87,9 @@ class BuildConfigTests(unittest.TestCase):
         )
 
     def test_local_build_disables_updater_artifacts(self) -> None:
-        config = json.loads((ROOT / "app-tauri/src-tauri/tauri.local.conf.json").read_text())
+        config = json.loads(
+            (ROOT / "app-tauri/src-tauri/tauri.local.conf.json").read_text()
+        )
 
         self.assertIs(config["bundle"]["createUpdaterArtifacts"], False)
 
@@ -107,26 +108,18 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(scripts["build"], "npm run build:release")
 
     def test_browser_probe_is_packaged_as_a_non_gui_cargo_binary(self) -> None:
-        config = json.loads(
-            (ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text()
-        )
-        cargo = (ROOT / "app-tauri/src-tauri/Cargo.toml").read_text(
-            encoding="utf-8"
-        )
+        config = json.loads((ROOT / "app-tauri/src-tauri/tauri.conf.json").read_text())
+        cargo = (ROOT / "app-tauri/src-tauri/Cargo.toml").read_text(encoding="utf-8")
         app_main = (ROOT / "app-tauri/src-tauri/src/main.rs").read_text(
             encoding="utf-8"
         )
         helper_main = (
-            ROOT
-            / "app-tauri/src-tauri/src/bin/slipstream-browser-probe.rs"
+            ROOT / "app-tauri/src-tauri/src/bin/slipstream-browser-probe.rs"
         ).read_text(encoding="utf-8")
         watchdog_main = (
-            ROOT
-            / "app-tauri/src-tauri/src/bin/slipstream-update-watchdog.rs"
+            ROOT / "app-tauri/src-tauri/src/bin/slipstream-update-watchdog.rs"
         ).read_text(encoding="utf-8")
-        workflow = (ROOT / ".github/workflows/ci.yml").read_text(
-            encoding="utf-8"
-        )
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         owned_geph = (
             ROOT / ".github/workflows/owned-geph-qualification.yml"
         ).read_text(encoding="utf-8")
@@ -161,9 +154,7 @@ class BuildConfigTests(unittest.TestCase):
             'watchdog="$app/Contents/MacOS/slipstream-update-watchdog"',
             owned_geph,
         )
-        self.assertIn(
-            '/usr/bin/codesign --verify --strict "$watchdog"', owned_geph
-        )
+        self.assertIn('/usr/bin/codesign --verify --strict "$watchdog"', owned_geph)
         self.assertIn('/usr/bin/otool -L "$watchdog"', owned_geph)
         self.assertIn("Print :CFBundleExecutable", owned_geph)
         self.assertIn(
@@ -204,12 +195,11 @@ class BuildConfigTests(unittest.TestCase):
         )
 
     def test_exact_main_candidate_qualifies_native_update_notification(self) -> None:
-        workflow = (ROOT / ".github/workflows/ci.yml").read_text(
-            encoding="utf-8"
-        )
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         job = workflow[
-            workflow.index("  packaged-update-notification-qualification:") :
-            workflow.index("  packaged-app-lifecycle-heavy:")
+            workflow.index(
+                "  packaged-update-notification-qualification:"
+            ) : workflow.index("  packaged-app-lifecycle-heavy:")
         ]
         aggregate = workflow[workflow.index("  packaged-app-lifecycle:") :]
 
@@ -245,9 +235,13 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("os.getcwd()", spec)
 
     def test_release_workflow_promotes_candidate_metadata(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
-        self.assertIn("Create tag-specific release metadata without rebuilding", workflow)
+        self.assertIn(
+            "Create tag-specific release metadata without rebuilding", workflow
+        )
         self.assertIn("scripts/verify_release_artifacts.py", workflow)
         self.assertIn("--release-dir dist-release", workflow)
         self.assertIn("dist-release/dependency-audit.json", workflow)
@@ -259,16 +253,68 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("npm run build", workflow)
         self.assertNotIn(".buildvenv/bin/pyinstaller", workflow.lower())
 
+    def test_release_publisher_requires_exact_main_dependency_audit(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+        resolution = workflow[
+            workflow.index(
+                "- name: Resolve exact candidate and qualification runs"
+            ) : workflow.index("- uses: actions/download-artifact@")
+        ]
+
+        self.assertIn("dependency_audit_run_id:", workflow)
+        self.assertIn(
+            "DEPENDENCY_AUDIT_INPUT: "
+            "${{ github.event.inputs.dependency_audit_run_id }}",
+            resolution,
+        )
+        self.assertIn(
+            "actions/workflows/dependency-audit.yml/runs?"
+            "branch=main&event=push&status=completed&per_page=100",
+            resolution,
+        )
+        self.assertIn('select(.head_sha == \\"$GITHUB_SHA\\")', resolution)
+        self.assertIn('select(.conclusion == \\"success\\")', resolution)
+        self.assertIn(
+            '"repos/${{ github.repository }}/actions/runs/$dependency_audit_run"',
+            resolution,
+        )
+        self.assertIn('"head_branch": "main"', resolution)
+        self.assertIn('"conclusion": "success"', resolution)
+        self.assertIn(
+            'dependency-audit.yml <<< "$dependency_audit_metadata"', resolution
+        )
+        self.assertIn(
+            "actions/runs/$dependency_audit_run/jobs?filter=latest&per_page=100",
+            resolution,
+        )
+        self.assertIn(
+            'required = ("audit", "geph-vendor-audit", ' '"Required dependency audit")',
+            resolution,
+        )
+        self.assertIn("total != len(jobs)", resolution)
+        self.assertIn('job.get("run_attempt") != expected_attempt', resolution)
+        self.assertIn('job.get("status") != "completed"', resolution)
+        self.assertIn('job.get("conclusion") != "success"', resolution)
+        self.assertIn(
+            'echo "dependency_audit_run_id=$dependency_audit_run"', resolution
+        )
+        self.assertIn(
+            'echo "dependency_audit_run_attempt=$dependency_audit_attempt"',
+            resolution,
+        )
+
     def test_dependency_audit_runs_on_changes_and_on_a_schedule(self) -> None:
-        workflow = (
-            ROOT / ".github/workflows/dependency-audit.yml"
-        ).read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/dependency-audit.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("pull_request:", workflow)
         self.assertIn("schedule:", workflow)
         self.assertIn('cron: "17 4 * * 1"', workflow)
         self.assertIn("--platform linux-amd64", workflow)
-        self.assertIn("--filter-platform \"$SLIPSTREAM_TAURI_TARGET\"", workflow)
+        self.assertIn('--filter-platform "$SLIPSTREAM_TAURI_TARGET"', workflow)
         self.assertIn("scripts/dependency_audit.py scan", workflow)
         self.assertIn("scripts/dependency_audit.py verify", workflow)
         self.assertIn("dist-audit/dependency-audit.json", workflow)
@@ -303,15 +349,18 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('test -f "$bundle/macos/Slipstream.app.tar.gz"', ci)
         self.assertIn("needs: [changes, packaged-app-build]", ci)
         self.assertIn("Assemble immutable main release candidate", ci)
-        self.assertGreaterEqual(ci.count("name: release-candidate-${{ github.sha }}"), 3)
+        self.assertGreaterEqual(
+            ci.count("name: release-candidate-${{ github.sha }}"), 3
+        )
 
         self.assertIn("release-candidate-${{ github.sha }}", qualification)
         self.assertIn("scripts/release_candidate.py verify", qualification)
         self.assertIn("scripts/release_candidate.py create-proof", qualification)
         self.assertIn("Attest exact qualification proof", qualification)
         proof_block = qualification[
-            qualification.index("Bind qualification proof to the exact candidate") :
-            qualification.index("Attest exact qualification proof")
+            qualification.index(
+                "Bind qualification proof to the exact candidate"
+            ) : qualification.index("Attest exact qualification proof")
         ]
         self.assertIn("--expected-candidate-run-attempt", proof_block)
         self.assertIn(
@@ -374,7 +423,7 @@ class BuildConfigTests(unittest.TestCase):
             workflow.count("${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"),
             1,
         )
-        self.assertIn("node \"$signer\" signer sign", signer)
+        self.assertIn('node "$signer" signer sign', signer)
         self.assertNotIn("actions/checkout@", signer)
         self.assertNotIn("npm ci", signer)
         self.assertNotIn("tauri build", signer)
@@ -384,11 +433,11 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("actions/runs/$GITHUB_RUN_ID/artifacts", signer)
         self.assertIn("artifact service digest mismatch", signer)
         self.assertIn('re.fullmatch(r"[0-9a-f]{64}", expected_digest)', signer)
-        self.assertIn(
-            'matches[0].get("digest") != f"sha256:{expected_digest}"', signer
-        )
+        self.assertIn('matches[0].get("digest") != f"sha256:{expected_digest}"', signer)
         self.assertIn("@tauri-apps/cli/-/cli-2.11.3.tgz", signer)
-        self.assertIn("@tauri-apps/cli-darwin-arm64/-/cli-darwin-arm64-2.11.3.tgz", signer)
+        self.assertIn(
+            "@tauri-apps/cli-darwin-arm64/-/cli-darwin-arm64-2.11.3.tgz", signer
+        )
         self.assertIn(
             "1049507bccfcb83ecf8b9fbeb49fd47c4c16b8ad3caddde808361d7886c901bea9651af196a9a8179821e47e58bf39943e14b821109a2d2b1086f5a4adf2be19",
             signer,
@@ -419,9 +468,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("signing-proof.json", assembly)
         self.assertIn("current-run artifact service identity mismatch", assembly)
         self.assertIn('re.fullmatch(r"[0-9a-f]{64}", digest)', assembly)
-        self.assertIn(
-            'matches[0].get("digest") != f"sha256:{digest}"', assembly
-        )
+        self.assertIn('matches[0].get("digest") != f"sha256:{digest}"', assembly)
         self.assertNotIn("tauri build", assembly)
         self.assertNotIn("disposable-updater.key", assembly)
 
@@ -457,7 +504,9 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("--expected-candidate-run-attempt", publisher)
         self.assertIn("--source-ref refs/heads/main", publisher)
         self.assertIn("scripts/release_readiness.py verify", publisher)
-        self.assertIn("--transport-report dist-readiness/transport-mechanics.json", publisher)
+        self.assertIn(
+            "--transport-report dist-readiness/transport-mechanics.json", publisher
+        )
         self.assertIn(
             "cp dist-readiness/transport-mechanics.json dist-release/", publisher
         )
@@ -490,7 +539,11 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn('"visible_window": False', smoke)
         self.assertIn("packaged_chromium_headless_shell", smoke)
         self.assertIn("Qualify packaged lazy sandboxed browser observation", ci)
-        browser_job = ci[ci.index("  packaged-browser-qualification:"):ci.index("  packaged-app-lifecycle-heavy:")]
+        browser_job = ci[
+            ci.index("  packaged-browser-qualification:") : ci.index(
+                "  packaged-app-lifecycle-heavy:"
+            )
+        ]
         self.assertNotIn("browser-actions/setup-chrome", browser_job)
         self.assertNotIn("--chrome-executable", browser_job)
 
@@ -521,16 +574,129 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("pull_request:\n    paths:", windows)
         self.assertIn('branches: ["main"]', windows)
 
-    def test_packaged_qualification_uses_the_same_revisioned_geph_release(self) -> None:
-        for name in ("ci.yml",):
-            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
-            self.assertIn(
-                'json.load(open("vendor/geph/SOURCE.json"))["release_revision"]',
-                workflow,
+    def test_geph_source_contract_has_one_fail_closed_pr_bootstrap_path(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        audit = (ROOT / ".github/workflows/dependency-audit.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("geph_bootstrap: ${{ steps.scope.outputs.geph_bootstrap }}", ci)
+        self.assertIn("python3 scripts/ci_scope.py", ci)
+        self.assertIn('--event-name "$GITHUB_EVENT_NAME"', ci)
+        self.assertIn('--github-output "$GITHUB_OUTPUT"', ci)
+        self.assertEqual(ci.count("GEPH_BOOTSTRAP:"), 2)
+        self.assertIn("Verify reviewed Geph source transition", ci)
+        self.assertIn("if: needs.changes.outputs.geph_bootstrap == 'true'", ci)
+        self.assertIn('mktemp -d "$RUNNER_TEMP/geph-transition-previous.XXXXXX"', ci)
+        self.assertNotIn('rm -rf "$previous"', ci)
+        self.assertIn('git cat-file -e "$BASE_SHA^{commit}"', ci)
+        self.assertIn('git show "$BASE_SHA:vendor/geph/SOURCE.json"', ci)
+        self.assertIn(
+            'git show "$BASE_SHA:security/geph-dependency-audit-policy.json"',
+            ci,
+        )
+        self.assertIn("scripts/geph_vendor_source.py verify-transition", ci)
+        self.assertIn('--previous-policy "$previous/dependency-audit-policy.json"', ci)
+        self.assertIn("--policy security/geph-dependency-audit-policy.json", ci)
+        self.assertIn(
+            "Geph source-contract PR: common gates and required dependency audit apply",
+            ci,
+        )
+        self.assertIn(
+            "Geph source-contract bootstrap: packaged binary waits for main", ci
+        )
+        self.assertIn("needs.changes.outputs.geph_bootstrap != 'true'", ci)
+        self.assertEqual(ci.count("main cannot use the Geph bootstrap path"), 2)
+        self.assertNotIn("scripts/ci_scope.py", audit)
+
+    def test_packaged_build_verifies_exact_attested_geph_release(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        build = workflow[
+            workflow.index("  packaged-app-build:") : workflow.index(
+                "  sign-updater-archive:"
             )
-            self.assertIn('tag="geph-vendor-$version-r$release_revision"', workflow)
-            self.assertIn("scripts/download_github_release_assets.py", workflow)
-            self.assertNotIn('tag="geph-vendor-$version"', workflow)
+        ]
+        geph = build[
+            build.index("Fetch and verify the recorded Geph build") : build.index(
+                "Materialize pinned Chromium headless shell"
+            )
+        ]
+
+        self.assertIn("attestations: read", build)
+        self.assertIn("scripts/geph_vendor_source.py verify", geph)
+        self.assertIn('["release_tag"]', geph)
+        self.assertIn("releases/tags/$tag", geph)
+        self.assertIn("verify_geph_release.py verify-metadata", geph)
+        self.assertIn('--expected-tag "$tag"', geph)
+        self.assertLess(
+            geph.index("verify_geph_release.py verify-metadata"),
+            geph.index("scripts/download_github_release_assets.py"),
+        )
+        self.assertIn("git/ref/tags/$tag", geph)
+        self.assertIn('[ "$tag_type" = commit ]', geph)
+        self.assertLess(
+            geph.index("git/ref/tags/$tag"),
+            geph.index("scripts/download_github_release_assets.py"),
+        )
+        for asset in (
+            "geph5-client",
+            "geph5-client.LICENSE",
+            "geph5-client.VERSION",
+            "geph5-client.SOURCE.json",
+            "geph5-client.Cargo.lock",
+            "geph5-client.spdx.json",
+            "geph5-client-dependency-audit.json",
+            "SHA256SUMS",
+        ):
+            self.assertIn(f"--pattern {asset}", geph)
+        self.assertIn("scripts/verify_geph_release.py verify-assets", geph)
+        self.assertIn('--metadata "$release_metadata"', geph)
+        self.assertIn('--expected-tag "$tag"', geph)
+        self.assertIn("scripts/make_geph_vendor_sbom.py verify", geph)
+        self.assertIn("scripts/dependency_audit.py verify", geph)
+        self.assertIn("umask 077", geph)
+        self.assertIn("application/vnd.github.raw+json", geph)
+        self.assertIn(
+            "contents/security/geph-dependency-audit-policy.json?ref=$tag_commit",
+            geph,
+        )
+        self.assertIn('--policy "$historical_policy"', geph)
+        self.assertNotIn(
+            "--policy security/geph-dependency-audit-policy.json",
+            geph,
+        )
+        self.assertNotIn('git show "$tag_commit:', geph)
+        self.assertIn("--vendored-transitive-dependencies full", geph)
+        self.assertIn('--source-commit "$tag_commit"', geph)
+        self.assertIn("gh attestation verify", geph)
+        self.assertIn('--signer-workflow "$signer_workflow"', geph)
+        self.assertIn('--signer-digest "$tag_commit"', geph)
+        self.assertIn('--source-digest "$tag_commit"', geph)
+        self.assertIn("--source-ref refs/heads/main", geph)
+        self.assertIn("--predicate-type https://slsa.dev/provenance/v1", geph)
+        self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", geph)
+        self.assertIn("--deny-self-hosted-runners", geph)
+        self.assertIn('--format json > "$provenance_json"', geph)
+        self.assertIn('--format json > "$spdx_attestation_json"', geph)
+        self.assertIn("verify_geph_release.py verify-attestations", geph)
+        self.assertIn('--provenance-json "$provenance_json"', geph)
+        self.assertIn('--spdx-json "$spdx_attestation_json"', geph)
+        self.assertIn("-verify_arch arm64 x86_64", geph)
+        self.assertLess(
+            geph.index("scripts/dependency_audit.py verify"),
+            geph.index("gh attestation verify"),
+        )
+        copy_index = geph.index("cp /tmp/geph/geph5-client")
+        for verifier in (
+            "verify_geph_release.py verify-metadata",
+            "scripts/verify_geph_release.py verify-assets",
+            "scripts/make_geph_vendor_sbom.py verify",
+            "scripts/dependency_audit.py verify",
+            "--predicate-type https://slsa.dev/provenance/v1",
+            "--predicate-type https://spdx.dev/Document/v2.3",
+            "verify_geph_release.py verify-attestations",
+            "-verify_arch arm64 x86_64",
+        ):
+            self.assertLess(geph.index(verifier), copy_index)
 
     def test_every_geph_release_download_uses_the_bounded_helper(self) -> None:
         workflows = tuple((ROOT / ".github/workflows").glob("*.yml"))
@@ -550,7 +716,9 @@ class BuildConfigTests(unittest.TestCase):
         )
 
     def test_release_workflow_keeps_manual_previews_off_the_stable_feed(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn('tag="v${v}"', workflow)
         self.assertIn('"0.1.9-preview.${preview_sequence}"', workflow)
@@ -558,20 +726,23 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("release or Git tag already exists", workflow)
         self.assertIn("git/matching-refs/tags/$tag", workflow)
         self.assertIn("group: build-app-${{ github.ref }}", workflow)
-        resolve_tag = workflow[workflow.index("- name: Resolve version and tag"):]
+        resolve_tag = workflow[workflow.index("- name: Resolve version and tag") :]
         self.assertIn("GH_TOKEN: ${{ github.token }}", resolve_tag[:500])
         self.assertIn("prerelease=true", workflow)
         self.assertIn("prerelease=false", workflow)
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
 
-    def test_common_ci_runs_windows_only_for_windows_or_shared_adapter_paths(self) -> None:
+    def test_common_ci_runs_windows_only_for_windows_or_shared_adapter_paths(
+        self,
+    ) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        scope = (ROOT / "scripts/ci_scope.py").read_text(encoding="utf-8")
 
         self.assertIn("windows: ${{ steps.scope.outputs.windows }}", workflow)
-        self.assertIn("crates/slipstream-core/*", workflow)
-        self.assertIn("crates/slipstream-windows-adapter/*", workflow)
-        self.assertIn("vendor/wintun/*", workflow)
+        self.assertIn('"crates/slipstream-core/"', scope)
+        self.assertIn('"crates/slipstream-windows-adapter/"', scope)
+        self.assertIn('"vendor/wintun/"', scope)
         self.assertIn(
             "if: needs.changes.outputs.product == 'true' && needs.changes.outputs.windows == 'true'",
             workflow,
@@ -580,7 +751,9 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('if [ "$WINDOWS_SCOPE" = true ]; then', workflow)
 
     def test_release_workflow_presents_dmg_and_archives_previous_preview(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("DMG для установки", workflow)
         self.assertIn("dmg_name=", workflow)
@@ -598,35 +771,51 @@ class BuildConfigTests(unittest.TestCase):
         )
 
     def test_release_workflow_binds_tags_and_notes_to_the_built_commit(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("target_commitish: ${{ github.sha }}", workflow)
         self.assertIn("select(.draft | not)", workflow)
         self.assertIn('[ "$GITHUB_REF" = refs/heads/main ]', workflow)
 
     def test_release_workflow_attests_only_verified_payloads(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("id-token: write", workflow)
         self.assertIn("attestations: write", workflow)
         self.assertIn("artifact-metadata: write", workflow)
-        self.assertEqual(workflow.count("uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763"), 1)
+        self.assertEqual(
+            workflow.count(
+                "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763"
+            ),
+            1,
+        )
         self.assertIn("Attest tag-specific release metadata", workflow)
         self.assertIn("gh attestation verify", workflow)
         self.assertIn('--source-digest "$GITHUB_SHA"', workflow)
         self.assertIn("--predicate-type https://spdx.dev/Document/v2.3", workflow)
         self.assertIn("--deny-self-hosted-runners", workflow)
-        self.assertLess(workflow.index("scripts/verify_release_artifacts.py"), workflow.index("Attest tag-specific release metadata"))
+        self.assertLess(
+            workflow.index("scripts/verify_release_artifacts.py"),
+            workflow.index("Attest tag-specific release metadata"),
+        )
 
     def test_release_workflow_requires_remote_policy_only_for_stable(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn('--channel "${{ steps.ver.outputs.channel }}"', workflow)
         self.assertIn("не содержит remote policy assets", workflow)
         self.assertNotIn("Package signed route policy channel", workflow)
 
     def test_release_workflow_qualifies_the_built_app_before_publish(self) -> None:
-        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
         wrapper = (ROOT / "scripts/run_packaged_lifecycle_smoke.sh").read_text(
             encoding="utf-8"
         )
@@ -683,6 +872,8 @@ class BuildConfigTests(unittest.TestCase):
         )
 
         self.assertIn("pull-requests: write", workflow)
+        self.assertIn("group: build-geph-main", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('branch="automation/geph-${version}"', workflow)
         self.assertIn("gh pr create", workflow)
         self.assertIn("--base main", workflow)
@@ -698,19 +889,20 @@ class BuildConfigTests(unittest.TestCase):
         )
 
         self.assertIn("scripts/geph_vendor_source.py prepare", workflow)
+        self.assertIn(
+            "scripts/geph_vendor_source.py retire-h2-transition-exception",
+            workflow,
+        )
         self.assertIn("vendor/geph/SOURCE.json", workflow)
         self.assertIn("vendor/geph/Cargo.lock", workflow)
+        self.assertIn("security/geph-dependency-audit-policy.json", workflow)
         self.assertIn("needs.resolve.outputs.should_prepare == 'true'", workflow)
         self.assertIn("needs.resolve.outputs.should_build == 'true'", workflow)
         self.assertIn("cargo install", workflow)
         self.assertIn("--locked", workflow)
-        self.assertIn("--path \"$source_root\"", workflow)
-        self.assertIn(
-            "lipo out/geph5-client -verify_arch arm64 x86_64", workflow
-        )
-        self.assertNotIn(
-            "lipo -verify_arch arm64 x86_64 out/geph5-client", workflow
-        )
+        self.assertIn('--path "$source_root"', workflow)
+        self.assertIn("lipo out/geph5-client -verify_arch arm64 x86_64", workflow)
+        self.assertNotIn("lipo -verify_arch arm64 x86_64 out/geph5-client", workflow)
         self.assertNotIn("cargo install geph5-client --version", workflow)
         self.assertIn("scripts/make_geph_vendor_sbom.py generate", workflow)
         self.assertIn("security/geph-dependency-audit-policy.json", workflow)
@@ -727,14 +919,18 @@ class BuildConfigTests(unittest.TestCase):
             workflow.index("gh pr create"),
         )
         self.assertLess(
+            workflow.index(
+                "scripts/geph_vendor_source.py retire-h2-transition-exception"
+            ),
+            workflow.index("git add --"),
+        )
+        self.assertLess(
             workflow.index("scripts/dependency_audit.py verify"),
             workflow.index("Publish the verified internal dependency release"),
         )
 
     def test_external_actions_use_reviewed_immutable_pins(self) -> None:
-        pattern = re.compile(
-            r"uses:\s+([^\s@]+)@([0-9a-f]{40})\s+#\s+([^\s]+)"
-        )
+        pattern = re.compile(r"uses:\s+([^\s@]+)@([0-9a-f]{40})\s+#\s+([^\s]+)")
         seen: set[str] = set()
 
         for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
@@ -824,7 +1020,9 @@ class BuildConfigTests(unittest.TestCase):
                     f"URL or VCS requirement in {path}: {requirement}",
                 )
                 match = requirement_pattern.match(requirement)
-                self.assertIsNotNone(match, f"unlocked requirement in {path}: {requirement}")
+                self.assertIsNotNone(
+                    match, f"unlocked requirement in {path}: {requirement}"
+                )
                 assert match is not None
                 package = match.group(1).lower()
                 packages.add(package)
@@ -861,8 +1059,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertNotIn("pip install --quiet --upgrade pip", combined)
 
         source_installer = (ROOT / "spike/tproxy.py").read_text(encoding="utf-8")
-        install_start = source_installer.index('if not os.path.exists(py):')
-        install_end = source_installer.index('prog_args = [py, script', install_start)
+        install_start = source_installer.index("if not os.path.exists(py):")
+        install_end = source_installer.index("prog_args = [py, script", install_start)
         source_install = source_installer[install_start:install_end]
         self.assertIn("requirements-runtime.txt", source_install)
         self.assertIn('"--require-hashes"', source_install)
@@ -935,9 +1133,7 @@ class BuildConfigTests(unittest.TestCase):
 
         self.assertLess(gate, checkout)
         self.assertIn("if: github.event_name == 'push'", workflow[gate:checkout])
-        self.assertIn(
-            "Stable release publication is disabled", workflow[gate:checkout]
-        )
+        self.assertIn("Stable release publication is disabled", workflow[gate:checkout])
         self.assertIn("exit 1", workflow[gate:checkout])
 
     def test_build_dependency_helper_skips_homebrew_when_tools_exist(self) -> None:
@@ -984,7 +1180,9 @@ printf '#!/bin/bash\\nexit 0\\n' > \"$SLIPSTREAM_FAKE_BIN/protoc\"
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(log.read_text(encoding="utf-8").strip(), "install protobuf")
+            self.assertEqual(
+                log.read_text(encoding="utf-8").strip(), "install protobuf"
+            )
             self.assertEqual(auto_update_log.read_text(encoding="utf-8").strip(), "1")
 
     def test_build_dependency_helper_installs_multiple_formulae_once(self) -> None:
@@ -1046,9 +1244,9 @@ done
         workflow = (
             ROOT / ".github/workflows/windows-packet-adapter-qualification.yml"
         ).read_text(encoding="utf-8")
-        runner = (
-            ROOT / "scripts/run_bounded_windows_cargo_test.ps1"
-        ).read_text(encoding="utf-8")
+        runner = (ROOT / "scripts/run_bounded_windows_cargo_test.ps1").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("scripts/run_bounded_windows_cargo_test.ps1", workflow)
         self.assertIn("-TimeoutSeconds 120", workflow)
@@ -1060,9 +1258,7 @@ done
         self.assertIn("$drainTimer.ElapsedMilliseconds -lt 2000", runner)
         self.assertNotIn("$stableSamples", runner)
         self.assertIn("$Process.Kill($true)", runner)
-        self.assertIn(
-            "if (-not $Process.WaitForExit($WaitMilliseconds))", runner
-        )
+        self.assertIn("if (-not $Process.WaitForExit($WaitMilliseconds))", runner)
         self.assertIn("throw $cleanupFailure", runner)
         self.assertNotIn("[void]$process.WaitForExit", runner)
         self.assertIn("RedirectStandardOutput", runner)

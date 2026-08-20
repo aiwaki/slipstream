@@ -101,6 +101,35 @@ class ReleaseCandidateTests(unittest.TestCase):
             self.assertEqual(result["builder_run_attempt"], 2)
             self.assertEqual(result["artifact_count"], 6)
 
+    def test_app_tree_digest_accepts_and_binds_empty_internal_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Slipstream.app"
+            root.mkdir()
+            (root / "binary").write_bytes(b"app")
+            without_empty = release_candidate.deterministic_tree_sha256(root)
+
+            marker = root / "py.typed"
+            marker.write_bytes(b"")
+            with_empty = release_candidate.deterministic_tree_sha256(root)
+
+            self.assertNotEqual(without_empty, with_empty)
+            self.assertEqual(
+                with_empty, release_candidate.deterministic_tree_sha256(root)
+            )
+
+            marker.write_bytes(b"typed")
+            with_content = release_candidate.deterministic_tree_sha256(root)
+            self.assertNotEqual(with_empty, with_content)
+
+    def test_manifest_rejects_empty_top_level_candidate_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._candidate(root)
+            (root / "Slipstream.app.tar.gz.sig").write_bytes(b"")
+
+            with self.assertRaisesRegex(ValueError, "empty release artifact"):
+                self._create(root)
+
     def test_manifest_rejects_a_different_builder_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

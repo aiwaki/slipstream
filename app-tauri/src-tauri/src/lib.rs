@@ -2593,9 +2593,9 @@ fn replace_exit_menu_items(
 // `mizaru_bw` was STALE and the root cause of "cannot get connect token" /
 // "mizaru_bw.inner: Encoding error": the fronts no longer serve get_connect_token
 // and the empty bw key can't decode. The current broker uses:
-//   - `priority_race` (a {priority: source} map, NOT a list), tried high-first;
-//   - an aws_lambda "bouncer" as the primary (1500) transport — the fast path;
-//   - kubernetes.io domain-fronting (host = netlify) as fallbacks (300/0);
+//   - `priority_race` (a {delay_ms: source} map, NOT a priority list);
+//   - kubernetes.io domain-fronting (host = netlify) starts at 0 and 300 ms;
+//   - the aws_lambda "bouncer" joins the same first-success race at 1500 ms;
 //   - tunneled_broker direct https://broker.geph.io;
 //   - the real RSA `mizaru_bw` key (DER hex) so bandwidth-token fetch succeeds.
 // The obfs_key below is public (shipped in every Geph.app binary).
