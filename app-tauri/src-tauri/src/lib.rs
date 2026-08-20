@@ -12,6 +12,7 @@ mod diagnostics;
 mod geph_config;
 mod install_attestation;
 mod native_messaging;
+mod native_update_notification;
 mod notification_qualification;
 mod status_client;
 mod updater_transaction;
@@ -1637,22 +1638,28 @@ fn notify(app: &AppHandle, body: &str) {
         .show();
 }
 
-fn notify_update_available(body: &str) -> Result<(), String> {
-    if NATIVE_UPDATE_NOTIFICATION_STATE.load(Ordering::Acquire) != NATIVE_NOTIFICATION_READY {
-        let development = tauri::is_dev();
-        let identity = if development {
-            "com.apple.Terminal"
-        } else {
-            app_update::BUNDLE_IDENTIFIER
-        };
-        configure_native_notification_identity(identity, development)?;
-    }
-    let mut notification = notify_rust::Notification::new();
-    notification.summary("Slipstream").body(body);
-    notification
-        .show()
-        .map(|_| ())
-        .map_err(|error| format!("native update notification failed: {error}"))
+fn notify_update_available(
+    version: &str,
+    body: &str,
+) -> Result<
+    native_update_notification::SubmissionOutcome,
+    native_update_notification::NotificationFailure,
+> {
+    let identifier = native_update_notification::production_request_identifier(version);
+    native_update_notification::submit_update_available(
+        &identifier,
+        body,
+        app_update::BUNDLE_IDENTIFIER,
+    )
+}
+
+fn update_notification_was_submitted(
+    outcome: native_update_notification::SubmissionOutcome,
+) -> bool {
+    matches!(
+        outcome,
+        native_update_notification::SubmissionOutcome::Submitted(_)
+    )
 }
 
 /// Consume the exact-candidate, one-shot macOS notification qualification.
@@ -1665,12 +1672,22 @@ pub fn run_update_notification_qualification_if_requested() -> bool {
     if !notification_qualification::requested() {
         return false;
     }
-    let terminal = |reason: &str, capability_sha256: Option<&str>| {
+    let report = |outcome: &str,
+                  capability_sha256: &str,
+                  request_identifier_sha256: &str,
+                  permission_status: &str,
+                  delivered: bool,
+                  removed: bool,
+                  reason: &str| {
         let report = serde_json::json!({
-            "schema_version": 1,
-            "outcome": "terminal",
+            "schema_version": 2,
+            "outcome": outcome,
             "identity": app_update::BUNDLE_IDENTIFIER,
-            "capability_sha256": capability_sha256.unwrap_or(""),
+            "capability_sha256": capability_sha256,
+            "request_identifier_sha256": request_identifier_sha256,
+            "permission_status": permission_status,
+            "delivered": delivered,
+            "removed": removed,
             "reason": reason,
         });
         println!("{report}");
@@ -1678,36 +1695,72 @@ pub fn run_update_notification_qualification_if_requested() -> bool {
     let capability = match notification_qualification::claim() {
         Ok(capability) => capability,
         Err(()) => {
-            terminal("capability_invalid", None);
+            report(
+                "terminal",
+                "",
+                "",
+                "unknown",
+                false,
+                false,
+                "capability_invalid",
+            );
             return true;
         }
     };
-    if configure_native_notification_identity(app_update::BUNDLE_IDENTIFIER, false).is_err() {
-        terminal("identity_unavailable", Some(&capability.sha256));
-        return true;
+    let identifier =
+        match native_update_notification::qualification_request_identifier(&capability.sha256) {
+            Ok(identifier) => identifier,
+            Err(()) => {
+                report(
+                    "terminal",
+                    &capability.sha256,
+                    "",
+                    "unknown",
+                    false,
+                    false,
+                    "capability_invalid",
+                );
+                return true;
+            }
+        };
+    let identifier_sha256 = native_update_notification::request_identifier_sha256(&identifier);
+    match native_update_notification::qualify_update_available(
+        &identifier,
+        "A Slipstream update is available.",
+        app_update::BUNDLE_IDENTIFIER,
+    ) {
+        Ok(native_update_notification::QualificationOutcome::Submitted {
+            permission,
+            delivered,
+            removed,
+        }) => report(
+            "submitted",
+            &capability.sha256,
+            &identifier_sha256,
+            permission.as_str(),
+            delivered,
+            removed,
+            "",
+        ),
+        Ok(native_update_notification::QualificationOutcome::Suppressed(permission)) => report(
+            "permission_suppressed",
+            &capability.sha256,
+            &identifier_sha256,
+            permission.as_str(),
+            false,
+            false,
+            "",
+        ),
+        Err(error) => report(
+            "terminal",
+            &capability.sha256,
+            &identifier_sha256,
+            error.permission.as_str(),
+            error.delivered,
+            error.removed,
+            error.kind.as_reason(),
+        ),
     }
-    let permission_status = match notification_qualification::permission_state() {
-        Ok(notification_qualification::PermissionState::Suppressed) => "suppressed",
-        Ok(notification_qualification::PermissionState::Allowed) => "allowed",
-        Err(()) => "unknown",
-    };
-    // Exercise the exact production notifier even when modern permission
-    // settings are denied or unavailable: notify-rust 4.12 uses the legacy
-    // NSUserNotificationCenter backend.  The external packaged gate decides
-    // whether macOS accepted an attributed record and never equates backend
-    // success with a visible banner.
-    if notify_update_available("A Slipstream update is available.").is_err() {
-        terminal("native_submission_failed", Some(&capability.sha256));
-        return true;
-    }
-    let report = serde_json::json!({
-        "schema_version": 1,
-        "outcome": "submitted",
-        "identity": app_update::BUNDLE_IDENTIFIER,
-        "capability_sha256": capability.sha256,
-        "permission_status": permission_status,
-    });
-    println!("{report}");
     true
 }
 
@@ -2143,16 +2196,22 @@ async fn refresh_app_update(
         set_update_menu_text(&item, &state);
     }
     if let Some((version, body)) = notification {
-        match notify_update_available(&body) {
-            Ok(()) => {
-                if let Some(version) = version {
+        if let Some(version) = version {
+            match notify_update_available(&version, &body) {
+                Ok(outcome) if update_notification_was_submitted(outcome) => {
                     let mut state = state.lock().expect("update state lock poisoned");
                     record_update_notification(&mut state, &version);
                 }
+                Ok(_) => {
+                    // The update remains visible and installable in the menu.
+                    // Keep it retryable in case the user later enables alerts.
+                }
+                Err(error) => eprintln!("{error}"),
             }
-            Err(error) => {
-                eprintln!("{error}");
-            }
+        } else {
+            // Manual check results are ordinary toasts. They must not request
+            // provisional authorization reserved for a real update offer.
+            notify(&app, &body);
         }
     }
 }
@@ -3895,7 +3954,7 @@ mod tests {
         let source = include_str!("lib.rs");
         assert!(source.contains("UPDATE_CHECK_INTERVAL_SECS"));
         assert!(source.contains("discover_app_update(&app).await"));
-        assert!(source.contains("notify_update_available(&body)"));
+        assert!(source.contains("notify_update_available(&version, &body)"));
         assert!(source.contains("install_or_discover_app_update"));
         assert!(source.contains("download_verified_archive"));
         assert!(source.contains("validate_macos_archive"));
@@ -3990,6 +4049,23 @@ v0.1.9-preview.25/Slipstream.app.tar.gz";
     }
 
     #[test]
+    fn suppressed_update_notification_never_advances_dedupe_state() {
+        use super::native_update_notification::{PermissionStatus, SubmissionOutcome};
+
+        assert!(super::update_notification_was_submitted(
+            SubmissionOutcome::Submitted(PermissionStatus::Allowed)
+        ));
+        for permission in [
+            PermissionStatus::Denied,
+            PermissionStatus::NotificationCenterDisabled,
+        ] {
+            assert!(!super::update_notification_was_submitted(
+                SubmissionOutcome::Suppressed(permission)
+            ));
+        }
+    }
+
+    #[test]
     fn persisted_highest_seen_rejects_offer_rollback() {
         let root = tempfile::tempdir().unwrap();
         let mut state = super::AppUpdateState {
@@ -4064,7 +4140,7 @@ v0.1.9-preview.25/Slipstream.app.tar.gz";
     }
 
     #[test]
-    fn notification_identity_is_configured_before_any_setup_notification() {
+    fn legacy_toast_identity_is_configured_before_any_setup_notification() {
         let source = include_str!("lib.rs");
         let identity = source
             .find("configure_native_notification_identity(notification_identity")
@@ -4074,7 +4150,14 @@ v0.1.9-preview.25/Slipstream.app.tar.gz";
             .unwrap();
         assert!(identity < daemon_setup);
         assert!(source.contains("NATIVE_UPDATE_NOTIFICATION_STATE"));
-        assert!(source.contains("native update notification failed"));
+        assert!(source.contains("native notification identity unavailable"));
+        let modern = include_str!("native_update_notification.rs");
+        assert!(modern.contains("UNUserNotificationCenter"));
+        let macos_backend = &modern[modern.find("mod macos {").unwrap()
+            ..modern
+                .find("pub(crate) fn submit_update_available")
+                .unwrap()];
+        assert!(!macos_backend.contains("notify_rust"));
     }
 
     #[test]

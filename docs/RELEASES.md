@@ -186,6 +186,15 @@ Geph artifact.
   qualification only when the entire required CI run, including all three
   consumers, succeeds. Pull requests use an equivalent sealed local-build
   bundle because updater signing secrets are unavailable there.
+- The main-only update-notification consumer runs the exact candidate from its
+  production `/Applications/Slipstream.app` layout on a disposable macOS host.
+  The production `UNUserNotificationCenter` path must obtain promptless
+  provisional or existing authorization, submit one capability-derived request,
+  observe exactly that identifier through the supported delivered-notification
+  API, remove only that test request, and leave no Dock, window, activation,
+  frontmost-app, process, or registration residue. Permission denial verifies
+  fallback behavior but cannot authorize a release that claims notifications
+  work. Private notification databases remain secondary diagnostics only.
 - The candidate tree digest includes every directory, symlink, regular file,
   mode, relative path, and file payload. Legitimate zero-length marker files
   inside the packaged application are represented in that digest; top-level

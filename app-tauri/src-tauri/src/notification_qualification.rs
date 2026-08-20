@@ -12,7 +12,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const ARGUMENT: &str = "--qualify-update-notification";
 const CAPABILITY_ENV: &str = "SLIPSTREAM_UPDATE_NOTIFICATION_QUALIFICATION_FD";
@@ -45,12 +45,6 @@ struct Capability {
     candidate_manifest_sha256: String,
     candidate_id: String,
     bundle_identifier: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PermissionState {
-    Allowed,
-    Suppressed,
 }
 
 #[derive(Debug)]
@@ -364,45 +358,6 @@ pub(crate) fn claim() -> Result<ClaimedCapability, ()> {
     let capability: Capability = serde_json::from_slice(&payload).map_err(|_| ())?;
     validate_capability(&capability)?;
     Ok(ClaimedCapability { sha256 })
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn permission_state() -> Result<PermissionState, ()> {
-    use block2::RcBlock;
-    use objc2_user_notifications::{
-        UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter,
-    };
-    use std::ptr::NonNull;
-    use std::sync::mpsc;
-
-    let center = UNUserNotificationCenter::currentNotificationCenter();
-    let (sender, receiver) = mpsc::sync_channel(1);
-    let callback = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
-        // SAFETY: UserNotifications promises this non-null settings object for
-        // the completion block; only the enum value is copied.
-        let status = unsafe { settings.as_ref() }.authorizationStatus();
-        let _ = sender.try_send(status);
-    });
-    center.getNotificationSettingsWithCompletionHandler(&callback);
-    let status = receiver
-        .recv_timeout(Duration::from_secs(3))
-        .map_err(|_| ())?;
-    match status {
-        UNAuthorizationStatus::Authorized
-        | UNAuthorizationStatus::Provisional
-        | UNAuthorizationStatus::Ephemeral => Ok(PermissionState::Allowed),
-        UNAuthorizationStatus::Denied => Ok(PermissionState::Suppressed),
-        // NotDetermined is not proof that runner policy suppressed a working
-        // notification.  Report it as unknown so the external gate requires
-        // an exact attributed OS record instead of accepting a false pass.
-        UNAuthorizationStatus::NotDetermined => Err(()),
-        _ => Err(()),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn permission_state() -> Result<PermissionState, ()> {
-    Err(())
 }
 
 #[cfg(test)]

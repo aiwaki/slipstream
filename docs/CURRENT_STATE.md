@@ -11,36 +11,47 @@ file.
 ## Current Checkpoint
 
 Update 2026-08-20 (release follow-up): vendor-bootstrap PR #344 merged as
-`f4b0de15607a911ffba1c7a8401b35bb73ed4922`, then Geph `0.3.9` PR #280
-merged as current main `21fcaab9d35bdfdbdaacd28bf835acf7585318c3`.
-The exact `geph-vendor-0.3.9-r1` lightweight tag points to that main commit and
-its non-draft prerelease contains the complete eight uploaded provenance,
-SBOM, audit, source, lock, license, version, checksum and universal-binary
-assets. The exact-main application dependency audit is green.
+`f4b0de15607a911ffba1c7a8401b35bb73ed4922`, Geph `0.3.9` PR #280 merged as
+`21fcaab9d35bdfdbdaacd28bf835acf7585318c3`, and notification-diagnostics plus
+transactional-publisher PR #345 merged as current main
+`b1abb1e1104ba5f1c69516a294c64b69452e174e`. The exact
+`geph-vendor-0.3.9-r1` release and its eight provenance/SBOM/audit/source assets
+remain bound to the reviewed source. Exact-main dependency audit run
+`32382675900` is green.
 
-Exact-main CI run `32376735211`, full rerun attempt `2`, passed the reviewed
-Geph ingestion, application build, isolated production updater signing,
-immutable candidate assembly and attestation, Chromium contract, packaged
-browser qualification, and the full packaged lifecycle/Safari sentinel. It
-failed only the main-only native-update-notification qualification. That job's
-old outer catch-all reduced every hook, visibility and macOS-attribution error
-to the same two-field `terminal` result and skipped its report upload on
-failure, so the surviving run cannot honestly distinguish the internal cause.
-The candidate is therefore not releasable and no protected gate or publisher
-was dispatched.
+Exact-main CI run `32382675926` passed the reviewed Geph ingestion, application
+build, isolated production updater signing, immutable candidate assembly and
+attestation, Chromium contract, packaged browser qualification, and full
+packaged lifecycle/Safari sentinel. Its only failed leaf was native update
+notification qualification `96471868763`. The always-uploaded bounded report
+survived with exact code `os_attribution_missing`; no capability, identity, or
+legacy submission wrapper error occurred. The macOS 14 runner was checking the
+macOS 15+ `usernoted` database path, while the legacy
+`notify-rust -> NSUserNotificationCenter` return value could not confirm OS
+delivery in any case. The candidate is not releasable and no protected gate or
+publisher was dispatched.
 
-The narrow follow-up branch keeps the notification gate strict but gives every
-failure a fixed privacy-bounded code, preserves only validated Rust terminal
-reasons, atomically writes the bounded report, and uploads it even when the job
-fails. It also makes preview publication transactional: one exact draft,
-uploads with overwrite disabled, local/remote digest and inventory checks,
-authoritative verification after an ambiguous publish response, strict
-already-published recovery, and idempotent prior-preview archival. The root
-READMEs keep the centered application icon but now label `.23` functionality
-as the next preview until it actually publishes. Next: merge this narrow
-follow-up, run a new exact-main candidate to obtain the concrete notification
-outcome, fix that outcome without weakening attribution or invisibility, then
-run owned-Geph and release-readiness before publishing `.23`.
+The active follow-up replaces only update alerts with the supported
+`UNUserNotificationCenter` API shared by production and qualification. A fresh
+update may request promptless provisional authorization; exact qualification
+requires the runtime bundle identity, a nil-error bounded native completion,
+exactly one delivered capability-derived identifier, exact cleanup, and zero
+Dock/window/frontmost/activation change. Denial proves fallback behavior but
+never satisfies release delivery. Sonoma/Sequoia private notification stores
+are explicitly resolved and validated only as secondary diagnostics. CI also
+runs the candidate from its production `/Applications` layout and preserves
+each rerun's failure artifact independently.
+
+The root READMEs already contain the centered application icon and label `.23`
+as the next preview. A separate first-install trust blocker remains: the bundle
+configuration still uses ad-hoc identity `-`, and the repository has updater
+signing secrets but no Developer ID/notarization credentials. Because a
+quarantined download must not reproduce the user's Gatekeeper “damaged” dialog,
+`.23` must not publish until Developer ID signing, hardened runtime,
+notarization, stapling, and an exact quarantined-install assessment are wired
+and pass. Next: finish and merge the modern notification gate, close that
+first-install trust boundary, obtain one green exact-main candidate, then run
+owned-Geph and release-readiness before publication.
 
 Update 2026-08-20: PR
 [#343](https://github.com/aiwaki/slipstream/pull/343) merged unchanged as

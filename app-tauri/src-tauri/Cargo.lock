@@ -3669,6 +3669,8 @@ dependencies = [
  "mac-notification-sys",
  "minisign-verify",
  "notify-rust",
+ "objc2",
+ "objc2-foundation",
  "objc2-user-notifications",
  "plist",
  "reqwest 0.12.28",

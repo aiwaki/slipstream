@@ -211,7 +211,16 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('--repository "${{ github.repository }}"', job)
         self.assertIn('--source-commit "$GITHUB_SHA"', job)
         self.assertIn('--candidate-run-id "$GITHUB_RUN_ID"', job)
-        self.assertIn('--candidate-run-attempt "$GITHUB_RUN_ATTEMPT"', job)
+        self.assertIn(
+            '--candidate-run-attempt "${{ steps.candidate-producer.outputs.run_attempt }}"',
+            job,
+        )
+        self.assertIn('--qualification-run-attempt "$GITHUB_RUN_ATTEMPT"', job)
+        self.assertIn("Authenticate the exact candidate producer attempt", job)
+        self.assertIn("/attempts/$candidate_attempt/jobs?per_page=100", job)
+        self.assertIn("--candidate-run-metadata", job)
+        self.assertIn("--candidate-run-jobs", job)
+        self.assertIn("--candidate-run-artifacts", job)
         self.assertIn("SLIPSTREAM_DISPOSABLE_CI", job)
         self.assertIn("update-notification-qualification.json", job)
         self.assertIn("Slipstream-update-notification-qualified-${{ github.sha }}", job)

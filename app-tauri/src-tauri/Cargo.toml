@@ -55,7 +55,9 @@ tokio = { version = "1", features = ["time", "net", "io-util", "macros"] }
 # raised MSRV above Slipstream's declared floor.
 mac-notification-sys = "=0.6.9"
 block2 = "=0.6.2"
-objc2-user-notifications = { version = "=0.3.2", default-features = false, features = ["block2", "UNNotificationSettings", "UNUserNotificationCenter"] }
+objc2 = "=0.6.4"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["NSArray", "NSBundle", "NSError", "NSString"] }
+objc2-user-notifications = { version = "=0.3.2", default-features = false, features = ["block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationSettings", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

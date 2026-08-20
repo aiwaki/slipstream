@@ -1371,6 +1371,46 @@ jobs:
         with:
           name: release-candidate-${{ github.sha }}
           path: dist-candidate
+      - name: Authenticate the exact candidate producer attempt
+        id: candidate-producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate_attempt="$(PYTHONPATH=scripts python3 -c '
+          import sys
+          from pathlib import Path
+          import macos_update_notification_smoke as smoke
+          print(smoke._candidate_producer_attempt(
+              Path(sys.argv[1]),
+              repository=sys.argv[2],
+              source_commit=sys.argv[3],
+              candidate_run_id=int(sys.argv[4]),
+          ))
+          ' dist-candidate "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID")"
+          if ! [[ "$candidate_attempt" =~ ^[1-9][0-9]*$ ]]; then
+            echo "candidate producer attempt selector is invalid" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/update-notification-run.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$candidate_attempt/jobs?per_page=100" \
+            > "$RUNNER_TEMP/update-notification-jobs.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/update-notification-artifacts.json"
+          for evidence in \
+            "$RUNNER_TEMP/update-notification-run.json" \
+            "$RUNNER_TEMP/update-notification-jobs.json" \
+            "$RUNNER_TEMP/update-notification-artifacts.json"; do
+            test -f "$evidence"
+            test ! -L "$evidence"
+            evidence_size="$(/usr/bin/stat -f %z "$evidence")"
+            test "$evidence_size" -gt 0
+            test "$evidence_size" -le 4194304
+          done
+          echo "run_attempt=$candidate_attempt" >> "$GITHUB_OUTPUT"
       - name: Unpack the exact candidate for native notification qualification
         run: |
           set -euo pipefail
@@ -1385,19 +1425,90 @@ jobs:
           GITHUB_ACTIONS: "true"
           SLIPSTREAM_DISPOSABLE_CI: "1"
         run: |
+          set -euo pipefail
+          source_app="$RUNNER_TEMP/update-notification-app/Slipstream.app"
+          installed_app="/Applications/Slipstream.app"
+          executable_relative="Contents/MacOS/slipstream"
+          lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+          lsregister_dump="$RUNNER_TEMP/update-notification-lsregister-cleanup.txt"
+          if [ -e "$installed_app" ] || [ -L "$installed_app" ]; then
+            echo "qualification target already exists" >&2
+            exit 1
+          fi
+          cleanup_installed_app() {
+            original_status=$?
+            cleanup_status=0
+            trap - EXIT INT TERM
+            set +e
+            "$lsregister" -u "$installed_app" >/dev/null 2>&1
+            if ! /usr/bin/sudo /bin/rm -rf -- "$installed_app"; then
+              echo "qualification app removal command failed" >&2
+              cleanup_status=1
+            fi
+            if [ -e "$installed_app" ] || [ -L "$installed_app" ]; then
+              echo "qualification app removal is incomplete" >&2
+              cleanup_status=1
+            fi
+            lsregister_deadline=$((SECONDS + 5))
+            while true; do
+              if ! "$lsregister" -dump >"$lsregister_dump" 2>/dev/null; then
+                echo "qualification LaunchServices cleanup could not be verified" >&2
+                cleanup_status=1
+                break
+              fi
+              if ! /usr/bin/grep -F -- "$installed_app" "$lsregister_dump" >/dev/null; then
+                break
+              fi
+              if [ "$SECONDS" -ge "$lsregister_deadline" ]; then
+                echo "qualification LaunchServices cleanup is incomplete" >&2
+                cleanup_status=1
+                break
+              fi
+              /bin/sleep 0.1
+            done
+            /bin/rm -f -- "$lsregister_dump"
+            if [ "$cleanup_status" -ne 0 ]; then
+              exit "$cleanup_status"
+            fi
+            if [ "$original_status" -ne 0 ]; then
+              exit "$original_status"
+            fi
+            exit 0
+          }
+          trap cleanup_installed_app EXIT INT TERM
+          /usr/bin/sudo /usr/bin/ditto --rsrc --extattr --acl \
+            "$source_app" "$installed_app"
+          test -d "$installed_app"
+          source_tree="$(PYTHONPATH=scripts python3 -c \
+            'import sys; from pathlib import Path; import release_candidate; print(release_candidate.deterministic_tree_sha256(Path(sys.argv[1])))' \
+            "$source_app")"
+          installed_tree="$(PYTHONPATH=scripts python3 -c \
+            'import sys; from pathlib import Path; import release_candidate; print(release_candidate.deterministic_tree_sha256(Path(sys.argv[1])))' \
+            "$installed_app")"
+          test "$source_tree" = "$installed_tree"
+          source_executable_sha256="$(/usr/bin/shasum -a 256 \
+            "$source_app/$executable_relative" | /usr/bin/awk '{print $1}')"
+          installed_executable_sha256="$(/usr/bin/shasum -a 256 \
+            "$installed_app/$executable_relative" | /usr/bin/awk '{print $1}')"
+          test "$source_executable_sha256" = "$installed_executable_sha256"
+          /usr/bin/codesign --verify --deep --strict "$installed_app"
           python3 scripts/macos_update_notification_smoke.py \
             --candidate-dir dist-candidate \
-            --app-bundle "$RUNNER_TEMP/update-notification-app/Slipstream.app" \
+            --app-bundle "$installed_app" \
             --repository "${{ github.repository }}" \
             --source-commit "$GITHUB_SHA" \
             --candidate-run-id "$GITHUB_RUN_ID" \
-            --candidate-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --candidate-run-attempt "${{ steps.candidate-producer.outputs.run_attempt }}" \
+            --qualification-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --candidate-run-metadata "$RUNNER_TEMP/update-notification-run.json" \
+            --candidate-run-jobs "$RUNNER_TEMP/update-notification-jobs.json" \
+            --candidate-run-artifacts "$RUNNER_TEMP/update-notification-artifacts.json" \
             --output "$RUNNER_TEMP/update-notification-qualification.json"
       - name: Upload native notification qualification report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Slipstream-update-notification-qualified-${{ github.sha }}
+          name: Slipstream-update-notification-qualified-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/update-notification-qualification.json
           if-no-files-found: error
           retention-days: 7
