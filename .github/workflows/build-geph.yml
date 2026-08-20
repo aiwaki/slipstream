@@ -1,7 +1,12 @@
 # Build the exact reviewed geph5-client source graph and publish it as an
 # internal Slipstream dependency. A new upstream crate first produces a PR with
-# SOURCE.json and Cargo.lock; binaries are built only after that review lands.
+# SOURCE.json and Cargo.lock, plus retirement of the exact temporary audit
+# bridge when the new lock fixes it. Binaries are built only after review lands.
 name: build-geph
+
+concurrency:
+  group: build-geph-main
+  cancel-in-progress: false
 
 on:
   workflow_dispatch:
@@ -56,9 +61,11 @@ jobs:
             echo "invalid crates.io checksum"; exit 1;
           }
           crate_url="https://static.crates.io/crates/geph5-client/geph5-client-$version.crate"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "crate_sha256=$crate_sha256" >> "$GITHUB_OUTPUT"
-          echo "crate_url=$crate_url" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "crate_sha256=$crate_sha256"
+            echo "crate_url=$crate_url"
+          } >> "$GITHUB_OUTPUT"
 
       - id: state
         name: Decide whether review or build is required
@@ -74,15 +81,19 @@ jobs:
             --cargo-lock vendor/geph/Cargo.lock \
             --expected-version "$version" \
             --expected-crate-sha256 "$checksum" 2>/dev/null)"; then
-            echo "should_prepare=false" >> "$GITHUB_OUTPUT"
             release_tag="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["release_tag"])' <<< "$source_summary")"
-            echo "release_revision=${release_tag##*-r}" >> "$GITHUB_OUTPUT"
-            echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+            {
+              echo "should_prepare=false"
+              echo "release_revision=${release_tag##*-r}"
+              echo "release_tag=$release_tag"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "should_prepare=true" >> "$GITHUB_OUTPUT"
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-            echo "release_revision=1" >> "$GITHUB_OUTPUT"
-            echo "release_tag=geph-vendor-$version-r1" >> "$GITHUB_OUTPUT"
+            {
+              echo "should_prepare=true"
+              echo "should_build=false"
+              echo "release_revision=1"
+              echo "release_tag=geph-vendor-$version-r1"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -175,11 +186,18 @@ jobs:
             --version "$version" \
             --crate-sha256 "${{ needs.resolve.outputs.crate_sha256 }}" \
             --output-dir vendor/geph
+          python3 scripts/geph_vendor_source.py retire-h2-transition-exception \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --policy security/geph-dependency-audit-policy.json
 
           git checkout -B "$branch"
           git config user.name "slipstream-ci"
           git config user.email "ci@slipstream.local"
-          git add vendor/geph/VERSION vendor/geph/SOURCE.json vendor/geph/Cargo.lock
+          git add -- \
+            vendor/geph/VERSION \
+            vendor/geph/SOURCE.json \
+            vendor/geph/Cargo.lock \
+            security/geph-dependency-audit-policy.json
           if git diff --cached --quiet; then
             exit 0
           fi
@@ -197,6 +215,7 @@ jobs:
           - exact crates.io archive SHA-256
           - freshly resolved Cargo.lock
           - reviewed features and macOS targets
+          - automatic retirement of the exact temporary h2 0.4.15 bridge when fixed
 
           The binary is not built or published until this PR passes checks and is merged.
           EOF

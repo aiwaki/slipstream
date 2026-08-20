@@ -12,6 +12,7 @@ jobs:
   changes:
     runs-on: ubuntu-24.04
     outputs:
+      geph_bootstrap: ${{ steps.scope.outputs.geph_bootstrap }}
       product: ${{ steps.scope.outputs.product }}
       windows: ${{ steps.scope.outputs.windows }}
     steps:
@@ -28,29 +29,10 @@ jobs:
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
             base="$(git rev-list --max-parents=0 HEAD)"
           fi
-          product=false
-          windows=false
-          changed=false
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            changed=true
-            case "$path" in
-              README.md|README.en.md|docs/*|*.md) ;;
-              *) product=true ;;
-            esac
-            case "$path" in
-              .github/workflows/ci.yml|.github/workflows/windows-packet-adapter-qualification.yml|contracts/*|crates/slipstream-core/*|crates/slipstream-userspace-stack-evaluation/*|crates/slipstream-userspace-stack-effect-evaluation/*|crates/slipstream-windows-adapter/*|vendor/wintun/*)
-                windows=true
-                ;;
-            esac
-          done < <(git diff --name-only "$base" "$GITHUB_SHA")
-          if [ "$changed" = false ]; then
-            echo "empty change set cannot bypass product gates"
-            product=true
-            windows=true
-          fi
-          echo "product=$product" >> "$GITHUB_OUTPUT"
-          echo "windows=$windows" >> "$GITHUB_OUTPUT"
+          git diff --name-only "$base" "$GITHUB_SHA" \
+            | python3 scripts/ci_scope.py \
+                --event-name "$GITHUB_EVENT_NAME" \
+                --github-output "$GITHUB_OUTPUT"
 
   product-checks:
     needs: changes
@@ -58,6 +40,31 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Verify reviewed Geph source transition
+        if: needs.changes.outputs.geph_bootstrap == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          previous="$(mktemp -d "$RUNNER_TEMP/geph-transition-previous.XXXXXX")"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git show "$BASE_SHA:vendor/geph/SOURCE.json" > "$previous/SOURCE.json"
+          git show "$BASE_SHA:vendor/geph/VERSION" > "$previous/VERSION"
+          git show "$BASE_SHA:vendor/geph/Cargo.lock" > "$previous/Cargo.lock"
+          git show "$BASE_SHA:security/geph-dependency-audit-policy.json" \
+            > "$previous/dependency-audit-policy.json"
+          python3 scripts/geph_vendor_source.py verify-transition \
+            --previous-source "$previous/SOURCE.json" \
+            --previous-version-file "$previous/VERSION" \
+            --previous-cargo-lock "$previous/Cargo.lock" \
+            --previous-policy "$previous/dependency-audit-policy.json" \
+            --source vendor/geph/SOURCE.json \
+            --version-file vendor/geph/VERSION \
+            --cargo-lock vendor/geph/Cargo.lock \
+            --policy security/geph-dependency-audit-policy.json
 
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable-2026-06-30
         with:
@@ -449,7 +456,12 @@ jobs:
 
   packaged-app-build:
     needs: changes
-    if: needs.changes.outputs.product == 'true'
+    if: >-
+      needs.changes.outputs.product == 'true' &&
+      (
+        github.event_name != 'pull_request' ||
+        needs.changes.outputs.geph_bootstrap != 'true'
+      )
     runs-on: macos-14
     timeout-minutes: 35
     permissions:
@@ -1386,6 +1398,8 @@ jobs:
       - name: Require every applicable common CI gate
         env:
           PRODUCT: ${{ needs.changes.outputs.product }}
+          GEPH_BOOTSTRAP: ${{ needs.changes.outputs.geph_bootstrap }}
+          EVENT_NAME: ${{ github.event_name }}
           WINDOWS_SCOPE: ${{ needs.changes.outputs.windows }}
           PRODUCT_CHECKS: ${{ needs.product-checks.result }}
           CHROMIUM: ${{ needs.chromium-webrequest-contract.result }}
@@ -1393,8 +1407,22 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$PRODUCT" = false ]; then
+            [ "$GEPH_BOOTSTRAP" = false ] || {
+              echo "a non-product change cannot use the Geph bootstrap path"
+              exit 1
+            }
             echo "documentation-only change: documentation validation passed"
             exit 0
+          fi
+          if [ "$GEPH_BOOTSTRAP" = true ]; then
+            [ "$EVENT_NAME" = pull_request ] || {
+              echo "main cannot use the Geph bootstrap path"
+              exit 1
+            }
+            echo "Geph source-contract PR: common gates and required dependency audit apply"
+          elif [ "$GEPH_BOOTSTRAP" != false ]; then
+            echo "unknown Geph bootstrap classification: $GEPH_BOOTSTRAP"
+            exit 1
           fi
           for result in "$PRODUCT_CHECKS" "$CHROMIUM"; do
             [ "$result" = success ] || {
@@ -1431,6 +1459,7 @@ jobs:
       - name: Preserve the required packaged lifecycle context
         env:
           PRODUCT: ${{ needs.changes.outputs.product }}
+          GEPH_BOOTSTRAP: ${{ needs.changes.outputs.geph_bootstrap }}
           BUILD: ${{ needs.packaged-app-build.result }}
           SIGNER: ${{ needs.sign-updater-archive.result }}
           ASSEMBLY: ${{ needs.assemble-release-candidate.result }}
@@ -1443,8 +1472,30 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$PRODUCT" = false ]; then
+            [ "$GEPH_BOOTSTRAP" = false ] || {
+              echo "a non-product change cannot use the Geph bootstrap path"
+              exit 1
+            }
             echo "documentation-only change: packaged product is unchanged"
             exit 0
+          fi
+          if [ "$GEPH_BOOTSTRAP" = true ]; then
+            [ "$EVENT_NAME" = pull_request ] || {
+              echo "main cannot use the Geph bootstrap path"
+              exit 1
+            }
+            for result in "$BUILD" "$SIGNER" "$ASSEMBLY" "$ATTESTATION" \
+              "$BROWSER" "$UPDATE_NOTIFICATION" "$LIFECYCLE"; do
+              [ "$result" = skipped ] || {
+                echo "a packaged gate ran before the reviewed Geph binary existed: $result"
+                exit 1
+              }
+            done
+            echo "Geph source-contract bootstrap: packaged binary waits for main"
+            exit 0
+          elif [ "$GEPH_BOOTSTRAP" != false ]; then
+            echo "unknown Geph bootstrap classification: $GEPH_BOOTSTRAP"
+            exit 1
           fi
           for result in "$BUILD" "$BROWSER" "$LIFECYCLE"; do
             [ "$result" = success ] || {

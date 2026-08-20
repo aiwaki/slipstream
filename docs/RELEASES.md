@@ -126,10 +126,11 @@ lock-compatible, the reviewed lock digest and `release_revision` are bumped and
 a new `geph-vendor-X.Y.Z-rN` is built and attested after that change reaches
 `main`. The temporary h2 0.4.15 exception for Geph r1 exists only to let the P0
 source merge; it expires on 2026-08-27 and does not authorize publishing
-`v0.1.9-preview.23`. The release candidate must embed audited r2 with h2 0.4.16.
-The separate exact h2 0.3.27 exception documents the residual low-severity
-availability risk in Geph's Hyper 0.14 AWS client until upstream provides a
-fixed 0.3-compatible graph.
+`v0.1.9-preview.23`. The release candidate must embed the reviewed and attested
+`geph-vendor-0.3.9-r1`, whose lock uses fixed h2 0.4.17. The separate exact h2
+0.3.27 exception documents the residual low-severity availability risk in
+Geph's Hyper 0.14 AWS client until upstream provides a fixed 0.3-compatible
+graph.
 
 ## Geph Dependency Artifacts
 
@@ -147,6 +148,18 @@ A new upstream Geph crate cannot publish a binary immediately. Automation first
 opens a source-contract PR; only the reviewed and merged contract may trigger a
 locked build.
 
+That source-contract PR has one exact bootstrap scope: `SOURCE.json` and
+`Cargo.lock` are required, while `VERSION` and the exact Geph audit policy are
+the only additional paths allowed. Common product and Chromium checks still
+run, and the separately required `Required dependency audit` context must
+materialize and scan the full new graph. Only packaged app jobs stay skipped,
+because the new immutable binary cannot exist yet. A mixed PR cannot use this
+scope, and a push to `main` never uses it. After merge, `build-geph` builds and
+attests the new internal release; the first main app run may fail closed while
+that artifact is absent and is rerun only after publication. The rerun then
+builds and qualifies one candidate from the same source SHA and the new exact
+Geph artifact.
+
 ## Candidate and publication pipeline
 
 - Required exact-main CI builds the frozen daemon, app, updater archives and
@@ -157,6 +170,10 @@ locked build.
   qualification only when the entire required CI run, including all three
   consumers, succeeds. Pull requests use an equivalent sealed local-build
   bundle because updater signing secrets are unavailable there.
+- The candidate tree digest includes every directory, symlink, regular file,
+  mode, relative path, and file payload. Legitimate zero-length marker files
+  inside the packaged application are represented in that digest; top-level
+  release and candidate artifacts remain strictly nonempty.
 - JavaScript dependencies are installed with lifecycle scripts disabled and no
   production updater credential. Compilation and bundling use a disposable CI
   updater key. A separate no-checkout, no-repository-code signer job first

@@ -8,6 +8,8 @@ import unittest
 from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import dependency_audit
 import make_release_manifest
@@ -291,6 +293,64 @@ class MakeReleaseManifestTests(unittest.TestCase):
                     source_date_epoch=SOURCE_DATE_EPOCH,
                     target=TARGET,
                 )
+
+    def test_rejects_empty_top_level_release_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_release_dir(root)
+            (root / "Slipstream.app.tar.gz.sig").write_bytes(b"")
+
+            with self.assertRaisesRegex(ValueError, "empty release artifact"):
+                make_release_manifest.build_artifact_manifest(
+                    release_dir=root,
+                    repository=REPOSITORY,
+                    version=VERSION,
+                    tag=STABLE_TAG,
+                    channel="stable",
+                    source_commit=SOURCE_COMMIT,
+                    source_date_epoch=SOURCE_DATE_EPOCH,
+                    target=TARGET,
+                )
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "requires O_NOFOLLOW")
+    def test_allow_empty_hash_still_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "target"
+            target.write_bytes(b"payload")
+            link = root / "link"
+            os.symlink(target, link)
+
+            with self.assertRaisesRegex(
+                ValueError, "cannot open release artifact safely"
+            ):
+                make_release_manifest.hash_regular_file(link, allow_empty=True)
+
+    def test_allow_empty_hash_still_rejects_identity_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "artifact"
+            path.write_bytes(b"")
+            real_fstat = os.fstat
+            call_count = 0
+
+            def changing_fstat(descriptor: int):
+                nonlocal call_count
+                call_count += 1
+                metadata = real_fstat(descriptor)
+                if call_count == 1:
+                    return metadata
+                return SimpleNamespace(
+                    st_dev=metadata.st_dev,
+                    st_ino=metadata.st_ino,
+                    st_mode=metadata.st_mode,
+                    st_mtime_ns=metadata.st_mtime_ns + 1,
+                    st_size=metadata.st_size,
+                )
+
+            with mock.patch.object(
+                make_release_manifest.os, "fstat", side_effect=changing_fstat
+            ), self.assertRaisesRegex(ValueError, "changed while hashing"):
+                make_release_manifest.hash_regular_file(path, allow_empty=True)
 
     def test_preview_rejects_remote_policy_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

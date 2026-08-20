@@ -521,6 +521,52 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("pull_request:\n    paths:", windows)
         self.assertIn('branches: ["main"]', windows)
 
+    def test_geph_source_contract_has_one_fail_closed_pr_bootstrap_path(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        audit = (ROOT / ".github/workflows/dependency-audit.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "geph_bootstrap: ${{ steps.scope.outputs.geph_bootstrap }}", ci
+        )
+        self.assertIn("python3 scripts/ci_scope.py", ci)
+        self.assertIn('--event-name "$GITHUB_EVENT_NAME"', ci)
+        self.assertIn('--github-output "$GITHUB_OUTPUT"', ci)
+        self.assertEqual(ci.count("GEPH_BOOTSTRAP:"), 2)
+        self.assertIn("Verify reviewed Geph source transition", ci)
+        self.assertIn(
+            "if: needs.changes.outputs.geph_bootstrap == 'true'", ci
+        )
+        self.assertIn(
+            'mktemp -d "$RUNNER_TEMP/geph-transition-previous.XXXXXX"', ci
+        )
+        self.assertNotIn('rm -rf "$previous"', ci)
+        self.assertIn('git cat-file -e "$BASE_SHA^{commit}"', ci)
+        self.assertIn(
+            'git show "$BASE_SHA:vendor/geph/SOURCE.json"', ci
+        )
+        self.assertIn(
+            'git show "$BASE_SHA:security/geph-dependency-audit-policy.json"',
+            ci,
+        )
+        self.assertIn(
+            "scripts/geph_vendor_source.py verify-transition", ci
+        )
+        self.assertIn(
+            '--previous-policy "$previous/dependency-audit-policy.json"', ci
+        )
+        self.assertIn("--policy security/geph-dependency-audit-policy.json", ci)
+        self.assertIn(
+            "Geph source-contract PR: common gates and required dependency audit apply",
+            ci,
+        )
+        self.assertIn(
+            "Geph source-contract bootstrap: packaged binary waits for main", ci
+        )
+        self.assertIn("needs.changes.outputs.geph_bootstrap != 'true'", ci)
+        self.assertEqual(ci.count("main cannot use the Geph bootstrap path"), 2)
+        self.assertNotIn("scripts/ci_scope.py", audit)
+
     def test_packaged_qualification_uses_the_same_revisioned_geph_release(self) -> None:
         for name in ("ci.yml",):
             workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
@@ -567,11 +613,12 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_common_ci_runs_windows_only_for_windows_or_shared_adapter_paths(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        scope = (ROOT / "scripts/ci_scope.py").read_text(encoding="utf-8")
 
         self.assertIn("windows: ${{ steps.scope.outputs.windows }}", workflow)
-        self.assertIn("crates/slipstream-core/*", workflow)
-        self.assertIn("crates/slipstream-windows-adapter/*", workflow)
-        self.assertIn("vendor/wintun/*", workflow)
+        self.assertIn('"crates/slipstream-core/"', scope)
+        self.assertIn('"crates/slipstream-windows-adapter/"', scope)
+        self.assertIn('"vendor/wintun/"', scope)
         self.assertIn(
             "if: needs.changes.outputs.product == 'true' && needs.changes.outputs.windows == 'true'",
             workflow,
@@ -683,6 +730,8 @@ class BuildConfigTests(unittest.TestCase):
         )
 
         self.assertIn("pull-requests: write", workflow)
+        self.assertIn("group: build-geph-main", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('branch="automation/geph-${version}"', workflow)
         self.assertIn("gh pr create", workflow)
         self.assertIn("--base main", workflow)
@@ -698,8 +747,13 @@ class BuildConfigTests(unittest.TestCase):
         )
 
         self.assertIn("scripts/geph_vendor_source.py prepare", workflow)
+        self.assertIn(
+            "scripts/geph_vendor_source.py retire-h2-transition-exception",
+            workflow,
+        )
         self.assertIn("vendor/geph/SOURCE.json", workflow)
         self.assertIn("vendor/geph/Cargo.lock", workflow)
+        self.assertIn("security/geph-dependency-audit-policy.json", workflow)
         self.assertIn("needs.resolve.outputs.should_prepare == 'true'", workflow)
         self.assertIn("needs.resolve.outputs.should_build == 'true'", workflow)
         self.assertIn("cargo install", workflow)
@@ -725,6 +779,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertLess(
             workflow.index("scripts/geph_vendor_source.py prepare"),
             workflow.index("gh pr create"),
+        )
+        self.assertLess(
+            workflow.index(
+                "scripts/geph_vendor_source.py retire-h2-transition-exception"
+            ),
+            workflow.index("git add --"),
         )
         self.assertLess(
             workflow.index("scripts/dependency_audit.py verify"),

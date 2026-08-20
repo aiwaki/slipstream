@@ -10,15 +10,12 @@ file.
 
 ## Current Checkpoint
 
-Update 2026-08-20: draft PR
-[#343](https://github.com/aiwaki/slipstream/pull/343) remains on
-`codex/p0-macos-reliability`. Its last pushed head `4ee7947b` passed every
-required PR check. Pushed head `c44dc447` then passed the app build, packaged
-lifecycle/browser, product and Windows gates, but the freshly updated advisory
-database blocked `quick-xml 0.32.0` in the app and `h2 0.3.27`/`0.4.15` in the
-immutable Geph r1 graph. The current local tree fixes the app dependency and
-records the narrow Geph transition policy; neither earlier green run approves
-this newer tree.
+Update 2026-08-20: PR
+[#343](https://github.com/aiwaki/slipstream/pull/343) merged unchanged as
+`a02ba90fb65d40f14ba0b67e5f2d4b657188747e` after all `15` exact-head checks
+passed. Its updated app graph removed the newly reported quick-xml
+vulnerabilities; the Geph policy contains one short bridge for immutable r1,
+but that bridge does not authorize publishing the app preview.
 
 The local tree now identifies the app and release as
 `0.1.9-preview.23` / `v0.1.9-preview.23`. It adds bounded background preview
@@ -59,10 +56,21 @@ to patched `quick-xml 0.41.0`; its exact macOS ARM OSV 2.3.8 scan covers `362`
 packages with `0` blockers and `0` vulnerability exceptions. Geph r1 still has
 the low-severity empty-DATA-frame advisory in `h2 0.3.27` and `0.4.15`. The
 unmaintained Hyper 0.14 / h2 0.3 branch has no fixed release and is accepted as
-an exact expiring availability risk. The readily fixed h2 0.4 finding has only
-a seven-day merge bridge: `.23` publication is explicitly blocked until a
-reviewed `geph-vendor-0.3.0-r2` replaces `0.4.15` with `0.4.16`, passes its own
-full audit, and is consumed by the exact release candidate.
+an exact expiring availability risk. Existing automated PR #280 reproducibly
+updates Geph to `0.3.9`; its lock already uses fixed `h2 0.4.17`, passes dual
+macOS metadata and arm64 compilation, and its 484-package audit has `0`
+blockers. It is therefore preferred over rebuilding old `0.3.0-r2`.
+
+Exact-main CI run `32368498935` built and signed the app and passed the updated
+application audit, then failed while assembling the candidate: the generic
+top-level artifact helper rejected a legitimate zero-length `py.typed` inside
+the frozen Python runtime. The correction keeps every top-level release and
+candidate artifact strictly nonempty, but permits zero-length regular files
+only while hashing the complete unpacked app tree, retaining `O_NOFOLLOW` and
+file-identity race checks. The current local packaged tree contains five such
+Python marker files and now hashes deterministically as
+`9a30b9a67d801ce0a07a3fbe30189642b4cfb9010fd73f5bd17e3fe5741d0793`;
+exact CI still has to reproduce that boundary.
 
 One pre-fix updater fault test called the production relaunch effect on its
 temporary `Slipstream.app`; macOS associated that direct executable with the
@@ -74,10 +82,13 @@ without executing an app, a static regression forbids any test-section
 `spawn_bundle`, and the post-fix full Rust run produced zero new Gatekeeper or
 CoreServicesUIAgent Slipstream records.
 
-The next verified action is to commit and push this dependency correction,
-pass every new PR check, and merge PR #343 unchanged. Immediately afterward,
-merge the reviewed Geph r2 source-contract/lock update, publish and attest r2,
-and require a new exact-main candidate that embeds it. That final candidate
+The next verified action is to merge the narrow vendor-bootstrap and candidate
+tree-hashing corrections, qualify PR #280 with the now-required
+dependency-audit context, publish and
+attest `geph-vendor-0.3.9-r1`, and require a new exact-main candidate that
+embeds it. The bootstrap applies only to a pull request containing the required
+Geph source/lock and no path outside its four-file allowlist; main and mixed
+changes still fail closed and run full packaged qualification. That final candidate
 must pass production signing, packaged notification qualification, protected
 owned-Geph proof, Safari/Chrome live-site matrix, transport mechanics, and the
 measured 30-minute invisibility soak before `v0.1.9-preview.23` is published. A

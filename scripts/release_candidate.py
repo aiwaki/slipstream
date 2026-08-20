@@ -132,7 +132,9 @@ def deterministic_tree_sha256(root: Path) -> str:
             payload = b""
         elif path.is_file():
             kind = b"file"
-            file_digest, _ = make_release_manifest.hash_regular_file(path)
+            file_digest, _ = make_release_manifest.hash_regular_file(
+                path, allow_empty=True
+            )
             payload = bytes.fromhex(file_digest)
         else:
             raise ValueError(f"unsupported candidate app tree entry: {relative}")
