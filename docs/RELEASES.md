@@ -24,6 +24,9 @@ release transition is itself a gate for `.24`: it must prove notification
 identity/submission, the bounded signed install, successor health, rollback on
 failure, and no Dock tile, window or focus change. Local MockRuntime tests are
 updater mechanics evidence only and do not satisfy that future live gate.
+Until `.23` is actually published, both root READMEs label these behaviors with
+that exact upcoming version and link only to the set of available previews;
+they do not describe the currently downloadable `.22` as carrying `.23` code.
 
 The `.23` installer itself is transactional. After signature and bundle
 validation, a separately signed non-AppKit watchdog durably records a
@@ -34,9 +37,15 @@ the exact previous bundle. The journal and user LaunchAgent are owner-private,
 restart-safe, and removed only after a terminal acknowledgement or recorded
 rollback; neither path uses `open` or activates the app.
 
-After a preview is published successfully, the immediately preceding preview
-is marked as archival in its release title. Its tag and verified artifacts are
-retained unchanged.
+After a preview is published and its remote tag, state, identity, asset set and
+digests are verified, the immediately preceding preview is marked as archival
+in its release title. That presentation-only edit is idempotent and its exact
+remote result is required. If publication succeeds but this final edit fails,
+a rerun may resume only the already-published release whose ID, tag, source
+commit, channel, name, local artifacts, remote asset set and digests all match;
+it then retries the archival finalizer without rebuilding or replacing files.
+Drafts, tag-only collisions and mismatched publications remain fail-closed. The
+previous tag and verified artifacts remain unchanged.
 
 ## Legacy App Releases
 
@@ -196,16 +205,27 @@ Geph artifact.
   manifest digest; it does not rebuild the app.
 - A manual `build-app` run creates the next explicitly validated preview only
   from `main`; for this P0 release the accepted tag is exactly
-  `v0.1.9-preview.23`, and publication fails if that tag already exists.
+  `v0.1.9-preview.23`. A draft, tag-only collision or mismatched published
+  release with that exact tag name fails closed. The sole exception is an exact
+  already-published release left by this transaction: after the complete local
+  and remote identity/digest proof, it may resume the idempotent post-publication
+  finalizer.
   It verifies the exact successful main-CI, dependency-audit, protected
   owned-Geph, and protected release-readiness runs. The audit run must belong to
   the same repository, main push, source SHA and workflow path, and its
   application audit, full Geph-vendor audit, and required aggregator must each
   have completed successfully; a skipped leaf cannot authorize publication.
-  The publisher then verifies the stored attestations, creates only
-  `latest.json`, the public artifact manifest and release notes, and publishes
-  the unchanged candidate. PyInstaller, Cargo/Tauri build and every
-  qualification are prohibited in the publisher.
+  The publisher then verifies the stored attestations and creates only
+  `latest.json`, the public artifact manifest and release notes. It uploads the
+  unchanged candidate into one exact draft with replacement disabled, verifies
+  that draft ID plus every remote asset size and SHA-256 against the local
+  manifest, and only then publishes that exact ID. A final API read must prove
+  the lightweight tag points to the source commit, the release is non-draft and
+  has the expected prerelease/name identity, and the unique remote asset set
+  still matches every digest. A failed or lost publish API response is
+  inconclusive: this authoritative read, rather than the response, decides the
+  result. PyInstaller, Cargo/Tauri build and every qualification are prohibited
+  in the publisher.
 - The current workflow is preview-only. A pushed `v*` tag stops before checkout
   until Developer ID signing, hardened runtime, notarization, and stapling are
   implemented as a fail-closed stable-channel gate.

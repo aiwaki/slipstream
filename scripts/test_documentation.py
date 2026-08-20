@@ -68,6 +68,19 @@ class DocumentationTests(unittest.TestCase):
             for phrase in forbidden:
                 self.assertNotIn(phrase, text, f"{name} contains {phrase!r}")
 
+    def test_root_readmes_bound_unreleased_preview_claims(self) -> None:
+        russian = (ROOT / "README.md").read_text(encoding="utf-8")
+        english = (ROOT / "README.en.md").read_text(encoding="utf-8")
+
+        self.assertIn("Slipstream 0.1.9-preview.23", russian)
+        self.assertIn("Следующая preview", russian)
+        self.assertGreaterEqual(russian.count("Начиная с `0.1.9-preview.23`"), 2)
+        self.assertNotIn("Скачать текущую preview", russian)
+        self.assertIn("Slipstream 0.1.9-preview.23", english)
+        self.assertIn("The next macOS Apple Silicon preview", english)
+        self.assertGreaterEqual(english.count("Starting with `0.1.9-preview.23`"), 2)
+        self.assertNotIn("Download the current macOS Apple Silicon preview", english)
+
     def test_spike_readme_describes_the_daemon(self) -> None:
         text = (ROOT / "spike" / "README.md").read_text(encoding="utf-8")
         self.assertIn("tproxy.py", text)

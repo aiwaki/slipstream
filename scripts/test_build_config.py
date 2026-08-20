@@ -725,6 +725,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('[ "$preview_sequence" = 23 ]', workflow)
         self.assertIn("release or Git tag already exists", workflow)
         self.assertIn("git/matching-refs/tags/$tag", workflow)
+        self.assertIn("releases?per_page=100", workflow)
+        self.assertIn('select(.tag_name == \\"$tag\\")', workflow)
+        self.assertIn("resume_release_id=", workflow)
+        self.assertIn(
+            "existing release is not an exact resumable publication", workflow
+        )
         self.assertIn("group: build-app-${{ github.ref }}", workflow)
         resolve_tag = workflow[workflow.index("- name: Resolve version and tag") :]
         self.assertIn("GH_TOKEN: ${{ github.token }}", resolve_tag[:500])
@@ -732,6 +738,74 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("prerelease=false", workflow)
         self.assertIn("prerelease: ${{ steps.ver.outputs.prerelease }}", workflow)
         self.assertIn("Manual runs produce prereleases", workflow)
+
+    def test_release_workflow_verifies_draft_and_remote_publication(self) -> None:
+        workflow = (ROOT / ".github/workflows/build-app.yml").read_text(
+            encoding="utf-8"
+        )
+
+        upload = workflow.index("Upload exact release draft")
+        release_id = workflow.index("Resolve exact release transaction ID")
+        draft_verify = workflow.index(
+            "Verify the sole exact release draft before publication"
+        )
+        publish = workflow.index("Publish only the verified exact release draft")
+        remote_verify = workflow.index(
+            "Verify exact remote publication postconditions"
+        )
+        archival = workflow.index("Idempotently verify previous preview archival")
+        self.assertLess(upload, release_id)
+        self.assertLess(release_id, draft_verify)
+        self.assertLess(draft_verify, publish)
+        self.assertLess(publish, remote_verify)
+        self.assertLess(remote_verify, archival)
+
+        draft = workflow[upload:draft_verify]
+        self.assertIn("id: release-draft", draft)
+        self.assertIn("if: steps.ver.outputs.resume_release_id == ''", draft)
+        self.assertIn("draft: true", draft)
+        self.assertIn("overwrite_files: false", draft)
+        self.assertIn("fail_on_unmatched_files: true", draft)
+        self.assertIn("target_commitish: ${{ github.sha }}", draft)
+
+        id_contract = workflow[release_id:draft_verify]
+        self.assertIn("steps.release-draft.outputs.id", id_contract)
+        self.assertIn("steps.ver.outputs.resume_release_id", id_contract)
+        self.assertIn('echo "id=$release_id"', id_contract)
+
+        draft_contract = workflow[draft_verify:publish]
+        self.assertIn("steps.release.outputs.id", draft_contract)
+        self.assertIn("if: steps.ver.outputs.resume_release_id == ''", draft_contract)
+        self.assertIn("git/matching-refs/tags/", draft_contract)
+        self.assertIn("releases?per_page=100", draft_contract)
+        self.assertIn("scripts/verify_published_release.py", draft_contract)
+        self.assertIn("--state draft", draft_contract)
+
+        publish_contract = workflow[publish:remote_verify]
+        self.assertIn("releases/$RELEASE_ID", publish_contract)
+        self.assertIn("-F draft=false", publish_contract)
+        self.assertIn("continue-on-error: true", publish_contract)
+        self.assertIn("authoritative remote verification will decide", publish_contract)
+        self.assertIn("steps.release.outputs.id", publish_contract)
+        self.assertNotIn("softprops/action-gh-release", publish_contract)
+
+        remote_contract = workflow[remote_verify:archival]
+        self.assertIn("releases/tags/", remote_contract)
+        self.assertIn("git/ref/tags/", remote_contract)
+        self.assertIn("releases?per_page=100", remote_contract)
+        self.assertIn("scripts/verify_published_release.py", remote_contract)
+        self.assertIn("--tag-ref", remote_contract)
+        self.assertIn("--state published", remote_contract)
+        self.assertIn("steps.release.outputs.id", remote_contract)
+
+        archival_contract = workflow[archival:]
+        self.assertNotIn("::warning::", archival_contract)
+        self.assertIn("releases/tags/$previous_tag", archival_contract)
+        self.assertIn("releases/$previous_id", archival_contract)
+        self.assertIn("archive_verified=false", archival_contract)
+        self.assertIn('archive_verified=true', archival_contract)
+        self.assertIn("archival_release_name", archival_contract)
+        self.assertIn('previous preview archival postcondition failed', archival_contract)
 
     def test_common_ci_runs_windows_only_for_windows_or_shared_adapter_paths(
         self,
@@ -758,16 +832,17 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("DMG для установки", workflow)
         self.assertIn("dmg_name=", workflow)
         self.assertIn("releases/download/${{ steps.ver.outputs.tag }}", workflow)
-        self.assertIn("Mark previous preview as archival", workflow)
+        self.assertIn("Idempotently verify previous preview archival", workflow)
         self.assertIn(
             "if: steps.ver.outputs.channel == 'preview' && steps.previous.outputs.tag != ''",
             workflow,
         )
-        self.assertIn("v*-preview.*", workflow)
-        self.assertIn("gh release edit", workflow)
+        self.assertIn("-preview\\.[0-9]+", workflow)
+        self.assertIn("releases/$previous_id", workflow)
+        self.assertIn("-f name=\"$archival_name\"", workflow)
         self.assertLess(
-            workflow.index("Publish release"),
-            workflow.index("Mark previous preview as archival"),
+            workflow.index("Verify exact remote publication postconditions"),
+            workflow.index("Idempotently verify previous preview archival"),
         )
 
     def test_release_workflow_binds_tags_and_notes_to_the_built_commit(self) -> None:
@@ -1113,7 +1188,8 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("body_path: dist-release/release-notes.md", app)
         self.assertIn("generate_release_notes: true", app)
         self.assertIn("Resolve previous app release tag", app)
-        self.assertIn('startswith(\\"v\\")', app)
+        self.assertIn('test(\\"$tag_pattern\\")', app)
+        self.assertIn("-preview\\.[0-9]+$", app)
         self.assertIn("previous_tag: ${{ steps.previous.outputs.tag }}", app)
         self.assertIn(".prerelease == $prerelease", app)
         self.assertIn("gh api --paginate", app)
