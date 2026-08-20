@@ -11,6 +11,7 @@ from pathlib import Path
 import make_appcast
 import make_release_manifest
 import make_route_policy_bundle
+import verify_updater_artifacts
 
 
 APP_REQUIRED_ASSETS = (
@@ -125,6 +126,7 @@ def verify_release_artifacts(
     channel: str = "stable",
     source_commit: str,
     target: str,
+    tauri_config: Path = verify_updater_artifacts.DEFAULT_TAURI_CONFIG,
 ) -> dict:
     release_dir = release_dir.resolve()
     if channel not in RELEASE_CHANNELS:
@@ -152,6 +154,11 @@ def verify_release_artifacts(
         "channel": channel,
         "repository": repository,
         "appcast": appcast,
+        "updater": verify_updater_artifacts.verify_updater_artifacts(
+            release_dir=release_dir,
+            version=version,
+            tauri_config=tauri_config,
+        ),
     }
     if channel == "stable":
         for name in ROUTE_POLICY_REQUIRED_ASSETS:
@@ -187,6 +194,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--channel", choices=RELEASE_CHANNELS, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument(
+        "--tauri-config",
+        type=Path,
+        default=verify_updater_artifacts.DEFAULT_TAURI_CONFIG,
+    )
+    parser.add_argument(
         "--target",
         choices=tuple(make_release_manifest.TARGETS),
         required=True,
@@ -204,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         channel=args.channel,
         source_commit=args.source_commit,
         target=args.target,
+        tauri_config=args.tauri_config,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

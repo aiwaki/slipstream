@@ -48,6 +48,64 @@ bundle before launch and runs browser observation through a separately signed
 non-AppKit helper; `Accessory` remains a second guard rather than the primary
 Dock fix.
 
+### macOS says “Slipstream is damaged” during development
+
+Do not assume the dialog names `/Applications/Slipstream.app`. First bind it to
+an exact path in unified logging, then verify the installed bundle separately.
+On 2026-08-20 an updater rollback unit test executed its temporary
+`.ctx-mode/.../apps/Slipstream.app`; the sandbox path contained a symlink loop,
+so CoreServicesUIAgent reported `ELOOP` and offered to trash a file that no
+longer existed. The installed `.22` was unrelated: its strict deep signature
+passed and it had no quarantine attribute.
+
+Unit rollback tests now inject and count a relaunch request without executing a
+temporary `.app`; a source regression rejects test-section `spawn_bundle`
+calls, and the post-fix full Rust run produced no new Slipstream Gatekeeper or
+CoreServicesUIAgent records. If unified logging instead names the real
+`/Applications/Slipstream.app`, treat that as an actual packaging/signature
+failure: preserve the evidence and do not bypass Gatekeeper or strip quarantine
+as a product fix.
+
+### A new-version notification does not appear
+
+Preview `.22` cannot discover `.23`: `.22` reports package version `0.1.9`,
+while the honest preview channel starts at `0.1.9-preview.23`. Install `.23`
+manually once; subsequent previews use ordinary semver precedence.
+
+From `.23` onward, Slipstream waits briefly after startup, then checks in the
+background and at a long cadence. It does not open a window, activate itself,
+or install/restart without the user. The tray item changes to “Install
+Slipstream …” when an offer is available; choosing it is the explicit action
+that downloads and installs the signed archive. “Check for Updates…” performs
+an immediate discovery when there is no cached offer.
+
+If the tray offers a version but no toast was shown, check System Settings →
+Notifications → Slipstream. macOS may suppress display when notifications are
+disabled or Focus is active. Slipstream records notification deduplication only
+after its bundle-bound native backend accepts the submission; it never
+impersonates Finder. An identity-initialization failure disables toasts for the
+current process instead of silently retrying with the wrong application, and a
+later Slipstream launch may try again. The tray action stays available even if
+notification registration fails.
+
+An installation failure leaves or restores the exact previous application and
+triggers a fresh channel check. The durable update watchdog keeps a verified
+sibling backup until the successor's exact version, process identity, tray,
+owned daemon, and advancing heartbeat are acknowledged. Wrong/cross-tag
+metadata, an unsafe redirect, oversized or tampered bytes, a signature/key
+mismatch, a replayed archive with the wrong internal version, a wrong bundle
+identity/executable, or missing `LSUIElement` all fail closed. Do not bypass
+these checks by replacing `latest.json` or the signature manually.
+
+Current P0 status is intentionally conservative: unit and MockRuntime mechanics
+tests do not prove native macOS delivery or a complete product transition.
+The durable rollback and successor acknowledgement are implemented and covered
+by fault tests, but `.23` release qualification still requires the exact
+packaged OS-observed notification gate with no activation. A real released
+`.23 -> .24` notification/download/install/relaunch plus forced rollback is the
+future `.24` gate. Until the applicable packaged gate passes, treat the feature
+as implemented but not end-to-end released.
+
 For a packaged candidate, verify the runtime without starting it:
 
 ```bash

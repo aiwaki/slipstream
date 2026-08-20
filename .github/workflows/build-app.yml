@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional version override; must match VERSION. Manual runs produce prereleases."
+        description: "Optional package version override; must match VERSION including preview sequence. Manual runs produce prereleases."
         required: false
       preview_sequence:
         description: "Preview sequence. This P0 release must be 23."
@@ -92,14 +92,18 @@ jobs:
               ''|*[!0-9]*) echo "preview_sequence must be a positive integer"; exit 1 ;;
             esac
             [ "$preview_sequence" = 23 ] || {
-              echo "the next P0 release must be v${v}-preview.23"
+              echo "the next P0 release must use preview sequence 23"
               exit 1
             }
-            tag="v${v}-preview.${preview_sequence}"
+            [ "$v" = "0.1.9-preview.${preview_sequence}" ] || {
+              echo "VERSION must encode the exact preview package version 0.1.9-preview.${preview_sequence}"
+              exit 1
+            }
+            tag="v${v}"
             channel=preview
             prerelease=true
             make_latest=false
-            release_name="Slipstream $v (preview ${preview_sequence})"
+            release_name="Slipstream $v"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"

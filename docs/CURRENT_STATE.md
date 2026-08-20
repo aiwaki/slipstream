@@ -10,6 +10,69 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-20: draft PR
+[#343](https://github.com/aiwaki/slipstream/pull/343) remains on
+`codex/p0-macos-reliability`. Its last pushed head `4ee7947b` passed every
+required PR check, including packaged lifecycle/browser, dependency, Windows,
+and aggregate contexts. The current local tree is newer and intentionally
+uncommitted while the final updater and documentation batch is qualified; the
+old green run is therefore historical evidence, not approval of this tree.
+
+The local tree now identifies the app and release as
+`0.1.9-preview.23` / `v0.1.9-preview.23`. It adds bounded background preview
+discovery, bundle-attributed native notification, explicit signed installation,
+and a durable non-AppKit update watchdog. Before replacement, the watchdog
+fsyncs an owner-private journal, a same-volume staged app, and an independently
+validated sibling backup. The successor is accepted only when its exact path,
+version, process birth identity, tray startup, owned daemon, and advancing
+heartbeat agree; otherwise the exact previous bundle is restored. Startup can
+resume a crash between journal publication and launchd bootstrap. `.22 -> .23`
+remains one manual install because `.22` reports `0.1.9`; automatic preview
+discovery begins with `.23 -> .24`.
+
+Required main CI builds the application once without the production updater
+secret. A separate no-checkout/no-repository-code signer job downloads and
+hash-binds the frozen updater archive, verifies pinned Tauri signer binaries,
+and exposes the production key only to the signing command. A no-secret
+assembler binds both service-artifact digests, cryptographically verifies the
+signature and archive contents against the exact packaged public key, and
+creates the immutable candidate without rebuilding. A parallel main-only
+packaged notification job binds the same candidate to a root-owned one-shot
+capability and requires exact `dev.slipstream.tray` macOS attribution (or an
+explicitly denied notification permission) with zero Dock, window, activation,
+or frontmost-app change.
+
+Current local evidence is green: `1030` routing/platform Python tests, `459`
+script tests plus `70` subtests, and `189` Rust tests pass; clippy is clean and
+version/project/workflow/diff checks pass. A fresh arm64 Tauri package has
+bundle identifier `dev.slipstream.tray`, version `0.1.9-preview.23`,
+`LSUIElement=true`, and the exact `slipstream`,
+`slipstream-browser-probe`, and `slipstream-update-watchdog` arm64 executables.
+The app and helpers pass strict local ad-hoc signature checks; both helpers
+link only `libiconv` and `libSystem`, never AppKit, Cocoa, or WebKit. This local
+package is not a release candidate and was neither installed nor published.
+
+One pre-fix updater fault test called the production relaunch effect on its
+temporary `Slipstream.app`; macOS associated that direct executable with the
+fake bundle and displayed a misleading “damaged” dialog. Unified logging bound
+the dialog to the `.ctx-mode` TempDir and `ELOOP`, while the installed `.22`
+passed strict code-signature verification and had no quarantine attribute. The
+rollback effect is now injected in unit tests: they assert one relaunch request
+without executing an app, a static regression forbids any test-section
+`spawn_bundle`, and the post-fix full Rust run produced zero new Gatekeeper or
+CoreServicesUIAgent Slipstream records.
+
+The next verified action is to commit and push this exact tree, pass every new
+PR check, merge it unchanged, then require the exact-main production-signed
+candidate, packaged notification qualification, protected owned-Geph proof,
+Safari/Chrome live-site matrix, transport mechanics, and measured 30-minute
+invisibility soak. Only that unchanged candidate may be published as
+`v0.1.9-preview.23`. A real public `.23 -> .24` notification/install/relaunch
+and forced rollback remains the release gate for `.24`; it cannot be honestly
+claimed before both public versions exist.
+
+## Superseded 2026-08-13 P0 Checkpoint
+
 Update 2026-08-13 P0 implementation is in draft PR
 [#343](https://github.com/aiwaki/slipstream/pull/343) on
 `codex/p0-macos-reliability`. Its second exact PR run again built the immutable
@@ -98,6 +161,22 @@ Cargo, or Tauri rebuild. Those protected gates have not yet passed, so
 green follow-up, pass every required PR check, merge, pass the exact-main
 candidate and both protected qualifications, then promote that unchanged
 candidate.
+
+The same draft moves the package version to `0.1.9-preview.23` and adds the
+first honest preview updater channel. `.22 -> .23` remains a manual install
+because `.22` identifies itself as `0.1.9`; automatic discovery begins only at
+`.23 -> .24`. The tray now discovers a bounded immutable preview appcast in the
+background, persists per-channel notification/highest-seen state, submits a
+native Slipstream-identified notification, and exposes an explicit install
+action. Installation rechecks tag/version/archive identity, performs a bounded
+minisign-verified download, then validates the signed bundle identifier,
+executable, internal version and `LSUIElement` before installing the same
+bytes. Local unit and MockRuntime installer-mechanics tests pass, but they are
+not product completion evidence. Durable pre-install backup, automatic rollback
+with successor health acknowledgement, an OS-observed packaged
+notification/no-activation gate, and a real released `.23 -> .24` transition
+are still open. Until those exact gates pass, the repository must not claim
+that auto-update or native delivery is end-to-end proven.
 
 The legacy transport-idle browser broker remains disabled permanently. The
 replacement exact-host pre-routing path is implemented on this branch and can

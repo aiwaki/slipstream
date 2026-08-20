@@ -128,6 +128,15 @@ jobs:
             echo "browser-probe helper links a GUI framework" >&2
             exit 1
           fi
+          watchdog="$app/Contents/MacOS/slipstream-update-watchdog"
+          test -x "$watchdog"
+          /usr/bin/lipo "$watchdog" -verify_arch arm64
+          /usr/bin/codesign --verify --strict "$watchdog"
+          if /usr/bin/otool -L "$watchdog" | /usr/bin/grep -E \
+            'AppKit\.framework|Cocoa\.framework|WebKit\.framework'; then
+            echo "update watchdog links a GUI framework" >&2
+            exit 1
+          fi
           /usr/bin/lipo "$app/Contents/MacOS/geph5-client" -verify_arch arm64
           /usr/bin/codesign --verify --deep --strict "$app"
           version="$(tr -d '[:space:]' < VERSION)"

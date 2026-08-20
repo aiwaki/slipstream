@@ -6,6 +6,9 @@
 )]
 
 fn main() {
+    if slipstream_lib::run_update_notification_qualification_if_requested() {
+        return;
+    }
     if slipstream_lib::run_native_messaging_if_requested() {
         return;
     }

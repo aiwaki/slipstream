@@ -6,13 +6,33 @@ purpose must remain visually and mechanically separate.
 | Kind | Tag | GitHub state | Purpose |
 |---|---|---|---|
 | Stable app | `vX.Y.Z` | Release and latest | Signed updater feed and first installation |
-| Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Manual qualification build from `main` |
+| Preview app | `vX.Y.Z-preview.N` | Pre-release, never latest | Qualified build from `main`; `.23+` discovers later previews in the background |
 | Geph dependency | `geph-vendor-X.Y.Z-rN` | Internal pre-release, never latest | Reviewed and attested build input, not an app release |
 
 Preview and internal dependency releases never replace GitHub's latest pointer
 or the stable updater feed. Old tags are retained as build history and never
 moved; user-facing installation instructions always select the newest
 compatible app release.
+
+`v0.1.9-preview.23` is the first preview with signed background discovery of
+new preview releases. Existing `.22` installations require one manual `.23`
+installation because `.22` reported the stable-looking package version `0.1.9`
+and cannot safely compare it with the new prerelease version. From `.23`
+onward, discovery may post a native notification, but download, installation
+and relaunch require an explicit tray-menu action. The first real `.23 -> .24`
+release transition is itself a gate for `.24`: it must prove notification
+identity/submission, the bounded signed install, successor health, rollback on
+failure, and no Dock tile, window or focus change. Local MockRuntime tests are
+updater mechanics evidence only and do not satisfy that future live gate.
+
+The `.23` installer itself is transactional. After signature and bundle
+validation, a separately signed non-AppKit watchdog durably records a
+same-volume staged app and verified sibling backup before replacement. It
+accepts the successor only when exact path, version, process identity, tray
+startup, owned daemon, and advancing heartbeat agree. Otherwise it restores
+the exact previous bundle. The journal and user LaunchAgent are owner-private,
+restart-safe, and removed only after a terminal acknowledgement or recorded
+rollback; neither path uses `open` or activates the app.
 
 After a preview is published successfully, the immediately preceding preview
 is marked as archival in its release title. Its tag and verified artifacts are
@@ -56,6 +76,21 @@ The manifest and SBOM use the source commit timestamp rather than workflow wall
 clock time. Release verification rejects missing, empty, unexpected, symlinked,
 or modified files before publication. The macOS build target is explicitly
 `aarch64-apple-darwin`.
+
+Updater verification is additionally cryptographic and offline. Before
+publication, `verify_updater_artifacts.py` verifies the exact updater archive's
+minisign signature with the public key from the source-bound Tauri
+configuration, confirms that the same key is compiled into the packaged main
+executable, and inspects the signed tar without extracting it. The archive must
+contain one `Slipstream.app` made only of regular files, directories and safe
+relative links that remain inside that app, the expected bundle
+identifier and executable, the exact release version in both version fields,
+and `LSUIElement=true`. Path traversal, absolute or app-escaping links,
+duplicate entries, unsupported types, decompression-size excess, a wrong key,
+a replayed signed archive from a different version, or any byte change fail
+publication. The verifier emits the archive, signature, configuration,
+executable and updater-key hashes in the existing publisher report; no
+Cargo/Tauri build or network call is permitted.
 
 ## Dependency Audit
 
@@ -106,12 +141,21 @@ locked build.
 
 - Required exact-main CI builds the frozen daemon, app, updater archives and
   pinned headless shell once, then assembles and attests one immutable
-  `release-candidate-${SHA}`. Packaged lifecycle and browser qualification
-  consume independent copies of that candidate in parallel; neither job
-  builds. The candidate is eligible for protected qualification only when the
-  entire required CI run, including both consumers, succeeds. Pull requests use
-  an equivalent sealed local-build bundle because updater signing secrets are
-  unavailable there.
+  `release-candidate-${SHA}`. Packaged lifecycle, browser, and native-update
+  notification qualifications consume independent copies of that candidate in
+  parallel; none rebuilds it. The candidate is eligible for protected
+  qualification only when the entire required CI run, including all three
+  consumers, succeeds. Pull requests use an equivalent sealed local-build
+  bundle because updater signing secrets are unavailable there.
+- JavaScript dependencies are installed with lifecycle scripts disabled and no
+  production updater credential. Compilation and bundling use a disposable CI
+  updater key. A separate no-checkout, no-repository-code signer job first
+  verifies the frozen archive and pinned Tauri CLI tarball digests, then exposes
+  the production key only to the signing command. A no-secret assembly job
+  binds both GitHub service-artifact digests and reruns the offline updater
+  verifier before candidate assembly. OIDC and attestation permissions live in
+  another no-checkout, no-shell-command job that downloads the sealed
+  candidate; build, signer, and assembly jobs do not inherit them.
 - Protected owned-Geph qualification downloads that exact artifact, verifies
   its source commit, Git tree, source-archive digest, CI run ID and file hashes,
   then runs against the unpacked candidate. Its proof is bound to the candidate

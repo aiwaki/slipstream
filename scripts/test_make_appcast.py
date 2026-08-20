@@ -39,7 +39,7 @@ class MakeAppcastTests(unittest.TestCase):
 
     def test_accepts_controlled_preview_tag(self) -> None:
         appcast = make_appcast.build_appcast(
-            version="0.1.5",
+            version="0.1.5-preview.42",
             tag="v0.1.5-preview.42",
             repository="aiwaki/slipstream",
             signature="sig",
@@ -53,10 +53,10 @@ class MakeAppcastTests(unittest.TestCase):
         )
 
     def test_rejects_uncontrolled_preview_tag(self) -> None:
-        with self.assertRaisesRegex(ValueError, "preview.<run>"):
+        with self.assertRaisesRegex(ValueError, "invalid version"):
             make_appcast.build_appcast(
-                version="0.1.5",
-                tag="v0.1.5-preview.local",
+                version="0.1.5-preview.local!",
+                tag="v0.1.5-preview.local!",
                 repository="aiwaki/slipstream",
                 signature="sig",
                 pub_date="2026-07-08T12:00:00Z",
@@ -65,9 +65,19 @@ class MakeAppcastTests(unittest.TestCase):
     def test_release_channel_matches_controlled_tag(self) -> None:
         self.assertEqual(make_appcast.release_channel_for_tag("0.1.5", "v0.1.5"), "stable")
         self.assertEqual(
-            make_appcast.release_channel_for_tag("0.1.5", "v0.1.5-preview.42"),
+            make_appcast.release_channel_for_tag(
+                "0.1.5-preview.42", "v0.1.5-preview.42"
+            ),
             "preview",
         )
+
+    def test_preview_tag_requires_preview_package_version(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be v0.1.5"):
+            make_appcast.release_channel_for_tag("0.1.5", "v0.1.5-preview.42")
+
+    def test_other_prerelease_channels_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "only stable or preview"):
+            make_appcast.release_channel_for_tag("0.1.5-beta.1", "v0.1.5-beta.1")
 
     def test_rejects_empty_signature(self) -> None:
         with self.assertRaisesRegex(ValueError, "empty updater signature"):

@@ -2,6 +2,8 @@
 
 <div align="center">
 
+<img src="app-tauri/src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Slipstream app icon">
+
 [Русский](README.md) · **English**
 
 [![preview](https://img.shields.io/badge/preview-macOS%20Apple%20Silicon-000000?logo=apple)](#install)
@@ -12,7 +14,7 @@
 
 <div align="center">
 
-## Next preview: install Slipstream — sites work
+## Install Slipstream — sites work
 
 **Fast. Automatic. Invisible.**
 
@@ -67,6 +69,10 @@ becomes a general VPN fallback.
 - The menu reports routing, Geph, and Telegram state; it can restart the service,
   copy redacted diagnostics, check for updates, and completely remove components
   owned by Slipstream.
+- Slipstream checks its signed update channel automatically and announces a new
+  version with a native notification. Installation starts only after the menu
+  action is chosen; the current app is backed up locally and restored if the
+  successor does not become healthy.
 
 ### Install
 
