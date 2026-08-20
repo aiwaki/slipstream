@@ -13,11 +13,11 @@ const RESPONSE: &[u8] = b"slipstream-wintun-ipv6-response-v1";
 
 fn internet_checksum(bytes: &[u8]) -> u16 {
     let mut sum = 0u32;
-    let mut chunks = bytes.chunks_exact(2);
-    for chunk in &mut chunks {
-        sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
+    let (chunks, remainder) = bytes.as_chunks::<2>();
+    for chunk in chunks {
+        sum += u32::from(u16::from_be_bytes(*chunk));
     }
-    if let Some(byte) = chunks.remainder().first() {
+    if let Some(byte) = remainder.first() {
         sum += u32::from(*byte) << 8;
     }
     while sum >> 16 != 0 {
