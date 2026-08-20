@@ -238,6 +238,36 @@ jobs:
           trap - EXIT
           rm -f "$ready" "$release" "$geph_log" "$driver_log"
 
+      - name: Preserve bounded live-site diagnostics for this attempt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            dist-readiness/live-sites.json
+            dist-readiness/live-sites.exit
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require passed live-site matrix before the long soak
+        run: |
+          set -euo pipefail
+          live_status="$(tr -d '[:space:]' < dist-readiness/live-sites.exit)"
+          PYTHONPATH=scripts python3 - "$live_status" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          import release_readiness
+
+          report = json.loads(
+              Path("dist-readiness/live-sites.json").read_text(encoding="utf-8")
+          )
+          result = release_readiness.validate_live_report(report, int(sys.argv[1]))
+          if result != "passed":
+              raise SystemExit("live-site matrix did not pass; skipping the long soak")
+          PY
+
       - name: Run measured 30-minute background invisibility soak
         env:
           CI: "true"

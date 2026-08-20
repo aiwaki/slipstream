@@ -10,6 +10,44 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (preview 23 readiness): PRs #347 and #348 are merged as
+`13519412dab27306df43c1ce3e301bd69d778ac8` and current main
+`eb5f6c1d655ec34a2bfac4774c0dd8dd599b8bc1`. Exact-main CI run
+`32418702039`, dependency audit `32418702233`, and owned-Geph qualification
+`32419820557` are green. Release-readiness run `32419823032` bound the exact
+candidate and preserved a complete failed report after the full live-site
+matrix and 30-minute soak; `.23` remains unpublished.
+
+The report exposed two measurement defects rather than another opaque failure.
+CoreGraphics counted the menu-bar UIElement once in every sample (`3604`) even
+though Dock visibility, frontmost changes, GUI/headless browser processes, and
+LaunchServices visible events were all zero. The unified log also recorded the
+single expected menu-bar registration `PostShowProcess` because observation
+started before launch. The follow-up restricts the CoreGraphics exception to
+the exact OS-reported status-window layer while retaining on-screen floating
+panels, alerts, overlays, and normal application windows; it starts the
+unified-log stream only after high-cadence launch observation and tray
+readiness, while preserving all launch-time Dock/frontmost/window/LaunchServices
+checks.
+
+The live-site report covered all four fixed hosts but exposed only generic
+`terminal_error` browser outcomes: Safari failed all four and Chrome succeeded
+only for Aikido. The follow-up schema adds a strict privacy-bounded reason enum
+for session, navigation, document, readiness-signal, timeout, denial, and
+observation failures; raw exception text, page content, and URLs remain absent.
+Failed or inconclusive live sites are now uploaded per run attempt and stop the
+workflow before the 30-minute soak. The next verified action is to merge this
+diagnostic correction, inspect one exact protected live-site report, fix the
+identified product or harness cause without weakening the two-browser policy,
+then run the soak and publisher only after the complete matrix passes.
+
+There are no Apple Developer ID/notarization credentials, and none will be
+purchased for this preview. The repository must therefore describe `.23`
+honestly as an ad-hoc-signed, unnotarized preview with the documented macOS
+Control-click/Open first-launch path; it must not claim normal Gatekeeper or
+notarization acceptance. This trust limitation is independent of the required
+functional readiness gates above.
+
 Update 2026-08-20 (release follow-up): vendor-bootstrap PR #344 merged as
 `f4b0de15607a911ffba1c7a8401b35bb73ed4922`, Geph `0.3.9` PR #280 merged as
 `21fcaab9d35bdfdbdaacd28bf835acf7585318c3`, and notification-diagnostics plus
@@ -43,15 +81,12 @@ runs the candidate from its production `/Applications` layout and preserves
 each rerun's failure artifact independently.
 
 The root READMEs already contain the centered application icon and label `.23`
-as the next preview. A separate first-install trust blocker remains: the bundle
-configuration still uses ad-hoc identity `-`, and the repository has updater
-signing secrets but no Developer ID/notarization credentials. Because a
-quarantined download must not reproduce the user's Gatekeeper “damaged” dialog,
-`.23` must not publish until Developer ID signing, hardened runtime,
-notarization, stapling, and an exact quarantined-install assessment are wired
-and pass. Next: finish and merge the modern notification gate, close that
-first-install trust boundary, obtain one green exact-main candidate, then run
-owned-Geph and release-readiness before publication.
+as the next preview. The bundle configuration uses ad-hoc identity `-`, and the
+repository has updater signing secrets but no Developer ID/notarization
+credentials. The later 2026-08-21 checkpoint records the explicit preview
+boundary: no Gatekeeper/notarization claim, documented Control-click/Open first
+launch, and functional publication only after exact-main owned-Geph and
+release-readiness pass.
 
 Update 2026-08-20: PR
 [#343](https://github.com/aiwaki/slipstream/pull/343) merged unchanged as

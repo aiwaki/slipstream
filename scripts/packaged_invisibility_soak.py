@@ -15,7 +15,6 @@ import time
 
 import pending_navigation_browser_probe_smoke as visibility
 
-
 SCHEMA_VERSION = 1
 RELEASE_DURATION_SECONDS = 1800
 SAMPLE_INTERVAL_SECONDS = 0.5
@@ -223,24 +222,6 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
             stderr=subprocess.STDOUT,
             text=True,
         )
-        unified_log = subprocess.Popen(
-            (
-                "/usr/bin/log",
-                "stream",
-                "--style",
-                "json",
-                "--level",
-                "debug",
-                "--predicate",
-                'eventMessage CONTAINS[c] "PostShowProcess" AND '
-                '(eventMessage CONTAINS[c] "slipstream" OR '
-                'eventMessage CONTAINS[c] "chrome-headless" OR '
-                'eventMessage CONTAINS[c] "chromium")',
-            ),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
         tray = subprocess.Popen(
             (str(tray_executable),),
             stdin=subprocess.DEVNULL,
@@ -269,13 +250,36 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
             max_profiles = max(max_profiles, len(current_profiles))
             max_launch_agents = max(max_launch_agents, len(current_agents))
             time.sleep(0.05)
-        if listener.poll() is not None or unified_log.poll() is not None:
+        if listener.poll() is not None:
             raise SoakError("visibility sampler exited before measured soak")
         if tray.poll() is not None:
             raise SoakError("tray process exited before measured soak")
         # The measured window starts only after the daemon, tray, LaunchServices
-        # listener, and unified-log sampler are all ready.
+        # listener, and high-cadence launch observations are all ready. Start
+        # the unified-log stream only now: a menu-bar UIElement emits one
+        # expected PostShowProcess while registering, whereas any later show
+        # request during the idle interval is a real regression signal.
         first_status = _wait_status()
+        unified_log = subprocess.Popen(
+            (
+                "/usr/bin/log",
+                "stream",
+                "--style",
+                "json",
+                "--level",
+                "debug",
+                "--predicate",
+                'eventMessage CONTAINS[c] "PostShowProcess" AND '
+                '(eventMessage CONTAINS[c] "slipstream" OR '
+                'eventMessage CONTAINS[c] "chrome-headless" OR '
+                'eventMessage CONTAINS[c] "chromium")',
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if unified_log.poll() is not None:
+            raise SoakError("unified-log sampler exited before measured soak")
         expected_pid = first_status.get("pid")
         previous_heartbeat_seq = first_status.get("heartbeat_seq")
         if type(expected_pid) is not int or type(previous_heartbeat_seq) is not int:
@@ -376,7 +380,9 @@ def run_soak(app_bundle: Path, duration_seconds: int) -> tuple[dict, int]:
     first_seq = first_status.get("heartbeat_seq") if first_status else None
     last_seq = last_status.get("heartbeat_seq") if last_status else None
     heartbeat_advanced = (
-        isinstance(first_seq, int) and isinstance(last_seq, int) and last_seq > first_seq
+        isinstance(first_seq, int)
+        and isinstance(last_seq, int)
+        and last_seq > first_seq
     )
     counters = {
         "coregraphics_window_samples": window_events,

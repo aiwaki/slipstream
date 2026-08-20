@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import inspect
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -20,11 +21,19 @@ class FakeClock:
 
 
 class PackagedInvisibilitySoakTests(unittest.TestCase):
+    def test_unified_log_observation_starts_after_launch_sampling(self) -> None:
+        source = inspect.getsource(soak.run_soak)
+        startup = source.index("startup_deadline =")
+        first_status = source.index("first_status = _wait_status()", startup)
+        unified_log = source.index("unified_log = subprocess.Popen", startup)
+        measured = source.index("_sample_window(", startup)
+        self.assertLess(startup, first_status)
+        self.assertLess(first_status, unified_log)
+        self.assertLess(unified_log, measured)
+
     def test_profile_residue_uses_the_effective_macos_temp_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            profile = Path(temporary) / (
-                "slipstream-browser-probe-" + "a" * 32
-            )
+            profile = Path(temporary) / ("slipstream-browser-probe-" + "a" * 32)
             profile.mkdir()
             with (
                 mock.patch.object(soak.tempfile, "gettempdir", return_value=temporary),

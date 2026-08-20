@@ -93,6 +93,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 result = smoke._run_chrome("app.aikido.dev", executable, 501, 20)
 
         self.assertEqual(result["outcome"], "terminal_error")
+        self.assertEqual(result["reason"], "navigation_rejected")
         self.assertEqual(result["browser"], "chrome")
         self.assertEqual(result["route"], "slipstream_selected")
         stop.assert_called_once()
@@ -109,6 +110,23 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "edge_access_denied",
         )
 
+    def test_browser_reason_contract_is_bounded_and_shared(self) -> None:
+        self.assertEqual(
+            smoke.TERMINAL_BROWSER_REASONS,
+            readiness.TERMINAL_BROWSER_REASONS,
+        )
+        self.assertEqual(
+            smoke._classify_document_evidence("app.aikido.dev", "short"),
+            ("terminal_error", "document_too_short"),
+        )
+        document = "<html>" + "x" * 600
+        self.assertEqual(
+            smoke._classify_document_evidence(
+                "app.aikido.dev", document, self._signals()
+            ),
+            ("usable", ""),
+        )
+
     def test_short_or_tls_warning_documents_fail(self) -> None:
         self.assertEqual(
             smoke._classify_document("app.aikido.dev", "short"),
@@ -121,16 +139,16 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         )
 
     def test_aikido_static_shell_cannot_false_pass(self) -> None:
-        document = "<html><title>Aikido Security</title><div id='app'></div>" + "x" * 600
+        document = (
+            "<html><title>Aikido Security</title><div id='app'></div>" + "x" * 600
+        )
         skeleton = self._signals(app_text_length=0, visible_app=False)
         self.assertEqual(
             smoke._classify_document("app.aikido.dev", document, skeleton),
             "terminal_error",
         )
         self.assertEqual(
-            smoke._classify_document(
-                "app.aikido.dev", document, self._signals()
-            ),
+            smoke._classify_document("app.aikido.dev", document, self._signals()),
             "usable",
         )
 
@@ -165,6 +183,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "deadline_ms": 20_000,
             "elapsed_ms": 100,
             "outcome": "usable",
+            "reason": "",
             "route": "slipstream_selected",
         }
         target = SimpleNamespace(install_command=("install",))
@@ -172,8 +191,12 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         with (
             mock.patch.object(smoke, "_require_protected_ci"),
             mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
-            mock.patch.object(smoke.lifecycle, "_preflight", return_value=("before", 501, 20)),
-            mock.patch.object(smoke.lifecycle, "packaged_app_target", return_value=target),
+            mock.patch.object(
+                smoke.lifecycle, "_preflight", return_value=("before", 501, 20)
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "packaged_app_target", return_value=target
+            ),
             mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
             mock.patch.object(smoke.lifecycle, "_wait_for_status"),
             mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
@@ -203,6 +226,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "deadline_ms": 20_000,
             "elapsed_ms": 100,
             "outcome": "usable",
+            "reason": "",
             "route": "slipstream_selected",
         }
         target = SimpleNamespace(install_command=("install",))
@@ -310,6 +334,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "deadline_ms": 20_000,
             "elapsed_ms": 100,
             "outcome": "usable",
+            "reason": "",
             "route": "slipstream_selected",
         }
         target = SimpleNamespace(install_command=("install",))
@@ -361,6 +386,7 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             "deadline_ms": 20_000,
             "elapsed_ms": 100,
             "outcome": "usable",
+            "reason": "",
             "route": "slipstream_selected",
         }
         target = SimpleNamespace(install_command=("install",))
@@ -379,9 +405,8 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                 **browser_result,
                 "browser": "chrome",
                 "deadline_ms": smoke.SITES[host]["deadline_ms"],
-                "outcome": (
-                    "terminal_error" if host == "app.aikido.dev" else "usable"
-                ),
+                "outcome": ("terminal_error" if host == "app.aikido.dev" else "usable"),
+                "reason": ("readiness_timeout" if host == "app.aikido.dev" else ""),
             }
 
         with (

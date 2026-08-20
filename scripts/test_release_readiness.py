@@ -27,6 +27,7 @@ def live_report(result: str = "passed") -> dict:
                         "deadline_ms": release_readiness.HOST_DEADLINES_MS[host],
                         "elapsed_ms": 1_000,
                         "outcome": outcome,
+                        "reason": "" if outcome == "usable" else "readiness_timeout",
                         "route": "slipstream_selected",
                     }
                     for browser, outcome in zip(("chrome", "safari"), outcomes)
@@ -38,7 +39,7 @@ def live_report(result: str = "passed") -> dict:
         )
     status = {"passed": 0, "failed": 1, "inconclusive": 2}[result]
     return {
-        "schema_version": 1,
+        "schema_version": release_readiness.LIVE_SITE_SCHEMA_VERSION,
         "harness": "safari_chrome_live_sites",
         "harness_exit_status": status,
         "result": result,
@@ -80,8 +81,15 @@ class ReleaseReadinessTests(unittest.TestCase):
         report = live_report()
         self.assertEqual(release_readiness.validate_live_report(report, 0), "passed")
         report["sites"][0]["browsers"][0]["outcome"] = "terminal_error"
+        report["sites"][0]["browsers"][0]["reason"] = "readiness_timeout"
         with self.assertRaisesRegex(ValueError, "two browser successes"):
             release_readiness.validate_live_report(report, 0)
+
+    def test_live_matrix_rejects_raw_or_unknown_browser_reasons(self) -> None:
+        report = live_report("inconclusive")
+        report["sites"][0]["browsers"][0]["reason"] = "private exception text"
+        with self.assertRaisesRegex(ValueError, "terminal reason"):
+            release_readiness.validate_live_report(report, 2)
 
     def test_inconclusive_requires_both_control_routes_unavailable(self) -> None:
         report = live_report("inconclusive")
