@@ -161,6 +161,26 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertEqual(ready.call_count, 2)
         sleep.assert_called_once_with(0.2)
 
+    def test_safari_ready_wait_fails_after_the_deadline(self) -> None:
+        clock = mock.Mock(side_effect=[0.0, 0.0, 0.3, 0.6])
+        with (
+            mock.patch.object(
+                smoke.lifecycle,
+                "_assert_safaridriver_ready",
+                side_effect=smoke.lifecycle.LifecycleError("not ready"),
+            ),
+            mock.patch.object(smoke.time, "monotonic", clock),
+            mock.patch.object(smoke.time, "sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(
+                smoke.LiveSiteError, "SafariDriver did not become ready"
+            ):
+                smoke._wait_for_safaridriver_ready(
+                    "http://127.0.0.1:12345", timeout=0.5
+                )
+
+        self.assertEqual(sleep.call_count, 2)
+
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"
         edge = "x" * 600 + "Sorry, you have been blocked"

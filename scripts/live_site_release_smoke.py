@@ -284,7 +284,6 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
                 # evaluation can race that replacement; keep polling inside
                 # the existing host deadline instead of treating it as a
                 # terminal browser failure.
-                reason = "browser_observation_failed"
                 time.sleep(0.25)
                 continue
             outcome, reason = _classify_document_evidence(host, document, signals)

@@ -209,19 +209,29 @@ jobs:
           driver_pid=$!
           driver_url="http://127.0.0.1:$driver_port"
           driver_status=""
+          driver_status_received=0
+          driver_ready=0
           for _ in $(seq 1 100); do
             kill -0 "$driver_pid" 2>/dev/null || exit 1
             if driver_status="$(/usr/bin/curl --silent --show-error --noproxy '*' \
               --max-time 2 "$driver_url/status" 2>/dev/null)"; then
+              driver_status_received=1
               if printf '%s' "$driver_status" | python3 -c \
                 'import json, sys; value=json.load(sys.stdin).get("value", {}); raise SystemExit(value.get("ready") is not True)'; then
+                driver_ready=1
                 break
               fi
             fi
             sleep 0.2
           done
-          printf '%s' "$driver_status" | python3 -c \
-            'import json, sys; value=json.load(sys.stdin).get("value", {}); raise SystemExit(value.get("ready") is not True)'
+          if [ "$driver_ready" -ne 1 ]; then
+            if [ "$driver_status_received" -eq 1 ]; then
+              echo "safaridriver did not report ready before timeout" >&2
+            else
+              echo "safaridriver did not return a status response before timeout" >&2
+            fi
+            exit 1
+          fi
           set +e
           env -u SLIPSTREAM_GEPH_ACCOUNT_SECRET sudo -E "$(command -v python3)" \
             scripts/live_site_release_smoke.py \
