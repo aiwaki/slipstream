@@ -123,11 +123,15 @@ def test_browser_process_snapshot_attributes_only_process_group_root() -> None:
     )
 
 
-def test_coregraphics_visibility_ignores_menu_bar_and_overlay_layers() -> None:
-    assert smoke._is_visible_slipstream_window("Slipstream", 0)
-    assert smoke._is_visible_slipstream_window("Chromium", 0)
-    assert not smoke._is_visible_slipstream_window("Slipstream", 25)
-    assert not smoke._is_visible_slipstream_window("Window Server", 0)
+def test_coregraphics_visibility_excludes_only_the_status_item_layer() -> None:
+    status_layer = 25
+    assert smoke._is_visible_slipstream_window("Slipstream", 0, status_layer)
+    assert smoke._is_visible_slipstream_window("Chromium", 3, status_layer)
+    assert smoke._is_visible_slipstream_window("Slipstream", 101, status_layer)
+    assert not smoke._is_visible_slipstream_window(
+        "Slipstream", status_layer, status_layer
+    )
+    assert not smoke._is_visible_slipstream_window("Window Server", 0, status_layer)
 
 
 def test_coregraphics_snapshot_requests_only_onscreen_windows() -> None:
@@ -135,6 +139,7 @@ def test_coregraphics_snapshot_requests_only_onscreen_windows() -> None:
     call = "CGWindowListCopyWindowInfo(COREGRAPHICS_ON_SCREEN_ONLY, 0)"
     assert call in source
     assert 'b"kCGWindowLayer"' in source
+    assert "CGWindowLevelForKey(COREGRAPHICS_STATUS_WINDOW_LEVEL_KEY)" in source
 
 
 @pytest.mark.parametrize(

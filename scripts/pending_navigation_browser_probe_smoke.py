@@ -84,7 +84,7 @@ LAUNCH_SERVICES_MARKERS = (
     "chromium",
 )
 COREGRAPHICS_ON_SCREEN_ONLY = 1
-COREGRAPHICS_NORMAL_WINDOW_LAYER = 0
+COREGRAPHICS_STATUS_WINDOW_LEVEL_KEY = 9
 LAUNCH_SERVICES_ASN_RE = re.compile(r"ASN:0x[0-9a-f]+-0x[0-9a-f]+:", re.I)
 LAUNCH_SERVICES_LSASN_RE = re.compile(
     r'(?<![A-Za-z0-9_])(?:"LSASN"|LSASN)\s*=\s*'
@@ -240,9 +240,11 @@ def _assert_pinned_executable_unchanged(
         raise QualificationError("pinned headless executable identity changed")
 
 
-def _is_visible_slipstream_window(owner_name: str, layer: int) -> bool:
-    """Classify only normal on-screen app windows, never menu-bar surfaces."""
-    return layer == COREGRAPHICS_NORMAL_WINDOW_LAYER and any(
+def _is_visible_slipstream_window(
+    owner_name: str, layer: int, status_window_layer: int
+) -> bool:
+    """Exclude only the OS status-item layer; retain panels and alerts."""
+    return layer != status_window_layer and any(
         marker in owner_name.casefold() for marker in LAUNCH_SERVICES_MARKERS
     )
 
@@ -256,6 +258,8 @@ def _slipstream_window_ids() -> frozenset[int]:
     cf = ctypes.CDLL(foundation)
     cg.CGWindowListCopyWindowInfo.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
     cg.CGWindowListCopyWindowInfo.restype = ctypes.c_void_p
+    cg.CGWindowLevelForKey.argtypes = [ctypes.c_int32]
+    cg.CGWindowLevelForKey.restype = ctypes.c_int32
     cf.CFArrayGetCount.argtypes = [ctypes.c_void_p]
     cf.CFArrayGetCount.restype = ctypes.c_long
     cf.CFArrayGetValueAtIndex.argtypes = [ctypes.c_void_p, ctypes.c_long]
@@ -282,6 +286,9 @@ def _slipstream_window_ids() -> frozenset[int]:
     owner_key = cf.CFStringCreateWithCString(None, b"kCGWindowOwnerName", 0x08000100)
     number_key = cf.CFStringCreateWithCString(None, b"kCGWindowNumber", 0x08000100)
     layer_key = cf.CFStringCreateWithCString(None, b"kCGWindowLayer", 0x08000100)
+    status_window_layer = int(
+        cg.CGWindowLevelForKey(COREGRAPHICS_STATUS_WINDOW_LEVEL_KEY)
+    )
     windows = cg.CGWindowListCopyWindowInfo(COREGRAPHICS_ON_SCREEN_ONLY, 0)
     if not owner_key or not number_key or not layer_key or not windows:
         for value in (owner_key, number_key, layer_key, windows):
@@ -304,7 +311,11 @@ def _slipstream_window_ids() -> frozenset[int]:
             window_layer = ctypes.c_int64()
             if not cf.CFNumberGetValue(layer, 4, ctypes.byref(window_layer)):
                 continue
-            if not _is_visible_slipstream_window(owner_name, int(window_layer.value)):
+            if not _is_visible_slipstream_window(
+                owner_name,
+                int(window_layer.value),
+                status_window_layer,
+            ):
                 continue
             window_id = ctypes.c_int64()
             if cf.CFNumberGetValue(number, 4, ctypes.byref(window_id)):

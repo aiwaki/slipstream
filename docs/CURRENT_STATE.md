@@ -23,10 +23,12 @@ CoreGraphics counted the menu-bar UIElement once in every sample (`3604`) even
 though Dock visibility, frontmost changes, GUI/headless browser processes, and
 LaunchServices visible events were all zero. The unified log also recorded the
 single expected menu-bar registration `PostShowProcess` because observation
-started before launch. The follow-up restricts the CoreGraphics sensor to
-on-screen layer-zero application windows and starts the unified-log stream only
-after high-cadence launch observation and tray readiness, while preserving all
-launch-time Dock/frontmost/window/LaunchServices checks.
+started before launch. The follow-up restricts the CoreGraphics exception to
+the exact OS-reported status-window layer while retaining on-screen floating
+panels, alerts, overlays, and normal application windows; it starts the
+unified-log stream only after high-cadence launch observation and tray
+readiness, while preserving all launch-time Dock/frontmost/window/LaunchServices
+checks.
 
 The live-site report covered all four fixed hosts but exposed only generic
 `terminal_error` browser outcomes: Safari failed all four and Chrome succeeded
