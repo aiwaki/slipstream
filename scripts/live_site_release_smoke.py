@@ -428,14 +428,18 @@ def _control_route(host: str, route: str) -> str:
     if route == "owned_geph":
         command.extend(("--socks5-hostname", "127.0.0.1:9954"))
     command.append(f"https://{host}/")
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode not in (0, 63) or "\n__SLIPSTREAM_STATUS__:" not in result.stdout:
+    result = subprocess.run(command, capture_output=True, check=False)
+    status_marker = b"\n__SLIPSTREAM_STATUS__:"
+    if result.returncode not in (0, 63) or status_marker not in result.stdout:
         return "unavailable"
-    body, code = result.stdout.rsplit("\n__SLIPSTREAM_STATUS__:", 1)
-    code = code.strip()
+    body, code_bytes = result.stdout.rsplit(status_marker, 1)
+    try:
+        code = code_bytes.strip().decode("ascii")
+    except UnicodeDecodeError:
+        return "unavailable"
     if not code.isdigit() or int(code) == 0:
         return "unavailable"
-    lowered = body.casefold()
+    lowered = body.decode("utf-8", errors="replace").casefold()
     all_denials = tuple(
         marker for site in SITES.values() for marker in site["denials"]
     )
@@ -447,7 +451,7 @@ def _control_route(host: str, route: str) -> str:
         429,
     }:
         return "challenge"
-    if 200 <= int(code) < 400 and len(body.encode("utf-8")) >= MIN_DOCUMENT_BYTES:
+    if 200 <= int(code) < 400 and len(body) >= MIN_DOCUMENT_BYTES:
         return "usable"
     return "origin_error"
 
