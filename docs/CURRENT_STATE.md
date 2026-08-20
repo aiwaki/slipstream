@@ -10,6 +10,28 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-21 (actionable protected retry): PR #349 merged as current main
+`0d2e016967b1efeb204d1b687739a3435e3f255d`. Exact-main CI
+`32425390228`, dependency audit `32425390226`, and owned-Geph qualification
+`32426463756` are green. Readiness `32426465935` stopped before the long soak
+and uploaded bounded diagnostics as designed. Safari reported
+`session_unavailable` for all four hosts because the workflow accepted an HTTP
+`/status` response without requiring SafariDriver's `value.ready == true`.
+Chrome passed Aikido but the other sites ended after transient CDP execution-
+context replacement during navigation. Direct and owned-Geph controls proved
+Aikido and Capacitor reachable, so this is a qualification-harness boundary,
+not a broad routing failure.
+
+The active narrow follow-up requires SafariDriver's explicit ready state both
+in the workflow and immediately before each clean session. Chrome now retries
+bounded `Runtime.evaluate` context-replacement failures inside the existing
+per-host deadline; navigation rejection, persistent observation failure,
+document invalidity, and readiness timeout remain distinct terminal evidence.
+Next: merge the narrow harness correction, obtain one exact-main candidate,
+then rerun owned-Geph and readiness. A failed live matrix will again preserve
+its report and skip the 30-minute soak; only a completely passed matrix may
+start that soak.
+
 Update 2026-08-21 (preview 23 readiness): PRs #347 and #348 are merged as
 `13519412dab27306df43c1ce3e301bd69d778ac8` and current main
 `eb5f6c1d655ec34a2bfac4774c0dd8dd599b8bc1`. Exact-main CI run
