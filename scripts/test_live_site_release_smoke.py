@@ -149,6 +149,16 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
                     "terminal_error",
                 )
 
+    def test_control_route_tolerates_non_utf8_document_bytes(self) -> None:
+        response = mock.Mock(
+            returncode=0,
+            stdout=b"\xff" + (b"x" * 600) + b"\n__SLIPSTREAM_STATUS__:200",
+        )
+        with mock.patch.object(smoke.subprocess, "run", return_value=response) as run:
+            self.assertEqual(smoke._control_route("weather.com", "direct"), "usable")
+
+        self.assertNotIn("text", run.call_args.kwargs)
+
     def test_successful_sites_cannot_hide_cleanup_failure(self) -> None:
         browser_result = {
             "browser": "safari",
