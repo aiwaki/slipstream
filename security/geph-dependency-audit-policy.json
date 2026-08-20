@@ -25,18 +25,6 @@
     },
     {
       "advisories": [
-        "GHSA-q83h-524g-xf6h",
-        "RUSTSEC-2026-0258"
-      ],
-      "ecosystem": "crates.io",
-      "expires": "2026-08-27",
-      "id": "geph-h2-0.4.15-awaiting-vendor-r2",
-      "package": "h2",
-      "reason": "h2 0.4.16 is a verified lock-compatible fix, but changing the reviewed Geph lock requires a new immutable geph-vendor-0.3.0-r2 that can only be built after its source-contract change reaches main. This exception only permits the existing r1 artifact through the P0 merge; publishing Slipstream preview.23 remains blocked until r2 is built, audited with zero h2 0.4 finding, and consumed by the exact release candidate.",
-      "version": "0.4.15"
-    },
-    {
-      "advisories": [
         "CVE-2023-49092"
       ],
       "ecosystem": "crates.io",
