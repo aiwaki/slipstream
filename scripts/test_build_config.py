@@ -389,6 +389,7 @@ class BuildConfigTests(unittest.TestCase):
             "Slipstream-live-site-diagnostics-${{ github.sha }}-${{ github.run_attempt }}",
             readiness,
         )
+        self.assertIn('value.get("ready") is not True', readiness)
         self.assertLess(
             readiness.index("Require passed live-site matrix before the long soak"),
             readiness.index("Run measured 30-minute background invisibility soak"),

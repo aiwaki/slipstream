@@ -250,32 +250,43 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
         signals: dict[str, object] = {}
         document = ""
         while time.monotonic() < deadline:
-            evaluated = chromium._devtools_command(
-                debugger,
-                port,
-                "Runtime.evaluate",
-                {
-                    "expression": READINESS_EXPRESSION,
-                    "returnByValue": True,
-                },
-                response_timeout=2,
-            ).get("result")
-            value = evaluated.get("value") if isinstance(evaluated, dict) else None
-            if isinstance(value, dict):
-                signals = value
-            html = chromium._devtools_command(
-                debugger,
-                port,
-                "Runtime.evaluate",
-                {
-                    "expression": "document.documentElement.outerHTML",
-                    "returnByValue": True,
-                },
-                response_timeout=2,
-            ).get("result")
-            value = html.get("value") if isinstance(html, dict) else None
-            if isinstance(value, str):
-                document = value
+            try:
+                evaluated = chromium._devtools_command(
+                    debugger,
+                    port,
+                    "Runtime.evaluate",
+                    {
+                        "expression": READINESS_EXPRESSION,
+                        "returnByValue": True,
+                    },
+                    response_timeout=2,
+                ).get("result")
+                value = (
+                    evaluated.get("value") if isinstance(evaluated, dict) else None
+                )
+                if isinstance(value, dict):
+                    signals = value
+                html = chromium._devtools_command(
+                    debugger,
+                    port,
+                    "Runtime.evaluate",
+                    {
+                        "expression": "document.documentElement.outerHTML",
+                        "returnByValue": True,
+                    },
+                    response_timeout=2,
+                ).get("result")
+                value = html.get("value") if isinstance(html, dict) else None
+                if isinstance(value, str):
+                    document = value
+            except chromium.QualificationError:
+                # Navigation replaces the execution context. A single CDP
+                # evaluation can race that replacement; keep polling inside
+                # the existing host deadline instead of treating it as a
+                # terminal browser failure.
+                reason = "browser_observation_failed"
+                time.sleep(0.25)
+                continue
             outcome, reason = _classify_document_evidence(host, document, signals)
             # A static app shell reaches readyState=complete before its JS has
             # rendered a useful interface. Keep polling until a fixed positive
@@ -325,6 +336,17 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     }
 
 
+def _wait_for_safaridriver_ready(driver_url: str, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            lifecycle._assert_safaridriver_ready(driver_url)
+            return
+        except lifecycle.LifecycleError:
+            time.sleep(0.2)
+    raise LiveSiteError("SafariDriver did not become ready")
+
+
 def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     session_id = None
     safari_pid = None
@@ -336,6 +358,7 @@ def _run_safari(host: str, driver_url: str, uid: int) -> dict[str, object]:
     finished = started
     failure: BaseException | None = None
     try:
+        _wait_for_safaridriver_ready(driver_url)
         lifecycle._assert_no_safari_process(uid, host)
         created = lifecycle._webdriver_request(
             driver_url,
