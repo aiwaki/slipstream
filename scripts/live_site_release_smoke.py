@@ -181,6 +181,7 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
     started = time.monotonic()
     finished = started
     outcome = "terminal_error"
+    failure: BaseException | None = None
     try:
         os.chown(profile, uid, gid)
         profile.chmod(0o700)
@@ -258,19 +259,36 @@ def _run_chrome(host: str, executable: Path, uid: int, gid: int) -> dict[str, ob
                 break
             time.sleep(0.25)
         finished = time.monotonic()
+    except BaseException as exc:
+        failure = exc
+        finished = time.monotonic()
     finally:
+        cleanup_failed = False
         if process is not None and process_group is not None:
-            lifecycle._stop_owned_chrome_process_group(
-                process,
-                process_group,
-                uid=uid,
-                gid=gid,
-                supplementary_groups=groups,
-            )
-        output.close()
-        shutil.rmtree(profile, ignore_errors=True)
+            try:
+                lifecycle._stop_owned_chrome_process_group(
+                    process,
+                    process_group,
+                    uid=uid,
+                    gid=gid,
+                    supplementary_groups=groups,
+                )
+            except BaseException:
+                cleanup_failed = True
+        try:
+            output.close()
+        except BaseException:
+            cleanup_failed = True
+        try:
+            shutil.rmtree(profile)
+        except BaseException:
+            cleanup_failed = True
+        if cleanup_failed:
+            raise LiveSiteError("Chrome cleanup failed") from None
     # Worker teardown is verified but excluded from the navigation deadline.
     elapsed_ms = round((finished - started) * 1000)
+    if failure is not None:
+        outcome = "terminal_error"
     return {
         "browser": "chrome",
         "deadline_ms": SITES[host]["deadline_ms"],
@@ -435,27 +453,44 @@ def _control_route(host: str, route: str) -> str:
 
 
 def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int]:
-    _require_protected_ci()
-    runner = pf.PfctlRunner()
-    before, uid, gid = lifecycle._preflight(runner)
-    target = lifecycle.packaged_app_target(app_bundle)
-    system = lifecycle.SystemRunner(target)
+    failure_stage = "require_protected_ci"
+    try:
+        _require_protected_ci()
+        failure_stage = "pf_runner"
+        runner = pf.PfctlRunner()
+        failure_stage = "preflight"
+        before, uid, gid = lifecycle._preflight(runner)
+        failure_stage = "packaged_app_target"
+        target = lifecycle.packaged_app_target(app_bundle)
+        failure_stage = "system_runner"
+        system = lifecycle.SystemRunner(target)
+    except BaseException as failure:
+        failure_name = type(failure).__name__
+        if len(failure_name) > 64 or not failure_name.isidentifier():
+            failure_name = "Exception"
+        raise LiveSiteError(
+            f"live-site execution failed at {failure_stage} ({failure_name})"
+        ) from None
     results: list[dict[str, object]] = []
     failure: BaseException | None = None
-    cleanup_errors: list[str] = []
     try:
+        failure_stage = "install"
         system.run(target.install_command)
+        failure_stage = "wait_for_active"
         lifecycle._wait_for_status("active", timeout=90)
+        failure_stage = "assert_anchor_active"
         lifecycle._assert_anchor_active(runner)
         for host in SITES:
-            browsers = (
-                _run_safari(host, driver_url, uid),
-                _run_chrome(host, chrome, uid, gid),
-            )
+            failure_stage = f"safari:{host}"
+            safari = _run_safari(host, driver_url, uid)
+            failure_stage = f"chrome:{host}"
+            chrome_result = _run_chrome(host, chrome, uid, gid)
+            browsers = (safari, chrome_result)
             usable = all(item["outcome"] == "usable" for item in browsers)
             controls = {"direct": "not_needed", "owned_geph": "not_needed"}
             result = "usable" if usable else "terminal_error"
             if not usable:
+                failure_stage = f"controls:{host}"
                 controls = {
                     "direct": _control_route(host, "direct"),
                     "owned_geph": _control_route(host, "owned_geph"),
@@ -473,17 +508,31 @@ def run_gate(app_bundle: Path, chrome: Path, driver_url: str) -> tuple[dict, int
     except BaseException as exc:
         failure = exc
     finally:
-        cleanup_errors.extend(lifecycle._fallback_uninstall(system, runner, target))
+        cleanup_failed = False
+        try:
+            cleanup_failed = bool(
+                lifecycle._fallback_uninstall(system, runner, target)
+            )
+        except BaseException:
+            cleanup_failed = True
         try:
             lifecycle._assert_clean_install_state(runner)
+        except BaseException:
+            cleanup_failed = True
+        try:
             pf._assert_same_snapshot(before, pf._pf_snapshot(runner))
-        except BaseException as exc:
-            cleanup_errors.append(str(exc))
-    if cleanup_errors:
-        failure = LiveSiteError("; ".join(cleanup_errors))
+        except BaseException:
+            cleanup_failed = True
+    if cleanup_failed:
+        raise LiveSiteError("live-site cleanup failed") from None
     if failure is not None:
-        overall = "failed"
-    elif any(item["result"] == "terminal_error" for item in results):
+        failure_name = type(failure).__name__
+        if len(failure_name) > 64 or not failure_name.isidentifier():
+            failure_name = "Exception"
+        raise LiveSiteError(
+            f"live-site execution failed at {failure_stage} ({failure_name})"
+        ) from None
+    if any(item["result"] == "terminal_error" for item in results):
         overall = "failed"
     elif any(item["result"] == "inconclusive" for item in results):
         overall = "inconclusive"

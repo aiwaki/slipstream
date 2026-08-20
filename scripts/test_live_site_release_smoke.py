@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
 import live_site_release_smoke as smoke
+import release_readiness as readiness
 
 
 class LiveSiteReleaseSmokeTests(unittest.TestCase):
@@ -45,6 +47,55 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
         self.assertFalse(any(argument.startswith("--headless") for argument in command))
         self.assertIn("--remote-debugging-port=0", command)
         self.assertIn("--user-data-dir=/tmp/private-profile", command)
+
+    def test_chrome_navigation_error_becomes_bounded_terminal_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = smoke.Path(temporary)
+            executable = root / "chrome"
+            executable.touch()
+            process = mock.Mock(pid=1234)
+            with (
+                mock.patch.object(
+                    smoke.lifecycle,
+                    "_user_environment",
+                    return_value=({}, root),
+                ),
+                mock.patch.object(
+                    smoke.lifecycle,
+                    "_user_supplementary_groups",
+                    return_value=(),
+                ),
+                mock.patch.object(smoke.os, "chown"),
+                mock.patch.object(smoke.subprocess, "Popen", return_value=process),
+                mock.patch.object(
+                    smoke.chromium, "_wait_for_devtools_port", return_value=9222
+                ),
+                mock.patch.object(
+                    smoke.chromium,
+                    "_devtools_json",
+                    return_value=[
+                        {
+                            "type": "page",
+                            "url": "about:blank",
+                            "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/1",
+                        }
+                    ],
+                ),
+                mock.patch.object(
+                    smoke.chromium,
+                    "_devtools_command",
+                    return_value={"errorText": "net::ERR_EMPTY_RESPONSE"},
+                ),
+                mock.patch.object(
+                    smoke.lifecycle, "_stop_owned_chrome_process_group"
+                ) as stop,
+            ):
+                result = smoke._run_chrome("app.aikido.dev", executable, 501, 20)
+
+        self.assertEqual(result["outcome"], "terminal_error")
+        self.assertEqual(result["browser"], "chrome")
+        self.assertEqual(result["route"], "slipstream_selected")
+        stop.assert_called_once()
 
     def test_regional_and_edge_denials_are_not_usable(self) -> None:
         regional = "x" * 600 + "This content is no longer available in your area"
@@ -131,12 +182,224 @@ class LiveSiteReleaseSmokeTests(unittest.TestCase):
             mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
             mock.patch.object(smoke.pf, "_assert_same_snapshot"),
         ):
+            with self.assertRaisesRegex(
+                smoke.LiveSiteError, "^live-site cleanup failed$"
+            ):
+                smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:1")
+
+    def test_mid_matrix_exception_is_bounded_and_cleanup_still_runs(self) -> None:
+        browser_result = {
+            "browser": "safari",
+            "deadline_ms": 20_000,
+            "elapsed_ms": 100,
+            "outcome": "usable",
+            "route": "slipstream_selected",
+        }
+        target = SimpleNamespace(install_command=("install",))
+        system = mock.Mock()
+        fallback = mock.Mock(return_value=[])
+        safari = mock.Mock(
+            side_effect=[browser_result, RuntimeError("private raw diagnostic")]
+        )
+        with (
+            mock.patch.object(smoke, "_require_protected_ci"),
+            mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
+            mock.patch.object(
+                smoke.lifecycle, "_preflight", return_value=("before", 501, 20)
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "packaged_app_target", return_value=target
+            ),
+            mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
+            mock.patch.object(smoke.lifecycle, "_wait_for_status"),
+            mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke, "_run_safari", safari),
+            mock.patch.object(
+                smoke,
+                "_run_chrome",
+                return_value={**browser_result, "browser": "chrome"},
+            ),
+            mock.patch.object(smoke.lifecycle, "_fallback_uninstall", fallback),
+            mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
+            mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
+            mock.patch.object(smoke.pf, "_assert_same_snapshot"),
+        ):
+            with self.assertRaises(smoke.LiveSiteError) as raised:
+                smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:1")
+
+        self.assertEqual(
+            str(raised.exception),
+            "live-site execution failed at safari:app.aikido.dev (RuntimeError)",
+        )
+        self.assertNotIn("private raw diagnostic", str(raised.exception))
+        fallback.assert_called_once()
+
+    def test_setup_exception_is_bounded_without_raw_diagnostic(self) -> None:
+        with (
+            mock.patch.object(smoke, "_require_protected_ci"),
+            mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
+            mock.patch.object(
+                smoke.lifecycle,
+                "_preflight",
+                side_effect=RuntimeError("private raw diagnostic"),
+            ),
+        ):
+            with self.assertRaises(smoke.LiveSiteError) as raised:
+                smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:1")
+
+        self.assertEqual(
+            str(raised.exception),
+            "live-site execution failed at preflight (RuntimeError)",
+        )
+        self.assertNotIn("private raw diagnostic", str(raised.exception))
+
+    def test_fallback_exception_cannot_skip_remaining_cleanup_proofs(self) -> None:
+        target = SimpleNamespace(install_command=("install",))
+        system = mock.Mock()
+        clean_install = mock.Mock()
+        same_snapshot = mock.Mock()
+        with (
+            mock.patch.object(smoke, "_require_protected_ci"),
+            mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
+            mock.patch.object(
+                smoke.lifecycle, "_preflight", return_value=("before", 501, 20)
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "packaged_app_target", return_value=target
+            ),
+            mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
+            mock.patch.object(smoke.lifecycle, "_wait_for_status"),
+            mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(
+                smoke,
+                "_run_safari",
+                side_effect=RuntimeError("stop before browser side effects"),
+            ),
+            mock.patch.object(
+                smoke.lifecycle,
+                "_fallback_uninstall",
+                side_effect=RuntimeError("private cleanup diagnostic"),
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "_assert_clean_install_state", clean_install
+            ),
+            mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
+            mock.patch.object(smoke.pf, "_assert_same_snapshot", same_snapshot),
+        ):
+            with self.assertRaisesRegex(
+                smoke.LiveSiteError, "^live-site cleanup failed$"
+            ):
+                smoke.run_gate(mock.Mock(), mock.Mock(), "http://127.0.0.1:1")
+
+        clean_install.assert_called_once()
+        same_snapshot.assert_called_once_with("before", "before")
+
+    def test_every_returned_report_matches_the_readiness_contract(self) -> None:
+        browser_result = {
+            "browser": "safari",
+            "deadline_ms": 20_000,
+            "elapsed_ms": 100,
+            "outcome": "usable",
+            "route": "slipstream_selected",
+        }
+        target = SimpleNamespace(install_command=("install",))
+        system = mock.Mock()
+
+        def safari(host: str, _driver_url: str, _uid: int) -> dict[str, object]:
+            return {
+                **browser_result,
+                "deadline_ms": smoke.SITES[host]["deadline_ms"],
+            }
+
+        def chrome(
+            host: str, _path: smoke.Path, _uid: int, _gid: int
+        ) -> dict[str, object]:
+            return {
+                **browser_result,
+                "browser": "chrome",
+                "deadline_ms": smoke.SITES[host]["deadline_ms"],
+            }
+
+        with (
+            mock.patch.object(smoke, "_require_protected_ci"),
+            mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
+            mock.patch.object(
+                smoke.lifecycle, "_preflight", return_value=("before", 501, 20)
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "packaged_app_target", return_value=target
+            ),
+            mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
+            mock.patch.object(smoke.lifecycle, "_wait_for_status"),
+            mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke, "_run_safari", side_effect=safari),
+            mock.patch.object(smoke, "_run_chrome", side_effect=chrome),
+            mock.patch.object(smoke.lifecycle, "_fallback_uninstall", return_value=[]),
+            mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
+            mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
+            mock.patch.object(smoke.pf, "_assert_same_snapshot"),
+        ):
             report, status = smoke.run_gate(
                 mock.Mock(), mock.Mock(), "http://127.0.0.1:1"
             )
 
-        self.assertEqual(status, 1)
-        self.assertEqual(report["result"], "failed")
+        self.assertEqual(readiness.validate_live_report(report, status), "passed")
+
+    def test_browser_terminal_result_still_returns_the_full_matrix(self) -> None:
+        browser_result = {
+            "browser": "safari",
+            "deadline_ms": 20_000,
+            "elapsed_ms": 100,
+            "outcome": "usable",
+            "route": "slipstream_selected",
+        }
+        target = SimpleNamespace(install_command=("install",))
+        system = mock.Mock()
+
+        def safari(host: str, _driver_url: str, _uid: int) -> dict[str, object]:
+            return {
+                **browser_result,
+                "deadline_ms": smoke.SITES[host]["deadline_ms"],
+            }
+
+        def chrome(
+            host: str, _path: smoke.Path, _uid: int, _gid: int
+        ) -> dict[str, object]:
+            return {
+                **browser_result,
+                "browser": "chrome",
+                "deadline_ms": smoke.SITES[host]["deadline_ms"],
+                "outcome": (
+                    "terminal_error" if host == "app.aikido.dev" else "usable"
+                ),
+            }
+
+        with (
+            mock.patch.object(smoke, "_require_protected_ci"),
+            mock.patch.object(smoke.pf, "PfctlRunner", return_value=mock.Mock()),
+            mock.patch.object(
+                smoke.lifecycle, "_preflight", return_value=("before", 501, 20)
+            ),
+            mock.patch.object(
+                smoke.lifecycle, "packaged_app_target", return_value=target
+            ),
+            mock.patch.object(smoke.lifecycle, "SystemRunner", return_value=system),
+            mock.patch.object(smoke.lifecycle, "_wait_for_status"),
+            mock.patch.object(smoke.lifecycle, "_assert_anchor_active"),
+            mock.patch.object(smoke, "_run_safari", side_effect=safari),
+            mock.patch.object(smoke, "_run_chrome", side_effect=chrome),
+            mock.patch.object(smoke, "_control_route", return_value="usable"),
+            mock.patch.object(smoke.lifecycle, "_fallback_uninstall", return_value=[]),
+            mock.patch.object(smoke.lifecycle, "_assert_clean_install_state"),
+            mock.patch.object(smoke.pf, "_pf_snapshot", return_value="before"),
+            mock.patch.object(smoke.pf, "_assert_same_snapshot"),
+        ):
+            report, status = smoke.run_gate(
+                mock.Mock(), mock.Mock(), "http://127.0.0.1:1"
+            )
+
+        self.assertEqual(len(report["sites"]), len(smoke.SITES))
+        self.assertEqual(readiness.validate_live_report(report, status), "failed")
 
 
 if __name__ == "__main__":

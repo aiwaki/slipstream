@@ -68,6 +68,14 @@ def soak_report(*, seconds: float = 1800.1, counter: str | None = None) -> dict:
 
 
 class ReleaseReadinessTests(unittest.TestCase):
+    def test_partial_live_matrix_is_rejected(self) -> None:
+        report = live_report()
+        report["result"] = "failed"
+        report["harness_exit_status"] = 1
+        report["sites"].pop()
+        with self.assertRaisesRegex(ValueError, "fixed host matrix"):
+            release_readiness.validate_live_report(report, 1)
+
     def test_live_matrix_requires_two_usable_browsers(self) -> None:
         report = live_report()
         self.assertEqual(release_readiness.validate_live_report(report, 0), "passed")
