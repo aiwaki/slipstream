@@ -10,6 +10,38 @@ file.
 
 ## Current Checkpoint
 
+Update 2026-08-20 (release follow-up): vendor-bootstrap PR #344 merged as
+`f4b0de15607a911ffba1c7a8401b35bb73ed4922`, then Geph `0.3.9` PR #280
+merged as current main `21fcaab9d35bdfdbdaacd28bf835acf7585318c3`.
+The exact `geph-vendor-0.3.9-r1` lightweight tag points to that main commit and
+its non-draft prerelease contains the complete eight uploaded provenance,
+SBOM, audit, source, lock, license, version, checksum and universal-binary
+assets. The exact-main application dependency audit is green.
+
+Exact-main CI run `32376735211`, full rerun attempt `2`, passed the reviewed
+Geph ingestion, application build, isolated production updater signing,
+immutable candidate assembly and attestation, Chromium contract, packaged
+browser qualification, and the full packaged lifecycle/Safari sentinel. It
+failed only the main-only native-update-notification qualification. That job's
+old outer catch-all reduced every hook, visibility and macOS-attribution error
+to the same two-field `terminal` result and skipped its report upload on
+failure, so the surviving run cannot honestly distinguish the internal cause.
+The candidate is therefore not releasable and no protected gate or publisher
+was dispatched.
+
+The narrow follow-up branch keeps the notification gate strict but gives every
+failure a fixed privacy-bounded code, preserves only validated Rust terminal
+reasons, atomically writes the bounded report, and uploads it even when the job
+fails. It also makes preview publication transactional: one exact draft,
+uploads with overwrite disabled, local/remote digest and inventory checks,
+authoritative verification after an ambiguous publish response, strict
+already-published recovery, and idempotent prior-preview archival. The root
+READMEs keep the centered application icon but now label `.23` functionality
+as the next preview until it actually publishes. Next: merge this narrow
+follow-up, run a new exact-main candidate to obtain the concrete notification
+outcome, fix that outcome without weakening attribution or invisibility, then
+run owned-Geph and release-readiness before publishing `.23`.
+
 Update 2026-08-20: PR
 [#343](https://github.com/aiwaki/slipstream/pull/343) merged unchanged as
 `a02ba90fb65d40f14ba0b67e5f2d4b657188747e` after all `15` exact-head checks

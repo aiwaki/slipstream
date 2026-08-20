@@ -118,10 +118,53 @@ jobs:
           existing_tag_count="$(gh api \
             "repos/${{ github.repository }}/git/matching-refs/tags/$tag" \
             --jq "[.[] | select(.ref == \"refs/tags/$tag\")] | length")"
-          if [ "$existing_tag_count" != 0 ]; then
+          existing_release_ids="$(gh api --paginate \
+            "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$tag\") | .id")"
+          resume_release_id=
+          if [ "$existing_tag_count" = 0 ] && [ -z "$existing_release_ids" ]; then
+            :
+          elif [ "$existing_tag_count" = 1 ]; then
+            release_count="$(printf '%s\n' "$existing_release_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+            [ "$release_count" = 1 ] || {
+              echo "release or Git tag collision is not uniquely resumable: $tag"
+              exit 1
+            }
+            resume_release_id="$(printf '%s\n' "$existing_release_ids" | sed -n '1p')"
+            [[ "$resume_release_id" =~ ^[1-9][0-9]*$ ]] || {
+              echo "existing release ID is invalid: $resume_release_id"
+              exit 1
+            }
+            existing_release="$(gh api \
+              "repos/${{ github.repository }}/releases/$resume_release_id")"
+            python3 -c '
+          import json
+          import sys
+          release = json.load(sys.stdin)
+          release_id, tag, name, source, prerelease = sys.argv[1:]
+          expected = {
+              "id": int(release_id),
+              "tag_name": tag,
+              "name": name,
+              "target_commitish": source,
+              "draft": False,
+              "prerelease": prerelease == "true",
+          }
+          for key, value in expected.items():
+              if release.get(key) != value:
+                  raise SystemExit(
+                      f"existing release is not an exact resumable publication: {key}"
+                  )
+          if not isinstance(release.get("published_at"), str) or not release["published_at"]:
+              raise SystemExit("existing release is not published")
+          ' "$resume_release_id" "$tag" "$release_name" "$GITHUB_SHA" "$prerelease" \
+              <<< "$existing_release"
+            echo "::notice::resuming exact published release finalization for $tag"
+          else
             echo "release or Git tag already exists and will not be overwritten: $tag"
             exit 1
           fi
+          echo "resume_release_id=$resume_release_id" >> "$GITHUB_OUTPUT"
 
       - name: Resolve previous app release tag
         id: previous
@@ -130,8 +173,14 @@ jobs:
         run: |
           set -euo pipefail
           current_tag="${{ steps.ver.outputs.tag }}"
-          [ "${{ steps.ver.outputs.channel }}" = preview ] && prerelease=true || prerelease=false
-          filter=".[] | select(.draft | not) | select(.tag_name != \"$current_tag\") | select(.tag_name | startswith(\"v\")) | select(.prerelease == $prerelease) | .tag_name"
+          if [ "${{ steps.ver.outputs.channel }}" = preview ]; then
+            prerelease=true
+            tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$'
+          else
+            prerelease=false
+            tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+$'
+          fi
+          filter=".[] | select(.draft | not) | select(.tag_name != \"$current_tag\") | select(.tag_name | test(\"$tag_pattern\")) | select(.prerelease == $prerelease) | .tag_name"
           previous_tag="$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" --jq "$filter" | sed -n '1p')"
           echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
@@ -486,14 +535,19 @@ jobs:
             >> dist-release/release-notes.md
           printf '\n</details>\n' >> dist-release/release-notes.md
 
-      - name: Publish release
+      - name: Upload exact release draft
+        id: release-draft
+        if: steps.ver.outputs.resume_release_id == ''
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.ver.outputs.release_name }}
+          draft: true
           prerelease: ${{ steps.ver.outputs.prerelease }}
           make_latest: ${{ steps.ver.outputs.make_latest }}
+          overwrite_files: false
+          fail_on_unmatched_files: true
           body_path: dist-release/release-notes.md
           generate_release_notes: true
           previous_tag: ${{ steps.previous.outputs.tag }}
@@ -511,18 +565,234 @@ jobs:
             dist-release/dependency-audit.json
             dist-release/*.dmg
 
-      - name: Mark previous preview as archival
+      - name: Resolve exact release transaction ID
+        id: release
+        env:
+          CREATED_RELEASE_ID: ${{ steps.release-draft.outputs.id }}
+          RESUME_RELEASE_ID: ${{ steps.ver.outputs.resume_release_id }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CREATED_RELEASE_ID" ] && [ -n "$RESUME_RELEASE_ID" ]; then
+            echo "release transaction has both created and resumed IDs"
+            exit 1
+          fi
+          release_id="${CREATED_RELEASE_ID:-$RESUME_RELEASE_ID}"
+          [[ "$release_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "release transaction ID is invalid"
+            exit 1
+          }
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the sole exact release draft before publication
+        if: steps.ver.outputs.resume_release_id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo "release action returned an invalid draft ID"
+            exit 1
+          }
+          draft_metadata="$(mktemp "$RUNNER_TEMP/release-draft.XXXXXX")"
+          verify_draft() {
+            local existing_tag_count matching_release_ids
+            matching_release_ids="$(gh api --paginate \
+              "repos/${{ github.repository }}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"${{ steps.ver.outputs.tag }}\") | .id")" \
+              || return 1
+            [ "$matching_release_ids" = "$RELEASE_ID" ] || return 1
+            existing_tag_count="$(gh api \
+              "repos/${{ github.repository }}/git/matching-refs/tags/${{ steps.ver.outputs.tag }}" \
+              --jq "[.[] | select(.ref == \"refs/tags/${{ steps.ver.outputs.tag }}\")] | length")" \
+              || return 1
+            [ "$existing_tag_count" = 0 ] || return 1
+            gh api \
+              "repos/${{ github.repository }}/releases/$RELEASE_ID" \
+              > "$draft_metadata" \
+              || return 1
+            python3 scripts/verify_published_release.py \
+              --release-metadata "$draft_metadata" \
+              --release-dir dist-release \
+              --repository "${{ github.repository }}" \
+              --version "${{ steps.ver.outputs.version }}" \
+              --tag "${{ steps.ver.outputs.tag }}" \
+              --channel "${{ steps.ver.outputs.channel }}" \
+              --release-name "${{ steps.ver.outputs.release_name }}" \
+              --source-commit "$GITHUB_SHA" \
+              --target "$SLIPSTREAM_TAURI_TARGET" \
+              --release-id "$RELEASE_ID" \
+              --state draft
+          }
+          verified=false
+          for attempt in 1 2 3 4; do
+            if verify_draft; then
+              verified=true
+              break
+            fi
+            [ "$attempt" = 4 ] || sleep "$attempt"
+          done
+          [ "$verified" = true ] || {
+            echo "exact release draft verification failed"
+            exit 1
+          }
+
+      - name: Publish only the verified exact release draft
+        if: steps.ver.outputs.resume_release_id == ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          published=false
+          for attempt in 1 2 3 4; do
+            if gh api --method PATCH \
+              "repos/${{ github.repository }}/releases/$RELEASE_ID" \
+              -F draft=false \
+              -f make_latest="${{ steps.ver.outputs.make_latest }}" \
+              > "$RUNNER_TEMP/published-release-response.json"; then
+              published=true
+              break
+            fi
+            [ "$attempt" = 4 ] || sleep "$attempt"
+          done
+          [ "$published" = true ] || {
+            echo "::warning::publish response was inconclusive; authoritative remote verification will decide"
+            exit 1
+          }
+
+      - name: Verify exact remote publication postconditions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          release_metadata="$(mktemp "$RUNNER_TEMP/published-release.XXXXXX")"
+          tag_ref="$(mktemp "$RUNNER_TEMP/published-tag.XXXXXX")"
+          verify_publication() {
+            local matching_release_ids
+            matching_release_ids="$(gh api --paginate \
+              "repos/${{ github.repository }}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"${{ steps.ver.outputs.tag }}\") | .id")" \
+              || return 1
+            [ "$matching_release_ids" = "$RELEASE_ID" ] || return 1
+            gh api \
+              "repos/${{ github.repository }}/releases/tags/${{ steps.ver.outputs.tag }}" \
+              > "$release_metadata" \
+              || return 1
+            gh api \
+              "repos/${{ github.repository }}/git/ref/tags/${{ steps.ver.outputs.tag }}" \
+              > "$tag_ref" \
+              || return 1
+            python3 scripts/verify_published_release.py \
+              --release-metadata "$release_metadata" \
+              --tag-ref "$tag_ref" \
+              --release-dir dist-release \
+              --repository "${{ github.repository }}" \
+              --version "${{ steps.ver.outputs.version }}" \
+              --tag "${{ steps.ver.outputs.tag }}" \
+              --channel "${{ steps.ver.outputs.channel }}" \
+              --release-name "${{ steps.ver.outputs.release_name }}" \
+              --source-commit "$GITHUB_SHA" \
+              --target "$SLIPSTREAM_TAURI_TARGET" \
+              --release-id "$RELEASE_ID" \
+              --state published
+          }
+          verified=false
+          for attempt in 1 2 3 4; do
+            if verify_publication; then
+              verified=true
+              break
+            fi
+            [ "$attempt" = 4 ] || sleep "$attempt"
+          done
+          [ "$verified" = true ] || {
+            echo "remote release publication postconditions failed"
+            exit 1
+          }
+
+      - name: Idempotently verify previous preview archival
         if: steps.ver.outputs.channel == 'preview' && steps.previous.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          umask 077
           previous_tag="${{ steps.previous.outputs.tag }}"
-          case "$previous_tag" in v*-preview.*) ;; *) echo "refusing non-preview: $previous_tag"; exit 1 ;; esac
-          previous_name="$(gh release view "$previous_tag" --repo "${{ github.repository }}" --json name --jq .name)"
-          case "$previous_name" in
-            *архивная*) exit 0 ;;
-            *\)) archival_name="${previous_name%?}, архивная)" ;;
-            *) archival_name="$previous_name (архивная)" ;;
-          esac
-          gh release edit "$previous_tag" --repo "${{ github.repository }}" --title "$archival_name"
+          [[ "$previous_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || {
+            echo "refusing to archive non-preview tag: $previous_tag"
+            exit 1
+          }
+          previous_metadata="$(mktemp "$RUNNER_TEMP/previous-release.XXXXXX")"
+          fetch_previous() {
+            gh api \
+              "repos/${{ github.repository }}/releases/tags/$previous_tag" \
+              > "$previous_metadata"
+          }
+          fetch_previous
+          previous_fields="$(python3 -c '
+          import json
+          import sys
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          tag = sys.argv[2]
+          if release.get("tag_name") != tag:
+              raise SystemExit("previous release tag mismatch")
+          if release.get("draft") is not False or release.get("prerelease") is not True:
+              raise SystemExit("previous release is not a published preview")
+          release_id = release.get("id")
+          name = release.get("name")
+          if isinstance(release_id, bool) or not isinstance(release_id, int) or release_id < 1:
+              raise SystemExit("previous release ID is invalid")
+          if not isinstance(name, str) or not name or "\n" in name or "\r" in name:
+              raise SystemExit("previous release title is invalid")
+          print(release_id)
+          print(name)
+          ' "$previous_metadata" "$previous_tag")"
+          previous_id="$(printf '%s\n' "$previous_fields" | sed -n '1p')"
+          previous_name="$(printf '%s\n' "$previous_fields" | sed -n '2p')"
+          archival_name="$(PYTHONPATH=scripts python3 -c '
+          import sys
+          from verify_published_release import archival_release_name
+          print(archival_release_name(sys.argv[1]))
+          ' "$previous_name")"
+          archive_verified=false
+          for attempt in 1 2 3 4; do
+            if [ "$previous_name" != "$archival_name" ]; then
+              gh api --method PATCH \
+                "repos/${{ github.repository }}/releases/$previous_id" \
+                -f name="$archival_name" \
+                > "$RUNNER_TEMP/archived-release-response.json" \
+                || true
+            fi
+            if fetch_previous; then
+              if observed_name="$(python3 -c '
+          import json
+          import sys
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          release_id, tag, name = sys.argv[2:]
+          expected = {
+              "id": int(release_id),
+              "tag_name": tag,
+              "name": name,
+              "draft": False,
+              "prerelease": True,
+          }
+          if any(release.get(key) != value for key, value in expected.items()):
+              raise SystemExit("previous release archival postcondition mismatch")
+          print(release["name"])
+          ' "$previous_metadata" "$previous_id" "$previous_tag" "$archival_name")"; then
+                if [ "$observed_name" = "$archival_name" ]; then
+                  archive_verified=true
+                  break
+                fi
+              fi
+            fi
+            [ "$attempt" = 4 ] || sleep "$attempt"
+          done
+          [ "$archive_verified" = true ] || {
+            echo "previous preview archival postcondition failed for $previous_tag"
+            exit 1
+          }

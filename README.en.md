@@ -14,11 +14,13 @@
 
 <div align="center">
 
-## Install Slipstream — sites work
+## Slipstream 0.1.9-preview.23: install it — sites work
 
 **Fast. Automatic. Invisible.**
 
-[Download the current macOS Apple Silicon preview](https://github.com/aiwaki/slipstream/releases)
+**The next macOS Apple Silicon preview is completing final checks.**
+
+[Available preview releases](https://github.com/aiwaki/slipstream/releases)
 
 </div>
 
@@ -56,7 +58,7 @@ becomes a general VPN fallback.
 - When a reviewed foreign-exit site attempts HTTP/3, only that flow is moved to
   the same managed TCP route through bundled Geph. Other QUIC/UDP traffic is not
   blocked.
-- The next candidate includes a pinned local headless engine that checks rare
+- Starting with `0.1.9-preview.23`, a pinned local headless engine checks rare
   ambiguous failures only for one exact host and only after a foreground Safari
   or Chrome navigation is verified. Known and healthy routes never start it;
   the candidate can be published only after packaged, live-site, and measured
@@ -69,10 +71,10 @@ becomes a general VPN fallback.
 - The menu reports routing, Geph, and Telegram state; it can restart the service,
   copy redacted diagnostics, check for updates, and completely remove components
   owned by Slipstream.
-- Slipstream checks its signed update channel automatically and announces a new
-  version with a native notification. Installation starts only after the menu
-  action is chosen; the current app is backed up locally and restored if the
-  successor does not become healthy.
+- Starting with `0.1.9-preview.23`, Slipstream checks its signed update channel
+  automatically and announces a new version with a native notification.
+  Installation starts only after the menu action is chosen; the current app is
+  backed up locally and restored if the successor does not become healthy.
 
 ### Install
 

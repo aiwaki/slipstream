@@ -168,6 +168,44 @@ def test_hook_result_accepts_bounded_terminal_category() -> None:
     assert parsed["reason"] == "native_submission_failed"
 
 
+@pytest.mark.parametrize("reason", sorted(smoke.TERMINAL_REASONS))
+def test_validated_rust_terminal_reason_survives_failure_report(reason) -> None:
+    hook_result = _hook("terminal", reason=reason)
+    with pytest.raises(smoke.NotificationQualificationError) as raised:
+        smoke.classify_os_observation(
+            hook_result=hook_result,
+            before=_snapshot(maximum=17, count=4),
+            after=_snapshot(maximum=17, count=4),
+        )
+
+    assert raised.value.failure_code == reason
+    assert smoke._failure_report(raised.value) == {
+        "schema_version": smoke.SCHEMA_VERSION,
+        "outcome": "terminal",
+        "failure_code": reason,
+    }
+
+
+def test_failure_report_is_whitelisted_bounded_and_content_free() -> None:
+    secret = "cookie=session-secret path=/private/user/url"
+    report = smoke._failure_report(RuntimeError(secret))
+    encoded = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+
+    assert report == {
+        "schema_version": smoke.SCHEMA_VERSION,
+        "outcome": "terminal",
+        "failure_code": smoke.INTERNAL_FAILURE_CODE,
+    }
+    assert len(encoded) <= smoke.FAILURE_REPORT_MAX_BYTES
+    assert secret.encode("utf-8") not in encoded
+    with pytest.raises(ValueError, match="not whitelisted"):
+        smoke.NotificationQualificationError(
+            "raw detail", failure_code="raw_backend_error"
+        )
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -522,6 +560,71 @@ def test_failed_hook_cleanup_fails_closed_if_process_survives() -> None:
         smoke.NotificationQualificationError, match="survived"
     ):
         smoke._reap_hook_after_failure(process)
+
+
+def test_cli_atomically_writes_safe_failure_report_before_nonzero_exit(
+    capsys,
+) -> None:
+    secret = "sensitive notification backend output"
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        output = root / "reports" / "notification.json"
+        argv = [
+            str(smoke.__file__),
+            "--candidate-dir",
+            str(root / "candidate"),
+            "--app-bundle",
+            str(root / "Slipstream.app"),
+            "--repository",
+            "aiwaki/slipstream",
+            "--source-commit",
+            SOURCE,
+            "--candidate-run-id",
+            "77",
+            "--candidate-run-attempt",
+            "2",
+            "--output",
+            str(output),
+        ]
+        failure = smoke.NotificationQualificationError(
+            secret, failure_code="native_submission_failed"
+        )
+        with (
+            mock.patch.object(smoke.sys, "argv", argv),
+            mock.patch.object(smoke, "run_gate", side_effect=failure),
+        ):
+            status = smoke._main()
+
+        report = json.loads(output.read_text(encoding="utf-8"))
+        report_size = output.stat().st_size
+        leftovers = list(output.parent.glob(f".{output.name}.*"))
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert report == {
+        "schema_version": smoke.SCHEMA_VERSION,
+        "outcome": "terminal",
+        "failure_code": "native_submission_failed",
+    }
+    assert report_size <= smoke.FAILURE_REPORT_MAX_BYTES
+    assert leftovers == []
+    assert secret not in captured.err
+    assert json.loads(captured.err) == report
+
+
+def test_ci_always_uploads_native_notification_failure_report() -> None:
+    root = Path(smoke.__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    job = workflow.split(
+        "  packaged-update-notification-qualification:\n", 1
+    )[1].split("\n  packaged-app-lifecycle-heavy:\n", 1)[0]
+    upload = job.split(
+        "      - name: Upload native notification qualification report\n", 1
+    )[1].split("\n      - ", 1)[0]
+
+    assert "        if: always()\n" in upload
+    assert "update-notification-qualification.json" in upload
+    assert "          if-no-files-found: error\n" in upload
 
 
 def test_report_contract_never_claims_visible_delivery_or_contains_content() -> None:

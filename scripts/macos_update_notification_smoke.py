@@ -66,6 +66,21 @@ TERMINAL_REASONS = frozenset(
         "native_submission_failed",
     }
 )
+GENERIC_FAILURE_CODE = "qualification_failed"
+INTERNAL_FAILURE_CODE = "internal_error"
+FAILURE_REPORT_MAX_BYTES = 512
+FAILURE_CODES = TERMINAL_REASONS | frozenset(
+    {
+        GENERIC_FAILURE_CODE,
+        INTERNAL_FAILURE_CODE,
+        "hook_cleanup_failed",
+        "hook_launch_failed",
+        "os_attribution_invalid",
+        "os_attribution_missing",
+        "os_observation_failed",
+        "visibility_violation",
+    }
+)
 HEX_64 = re.compile(r"[0-9a-f]{64}")
 HEX_32_BYTES = re.compile(r"[0-9a-f]{64}")
 FORBIDDEN_LAUNCH_SERVICES_EVENTS = (
@@ -85,6 +100,48 @@ USERNOTED_DB_RELATIVE = Path(
 
 class NotificationQualificationError(RuntimeError):
     """The exact packaged notification qualification did not complete."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = GENERIC_FAILURE_CODE,
+    ) -> None:
+        if failure_code not in FAILURE_CODES:
+            raise ValueError("notification failure code is not whitelisted")
+        super().__init__(message)
+        self.failure_code = failure_code
+
+
+def _failure_report(error: BaseException) -> dict:
+    failure_code = INTERNAL_FAILURE_CODE
+    if isinstance(error, NotificationQualificationError):
+        candidate = error.failure_code
+        if candidate in FAILURE_CODES:
+            failure_code = candidate
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "outcome": "terminal",
+        "failure_code": failure_code,
+    }
+    encoded = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if len(encoded) > FAILURE_REPORT_MAX_BYTES:
+        raise AssertionError("notification failure report exceeded its bound")
+    return report
+
+
+def _with_failure_code(
+    error: BaseException,
+    *,
+    failure_code: str,
+    message: str,
+) -> NotificationQualificationError:
+    if (
+        isinstance(error, NotificationQualificationError)
+        and error.failure_code != GENERIC_FAILURE_CODE
+    ):
+        failure_code = error.failure_code
+    return NotificationQualificationError(message, failure_code=failure_code)
 
 
 @dataclass(frozen=True)
@@ -945,6 +1002,19 @@ def parse_hook_result(payload: str, *, capability_sha256: str) -> dict:
     return value
 
 
+def _terminal_hook_failure(hook_result: dict) -> NotificationQualificationError:
+    reason = hook_result.get("reason")
+    if reason not in TERMINAL_REASONS:
+        return NotificationQualificationError(
+            "native notification hook returned an invalid terminal outcome",
+            failure_code="hook_launch_failed",
+        )
+    return NotificationQualificationError(
+        "native notification hook returned a terminal outcome",
+        failure_code=reason,
+    )
+
+
 def classify_os_observation(
     *,
     hook_result: dict,
@@ -957,19 +1027,19 @@ def classify_os_observation(
     )
     outcome = hook_result["outcome"]
     if outcome == "terminal":
-        raise NotificationQualificationError(
-            "native notification hook returned a terminal outcome"
-        )
+        raise _terminal_hook_failure(hook_result)
     if delta < 0 or delta > 1:
         raise NotificationQualificationError(
-            "notification attribution count changed unexpectedly"
+            "notification attribution count changed unexpectedly",
+            failure_code="os_attribution_invalid",
         )
     if new_record:
         return "submitted"
     if outcome == "submitted" and hook_result.get("permission_status") == "suppressed":
         return "permission_suppressed"
     raise NotificationQualificationError(
-        "macOS did not record exactly one attributed notification"
+        "macOS did not record exactly one attributed notification",
+        failure_code="os_attribution_missing",
     )
 
 
@@ -1001,7 +1071,8 @@ def _reap_hook_after_failure(process: subprocess.Popen[bytes]) -> None:
         )
     except subprocess.TimeoutExpired as exc:
         raise NotificationQualificationError(
-            "notification hook survived failed-launch cleanup"
+            "notification hook survived failed-launch cleanup",
+            failure_code="hook_cleanup_failed",
         ) from exc
 
 
@@ -1079,8 +1150,16 @@ def _launch_hook(
         try:
             _reap_hook_after_failure(process)
         except BaseException as cleanup_exc:
-            raise cleanup_exc from exc
-        raise
+            raise _with_failure_code(
+                cleanup_exc,
+                failure_code="hook_cleanup_failed",
+                message="notification hook cleanup failed",
+            ) from exc
+        raise _with_failure_code(
+            exc,
+            failure_code="hook_launch_failed",
+            message="notification hook launch failed",
+        ) from exc
 
 
 def run_gate(
@@ -1126,6 +1205,8 @@ def run_gate(
         after_records = before
         try:
             hook_result, _ = _launch_hook(template=template, monitor=monitor)
+            if hook_result["outcome"] == "terminal":
+                raise _terminal_hook_failure(hook_result)
             deadline = time.monotonic() + OS_OBSERVATION_TIMEOUT_SECONDS
             while time.monotonic() < deadline:
                 after_records = _notification_record_snapshot(home)
@@ -1133,19 +1214,28 @@ def run_gate(
                     break
                 time.sleep(0.1)
         except BaseException as exc:
-            failure = exc
+            failure = _with_failure_code(
+                exc,
+                failure_code="os_observation_failed",
+                message="notification OS observation failed",
+            )
         finally:
             try:
                 visibility_after = monitor.close()
                 visibility = monitor.assert_invisible(visibility_after)
             except BaseException as exc:
                 if failure is None:
-                    failure = exc
+                    failure = _with_failure_code(
+                        exc,
+                        failure_code="visibility_violation",
+                        message="notification visibility invariant failed",
+                    )
         if failure is not None:
             raise failure
         if hook_result is None:
             raise NotificationQualificationError(
-                "notification hook produced no result"
+                "notification hook produced no result",
+                failure_code="hook_launch_failed",
             )
         outcome = classify_os_observation(
             hook_result=hook_result,
@@ -1206,13 +1296,13 @@ def _main() -> int:
             candidate_run_attempt=args.candidate_run_attempt,
         )
         release_candidate._write_json(args.output, report)
-    except Exception:
-        print(
-            json.dumps(
-                {"schema_version": SCHEMA_VERSION, "outcome": "terminal"}
-            ),
-            file=sys.stderr,
-        )
+    except Exception as exc:
+        failure_report = _failure_report(exc)
+        try:
+            release_candidate._write_json(args.output, failure_report)
+        except Exception:
+            pass
+        print(json.dumps(failure_report, sort_keys=True), file=sys.stderr)
         return 1
     print(
         json.dumps(
